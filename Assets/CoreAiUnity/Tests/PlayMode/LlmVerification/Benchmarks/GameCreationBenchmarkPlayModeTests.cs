@@ -38,6 +38,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <summary>Env var (seconds) overriding the per-scenario wall-clock timeout. 0/unset = per-scenario default.</summary>
         public const string EnvTimeout = "COREAI_BENCHMARK_TIMEOUT";
 
+        /// <summary>Env var (int) for the per-request tool-call roundtrip cap. 0/unset = default 40.</summary>
+        public const string EnvRoundtrips = "COREAI_BENCHMARK_ROUNDTRIPS";
+
+        private static int ResolveBenchmarkRoundtrips()
+        {
+            string raw = Environment.GetEnvironmentVariable(EnvRoundtrips);
+            if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out int value) && value >= 1)
+            {
+                return value;
+            }
+
+            return 40;
+        }
+
         /// <summary>
         /// Env var (int) for extra attempts on a hard FAILURE — any crash/fault/timeout that produced no
         /// measurement: provider 5xx, dropped connection, model-load crash, "model has crashed", or a
@@ -128,6 +142,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            // Free-build scenes (the castle) spawn AND colour 24+ objects, which needs more tool-call
+            // roundtrips than the default 10 (each object = a spawn + a set_color). Overridable via env.
+            settings.SetMaxToolCallRoundtrips(ResolveBenchmarkRoundtrips());
             BenchmarkReport report = new();
 
             try
@@ -157,7 +174,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 report.Metadata = new BenchmarkRunMetadata
                 {
-                    RunId = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"),
+                    RunId = DateTime.Now.ToString("yyyyMMdd_HHmmss"),
                     TimestampUtc = DateTime.UtcNow.ToString("o"),
                     ModelId = modelId,
                     Backend = handle.ResolvedBackend.ToString(),
@@ -316,15 +333,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
-                ScenarioResult hero = FindCastleHeroResult(report);
+                ScenarioResult hero = FindFreeBuildHeroResult(report);
                 if (hero != null)
                 {
-                    string heroName = stem + "_g6_castle_hero.png";
+                    string heroName = stem + "_g6_free_build_hero.png";
                     try
                     {
                         File.WriteAllBytes(Path.Combine(dir, heroName), hero.SceneScreenshotPng);
-                        md = EmbedResultsImage(md, heroName, "castle hero",
-                            "_Hero: G6 Castle free-build scene, preserving the model-authored layout._");
+                        md = EmbedResultsImage(md, heroName, "free-build hero",
+                            "_Hero: G6 free-build visual scene, preserving the model-authored layout._");
                         heroScenarioId = hero.ScenarioId;
                     }
                     catch (Exception ex)
@@ -355,7 +372,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private static ScenarioResult FindCastleHeroResult(BenchmarkReport report)
+        private static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report)
         {
             foreach (ScenarioResult r in report.Results)
             {
@@ -365,7 +382,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 if (string.Equals(r.Group, "G6", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(r.ScenarioId, "g6_castle", StringComparison.OrdinalIgnoreCase))
+                    && string.Equals(r.ScenarioId, "g6_free_build", StringComparison.OrdinalIgnoreCase))
                 {
                     return r;
                 }

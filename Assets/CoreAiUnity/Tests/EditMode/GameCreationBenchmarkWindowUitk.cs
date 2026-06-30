@@ -208,7 +208,7 @@ namespace CoreAI.Tests.EditMode
         {
             ScrollView scroll = new();
             scroll.style.flexGrow = 1;
-            scroll.Add(Header("Game-Creation Benchmark",
+            scroll.Add(Header($"Game-Creation Benchmark {BenchmarkInfo.Version}",
                 "The model builds a game with execute_lua + world_command; scored 0..100."));
             scroll.Add(BuildGroupsSection());
             scroll.Add(BuildRunOptionsSection());
@@ -221,18 +221,35 @@ namespace CoreAI.Tests.EditMode
         private VisualElement BuildGroupsSection()
         {
             VisualElement section = Section("Scenarios (easy -> hard)");
+
+            // Column header so the right-hand value is obviously the difficulty rating.
+            VisualElement head = Row();
+            Label hl = Muted("Scenario");
+            hl.style.flexGrow = 1;
+            head.Add(hl);
+            Label hd = Muted("Difficulty 1–10");
+            hd.style.width = 96;
+            hd.style.unityTextAlign = TextAnchor.MiddleRight;
+            head.Add(hd);
+            section.Add(head);
+
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG2,
-                "G2 - runtime mechanic authoring (pure Lua)", 1, _runG2, v => _runG2 = v));
+                "G2 - runtime mechanic authoring (pure Lua)", 2, _runG2, v => _runG2 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG1,
-                "G1 - build a game (world + Lua)", 2, _runG1, v => _runG1 = v));
+                "G1 - build a game (world + Lua)", 3, _runG1, v => _runG1 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG5,
-                "G5 - strict instruction-following (subtractive)", 3, _runG5, v => _runG5 = v));
+                "G5 - strict instruction-following (subtractive)", 5, _runG5, v => _runG5 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG3,
-                "G3 - reasoning & design (harder, intelligence)", 4, _runG3, v => _runG3 = v));
+                "G3 - reasoning & design (harder, intelligence)", 7, _runG3, v => _runG3 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG4,
-                "G4 - playable game (simulated playthrough)", 5, _runG4, v => _runG4 = v));
+                "G4 - playable game (simulated playthrough)", 8, _runG4, v => _runG4 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG6,
-                "G6 - castle free-build (bonus, visual)", 5, _runG6, v => _runG6 = v));
+                "G6 - free-build visual (bonus; default: castle)", 6, _runG6, v =>
+                {
+                    _runG6 = v;
+                    UpdateFreeBuildBoxVisibility();
+                }));
+            section.Add(BuildFreeBuildBox());
             _groupWarning = Muted("Select at least one group.");
             _groupWarning.style.color = new Color(0.95f, 0.68f, 0.32f);
             section.Add(_groupWarning);
@@ -240,7 +257,7 @@ namespace CoreAI.Tests.EditMode
             return section;
         }
 
-        private VisualElement GroupToggle(string prefKey, string label, int difficulty, bool value, Action<bool> assign)
+        private VisualElement GroupToggle(string prefKey, string label, int difficulty10, bool value, Action<bool> assign)
         {
             VisualElement row = Row();
             Toggle toggle = new(label) { value = value };
@@ -254,12 +271,92 @@ namespace CoreAI.Tests.EditMode
             });
             row.Add(toggle);
 
-            Label dots = new(new string('●', difficulty) + new string('○', 5 - difficulty));
+            int d = Mathf.Clamp(difficulty10, 1, 10);
+            int half = Mathf.RoundToInt(d / 2f); // 5 dots scaled from the 1..10 rating
+            Label dots = new($"{new string('●', half)}{new string('○', 5 - half)}  {d}/10")
+            {
+                tooltip = $"Difficulty {d}/10"
+            };
             dots.style.unityTextAlign = TextAnchor.MiddleRight;
-            dots.style.width = 82;
-            dots.style.color = ScoreColor(difficulty * 20);
+            dots.style.width = 96;
+            // Inverted vs. score colour: low difficulty = green (easy), high difficulty = red (hard).
+            dots.style.color = ScoreColor(100 - (d - 1) * 11);
             row.Add(dots);
             return row;
+        }
+
+        private VisualElement _freeBuildBox;
+
+        // G6-only contextual controls: hidden unless G6 is ticked; the subject field appears only when the
+        // "custom subject" toggle is on. Default (toggle off) = the built-in castle. Convenient + uncluttered.
+        private VisualElement BuildFreeBuildBox()
+        {
+            const string subjectKey = "CoreAI.Benchmark.FreeBuildSubject";
+            const string overrideKey = "CoreAI.Benchmark.FreeBuildOverride";
+            bool overrideOn = EditorPrefs.GetBool(overrideKey, false);
+            string subject = EditorPrefs.GetString(subjectKey, "");
+
+            // Keep the env var the harness reads in sync with the persisted state on window open.
+            System.Environment.SetEnvironmentVariable(
+                "COREAI_BENCHMARK_FREEBUILD_SUBJECT", overrideOn ? subject : "");
+
+            _freeBuildBox = new VisualElement();
+            _freeBuildBox.style.marginLeft = 16;
+            _freeBuildBox.style.marginBottom = 4;
+
+            TextField subjectField = new("Build subject")
+            {
+                value = subject,
+                multiline = true,
+                tooltip = "What G6 builds — a short subject ('a futuristic city', 'a knight') or a full " +
+                          "multi-line prompt. Multi-line: Shift+Enter for a new line.\n" +
+                          "For a fully custom prompt you can also use the COREAI_BENCHMARK_FREEBUILD_PROMPT env var."
+            };
+            subjectField.style.display = overrideOn ? DisplayStyle.Flex : DisplayStyle.None;
+            // Comfortable multi-line editing: wrap long prompts, grow vertically, keep the label on top.
+            subjectField.style.minHeight = 72;
+            subjectField.style.whiteSpace = WhiteSpace.Normal;
+            subjectField.labelElement.style.minWidth = 0;
+            subjectField.labelElement.style.alignSelf = Align.FlexStart;
+            VisualElement subjectInput = subjectField.Q(className: "unity-base-text-field__input");
+            if (subjectInput != null)
+            {
+                subjectInput.style.whiteSpace = WhiteSpace.Normal;
+                subjectInput.style.minHeight = 72;
+                subjectInput.style.unityTextAlign = TextAnchor.UpperLeft;
+            }
+            subjectField.RegisterValueChangedCallback(evt =>
+            {
+                string v = (evt.newValue ?? "").Trim();
+                EditorPrefs.SetString(subjectKey, v);
+                if (EditorPrefs.GetBool(overrideKey, false))
+                {
+                    System.Environment.SetEnvironmentVariable("COREAI_BENCHMARK_FREEBUILD_SUBJECT", v);
+                }
+            });
+
+            Toggle overrideToggle = new("Custom subject (override default castle)") { value = overrideOn };
+            overrideToggle.RegisterValueChangedCallback(evt =>
+            {
+                EditorPrefs.SetBool(overrideKey, evt.newValue);
+                subjectField.style.display = evt.newValue ? DisplayStyle.Flex : DisplayStyle.None;
+                System.Environment.SetEnvironmentVariable(
+                    "COREAI_BENCHMARK_FREEBUILD_SUBJECT",
+                    evt.newValue ? EditorPrefs.GetString(subjectKey, "") : "");
+            });
+
+            _freeBuildBox.Add(overrideToggle);
+            _freeBuildBox.Add(subjectField);
+            _freeBuildBox.style.display = _runG6 ? DisplayStyle.Flex : DisplayStyle.None;
+            return _freeBuildBox;
+        }
+
+        private void UpdateFreeBuildBoxVisibility()
+        {
+            if (_freeBuildBox != null)
+            {
+                _freeBuildBox.style.display = _runG6 ? DisplayStyle.Flex : DisplayStyle.None;
+            }
         }
 
         private VisualElement BuildRunOptionsSection()
@@ -1291,12 +1388,18 @@ namespace CoreAI.Tests.EditMode
             return $"{m}m{s:00}s";
         }
 
+        private static readonly string[] MonthAbbr =
+            { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+        // Compact, no-year run timestamp (e.g. "30 Jun · 14:57"). RunIds carry yyyyMMdd_HHmm; the year is
+        // dropped so the date fits the narrow columns without truncation, staying easy to read.
         private static string FormatRunDate(string runId)
         {
             if (!string.IsNullOrEmpty(runId) && runId.Length == 15 && runId[8] == '_')
             {
-                return $"{runId.Substring(0, 4)}-{runId.Substring(4, 2)}-{runId.Substring(6, 2)} " +
-                       $"{runId.Substring(9, 2)}:{runId.Substring(11, 2)}";
+                string day = runId.Substring(6, 2);
+                int mi = int.TryParse(runId.Substring(4, 2), out int mm) && mm >= 1 && mm <= 12 ? mm : 0;
+                return $"{day} {MonthAbbr[mi]} · {runId.Substring(9, 2)}:{runId.Substring(11, 2)}";
             }
 
             return runId ?? "";

@@ -102,8 +102,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override string Goal =>
                 "Build a small arena with the world_command tool. Spawn exactly five objects, each with " +
-                "action='spawn', prefabKey='Cube', and a distinct targetName: 'Player', 'Enemy1', 'Enemy2', " +
-                "'Enemy3', 'Enemy4'. Do not spawn anything else.";
+                "action='spawn' and a distinct targetName. Choose a fitting primitive prefabKey for each: " +
+                "prefabKey='capsule' for 'Player', and prefabKey='sphere' for 'Enemy1', 'Enemy2', 'Enemy3', " +
+                "'Enemy4'. Do not spawn anything else.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -171,8 +172,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override string Goal =>
                 "Build a simple coin-collector game.\n" +
-                "1. With world_command action='spawn', prefabKey='Cube', spawn exactly five objects with " +
-                "distinct targetName: 'Player', 'Coin1', 'Coin2', 'Coin3', 'Goal'.\n" +
+                "1. With world_command action='spawn', spawn exactly five objects with distinct targetName and a " +
+                "fitting primitive prefabKey: 'Player' (capsule), 'Coin1', 'Coin2', 'Coin3' (cylinder), 'Goal' (cube).\n" +
                 "2. With execute_lua, define two logic slots:\n" +
                 "logic_define('score_formula', function(coins) return coins end)\n" +
                 "logic_define('win_condition', function(score) return score >= 3 end)";
@@ -248,8 +249,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int TokenBudget => 1200;
 
             public override string Goal =>
-                "Spawn exactly three objects and do nothing else. Use world_command action='spawn', " +
-                "prefabKey='Cube', with distinct targetName: 'Tree', 'Rock', 'Bush'. " +
+                "Spawn exactly three objects and do nothing else. Use world_command action='spawn' with distinct " +
+                "targetName and a fitting primitive prefabKey: 'Tree' (capsule), 'Rock' (sphere), 'Bush' (sphere). " +
                 "Do not spawn extra objects, do not move or destroy anything.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)

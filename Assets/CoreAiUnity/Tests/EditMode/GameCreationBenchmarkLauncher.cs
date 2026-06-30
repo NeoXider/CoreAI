@@ -207,7 +207,7 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         public static string WriteComparison(string root, List<ModelSummary> models, string pinnedModelId)
         {
-            string md = ModelComparison.Build(models, "Game-Creation Benchmark", pinnedModelId);
+            string md = ModelComparison.Build(models, "Game-Creation Benchmark v1", pinnedModelId);
             string svg = ModelComparison.ToComparisonSvg(models, pinnedModelId);
             string mdPath = Path.Combine(root, "COMPARISON.md");
             File.WriteAllText(mdPath, md);

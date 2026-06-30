@@ -222,8 +222,8 @@ namespace CoreAI.Benchmarking
             sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
               .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
             sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
-            sb.Append("<text x=\"24\" y=\"38\" fill=\"#e8e8ea\" font-size=\"22\" font-weight=\"bold\">Game-Creation Benchmark</text>");
-            sb.Append("<text x=\"24\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">Suite base score, ranked descending</text>");
+            sb.Append($"<text x=\"24\" y=\"38\" fill=\"#e8e8ea\" font-size=\"22\" font-weight=\"bold\">{BenchmarkInfo.TitleWithVersion}</text>");
+            sb.Append("<text x=\"24\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">Suite base score (0–100, higher is better), ranked best-first</text>");
 
             for (int tick = 0; tick <= 100; tick += 25)
             {

@@ -10,11 +10,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// G6 — free-form visual build. This group gives the model creative freedom and grades leniently,
     /// while preserving the model-authored positions for the report hero screenshot.
     /// </summary>
-    internal static class GameCastleScenariosG6
+    internal static class GameFreeBuildScenariosG6
     {
         public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
         {
-            new CastleFreeBuild()
+            new FreeBuildScene()
         };
 
         private abstract class G6Scenario : GameBenchmarkScenario
@@ -24,8 +24,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
-            public override int TokenBudget => 4000;
-            public override int MaxOutputTokens => 3200; // ~24+ verbose spawn calls without truncation
+            public override int TokenBudget => 6000;
+            public override int MaxOutputTokens => 4800; // 24+ objects, each spawned AND coloured (set_color)
             public override double TimeBudgetMs => 45000;
             public override float TimeoutSeconds => 360f;
 
@@ -52,30 +52,84 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private sealed class CastleFreeBuild : G6Scenario
+        private sealed class FreeBuildScene : G6Scenario
         {
-            public override string Id => "g6_castle";
-            public override string Name => "Castle (free build)";
+            public override string Id => "g6_free_build";
+            public override string Name => FreeBuildSubject() != null
+                ? $"Free build: {FreeBuildSubject()}"
+                : "Free build (visual)";
 
             public override string WhatItChecks =>
-                "Free-form build: the model designs and places a whole castle scene — judged loosely on scale and variety, shown as the report hero image.";
+                "Free-form build: the model designs and places a whole scene from scratch — judged loosely on scale and variety, shown as the report hero image.";
 
-            public override string Goal =>
-                "Build the most impressive castle you can — full creative freedom over its shape and details. " +
-                "Use the world_command tool only, action='spawn', prefabKey='Cube', a DISTINCT targetName for every " +
-                "object, and explicit x,y,z coordinates kept within the -9..9 range so the whole castle fits in one " +
-                "screenshot (y is height, larger y = higher).\n\n" +
-                "Make it read like a real castle and pack in as much detail as you can manage. Use names that hint at " +
-                "what each object is so the scene is colourful and legible:\n" +
-                "- tall corner Towers placed so the walls between them form a real enclosed perimeter;\n" +
-                "- Walls connecting the towers, with a Gate or Door gap at the front;\n" +
-                "- a central Keep (or Castle) block in the middle;\n" +
-                "- Flags high on the towers (use a larger y);\n" +
-                "- then add as many extras as you like for grandeur: battlements, a Bridge, a Moat/Water ring, " +
-                "Trees and Torches outside, banners, courtyard props, stairs, or roofs.\n\n" +
-                "Aim for AT LEAST 24 objects — the bigger, more detailed, and better-arranged, the better. " +
-                "Choose your own coordinates, but place walls so the towers actually connect into a perimeter and put " +
-                "the keep in the centre. Keep every targetName distinct.";
+            // The visual free-build prompt is overridable, so you can ask for other things (a city, a
+            // character, a spaceship...) with no code change:
+            //   COREAI_BENCHMARK_FREEBUILD_PROMPT  — a full custom prompt, used verbatim
+            //   COREAI_BENCHMARK_FREEBUILD_SUBJECT — just the subject (e.g. "a futuristic city"); a generic
+            //                                        spatial-build scaffold is generated around it
+            // With neither set, the default is the detailed castle prompt below.
+            private static string Env(string key)
+            {
+                string v = System.Environment.GetEnvironmentVariable(key);
+                return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+            }
+
+            private static string FreeBuildSubject() => Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT");
+
+            public override string Goal
+            {
+                get
+                {
+                    string full = Env("COREAI_BENCHMARK_FREEBUILD_PROMPT");
+                    if (full != null)
+                    {
+                        return full;
+                    }
+
+                    string subject = FreeBuildSubject();
+                    return subject != null ? GenericGoal(subject) : CastleGoal;
+                }
+            }
+
+            private static string GenericGoal(string subject) =>
+                $"Build the most impressive {subject} you can. This is a showcase of your 3D spatial reasoning: " +
+                "the more complete, structured and detailed, the better you score. Use the world_command tool only, " +
+                "action='spawn', a DISTINCT targetName for every object, and explicit x,y,z coordinates within the " +
+                "-9..9 range so the whole scene fits in one screenshot (y is height, larger y = higher; ground at y=0).\n\n" +
+                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
+                "plane, quad (a plane makes a good ground).\n\n" +
+                $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
+                "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
+                "detailed — quantity and structure come first.\n\n" +
+                "For natural variety you may resize parts with action='set_scale' (a uniform 'scale') and turn pieces " +
+                "with action='rotate' (fx/fy/fz degrees), only after you have spawned plenty of objects.";
+
+            private const string CastleGoal =
+                "Build the most impressive castle you can. This is a showcase of your 3D spatial reasoning: the more " +
+                "complete, structured and detailed the castle, the better you score. Use the world_command tool only, " +
+                "action='spawn', a DISTINCT targetName for every object, and explicit x,y,z coordinates within the " +
+                "-9..9 range so the whole castle fits in one screenshot (y is height, larger y = higher; the ground is " +
+                "at y=0).\n\n" +
+                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
+                "plane, quad. For example cylinders for round towers and flag poles, cubes for walls/keep/battlements, " +
+                "spheres for domes/treetops, a plane for the ground.\n\n" +
+                "A castle MUST have, at minimum: four corner towers, walls connecting them into a closed perimeter, a " +
+                "gate gap at the front, and a central keep. Then add grandeur: battlements along the walls, flags on " +
+                "top of the towers, roofs, a bridge, a moat ring, trees and torches outside.\n\n" +
+                "If you are unsure how to lay it out, follow this proven skeleton and then EXTEND it with more detail:\n" +
+                "- Ground: prefabKey='plane' at (0,0,0).\n" +
+                "- Four corner towers: prefabKey='cylinder' at (-6,1.5,-6), (6,1.5,-6), (-6,1.5,6), (6,1.5,6).\n" +
+                "- Walls (cubes) spaced every ~2 units along each of the four edges connecting the towers, e.g. the " +
+                "back wall at z=-6 with x = -4,-2,0,2,4 (leave the front edge z=6 open in the middle for the gate).\n" +
+                "- Keep: a few stacked cubes near (0,1,0).\n" +
+                "- Flags: prefabKey='cylinder' on top of each tower at y=4.\n" +
+                "- Battlements: small cubes at y=3 along the wall tops; torches (cylinders) flanking the gate.\n\n" +
+                "Aim for AT LEAST 24 objects — ideally 30+. Place walls so the towers actually connect into a " +
+                "perimeter and keep every targetName distinct. Do not stop early: keep emitting spawn calls until the " +
+                "castle is full and detailed — quantity and structure come first.\n\n" +
+                "For natural variety you may resize parts with action='set_scale' (a uniform 'scale', e.g. taller " +
+                "towers, a bigger keep) and turn pieces with action='rotate' (fx/fy/fz degrees). Only do this after " +
+                "you have spawned plenty of objects — never let it reduce how many objects you build.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

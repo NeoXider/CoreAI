@@ -207,13 +207,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return sb.ToString();
             }
 
-            /// <summary>Concatenated assistant text for BPE estimation.</summary>
+            /// <summary>
+            /// Concatenated assistant output for BPE estimation. Includes the tool calls (name + arguments),
+            /// not just prose — in tool-only runs (e.g. the castle) almost all generated tokens are tool-call
+            /// JSON, so estimating from assistant text alone would massively undercount decode throughput.
+            /// </summary>
             public string CompletionTextForEstimate()
             {
                 StringBuilder sb = new();
                 foreach (CapturedTurn t in Turns)
                 {
                     sb.Append(t.Assistant).Append('\n');
+                    foreach (LlmToolCallTrace tool in t.Tools)
+                    {
+                        sb.Append(tool.Name).Append(' ').Append(tool.Detail ?? "").Append('\n');
+                    }
                 }
 
                 return sb.ToString();
@@ -334,6 +342,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public string PrefabKeyOrName = "";
             public string StringValue = "";
             public float X, Y, Z;
+            public float FloatValue;
+            public float Fx, Fy, Fz;
         }
 
         public class RecordingWorldExecutor : ICoreAiWorldCommandExecutor
@@ -370,7 +380,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         StringValue = env.stringValue ?? "",
                         X = env.x,
                         Y = env.y,
-                        Z = env.z
+                        Z = env.z,
+                        FloatValue = env.floatValue,
+                        Fx = env.fx,
+                        Fy = env.fy,
+                        Fz = env.fz
                     };
                     Commands.Add(recorded);
                     OnCommand(recorded);
@@ -419,15 +433,65 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // Translucent placeholders for expected objects the model never spawned (added at capture time).
             private readonly List<UnityEngine.GameObject> _ghosts = new();
 
-            /// <summary>Object names the scene should contain — drives role colour + the ✓/✗ status marker.</summary>
+            /// <summary>Object names the scene should contain — drives the ✓/✗ status marker + correctness tint.</summary>
             public readonly HashSet<string> ExpectedNames = new(StringComparer.OrdinalIgnoreCase);
+
+            /// <summary>When true, per-object name labels are not drawn (free-build hero shots stay uncluttered).</summary>
+            public bool HideLabels;
 
             public UnityEngine.Transform Root { get; }
             public int ObjectCount => _objects.Count;
 
+            // Live preview camera + light so the Game view shows the model building the scene in real time
+            // (objects pop in as commands stream), instead of staring at an empty view until the final shot.
+            private UnityEngine.GameObject _liveCamGo;
+            private UnityEngine.GameObject _liveLightGo;
+
             public VisualBenchmarkWorldExecutor()
             {
                 Root = new UnityEngine.GameObject("BenchmarkScene").transform;
+                CreateLivePreview();
+            }
+
+            private void CreateLivePreview()
+            {
+                try
+                {
+                    _liveLightGo = new UnityEngine.GameObject("BenchmarkLivePreviewLight");
+                    UnityEngine.Light light = _liveLightGo.AddComponent<UnityEngine.Light>();
+                    light.type = UnityEngine.LightType.Directional;
+                    light.intensity = 1.3f;
+                    _liveLightGo.transform.rotation = UnityEngine.Quaternion.Euler(48f, -32f, 0f);
+
+                    _liveCamGo = new UnityEngine.GameObject("BenchmarkLivePreviewCamera");
+                    UnityEngine.Camera cam = _liveCamGo.AddComponent<UnityEngine.Camera>();
+                    cam.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+                    cam.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
+                    cam.fieldOfView = 50f;
+                    cam.nearClipPlane = 0.05f;
+                    cam.farClipPlane = 500f;
+                    // Frame the -9..9 build volume from a 3/4 angle so objects appear in place as they spawn.
+                    cam.transform.position = new UnityEngine.Vector3(14f, 16f, -22f);
+                    cam.transform.LookAt(new UnityEngine.Vector3(0f, 2f, 0f));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Benchmark] live preview setup failed: {ex.Message}");
+                }
+            }
+
+            /// <summary>Turns off the live preview camera + light so they never affect the final screenshot lighting.</summary>
+            public void HideLivePreview()
+            {
+                if (_liveCamGo != null)
+                {
+                    _liveCamGo.SetActive(false);
+                }
+
+                if (_liveLightGo != null)
+                {
+                    _liveLightGo.SetActive(false);
+                }
             }
 
             protected override void OnCommand(RecordedWorldCommand cmd)
@@ -444,7 +508,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         {
                             bool expected = ExpectedNames.Count == 0 || ExpectedNames.Contains(key);
                             UnityEngine.GameObject go = BuildVisual(
-                                key, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z), expected, ghost: false);
+                                key, cmd.PrefabKeyOrName, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z),
+                                expected, ghost: false);
                             _objects[key] = go;
                         }
                     }
@@ -461,6 +526,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                         _objects.Remove(name);
                     }
+                    else if (action == "set_scale"
+                             && _objects.TryGetValue(name, out UnityEngine.GameObject sc) && sc != null
+                             && cmd.FloatValue > 0f)
+                    {
+                        // Honour the model's uniform scale so towers/walls vary in size (natural variety).
+                        sc.transform.localScale =
+                            UnityEngine.Vector3.one * UnityEngine.Mathf.Clamp(cmd.FloatValue, 0.05f, 50f);
+                    }
+                    else if (action == "rotate"
+                             && _objects.TryGetValue(name, out UnityEngine.GameObject ro) && ro != null)
+                    {
+                        ro.transform.rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -468,106 +546,49 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
             }
 
-            // Role -> primitive shape, scale and base colour, so the scene reads like a game prototype
-            // (capsule player, sphere enemies, coin pucks, a goal post) instead of identical cubes.
-            private static (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale, UnityEngine.Color color)
-                RoleVisual(string name)
+            // The model now chooses each object's primitive via prefabKey (cube/sphere/cylinder/capsule/
+            // plane/quad); the harness no longer guesses a shape from the object's name. ShapeFor maps that
+            // key to a primitive + a sensible per-shape default scale, and HashColor gives each object a
+            // stable distinct colour so the scene reads like a prototype instead of identical grey cubes.
+            private static (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) ShapeFor(string prefabKey)
             {
-                string n = (name ?? "").ToLowerInvariant();
                 UnityEngine.Vector3 S(float x, float y, float z) => new(x, y, z);
-
-                if (n.StartsWith("player") || n.StartsWith("hero"))
+                if (!CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.TryGetPrimitiveType(
+                        prefabKey, out UnityEngine.PrimitiveType prim))
                 {
-                    return (UnityEngine.PrimitiveType.Capsule, S(0.8f, 0.8f, 0.8f), new UnityEngine.Color(0.30f, 0.55f, 0.95f));
+                    prim = UnityEngine.PrimitiveType.Cube;
                 }
 
-                if (n.StartsWith("enemy") || n.StartsWith("goblin") || n.StartsWith("monster") || n.Contains("enemy"))
+                switch (prim)
                 {
-                    return (UnityEngine.PrimitiveType.Sphere, S(0.9f, 0.9f, 0.9f), new UnityEngine.Color(0.90f, 0.45f, 0.30f));
+                    case UnityEngine.PrimitiveType.Cylinder:
+                        return (prim, S(0.6f, 1.3f, 0.6f));
+                    case UnityEngine.PrimitiveType.Capsule:
+                        return (prim, S(0.7f, 0.95f, 0.7f));
+                    case UnityEngine.PrimitiveType.Plane:
+                        return (prim, S(1.2f, 1f, 1.2f));
+                    case UnityEngine.PrimitiveType.Quad:
+                        return (prim, S(1f, 1f, 0.12f));
+                    default: // Cube, Sphere
+                        return (prim, S(0.9f, 0.9f, 0.9f));
                 }
-
-                if (n.StartsWith("coin") || n.StartsWith("gold") || n.StartsWith("gem"))
-                {
-                    return (UnityEngine.PrimitiveType.Cylinder, S(0.75f, 0.14f, 0.75f), new UnityEngine.Color(0.95f, 0.82f, 0.30f));
-                }
-
-                if (n.StartsWith("goal") || n.StartsWith("exit"))
-                {
-                    return (UnityEngine.PrimitiveType.Cylinder, S(0.45f, 0.95f, 0.45f), new UnityEngine.Color(0.30f, 0.82f, 0.72f));
-                }
-
-                if (n.Contains("wall"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(2.0f, 1.0f, 0.5f), new UnityEngine.Color(0.50f, 0.52f, 0.55f));
-                }
-
-                if (n.Contains("tower"))
-                {
-                    return (UnityEngine.PrimitiveType.Cylinder, S(0.9f, 2.2f, 0.9f), new UnityEngine.Color(0.58f, 0.60f, 0.63f));
-                }
-
-                if (n.Contains("keep") || n.Contains("castle"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(2.2f, 2.0f, 2.2f), new UnityEngine.Color(0.32f, 0.34f, 0.38f));
-                }
-
-                if (n.Contains("gate") || n.Contains("door"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(1.2f, 1.4f, 0.35f), new UnityEngine.Color(0.48f, 0.28f, 0.14f));
-                }
-
-                if (n.Contains("roof"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(1.5f, 0.35f, 1.5f), new UnityEngine.Color(0.48f, 0.08f, 0.08f));
-                }
-
-                if (n.Contains("flag"))
-                {
-                    return (UnityEngine.PrimitiveType.Cylinder, S(0.18f, 1.1f, 0.18f), new UnityEngine.Color(0.95f, 0.12f, 0.18f));
-                }
-
-                if (n.Contains("bridge"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(1.8f, 0.2f, 0.8f), new UnityEngine.Color(0.72f, 0.55f, 0.32f));
-                }
-
-                if (n.Contains("moat") || n.Contains("water"))
-                {
-                    return (UnityEngine.PrimitiveType.Cube, S(2.0f, 0.08f, 2.0f), new UnityEngine.Color(0.14f, 0.42f, 0.78f));
-                }
-
-                if (n.StartsWith("tree"))
-                {
-                    return (UnityEngine.PrimitiveType.Sphere, S(0.9f, 1.05f, 0.9f), new UnityEngine.Color(0.30f, 0.66f, 0.36f));
-                }
-
-                if (n.Contains("torch"))
-                {
-                    return (UnityEngine.PrimitiveType.Cylinder, S(0.18f, 0.8f, 0.18f), new UnityEngine.Color(1.0f, 0.46f, 0.08f));
-                }
-
-                if (n.StartsWith("rock") || n.StartsWith("stone"))
-                {
-                    return (UnityEngine.PrimitiveType.Sphere, S(1.0f, 0.7f, 1.0f), new UnityEngine.Color(0.55f, 0.55f, 0.58f));
-                }
-
-                if (n.StartsWith("bush") || n.StartsWith("plant"))
-                {
-                    return (UnityEngine.PrimitiveType.Sphere, S(0.8f, 0.66f, 0.8f), new UnityEngine.Color(0.45f, 0.74f, 0.42f));
-                }
-
-                return (UnityEngine.PrimitiveType.Cube, S(0.85f, 0.85f, 0.85f), new UnityEngine.Color(0.32f, 0.68f, 0.70f));
             }
 
+            // Neutral stone for any object the model did not colour itself — colours are the model's call
+            // (it tints via set_color). Plane/ground gets a muted earth tone in BuildVisual.
+            private static readonly UnityEngine.Color DefaultObjectColor = new(0.62f, 0.63f, 0.67f);
+
             /// <summary>
-            /// Spawns the role-shaped primitive for <paramref name="key"/> with a status-coloured name label.
-            /// Expected object -> role colour + "✓"; unexpected/extra -> red + "✗"; ghost -> faint grey + "✗".
+            /// Spawns the model-chosen primitive (<paramref name="prefabKey"/>) for <paramref name="key"/>,
+            /// tinted a stable hash colour. When <see cref="ExpectedNames"/> is set, unexpected/extra objects
+            /// turn red and ghosts grey, and a ✓/✗ status label is drawn (unless <see cref="HideLabels"/>).
             /// </summary>
             private static float Safe(float v) => UnityEngine.Mathf.Max(UnityEngine.Mathf.Abs(v), 0.05f);
 
-            private UnityEngine.GameObject BuildVisual(string key, UnityEngine.Vector3 pos, bool expected, bool ghost)
+            private UnityEngine.GameObject BuildVisual(
+                string key, string prefabKey, UnityEngine.Vector3 pos, bool expected, bool ghost)
             {
-                (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale, UnityEngine.Color roleColor) = RoleVisual(key);
+                (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) = ShapeFor(prefabKey);
                 UnityEngine.GameObject go = UnityEngine.GameObject.CreatePrimitive(prim);
                 go.name = ghost ? $"ghost:{key}" : key;
                 UnityEngine.Collider col = go.GetComponent<UnityEngine.Collider>();
@@ -582,11 +603,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 UnityEngine.Color objColor =
                     ghost ? new UnityEngine.Color(0.34f, 0.36f, 0.40f) :
-                    expected ? roleColor : new UnityEngine.Color(0.86f, 0.36f, 0.34f);
+                    ExpectedNames.Count > 0 && !expected ? new UnityEngine.Color(0.86f, 0.36f, 0.34f) :
+                    prim == UnityEngine.PrimitiveType.Plane ? new UnityEngine.Color(0.42f, 0.46f, 0.40f) :
+                    DefaultObjectColor;
                 UnityEngine.Renderer rend = go.GetComponent<UnityEngine.Renderer>();
                 if (rend != null)
                 {
                     TintRenderer(rend, objColor);
+                }
+
+                if (HideLabels)
+                {
+                    return go;
                 }
 
                 string mark = ExpectedNames.Count == 0 ? "" : (ghost || !expected ? "  ✗" : "  ✓");
@@ -643,7 +671,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 missing.Sort(StringComparer.OrdinalIgnoreCase);
                 foreach (string name in missing)
                 {
-                    _ghosts.Add(BuildVisual(name, UnityEngine.Vector3.zero, expected: true, ghost: true));
+                    _ghosts.Add(BuildVisual(name, "", UnityEngine.Vector3.zero, expected: true, ghost: true));
                 }
             }
 
@@ -747,6 +775,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public void Cleanup()
             {
+                if (_liveCamGo != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(_liveCamGo);
+                }
+
+                if (_liveLightGo != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(_liveLightGo);
+                }
+
                 if (Root != null)
                 {
                     UnityEngine.Object.DestroyImmediate(Root.gameObject);
@@ -1009,6 +1047,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     {
                         visSetup.ExpectedNames.Add(n);
                     }
+
+                    // Free-build hero shots (the castle) drop per-object labels — dozens of model-named
+                    // objects would overlap into unreadable garble.
+                    visSetup.HideLabels = scenario.FreeBuildLayout;
                 }
 
                 config = scenario.BuildAgent(env);
@@ -1149,18 +1191,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 grading.HardCap = Math.Min(grading.HardCap ?? 100, 60);
             }
 
-            // Real token usage when the provider reports it; otherwise a labeled BPE estimate.
+            // Real token usage when the provider reports it; otherwise a labeled BPE estimate. Streaming
+            // local backends (e.g. LM Studio) frequently under-report completion usage on tool-call turns,
+            // which made decode tok/s read as ~0.3; guard against that by never trusting a provider completion
+            // count that falls below a tokenizer estimate of everything the model generated (incl. tool calls).
+            int estCompletion = tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId);
             int promptTokens, completionTokens;
             bool fromProvider = capture.AnyProviderUsage;
             if (fromProvider)
             {
                 promptTokens = capture.ProviderPromptTokens;
-                completionTokens = capture.ProviderCompletionTokens;
+                completionTokens = Math.Max(capture.ProviderCompletionTokens, estCompletion);
             }
             else
             {
                 promptTokens = tokenCounter.CountTokens(capture.PromptTextForEstimate(), modelId);
-                completionTokens = tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId);
+                completionTokens = estCompletion;
             }
 
             double totalTokens = promptTokens + completionTokens;
@@ -1240,14 +1286,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Action<byte[]> onPng)
         {
             UnityEngine.GameObject camGo = null;
+            UnityEngine.GameObject camBGo = null;
+            UnityEngine.GameObject camCGo = null;
             UnityEngine.GameObject keyGo = null;
             UnityEngine.GameObject fillGo = null;
             UnityEngine.GameObject groundGo = null;
             UnityEngine.Camera cam = null;
             UnityEngine.RenderTexture rt = null;
+            UnityEngine.RenderTexture rtB = null;
+            UnityEngine.RenderTexture rtC = null;
+            UnityEngine.Vector3 sceneCenter = UnityEngine.Vector3.zero;
+            float sceneExt = 1.2f;
 
             try
             {
+                // Switch off the live preview camera/light so only the capture rig lights the final shot.
+                vis.HideLivePreview();
+
                 if (!freeBuildLayout)
                 {
                     vis.AddMissingGhosts();
@@ -1256,6 +1311,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 UnityEngine.Bounds bounds = vis.ComputeBounds();
                 float ext = UnityEngine.Mathf.Max(bounds.extents.magnitude, 1.2f);
+                sceneCenter = bounds.center;
+                sceneExt = ext;
 
                 camGo = new UnityEngine.GameObject("BenchmarkCamera");
                 cam = camGo.AddComponent<UnityEngine.Camera>();
@@ -1343,73 +1400,212 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Debug.LogWarning($"[Benchmark] screenshot setup failed: {ex.Message}");
             }
 
-            // Let the (enabled) camera render to its target texture this frame — Camera.Render() is not
-            // supported under the Scriptable Render Pipeline, so we rely on the normal render loop.
+            // Frame 1: the main camera (with its banner overlay) renders to rt under the SRP render loop
+            // (Camera.Render() is not supported under SRP, so we rely on the normal render loop).
+            yield return new UnityEngine.WaitForEndOfFrame();
+
+            UnityEngine.Texture2D texMain = ReadRenderTexture(rt);
+
+            // Hide the main camera (and its parented banner quads) so the two inset cameras capture a clean
+            // scene, then render the scene from two other angles for the composite.
+            if (camGo != null)
+            {
+                camGo.SetActive(false);
+            }
+
+            try
+            {
+                rtB = new UnityEngine.RenderTexture(300, 169, 24) { antiAliasing = 8 };
+                camBGo = MakeInsetCamera("BenchmarkCameraB",
+                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 1.9f, sceneExt * 1.3f, sceneExt * 2.4f),
+                    sceneCenter, rtB);
+                rtC = new UnityEngine.RenderTexture(300, 169, 24) { antiAliasing = 8 };
+                camCGo = MakeInsetCamera("BenchmarkCameraC",
+                    sceneCenter + new UnityEngine.Vector3(sceneExt * 0.25f, sceneExt * 3.0f, -sceneExt * 0.7f),
+                    sceneCenter, rtC);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Benchmark] inset camera setup failed: {ex.Message}");
+            }
+
+            // Frame 2: the inset cameras render their small views.
             yield return new UnityEngine.WaitForEndOfFrame();
 
             byte[] png = null;
-            UnityEngine.Texture2D tex = null;
-            UnityEngine.RenderTexture prevActive = UnityEngine.RenderTexture.active;
+            UnityEngine.Texture2D texB = null;
+            UnityEngine.Texture2D texC = null;
             try
             {
-                if (cam != null && rt != null)
+                if (texMain != null)
                 {
-                    UnityEngine.RenderTexture.active = rt;
-                    tex = new UnityEngine.Texture2D(rt.width, rt.height, UnityEngine.TextureFormat.RGB24, false);
-                    tex.ReadPixels(new UnityEngine.Rect(0, 0, rt.width, rt.height), 0, 0);
-                    tex.Apply();
-                    png = UnityEngine.ImageConversion.EncodeToPNG(tex);
+                    texB = ReadRenderTexture(rtB);
+                    texC = ReadRenderTexture(rtC);
+                    CompositeInsets(texMain, texB, texC);
+                    png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[Benchmark] screenshot capture failed: {ex.Message}");
+                Debug.LogWarning($"[Benchmark] screenshot composite failed: {ex.Message}");
+                try
+                {
+                    if (texMain != null)
+                    {
+                        png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
+                    }
+                }
+                catch
+                {
+                    // Give up — a null png is handled downstream (report just omits the image).
+                }
             }
             finally
             {
-                // Restore the active RT even if ReadPixels/Apply/Encode threw, so we never leave a dangling
-                // target bound for the rest of the editor session.
-                UnityEngine.RenderTexture.active = prevActive;
-
+                // Unbind + destroy the cameras BEFORE their render textures, otherwise Unity logs
+                // "Releasing render texture that is set as Camera.targetTexture!" at Error level, which the
+                // test framework treats as a failure.
                 if (cam != null)
                 {
                     cam.targetTexture = null;
                 }
 
-                if (tex != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(tex);
-                }
-
-                if (rt != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(rt);
-                }
-
-                if (camGo != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(camGo);
-                }
-
-                if (keyGo != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(keyGo);
-                }
-
-                if (fillGo != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(fillGo);
-                }
-
-                if (groundGo != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(groundGo);
-                }
-
+                DestroyGo(camGo);
+                DestroyGo(camBGo);
+                DestroyGo(camCGo);
+                DestroyTex(texMain);
+                DestroyTex(texB);
+                DestroyTex(texC);
+                DestroyRt(rt);
+                DestroyRt(rtB);
+                DestroyRt(rtC);
+                DestroyGo(keyGo);
+                DestroyGo(fillGo);
+                DestroyGo(groundGo);
                 DestroyScratchMeshes();
             }
 
             onPng?.Invoke(png);
+        }
+
+        // --- Screenshot composite helpers ---------------------------------------------------------------
+
+        private static UnityEngine.Texture2D ReadRenderTexture(UnityEngine.RenderTexture rt)
+        {
+            if (rt == null)
+            {
+                return null;
+            }
+
+            UnityEngine.RenderTexture prev = UnityEngine.RenderTexture.active;
+            UnityEngine.Texture2D tex = null;
+            try
+            {
+                UnityEngine.RenderTexture.active = rt;
+                tex = new UnityEngine.Texture2D(rt.width, rt.height, UnityEngine.TextureFormat.RGB24, false);
+                tex.ReadPixels(new UnityEngine.Rect(0, 0, rt.width, rt.height), 0, 0);
+                tex.Apply();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Benchmark] render-texture read failed: {ex.Message}");
+            }
+            finally
+            {
+                UnityEngine.RenderTexture.active = prev;
+            }
+
+            return tex;
+        }
+
+        private static UnityEngine.GameObject MakeInsetCamera(
+            string name, UnityEngine.Vector3 position, UnityEngine.Vector3 lookAt, UnityEngine.RenderTexture rt)
+        {
+            UnityEngine.GameObject go = new(name);
+            UnityEngine.Camera c = go.AddComponent<UnityEngine.Camera>();
+            c.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+            c.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
+            c.fieldOfView = 50f;
+            c.nearClipPlane = 0.05f;
+            c.farClipPlane = 500f;
+            c.allowMSAA = true;
+            go.transform.position = position;
+            c.transform.LookAt(lookAt);
+            c.targetTexture = rt;
+            return go;
+        }
+
+        // Pastes the two extra-angle views into the right column of the hero shot (below the top banner).
+        private static void CompositeInsets(
+            UnityEngine.Texture2D main, UnityEngine.Texture2D b, UnityEngine.Texture2D c)
+        {
+            if (main == null)
+            {
+                return;
+            }
+
+            const int iw = 300;
+            const int ih = 169;
+            const int margin = 16;
+            const int bannerPx = 151; // top results bar height, kept clear
+            int x = main.width - margin - iw;
+            int y1 = main.height - bannerPx - margin - ih;
+            int y2 = y1 - margin - ih;
+            PasteInset(main, b, x, y1, iw, ih);
+            PasteInset(main, c, x, y2, iw, ih);
+            main.Apply();
+        }
+
+        private static void PasteInset(
+            UnityEngine.Texture2D main, UnityEngine.Texture2D inset, int x, int y, int w, int h)
+        {
+            if (main == null || inset == null || inset.width != w || inset.height != h)
+            {
+                return;
+            }
+
+            const int border = 3;
+            int fx = UnityEngine.Mathf.Max(0, x - border);
+            int fy = UnityEngine.Mathf.Max(0, y - border);
+            int fw = UnityEngine.Mathf.Min(main.width - fx, w + 2 * border);
+            int fh = UnityEngine.Mathf.Min(main.height - fy, h + 2 * border);
+            UnityEngine.Color[] frame = new UnityEngine.Color[fw * fh];
+            UnityEngine.Color frameColor = new(0.04f, 0.05f, 0.06f);
+            for (int i = 0; i < frame.Length; i++)
+            {
+                frame[i] = frameColor;
+            }
+
+            main.SetPixels(fx, fy, fw, fh, frame);
+
+            if (x >= 0 && y >= 0 && x + w <= main.width && y + h <= main.height)
+            {
+                main.SetPixels(x, y, w, h, inset.GetPixels());
+            }
+        }
+
+        private static void DestroyTex(UnityEngine.Texture2D tex)
+        {
+            if (tex != null)
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+            }
+        }
+
+        private static void DestroyRt(UnityEngine.RenderTexture rt)
+        {
+            if (rt != null)
+            {
+                UnityEngine.Object.DestroyImmediate(rt);
+            }
+        }
+
+        private static void DestroyGo(UnityEngine.GameObject go)
+        {
+            if (go != null)
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
         }
 
         /// <summary>

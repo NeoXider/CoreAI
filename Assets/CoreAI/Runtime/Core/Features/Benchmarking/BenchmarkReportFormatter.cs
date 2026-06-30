@@ -23,7 +23,7 @@ namespace CoreAI.Benchmarking
             sb.AppendLine($"> **{Grade(report.SuiteBaseScore)}** · " +
                           $"PASS {report.PassCount} / PARTIAL {report.PartialCount} / FAIL {report.FailCount} " +
                           $"· pass-rate {F(report.PassRate * 100)}% · mean bonus {F(report.MeanBonus)} " +
-                          $"· reps {m.Repetitions}");
+                          $"· reps {m.Repetitions} · {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
             sb.AppendLine();
 
             sb.Append("- **By group:** ");
@@ -406,7 +406,7 @@ namespace CoreAI.Benchmarking
         public static string IndexHeader()
         {
             StringBuilder sb = new();
-            sb.AppendLine("# CoreAI Game-Creation Benchmark — Index");
+            sb.AppendLine($"# {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version} — Index");
             sb.AppendLine();
             sb.AppendLine("Newest runs are appended at the bottom. Click a report to open it.");
             sb.AppendLine();
