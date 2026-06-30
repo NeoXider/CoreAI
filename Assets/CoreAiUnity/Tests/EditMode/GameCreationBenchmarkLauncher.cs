@@ -90,7 +90,7 @@ namespace CoreAI.Tests.EditMode
             bool g3 = EditorPrefs.GetBool(PrefG3, true);
             bool g4 = EditorPrefs.GetBool(PrefG4, true);
             bool g5 = EditorPrefs.GetBool(PrefG5, true);
-            bool g6 = EditorPrefs.GetBool(PrefG6, true);
+            bool g6 = EditorPrefs.GetBool(PrefG6, false);
             int reps = EditorPrefs.GetInt(PrefReps, 1);
             int retries = EditorPrefs.GetInt(PrefRetries, 1);
             int timeout = EditorPrefs.GetInt(PrefTimeout, 0);
@@ -600,7 +600,7 @@ namespace CoreAI.Tests.EditMode
         private bool _runG3 = true;
         private bool _runG4 = true;
         private bool _runG5 = true;
-        private bool _runG6 = true;
+        private bool _runG6 = false;
         private int _reps = 1;
         private int _retries = 1;
         private int _timeoutSeconds; // 0 = per-scenario default
@@ -635,7 +635,7 @@ namespace CoreAI.Tests.EditMode
             _runG3 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG3, true);
             _runG4 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG4, true);
             _runG5 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG5, true);
-            _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, true);
+            _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, false);
             _reps = EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefReps, 1);
             _retries = EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefRetries, 1);
             _timeoutSeconds = EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefTimeout, 0);

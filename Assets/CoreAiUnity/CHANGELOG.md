@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.15.3 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.15.3**.
+
+- **Castle = creative freedom.** G6 now asks for the most impressive castle the model can build within the
+  coordinate bounds (no fixed blueprint), so the hero image reflects each model's own design.
+- **G6 off by default** in the benchmark window (RUN tab toggle) — it is a bonus visual, not a scored core
+  group. Enable it per run when you want a castle hero.
+
 ## 4.15.2 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.15.2**.

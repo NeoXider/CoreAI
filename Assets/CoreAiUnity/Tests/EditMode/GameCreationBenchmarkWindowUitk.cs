@@ -65,7 +65,7 @@ namespace CoreAI.Tests.EditMode
         private bool _runG3 = true;
         private bool _runG4 = true;
         private bool _runG5 = true;
-        private bool _runG6 = true;
+        private bool _runG6 = false; // castle bonus is off by default
         private int _reps = 1;
         private int _retries = 1;
         private int _timeoutSeconds;
@@ -997,7 +997,7 @@ namespace CoreAI.Tests.EditMode
             _runG3 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG3, true);
             _runG4 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG4, true);
             _runG5 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG5, true);
-            _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, true);
+            _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, false);
             _reps = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefReps, 1), 1, 5);
             _retries = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefRetries, 1), 0, 3);
             _timeoutSeconds = Mathf.Max(0, EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefTimeout, 0));

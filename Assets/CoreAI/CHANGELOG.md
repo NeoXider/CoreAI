@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## 4.15.3 - 2026-06-30
+
+- **Free, ambitious castles.** The G6 prompt swaps the rigid coordinate blueprint for full creative freedom
+  within the -9..9 range, pushing the model to build the most impressive castle it can (towers, walls, gate,
+  keep, flags + as many extras as it wants) — so each model's character shows.
+- **G6 is off by default.** The castle hero is a non-scored bonus visual, so its toggle now defaults to off
+  in the benchmark window; enable it explicitly (window toggle or `COREAI_BENCHMARK_GROUPS=…,G6`).
+
 ## 4.15.2 - 2026-06-30
 
 - **Model name on every scene/castle screenshot.** The baked header now leads with the model id (long

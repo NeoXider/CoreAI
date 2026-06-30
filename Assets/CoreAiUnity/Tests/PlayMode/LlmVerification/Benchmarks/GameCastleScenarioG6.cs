@@ -61,21 +61,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Free-form build: the model designs and places a whole castle scene — judged loosely on scale and variety, shown as the report hero image.";
 
             public override string Goal =>
-                "Build a castle showcase scene. Use the world_command tool only, action='spawn', prefabKey='Cube', " +
-                "a DISTINCT targetName for every object, and the EXACT x,y,z below so the objects form a clean square " +
-                "castle. First spawn ALL of these CORE objects, then add several of your own decorations.\n\n" +
-                "CORE — spawn every one of these (use these exact coordinates):\n" +
-                "- corner towers: Tower1 (-6,0,-6), Tower2 (6,0,-6), Tower3 (-6,0,6), Tower4 (6,0,6)\n" +
-                "- flags high on the towers: Flag1 (-6,3,-6), Flag2 (6,3,-6), Flag3 (-6,3,6), Flag4 (6,3,6)\n" +
-                "- front wall with a gateway gap: Wall1 (-3,0,-6), Wall2 (3,0,-6), Gate (0,0,-6)\n" +
-                "- back wall: Wall3 (-3,0,6), Wall4 (0,0,6), Wall5 (3,0,6)\n" +
-                "- left wall: Wall6 (-6,0,-3), Wall7 (-6,0,0), Wall8 (-6,0,3)\n" +
-                "- right wall: Wall9 (6,0,-3), Wall10 (6,0,0), Wall11 (6,0,3)\n" +
-                "- central keep: Keep (0,1,0)\n\n" +
-                "THEN add 6 or more of your OWN extra objects with distinct names and sensible coordinates in the " +
-                "-9..9 range to make it richer — for example trees outside the walls (Tree1, Tree2…), torches by the " +
-                "gate, a bridge in front (Bridge at (0,0,-9)), banners, or courtyard props. Aim for 24+ objects total. " +
-                "Keep every targetName distinct.";
+                "Build the most impressive castle you can — full creative freedom over its shape and details. " +
+                "Use the world_command tool only, action='spawn', prefabKey='Cube', a DISTINCT targetName for every " +
+                "object, and explicit x,y,z coordinates kept within the -9..9 range so the whole castle fits in one " +
+                "screenshot (y is height, larger y = higher).\n\n" +
+                "Make it read like a real castle and pack in as much detail as you can manage. Use names that hint at " +
+                "what each object is so the scene is colourful and legible:\n" +
+                "- tall corner Towers placed so the walls between them form a real enclosed perimeter;\n" +
+                "- Walls connecting the towers, with a Gate or Door gap at the front;\n" +
+                "- a central Keep (or Castle) block in the middle;\n" +
+                "- Flags high on the towers (use a larger y);\n" +
+                "- then add as many extras as you like for grandeur: battlements, a Bridge, a Moat/Water ring, " +
+                "Trees and Torches outside, banners, courtyard props, stairs, or roofs.\n\n" +
+                "Aim for AT LEAST 24 objects — the bigger, more detailed, and better-arranged, the better. " +
+                "Choose your own coordinates, but place walls so the towers actually connect into a perimeter and put " +
+                "the keep in the centre. Keep every targetName distinct.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
