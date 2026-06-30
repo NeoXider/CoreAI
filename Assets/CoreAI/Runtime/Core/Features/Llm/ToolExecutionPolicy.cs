@@ -180,7 +180,7 @@ namespace CoreAI.Infrastructure.Llm
                 foreach (MEAI.FunctionCallContent fc in toolCalls)
                 {
                     string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
-                    _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
+                    AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
                     errs.Add(new MEAI.FunctionResultContent(fc.CallId, duplicate));
                 }
 

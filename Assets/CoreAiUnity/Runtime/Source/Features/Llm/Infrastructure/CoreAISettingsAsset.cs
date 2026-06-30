@@ -764,7 +764,8 @@ namespace CoreAI.Infrastructure.Llm
         // falls back to the default 20.
         public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 0 ? 20 : maxToolCallRoundtrips;
 
-        /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit.</summary>
+        /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit. Default: 0 (unlimited).</summary>
+        // A negative (corrupt) value falls back to 20; 0 is a valid value meaning unlimited.
         public int MaxToolCallHistoryMessages => maxToolCallHistoryMessages < 0 ? 20 : maxToolCallHistoryMessages;
 
         /// <summary>Max concurrent tool calls within one batch. 1 = sequential. Default 4.</summary>

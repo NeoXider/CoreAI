@@ -19,6 +19,13 @@ namespace CoreAI.Infrastructure.World
         private readonly List<ICoreAiCustomWorldCommandHandler> _customHandlers = new();
         private MaterialPropertyBlock _sharedColorMpb;
 
+        /// <summary>
+        /// Opt-in collision-avoidance for <c>spawn</c>. OFF by default: the model's explicit coordinates are
+        /// authoritative, so adjacent/stacked/on-ground placements are honored. Set to true only when a caller
+        /// wants <see cref="ValidateSpawnPosition"/> to reject positions overlapping non-trigger colliders.
+        /// </summary>
+        public bool RejectOverlappingSpawns { get; set; }
+
         /// <param name="allowedScenes">
         /// Optional scene whitelist for <c>load_scene</c>. When null/empty any Build-Settings scene stays
         /// loadable (legacy). Enforced here (not only on the Lua binding) so every path — the native
@@ -169,7 +176,11 @@ namespace CoreAI.Infrastructure.World
 
             Vector3 pos = new(env.x, env.y, env.z);
 
-            if (!ValidateSpawnPosition(pos, 0.5f))
+            // The model's explicit coordinates are authoritative by default: adjacent/stacked/on-the-ground
+            // placements (castle blocks, coins on a floor) are legitimate, and the PhysX broadphase is stale in
+            // edit-mode / mid-batch. So the overlap rejection is opt-in (off by default) — only honored when the
+            // request explicitly asks to avoid collisions. The check remains available for callers that want it.
+            if (RejectOverlappingSpawns && !ValidateSpawnPosition(pos, 0.5f))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[World] spawn blocked: position ({pos.x},{pos.y},{pos.z}) overlaps existing colliders");

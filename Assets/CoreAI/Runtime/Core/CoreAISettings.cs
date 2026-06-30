@@ -402,7 +402,7 @@
 
         /// <summary>
         /// Max tool call history messages in the MEAI message list during tool-calling loop.
-        /// 0 = no limit. Default: 20.
+        /// 0 = no limit. Default: 0 (unlimited).
         /// </summary>
         public static int MaxToolCallHistoryMessages
         {

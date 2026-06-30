@@ -42,7 +42,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "world_command";
-        public override bool AllowDuplicates => false;
+
+        // Multi-action tool: identical repeats are legitimate (apply_force/set_velocity/update_score etc.).
+        // The original duplicate-SPAWN spam is now prevented at the root by reasoning being enabled and the
+        // self-describing [Description] schema (models emit distinct args), so blanket tool-level dedup is the
+        // wrong layer — it would wrongly skip valid repeated physics/score calls.
+        public override bool AllowDuplicates => true;
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +

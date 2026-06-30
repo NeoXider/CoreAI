@@ -32,7 +32,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "component_command";
-        public override bool AllowDuplicates => false;
+
+        // Multi-action tool: identical repeats are legitimate (e.g. repeated 'set' on different frames). The
+        // original duplicate-SPAWN spam is now prevented at the root by reasoning being enabled and the
+        // self-describing [Description] schema (models emit distinct args), so blanket tool-level dedup is the
+        // wrong layer — it would wrongly skip valid repeated component calls.
+        public override bool AllowDuplicates => true;
 
         public override string Description =>
             "Execute component commands to add, remove, configure, or list Unity components on existing GameObjects. " +

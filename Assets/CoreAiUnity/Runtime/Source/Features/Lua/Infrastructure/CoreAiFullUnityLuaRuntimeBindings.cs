@@ -849,9 +849,17 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            // Fail-CLOSED hard floor (mirrors IsTypeAllowed): a member declared on a dangerous type is never
-            // callable/readable/writable from Full Lua regardless of the host deny-list policy.
-            if (IsHardDeniedType(member.DeclaringType) || IsHardDeniedType(member is MethodInfo m ? m.ReturnType : null))
+            // Fail-CLOSED hard floor (mirrors IsTypeAllowed): a member declared on a dangerous type — or whose
+            // member TYPE is dangerous (method return, property type, field type) — is never callable/readable/
+            // writable from Full Lua regardless of the host deny-list policy.
+            Type memberType = member switch
+            {
+                MethodInfo mi => mi.ReturnType,
+                PropertyInfo pi => pi.PropertyType,
+                FieldInfo fi => fi.FieldType,
+                _ => null
+            };
+            if (IsHardDeniedType(member.DeclaringType) || IsHardDeniedType(memberType))
             {
                 throw new ScriptRuntimeException(
                     $"Full Lua access to member '{member.DeclaringType?.Name}.{member.Name}' is denied " +
