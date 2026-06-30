@@ -4,6 +4,21 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Native tool schemas are self-describing.** Tool parameter descriptions now reach the model via
+  `[System.ComponentModel.Description]` attributes on the delegate params (the `ParametersSchema` string
+  only feeds the text path, not native tool-calling). Added across the World/Scene/Camera/Component tools —
+  so models actually use `world_command`'s `fx/fy/fz` rotation and `scale` (verified: qwythos-9b 58/63
+  spawns with rotation+scale, ornith-9b 52/52 with scale, fable-27b 79/79). New `Docs/TOOL_AUTHORING_GUIDE.md`.
+- **`plane` removed from advertised spawn primitives** (models misused it as a flat ceiling/floor); the
+  executor still maps it for backward compatibility.
+- **Duplicate tool calls off by default** for the world/component tools (`AllowDuplicates => false`), so the
+  args-aware dedup applies — distinct spawns stay allowed, exact-identical calls are skipped. Removed the
+  `WithAllowDuplicateToolCalls(true)` override from every benchmark scenario.
+- **Benchmark.** Each scenario's authored system prompt now reaches the model (via the new
+  `AiTaskRequest.SystemPrompt`); G6 castle timeout back to 10 minutes; the free-build now grades and
+  screenshots whatever was built when the model stops (empty response) or the time budget elapses, instead
+  of failing the run and discarding the scene.
+
 ## 4.17.0 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.17.0**.
@@ -29,7 +44,7 @@ Depends on **`com.neoxider.coreai` 4.17.0**.
   `hooks_every` timers, react to events). 16 EditMode cases cover it.
 - **`world_command` spawn accepts rotation + scale inline**, and the tool schema now documents it so the
   model can discover it. Unnamed spawns get a readable name (`cube_1`) instead of a GUID hash.
-- **Benchmark.** Fixed the silent 10-roundtrip throttle that zeroed the castle score; soft 5-min suite
+- **Benchmark.** Fixed the silent 10-roundtrip throttle that zeroed the castle score; soft 10-min suite
   budget that still writes the report on timeout (vs NUnit's hard abort); the model is told its time
   budget with a live countdown per spawn; hero image bakes tool-calls/spawns/gen-seconds/tokens/tok/s;
   a single source of difficulty (1–10) so the editor and history agree; honest throughput labeling

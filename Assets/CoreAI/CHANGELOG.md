@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **Optional per-request system-prompt override** (`AiTaskRequest.SystemPrompt`). When set, the prompt
+  composer uses it as the role's base prompt while still prepending the universal prefix; empty = unchanged
+  (the registered role prompt). Lets a caller give a task-specific system prompt on a shared role.
+- **Native tool schemas are self-describing.** On the native tool-calling path the JSON schema is generated
+  from the C# delegate signature, so parameter descriptions reach the model ONLY via
+  `[System.ComponentModel.Description]` attributes — the `ParametersSchema` string only feeds the text path.
+  Added `[Description]` to the delegate params of the core tools (Memory, GameConfig, Compatibility,
+  CallSkill, ManageSkills, ReadSkill, Wait, Lua, LuaMods). Without it the model saw bare unlabeled params.
+
 ## 4.17.0 - 2026-06-30
 
 - **Tool-call history defaults to unlimited (`MaxToolCallHistoryMessages = 0`).** It was 20, which silently

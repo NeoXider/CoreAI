@@ -45,7 +45,7 @@ These were found by actually running the suite and reading transcripts, not by i
    used a separate 1–5 scale. Unified on one source `BenchmarkInfo.GroupDifficulty10`; UI, ordering, and
    progress all read it now.
 
-6. **Time handling.** Added a SOFT 5-min suite budget that still writes the report/screenshots (vs the
+6. **Time handling.** Added a SOFT 10-min suite budget that still writes the report/screenshots (vs the
    NUnit `[Timeout]` hard-abort that writes nothing), and the model is now told its time budget with a
    live "X s left" countdown appended to each spawn result so it can pace itself.
 
