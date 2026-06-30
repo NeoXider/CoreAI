@@ -293,6 +293,158 @@ return t.position.x == 4 and t.scale.z == 4
             }
         }
 
+        [Test]
+        public void FullBindings_SetMember_CoercesColorVectorQuaternionEnum()
+        {
+            GameObject probe = new("ForgeCoerceGo");
+            ForgeMemberProbe comp = probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(probe);
+                const string t = "'CoreAI.Tests.EditMode.ForgeMemberProbe'";
+
+                env.RunChunk(script, $@"
+unity_set_member({id}, {t}, 'tint', '#ff0000')
+unity_set_member({id}, {t}, 'offset', {{ x = 1, y = 2, z = 3 }})
+unity_set_member({id}, {t}, 'spin', {{ x = 0, y = 90, z = 0 }})
+unity_set_member({id}, {t}, 'mode', 'Boost')
+unity_set_member({id}, {t}, 'bigValue', 5000000000)
+unity_set_member({id}, {t}, 'smallValue', 200)
+");
+
+                Assert.AreEqual(Color.red, comp.tint, "Color from hex string");
+                Assert.AreEqual(new Vector3(1, 2, 3), comp.offset, "Vector3 from table");
+                Assert.AreEqual(90f, comp.spin.eulerAngles.y, 0.1f, "Quaternion from Euler table");
+                Assert.AreEqual(ProbeMode.Boost, comp.mode, "Enum from name");
+                Assert.AreEqual(5000000000L, comp.bigValue, "long width");
+                Assert.AreEqual((byte)200, comp.smallValue, "byte width");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+
+        [Test]
+        public void FullBindings_SetMember_CoercesColorTableEnumNumberRectBounds()
+        {
+            GameObject probe = new("ForgeCoerceGo2");
+            ForgeMemberProbe comp = probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(probe);
+                const string t = "'CoreAI.Tests.EditMode.ForgeMemberProbe'";
+
+                env.RunChunk(script, $@"
+unity_set_member({id}, {t}, 'tint', {{ r = 0, g = 1, b = 0, a = 0.5 }})
+unity_set_member({id}, {t}, 'tint32', {{ r = 10, g = 20, b = 30, a = 40 }})
+unity_set_member({id}, {t}, 'mode', 2)
+unity_set_member({id}, {t}, 'area', {{ x = 1, y = 2, width = 3, height = 4 }})
+unity_set_member({id}, {t}, 'box', {{ center = {{ x = 1, y = 1, z = 1 }}, size = {{ x = 2, y = 2, z = 2 }} }})
+");
+
+                Assert.AreEqual(new Color(0, 1, 0, 0.5f), comp.tint, "Color from r/g/b/a table");
+                Assert.AreEqual(new Color32(10, 20, 30, 40), comp.tint32, "Color32 from table");
+                Assert.AreEqual(ProbeMode.Boost, comp.mode, "Enum from number");
+                Assert.AreEqual(new Rect(1, 2, 3, 4), comp.area, "Rect from table");
+                Assert.AreEqual(new Vector3(1, 1, 1), comp.box.center, "Bounds center");
+                Assert.AreEqual(new Vector3(2, 2, 2), comp.box.size, "Bounds size");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+
+        [Test]
+        public void FullBindings_SetMember_CoercesUnityObjectReferenceById()
+        {
+            GameObject probe = new("ForgeRefGo");
+            ForgeMemberProbe comp = probe.AddComponent<ForgeMemberProbe>();
+            GameObject target = new("ForgeRefTarget");
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int probeId = GetObjectId(probe);
+                int targetTransformId = GetObjectId(target.transform);
+
+                env.RunChunk(script, $@"
+unity_set_member({probeId}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'linkedTransform', {targetTransformId})
+");
+
+                Assert.AreSame(target.transform, comp.linkedTransform,
+                    "A Transform reference must be assignable by its object id.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+                Object.DestroyImmediate(target);
+            }
+        }
+
+        [Test]
+        public void FullBindings_ListMembers_ReportsSettableMembersWithTypes()
+        {
+            GameObject probe = new("ForgeListGo");
+            probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(probe);
+
+                MoonSharp.Interpreter.DynValue members = env.RunChunk(script,
+                    $"return unity_list_members({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe')");
+
+                Assert.AreEqual(MoonSharp.Interpreter.DataType.Table, members.Type,
+                    "unity_list_members should return a table of settable members.");
+                Assert.Greater(members.Table.Length, 0, "Probe exposes several public settable members.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+
+        [Test]
+        public void FullBindings_SetMember_UnknownMember_ListsValidMembers()
+        {
+            GameObject probe = new("ForgeHintGo");
+            probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(probe);
+
+                Exception ex = Assert.Catch(() => env.RunChunk(script,
+                    $"unity_set_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'noSuchMember', 1)"),
+                    "Setting an unknown member must throw.");
+
+                StringAssert.Contains("publicValue", ex.Message,
+                    "The error should list valid settable members as a did-you-mean hint.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+
         private static int GetObjectId(UnityEngine.Object obj)
         {
             if (obj == null)
@@ -310,10 +462,30 @@ return t.position.x == 4 and t.scale.z == 4
         public int publicValue = 7;
         private int secretValue = 11;
 
+        // Typed members exercised by the coercion tests (Lua table/string/number -> C# type).
+        public Color tint = Color.black;
+        public Color32 tint32 = new(0, 0, 0, 255);
+        public Vector3 offset = Vector3.zero;
+        public Quaternion spin = Quaternion.identity;
+        public Rect area = new(0, 0, 0, 0);
+        public Bounds box = new(Vector3.zero, Vector3.zero);
+        public ProbeMode mode = ProbeMode.Idle;
+        public long bigValue;
+        public byte smallValue;
+        public Transform linkedTransform;
+
         public int RevealSecret()
         {
             return secretValue;
         }
+    }
+
+    /// <summary>Enum used by the Full-tier coercion tests (set by name and by number).</summary>
+    public enum ProbeMode
+    {
+        Idle = 0,
+        Active = 1,
+        Boost = 2
     }
 
     internal sealed class DenyForgeProbePolicy : IFullLuaAccessBlacklistPolicy

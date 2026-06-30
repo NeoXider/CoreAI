@@ -480,6 +480,44 @@ namespace CoreAI.Infrastructure.Lua
             return null;
         }
 
+        /// <summary>
+        /// Resolves any loaded <see cref="UnityEngine.Object"/> (Material, Texture, Transform, a Component,
+        /// GameObject, …) by the same id scheme <see cref="GetObjectId"/> hands out, so Lua can assign a
+        /// reference member to another object. Returns null when no loaded object of an assignable type
+        /// matches the id (the caller's SetValue then nulls/throws as usual).
+        /// </summary>
+        private static UnityEngine.Object ResolveUnityObject(int objectId, Type wanted)
+        {
+            if (objectId == 0)
+            {
+                return null;
+            }
+
+            UnityEngine.Object[] loaded = Resources.FindObjectsOfTypeAll(wanted);
+            for (int i = 0; i < loaded.Length; i++)
+            {
+                if (GetObjectId(loaded[i]) == objectId)
+                {
+                    return loaded[i];
+                }
+            }
+
+            return null;
+        }
+
+        private static Vector3 ReadVector3(Table t)
+        {
+            if (t == null)
+            {
+                return Vector3.zero;
+            }
+
+            return new Vector3(
+                (float)t.Get("x").CastToNumber(),
+                (float)t.Get("y").CastToNumber(),
+                (float)t.Get("z").CastToNumber());
+        }
+
         private delegate bool ObjectMatch(GameObject go, string search);
 
         private void CollectSceneObjects(
@@ -765,7 +803,9 @@ namespace CoreAI.Infrastructure.Lua
                 Vector3 v => NewNumberTable(("x", v.x), ("y", v.y), ("z", v.z)),
                 Vector4 v => NewNumberTable(("x", v.x), ("y", v.y), ("z", v.z), ("w", v.w)),
                 Color c => NewNumberTable(("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)),
+                Color32 c => NewNumberTable(("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)),
                 Quaternion q => NewNumberTable(("x", q.x), ("y", q.y), ("z", q.z), ("w", q.w)),
+                Rect r => NewNumberTable(("x", r.x), ("y", r.y), ("width", r.width), ("height", r.height)),
                 _ => DynValue.NewString(value.ToString())
             };
         }
@@ -824,9 +864,25 @@ namespace CoreAI.Infrastructure.Lua
                 return value.CastToNumber();
             }
 
+            // Remaining numeric widths: route every other primitive numeric type through CastToNumber so a
+            // Lua number can set a long/short/byte/uint/etc member instead of falling through to ChangeType.
+            if (targetType == typeof(long)) return (long)value.CastToNumber();
+            if (targetType == typeof(uint)) return (uint)value.CastToNumber();
+            if (targetType == typeof(ulong)) return (ulong)value.CastToNumber();
+            if (targetType == typeof(short)) return (short)value.CastToNumber();
+            if (targetType == typeof(ushort)) return (ushort)value.CastToNumber();
+            if (targetType == typeof(byte)) return (byte)value.CastToNumber();
+            if (targetType == typeof(sbyte)) return (sbyte)value.CastToNumber();
+
             if (targetType.IsEnum && value.Type == DataType.String)
             {
                 return Enum.Parse(targetType, value.String, true);
+            }
+
+            // Enum from a Lua number (the underlying integral value).
+            if (targetType.IsEnum && value.Type == DataType.Number)
+            {
+                return Enum.ToObject(targetType, (long)value.CastToNumber());
             }
 
             if (targetType == typeof(Vector3) && value.Type == DataType.Table)
@@ -896,6 +952,50 @@ namespace CoreAI.Infrastructure.Lua
                     (float)t.Get("x").CastToNumber(),
                     (float)t.Get("y").CastToNumber(),
                     (float)t.Get("z").CastToNumber());
+            }
+
+            if (targetType == typeof(Rect) && value.Type == DataType.Table)
+            {
+                Table t = value.Table;
+                return new Rect(
+                    (float)t.Get("x").CastToNumber(),
+                    (float)t.Get("y").CastToNumber(),
+                    (float)t.Get("width").CastToNumber(),
+                    (float)t.Get("height").CastToNumber());
+            }
+
+            if (targetType == typeof(Bounds) && value.Type == DataType.Table)
+            {
+                Table t = value.Table;
+                Vector3 center = ReadVector3(t.Get("center").Table);
+                Vector3 size = ReadVector3(t.Get("size").Table);
+                return new Bounds(center, size);
+            }
+
+            if (targetType == typeof(Color32))
+            {
+                if (value.Type == DataType.String &&
+                    ColorUtility.TryParseHtmlString(value.String, out Color parsed))
+                {
+                    return (Color32)parsed;
+                }
+
+                if (value.Type == DataType.Table)
+                {
+                    Table t = value.Table;
+                    return new Color32(
+                        (byte)t.Get("r").CastToNumber(),
+                        (byte)t.Get("g").CastToNumber(),
+                        (byte)t.Get("b").CastToNumber(),
+                        (byte)ReadOptionalTableNumber(t, "a", 255f));
+                }
+            }
+
+            // Unity object reference (Material, Texture, Transform, GameObject, a Component, …) by the same
+            // instance id GetObjectId() hands out, so a mod can WIRE references, not just set value types.
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && value.Type == DataType.Number)
+            {
+                return ResolveUnityObject((int)value.CastToNumber(), targetType);
             }
 
             return Convert.ChangeType(value.ToObject(), targetType, CultureInfo.InvariantCulture);
