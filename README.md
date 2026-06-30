@@ -90,7 +90,11 @@ The **`version`** field in each package’s `package.json` is the authoritative 
 
 CoreAI includes a local game-creation benchmark that measures how well an LLM builds a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across six dimensions, adds 0-10 game-fitness ratings per role, and can run locally, including an LMStudio multi-model sweep.
 
-<img src="Docs/Images/example_comparison.svg" alt="Model comparison" width="640">
+**Model comparison** — 8 local models, 3 repetitions each (averaged), built into a single combined report:
+
+<img src="Docs/Images/example_comparison.png" alt="Model comparison — Game-Creation Benchmark (8 local models, reps=3, ranked by suite score)" width="900">
+
+<details><summary>Full ranking table</summary>
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
@@ -102,6 +106,8 @@ CoreAI includes a local game-creation benchmark that measures how well an LLM bu
 | 6 | `qwen3.5-2b` | **79.4** | 70.8% | 17/1/6 | 88.9 | 86.3 | 78.6 | 50 | 50.6 | 91.7 | 4.9 | 22.7% | 97549 | `20260629_235827` |
 | 7 | `qwen3.5-0.8b` | **51.2** | 33.3% | 8/4/12 | 83.3 | 61 | 70.6 | 50 | 37.3 | 55.6 | 3.2 | 12.1% | 52315 | `20260629_235214` |
 | 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 87038 | `20260630_000238` |
+
+</details>
 
 [Full benchmark guide → Docs/BENCHMARK.md](Docs/BENCHMARK.md)
 

@@ -163,7 +163,7 @@ _G1 scene example: the model built the coin-collector world and the report marks
 
 _G6 scene example: a free-form castle build preserving the model-authored layout._
 
-![Cross-model comparison](Images/example_comparison.svg)
+![Cross-model comparison](Images/example_comparison.png)
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
