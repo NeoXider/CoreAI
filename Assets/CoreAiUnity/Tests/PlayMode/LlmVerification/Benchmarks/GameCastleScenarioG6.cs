@@ -24,10 +24,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
+            // The visual free-build must NEVER be cut off mid-build: no tool-call roundtrip cap at all
+            // (0 = unlimited). The model keeps spawning until it decides the scene is complete.
+            public override int? MaxToolCallRoundtripsOverride => 0;
             public override int TokenBudget => 6000;
-            public override int MaxOutputTokens => 4800; // 24+ objects, each spawned AND coloured (set_color)
+            public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
-            public override float TimeoutSeconds => 360f;
+            // No roundtrip cap means a slow model may spawn 30+ objects one call at a time, so give the
+            // visual build a generous wall-clock budget (12 min) — it is a one-off hero, not a timed gate.
+            public override float TimeoutSeconds => 720f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
             {

@@ -956,6 +956,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>When false, the scenario runs once even when the suite repeats (e.g. the G6 visual hero).</summary>
             public virtual bool Repeatable => true;
 
+            /// <summary>
+            /// Per-scenario tool-call roundtrip cap, propagated to <see cref="AiTaskRequest.MaxToolCallRoundtrips"/>
+            /// (the per-call override always wins over agent/global settings). <c>null</c> = inherit the
+            /// benchmark default; <c>0</c> = UNLIMITED (the visual free-build must never be cut off mid-build).
+            /// </summary>
+            public virtual int? MaxToolCallRoundtripsOverride => null;
+
             /// <summary>Relative difficulty 1 (easiest) .. 5 (hardest). Drives ordering and the UI indicator.</summary>
             public virtual int Difficulty => 3;
 
@@ -1095,7 +1102,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = scenario.RoleId,
-                Hint = scenario.Goal
+                Hint = scenario.Goal,
+                // Per-call override always wins over agent/global settings — this is the reliable channel
+                // for the visual free-build to run with NO roundtrip cap (0 = unlimited), independent of
+                // however the HTTP client's settings were built.
+                MaxToolCallRoundtrips = scenario.MaxToolCallRoundtripsOverride
             }, cts.Token);
 
             // Non-throwing wait: poll, cancel on timeout, give cancellation a grace window — never Assert.
@@ -1264,6 +1275,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         _ => "FAIL"
                     };
                     string header = $"{scenario.Name} — {score.Base:0}/100 {verdict}";
+                    // Free-build hero shots show how many tool-calls (build steps) the model actually issued —
+                    // a "30 build steps" badge makes the effort behind the scene legible at a glance.
+                    if (scenario.FreeBuildLayout)
+                    {
+                        int spawns = env.World.Count("spawn");
+                        header += $"   ·   {obs.ToolCalls} build steps ({spawns} spawns)";
+                    }
+
                     yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
                         scenario.FreeBuildLayout, png => result.SceneScreenshotPng = png);
                 }
