@@ -197,8 +197,11 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
-| `spawn` | Spawn an object | `prefabKey`, `targetName`, `x`, `y`, `z` |
+| `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) | `prefabKey`, `targetName`, `x`, `y`, `z` |
 | `move` | Move an object | `targetName`, `x`, `y`, `z` |
+| `rotate` | Rotate an object in degrees | `targetName`, `fx`, `fy`, `fz` |
+| `set_scale` | Set uniform object scale | `targetName`, `scale` |
+| `parent` | Parent an object under another object | `targetName`, `stringValue` (parent object name) |
 | `destroy` | Remove an object | `targetName` |
 | `list_objects` | List objects | — (optional: `stringValue` for search) |
 | `load_scene` | Load a scene | `stringValue` (scene name) |
@@ -207,7 +210,7 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 | `play_animation` | Play an animation | `targetName`, `animationName` |
 | `list_animations` | List animations | `targetName` |
 | `show_text` | Show text | `targetName`, `textToDisplay` |
-| `apply_force` | Apply a force | `targetName`, `x`, `y`, `z` |
+| `apply_force` | Apply a force | `targetName`, `fx`, `fy`, `fz` |
 | `spawn_particles` | Spawn particles | `targetName`, `stringValue` |
 
 **Code:**
@@ -223,6 +226,9 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 // Move player to checkpoint (by targetName)
 {"name": "world_command", "arguments": {"action": "move", "targetName": "Player", "x": 100, "y": 0, "z": 50}}
+
+// Spawn built-in primitive without prefab registry
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "cube", "targetName": "test_cube", "x": 0, "y": 1, "z": 0}}
 
 // Destroy object by name
 {"name": "world_command", "arguments": {"action": "destroy", "targetName": "OldBuilding"}}
@@ -248,7 +254,60 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 **When to use:** Creator / Designer AI that dynamically drives the world.
 
-### 5. Get inventory tool (merchant NPC)
+### 5. Component command tool
+
+**Purpose:** Add, remove, configure, and list Unity components on existing GameObjects through a curated catalog. This tool does not use reflection.
+
+**Format:**
+
+```json
+{"name": "component_command", "arguments": {"action": "set", "targetName": "Lamp", "componentType": "light", "propertyName": "color", "stringValue": "#88aa33"}}
+```
+
+| Action | Description | Required parameters |
+|--------|-------------|---------------------|
+| `add` | Add a supported component if missing | `targetName`, `componentType` |
+| `remove` | Remove a supported component | `targetName`, `componentType` |
+| `set` | Set a supported property, auto-adding the component if missing | `targetName`, `componentType`, `propertyName`, matching value field |
+| `list_components` | List component type names on the target | `targetName` |
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `action` | string | Yes | `add` / `remove` / `set` / `list_components` |
+| `targetName` | string | Yes | Existing `GameObject` name |
+| `componentType` | string | For `add`, `remove`, `set` | Supported component catalog key |
+| `propertyName` | string | For `set` | Supported property key for the selected component |
+| `stringValue` | string | Optional | Text, HTML colour, or enum name |
+| `floatValue` | number | Optional | Numeric value |
+| `boolValue` | number | Optional | Boolean encoded as `0` or `1` |
+| `x`, `y`, `z` | number | Optional | Vector components |
+
+Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, `particlesystem`.
+
+Example properties include `rigidbody.mass`, `rigidbody.useGravity`, `rigidbody.isKinematic`, `rigidbody.drag`, `rigidbody.angularDrag`; `light.type`, `light.intensity`, `light.range`, `light.color`, `light.spotAngle`; `boxcollider.isTrigger`, `boxcollider.size`, `boxcollider.center`; and `audiosource.volume`, `audiosource.pitch`, `audiosource.loop`.
+
+**Examples:**
+
+```json
+// Add Rigidbody
+{"name": "component_command", "arguments": {"action": "add", "targetName": "Cube", "componentType": "rigidbody"}}
+
+// Set Rigidbody mass
+{"name": "component_command", "arguments": {"action": "set", "targetName": "Cube", "componentType": "rigidbody", "propertyName": "mass", "floatValue": 5}}
+
+// Set BoxCollider trigger flag
+{"name": "component_command", "arguments": {"action": "set", "targetName": "Trigger", "componentType": "boxcollider", "propertyName": "isTrigger", "boolValue": 1}}
+
+// Set BoxCollider size vector
+{"name": "component_command", "arguments": {"action": "set", "targetName": "Trigger", "componentType": "boxcollider", "propertyName": "size", "x": 2, "y": 3, "z": 2}}
+
+// List components
+{"name": "component_command", "arguments": {"action": "list_components", "targetName": "Cube"}}
+```
+
+### 6. Get inventory tool (merchant NPC)
 
 **Purpose:** Read an NPC merchant’s inventory for grounded replies to the player.
 
@@ -279,7 +338,7 @@ Merchant: "I have an Iron Sword for 50 coins..."
 
 **When to use:** Merchant / shopkeeper NPCs that sell items.
 
-### 6. Game config tool
+### 7. Game config tool
 
 **Purpose:** Read and update game configuration.
 
@@ -294,7 +353,7 @@ Merchant: "I have an Iron Sword for 50 coins..."
 - `GameConfigTool.cs` — MEAI `AIFunction`
 - `GameConfigLlmTool.cs` — `ILlmTool` wrapper
 
-### 7. Action / event tool (`DelegateLlmTool`)
+### 8. Action / event tool (`DelegateLlmTool`)
 
 **Purpose:** Invoke C# methods or events (`Action` / `Func`) directly without implementing `ILlmTool` classes. Ideal for wiring game mechanics.
 
