@@ -34,11 +34,16 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
-            "Actions: spawn, move, destroy, load_scene, reload_scene, " +
+            "Actions: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, " +
             "set_active, play_animation, stop_animation, list_animations, show_text, " +
             "play_sound, set_volume, hide_panel, update_score, " +
             "apply_force, set_velocity, spawn_particles, list_objects. " +
-            "Use 'spawn' to create objects, 'move' to reposition, 'destroy' to remove, " +
+            "Use 'spawn' to create objects (prefabKey can be a built-in primitive — " +
+            "cube, sphere, cylinder, capsule, plane, quad, empty — or a registered prefab key). " +
+            "During spawn you can ALSO set rotation (fx/fy/fz degrees) and scale (uniform) in the same call, " +
+            "or use separate 'rotate'/'set_scale' actions later. " +
+            "'move' to reposition, 'rotate' to rotate (fx/fy/fz degrees), 'set_scale' to resize (uniform scale), " +
+            "'parent' to attach a child to a parent (stringValue = parent name), 'destroy' to remove, " +
             "'play_animation'/'stop_animation' to control animations, 'list_animations' to get available animations, " +
             "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel'/'update_score' for UI, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
@@ -48,26 +53,29 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true,
-                "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects"),
+                "Command: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects"),
             ("targetName", "string", false,
-                "Object name to target (required for move, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects."),
+                "Object name to target (required for move, rotate, set_scale, parent, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects."),
             ("x", "number", false, "X coordinate (for spawn, move)"),
             ("y", "number", false, "Y coordinate (for spawn, move)"),
             ("z", "number", false, "Z coordinate (for spawn, move)"),
-            ("fx", "number", false, "Force X (for apply_force)"),
-            ("fy", "number", false, "Force Y (for apply_force)"),
-            ("fz", "number", false, "Force Z (for apply_force)"),
-            ("prefabKey", "string", false, "Prefab key for spawn command"),
+            ("fx", "number", false, "Force X (apply_force) or rotation X in degrees (rotate)"),
+            ("fy", "number", false, "Force Y (apply_force) or rotation Y in degrees (rotate)"),
+            ("fz", "number", false, "Force Z (apply_force) or rotation Z in degrees (rotate)"),
+            ("scale", "number", false, "Uniform scale for set_scale (e.g. 0.5 = half size, 2 = double)"),
+            ("prefabKey", "string", false,
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, plane, quad, empty) or a registered prefab key"),
             ("animationName", "string", false, "Name of the animation to play/stop"),
             ("textToDisplay", "string", false, "Text for show_text / update_score"),
             ("stringValue", "string", false,
-                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound)"),
+                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound, parent object name for parent)"),
             ("volume", "number", false, "Volume level 0.0-1.0 for set_volume")
         );
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, float, float, float, float, float, float, string?, string?, string?, string?, string?, float,
+            Func<string, float, float, float, float, float, float, float, string?, string?, string?, string?, string?,
+                float,
                 CancellationToken,
                 Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
@@ -86,6 +94,7 @@ namespace CoreAI.Infrastructure.Llm
             float fx = 0f,
             float fy = 0f,
             float fz = 0f,
+            float scale = 0f,
             string? prefabKey = null,
             string? targetName = null,
             string? stringValue = null,
@@ -157,6 +166,9 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z),
                     "move" => CreateMoveCommand(targetName, x, y, z),
+                    "rotate" => CreateRotateCommand(targetName, fx, fy, fz),
+                    "set_scale" => CreateSetScaleCommand(targetName, scale),
+                    "parent" => CreateParentCommand(targetName, stringValue),
                     "destroy" => CreateDestroyCommand(targetName),
                     "load_scene" => CreateLoadSceneCommand(stringValue),
                     "reload_scene" => CreateReloadSceneCommand(),
@@ -327,6 +339,36 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ApplyForce(targetName, new Vector3(x, y, z));
         }
 
+        private static CoreAiWorldCommandEnvelope CreateRotateCommand(string? targetName, float fx, float fy, float fz)
+        {
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
+            return CoreAiWorldCommandEnvelope.Rotate(targetName, new Vector3(fx, fy, fz));
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateSetScaleCommand(string? targetName, float scale)
+        {
+            if (string.IsNullOrEmpty(targetName) || scale <= 0f)
+            {
+                return null;
+            }
+
+            return CoreAiWorldCommandEnvelope.SetScale(targetName, scale);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateParentCommand(string? childName, string? parentName)
+        {
+            if (string.IsNullOrEmpty(childName) || string.IsNullOrEmpty(parentName))
+            {
+                return null;
+            }
+
+            return CoreAiWorldCommandEnvelope.Parent(childName, parentName);
+        }
+
         private static CoreAiWorldCommandEnvelope CreateSpawnParticlesCommand(string? targetName, string? effectName)
         {
             if (string.IsNullOrEmpty(effectName))
@@ -420,17 +462,17 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private const string ValidActionsText =
-            "spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, " +
-            "list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, " +
-            "set_velocity, spawn_particles, list_objects";
+            "spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, " +
+            "play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, " +
+            "update_score, apply_force, set_velocity, spawn_particles, list_objects";
 
         private static bool IsKnownWorldAction(string action)
         {
             return action switch
             {
-                "spawn" or "move" or "destroy" or "load_scene" or "reload_scene" or "set_active" or
-                    "play_animation" or "stop_animation" or "list_animations" or "play_sound" or
-                    "set_volume" or "show_text" or "hide_panel" or "update_score" or "apply_force" or
+                "spawn" or "move" or "rotate" or "set_scale" or "parent" or "destroy" or "load_scene" or
+                    "reload_scene" or "set_active" or "play_animation" or "stop_animation" or "list_animations" or
+                    "play_sound" or "set_volume" or "show_text" or "hide_panel" or "update_score" or "apply_force" or
                     "set_velocity" or "spawn_particles" or "list_objects" => true,
                 _ => false
             };
@@ -443,6 +485,9 @@ namespace CoreAI.Infrastructure.Llm
                 "spawn" =>
                     "Missing required parameters for action 'spawn': prefabKey is required; targetName is recommended.",
                 "move" => "Missing required parameters for action 'move': targetName is required.",
+                "rotate" => "Missing required parameters for action 'rotate': targetName and fx/fy/fz (degrees) are required.",
+                "set_scale" => "Missing required parameters for action 'set_scale': targetName and a positive scale are required.",
+                "parent" => "Missing required parameters for action 'parent': targetName (child) and stringValue (parent name) are required.",
                 "destroy" => "Missing required parameters for action 'destroy': targetName is required.",
                 "load_scene" =>
                     "Missing required parameters for action 'load_scene': stringValue must be the scene name.",
@@ -464,6 +509,8 @@ namespace CoreAI.Infrastructure.Llm
                     "Missing required parameters for action 'apply_force': targetName and force components are required.",
                 "set_velocity" =>
                     "Missing required parameters for action 'set_velocity': targetName and velocity components are required.",
+                "set_color" =>
+                    "Missing required parameters for action 'set_color': targetName and stringValue (an HTML colour like #88aa33) are required.",
                 "spawn_particles" =>
                     "Missing required parameters for action 'spawn_particles': targetName and stringValue are required.",
                 "list_objects" => "Missing required parameters for action 'list_objects'.",

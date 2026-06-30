@@ -107,7 +107,7 @@ When the model decides to invoke a tool, a structure equivalent to the following
 |----------|-------------|
 | `report(string)` | Send result back |
 | `add(a, b)` | Add two numbers |
-| `coreai_world_spawn(key, name, x, y, z)` | Spawn an object |
+| `coreai_world_spawn(key, name, x, y, z, [rx, ry, rz, scale])` | Spawn object; optional rotation (degrees) and uniform scale |
 | `coreai_world_move(name, x, y, z)` | Move an object |
 | `coreai_world_destroy(name)` | Destroy an object |
 | `coreai_world_set_active(name, active)` | Enable/disable an object |
@@ -119,6 +119,12 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | `coreai_world_apply_force(name, fx, fy, fz)` | Apply force |
 | `coreai_world_spawn_particles(name, pfx)` | Spawn particles |
 | `coreai_world_list_objects(pattern)` | Search objects |
+| `coreai_component_add(name, type)` | Add a supported component |
+| `coreai_component_remove(name, type)` | Remove a supported component |
+| `coreai_component_set_number(name, type, property, value)` | Set numeric component property |
+| `coreai_component_set_bool(name, type, property, value)` | Set boolean component property |
+| `coreai_component_set_text(name, type, property, value)` | Set text, colour, or enum component property |
+| `coreai_component_set_vector(name, type, property, x, y, z)` | Set vector component property |
 
 **On success:** Output of `report(...)` or `"Lua executed successfully"`  
 **On error:** `"[Error] MoonSharp runtime: <error description>"` or a platform
@@ -156,6 +162,43 @@ WebGL player builds).
   }
 }
 ```
+
+`prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence; primitive fallback lets `spawn` work with no prefab registry.
+
+### Spawn built-in primitive
+```json
+{
+  "name": "world_command",
+  "arguments": {
+    "action": "spawn",
+    "prefabKey": "cube",
+    "targetName": "test_cube",
+    "x": 0,
+    "y": 1,
+    "z": 0
+  }
+}
+```
+
+### Spawn with rotation and scale (convenience)
+```json
+{
+  "name": "world_command",
+  "arguments": {
+    "action": "spawn",
+    "prefabKey": "cylinder",
+    "targetName": "tower_1",
+    "x": -6,
+    "y": 1.5,
+    "z": -6,
+    "fx": 0,
+    "fy": 0,
+    "fz": 0,
+    "scale": 1.5
+  }
+}
+```
+During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in the same call, or use separate `rotate`/`set_scale` actions later.
 
 ### Move — reposition object
 ```json
@@ -277,9 +320,9 @@ WebGL player builds).
   "arguments": {
     "action": "apply_force",
     "targetName": "Boulder",
-    "x": 0,
-    "y": 100,
-    "z": 50
+    "fx": 0,
+    "fy": 100,
+    "fz": 50
   }
 }
 ```
@@ -301,10 +344,12 @@ WebGL player builds).
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `action` | string | Operation type (see below) |
-| `prefabKey` | string | Prefab key from PrefabRegistryAsset |
+| `prefabKey` | string | Registered prefab key or primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) |
 | `targetName` | string | GameObject name in the scene |
-| `x`, `y`, `z` | float | Coordinates (position or force) |
-| `stringValue` | string | Additional string parameter |
+| `x`, `y`, `z` | float | Position coordinates |
+| `fx`, `fy`, `fz` | float | Rotation degrees or force vector components |
+| `scale` | float | Uniform scale value |
+| `stringValue` | string | Additional string parameter, such as a scene name, search query, particle key, or parent object name |
 | `animationName` | string | Animation name |
 | `textToDisplay` | string | Text to display |
 
@@ -312,8 +357,11 @@ WebGL player builds).
 
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
-| `spawn` | Create object | `prefabKey`, `targetName`, `x`, `y`, `z` |
+| `spawn` | Create registered prefab or built-in primitive | `prefabKey`, `targetName`, `x`, `y`, `z` |
 | `move` | Move | `targetName`, `x`, `y`, `z` |
+| `rotate` | Rotate in degrees | `targetName`, `fx`, `fy`, `fz` |
+| `set_scale` | Set uniform scale | `targetName`, `scale` |
+| `parent` | Parent under another object | `targetName`, `stringValue` (parent object name) |
 | `destroy` | Remove | `targetName` |
 | `list_objects` | List objects | — (optional `stringValue`) |
 | `load_scene` | Load scene | `stringValue` |
@@ -322,12 +370,112 @@ WebGL player builds).
 | `play_animation` | Animation | `targetName`, `animationName` |
 | `list_animations` | List animations | `targetName` |
 | `show_text` | Show text | `targetName`, `textToDisplay` |
-| `apply_force` | Apply force | `targetName`, `x`, `y`, `z` |
+| `apply_force` | Apply force | `targetName`, `fx`, `fy`, `fz` |
 | `spawn_particles` | Particles | `targetName`, `stringValue` |
 
 ---
 
-## 4. Get Inventory Tool (Merchant / Shopkeeper)
+## 4. Component Command Tool (Creator / Designer / Programmer via Lua)
+
+**Roles:** Custom agents with `ComponentLlmTool`; Programmer through Lua `coreai_component_*` bindings.
+
+### Add component
+```json
+{
+  "name": "component_command",
+  "arguments": {
+    "action": "add",
+    "targetName": "Cube",
+    "componentType": "rigidbody"
+  }
+}
+```
+
+### Remove component
+```json
+{
+  "name": "component_command",
+  "arguments": {
+    "action": "remove",
+    "targetName": "Cube",
+    "componentType": "rigidbody"
+  }
+}
+```
+
+### Set component property
+```json
+{
+  "name": "component_command",
+  "arguments": {
+    "action": "set",
+    "targetName": "Lamp",
+    "componentType": "light",
+    "propertyName": "color",
+    "stringValue": "#88aa33"
+  }
+}
+```
+
+### List components
+```json
+{
+  "name": "component_command",
+  "arguments": {
+    "action": "list_components",
+    "targetName": "Cube"
+  }
+}
+```
+
+**Envelope shape:**
+
+```json
+{
+  "action": "add|remove|set|list_components",
+  "targetName": "GameObjectName",
+  "componentType": "rigidbody",
+  "propertyName": "mass",
+  "stringValue": "",
+  "floatValue": 5,
+  "boolValue": 0,
+  "x": 0,
+  "y": 0,
+  "z": 0
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|:--------:|-------------|
+| `action` | string | Yes | `add`, `remove`, `set`, or `list_components` |
+| `targetName` | string | Yes | Existing `GameObject` name |
+| `componentType` | string | For `add`, `remove`, `set` | Supported component catalog key |
+| `propertyName` | string | For `set` | Supported property key for the selected component |
+| `stringValue` | string | Optional | Text, HTML colour, or enum name |
+| `floatValue` | number | Optional | Numeric value |
+| `boolValue` | number | Optional | Boolean encoded as `0` or `1` |
+| `x`, `y`, `z` | number | Optional | Vector components |
+
+Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, `particlesystem`.
+
+`set` auto-adds the component if it is missing. Example properties include `rigidbody.mass`, `rigidbody.useGravity`, `rigidbody.isKinematic`, `rigidbody.drag`, `rigidbody.angularDrag`; `light.type`, `light.intensity`, `light.range`, `light.color`, `light.spotAngle`; `boxcollider.isTrigger`, `boxcollider.size`, `boxcollider.center`; and `audiosource.volume`, `audiosource.pitch`, `audiosource.loop`.
+
+Lua bindings publish the same envelope shape:
+
+```lua
+coreai_component_add("Cube", "rigidbody")
+coreai_component_remove("Cube", "rigidbody")
+coreai_component_set_number("Cube", "rigidbody", "mass", 5)
+coreai_component_set_bool("Cube", "rigidbody", "useGravity", true)
+coreai_component_set_text("Lamp", "light", "color", "#88aa33")
+coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
+```
+
+---
+
+## 5. Get Inventory Tool (Merchant / Shopkeeper)
 
 **Roles:** Merchant NPC, any agent with InventoryTool
 
@@ -351,7 +499,7 @@ WebGL player builds).
 
 ---
 
-## 5. Game Config Tool (Creator / Designer)
+## 6. Game Config Tool (Creator / Designer)
 
 **Roles:** Creator, Designer AI
 
@@ -385,7 +533,7 @@ WebGL player builds).
 
 ---
 
-## 6. Scene Tool (all agents)
+## 7. Scene Tool (all agents)
 
 **Roles:** All agents (available in Play Mode)
 
@@ -435,7 +583,7 @@ WebGL player builds).
 
 ---
 
-## 7. Camera Tool (all agents)
+## 8. Camera Tool (all agents)
 
 **Roles:** All agents (available in Play Mode)
 
@@ -451,7 +599,7 @@ WebGL player builds).
 
 ---
 
-## 8. Action / Event Tool (custom agents)
+## 9. Action / Event Tool (custom agents)
 
 **Roles:** Custom agents via `AgentBuilder.WithAction()` / `WithEventTool()`
 
@@ -488,7 +636,9 @@ WebGL player builds).
 
 ---
 
-## 9. Matrix: tools available per role
+## 10. Matrix: tools available per role
+
+`component_command` is optional for host-wired agents through `ComponentLlmTool`. The Programmer role can publish the same component command envelope through the Lua `coreai_component_*` bindings when Lua is available.
 
 | Role | memory | execute_lua | world_command | get_inventory | game_config | scene_tool | camera | custom |
 |------|:------:|:-------------:|:-------------:|:-------------:|:-----------:|:----------:|:------:|:------:|
@@ -506,7 +656,7 @@ WebGL player builds).
 
 ---
 
-## 10. Tool call error handling
+## 11. Tool call error handling
 
 ### Tool call retry (up to 3 attempts)
 

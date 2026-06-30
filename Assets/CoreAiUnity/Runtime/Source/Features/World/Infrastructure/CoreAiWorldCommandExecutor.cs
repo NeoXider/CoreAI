@@ -15,6 +15,7 @@ namespace CoreAI.Infrastructure.World
         private readonly IGameLogger _logger;
         private readonly ICoreAiPrefabRegistry _prefabRegistry;
         private readonly HashSet<string> _allowedScenes;
+        private readonly bool _allowPrimitives;
         private readonly List<ICoreAiCustomWorldCommandHandler> _customHandlers = new();
         private MaterialPropertyBlock _sharedColorMpb;
 
@@ -24,13 +25,20 @@ namespace CoreAI.Infrastructure.World
         /// <c>world_command</c> tool and the Lua <c>coreai_world_load_scene</c> binding alike — honours the
         /// same restriction, closing the gap where the native tool bypassed the Lua-only whitelist.
         /// </param>
+        /// <param name="allowPrimitives">
+        /// When true (default), <c>spawn</c> falls back to creating a built-in Unity primitive
+        /// (cube/sphere/cylinder/capsule/plane/quad/empty via <see cref="CoreAiPrimitiveFactory"/>) when the
+        /// requested <c>prefabKey</c> is not a registered prefab, so the tool works without a prefab registry.
+        /// </param>
         public CoreAiWorldCommandExecutor(
             IGameLogger logger,
             ICoreAiPrefabRegistry prefabRegistry = null,
-            IEnumerable<string> allowedScenes = null)
+            IEnumerable<string> allowedScenes = null,
+            bool allowPrimitives = true)
         {
             _logger = logger;
             _prefabRegistry = prefabRegistry;
+            _allowPrimitives = allowPrimitives;
             if (allowedScenes != null)
             {
                 HashSet<string> set = new(StringComparer.Ordinal);
@@ -150,18 +158,7 @@ namespace CoreAI.Infrastructure.World
 
         private bool TrySpawn(CoreAiWorldCommandEnvelope env)
         {
-            if (_prefabRegistry == null)
-            {
-                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] prefab registry not assigned");
-                return false;
-            }
-
             string key = (env.prefabKeyOrName ?? "").Trim();
-            if (!_prefabRegistry.TryResolve(key, out GameObject prefab) || prefab == null)
-            {
-                _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] prefab not found: '{key}'");
-                return false;
-            }
 
             string targetName = (env.targetName ?? "").Trim();
             if (string.IsNullOrEmpty(targetName))
@@ -179,9 +176,50 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            GameObject go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
-            go.name = targetName;
-            return true;
+            // Rotation (fx/fy/fz) and scale can be set during spawn for convenience.
+            Quaternion rotation = Quaternion.identity;
+            if (env.fx != 0f || env.fy != 0f || env.fz != 0f)
+            {
+                rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+            }
+
+            float scale = 1f;
+            if (float.IsFinite(env.floatValue) && env.floatValue > 0f)
+            {
+                scale = Mathf.Clamp(env.floatValue, 0.01f, 100f);
+            }
+
+            // Registered prefab takes precedence; otherwise fall back to a built-in primitive so the world
+            // tool is usable without any prefab registry assigned.
+            if (_prefabRegistry != null && _prefabRegistry.TryResolve(key, out GameObject prefab) && prefab != null)
+            {
+                GameObject prefabGo = UnityEngine.Object.Instantiate(prefab, pos, rotation);
+                prefabGo.name = targetName;
+                if (scale != 1f) prefabGo.transform.localScale = Vector3.one * scale;
+                return true;
+            }
+
+            if (_allowPrimitives && CoreAiPrimitiveFactory.IsPrimitiveKey(key))
+            {
+                GameObject primitive = CoreAiPrimitiveFactory.Create(key);
+                primitive.name = targetName;
+                primitive.transform.position = pos;
+                primitive.transform.rotation = rotation;
+                if (scale != 1f) primitive.transform.localScale = Vector3.one * scale;
+                return true;
+            }
+
+            if (_prefabRegistry == null && !_allowPrimitives)
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] prefab registry not assigned");
+                return false;
+            }
+
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                _allowPrimitives
+                    ? $"[World] spawn failed: '{key}' is neither a registered prefab nor a primitive ({CoreAiPrimitiveFactory.SupportedKeys})"
+                    : $"[World] prefab not found: '{key}'");
+            return false;
         }
 
         /// <summary>
