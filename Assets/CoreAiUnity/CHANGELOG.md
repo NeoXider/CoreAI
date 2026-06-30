@@ -10,7 +10,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `WithMaxToolCallRoundtrips(5)` tightens a quiet NPC; `AiTaskRequest.MaxToolCallRoundtrips` overrides a
   single call. `0` = unlimited, `null` = inherit. Default raised **10 → 20**; built-in **Programmer** and
   **Creator** roles default to unlimited. The G6 free-build (castle) scenario now runs unlimited so it is
-  never cut off mid-build. When the cap is hit the warning explains how to raise or disable it.
+  never cut off mid-build. When the cap is hit the warning explains how to raise or disable it. The global
+  `CoreAISettingsAsset` value now also accepts **0 = unlimited** in the inspector (previously clamped to a
+  minimum of 1), so the meaning of `0` is identical at every level.
 
 ## 4.16.0 - 2026-06-30
 

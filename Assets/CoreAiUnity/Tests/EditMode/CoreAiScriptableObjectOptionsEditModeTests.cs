@@ -334,6 +334,37 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// 0 is a VALID setting on the global asset and means "unlimited" — it must survive round-trips
+        /// (SetMaxToolCallRoundtrips, ApplyOptions/ToOptions) and NOT be silently clamped back to the
+        /// default. This pins the cross-layer semantics promised by ICoreAISettings ("0 = disable the cap").
+        /// </summary>
+        [Test]
+        public void MaxToolCallRoundtrips_Zero_IsPreservedAsUnlimited()
+        {
+            CoreAISettingsAsset asset = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                asset.SetMaxToolCallRoundtrips(0);
+                Assert.AreEqual(0, asset.MaxToolCallRoundtrips,
+                    "0 must be kept as unlimited, not clamped to the default");
+
+                // A negative (corrupt) value DOES fall back to the default 20.
+                asset.SetMaxToolCallRoundtrips(-5);
+                Assert.AreEqual(20, asset.MaxToolCallRoundtrips,
+                    "A negative value resets to the default (20)");
+
+                // ApplyOptions(0) must also preserve unlimited through the portable options bridge.
+                asset.ApplyOptions(new CoreAISettingsOptions { MaxToolCallRoundtrips = 0 });
+                Assert.AreEqual(0, asset.MaxToolCallRoundtrips,
+                    "ApplyOptions(0) must keep unlimited");
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
         private static void SetField(object target, string fieldName, object value)
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
