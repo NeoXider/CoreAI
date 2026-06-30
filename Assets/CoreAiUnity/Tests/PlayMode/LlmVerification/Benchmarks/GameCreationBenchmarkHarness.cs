@@ -73,9 +73,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public bool AnyProviderUsage { get; private set; }
 
             /// <summary>
-            /// Wall-clock spent INSIDE the LLM completion calls only (prefill + decode), summed across turns.
-            /// Excludes tool execution, grading and orchestration, so completion-tokens ÷ this is the model's
-            /// real generation throughput — comparable to the tok/s LM Studio reports (which is decode-only).
+            /// Wall-clock spent INSIDE the LLM completion calls (prefill + decode), summed across turns.
+            /// Excludes tool execution, grading and orchestration. NOTE: this is the full provider-call span,
+            /// NOT decode-only, so completion-tokens ÷ this reads LOWER than LM Studio's decode-only tok/s
+            /// (LM Studio excludes prefill). See Docs/TOKENS_PER_SEC_FIX_PLAN.md.
             /// </summary>
             public double GenerationMs { get; private set; }
 

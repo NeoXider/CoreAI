@@ -67,10 +67,10 @@ The benchmark reports two speed numbers:
 
 | Metric | Meaning |
 |---|---|
-| Decode tok/s | Completion tokens divided by time spent inside LLM calls. This is the number comparable to LM Studio's token/sec counter. |
+| Provider-call tok/s | Completion tokens divided by time spent inside the LLM calls — this is **prefill + decode**, not decode-only. It excludes tool execution, grading and orchestration gaps. |
 | Effective tok/s | Completion tokens divided by the whole agentic session time, including tool execution, grading, orchestration gaps, and other overhead. |
 
-LM Studio's headline tok/s can look higher because it is often measured on a tiny prompt and may use MTP/speculative decoding. CoreAI benchmark prompts are real agentic prompts with tool schemas, role instructions, scenario goals, traces, and grading context. In recorded runs the prompt is often much larger than the completion, commonly around 14x the generated output. That makes effective tok/s the honest end-to-end user experience, while decode tok/s is the fair runtime-throughput comparison.
+> **Why this is LOWER than LM Studio's tok/s.** LM Studio reports **decode-only** throughput (it excludes prompt prefill). CoreAI's provider-call tok/s includes prefill, and agentic prompts are large — tool schemas, role instructions, scenario goals, traces, grading context — commonly ~14x the generated output. With a big prompt, prefill dominates the call time, so CoreAI's number reads much lower than LM Studio's even on the same model. True decode-only timing requires measuring time-to-first-token, which is only available on the streaming path (see `TOKENS_PER_SEC_FIX_PLAN.md`). Effective tok/s is the honest end-to-end user experience; provider-call tok/s is the closest non-streaming comparison.
 
 ## How To Run
 

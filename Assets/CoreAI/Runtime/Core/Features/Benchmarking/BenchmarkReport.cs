@@ -140,9 +140,13 @@ namespace CoreAI.Benchmarking
         public double TotalGenerationMs => Results.Sum(r => r.GenerationMs);
 
         /// <summary>
-        /// Decode throughput: COMPLETION tokens ÷ time spent INSIDE the LLM calls (prefill + decode), so it
-        /// excludes tool execution, grading and orchestration. This is the number comparable to the tok/s a
-        /// runtime like LM Studio reports. Falls back to the session-wide rate if per-call timing is absent.
+        /// Provider-call throughput: COMPLETION tokens ÷ time spent INSIDE the LLM calls, which is
+        /// <b>prefill + decode</b> (NOT decode-only), excluding tool execution, grading and orchestration.
+        /// This is LOWER than the decode-only tok/s a runtime like LM Studio reports, because LM Studio
+        /// excludes prompt prefill — and CoreAI's agentic prompts are large (often ~14x the output), so
+        /// prefill dominates. True decode-only timing needs TTFT, which is only measurable on the streaming
+        /// path (see Docs/TOKENS_PER_SEC_FIX_PLAN.md). Falls back to the session-wide rate if per-call timing
+        /// is absent.
         /// </summary>
         public double GenerationTokensPerSecond =>
             TotalGenerationMs > 0 ? TotalCompletionTokens / (TotalGenerationMs / 1000.0)

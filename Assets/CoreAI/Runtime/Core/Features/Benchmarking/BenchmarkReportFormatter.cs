@@ -54,8 +54,8 @@ namespace CoreAI.Benchmarking
             }
 
             sb.AppendLine($"- **Cost of run:** {report.TotalTokens} tokens " +
-                          $"({report.TotalCompletionTokens} generated) · {F(report.GenerationTokensPerSecond)} tok/s decode " +
-                          $"(effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
+                          $"({report.TotalCompletionTokens} generated) · {F(report.GenerationTokensPerSecond)} tok/s provider-call " +
+                          $"(prefill+decode; effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
                           $"${F(report.TotalCostUsd)} · {F(report.TotalLatencyMs / 1000.0)} s total");
             sb.AppendLine($"- **Speed/efficiency bonus:** mean +{F(report.MeanEfficiencyBonus)} " +
                           $"(fewer tokens +{F(report.MeanTokenBonus)}, less time +{F(report.MeanTimeBonus)})");
