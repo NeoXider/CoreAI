@@ -1275,16 +1275,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         _ => "FAIL"
                     };
                     string header = $"{scenario.Name} — {score.Base:0}/100 {verdict}";
-                    // Free-build hero shots show how many tool-calls (build steps) the model actually issued —
-                    // a "30 build steps" badge makes the effort behind the scene legible at a glance.
+                    // Free-build hero shots get a second stats line showing the real effort behind the scene:
+                    // how many tool-calls (build steps) and spawns the model issued, how long generation took,
+                    // and how many tokens it cost — so the picture carries its own provenance.
+                    string heroStats = null;
                     if (scenario.FreeBuildLayout)
                     {
                         int spawns = env.World.Count("spawn");
-                        header += $"   ·   {obs.ToolCalls} build steps ({spawns} spawns)";
+                        double genSec = obs.GenerationMs / 1000.0;
+                        heroStats = $"{obs.ToolCalls} tool-calls · {spawns} spawns · " +
+                                    $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
+                                    $"{(fromProvider ? "" : "~")} ({totalTokens:0} total)";
                     }
 
                     yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
-                        scenario.FreeBuildLayout, png => result.SceneScreenshotPng = png);
+                        scenario.FreeBuildLayout, heroStats, png => result.SceneScreenshotPng = png);
                 }
 
                 // Always tear down the spawned scene, even when no screenshot was taken, so a visual
@@ -1302,7 +1307,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         private static IEnumerator CaptureSceneScreenshot(
             VisualBenchmarkWorldExecutor vis, string model, string header, string subtitle, bool freeBuildLayout,
-            Action<byte[]> onPng)
+            string heroStats, Action<byte[]> onPng)
         {
             UnityEngine.GameObject camGo = null;
             UnityEngine.GameObject camBGo = null;
@@ -1398,6 +1403,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     mSize, UnityEngine.Color.white, true);
                 AddCameraText(p, header ?? "", new UnityEngine.Vector3(0f, topY - 0.10f, zb - 0.02f),
                     0.0078f, verdict, true);
+
+                // Stats line (free-build hero only): tool-calls · spawns · generation time · tokens, in a
+                // muted colour just under the score line, so the effort behind the scene is on the image.
+                if (!string.IsNullOrEmpty(heroStats))
+                {
+                    AddCameraText(p, heroStats, new UnityEngine.Vector3(0f, topY - 0.135f, zb - 0.02f),
+                        0.0050f, new UnityEngine.Color(0.78f, 0.82f, 0.88f), false);
+                }
 
                 string cap = WrapText(subtitle ?? "", 52);
                 if (!string.IsNullOrEmpty(cap))
