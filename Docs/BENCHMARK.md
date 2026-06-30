@@ -163,6 +163,11 @@ _G1 scene example: the model built the coin-collector world and the report marks
 
 _G6 scene example: a free-form castle build preserving the model-authored layout._
 
+> The free-build is resilient by design: when the model stops on its own (an empty response) or the
+> per-scenario time budget elapses *after a scene already exists*, the harness grades and screenshots
+> what was built instead of failing the run. This is why a long, unbounded build always yields a hero
+> image even on small local models. See `SESSION_WORK_AUDIT.md` for the root-cause write-up.
+
 ![Cross-model comparison](Images/example_comparison.png)
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._

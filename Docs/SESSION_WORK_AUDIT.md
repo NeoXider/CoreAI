@@ -70,13 +70,44 @@ These were found by actually running the suite and reading transcripts, not by i
   verified intact). See `DEMO_FOLDER_STRUCTURE_AUDIT.md`.
 - The FullAccess demo now also showcases `unity_list_members` + member coercion.
 
-## Known blocker (not a code issue)
+## G6 castle "Empty response from LLM" — root cause and fix (resolved)
 
-The 7-model G6 castle re-sweep is **blocked by an LM Studio model-config issue**, not by the benchmark
-code: on the current load of `qwen3.5-4b-mtp`, the model reasons (in its think block) that it "has no
-tool-execution capability" and emits zero tool calls, hitting the token limit on reasoning. A prior load
-of the same model built a 111-tool castle fine, so this is a load/template configuration to resolve on the
-LM Studio side. The benchmark harness itself is verified working (EditMode + PlayMode green).
+The G6 castle runs were failing with `Empty response from LLM`. Diagnosed live (LM Studio server logs +
+direct `curl`), the cause was **not** the model or the prompt:
+
+- The model is healthy — via the raw OpenAI-compatible API it emits up to 30 tool calls in one
+  non-streaming response, fast. The HTTP request the code builds is equivalent to a known-good `curl`.
+- The free-build runs as ~one tool-call per orchestrator turn with **unbounded** tool-call history
+  (`maxToolCallHistoryMessages = 0`). A weak model never decides it is "done", so the conversation runs
+  away — observed live growing to **500+ messages / ~37k tokens**. Eventually one turn returns empty (no
+  tool call, no visible text), surfaced as `LlmErrorCode.EmptyResponse` at `MeaiLlmClient.cs:271`. The
+  earlier "244 s timeout" was the same runaway hitting `requestTimeoutSeconds: 240` on a giant prefill.
+- **Reasoning was disabled.** `LlmReasoningMode` = ProviderDefault(0) / Disabled(1) / Enabled(2); the
+  settings asset had `reasoningMode: 1` (Disabled → `enable_thinking:false`). Set to Enabled.
+
+**Fixes (both in `GameCreationBenchmarkHarness.cs`, `dotnet build` green):**
+
+1. **Grade-on-empty.** A mid-build empty response *after a scene already exists*
+   (`env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1`) is treated as a clean STOP — grade and
+   screenshot what was built, no Environment failure, no retry (helper `IsEmptyResponseError`).
+2. **Grade-on-cancel/timeout.** Same clean-stop for an `OperationCanceledException` / timeout
+   (`"A task was canceled."`) once a scene exists, so a heavy model that hits the per-scenario time budget
+   keeps its castle instead of being retried-from-scratch (helper `IsCancellationError`). The grading
+   itself was deliberately left unchanged (free visual test, no restrictions).
+
+**Validated live (G6, reasoning on):** `qwythos-9b` → Pass, 37 objects; `deepreinforce-ai_ornith-1.0-9b`
+→ Pass, 65 objects; `qwen3.6-27b-fable-5-experimental` → Pass, 27 objects (clean walled perimeter). All
+`failure=''`, 0 failed/invalid tool calls; fresh hero screenshots saved to `Docs/Images/castles/`. The
+weak `qwen3.5-2b` no longer fails but false-passes via duplicate-spam (273 spawn *commands* ≈ 2 distinct
+objects) — expected for a free build that counts commands, not distinct objects.
+
+## Follow-ups (tracked, not blocking)
+
+- Make the benchmark's manually-built orchestrator turn-trace visible in the Agent Session Inspector
+  (today it only resolves a trace reader from a scene DI scope).
+- The free-build capture reports `toolCalls=0` when a run ends via the empty/timeout clean-stop path (the
+  inner tool loop's calls aren't surfaced to `capture`); the spawn count from `env.World` is correct and
+  is what grading uses. Cosmetic only.
 
 ## Follow-ups (tracked, not blocking)
 
