@@ -44,7 +44,7 @@ Verdicts:
 | PARTIAL | Base score from 50 to 89. |
 | FAIL | Base score below 50. |
 
-When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario median base score. This makes rankings less sensitive to one noisy local-model run.
+When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. A purely visual one-off such as the G6 castle hero is marked non-repeatable, so it always runs exactly once even when the rest of the suite repeats.
 
 ## Game-Fitness Roles
 
@@ -78,12 +78,13 @@ Open the UI Toolkit benchmark window from:
 
 `CoreAI/Benchmarks/Benchmark Window (UITK)...`
 
-The window has three tabs:
+The window has four tabs, plus toolbar **Open folder** / **Open report** shortcuts:
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups, repetitions, retries, timeout override, and start a run. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G6), repetitions, retries, timeout override, and start a run. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
+| Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
 | Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md` plus `COMPARISON.svg`. |
 
 For a one-click run, use:
@@ -110,7 +111,7 @@ Environment shaping is also supported:
 | `COREAI_TEST_API_KEY` | API key when required; local LM Studio normally leaves this empty. |
 | `COREAI_TEST_MODEL` | Model id to request. |
 | `COREAI_BENCHMARK_GROUPS` | CSV group filter, such as `G1,G2,G6`; empty means all groups. |
-| `COREAI_BENCHMARK_REPS` | Repetitions per scenario. Use 3-5 for median stability when comparing local models. |
+| `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. |
 
 For an LM Studio multi-model sweep, load one model at a time, run the benchmark, unload it, and move to the next model. Example structure:
 
@@ -170,11 +171,11 @@ Example 8-model ranking from `TestResults/CoreAI/Benchmarks/COMPARISON.md`:
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 1 | `qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max` | **94.8** | 87.5% | 21/2/1 | 91.7 | 96.3 | 100 | 100 | 100 | 88.9 | 2.2 | 10.3% | 38219 | `20260629_220051` |
-| 2 | `qwen3.5-4b-mtp` | **88.8** | 75% | 18/3/3 | 88.9 | 100 | 89.9 | 100 | 88.9 | 72.2 | 4.6 | 20.6% | 38833 | `20260629_212832` |
-| 3 | `deepreinforce-ai_ornith-1.0-9b` | **84.4** | 70.8% | 17/3/4 | 75 | 94.1 | 89.6 | 100 | 66.7 | 88.9 | 3.6 | 43.3% | 35436 | `20260629_213245` |
-| 4 | `qwen3.6-27b-fable-5-experimental` | **82.2** | 66.7% | 16/3/5 | 76.9 | 94.1 | 80.4 | 100 | 88.9 | 100 | 2.3 | 46.4% | 38785 | `20260629_214659` |
-| 5 | `qwen3.5-2b` | **82.1** | 75% | 18/2/4 | 83.3 | 82.4 | 81.3 | 0 | 63 | 100 | 5.2 | 26.5% | 29793 | `20260629_212524` |
-| 6 | `qwythos-9b-claude-mythos-5-1m` | **79.1** | 75% | 18/1/5 | 72.2 | 82.4 | 83.3 | 100 | 66.7 | 88.9 | 4.6 | 39.7% | 39010 | `20260629_214115` |
-| 7 | `qwen3.5-0.8b` | **53.7** | 37.5% | 9/4/11 | 86.1 | 66.9 | 74.1 | 50 | 35.6 | 55.6 | 3.1 | 10.2% | 20084 | `20260629_212253` |
-| 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 31140 | `20260629_212725` |
+| 1 | `qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max` | **97.2** | 91.7% | 22/2/0 | 90.7 | 97.5 | 100 | 100 | 100 | 96.3 | 2.6 | 12.9% | 106463 | `20260630_015516` |
+| 2 | `qwen3.5-4b-mtp` | **91.1** | 79.2% | 19/3/2 | 88 | 98 | 94.2 | 100 | 96.3 | 77.8 | 4.8 | 24.7% | 111193 | `20260630_000446` |
+| 3 | `deepreinforce-ai_ornith-1.0-9b` | **88.4** | 62.5% | 15/7/2 | 74.1 | 100 | 93.8 | 100 | 88.9 | 88.9 | 3.1 | 54.7% | 97583 | `20260630_001730` |
+| 4 | `qwythos-9b-claude-mythos-5-1m` | **86.2** | 75% | 18/3/3 | 82.4 | 89 | 89.3 | 83.3 | 77.8 | 88.9 | 4.9 | 18.3% | 117850 | `20260630_004250` |
+| 5 | `qwen3.6-27b-fable-5-experimental` | **83.9** | 70.8% | 17/3/4 | 78.7 | 80.4 | 84.7 | 50 | 81.5 | 94.4 | 2.5 | 19.1% | 126110 | `20260630_012400` |
+| 6 | `qwen3.5-2b` | **79.4** | 70.8% | 17/1/6 | 88.9 | 86.3 | 78.6 | 50 | 50.6 | 91.7 | 4.9 | 22.7% | 97549 | `20260629_235827` |
+| 7 | `qwen3.5-0.8b` | **51.2** | 33.3% | 8/4/12 | 83.3 | 61 | 70.6 | 50 | 37.3 | 55.6 | 3.2 | 12.1% | 52315 | `20260629_235214` |
+| 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 87038 | `20260630_000238` |
