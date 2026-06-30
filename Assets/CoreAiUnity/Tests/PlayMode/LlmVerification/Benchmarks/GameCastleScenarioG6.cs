@@ -24,16 +24,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
-            // A castle is 24+ objects, each a separate spawn roundtrip, so the cap must be HIGH — but NOT
-            // unlimited. Unlimited (0) + duplicate tool-calls let a small model loop forever (re-spawning the
-            // same object), which reads as a "hang". 80 is generous headroom for 30+ objects yet still a hard
-            // safety valve so the build always terminates.
-            public override int? MaxToolCallRoundtripsOverride => 80;
+            // Tool-call cap for the visual build. Default 1000 — effectively "build as much as you want" for
+            // any real model, while still a HARD safety valve so a small model that spams duplicate spawns
+            // (with AllowDuplicateToolCalls on) can never loop forever and hang the run. When the cap is hit
+            // the client returns FinishReason.Stop, the scenario completes normally, and the hero screenshot
+            // is still captured. Override with COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS (e.g. set 200 for a quick
+            // pass, or higher for an enormous scene).
+            public const int DefaultFreeBuildRoundtrips = 1000;
+
+            public static int FreeBuildRoundtrips()
+            {
+                string raw = System.Environment.GetEnvironmentVariable("COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS");
+                if (!string.IsNullOrWhiteSpace(raw) && int.TryParse(raw, out int v) && v >= 1)
+                {
+                    return v;
+                }
+
+                return DefaultFreeBuildRoundtrips;
+            }
+
+            public override int? MaxToolCallRoundtripsOverride => FreeBuildRoundtrips();
             public override int TokenBudget => 6000;
             public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
-            // A slow model may spawn 30+ objects one call at a time, so give the visual build a generous
-            // wall-clock budget (12 min) — it is a one-off hero, not a timed gate.
+            // A slow model may spawn dozens of objects one call at a time, so give the visual build a generous
+            // wall-clock budget (12 min) — it is a one-off hero, not a timed gate. The roundtrip cap (above)
+            // is the primary terminator; the timeout is the backstop.
             public override float TimeoutSeconds => 720f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
@@ -44,10 +60,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     .WithAllowDuplicateToolCalls(true)
                     .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
-                    // High but finite cap (80) — enough for a detailed castle, but the model can never loop
-                    // forever re-spawning duplicates. The per-scenario override (AiTaskRequest) is the channel
-                    // that actually reaches the client.
-                    .WithMaxToolCallRoundtrips(80)
+                    // High but finite cap (default 1000) — the model builds freely, yet can never loop
+                    // forever. The per-scenario override (AiTaskRequest) is the channel that actually reaches
+                    // the client; this agent-level value is a redundant safety net.
+                    .WithMaxToolCallRoundtrips(FreeBuildRoundtrips())
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
             }
@@ -73,12 +89,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string WhatItChecks =>
                 "Free-form build: the model designs and places a whole scene from scratch — judged loosely on scale and variety, shown as the report hero image.";
 
-            // The visual free-build prompt is overridable, so you can ask for other things (a city, a
-            // character, a spaceship...) with no code change:
-            //   COREAI_BENCHMARK_FREEBUILD_PROMPT  — a full custom prompt, used verbatim
-            //   COREAI_BENCHMARK_FREEBUILD_SUBJECT — just the subject (e.g. "a futuristic city"); a generic
-            //                                        spatial-build scaffold is generated around it
-            // With neither set, the default is the detailed castle prompt below.
+            // The visual free-build is overridable with no code change:
+            //   COREAI_BENCHMARK_FREEBUILD_PROMPT      — a full custom prompt, used verbatim
+            //   COREAI_BENCHMARK_FREEBUILD_SUBJECT     — just the subject (e.g. "a futuristic city"); a generic
+            //                                            spatial-build scaffold is generated around it
+            //   COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS  — tool-call cap (default 1000); the test ends and the
+            //                                            hero screenshot is taken when the model hits it
+            // With none set, the default is the detailed castle prompt below with a 1000 tool-call cap.
             private static string Env(string key)
             {
                 string v = System.Environment.GetEnvironmentVariable(key);
