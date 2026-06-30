@@ -286,10 +286,11 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip(
             "Max tool-call roundtrips per single request. Each roundtrip = one LLM call + tool execution. " +
-            "Prevents infinite tool-calling loops. Default 10.")]
+            "Prevents infinite tool-calling loops. Default 20. To remove the cap for a specific agent or " +
+            "task, set 0 via AgentBuilder.WithMaxToolCallRoundtrips(0) or AiTaskRequest.MaxToolCallRoundtrips.")]
         [SerializeField]
         [Min(1)]
-        private int maxToolCallRoundtrips = 10;
+        private int maxToolCallRoundtrips = 20;
 
         [Tooltip(
             "Max tool call history messages retained in the MEAI message list during a single request's tool-calling loop. " +
@@ -756,7 +757,7 @@ namespace CoreAI.Infrastructure.Llm
         public int MaxResponseChars => maxResponseChars < 0 ? 0 : maxResponseChars;
 
         /// <summary>Max tool-call roundtrips per request.</summary>
-        public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 1 ? 10 : maxToolCallRoundtrips;
+        public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 1 ? 20 : maxToolCallRoundtrips;
 
         /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit.</summary>
         public int MaxToolCallHistoryMessages => maxToolCallHistoryMessages < 0 ? 20 : maxToolCallHistoryMessages;
@@ -880,7 +881,7 @@ namespace CoreAI.Infrastructure.Llm
             maxToolResultChars = options.MaxToolResultChars < 0 ? 0 : options.MaxToolResultChars;
             defaultToolTimeoutMs = options.DefaultToolTimeoutMs < 0 ? 0 : options.DefaultToolTimeoutMs;
             maxResponseChars = options.MaxResponseChars < 0 ? 0 : options.MaxResponseChars;
-            maxToolCallRoundtrips = options.MaxToolCallRoundtrips < 1 ? 10 : options.MaxToolCallRoundtrips;
+            maxToolCallRoundtrips = options.MaxToolCallRoundtrips < 1 ? 20 : options.MaxToolCallRoundtrips;
             maxToolCallHistoryMessages =
                 options.MaxToolCallHistoryMessages < 0 ? 20 : options.MaxToolCallHistoryMessages;
             maxParallelToolCalls = options.MaxParallelToolCalls < 1 ? 1 : options.MaxParallelToolCalls;
@@ -1025,7 +1026,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Programmatic override for the per-request tool-call roundtrip cap (tests/bootstrap).</summary>
         public void SetMaxToolCallRoundtrips(int value)
         {
-            maxToolCallRoundtrips = value < 1 ? 10 : value;
+            maxToolCallRoundtrips = value < 1 ? 20 : value;
         }
 
         /// <summary>Sets the OpenAI-compatible base URL without normalization (callers may pass raw values).</summary>
@@ -1201,7 +1202,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (maxToolCallRoundtrips < 1)
             {
-                maxToolCallRoundtrips = 10;
+                maxToolCallRoundtrips = 20;
             }
 
             if (maxToolCallHistoryMessages < 0)

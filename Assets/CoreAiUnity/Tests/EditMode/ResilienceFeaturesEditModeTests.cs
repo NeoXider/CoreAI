@@ -213,8 +213,8 @@ namespace CoreAI.Tests.EditMode
                     "Default DefaultToolTimeoutMs should be 30000");
                 Assert.AreEqual(0, CoreAISettings.MaxResponseChars,
                     "Default MaxResponseChars should be 0 (disabled)");
-                Assert.AreEqual(10, CoreAISettings.MaxToolCallRoundtrips,
-                    "Default MaxToolCallRoundtrips should be 10");
+                Assert.AreEqual(20, CoreAISettings.MaxToolCallRoundtrips,
+                    "Default MaxToolCallRoundtrips should be 20");
             }
             finally
             {

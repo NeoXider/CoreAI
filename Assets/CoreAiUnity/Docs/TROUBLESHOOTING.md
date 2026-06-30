@@ -371,6 +371,21 @@ var agent = new AgentBuilder("MyAgent")
 
 **Fix:** `SmartToolCallingChatClient` detects and breaks the loop automatically. If it keeps happening — improve the prompt.
 
+**Type 4: Agent stopped: exceeded maximum of N tool-call roundtrips**
+```
+[SmartToolCall] Role 'X' hit the tool-call roundtrip cap (20, from global ICoreAISettings.MaxToolCallRoundtrips) and was stopped …
+Agent stopped: exceeded maximum of 20 tool-call roundtrips
+```
+
+**Cause:** The task needed **more** tool roundtrips than the cap allows. One roundtrip is one LLM call plus one tool-execution batch. Common for builders that emit many `spawn` calls, or a Programmer iterating Lua.
+
+**Fix:** raise or remove the cap at the right scope:
+- Per agent: `new AgentBuilder("Builder").WithMaxToolCallRoundtrips(0)`; `0` = unlimited.
+- Per call: `new AiTaskRequest { MaxToolCallRoundtrips = 0 }`.
+- Global: `CoreAISettings.MaxToolCallRoundtrips = 40;` or raise it in the CoreAI settings asset.
+
+Priority is per-call → per-agent → global. The built-in **Programmer** and **Creator** roles are already unlimited by default.
+
 ---
 
 ## 🌍 Problem: World command is not executed

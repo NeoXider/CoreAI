@@ -185,7 +185,8 @@ namespace CoreAI.Infrastructure.Llm
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
                 request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
-                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
+                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
+                request.MaxToolCallRoundtrips);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 

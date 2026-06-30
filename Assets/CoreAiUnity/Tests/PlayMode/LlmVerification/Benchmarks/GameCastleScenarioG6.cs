@@ -37,6 +37,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     .WithAllowDuplicateToolCalls(true)
                     .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
+                    // Free-build visual: a castle is 24+ objects, each a separate spawn roundtrip. Lift the
+                    // safety valve entirely (0 = unlimited) so the model is never cut off mid-build.
+                    .WithMaxToolCallRoundtrips(0)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
             }

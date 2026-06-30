@@ -46,6 +46,68 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, callCount, "Agent must stop after 3 consecutive errors");
         }
 
+        /// <summary>
+        /// A per-request roundtrip override caps the tool-call loop at that value even when the model
+        /// keeps requesting tools, independent of the global settings value.
+        /// </summary>
+        [Test]
+        public void RoundtripOverride_CapsLoopAtOverrideValue()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                return MakeToolCallResponse("ok_tool", "call_" + callCount);
+            });
+
+            MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            // Global settings default is 10; override to 2 must win.
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 5, "",
+                null, null, maxRoundtripsOverride: 2);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            // iteration 1 (call 1) → tool; iteration 2 (call 2) → tool; iteration 3 → over cap → stop.
+            Assert.AreEqual(2, callCount, "Override of 2 must stop the loop after 2 roundtrips");
+        }
+
+        /// <summary>
+        /// A roundtrip override of 0 means UNLIMITED: the loop is not cut off by the safety valve and
+        /// runs until the model itself stops requesting tools.
+        /// </summary>
+        [Test]
+        public void RoundtripOverrideZero_IsUnlimited()
+        {
+            // Model requests the tool 25 times (past the default cap of 10), then returns text.
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                return callCount <= 25
+                    ? MakeToolCallResponse("ok_tool", "call_" + callCount)
+                    : MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 50, "",
+                null, null, maxRoundtripsOverride: 0);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            // 25 tool roundtrips + 1 final text turn = 26 model calls; the default-10 valve never fired.
+            Assert.AreEqual(26, callCount, "Override of 0 must not cap the loop (unlimited)");
+        }
+
         [Test]
         public void ConcatenateAssistantTextContents_JoinsMultipleTextParts()
         {

@@ -518,6 +518,8 @@ namespace CoreAI.Tests.PlayMode
             // resolves _settings.MaxToolCallRoundtrips), NOT on the per-run benchmark settings passed to the
             // orchestrator. Benchmark scenes such as the G6 free-build emit 24+ spawns, well past the default 10,
             // so honor COREAI_BENCHMARK_ROUNDTRIPS here too — otherwise the run is silently capped at 10.
+            // Note: this is the GLOBAL fallback. A scenario can additionally set a PER-AGENT override via
+            // AgentBuilder.WithMaxToolCallRoundtrips (G6 uses 0 = unlimited), which takes priority over this.
             string roundtripsRaw = System.Environment.GetEnvironmentVariable("COREAI_BENCHMARK_ROUNDTRIPS");
             if (!string.IsNullOrWhiteSpace(roundtripsRaw)
                 && int.TryParse(roundtripsRaw, out int roundtrips) && roundtrips >= 1)

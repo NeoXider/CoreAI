@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Flexible tool-call roundtrip limits.** The roundtrip cap (LLM call + tool batch per iteration) is now
+  configurable per agent and per task, not just globally:
+  `new AgentBuilder("Builder").WithMaxToolCallRoundtrips(0)` removes the cap for a free-build agent;
+  `WithMaxToolCallRoundtrips(5)` tightens a quiet NPC; `AiTaskRequest.MaxToolCallRoundtrips` overrides a
+  single call. `0` = unlimited, `null` = inherit. Default raised **10 → 20**; built-in **Programmer** and
+  **Creator** roles default to unlimited. The G6 free-build (castle) scenario now runs unlimited so it is
+  never cut off mid-build. When the cap is hit the warning explains how to raise or disable it.
+
 ## 4.16.0 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.16.0**.

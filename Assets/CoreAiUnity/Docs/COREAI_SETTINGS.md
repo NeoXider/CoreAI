@@ -247,6 +247,7 @@ The Inspector includes an **LLMUnity status** panel:
 | **LLM Timeout** | `15` | LLM request timeout (seconds). v1.5.1: enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (WebGL-compatible). |
 | **Lua Repair Retries** | `3` | Max consecutive failed Lua repair attempts for Programmer (counter resets on success) |
 | **Tool Call Retries** | `3` | Max consecutive failed tool calls before aborting the agent (counter resets on success) |
+| **Max Tool Call Roundtrips** | `20` | Max tool-call loop iterations per request (one roundtrip = one LLM call + tool batch). Prevents infinite tool-calling loops. `0` = unlimited. Per-agent override: `AgentBuilder.WithMaxToolCallRoundtrips`. Per-call override: `AiTaskRequest.MaxToolCallRoundtrips`. Built-in **Programmer** and **Creator** roles default to unlimited. |
 | **Context Overflow Retries** | `3` | Max bounded retries after `ContextLengthExceeded`; each retry applies a tighter `ContextRetryLevel` and drops roughly 25% more oldest history (`0` disables). |
 
 These fields live in the **Advanced** inspector under **Chat history summarization** (alongside **Enable LLM context compaction**):
