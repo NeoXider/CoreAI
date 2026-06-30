@@ -53,8 +53,13 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 - 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, Lua generation rate limit, rate-limit metrics + F10 token-budget overlay
 - 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
 - 🧩 **Optional modules** — no MoonSharp? No LLMUnity? Still compiles; features light up when packages appear
+- 🌍 **Unity world control** — spawn primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`), move/rotate/scale objects, and add configured components through the reflection-free `component_command` tool
 
 ⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
+
+### Why not just call the API yourself?
+
+Raw API calls get you text; CoreAI gives you the production layer around that text. Tool-calling, persistent memory, streaming, Lua sandboxing, retries, and multi-backend routing are already wired into Unity and covered by tests. You still own your game logic, but you do not have to rebuild the fragile glue around local models, OpenAI-compatible APIs, tool repair, and long-running conversations. CoreAI is the shortest path from "chat box" to agents that can safely act inside the game.
 
 **Releases:** `version` in [core `package.json`](Assets/CoreAI/package.json) and [Unity `package.json`](Assets/CoreAiUnity/package.json) (same semver). **Notes:** [Unity changelog](Assets/CoreAiUnity/CHANGELOG.md) · [Core changelog](Assets/CoreAI/CHANGELOG.md).
 
@@ -64,7 +69,6 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 | | Section |
 |---|---------|
-| [Changelog](#changelog) | Unity + core release notes (single source of truth) |
 | [Game-Creation Benchmark](#game-creation-benchmark) | Local LLM game-building benchmark and model ranking |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
@@ -72,17 +76,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
 | [Tests](#-tests) | EditMode & PlayMode |
-
----
-
-## Changelog
-
-Per-release notes, migration hints, and **version numbers** are maintained only in the changelogs (so this README does not need duplicate edits on every ship):
-
-- **[`com.neoxider.coreaiunity` CHANGELOG](Assets/CoreAiUnity/CHANGELOG.md)** — Unity layer: Editor, chat UI, PlayMode tests, docs.
-- **[`com.neoxider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
-
-The **`version`** field in each package’s `package.json` is the authoritative semver for that package.
+| [Changelog](#changelog) | Unity + core release notes (single source of truth) |
 
 ---
 
@@ -109,7 +103,23 @@ CoreAI includes a local game-creation benchmark that measures how well an LLM bu
 
 </details>
 
-[Full benchmark guide → Docs/BENCHMARK.md](Docs/BENCHMARK.md)
+Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
+
+### Castle gallery - G6 free-build visual
+
+The benchmark's G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability.
+
+| Model | Hero screenshot |
+|-------|-----------------|
+| **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (97.2/100) | ![Heretic](Docs/Images/castles/heretic.png) |
+| **qwen3.5-4b-mtp** (91.1/100) | ![Qwen3.5 4B MTP](Docs/Images/castles/qwen3.5-4b-mtp.png) |
+| **deepreinforce-ai_ornith-1.0-9b** (88.4/100) | ![Ornith](Docs/Images/castles/ornith.png) |
+| **qwythos-9b-claude-mythos-5-1m** (86.2/100) | ![Qwythos](Docs/Images/castles/qwythos.png) |
+| **qwen3.6-27b-fable-5-experimental** (83.9/100) | ![Fable](Docs/Images/castles/fable.png) |
+| **qwen3.5-2b** (79.4/100) | ![Qwen3.5 2B](Docs/Images/castles/qwen3.5-2b.png) |
+| **qwen3.5-0.8b** (51.2/100) | ![Qwen3.5 0.8B](Docs/Images/castles/qwen3.5-0.8b.png) |
+
+> **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [BENCHMARK.md](Docs/BENCHMARK.md) for details.
 
 ---
 
@@ -234,7 +244,8 @@ AI doesn't just generate text — it **calls code** for real actions:
 
 | Tool | What it does | Who uses it |
 |------|--------------|-------------|
-| 🌍 **WorldCommandTool** | Spawns, moves, modifies objects in the world | Creator AI |
+| 🌍 **WorldCommandTool** | Spawns primitives/prefabs and moves, rotates, scales, parents, or toggles objects in the world | Creator AI |
+| 🧱 **component_command** | Adds/configures curated Unity components such as `Rigidbody`, colliders, and `Light` without reflection | Creator AI |
 | ⚡ **Action/Event Tool** | Calls any C# method or triggers an Event | All Agents |
 | 🧠 **MemoryTool** | Saves/reads memory between sessions | All Agents |
 | 📜 **LuaTool** | Executes Lua scripts | Programmer AI |
@@ -417,6 +428,8 @@ The repository consists of **two packages**:
 | **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
 | **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MEAI, MessagePipe, tests | Depends on `coreai` |
 
+<details><summary>Architecture diagram</summary>
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Player / Game                           │
@@ -462,15 +475,27 @@ The repository consists of **two packages**:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+</details>
+
 ---
 
 ## 🚀 Quick Start
 
 > 📦 **Full step-by-step guide: [INSTALL.md](INSTALL.md)** — base install, the LLM module (NuGet), and the Lua module, with the optional-module switches. The summary below is the short version.
 
-### 1. Install NuGet DLLs (required)
+### 1. Install the LLM pipeline with NuGetForUnity
 
-CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) for the LLM pipeline. Copy these DLLs into your project's `Assets/Packages/` folder (download from NuGet or copy from this repo's `Assets/Packages/`):
+CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) for the LLM pipeline. The recommended install path is [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity): install NuGetForUnity, then install one package:
+
+```text
+Microsoft.Extensions.AI
+```
+
+NuGetForUnity resolves the rest of the dependency chain automatically. Do **not** install the transitive packages by hand when using this path.
+
+<details><summary>Manual DLL alternative</summary>
+
+If you cannot use NuGetForUnity, clone this repo and copy the entire `Assets/Packages/` folder into your project. It contains the restored DLLs plus the `packages.config` / `NuGet.config` manifests.
 
 | NuGet Package | Version | Required by |
 |---------------|---------|-------------|
@@ -484,7 +509,18 @@ CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.E
 | `Microsoft.Extensions.DependencyInjection.Abstractions` | 10.0.4 | DI |
 | `System.Diagnostics.DiagnosticSource` | 10.0.4 | System dependency |
 
-> 💡 **Easiest way:** Clone this repo and copy the entire `Assets/Packages/` folder into your project.
+</details>
+
+### Supported backends
+
+| Backend | Use it for |
+|---------|------------|
+| **LLMUnity** | On-device GGUF models inside Unity |
+| **LM Studio** | Local OpenAI-compatible development server |
+| **OpenAI / any OpenAI-compatible API** | Hosted provider calls through the client-owned API path |
+| **vLLM** | Self-hosted OpenAI-compatible inference |
+| **Ollama** | Local OpenAI-compatible model server |
+| **Server-managed proxy** | Production proxy where your backend owns credentials, budgets, and policy |
 
 ### 2. Add Git dependencies to manifest.json (required)
 
@@ -578,8 +614,8 @@ var storyteller = new AgentBuilder("Storyteller")
 
 Start from the index and pick the level that matches your goal:
 
-- **Game-Creation Benchmark:** live PlayMode benchmark design for scored model-driven game creation:
-  [BENCHMARK_DESIGN.md](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
+- **Game-Creation Benchmark:** live PlayMode benchmark guide and design for scored model-driven game creation:
+  [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
 
 > 🧭 **[Docs/README.md](Docs/README.md)** — repository documentation entry point.
 > 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — CoreAI Unity map (Beginner → Intermediate → Architecture).
@@ -654,6 +690,17 @@ Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for
 - **Multiplayer:** AI logic on host, clients receive agreed outcomes
 
 **One template — for both solo campaign and coop.**
+
+---
+
+## Changelog
+
+Per-release notes, migration hints, and **version numbers** are maintained only in the changelogs (so this README does not need duplicate edits on every ship):
+
+- **[`com.neoxider.coreaiunity` CHANGELOG](Assets/CoreAiUnity/CHANGELOG.md)** — Unity layer: Editor, chat UI, PlayMode tests, docs.
+- **[`com.neoxider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
+
+The **`version`** field in each package’s `package.json` is the authoritative semver for that package.
 
 ---
 
