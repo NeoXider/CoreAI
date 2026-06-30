@@ -22,34 +22,70 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             byte[] raw = Encoding.UTF8.GetBytes(request.JsonBody ?? "");
-            using UnityWebRequest uwr = new(request.Url, UnityWebRequest.kHttpVerbPOST);
-            uwr.uploadHandler = new UploadHandlerRaw(raw);
-            uwr.downloadHandler = new DownloadHandlerBuffer();
-            uwr.SetRequestHeader("Content-Type", "application/json");
-            ApplyHeaders(uwr, request);
-
-            int t = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
-            uwr.timeout = t;
-
-            UnityWebRequestAsyncOperation op = uwr.SendWebRequest();
-            while (!op.isDone)
+            UnityWebRequest uwr = new(request.Url, UnityWebRequest.kHttpVerbPOST);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
+                uwr.uploadHandler = new UploadHandlerRaw(raw);
+                uwr.downloadHandler = new DownloadHandlerBuffer();
+                uwr.SetRequestHeader("Content-Type", "application/json");
+                ApplyHeaders(uwr, request);
+
+                int t = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
+                uwr.timeout = t;
+
+                UnityWebRequestAsyncOperation op = uwr.SendWebRequest();
+                while (!op.isDone)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        // Tear down the underlying connection before the request is disposed; a bare
+                        // Dispose() while in-flight leaks the native socket/handles until GC finalization.
+                        AbortQuietly(uwr);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    await Task.Yield();
+                }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    AbortQuietly(uwr);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                long codeLong = uwr.responseCode;
+                int code = codeLong > 0 ? (int)codeLong : 0;
+                string body = uwr.downloadHandler?.text ?? "";
+
+                return new OpenAiHttpPostResult
+                {
+                    StatusCode = code > 0 ? code : MapFailureToStatus(uwr),
+                    BodyText = body,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase)
+                };
+            }
+            finally
+            {
+                uwr.Dispose();
+            }
+        }
+
+        private static void AbortQuietly(UnityWebRequest uwr)
+        {
+            if (uwr == null)
+            {
+                return;
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-
-            long codeLong = uwr.responseCode;
-            int code = codeLong > 0 ? (int)codeLong : 0;
-            string body = uwr.downloadHandler?.text ?? "";
-
-            return new OpenAiHttpPostResult
+            try
             {
-                StatusCode = code > 0 ? code : MapFailureToStatus(uwr),
-                BodyText = body,
-                ResponseHeaders = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase)
-            };
+                uwr.Abort();
+            }
+            catch
+            {
+                // Abort() can throw if the request already completed/disposed; the subsequent
+                // Dispose() in finally still runs, so swallow and proceed.
+            }
         }
 
         public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,

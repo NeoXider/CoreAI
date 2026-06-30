@@ -182,6 +182,12 @@ namespace CoreAI.Infrastructure.Llm
             {
                 return await refresher.RefreshAsync(cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // A cancelled refresh is not a refresh failure; let cancellation propagate instead of
+                // swallowing it into a silent "false" that the caller would treat as "refresh unavailable".
+                throw;
+            }
             catch
             {
                 return false;

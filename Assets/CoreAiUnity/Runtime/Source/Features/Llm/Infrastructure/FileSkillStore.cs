@@ -219,7 +219,29 @@ namespace CoreAI.Infrastructure.Llm
 
         private string GetSkillPath(string id)
         {
-            return Path.Combine(_dir, SanitizedFileName(id) + ".json");
+            string combined = Path.Combine(_dir, SanitizedFileName(id) + ".json");
+            return EnsureWithinRoot(combined);
+        }
+
+        /// <summary>
+        /// Guards against path traversal: <see cref="Path.GetInvalidFileNameChars"/> does NOT strip
+        /// <c>..</c>, so an id like <c>..</c> or <c>../x</c> could resolve outside <see cref="_dir"/> and
+        /// read/write/delete arbitrary files. Reject any combined path that escapes the store root.
+        /// </summary>
+        private string EnsureWithinRoot(string combinedPath)
+        {
+            string rootFull = Path.GetFullPath(_dir);
+            string rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? rootFull
+                : rootFull + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(combinedPath);
+            if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "[FileSkillStore] Skill id resolves outside the store root; rejected to prevent path traversal.");
+            }
+
+            return fullPath;
         }
 
         /// <summary>

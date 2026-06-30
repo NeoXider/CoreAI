@@ -298,7 +298,30 @@ namespace CoreAI.Infrastructure.Lua
 
         private string GetModDir(string modId)
         {
-            return Path.Combine(_dir, SanitizedFolderName(modId));
+            string combined = Path.Combine(_dir, SanitizedFolderName(modId));
+            return EnsureWithinRoot(combined);
+        }
+
+        /// <summary>
+        /// Guards against path traversal: <see cref="Path.GetInvalidFileNameChars"/> does NOT strip
+        /// <c>..</c>, so an id like <c>..</c> or <c>../x</c> could resolve outside <see cref="_dir"/> and
+        /// read/write/delete arbitrary files (a recursive <see cref="Directory.Delete(string,bool)"/> on the
+        /// escaped folder is especially destructive). Reject any combined path that escapes the store root.
+        /// </summary>
+        private string EnsureWithinRoot(string combinedPath)
+        {
+            string rootFull = Path.GetFullPath(_dir);
+            string rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? rootFull
+                : rootFull + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(combinedPath);
+            if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "[FileLuaModSourceStore] Mod id resolves outside the store root; rejected to prevent path traversal.");
+            }
+
+            return fullPath;
         }
 
         /// <summary>

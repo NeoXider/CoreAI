@@ -825,7 +825,21 @@ namespace CoreAI.Infrastructure.Lua
 
         private bool IsTypeAllowed(Type type)
         {
-            return type != null && (_blacklistPolicy?.IsTypeAllowed(type) ?? true);
+            if (type == null)
+            {
+                return false;
+            }
+
+            // Fail-CLOSED hard floor: certain namespaces/types are NEVER reachable from Full Lua, even with
+            // the allow-all default policy. Without this, Full tier + no deny-list lets a script reflect into
+            // System.IO/Reflection/Diagnostics/etc and escape the sandbox (arbitrary process spawn, file I/O,
+            // assembly loading = RCE). This runs BEFORE the permissive allow-list path below.
+            if (IsHardDeniedType(type))
+            {
+                return false;
+            }
+
+            return _blacklistPolicy?.IsTypeAllowed(type) ?? true;
         }
 
         private void EnsureMemberAllowed(MemberInfo member)
@@ -835,11 +849,125 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
+            // Fail-CLOSED hard floor (mirrors IsTypeAllowed): a member declared on a dangerous type is never
+            // callable/readable/writable from Full Lua regardless of the host deny-list policy.
+            if (IsHardDeniedType(member.DeclaringType) || IsHardDeniedType(member is MethodInfo m ? m.ReturnType : null))
+            {
+                throw new ScriptRuntimeException(
+                    $"Full Lua access to member '{member.DeclaringType?.Name}.{member.Name}' is denied " +
+                    "(dangerous type; blocked by the Full Lua hard deny-list).");
+            }
+
             if (!(_blacklistPolicy?.IsMemberAllowed(member) ?? true))
             {
                 throw new ScriptRuntimeException(
                     $"Full Lua access to member '{member.DeclaringType?.Name}.{member.Name}' is denied by host policy.");
             }
+        }
+
+        /// <summary>
+        /// Namespace prefixes that are NEVER reachable from Full-tier Lua, even when the host supplies no
+        /// deny-list (allow-all). These gate the .NET capabilities that would let a script break out of the
+        /// game sandbox: file I/O, reflection escapes, process/diagnostics, threading, networking, assembly
+        /// loading, environment access, and activation. <c>UnityEngine.*</c> and ordinary game/component
+        /// types are intentionally NOT here, so Full Lua stays useful for gameplay scripting.
+        /// </summary>
+        private static readonly string[] HardDeniedNamespacePrefixes =
+        {
+            "System.IO",
+            "System.Reflection",
+            "System.Diagnostics",
+            "System.Threading",
+            "System.Runtime",
+            "System.Net",
+            "System.Security",
+            "System.CodeDom",
+            "Microsoft.CSharp",
+            "Mono.",
+            "MoonSharp"
+        };
+
+        /// <summary>
+        /// Fully-qualified dangerous types that must be blocked even though their namespace (e.g. plain
+        /// <c>System</c>) is otherwise allowed: the reflection/activation/environment/process escapes.
+        /// </summary>
+        private static readonly HashSet<string> HardDeniedFullTypeNames = new(StringComparer.Ordinal)
+        {
+            "System.Type",
+            "System.Activator",
+            "System.AppDomain",
+            "System.Environment",
+            "System.GC",
+            "System.Runtime.InteropServices.Marshal",
+            "System.AppContext",
+            "System.OperatingSystem"
+        };
+
+        /// <summary>
+        /// True when <paramref name="type"/> (or, for generics, any of its type arguments) is one of the
+        /// hard-denied dangerous .NET types/namespaces that must stay out of Full Lua's reach.
+        /// </summary>
+        private static bool IsHardDeniedType(Type type)
+        {
+            if (type == null)
+            {
+                return false;
+            }
+
+            if (type.IsByRef || type.IsArray || type.IsPointer)
+            {
+                Type element = type.GetElementType();
+                if (element != null && element != type)
+                {
+                    return IsHardDeniedType(element);
+                }
+            }
+
+            string fullName = type.FullName;
+            if (!string.IsNullOrEmpty(fullName) && HardDeniedFullTypeNames.Contains(fullName))
+            {
+                return true;
+            }
+
+            string ns = type.Namespace;
+            if (!string.IsNullOrEmpty(ns))
+            {
+                for (int i = 0; i < HardDeniedNamespacePrefixes.Length; i++)
+                {
+                    string prefix = HardDeniedNamespacePrefixes[i];
+                    if (ns.Equals(prefix, StringComparison.Ordinal) ||
+                        ns.StartsWith(prefix + ".", StringComparison.Ordinal) ||
+                        ns.StartsWith(prefix, StringComparison.Ordinal) && prefix.EndsWith(".", StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Reflection-typed instances often surface as the abstract bases (Type, MemberInfo, Assembly,
+            // MethodBase, …) whose Namespace is System.Reflection (caught above) or System (Type, caught by
+            // name above). Also block any type that itself derives from these reflection roots.
+            if (typeof(Type).IsAssignableFrom(type) ||
+                typeof(MemberInfo).IsAssignableFrom(type) ||
+                typeof(Assembly).IsAssignableFrom(type) ||
+                typeof(System.Reflection.Module).IsAssignableFrom(type) ||
+                typeof(Delegate).IsAssignableFrom(type))
+            {
+                return true;
+            }
+
+            if (type.IsGenericType)
+            {
+                foreach (Type arg in type.GetGenericArguments())
+                {
+                    if (arg != type && IsHardDeniedType(arg))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static DynValue ToDyn(object value)

@@ -341,10 +341,19 @@ namespace CoreAI.Infrastructure.Llm
                 _signal.Set();
                 _stream.PumpPendingRead();
                 _openTcs.TrySetCanceled(cancellationToken);
+
+                // On cancellation the consumer may never read to EOF or dispose the stream, so remove the
+                // per-call state here too. Otherwise a cancelled-but-abandoned stream leaks its entry in the
+                // static States dictionary, which grows unbounded over the app lifetime.
+                States.TryRemove(CallId, out _);
             }
 
             public void Dispose()
             {
+                // Abandoned-before-read streams are reclaimed here. The dictionary is static, so an entry
+                // that is never removed (consumer drops the stream without reading to completion) is a
+                // permanent leak; removing on Dispose bounds the dictionary to live streams only.
+                States.TryRemove(CallId, out _);
                 try { _cancelRegistration.Dispose(); } catch { }
                 try { _signal.Set(); } catch { }
                 try { _signal.Dispose(); } catch { }
@@ -417,7 +426,17 @@ namespace CoreAI.Infrastructure.Llm
                 _pendingCount = count;
                 if (cancellationToken.CanBeCanceled)
                 {
-                    cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+                    // Dispose the registration once the read resolves; otherwise every parked read over a
+                    // long stream leaves a live registration attached to the same token, accumulating until
+                    // the token (request lifetime) is finally cancelled/disposed.
+                    CancellationTokenRegistration registration =
+                        cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+                    tcs.Task.ContinueWith(
+                        (_, state) => ((CancellationTokenRegistration)state).Dispose(),
+                        registration,
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
                 }
 
                 // Chunk/done may have fired before we parked; drain queue / EOF without waiting for another JS callback.

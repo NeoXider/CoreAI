@@ -361,7 +361,29 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private string GetPath(string roleId)
         {
-            return Path.Combine(_dir, $"{SanitizedFileStem(roleId)}.json");
+            string combined = Path.Combine(_dir, $"{SanitizedFileStem(roleId)}.json");
+            return EnsureWithinRoot(combined);
+        }
+
+        /// <summary>
+        /// Guards against path traversal: <see cref="Path.GetInvalidFileNameChars"/> does NOT strip
+        /// <c>..</c>, so a role id like <c>..</c> or <c>../x</c> could resolve outside <see cref="_dir"/>
+        /// and read/write/delete arbitrary files. Reject any combined path that escapes the store root.
+        /// </summary>
+        private string EnsureWithinRoot(string combinedPath)
+        {
+            string rootFull = Path.GetFullPath(_dir);
+            string rootPrefix = rootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? rootFull
+                : rootFull + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(combinedPath);
+            if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "[FileAgentMemoryStore] Role id resolves outside the store root; rejected to prevent path traversal.");
+            }
+
+            return fullPath;
         }
 
         /// <summary>

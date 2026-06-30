@@ -340,6 +340,14 @@ namespace CoreAI.Ai
             {
                 throw; // honour caller cancellation
             }
+            catch (OperationCanceledException)
+            {
+                // A cancellation (incl. TaskCanceledException from a timeout or a linked token) must
+                // propagate as cancellation, not fall into the general catch below and collapse to null —
+                // a null result is indistinguishable from a genuine empty model response. Re-throw so the
+                // caller can tell "cancelled" apart from "the model returned nothing".
+                throw;
+            }
             catch (Exception ex)
             {
                 Log.Instance.Error($"[AiOrchestrator] Task execution failed: {ex.Message}", LogTag.Llm);

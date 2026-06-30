@@ -27,6 +27,13 @@ So **env overrides the local file, and the local file overrides the settings ass
 Each field is resolved independently — you can keep the base URL + key in the local file and override
 just the model from the shell.
 
+> **Security — never commit API keys to the Resources asset.** The `CoreAISettingsAsset` under a
+> `Resources/` folder is packed into every player build, and the key string is trivially recoverable
+> from the shipped bundle. Keep keys in the **gitignored local config** (`coreai-live-tests.local.json`)
+> or a `COREAI_TEST_*` environment variable, and inject the production key at runtime from a secure
+> source — not from the committed asset. A build-time guard (`CoreAIResourcesApiKeyBuildGuard`) **fails
+> the build** if a Resources `CoreAISettingsAsset` has a non-empty `apiKey`/`secondaryApiKey`.
+
 ---
 
 ## Option A — environment variables
