@@ -7,7 +7,7 @@
 **CoreAI is a Unity framework for LLM-powered NPCs and agents that call your game code** — function calling, tools, persistent memory, and runtime Lua — running on a **local 4 GB model** or any **OpenAI-compatible API**. No cloud keys required, no scripted dialogue trees.
 
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
-[![EditMode tests](https://img.shields.io/badge/EditMode-967%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![EditMode tests](https://img.shields.io/badge/EditMode-1332%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI%20API-blue)](#-recommended-models)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
