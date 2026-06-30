@@ -17,6 +17,7 @@ namespace CoreAI.Infrastructure.Lua
         private readonly IGameLogger _logger;
         private readonly CoreAiVersioningLuaRuntimeBindings _versioning;
         private readonly World.CoreAiWorldLuaRuntimeBindings _world;
+        private readonly World.CoreAiComponentLuaRuntimeBindings _components;
         private readonly LuaTimeBindings _time;
         private readonly World.CoreAiWorldQueryLuaBindings _worldQuery;
         private readonly LuaLogicSlots _logicSlots;
@@ -27,6 +28,7 @@ namespace CoreAI.Infrastructure.Lua
             IGameLogger logger,
             CoreAiVersioningLuaRuntimeBindings versioning,
             World.CoreAiWorldLuaRuntimeBindings world,
+            World.CoreAiComponentLuaRuntimeBindings components = null,
             LuaTimeBindings time = null,
             World.CoreAiWorldQueryLuaBindings worldQuery = null,
             LuaLogicSlots logicSlots = null,
@@ -36,6 +38,7 @@ namespace CoreAI.Infrastructure.Lua
             _logger = logger;
             _versioning = versioning;
             _world = world;
+            _components = components;
             _time = time ?? new LuaTimeBindings();
             _worldQuery = worldQuery;
             _logicSlots = logicSlots;
@@ -69,6 +72,7 @@ namespace CoreAI.Infrastructure.Lua
             if ((effective & LuaCapabilities.WorldEdit) != 0)
             {
                 _world?.RegisterGameplayApis(registry);
+                _components?.RegisterGameplayApis(registry);
             }
 
             if ((effective & LuaCapabilities.Gameplay) != 0)

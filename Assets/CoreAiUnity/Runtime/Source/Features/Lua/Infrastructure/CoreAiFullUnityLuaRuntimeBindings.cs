@@ -22,6 +22,7 @@ namespace CoreAI.Infrastructure.Lua
     {
         private static readonly ConcurrentDictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
         private static readonly ConcurrentDictionary<(Type type, string member, bool nonPublic), MemberInfo> MemberCache = new();
+        private static readonly ConcurrentDictionary<(Type type, bool nonPublic), List<MemberInfo>> SettableMemberCache = new();
 
         private readonly IGameLogger _logger;
         private readonly bool _allowNonPublic;
@@ -75,6 +76,9 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("unity_parent", new Func<int, int, bool, bool>(SetParent));
             registry.Register("unity_get_children", new Func<int, List<object>>(GetChildren));
             registry.Register("unity_list_components", new Func<int, List<string>>(ListComponents));
+            registry.RegisterCallback("unity_list_members", (ctx, args) => ToLuaValue(ctx.GetScript(),
+                ListMembers((int)args.AsType(0, "unity_list_members", DataType.Number, false).Number,
+                    ReadString(args, 1, "unity_list_members"))));
             registry.Register("unity_get_member", new Func<int, string, string, DynValue>(GetMember));
             registry.Register("unity_set_member", new Func<int, string, string, DynValue, bool>(SetMember));
             registry.Register("unity_call", new Func<int, string, string, DynValue[], DynValue>(CallMethod));
@@ -339,6 +343,30 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             return names;
+        }
+
+        private List<object> ListMembers(int instanceId, string componentType)
+        {
+            object target = ResolveComponent(instanceId, componentType);
+            if (target == null)
+            {
+                throw new ScriptRuntimeException(
+                    $"unity_list_members: component '{componentType}' on id {instanceId} not found.");
+            }
+
+            List<object> results = new();
+            List<MemberInfo> members = GetAllowedSettableMembers(target.GetType());
+            for (int i = 0; i < members.Count; i++)
+            {
+                MemberInfo member = members[i];
+                results.Add(new Dictionary<string, object>
+                {
+                    { "name", member.Name },
+                    { "type", FriendlyTypeName(GetMemberValueType(member)) }
+                });
+            }
+
+            return results;
         }
 
         private DynValue GetMember(int instanceId, string componentType, string memberName)
@@ -689,7 +717,8 @@ namespace CoreAI.Infrastructure.Lua
 
             if (member == null)
             {
-                throw new ScriptRuntimeException($"Member '{memberName}' not found on {type.Name}.");
+                throw new ScriptRuntimeException(
+                    $"Member '{memberName}' not found on {type.Name}. Settable members: {BuildSettableMemberHint(type)}");
             }
 
             EnsureMemberAllowed(member);
@@ -732,9 +761,24 @@ namespace CoreAI.Infrastructure.Lua
                 int i => DynValue.NewNumber(i),
                 long l => DynValue.NewNumber(l),
                 Enum e => DynValue.NewString(e.ToString()),
-                Vector3 v => DynValue.NewString($"({v.x},{v.y},{v.z})"),
+                Vector2 v => NewNumberTable(("x", v.x), ("y", v.y)),
+                Vector3 v => NewNumberTable(("x", v.x), ("y", v.y), ("z", v.z)),
+                Vector4 v => NewNumberTable(("x", v.x), ("y", v.y), ("z", v.z), ("w", v.w)),
+                Color c => NewNumberTable(("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)),
+                Quaternion q => NewNumberTable(("x", q.x), ("y", q.y), ("z", q.z), ("w", q.w)),
                 _ => DynValue.NewString(value.ToString())
             };
+        }
+
+        private static DynValue NewNumberTable(params (string key, float value)[] values)
+        {
+            Table table = new(null);
+            for (int i = 0; i < values.Length; i++)
+            {
+                table[values[i].key] = values[i].value;
+            }
+
+            return DynValue.NewTable(table);
         }
 
         private static object FromDyn(DynValue value, MemberInfo member)
@@ -794,7 +838,211 @@ namespace CoreAI.Infrastructure.Lua
                     (float)t.Get("z").CastToNumber());
             }
 
+            if (targetType == typeof(Vector2) && value.Type == DataType.Table)
+            {
+                Table t = value.Table;
+                return new Vector2(
+                    (float)t.Get("x").CastToNumber(),
+                    (float)t.Get("y").CastToNumber());
+            }
+
+            if (targetType == typeof(Vector4) && value.Type == DataType.Table)
+            {
+                Table t = value.Table;
+                return new Vector4(
+                    (float)t.Get("x").CastToNumber(),
+                    (float)t.Get("y").CastToNumber(),
+                    (float)t.Get("z").CastToNumber(),
+                    (float)t.Get("w").CastToNumber());
+            }
+
+            if (targetType == typeof(Color))
+            {
+                if (value.Type == DataType.String)
+                {
+                    if (ColorUtility.TryParseHtmlString(value.String, out Color color))
+                    {
+                        return color;
+                    }
+
+                    throw new ScriptRuntimeException($"Could not parse Color from '{value.String}'.");
+                }
+
+                if (value.Type == DataType.Table)
+                {
+                    Table t = value.Table;
+                    return new Color(
+                        (float)t.Get("r").CastToNumber(),
+                        (float)t.Get("g").CastToNumber(),
+                        (float)t.Get("b").CastToNumber(),
+                        ReadOptionalTableNumber(t, "a", 1f));
+                }
+            }
+
+            if (targetType == typeof(Quaternion) && value.Type == DataType.Table)
+            {
+                Table t = value.Table;
+                DynValue w = t.Get("w");
+                if (!w.IsNil())
+                {
+                    return new Quaternion(
+                        (float)t.Get("x").CastToNumber(),
+                        (float)t.Get("y").CastToNumber(),
+                        (float)t.Get("z").CastToNumber(),
+                        (float)w.CastToNumber());
+                }
+
+                return Quaternion.Euler(
+                    (float)t.Get("x").CastToNumber(),
+                    (float)t.Get("y").CastToNumber(),
+                    (float)t.Get("z").CastToNumber());
+            }
+
             return Convert.ChangeType(value.ToObject(), targetType, CultureInfo.InvariantCulture);
+        }
+
+        private static float ReadOptionalTableNumber(Table table, string key, float defaultValue)
+        {
+            DynValue value = table.Get(key);
+            return value.IsNil() ? defaultValue : (float)value.CastToNumber();
+        }
+
+        private List<MemberInfo> GetAllowedSettableMembers(Type type)
+        {
+            List<MemberInfo> candidates = GetSettableMembers(type);
+            List<MemberInfo> allowed = new(candidates.Count);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                MemberInfo member = candidates[i];
+                if (_blacklistPolicy?.IsMemberAllowed(member) ?? true)
+                {
+                    allowed.Add(member);
+                }
+            }
+
+            return allowed;
+        }
+
+        private List<MemberInfo> GetSettableMembers(Type type)
+        {
+            BindingFlags flags = MemberFlags();
+            (Type, bool) key = (type, _allowNonPublic);
+            return SettableMemberCache.GetOrAdd(key, _ =>
+            {
+                List<MemberInfo> members = new();
+                MemberInfo[] allMembers = type.GetMembers(flags);
+                for (int i = 0; i < allMembers.Length; i++)
+                {
+                    MemberInfo member = allMembers[i];
+                    if (IsSettableDiscoverableMember(member))
+                    {
+                        members.Add(member);
+                    }
+                }
+
+                return members;
+            });
+        }
+
+        private static bool IsSettableDiscoverableMember(MemberInfo member)
+        {
+            if (Attribute.IsDefined(member, typeof(ObsoleteAttribute), true) ||
+                Attribute.IsDefined(member, typeof(HideInInspector), true))
+            {
+                return false;
+            }
+
+            return member switch
+            {
+                FieldInfo fi => !fi.IsLiteral && !fi.IsInitOnly,
+                PropertyInfo pi => pi.CanWrite && pi.GetIndexParameters().Length == 0,
+                _ => false
+            };
+        }
+
+        private string BuildSettableMemberHint(Type type)
+        {
+            List<MemberInfo> members = GetAllowedSettableMembers(type);
+            if (members.Count == 0)
+            {
+                return "none";
+            }
+
+            int count = Math.Min(members.Count, 12);
+            string[] names = new string[count];
+            for (int i = 0; i < count; i++)
+            {
+                names[i] = members[i].Name;
+            }
+
+            return string.Join(", ", names);
+        }
+
+        private static Type GetMemberValueType(MemberInfo member)
+        {
+            return member switch
+            {
+                FieldInfo fi => fi.FieldType,
+                PropertyInfo pi => pi.PropertyType,
+                _ => typeof(object)
+            };
+        }
+
+        private static string FriendlyTypeName(Type type)
+        {
+            if (type == typeof(float) || type == typeof(double))
+            {
+                return "float";
+            }
+
+            if (type == typeof(int) || type == typeof(long) || type == typeof(short) ||
+                type == typeof(byte) || type == typeof(uint) || type == typeof(ulong) ||
+                type == typeof(ushort) || type == typeof(sbyte))
+            {
+                return "int";
+            }
+
+            if (type == typeof(bool))
+            {
+                return "bool";
+            }
+
+            if (type == typeof(string))
+            {
+                return "string";
+            }
+
+            if (type == typeof(Vector2))
+            {
+                return "Vector2";
+            }
+
+            if (type == typeof(Vector3))
+            {
+                return "Vector3";
+            }
+
+            if (type == typeof(Vector4))
+            {
+                return "Vector4";
+            }
+
+            if (type == typeof(Quaternion))
+            {
+                return "Quaternion";
+            }
+
+            if (type == typeof(Color))
+            {
+                return "Color";
+            }
+
+            if (type.IsEnum)
+            {
+                return "enum:" + type.Name;
+            }
+
+            return type.Name;
         }
     }
 }
