@@ -82,6 +82,8 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("unity_get_member", new Func<int, string, string, DynValue>(GetMember));
             registry.Register("unity_set_member", new Func<int, string, string, DynValue, bool>(SetMember));
             registry.Register("unity_call", new Func<int, string, string, DynValue[], DynValue>(CallMethod));
+            registry.Register("unity_add_component", new Func<int, string, bool>(AddComponent));
+            registry.Register("unity_destroy", new Func<int, bool>(DestroyObject));
         }
 
         private static int ReadOptionalMax(CallbackArguments args, int index)
@@ -230,6 +232,59 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             go.SetActive(active);
+            return true;
+        }
+
+        /// <summary>
+        /// Full-tier: add a component of the named type to an object (e.g. "Rigidbody", "BoxCollider", or a
+        /// fully-qualified custom type). Honors the host blacklist policy. Returns false when the object or
+        /// type cannot be resolved. Symmetric with the curated <c>coreai_component_add</c>, but reflection-based.
+        /// </summary>
+        private bool AddComponent(int instanceId, string componentType)
+        {
+            GameObject go = Resolve(instanceId);
+            if (go == null || string.IsNullOrWhiteSpace(componentType))
+            {
+                return false;
+            }
+
+            Type type = ResolveType(componentType.Trim());
+            if (type == null || !typeof(Component).IsAssignableFrom(type))
+            {
+                throw new ScriptRuntimeException(
+                    $"unity_add_component: '{componentType}' is not a resolvable Component type.");
+            }
+
+            if (!IsTypeAllowed(type))
+            {
+                throw new ScriptRuntimeException(
+                    $"Full Lua access to type '{type.Name}' is denied by host policy.");
+            }
+
+            go.AddComponent(type);
+            return true;
+        }
+
+        /// <summary>Full-tier: destroy a scene object by id. Returns false when the object is not found.</summary>
+        private static bool DestroyObject(int instanceId)
+        {
+            GameObject go = Resolve(instanceId);
+            if (go == null)
+            {
+                return false;
+            }
+
+            // Destroy() is illegal outside Play mode (it throws in edit mode and would corrupt assets), so
+            // route to DestroyImmediate when not playing. At runtime, Destroy() is the correct deferred path.
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(go);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+
             return true;
         }
 
@@ -713,9 +768,13 @@ namespace CoreAI.Infrastructure.Lua
 
             if (t == null)
             {
+                // Scan loaded assemblies for the fully-qualified name AND the bare name with a UnityEngine
+                // prefix, so "Rigidbody" (in PhysicsModule, not CoreModule), "Light", "Camera", etc. resolve
+                // from a short name without the caller knowing which UnityEngine.*Module assembly hosts them.
+                string unityQualified = "UnityEngine." + name;
                 foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    t = asm.GetType(name);
+                    t = asm.GetType(name) ?? asm.GetType(unityQualified);
                     if (t != null)
                     {
                         break;

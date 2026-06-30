@@ -445,6 +445,55 @@ unity_set_member({probeId}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'linkedTra
             }
         }
 
+        [Test]
+        public void FullBindings_AddComponent_AddsComponentToObject()
+        {
+            GameObject go = new("ForgeAddCompGo");
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(go);
+
+                MoonSharp.Interpreter.DynValue ok = env.RunChunk(script,
+                    $"return unity_add_component({id}, 'Rigidbody')");
+
+                Assert.IsTrue(ok.Boolean, "unity_add_component should report success.");
+                Assert.IsNotNull(go.GetComponent<Rigidbody>(), "Rigidbody should be present after add.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void FullBindings_Destroy_RemovesObject()
+        {
+            GameObject go = new("ForgeDestroyGo");
+            ForgeMemberProbe probe = go.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = GetObjectId(go);
+
+                MoonSharp.Interpreter.DynValue ok = env.RunChunk(script, $"return unity_destroy({id})");
+                Assert.IsTrue(ok.Boolean, "unity_destroy should report success for a live object.");
+            }
+            finally
+            {
+                if (probe != null && probe.gameObject != null)
+                {
+                    Object.DestroyImmediate(probe.gameObject);
+                }
+            }
+        }
+
         private static int GetObjectId(UnityEngine.Object obj)
         {
             if (obj == null)
