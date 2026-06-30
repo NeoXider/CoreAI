@@ -210,11 +210,20 @@ namespace CoreAI
         int MaxResponseChars => 0;
 
         /// <summary>
-        /// Maximum tool-call roundtrips (iterations) within a single request.
-        /// Each iteration = one LLM call + tool execution batch. Prevents infinite tool-calling loops.
-        /// Default 20. Set to 0 to DISABLE the cap entirely (unlimited). Per-agent and per-call overrides
-        /// (<see cref="AgentBuilder.WithMaxToolCallRoundtrips"/> / <c>AiTaskRequest.MaxToolCallRoundtrips</c>)
-        /// take priority over this global value.
+        /// Maximum tool-call roundtrips (iterations) within a single request. One roundtrip = one LLM call +
+        /// one tool-execution batch. Prevents infinite tool-calling loops. Default 20.
+        /// <para>
+        /// <b>Value meaning (identical at every level):</b> a positive number caps the loop;
+        /// <c>0</c> = UNLIMITED (cap disabled). At the global level a negative value is clamped back to the
+        /// default; at the per-agent / per-call level <c>null</c> means "inherit the next level down".
+        /// </para>
+        /// <para>
+        /// <b>Resolution priority (highest first):</b>
+        /// per-call <c>AiTaskRequest.MaxToolCallRoundtrips</c> →
+        /// per-agent <see cref="AgentBuilder.WithMaxToolCallRoundtrips"/> →
+        /// this global setting. The built-in <c>Programmer</c> and <c>Creator</c> roles default to <c>0</c>
+        /// (unlimited). When the cap is hit, the agent stops and logs a warning explaining how to raise it.
+        /// </para>
         /// </summary>
         int MaxToolCallRoundtrips => 20;
 

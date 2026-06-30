@@ -391,8 +391,8 @@
         }
 
         /// <summary>
-        /// Max tool-call roundtrips per request. Prevents infinite loops.
-        /// Default: 10.
+        /// Max tool-call roundtrips per request. Prevents infinite loops. Default: 20.
+        /// <c>0</c> = unlimited (cap disabled). Per-agent and per-call overrides take priority.
         /// </summary>
         public static int MaxToolCallRoundtrips
         {
