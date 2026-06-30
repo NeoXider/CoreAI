@@ -26,7 +26,7 @@ under dotnet (`GoalScoreEditModeTests`). Summary:
 - `FailureAttribution` separates `Framework` / `Model` / `Environment` (classified by exception type)
   so a harness bug is never mistaken for a weak model. The runner **never throws** on a model
   timeout/fault — it records the failure and still grades + reports.
-- Repetitions: each scenario can run N times; the suite scorecard uses the **per-scenario median**
+- Repetitions: each scenario can run N times; the suite scorecard uses the **per-scenario mean (average)**
   base (robust to a single noisy run on a small local model) and reports the spread.
 - **Real metrics:** a session-capturing `ILlmClient` decorator records true per-turn token usage
   (provider `usage` when available, else a labeled BPE estimate), tool-call counts (incl. failures),
@@ -163,5 +163,5 @@ date and model in the filename, so runs are self-identifying and never overwrite
   with `-coreAiBenchmarkModel` / `-coreAiBenchmarkGroups` / `-coreAiBenchmarkReps`.
 
 The suite honors `COREAI_BENCHMARK_GROUPS` (CSV of group ids) and `COREAI_BENCHMARK_REPS` (per-scenario
-repetitions; the report keeps the per-scenario median). Multi-model **matrix** runs are just a shell
+repetitions; the report keeps the per-scenario mean). Multi-model **matrix** runs are just a shell
 loop over `-coreAiBenchmarkModel`; each invocation writes its own date+model report.
