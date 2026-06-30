@@ -24,14 +24,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
-            // The visual free-build must NEVER be cut off mid-build: no tool-call roundtrip cap at all
-            // (0 = unlimited). The model keeps spawning until it decides the scene is complete.
-            public override int? MaxToolCallRoundtripsOverride => 0;
+            // A castle is 24+ objects, each a separate spawn roundtrip, so the cap must be HIGH — but NOT
+            // unlimited. Unlimited (0) + duplicate tool-calls let a small model loop forever (re-spawning the
+            // same object), which reads as a "hang". 80 is generous headroom for 30+ objects yet still a hard
+            // safety valve so the build always terminates.
+            public override int? MaxToolCallRoundtripsOverride => 80;
             public override int TokenBudget => 6000;
             public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
-            // No roundtrip cap means a slow model may spawn 30+ objects one call at a time, so give the
-            // visual build a generous wall-clock budget (12 min) — it is a one-off hero, not a timed gate.
+            // A slow model may spawn 30+ objects one call at a time, so give the visual build a generous
+            // wall-clock budget (12 min) — it is a one-off hero, not a timed gate.
             public override float TimeoutSeconds => 720f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
@@ -42,9 +44,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     .WithAllowDuplicateToolCalls(true)
                     .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
-                    // Free-build visual: a castle is 24+ objects, each a separate spawn roundtrip. Lift the
-                    // safety valve entirely (0 = unlimited) so the model is never cut off mid-build.
-                    .WithMaxToolCallRoundtrips(0)
+                    // High but finite cap (80) — enough for a detailed castle, but the model can never loop
+                    // forever re-spawning duplicates. The per-scenario override (AiTaskRequest) is the channel
+                    // that actually reaches the client.
+                    .WithMaxToolCallRoundtrips(80)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
             }
