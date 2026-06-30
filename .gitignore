@@ -116,3 +116,8 @@ FirebaseCppApp-*.so
 # Local-only config for the LIVE PlayMode test suite (provider base URL / API key / model).
 # Never commit: it usually holds a real API key. See Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md.
 /coreai-live-tests.local.json
+
+# Roslyn analyzer tool build outputs (the Unity-consumed DLL lives in Assets/.../RoslynAnalyzers)
+/tools/**/[Bb]in/
+/tools/**/[Oo]bj/
+/[Aa]ssets/_Recovery/

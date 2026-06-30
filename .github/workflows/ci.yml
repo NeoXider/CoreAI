@@ -7,15 +7,46 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Secret-free analyzer guard. Uses plain dotnet (no Unity license), so it also runs
+  # on forked PRs where the Unity jobs are skipped. Building + testing the Roslyn
+  # analyzer project guards the committed CoreAI.UnityAsyncAnalyzers.dll against drift
+  # and proves rule CAIU001 (ban ConfigureAwait(false) in CoreAiUnity code) still fires.
+  analyzer:
+    name: Roslyn analyzer (dotnet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build analyzer + tests
+        run: dotnet build tools/CoreAI.Tools.sln -c Release --nologo
+
+      - name: Run analyzer tests (verifies CAIU001 fires)
+        run: dotnet test tools/CoreAI.Tools.sln -c Release --no-build --nologo
+
   editmode-tests:
-    name: EditMode (${{ matrix.lua }})
+    name: EditMode (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Both Lua configurations must stay green: the default project with MoonSharp,
-        # and the COREAI_NO_LUA build with the MoonSharp package removed entirely.
-        lua: [moonsharp, no-lua]
+        # Explicit include list (no cross-product). Three configurations must stay green:
+        #   moonsharp  - default project with MoonSharp.
+        #   no-lua     - COREAI_NO_LUA build with the MoonSharp package removed entirely.
+        #   no-llm     - COREAI_NO_LLM build so the layer under #if !COREAI_NO_LLM compiles out.
+        include:
+          - name: moonsharp
+            lua: moonsharp
+            no_llm: false
+          - name: no-lua
+            lua: no-lua
+            no_llm: false
+          - name: no-llm
+            lua: moonsharp
+            no_llm: true
     steps:
       - uses: actions/checkout@v4
 
@@ -49,12 +80,20 @@ jobs:
           sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LUA/' ProjectSettings/ProjectSettings.asset
           grep -q 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LUA injection failed'; exit 1; }
 
+      - name: Define COREAI_NO_LLM
+        if: matrix.no_llm
+        run: |
+          # Compile out the LLM layer (real code lives under #if !COREAI_NO_LLM) so the
+          # no-LLM build can't silently break. Mirrors the COREAI_NO_LUA injection above.
+          sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LLM/' ProjectSettings/ProjectSettings.asset
+          grep -q 'COREAI_NO_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LLM injection failed'; exit 1; }
+
       - uses: actions/cache@v4
         with:
           path: Library
-          key: library-${{ matrix.lua }}-${{ hashFiles('Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          key: library-${{ matrix.name }}-${{ hashFiles('Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
           restore-keys: |
-            library-${{ matrix.lua }}-
+            library-${{ matrix.name }}-
 
       - name: Run EditMode tests
         if: steps.unity-license-check.outputs.run_tests == 'true'
@@ -65,17 +104,17 @@ jobs:
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           testMode: editmode
-          artifactsPath: artifacts-${{ matrix.lua }}
-          checkName: EditMode results (${{ matrix.lua }})
+          artifactsPath: artifacts-${{ matrix.name }}
+          checkName: EditMode results (${{ matrix.name }})
           githubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce Lua sandbox escape-test coverage
-        if: matrix.lua == 'moonsharp' && steps.unity-license-check.outputs.run_tests == 'true'
+        if: matrix.lua == 'moonsharp' && matrix.no_llm == false && steps.unity-license-check.outputs.run_tests == 'true'
         run: |
           # The sandbox isolation suite must actually have run — a green build with
           # 0 executed escape tests (filter typo, asmdef regression, define drift)
           # must fail, not pass silently.
-          count=$(grep -o 'SecureLuaSandboxEditModeTests' artifacts-moonsharp/editmode-results.xml | wc -l)
+          count=$(grep -o 'SecureLuaSandboxEditModeTests' artifacts-${{ matrix.name }}/editmode-results.xml | wc -l)
           echo "SecureLuaSandboxEditModeTests occurrences in results: $count"
           if [ "$count" -lt 10 ]; then
             echo "::error::Lua sandbox escape tests did not run (expected the SecureLuaSandboxEditModeTests fixture in EditMode results)."
@@ -85,5 +124,67 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always() && steps.unity-license-check.outputs.run_tests == 'true'
         with:
-          name: test-results-${{ matrix.lua }}
-          path: artifacts-${{ matrix.lua }}
+          name: test-results-${{ matrix.name }}
+          path: artifacts-${{ matrix.name }}
+
+  # Deterministic, no-LLM PlayMode suite (main-thread marshaling, streaming/non-streaming
+  # parity, stop/cancel). Filtered to the FastNoLlm test assembly so the live LLM
+  # benchmark / LlmVerification fixtures (which need a model server) never run here.
+  playmode-fastnollm:
+    name: PlayMode (FastNoLlm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check UNITY_LICENSE availability for this run
+        id: unity-license-check
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
+            echo "::notice::Skipping PlayMode tests because UNITY_LICENSE is unavailable (forked PRs do not receive repository secrets)."
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: library-playmode-${{ hashFiles('Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            library-playmode-
+
+      - name: Run PlayMode tests (FastNoLlm assembly only)
+        if: steps.unity-license-check.outputs.run_tests == 'true'
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          testMode: playmode
+          # The deterministic suite has no NUnit [Category]; isolate it by assembly name.
+          # The LlmVerification / benchmark fixtures live in separate assemblies and are
+          # excluded by not naming them here.
+          customParameters: -assemblyNames "CoreAI.Tests.PlayMode.FastNoLlm"
+          artifactsPath: artifacts-playmode
+          checkName: PlayMode results (FastNoLlm)
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enforce FastNoLlm PlayMode suite actually ran
+        if: steps.unity-license-check.outputs.run_tests == 'true'
+        run: |
+          # A green build with 0 executed FastNoLlm tests (filter typo, asmdef rename,
+          # define drift) must fail, not pass silently.
+          count=$(grep -o 'PlayModeTests' artifacts-playmode/playmode-results.xml | wc -l)
+          echo "PlayMode FastNoLlm test-case occurrences in results: $count"
+          if [ "$count" -lt 10 ]; then
+            echo "::error::FastNoLlm PlayMode suite did not run (expected the CoreAI.Tests.PlayMode.FastNoLlm fixtures in PlayMode results)."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.unity-license-check.outputs.run_tests == 'true'
+        with:
+          name: test-results-playmode
+          path: artifacts-playmode
