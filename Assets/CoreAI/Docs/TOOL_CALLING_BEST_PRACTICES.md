@@ -131,7 +131,7 @@ default 20) stops runaway loops, but the right value depends on the agent:
 
 - **Tight for conversational NPCs** — a guard or merchant rarely needs more than a few tool rounds;
   `WithMaxToolCallRoundtrips(5)` keeps a misbehaving model from burning tokens.
-- **Unlimited for builders and code agents** — a world builder that emits dozens of `spawn` calls, or a
+- **Unlimited for builders and code agents** — a free-build visual agent that emits 24+ `spawn` calls, or a
   Programmer that iterates Lua (generate → run → read error → fix), should set
   `WithMaxToolCallRoundtrips(0)` so it is never cut off mid-task. The built-in **Programmer** and
   **Creator** roles already default to unlimited.
