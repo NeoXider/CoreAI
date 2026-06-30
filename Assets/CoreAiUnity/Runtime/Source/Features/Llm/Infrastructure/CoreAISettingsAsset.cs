@@ -294,10 +294,13 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip(
             "Max tool call history messages retained in the MEAI message list during a single request's tool-calling loop. " +
-            "Prevents unbounded context growth in long multi-tool sessions. 0 = no limit. Default 20.")]
+            "0 = no limit (default): the model keeps full sight of everything it did this turn, so long multi-step " +
+            "work (e.g. building a 30+ object scene, a multi-file refactor) never forgets and repeats earlier steps. " +
+            "Set a positive cap only if you must bound context growth; conversation summarization + overflow retry " +
+            "already handle very long sessions.")]
         [SerializeField]
         [Min(0)]
-        private int maxToolCallHistoryMessages = 20;
+        private int maxToolCallHistoryMessages;
 
         [Tooltip(
             "Max tool calls within a single LLM turn (batch) that may execute concurrently. " +
@@ -1032,6 +1035,15 @@ namespace CoreAI.Infrastructure.Llm
         public void SetMaxToolCallRoundtrips(int value)
         {
             maxToolCallRoundtrips = value < 0 ? 20 : value;
+        }
+
+        /// <summary>
+        /// Programmatic override for the tool-call history cap (tests/bootstrap). <c>0</c> = UNLIMITED (keep
+        /// the whole tool-call history so a long build is never forgotten); a negative value resets to 20.
+        /// </summary>
+        public void SetMaxToolCallHistoryMessages(int value)
+        {
+            maxToolCallHistoryMessages = value < 0 ? 20 : value;
         }
 
         /// <summary>Sets the OpenAI-compatible base URL without normalization (callers may pass raw values).</summary>

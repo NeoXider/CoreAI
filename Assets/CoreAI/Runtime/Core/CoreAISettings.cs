@@ -101,7 +101,7 @@
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
         private const int DefaultMaxToolCallRoundtrips = 20;
-        private const int DefaultMaxToolCallHistoryMessages = 20;
+        private const int DefaultMaxToolCallHistoryMessages = 0; // 0 = unlimited (never forget prior tool steps)
         private const int DefaultMaxParallelToolCalls = 4;
 
         internal const string DefaultUniversalSystemPromptPrefix =

@@ -263,8 +263,8 @@ namespace CoreAI.Tests.EditMode
 
             try
             {
-                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages,
-                    "Default MaxToolCallHistoryMessages should be 20");
+                Assert.AreEqual(0, CoreAISettings.MaxToolCallHistoryMessages,
+                    "Default MaxToolCallHistoryMessages should be 0 (unlimited)");
             }
             finally
             {
@@ -285,7 +285,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(6, CoreAISettings.MaxToolCallHistoryMessages);
 
                 CoreAISettings.ResetOverrides();
-                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages, "Should reset to default");
+                Assert.AreEqual(0, CoreAISettings.MaxToolCallHistoryMessages, "Should reset to default (0 = unlimited)");
             }
             finally
             {
