@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.15.2 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.15.2**.
+
+- **Scene/castle screenshots show the model name** as the headline (long ids wrap to two lines).
+- **Castle hero blueprint.** The G6 prompt gives an explicit coordinate plan + higher output budget, so
+  the castle reads as a real square castle (towers, walls, gate, keep, flags) across models.
+
 ## 4.15.1 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.15.1**.

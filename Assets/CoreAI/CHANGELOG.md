@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## 4.15.2 - 2026-06-30
+
+- **Model name on every scene/castle screenshot.** The baked header now leads with the model id (long
+  hyphenated ids wrap onto two lines and shrink to fit) above the scenario/score/verdict line, so each
+  hero image is self-identifying.
+- **Recognizable castles.** The G6 free-build prompt now hands the model an explicit coordinate blueprint
+  (corner towers, perimeter walls with a gateway gap, central keep, flags) and invites extra decorations,
+  and the output-token budget is raised, so even small local models produce a clean square castle instead
+  of scattered cubes.
+
 ## 4.15.1 - 2026-06-30
 
 - **Averaged repetitions.** When a scenario is run multiple times, the report now aggregates each

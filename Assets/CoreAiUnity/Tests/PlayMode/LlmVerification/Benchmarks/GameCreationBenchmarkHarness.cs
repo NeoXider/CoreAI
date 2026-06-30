@@ -1218,8 +1218,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         _ => "FAIL"
                     };
                     string header = $"{scenario.Name} — {score.Base:0}/100 {verdict}";
-                    yield return CaptureSceneScreenshot(vis, header, scenario.WhatItChecks, scenario.FreeBuildLayout,
-                        png => result.SceneScreenshotPng = png);
+                    yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
+                        scenario.FreeBuildLayout, png => result.SceneScreenshotPng = png);
                 }
 
                 // Always tear down the spawned scene, even when no screenshot was taken, so a visual
@@ -1236,7 +1236,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// never breaks the run.
         /// </summary>
         private static IEnumerator CaptureSceneScreenshot(
-            VisualBenchmarkWorldExecutor vis, string header, string subtitle, bool freeBuildLayout, Action<byte[]> onPng)
+            VisualBenchmarkWorldExecutor vis, string model, string header, string subtitle, bool freeBuildLayout,
+            Action<byte[]> onPng)
         {
             UnityEngine.GameObject camGo = null;
             UnityEngine.GameObject keyGo = null;
@@ -1306,14 +1307,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 UnityEngine.Transform p = cam.transform;
                 UnityEngine.Color verdict = VerdictColor(header);
 
-                float topH = 0.30f * halfH;
+                float topH = 0.42f * halfH;
                 float topY = halfH - topH * 0.5f;
                 AddQuad(p, new UnityEngine.Vector3(0f, topY, zb), new UnityEngine.Vector2(fullW, topH),
                     new UnityEngine.Color(0.09f, 0.10f, 0.12f));
                 AddQuad(p, new UnityEngine.Vector3(0f, halfH - 0.012f, zb - 0.01f),
                     new UnityEngine.Vector2(fullW, 0.024f), verdict);
-                AddCameraText(p, header ?? "", new UnityEngine.Vector3(0f, topY, zb - 0.02f),
-                    0.012f, verdict, true);
+                // Model name is the headline (so each scene/castle image says which model built it),
+                // with the scenario + score + verdict as the line below. Long hyphenated model ids are
+                // wrapped (and shrunk) so they never overflow the banner.
+                string m = model ?? "";
+                float mSize = m.Length > 42 ? 0.0072f : (m.Length > 26 ? 0.0100f : 0.0125f);
+                AddCameraText(p, WrapModel(m, 33), new UnityEngine.Vector3(0f, topY + 0.035f, zb - 0.02f),
+                    mSize, UnityEngine.Color.white, true);
+                AddCameraText(p, header ?? "", new UnityEngine.Vector3(0f, topY - 0.10f, zb - 0.02f),
+                    0.0078f, verdict, true);
 
                 string cap = WrapText(subtitle ?? "", 52);
                 if (!string.IsNullOrEmpty(cap))
@@ -1867,6 +1875,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 sb.Append(word);
                 lineLen += word.Length;
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>Wraps a long model id onto multiple lines, breaking after hyphens/underscores/spaces
+        /// (model ids rarely contain spaces), so it never overflows the header banner.</summary>
+        private static string WrapModel(string s, int maxChars)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length <= maxChars)
+            {
+                return s;
+            }
+
+            System.Text.StringBuilder sb = new();
+            int lineLen = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                sb.Append(c);
+                lineLen++;
+                if (lineLen >= maxChars && (c == '-' || c == '_' || c == ' ') && i < s.Length - 1)
+                {
+                    sb.Append('\n');
+                    lineLen = 0;
+                }
             }
 
             return sb.ToString();

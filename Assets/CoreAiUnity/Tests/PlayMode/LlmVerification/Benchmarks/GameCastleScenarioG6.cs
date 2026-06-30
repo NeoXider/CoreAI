@@ -24,8 +24,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
-            public override int TokenBudget => 2600;
-            public override int MaxOutputTokens => 1600;
+            public override int TokenBudget => 4000;
+            public override int MaxOutputTokens => 3200; // ~24+ verbose spawn calls without truncation
             public override double TimeBudgetMs => 45000;
             public override float TimeoutSeconds => 360f;
 
@@ -61,21 +61,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Free-form build: the model designs and places a whole castle scene — judged loosely on scale and variety, shown as the report hero image.";
 
             public override string Goal =>
-                "Build an elaborate castle showcase scene with full creative freedom. Use the world_command tool only, " +
-                "with action='spawn', prefabKey='Cube', a distinct targetName for every object, and explicit x,y,z " +
-                "coordinates so the objects form a readable castle in the world. Spawn AT LEAST 18 objects; 20 or more " +
-                "is better. Keep coordinates roughly in the -8..8 range so the full scene fits in one screenshot.\n\n" +
-                "Suggested layout, but you may improve it creatively:\n" +
-                "- square perimeter walls around the castle, using names containing 'Wall';\n" +
-                "- 4 corner towers, using names containing 'Tower';\n" +
-                "- a central keep or castle block, using names containing 'Keep' or 'Castle';\n" +
-                "- a front gate or door, using names containing 'Gate' or 'Door';\n" +
-                "- flags on towers, using names containing 'Flag' and placed high with larger y values;\n" +
-                "- optional moat or water around the castle, a bridge to the gate, trees outside, roofs, torches, " +
-                "courtyard props, or decorative stones.\n\n" +
-                "Use sensible coordinates to shape the scene. For example, walls can form a square perimeter near " +
-                "x/z = +/-6, towers can sit at the four corners, the keep can sit at the center, the gate at the front, " +
-                "and flags can sit above towers. Do not worry about exact names beyond keeping each targetName distinct.";
+                "Build a castle showcase scene. Use the world_command tool only, action='spawn', prefabKey='Cube', " +
+                "a DISTINCT targetName for every object, and the EXACT x,y,z below so the objects form a clean square " +
+                "castle. First spawn ALL of these CORE objects, then add several of your own decorations.\n\n" +
+                "CORE — spawn every one of these (use these exact coordinates):\n" +
+                "- corner towers: Tower1 (-6,0,-6), Tower2 (6,0,-6), Tower3 (-6,0,6), Tower4 (6,0,6)\n" +
+                "- flags high on the towers: Flag1 (-6,3,-6), Flag2 (6,3,-6), Flag3 (-6,3,6), Flag4 (6,3,6)\n" +
+                "- front wall with a gateway gap: Wall1 (-3,0,-6), Wall2 (3,0,-6), Gate (0,0,-6)\n" +
+                "- back wall: Wall3 (-3,0,6), Wall4 (0,0,6), Wall5 (3,0,6)\n" +
+                "- left wall: Wall6 (-6,0,-3), Wall7 (-6,0,0), Wall8 (-6,0,3)\n" +
+                "- right wall: Wall9 (6,0,-3), Wall10 (6,0,0), Wall11 (6,0,3)\n" +
+                "- central keep: Keep (0,1,0)\n\n" +
+                "THEN add 6 or more of your OWN extra objects with distinct names and sensible coordinates in the " +
+                "-9..9 range to make it richer — for example trees outside the walls (Tree1, Tree2…), torches by the " +
+                "gate, a bridge in front (Bridge at (0,0,-9)), banners, or courtyard props. Aim for 24+ objects total. " +
+                "Keep every targetName distinct.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
