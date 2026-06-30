@@ -514,6 +514,23 @@ namespace CoreAI.Tests.PlayMode
             CoreAISettingsAsset behavior = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             behavior.SetOrchestratorTimeoutSeconds(timeoutSeconds);
 
+            // The tool-call roundtrip cap lives on the SETTINGS the HTTP client reads (SmartToolCallingChatClient
+            // resolves _settings.MaxToolCallRoundtrips), NOT on the per-run benchmark settings passed to the
+            // orchestrator. Benchmark scenes such as the G6 free-build emit 24+ spawns, well past the default 10,
+            // so honor COREAI_BENCHMARK_ROUNDTRIPS here too — otherwise the run is silently capped at 10.
+            string roundtripsRaw = System.Environment.GetEnvironmentVariable("COREAI_BENCHMARK_ROUNDTRIPS");
+            if (!string.IsNullOrWhiteSpace(roundtripsRaw)
+                && int.TryParse(roundtripsRaw, out int roundtrips) && roundtrips >= 1)
+            {
+                behavior.SetMaxToolCallRoundtrips(roundtrips);
+            }
+            else
+            {
+                // Benchmark default: match GameCreationBenchmarkPlayModeTests.ResolveBenchmarkRoundtrips (40),
+                // so a free-build scene is never throttled to the production default of 10 by accident.
+                behavior.SetMaxToolCallRoundtrips(40);
+            }
+
             if (!enableStreaming)
             {
                 System.Reflection.FieldInfo field = typeof(CoreAISettingsAsset).GetField(
