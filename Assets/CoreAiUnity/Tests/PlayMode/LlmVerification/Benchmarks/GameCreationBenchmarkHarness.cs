@@ -1157,17 +1157,37 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             sw.Stop();
             obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
 
+            // A cancellation/timeout AFTER the model already built a scene is the build simply ending (the
+            // per-scenario time budget or a single orchestrator turn was cancelled while a good scene already
+            // exists), not an infrastructure failure: treat it as a CLEAN STOP — grade and screenshot what was
+            // built, do NOT set Environment attribution and do NOT trigger the scenario retry (which would wipe
+            // the scene and rebuild from scratch). A cancellation/timeout BEFORE anything was built keeps the
+            // Environment+retry behaviour. "scene built" is defined exactly as the empty-response clean-stop below.
+            bool sceneWasBuilt = env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1;
+
             if (task.IsFaulted)
             {
                 Exception baseEx = task.Exception?.GetBaseException();
-                obs.Attribution = ClassifyException(baseEx);
-                obs.Failure = baseEx?.Message ?? "faulted";
+                bool cancelStop = sceneWasBuilt
+                                  && (baseEx is OperationCanceledException
+                                      || baseEx is LlmOperationTimeoutException
+                                      || IsCancellationError(baseEx?.Message));
+                if (!cancelStop)
+                {
+                    obs.Attribution = ClassifyException(baseEx);
+                    obs.Failure = baseEx?.Message ?? "faulted";
+                }
             }
             else if (task.IsCanceled || !task.IsCompleted)
             {
+                // The scenario time budget elapsed and we cancelled the orchestrator. If a scene already
+                // exists, this is a clean stop — grade what was built, no failure/retry.
                 obs.TimedOut = true;
-                obs.Attribution = FailureAttribution.Environment;
-                obs.Failure = "timed out";
+                if (!sceneWasBuilt)
+                {
+                    obs.Attribution = FailureAttribution.Environment;
+                    obs.Failure = "timed out";
+                }
             }
 
             StringBuilder finalText = new();
@@ -1184,11 +1204,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             obs.FailedToolCalls = capture.FailedToolCalls + env.Lua.FailedExecutions;
             obs.InvalidCommands = env.World.InvalidCommandCount;
 
+            // A mid-build empty/blank response AFTER the model has already built something is the weak
+            // model signalling it is done, not an infrastructure failure: a long unbounded conversation
+            // eventually yields a turn with no tool call and no visible text ("Empty response from LLM").
+            // When a scene already exists (>=1 spawn or >=1 tool call), treat it as a CLEAN STOP — grade
+            // and screenshot what was built, and do NOT trigger the scenario retry. A clearly transient
+            // transport error (HTTP/crash/timeout) still falls through to the Environment branch below.
+            // (sceneWasBuilt is computed above, where the fault/cancel clean-stop also uses it.)
+            bool emptyResponseStop = capture.FailedTurnCount > 0
+                                     && IsEmptyResponseError(capture.FirstProviderError)
+                                     && !LooksTransient(capture.FirstProviderError)
+                                     && sceneWasBuilt;
+
+            // Same clean-stop for a cancellation/timeout that surfaced as an Ok=false provider result (rather
+            // than a thrown fault): "A task was canceled." after a scene was built is the build ending, not an
+            // infrastructure failure. This WINS over the transient/Environment classification below.
+            bool cancellationStop = capture.FailedTurnCount > 0
+                                    && IsCancellationError(capture.FirstProviderError)
+                                    && sceneWasBuilt;
+
             // A provider/model crash that came back as a failed result (not a thrown fault) — model-load
             // crash, "model has crashed", HTTP 4xx/5xx — is an Environment failure, not a weak model.
             // Classify it (so it is retried and excluded from the model's score) when the error text looks
             // transient OR the run produced no usable output at all despite a failed turn.
-            if (obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
+            if (!emptyResponseStop && !cancellationStop
+                && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
                 && capture.FailedTurnCount > 0
                 && (LooksTransient(capture.FirstProviderError) || !capture.AnyUsableOutput))
             {
@@ -2209,6 +2249,47 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "unavailable", "overloaded", "no healthy"
             };
 
+            foreach (string s in signatures)
+            {
+                if (e.Contains(s))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when a failed turn carried an empty/blank-response error (<see cref="LlmErrorCode.EmptyResponse"/>,
+        /// surfaced as "Empty response from LLM"). For a weak model on a long free-build this means "I'm done",
+        /// not an infrastructure fault — see the empty-response clean-stop in RunScenario.
+        /// </summary>
+        private static bool IsEmptyResponseError(string error)
+        {
+            if (string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            return error.IndexOf("empty response", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>
+        /// True when an error string looks like a cooperative cancellation / time-budget cutoff
+        /// ("A task was canceled.", "timed out", "timeout", …). For a model that has ALREADY built a scene
+        /// this means the build ran out of time, not an infrastructure fault — see the cancellation clean-stop
+        /// in RunScenario. Mirrors <see cref="IsEmptyResponseError"/>.
+        /// </summary>
+        private static bool IsCancellationError(string error)
+        {
+            if (string.IsNullOrEmpty(error))
+            {
+                return false;
+            }
+
+            string e = error.ToLowerInvariant();
+            string[] signatures = { "task was canceled", "canceled", "cancelled", "timed out", "timeout" };
             foreach (string s in signatures)
             {
                 if (e.Contains(s))
