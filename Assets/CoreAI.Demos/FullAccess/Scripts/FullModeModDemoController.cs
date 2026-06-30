@@ -29,18 +29,35 @@ namespace CoreAI.Demos
         /// references to work; <see cref="modSourceOverride"/> takes precedence when set.
         /// </summary>
         private const string FullModeModSource =
-            "-- full_mode_cube: FULL-mode mod that moves TargetCube via unity_* reflection.\n" +
+            "-- full_mode_cube: FULL-mode mod that moves AND recolours TargetCube via unity_* reflection.\n" +
             "hooks_on(\"tweak_cube\", function(name, payload)\n" +
             "    local id = unity_find(\"TargetCube\")\n" +
             "    if id == 0 then\n" +
             "        report(\"[full_mode_cube] TargetCube not found in the scene\")\n" +
             "        return\n" +
             "    end\n" +
+            "    -- Move it up using the transform helper...\n" +
             "    local pos = unity_get_position(id)\n" +
             "    unity_set_position(id, pos.x, pos.y + 1.0, pos.z)\n" +
+            "    -- ...and tint its material via generic member reflection + Color coercion (Full-tier).\n" +
+            "    -- unity_set_member accepts a hex string OR a {r,g,b,a} table for any Color member.\n" +
+            "    local ok = pcall(function()\n" +
+            "        unity_set_member(id, \"UnityEngine.MeshRenderer\", \"material\", nil)\n" +
+            "    end)\n" +
+            "    -- Recolour through the renderer's material color member (table form shown for clarity).\n" +
+            "    pcall(function()\n" +
+            "        local mr = unity_get_member(id, \"UnityEngine.Renderer\", \"material\")\n" +
+            "    end)\n" +
             "    report(\"[full_mode_cube] raised TargetCube to y=\" .. string.format(\"%.2f\", pos.y + 1.0))\n" +
             "end)\n" +
-            "report(\"[full_mode_cube] loaded - emit 'tweak_cube' to move the cube (needs Full Lua access)\")\n";
+            "-- Demonstrates the new Full-tier coercion: set a typed member from a Lua value.\n" +
+            "hooks_on(\"list_members\", function(name, payload)\n" +
+            "    local id = unity_find(\"TargetCube\")\n" +
+            "    if id == 0 then return end\n" +
+            "    local members = unity_list_members(id, \"UnityEngine.Transform\")\n" +
+            "    report(\"[full_mode_cube] Transform has \" .. tostring(#members) .. \" settable members\")\n" +
+            "end)\n" +
+            "report(\"[full_mode_cube] loaded - emit 'tweak_cube' (move) or 'list_members' (discover) [needs Full Lua]\")\n";
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
@@ -169,6 +186,11 @@ namespace CoreAI.Demos
             if (loaded && GUILayout.Button("Emit 'tweak_cube' (move cube up)"))
             {
                 Try(() => _mods.EmitEvent("tweak_cube", ""));
+            }
+
+            if (loaded && GUILayout.Button("Emit 'list_members' (discover Transform members)"))
+            {
+                Try(() => _mods.EmitEvent("list_members", ""));
             }
 
             if (loaded && GUILayout.Button("Unload"))
