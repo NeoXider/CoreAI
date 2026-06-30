@@ -1,6 +1,7 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -113,10 +114,19 @@ namespace CoreAI.Ai
 
         /// <summary>Executes a mod-management action and returns a JSON result for the model.</summary>
         public Task<string> ExecuteAsync(
+            [Description(
+                "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics")]
             string action,
+            [Description(
+                "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)")]
             string mod_id = null,
+            [Description(
+                "Lua source for load/reload. Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted.")]
             string code = null,
+            [Description("Shareable mod bundle JSON (as returned by export) for the import action.")]
             string bundle = null,
+            [Description(
+                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")]
             int revision = -1,
             CancellationToken cancellationToken = default)
         {

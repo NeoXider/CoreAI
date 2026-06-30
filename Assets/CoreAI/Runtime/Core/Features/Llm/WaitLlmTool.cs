@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -47,7 +48,9 @@ namespace CoreAI.Ai
         }
 
         public async Task<string> ExecuteAsync(
+            [Description("Seconds to wait. Must be greater than 0 and at most the tool's configured maximum.")]
             double seconds,
+            [Description("Short reason for the wait, used only for diagnostics.")]
             string reason = "",
             CancellationToken cancellationToken = default)
         {

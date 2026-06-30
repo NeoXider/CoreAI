@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -72,10 +73,16 @@ namespace CoreAI.Ai
 
         /// <summary>Executes a skill-management action and returns a JSON result for the model.</summary>
         public Task<string> ExecuteAsync(
+            [Description("One of: create, update, list, get, delete")]
             string action,
+            [Description("Skill name/id (required for create, update, get, delete)")]
             string name = null,
+            [Description("Short one-line catalog description (create/update)")]
             string description = null,
+            [Description("Full step-by-step instructions returned by read_skill (create/update)")]
             string instructions = null,
+            [Description(
+                "JSON array (or comma-separated string) of EXISTING tool names this skill exposes via call_skill_tool")]
             string tool_names = null,
             CancellationToken cancellationToken = default)
         {

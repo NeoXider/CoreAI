@@ -491,6 +491,13 @@ public class WeatherLlmTool : IAIFunctionLlmTool
 
 Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when one logical tool exposes several functions. CoreAI no longer discovers `CreateAIFunction()` by reflection; custom tool classes must implement one of these explicit contracts or use `DelegateLlmTool`.
 
+> **Authoring tools: parameter descriptions (read this).** On the native tool-calling path the JSON Schema is
+> generated from the C# **delegate signature**, so a parameter's description reaches the model **only** if the
+> delegate parameter carries `[System.ComponentModel.Description("...")]`. The `ParametersSchema` string is
+> injected into the prompt **only** on the text-shaped path (`AiToolContractPromptFormatter` early-returns for
+> native tool-calling) — on the native path it is invisible. Always add `[Description]` to every meaningful
+> parameter. Full guide, template, and checklist: **[TOOL_AUTHORING_GUIDE.md](./TOOL_AUTHORING_GUIDE.md)**.
+
 **2. Attach to an agent:**
 
 ```csharp

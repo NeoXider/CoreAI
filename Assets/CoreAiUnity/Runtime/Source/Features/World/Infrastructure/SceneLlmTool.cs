@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,8 +66,11 @@ namespace CoreAI.Ai
         }
 
         private async Task<string> FindObjectsAsync(
+            [Description("Name or tag to search for.")]
             string searchTerm,
+            [Description("How to match: 'name' (substring of the object name) or 'tag'. Default 'name'.")]
             string searchMethod = "name",
+            [Description("When true, also search inactive GameObjects. Default false.")]
             bool includeInactive = false,
             CancellationToken cancellationToken = default)
         {
@@ -116,6 +120,7 @@ namespace CoreAI.Ai
         }
 
         private async Task<string> GetHierarchyAsync(
+            [Description("GameObject instanceId whose children to list. If null or 0, returns root objects.")]
             int? rootInstanceId = null,
             CancellationToken cancellationToken = default)
         {
@@ -172,6 +177,7 @@ namespace CoreAI.Ai
         }
 
         private async Task<string> GetTransformAsync(
+            [Description("instanceId of the GameObject whose transform to read.")]
             int instanceId,
             CancellationToken cancellationToken = default)
         {
@@ -205,12 +211,19 @@ namespace CoreAI.Ai
         }
 
         private async Task<string> SetTransformAsync(
+            [Description("instanceId of the GameObject to move, rotate, or scale.")]
             int instanceId,
             // Default values mark these optional in the MEAI function schema so the model (and callers)
             // can pass only the coordinates they want to change; missing values leave the axis untouched.
-            float? px = null, float? py = null, float? pz = null,
-            float? rx = null, float? ry = null, float? rz = null,
-            float? sx = null, float? sy = null, float? sz = null,
+            [Description("New world position X. Omit to leave unchanged.")] float? px = null,
+            [Description("New world position Y. Omit to leave unchanged.")] float? py = null,
+            [Description("New world position Z. Omit to leave unchanged.")] float? pz = null,
+            [Description("New Euler rotation X in degrees. Omit to leave unchanged.")] float? rx = null,
+            [Description("New Euler rotation Y in degrees. Omit to leave unchanged.")] float? ry = null,
+            [Description("New Euler rotation Z in degrees. Omit to leave unchanged.")] float? rz = null,
+            [Description("New local scale X. Omit to leave unchanged.")] float? sx = null,
+            [Description("New local scale Y. Omit to leave unchanged.")] float? sy = null,
+            [Description("New local scale Z. Omit to leave unchanged.")] float? sz = null,
             CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using Newtonsoft.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,12 +40,20 @@ namespace CoreAI.Ai
 
         // generating an unnecessary state machine. Returns Task.FromResult directly.
         public Task<string> ExecuteAsync(
+            [Description("Action: read, write, append, clear, str_replace, insert, delete, or rename")]
             string action,
+            [Description(
+                "Memory content for write/append/insert, replacement fallback for str_replace/rename, or delete target fallback")]
             string? content = null,
+            [Description("Exact text to replace/delete, or section/key label to rename")]
             string? old_text = null,
+            [Description("Replacement text for str_replace, or new section/key label for rename")]
             string? new_text = null,
+            [Description("For insert: exact anchor text; content is inserted after the anchor's line")]
             string? anchor = null,
+            [Description("For insert: 1-based line number to insert before; beyond end appends")]
             int? line = null,
+            [Description("For str_replace/delete: true edits all exact matches; false edits the first match")]
             bool replace_all = false,
             CancellationToken cancellationToken = default)
         {

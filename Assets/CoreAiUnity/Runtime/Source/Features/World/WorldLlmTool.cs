@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,7 +42,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "world_command";
-        public override bool AllowDuplicates => true;
+        public override bool AllowDuplicates => false;
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
@@ -50,7 +51,7 @@ namespace CoreAI.Infrastructure.Llm
             "play_sound, set_volume, hide_panel, update_score, " +
             "apply_force, set_velocity, spawn_particles, list_objects. " +
             "Use 'spawn' to create objects (prefabKey can be a built-in primitive — " +
-            "cube, sphere, cylinder, capsule, plane, quad, empty — or a registered prefab key). " +
+            "cube, sphere, cylinder, capsule, quad, empty — or a registered prefab key). " +
             "During spawn you can ALSO set rotation (fx/fy/fz degrees) and scale (uniform) in the same call, " +
             "or use separate 'rotate'/'set_scale' actions later. " +
             "'move' to reposition, 'rotate' to rotate (fx/fy/fz degrees), 'set_scale' to resize (uniform scale), " +
@@ -79,7 +80,7 @@ namespace CoreAI.Infrastructure.Llm
             ("scale", "number", false,
                 "Uniform scale. Works on 'set_scale' AND directly on 'spawn' (spawn the object already sized, e.g. 0.5 = half, 2 = double, 3 = a tall tower). Omit or 0 = default size."),
             ("prefabKey", "string", false,
-                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, plane, quad, empty) or a registered prefab key"),
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key"),
             ("animationName", "string", false, "Name of the animation to play/stop"),
             ("textToDisplay", "string", false, "Text for show_text / update_score"),
             ("stringValue", "string", false,
@@ -102,19 +103,41 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public async Task<string> ExecuteAsync(
+            [Description(
+                "Command: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects")]
             string action,
+            [Description("X coordinate (for spawn, move)")]
             float x = 0f,
+            [Description("Y coordinate (for spawn, move). Y is height: larger Y = higher; ground at y=0.")]
             float y = 0f,
+            [Description("Z coordinate (for spawn, move)")]
             float z = 0f,
+            [Description(
+                "Rotation X in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned). Also Force X for apply_force. Vary it so objects are not all axis-aligned.")]
             float fx = 0f,
+            [Description(
+                "Rotation Y in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned, e.g. 45 for angled towers/roofs). Also Force Y for apply_force.")]
             float fy = 0f,
+            [Description(
+                "Rotation Z in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned). Also Force Z for apply_force.")]
             float fz = 0f,
+            [Description(
+                "Uniform size. Works on 'set_scale' AND directly on 'spawn' (the object is created already sized, e.g. 0.5 = half, 2 = double, 3 = a tall tower). Omit or 0 = default size. Vary it for differently sized pieces.")]
             float scale = 0f,
+            [Description(
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key")]
             string? prefabKey = null,
+            [Description(
+                "Object name to target (required for move, rotate, set_scale, parent, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects.")]
             string? targetName = null,
+            [Description(
+                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound, parent object name for parent)")]
             string? stringValue = null,
+            [Description("Name of the animation to play/stop")]
             string? animationName = null,
+            [Description("Text for show_text / update_score")]
             string? textToDisplay = null,
+            [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             CancellationToken cancellationToken = default)
         {

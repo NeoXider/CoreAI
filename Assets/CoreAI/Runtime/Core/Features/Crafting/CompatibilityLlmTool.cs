@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -50,7 +51,10 @@ namespace CoreAI.Crafting
             return AIFunctionFactory.Create(func, options);
         }
 
-        public Task<string> ExecuteAsync(string[] ingredients, CancellationToken cancellationToken = default)
+        public Task<string> ExecuteAsync(
+            [Description("Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")]
+            string[] ingredients,
+            CancellationToken cancellationToken = default)
         {
             return ExecuteAsync((object)ingredients, cancellationToken);
         }

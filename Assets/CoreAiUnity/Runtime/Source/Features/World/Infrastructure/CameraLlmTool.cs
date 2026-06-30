@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -34,8 +35,11 @@ namespace CoreAI.Infrastructure.World
         }
 
         private async Task<string> CaptureCameraAsync(
+            [Description("Camera GameObject name, or 'main' for the main camera. Default 'main'.")]
             string cameraName = "main",
+            [Description("Screenshot width in pixels (clamped 64..1024). Default 512.")]
             int width = 512,
+            [Description("Screenshot height in pixels (clamped 64..1024). Default 512.")]
             int height = 512,
             CancellationToken cancellationToken = default)
         {

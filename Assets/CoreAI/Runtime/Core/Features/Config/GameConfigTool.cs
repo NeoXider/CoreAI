@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text;
@@ -51,7 +52,9 @@ namespace CoreAI.Config
         /// <param name="content">JSON object used by the <c>update</c> action.</param>
         /// <param name="cancellationToken">Cancellation token for future async stores.</param>
         public async Task<string> ExecuteAsync(
+            [Description("Action to perform: read or update.")]
             string action,
+            [Description("For 'update': modified JSON config. For 'read': ignored.")]
             string? content = null,
             CancellationToken cancellationToken = default)
         {

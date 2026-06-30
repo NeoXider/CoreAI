@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -80,7 +81,11 @@ namespace CoreAI.Ai
                     });
             }
 
-            private Task<string> ExecuteAsync(string tool_name, string arguments_json,
+            private Task<string> ExecuteAsync(
+                [Description("Skill tool name returned by read_skill.")]
+                string tool_name,
+                [Description("JSON object string with the skill tool parameters.")]
+                string arguments_json,
                 CancellationToken cancellationToken = default)
             {
                 return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(), cancellationToken);

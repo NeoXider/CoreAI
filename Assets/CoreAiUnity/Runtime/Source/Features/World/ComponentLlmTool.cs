@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,7 +32,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "component_command";
-        public override bool AllowDuplicates => true;
+        public override bool AllowDuplicates => false;
 
         public override string Description =>
             "Execute component commands to add, remove, configure, or list Unity components on existing GameObjects. " +
@@ -69,15 +70,26 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public async Task<string> ExecuteAsync(
+            [Description("Command: add, remove, set, list_components")]
             string action,
+            [Description("Existing GameObject name to target")]
             string targetName,
+            [Description(
+                "Component type. Supported: " + CoreAiComponentCatalog.SupportedTypes)]
             string? componentType = null,
+            [Description("Property to set for the set action")]
             string? propertyName = null,
+            [Description("String value for text, HTML color, or enum properties")]
             string? stringValue = null,
+            [Description("Numeric value for float or integer-like component properties")]
             float floatValue = 0f,
+            [Description("Boolean value encoded as 0 or 1")]
             int boolValue = 0,
+            [Description("Vector X value")]
             float x = 0f,
+            [Description("Vector Y value")]
             float y = 0f,
+            [Description("Vector Z value")]
             float z = 0f,
             CancellationToken cancellationToken = default)
         {

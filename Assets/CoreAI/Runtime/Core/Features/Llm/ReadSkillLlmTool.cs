@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
@@ -134,7 +135,9 @@ namespace CoreAI.Ai
                     });
             }
 
-            private string Execute(string skill_name)
+            private string Execute(
+                [Description("Skill name exactly as listed in the catalog.")]
+                string skill_name)
             {
                 return ReadSkillLlmTool.Execute(skill_name, ResolveSkillsByName(), _allowedToolNames);
             }
