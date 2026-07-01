@@ -138,10 +138,10 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public async Task<AgentMemoryState> TryLoadAsync(string roleId)
         {
-            await _gate.WaitAsync().ConfigureAwait(false);
+            await _gate.WaitAsync();
             try
             {
-                return await RunOffThread(() => TryLoadCore(roleId)).ConfigureAwait(false);
+                return await RunOffThread(() => TryLoadCore(roleId));
             }
             finally
             {
@@ -214,13 +214,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task SaveAsync(string roleId, AgentMemoryState state)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync().ConfigureAwait(false);
+            await mutationGate.WaitAsync();
             try
             {
-                await _gate.WaitAsync().ConfigureAwait(false);
+                await _gate.WaitAsync();
                 try
                 {
-                    await RunOffThread(() => SaveCore(roleId, state)).ConfigureAwait(false);
+                    await RunOffThread(() => SaveCore(roleId, state));
                 }
                 finally
                 {
@@ -245,10 +245,10 @@ namespace CoreAI.Infrastructure.AiMemory
             }
 
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await mutationGate.WaitAsync(cancellationToken);
             try
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _gate.WaitAsync(cancellationToken);
                 try
                 {
                     return await RunOffThread(() =>
@@ -257,7 +257,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         TResult result = mutator(state);
                         SaveCore(roleId, state);
                         return result;
-                    }).ConfigureAwait(false);
+                    });
                 }
                 finally
                 {
@@ -330,13 +330,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearAsync(string roleId)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync().ConfigureAwait(false);
+            await mutationGate.WaitAsync();
             try
             {
-                await _gate.WaitAsync().ConfigureAwait(false);
+                await _gate.WaitAsync();
                 try
                 {
-                    await RunOffThread(() => ClearCore(roleId)).ConfigureAwait(false);
+                    await RunOffThread(() => ClearCore(roleId));
                 }
                 finally
                 {
@@ -399,13 +399,13 @@ namespace CoreAI.Infrastructure.AiMemory
         public async Task ClearChatHistoryAsync(string roleId)
         {
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync().ConfigureAwait(false);
+            await mutationGate.WaitAsync();
             try
             {
-                await _gate.WaitAsync().ConfigureAwait(false);
+                await _gate.WaitAsync();
                 try
                 {
-                    await RunOffThread(() => ClearChatHistoryCore(roleId)).ConfigureAwait(false);
+                    await RunOffThread(() => ClearChatHistoryCore(roleId));
                 }
                 finally
                 {
@@ -788,14 +788,14 @@ namespace CoreAI.Infrastructure.AiMemory
             }
 
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync().ConfigureAwait(false);
+            await mutationGate.WaitAsync();
             try
             {
-                await _gate.WaitAsync().ConfigureAwait(false);
+                await _gate.WaitAsync();
                 try
                 {
                     await RunOffThread(() => AppendChatMessageCore(roleId, role, content, persistToDisk))
-                        .ConfigureAwait(false);
+                        ;
                 }
                 finally
                 {
@@ -876,14 +876,14 @@ namespace CoreAI.Infrastructure.AiMemory
             }
 
             SemaphoreSlim mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync().ConfigureAwait(false);
+            await mutationGate.WaitAsync();
             try
             {
-                await _gate.WaitAsync().ConfigureAwait(false);
+                await _gate.WaitAsync();
                 try
                 {
                     await RunOffThread(() => AppendTranscriptEntryCore(roleId, entry, persistToDisk))
-                        .ConfigureAwait(false);
+                        ;
                 }
                 finally
                 {
