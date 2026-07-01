@@ -115,7 +115,7 @@ The benchmark's G6 scenario is a free-form visual build (default: castle). Each 
 | Model | Hero screenshot |
 |-------|-----------------|
 | **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (97.2/100) | ![Heretic](Docs/Images/castles/heretic.png) |
-| **qwen3.5-4b-mtp** (91.1/100) | ![Qwen3.5 4B MTP](Docs/Images/castles/qwen3.5-4b-mtp.png) |
+| **qwen3.5-4b-mtp** (94.1/100)¹ | ![Qwen3.5 4B MTP](Docs/Images/castles/qwen3.5-4b-mtp.png) |
 | **deepreinforce-ai_ornith-1.0-9b** (88.4/100) | ![Ornith](Docs/Images/castles/ornith.png) |
 | **qwythos-9b-claude-mythos-5-1m** (86.2/100) | ![Qwythos](Docs/Images/castles/qwythos.png) |
 | **qwen3.6-27b-fable-5-experimental** (83.9/100) | ![Fable](Docs/Images/castles/fable.png) |
@@ -123,6 +123,11 @@ The benchmark's G6 scenario is a free-form visual build (default: castle). Each 
 | **qwen3.5-0.8b** (51.2/100) | ![Qwen3.5 0.8B](Docs/Images/castles/qwen3.5-0.8b.png) |
 
 > **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [BENCHMARK.md](Docs/BENCHMARK.md) for details.
+
+¹ Re-verified 2026-07-01 (reps=1) after this session's streaming-migration and tool-calling reliability
+fixes; the other rows are from the reps=3 sweep dated in the ranking table above and have not been re-run.
+See [the full example report](Docs/Images/example_report/example_report.md) for the complete
+per-scenario breakdown and transcripts behind this number.
 
 ---
 

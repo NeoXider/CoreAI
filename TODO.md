@@ -3,7 +3,7 @@
 > Updated 2026-07-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`. Priorities below reflect the
 > 2026-06-28 competitive audit (vs Cursor / Claude Code / Kilo / Cline) and the maintainer's ordering.
-> Test baseline: EditMode ~1314, PlayMode `FastNoLlm` ~50 (deterministic).
+> Test baseline: EditMode 1361, PlayMode `FastNoLlm` 48 (deterministic).
 
 ## Roadmap (prioritized)
 
@@ -70,6 +70,18 @@
       (invalid/malformed world commands are invisible in the "Tool calls" column). Defensible as a distinct
       metric, but worth an explicit decision — either document the split or fold invalid attempts into
       `ToolCalls` too. Low severity (labeling nuance, not a scoring bug).
+- [ ] Make the benchmark's manually-built orchestrator turn-trace visible in the Agent Session Inspector
+      (today it only resolves a trace reader from a scene DI scope).
+- [ ] G4 playthrough scenarios (Combat/Crafting/Shop) score PARTIAL on weak models mainly from failed Lua
+      calls right after a successful `logic_define` (`attempt to call a nil value`, `bad argument #1 to
+      'next'`) — the goal text explains how to define a logic slot but not how to invoke/verify it
+      afterward. Ambiguous per a 2026-07-01 Codex read of the qwen3.5-4b-mtp full-suite transcripts: could
+      be pure model weakness, or a documented `logic_eval`/test-call API gap worth adding. Needs a look at
+      the actual Lua the model wrote (not visible in the report Markdown) before deciding.
+- [ ] G1 world-building scenarios (Coin collector, Constraint budget) can PASS while spawning every object
+      at the same `(0,0,0)` position — checkpoints don't verify spatial spread/distinctness. Found via the
+      same 2026-07-01 Codex transcript read. Consider adding a spacing/overlap checkpoint if G1 is meant to
+      test layout, not just object count/type.
 
 ## Shipped (recent)
 

@@ -61,6 +61,44 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   screenshots whatever was built when the model stops (empty response) or the time budget elapses, instead
   of failing the run and discarding the scene.
 
+### WebGL + streaming migration hardening (2026-07-01)
+
+- **Fixed a real EditMode deadlock from the WebGL `ConfigureAwait(false)` sweep.** Stripping
+  `ConfigureAwait(false)` everywhere (for the `CAIU001` analyzer) reintroduced a classic sync-over-async
+  deadlock: `FileAgentMemoryStoreEditModeTests` blocked the Unity main thread via `.GetAwaiter().GetResult()`
+  on `FileAgentMemoryStore.SaveAsync`/`TryLoadAsync`, whose `Task.Run` continuation now needed to marshal
+  back onto that same blocked thread. Fixed by converting the test to `async Task`/`await`. Separately,
+  `UnityMainThreadLlmAsyncMarshaler`'s `#if UNITY_EDITOR`-only branch (which can never compile into a WebGL
+  player) restored its `ConfigureAwait(false)` with a scoped `#pragma warning disable CAIU001`, since that
+  code path legitimately needs it to avoid the same deadlock shape.
+- **Benchmark harness now always streams**, matching every real production caller
+  (`AiOrchestrator.RunStreamingAsync` via a new `DrainStreamingAsync` wrapper) instead of the non-streaming
+  `RunTaskAsync` convenience path; the dead `.WithStreaming(false)` scenario overrides were removed.
+  `DrainStreamingAsync` re-throws `OperationCanceledException` after the drain loop so its `Task` keeps the
+  same Canceled/RanToCompletion semantics `RunScenario`'s timeout classification relies on (an independent
+  Codex audit found the streamed drain otherwise completed normally even after a timeout-driven cancel).
+  `SessionCapturingLlmClient.CompleteStreamingAsync` now also captures `ExecutedToolCalls` (previously
+  dead code since benchmarks forced non-streaming).
+- **Empty-response-after-tool-call nudge now gates on genuine success**, not mere attempt. Both
+  `SmartToolCallingChatClient` (non-streaming) and `MeaiLlmClient` (streaming) nudge the model to continue
+  instead of ending the turn when a response comes back with no text and no tool call after a *successful*
+  tool call earlier in the same turn/request — an all-failed batch that trails into an empty response falls
+  through to the existing failure-retry path instead (a Codex audit found the first version of this fix
+  conflated "attempted" with "succeeded").
+- **G6's live pacing note no longer leaks into fixed-count scenarios.** `BenchmarkEnvironment.DeadlineUtc`
+  was set for every scenario, so every `world_command` result carried "~Xs left to build — keep going, then
+  stop when done" even for G5's "exactly three actions, nothing else" — actively encouraging extra spawns
+  in a scenario that wants the model to stop. Now only set for `FreeBuildLayout` scenarios (G6).
+- **G6-solo progress now shows elapsed/remaining time.** `BenchmarkProgress` tracks the current scenario's
+  own timeout budget; the benchmark window falls back to a time-based bar/label instead of a static "0/1"
+  count when only one scenario is running.
+- Fixed a `set_velocity` PlayMode test flake: `Rigidbody.AddForce(Impulse)` only lands in `linearVelocity`
+  on the next `FixedUpdate`, so a queued `apply_force` impulse could land after a subsequent `set_velocity`
+  assignment and add on top of it once the async `WorldLlmTool` tool-call path (unlike the synchronous
+  direct-executor calls) let a physics step slip in between the two calls.
+- Verified end to end on `qwen3.5-4b-mtp` (local LM Studio): EditMode 1361/1361, PlayMode `FastNoLlm`
+  48/48, full G1-G6 live suite 94.1/100 (20 PASS / 3 PARTIAL / 1 FAIL).
+
 ## 4.17.0 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.17.0**.

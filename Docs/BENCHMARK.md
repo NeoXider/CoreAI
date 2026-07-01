@@ -166,7 +166,7 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 > The free-build is resilient by design: when the model stops on its own (an empty response) or the
 > per-scenario time budget elapses *after a scene already exists*, the harness grades and screenshots
 > what was built instead of failing the run. This is why a long, unbounded build always yields a hero
-> image even on small local models. See `SESSION_WORK_AUDIT.md` for the root-cause write-up.
+> image even on small local models.
 
 ![Cross-model comparison](Images/example_comparison.png)
 
