@@ -29,6 +29,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "one spawn tool call per object, with explicit coordinates and meter-scale dimensions. " +
                 "One Unity unit is one meter. Use scaleX/scaleY/scaleZ for non-uniform parts such as " +
                 "walls, floors, roads, slabs, bridges and towers; do not rely only on default 1m objects. " +
+                "Give parts appropriate colors with action='set_color' (targetName + stringValue as an " +
+                "HTML color) — an all-grey scene reads as unfinished. " +
                 "Keep building a rich, structured scene " +
                 "until it is complete — do not stop early and do not ask questions. " +
                 "Vary positions, sizes and angles.";
@@ -61,8 +63,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
             // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
-            // and counted down to after each spawn, so it can pace itself. 600s (10 min) matches the default
-            // suite budget; override via COREAI_BENCHMARK_TIMEOUT. The roundtrip cap stays the hard backstop.
+            // and counted down to after each spawn, so it can pace itself. 600s (10 min) is intentionally
+            // G6-specific; the whole-suite soft budget is much larger. Override via COREAI_BENCHMARK_TIMEOUT.
+            // The roundtrip cap stays the hard backstop.
             public override float TimeoutSeconds => 600f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
@@ -157,7 +160,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "detailed — quantity and structure come first.\n\n" +
                 "Give it natural variety — varied sizes, angles and rotations fx/fy/fz for angled pieces — so it " +
                 "does not read as a grid of identical 1m cubes. Use scaleX/scaleY/scaleZ for long, tall, wide or " +
-                "thin parts.";
+                "thin parts.\n\n" +
+                "COLOR the scene: use action='set_color' with targetName and stringValue as an HTML color " +
+                "(e.g. '#9aa0a8') to tint each major group appropriately — ground, structures, details. " +
+                "An all-grey scene loses points; color at least the main groups.";
 
             private const string CastleGoal =
                 "Build the most impressive castle you can. This is a showcase of your 3D spatial reasoning: the more " +
@@ -188,7 +194,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "castle is full and detailed — quantity and structure come first.\n\n" +
                 "Give it natural variety — varied tower heights, differently sized pieces, angled roofs — so it " +
                 "does not read as a grid of identical cubes. Use scaleX, scaleY, scaleZ and rotations fx/fy/fz " +
-                "directly in spawn calls; do not build everything from default 1m cubes.";
+                "directly in spawn calls; do not build everything from default 1m cubes.\n\n" +
+                "COLOR the castle: use action='set_color' with targetName and stringValue as an HTML color to " +
+                "tint each major group — e.g. grey stone '#9aa0a8' walls and towers, dark red '#8e3b2f' roofs " +
+                "and flags, brown '#6b4a2f' gate and bridge, green '#3f7d3a' treetops, blue '#3b6ea5' moat " +
+                "water, warm '#d8b36a' torch tips. An all-grey castle loses points; color at least the major " +
+                "groups.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -267,6 +278,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     detail: genericFreeBuild
                         ? $"{namedDetailGroups} named detail groups"
                         : $"{extras} extra-detail groups");
+
+                // Soft, non-mandatory: the prompt now explicitly asks for set_color tints on the major
+                // groups (an all-grey scene reads as unfinished in the hero shot).
+                int colorCommands = env.World.Count("set_color");
+                g.Add("used_color", "tinted pieces with set_color", 6, colorCommands >= 4,
+                    dimension: BenchmarkDimension.TaskCompletion,
+                    detail: $"{colorCommands} set_color commands");
 
                 return g;
             }

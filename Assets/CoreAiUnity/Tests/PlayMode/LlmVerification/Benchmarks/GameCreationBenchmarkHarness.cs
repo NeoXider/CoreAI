@@ -1594,13 +1594,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // world-space or sized relative to these, so the whole card scales with them.
         private const int ShotWidth = 3840;
         private const int ShotHeight = 2160;
-        private const int InsetWidth = 676;   // 16:9, three fit in the left column between the bars
+        private const int InsetWidth = 676;   // 16:9, two per column between the top/bottom bars
         private const int InsetHeight = 380;
 
+        // Shared by the main and inset scene cameras: a soft daylight sky instead of the old
+        // near-black void, so report shots read as daytime scenes.
+        private static readonly UnityEngine.Color DaySkyColor = new(0.53f, 0.65f, 0.80f);
+
         /// <summary>
-        /// Frames a camera over the spawned objects, renders to a 4K (3840x2160) RenderTexture with three
-        /// extra-angle inset views (opposite side, top-down, close-up) composited into the left column, and
-        /// returns PNG bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null
+        /// Frames a camera over the spawned objects, renders to a 4K (3840x2160) RenderTexture with four
+        /// inset views composited in — two alternate wide angles (opposite side, top-down) in the RIGHT
+        /// column, two close-up zoom shots at different magnifications in the LEFT column — and returns
+        /// PNG bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null
         /// screenshot and never breaks the run.
         /// </summary>
         private static IEnumerator CaptureSceneScreenshot(
@@ -1611,6 +1616,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.GameObject camBGo = null;
             UnityEngine.GameObject camCGo = null;
             UnityEngine.GameObject camDGo = null;
+            UnityEngine.GameObject camEGo = null;
             UnityEngine.GameObject keyGo = null;
             UnityEngine.GameObject fillGo = null;
             UnityEngine.GameObject groundGo = null;
@@ -1619,11 +1625,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.RenderTexture rtB = null;
             UnityEngine.RenderTexture rtC = null;
             UnityEngine.RenderTexture rtD = null;
+            UnityEngine.RenderTexture rtE = null;
             UnityEngine.Vector3 sceneCenter = UnityEngine.Vector3.zero;
             float sceneExt = 1.2f;
+            UnityEngine.Rendering.AmbientMode prevAmbientMode = UnityEngine.RenderSettings.ambientMode;
+            UnityEngine.Color prevAmbientLight = UnityEngine.RenderSettings.ambientLight;
 
             try
             {
+                // Flat daylight ambient for the duration of the capture: with only a directional key,
+                // views looking at the shadow side of the build read several stops darker than the hero
+                // view — as if each inset had a different sun. A flat ambient floor lifts the unlit
+                // faces so every angle reads as the same daytime scene. Restored in finally.
+                UnityEngine.RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+                UnityEngine.RenderSettings.ambientLight = new UnityEngine.Color(0.42f, 0.46f, 0.53f);
+
                 // Switch off the live preview camera/light so only the capture rig lights the final shot.
                 vis.HideLivePreview();
 
@@ -1641,13 +1657,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 camGo = new UnityEngine.GameObject("BenchmarkCamera");
                 cam = camGo.AddComponent<UnityEngine.Camera>();
                 cam.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
-                cam.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
+                // Daylight sky, not a void: the report shots must read as DAYTIME (the dark
+                // near-black backdrop made every hero image look like a night scene).
+                cam.backgroundColor = DaySkyColor;
                 cam.fieldOfView = 50f;
                 cam.nearClipPlane = 0.05f;
                 cam.farClipPlane = 500f;
                 cam.allowMSAA = true;
+                // 1.5x closer than the old (1.7, 1.5, -2.7)*ext framing — free-build scenes sit on a
+                // large ground plate that inflates the bounds, which left the actual build tiny in the
+                // middle of empty ground.
                 cam.transform.position =
-                    bounds.center + new UnityEngine.Vector3(ext * 1.7f, ext * 1.5f, -ext * 2.7f);
+                    bounds.center + new UnityEngine.Vector3(ext * 1.13f, ext * 1.0f, -ext * 1.8f);
                 cam.transform.LookAt(bounds.center);
 
                 // A grounded floor so the objects sit on a surface instead of floating in a void.
@@ -1662,7 +1683,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 UnityEngine.Renderer gr = groundGo.GetComponent<UnityEngine.Renderer>();
                 if (gr != null)
                 {
-                    TintRenderer(gr, new UnityEngine.Color(0.17f, 0.18f, 0.21f));
+                    // Light warm-grey ground for the daytime look — dark enough that white
+                    // primitives and their shadows still separate from it.
+                    TintRenderer(gr, new UnityEngine.Color(0.47f, 0.49f, 0.45f));
                 }
 
                 // Key + cool fill so the cubes read as 3D instead of flat silhouettes. A freshly
@@ -1672,7 +1695,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 keyGo = new UnityEngine.GameObject("BenchmarkKey");
                 UnityEngine.Light key = keyGo.AddComponent<UnityEngine.Light>();
                 key.type = UnityEngine.LightType.Directional;
-                key.intensity = 1.5f;
+                key.intensity = 1.35f;
+                key.color = new UnityEngine.Color(1.0f, 0.96f, 0.87f); // warm afternoon sun
                 key.shadows = UnityEngine.LightShadows.Soft;
                 // Full strength + a small bias: the default bias is tuned for room/level-scale scenes and
                 // "peter-pans" (detaches/hides) the shadow on these ~1m benchmark objects, which was why
@@ -1680,13 +1704,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 key.shadowStrength = 1f;
                 key.shadowBias = 0.01f;
                 key.shadowNormalBias = 0.2f;
-                keyGo.transform.rotation = UnityEngine.Quaternion.Euler(48f, -32f, 0f);
+                // Afternoon-sun elevation: at the old 48 deg the shadows were shorter than the objects
+                // (~0.9x height) and read as barely-there in the report; 33 deg throws ~1.5x-height
+                // shadows across the ground — the screenshot light is static and independent of the
+                // live-preview day/night orbit, so the report always gets "daytime" shadows.
+                keyGo.transform.rotation = UnityEngine.Quaternion.Euler(33f, -40f, 0f);
 
                 fillGo = new UnityEngine.GameObject("BenchmarkFill");
                 UnityEngine.Light fill = fillGo.AddComponent<UnityEngine.Light>();
                 fill.type = UnityEngine.LightType.Directional;
-                fill.intensity = 0.55f;
-                fill.color = new UnityEngine.Color(0.70f, 0.80f, 1.0f);
+                fill.intensity = 0.7f; // brighter sky-bounce fill for the daytime look
+                fill.color = new UnityEngine.Color(0.72f, 0.82f, 1.0f);
                 fillGo.transform.rotation = UnityEngine.Quaternion.Euler(-15f, 150f, 0f);
 
                 // Screen-aligned overlay (parented to the camera): a top results bar and a bottom caption
@@ -1757,20 +1785,28 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             try
             {
+                // RIGHT column — two alternate angles (opposite side, top-down), framed 2x closer than
+                // the original wide offsets: the ground plate inflates the bounds, so at the old
+                // distance the build was a speck in the middle of empty ground.
                 rtB = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camBGo = MakeInsetCamera("BenchmarkCameraB",
-                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 1.9f, sceneExt * 1.3f, sceneExt * 2.4f),
+                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 0.95f, sceneExt * 0.65f, sceneExt * 1.2f),
                     sceneCenter, rtB);
                 rtC = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camCGo = MakeInsetCamera("BenchmarkCameraC",
-                    sceneCenter + new UnityEngine.Vector3(sceneExt * 0.25f, sceneExt * 3.0f, -sceneExt * 0.7f),
+                    sceneCenter + new UnityEngine.Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
                     sceneCenter, rtC);
-                // Close-up "zoom" view: nearer to the scene, low angle, narrow FOV — a detail shot the
-                // wide hero framing can't show (larger models build compositions worth zooming into).
+                // LEFT column — two close-up "zoom" shots at different magnifications (narrow FOV, near,
+                // low angle): detail views the wide hero framing can't show (larger models build
+                // compositions worth zooming into).
                 rtD = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camDGo = MakeInsetCamera("BenchmarkCameraD",
                     sceneCenter + new UnityEngine.Vector3(sceneExt * 1.0f, sceneExt * 0.4f, -sceneExt * 1.3f),
                     sceneCenter, rtD, 32f);
+                rtE = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                camEGo = MakeInsetCamera("BenchmarkCameraE",
+                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 0.9f, sceneExt * 0.55f, sceneExt * 1.15f),
+                    sceneCenter, rtE, 20f);
             }
             catch (Exception ex)
             {
@@ -1784,6 +1820,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.Texture2D texB = null;
             UnityEngine.Texture2D texC = null;
             UnityEngine.Texture2D texD = null;
+            UnityEngine.Texture2D texE = null;
             try
             {
                 if (texMain != null)
@@ -1791,7 +1828,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     texB = ReadRenderTexture(rtB);
                     texC = ReadRenderTexture(rtC);
                     texD = ReadRenderTexture(rtD);
-                    CompositeInsets(texMain, texB, texC, texD);
+                    texE = ReadRenderTexture(rtE);
+                    CompositeInsets(texMain, texB, texC, texD, texE);
                     png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
                 }
             }
@@ -1824,18 +1862,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 DestroyGo(camBGo);
                 DestroyGo(camCGo);
                 DestroyGo(camDGo);
+                DestroyGo(camEGo);
                 DestroyTex(texMain);
                 DestroyTex(texB);
                 DestroyTex(texC);
                 DestroyTex(texD);
+                DestroyTex(texE);
                 DestroyRt(rt);
                 DestroyRt(rtB);
                 DestroyRt(rtC);
                 DestroyRt(rtD);
+                DestroyRt(rtE);
                 DestroyGo(keyGo);
                 DestroyGo(fillGo);
                 DestroyGo(groundGo);
                 DestroyScratchMeshes();
+                UnityEngine.RenderSettings.ambientMode = prevAmbientMode;
+                UnityEngine.RenderSettings.ambientLight = prevAmbientLight;
             }
 
             onPng?.Invoke(png);
@@ -1878,7 +1921,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.GameObject go = new(name);
             UnityEngine.Camera c = go.AddComponent<UnityEngine.Camera>();
             c.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
-            c.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
+            c.backgroundColor = DaySkyColor;
             c.fieldOfView = fieldOfView;
             c.nearClipPlane = 0.05f;
             c.farClipPlane = 500f;
@@ -1889,12 +1932,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return go;
         }
 
-        // Pastes the three extra-angle views (opposite side, top-down, close-up) into the LEFT column
-        // of the hero shot, stacked below the top banner and above the bottom caption bar. All metrics
-        // scale from the main image height so the layout is resolution-independent.
+        // Pastes the four extra views into the hero shot, stacked below the top banner: the two
+        // alternate wide angles (opposite side, top-down) down the RIGHT column, the two close-up zoom
+        // shots down the LEFT column. All metrics scale from the main image dimensions so the layout is
+        // resolution-independent; two per column never reaches the bottom caption bar.
         private static void CompositeInsets(
             UnityEngine.Texture2D main, UnityEngine.Texture2D b, UnityEngine.Texture2D c,
-            UnityEngine.Texture2D d)
+            UnityEngine.Texture2D d, UnityEngine.Texture2D e)
         {
             if (main == null)
             {
@@ -1905,17 +1949,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             const int ih = InsetHeight;
             int margin = UnityEngine.Mathf.RoundToInt(main.height * (16f / 720f));
             int bannerPx = UnityEngine.Mathf.RoundToInt(main.height * (151f / 720f)); // top results bar, kept clear
-            int x = margin;
+            int xLeft = margin;
+            int xRight = main.width - margin - iw;
             int y1 = main.height - bannerPx - margin - ih;
             int y2 = y1 - margin - ih;
-            int y3 = y2 - margin - ih;
-            // The bottom caption bar (when a subtitle is present) is 0.42 * halfH tall = 21% of the
-            // image; without this clamp the third inset's bottom edge dips ~31px into it at 4K.
-            int captionPx = UnityEngine.Mathf.RoundToInt(main.height * (152f / 720f));
-            y3 = UnityEngine.Mathf.Max(y3, captionPx + 8);
-            PasteInset(main, b, x, y1, iw, ih);
-            PasteInset(main, c, x, y2, iw, ih);
-            PasteInset(main, d, x, y3, iw, ih);
+            PasteInset(main, b, xRight, y1, iw, ih); // wide: opposite side
+            PasteInset(main, c, xRight, y2, iw, ih); // wide: top-down
+            PasteInset(main, d, xLeft, y1, iw, ih);  // zoom: close-up
+            PasteInset(main, e, xLeft, y2, iw, ih);  // zoom: tighter close-up
             main.Apply();
         }
 
