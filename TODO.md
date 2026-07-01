@@ -92,6 +92,16 @@
 - [ ] G5 `exact_count`-style constraints (e.g. `g5_exact_three`) count `env.World.Commands.Count`, not
       actual tool-call attempts — a 4th malformed/failed `world_command` after 3 valid spawns still reads
       as `total == 3`, so the constraint passes despite an extra action being issued.
+- [ ] `RoleFitness` "Orchestrator / Director" can rate a small model 9+/10 off G1-G7 alone, since almost
+      every scenario resolves in a single LLM turn (`RunObservation.Turns` = 1 nearly everywhere) — high
+      Reasoning/Intent scores reflect "parsed the instruction correctly in one shot", not sustained
+      multi-turn orchestration with error recovery, which is what the role's own description asks for. G4's
+      "playthrough" doesn't cover this either — the harness simulates the multi-step trajectory in C# after
+      the model installs Lua slots, not the model itself across real turns. Added an honest caveat to the
+      role's `Note` text (2026-07-01, Codex audit) without touching the formula/weights — changing those
+      would affect every historical comparison and needs a user decision, not a quiet fix. A real fix likely
+      needs a genuinely multi-turn scenario (adversarial tool failures forcing retries, or a task that can't
+      complete in one turn by construction) feeding into the Director gate/weights specifically.
 
 ## Shipped (recent)
 

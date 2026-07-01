@@ -88,7 +88,7 @@ namespace CoreAI.Benchmarking
                 Name = "Orchestrator / Director", Agentic = true,
                 Weights = new() { [Reason] = .30, [Intent] = .25, [Instr] = .20, [Task] = .15, [Determ] = .10 },
                 Gates = new[] { (Reason, 80.0), (Intent, 75.0), (Instr, 75.0) },
-                Note = "multi-step control — needs high reasoning, sequencing, and instruction-following",
+                Note = "multi-step control — current suite mostly measures task-level sequencing, not sustained multi-turn orchestration; needs high reasoning, sequencing, and instruction-following",
             },
             new()
             {
