@@ -626,13 +626,28 @@ namespace CoreAI.Tests.EditMode
             }
 
             bool active = BenchmarkProgress.IsRunning;
+            // A solo scenario (Total <= 1, e.g. running G6's free build alone) has a count-based Fraction
+            // that sits at 0% for its whole multi-minute run and only jumps to 100% at the very end - not
+            // useful to a human watching. Fall back to the scenario's own elapsed/remaining wall-clock
+            // budget when it is the only thing running and a timeout was recorded for it.
+            bool useScenarioClock = active && BenchmarkProgress.Total <= 1 && BenchmarkProgress.HasScenarioClock;
+
             _statusLabel.text = active
-                ? $"{BenchmarkProgress.ModelId}  {BenchmarkProgress.Completed}/{BenchmarkProgress.Total}"
+                ? useScenarioClock
+                    ? $"{BenchmarkProgress.ModelId}  {FormatDuration(BenchmarkProgress.ScenarioRemainingSeconds * 1000.0)} left"
+                    : $"{BenchmarkProgress.ModelId}  {BenchmarkProgress.Completed}/{BenchmarkProgress.Total}"
                 : GameCreationBenchmarkLauncher.LastStatus;
 
-            float pct = active ? Mathf.Clamp01(BenchmarkProgress.Fraction) * 100f : 0f;
+            float pct = active
+                ? Mathf.Clamp01(useScenarioClock ? BenchmarkProgress.ScenarioTimeFraction : BenchmarkProgress.Fraction) * 100f
+                : 0f;
             _progressFill.style.width = Length.Percent(pct);
-            _progressText.text = active ? BenchmarkProgress.CurrentLabel : "";
+            _progressText.text = active
+                ? useScenarioClock
+                    ? $"{BenchmarkProgress.CurrentLabel}  —  {FormatDuration(BenchmarkProgress.ScenarioElapsedSeconds * 1000.0)} elapsed, " +
+                      $"{FormatDuration(BenchmarkProgress.ScenarioRemainingSeconds * 1000.0)} left"
+                    : BenchmarkProgress.CurrentLabel
+                : "";
             _progressLines.Clear();
             if (!active)
             {

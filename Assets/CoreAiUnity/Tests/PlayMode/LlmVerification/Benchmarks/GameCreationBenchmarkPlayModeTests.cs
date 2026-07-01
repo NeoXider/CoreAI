@@ -248,7 +248,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     {
                         BenchmarkProgress.StartScenario(
                             $"{scenario.Group} · {scenario.Name}  {Stars(BenchmarkInfo.DifficultyFor(scenario.Group))}" +
-                            (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""));
+                            (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""),
+                            timeoutSeconds: timeout);
                         ScenarioResult captured = null;
                         // Retry on ANY hard failure that produced no measurement — provider/model crash,
                         // failed-to-load, timeout, dropped connection — so a crash never counts as a model

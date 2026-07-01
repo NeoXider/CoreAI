@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CoreAI.Benchmarking
@@ -31,9 +32,32 @@ namespace CoreAI.Benchmarking
         public static int Completed { get; private set; }
         public static string ModelId { get; private set; } = "";
         public static string CurrentLabel { get; private set; } = "";
+        private static DateTime? _currentScenarioStartedUtc;
+        private static float _currentScenarioTimeoutSeconds;
 
         /// <summary>Fraction 0..1 for a progress bar.</summary>
         public static float Fraction => Total <= 0 ? 0f : (float)Completed / Total;
+
+        /// <summary>
+        /// True when the current scenario's elapsed/remaining wall-clock time is known and worth showing -
+        /// a single long-running scenario (e.g. G6's free build alone, <see cref="Total"/> == 1) sits at a
+        /// meaningless 0% count-based fraction for its whole multi-minute run otherwise.
+        /// </summary>
+        public static bool HasScenarioClock => _currentScenarioStartedUtc.HasValue && _currentScenarioTimeoutSeconds > 0f;
+
+        /// <summary>Seconds elapsed since the current scenario started, or 0 when no clock is set.</summary>
+        public static float ScenarioElapsedSeconds => _currentScenarioStartedUtc.HasValue
+            ? (float)(DateTime.UtcNow - _currentScenarioStartedUtc.Value).TotalSeconds
+            : 0f;
+
+        /// <summary>Seconds left before the current scenario's own timeout, clamped to 0.</summary>
+        public static float ScenarioRemainingSeconds =>
+            Math.Max(0f, _currentScenarioTimeoutSeconds - ScenarioElapsedSeconds);
+
+        /// <summary>Fraction 0..1 of the current scenario's own timeout budget elapsed.</summary>
+        public static float ScenarioTimeFraction => _currentScenarioTimeoutSeconds > 0f
+            ? Math.Min(1f, Math.Max(0f, ScenarioElapsedSeconds / _currentScenarioTimeoutSeconds))
+            : 0f;
 
         /// <summary>Begins a run of <paramref name="total"/> scenario executions (scenarios × repetitions).</summary>
         public static void Begin(int total, string modelId)
@@ -46,15 +70,23 @@ namespace CoreAI.Benchmarking
                 ModelId = modelId ?? "";
                 CurrentLabel = "Starting…";
                 CompletedLines.Clear();
+                _currentScenarioStartedUtc = null;
+                _currentScenarioTimeoutSeconds = 0f;
             }
         }
 
-        /// <summary>Marks the scenario currently executing (e.g. "G2 · Score win condition (run 1/1)").</summary>
-        public static void StartScenario(string label)
+        /// <summary>Marks the scenario currently executing (e.g. "G2 · Score win condition (run 1/1)").
+        /// <paramref name="timeoutSeconds"/> is the scenario's own wall-clock budget, when known
+        /// (0/negative = unknown) - it powers <see cref="HasScenarioClock"/> so a solo long-running
+        /// scenario (<see cref="Total"/> == 1, e.g. G6 alone) can show elapsed/remaining time instead of a
+        /// count-based fraction that would otherwise sit at 0% for the whole run.</summary>
+        public static void StartScenario(string label, float timeoutSeconds = 0f)
         {
             lock (Gate)
             {
                 CurrentLabel = label ?? "";
+                _currentScenarioStartedUtc = DateTime.UtcNow;
+                _currentScenarioTimeoutSeconds = timeoutSeconds;
             }
         }
 
@@ -78,6 +110,8 @@ namespace CoreAI.Benchmarking
             {
                 IsRunning = false;
                 CurrentLabel = "";
+                _currentScenarioStartedUtc = null;
+                _currentScenarioTimeoutSeconds = 0f;
             }
         }
 
