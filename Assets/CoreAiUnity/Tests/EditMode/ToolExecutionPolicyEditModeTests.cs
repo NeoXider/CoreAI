@@ -575,6 +575,40 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteBatch_AllDuplicatesInBatch_CountsAsConsecutiveFailure()
+        {
+            // Regression: a batch where every call is a duplicate (no executable call) must still
+            // increment the consecutive-error counter, same as any other failed iteration. Otherwise a
+            // model stuck repeating the same call forever never trips the max-consecutive-errors guard.
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            Dictionary<string, object> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) }, opts, CancellationToken.None);
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "First (non-duplicate) call must not count as a failure");
+
+            Assert.IsFalse(policy.IsMaxErrorsReached);
+            await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) }, opts, CancellationToken.None);
+            Assert.AreEqual(1, policy.ConsecutiveErrors, "All-duplicate batch must increment the error counter");
+
+            await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) }, opts, CancellationToken.None);
+            Assert.AreEqual(2, policy.ConsecutiveErrors);
+            Assert.IsFalse(policy.IsMaxErrorsReached);
+
+            await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) }, opts, CancellationToken.None);
+            Assert.AreEqual(3, policy.ConsecutiveErrors);
+            Assert.IsTrue(policy.IsMaxErrorsReached,
+                "Repeated all-duplicate batches must eventually trip the max-consecutive-errors guard");
+        }
+
+        [Test]
         public async Task ExecuteBatch_IntraBatchDuplicate_ExecutesFirstAndSuppressesLaterSlot()
         {
             CountingMarshaler countingMarshaler = new();

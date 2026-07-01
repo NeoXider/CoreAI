@@ -848,6 +848,10 @@ namespace CoreAI.Infrastructure.Llm
             DuplicatePlan duplicatePlan = BuildDuplicatePlan(toolCalls);
             if (duplicatePlan.HasDuplicates && !duplicatePlan.HasExecutable)
             {
+                // Every call in the batch was a duplicate - this counts as a failed iteration for the
+                // consecutive-error guard, same as the sequential/concurrent paths below. Without this, a
+                // model stuck repeating the same call forever never trips the max-consecutive-errors guard.
+                RecordFailure();
                 return new BatchToolCallResult
                 {
                     Results = duplicatePlan.IndexedResults.Select(r => (MEAI.AIContent)r.Result).ToList(),
