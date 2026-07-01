@@ -32,7 +32,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <summary>Env var (CSV of group ids, e.g. "G1,G2") to restrict which scenarios run. Empty = all.</summary>
         public const string EnvGroups = "COREAI_BENCHMARK_GROUPS";
 
-        /// <summary>Env var (int) for how many times each scenario runs; the report keeps the per-scenario median.</summary>
+        /// <summary>Env var (int) for how many times each scenario runs; the report keeps the per-scenario mean.</summary>
         public const string EnvRepetitions = "COREAI_BENCHMARK_REPS";
 
         /// <summary>Env var (seconds) overriding the per-scenario wall-clock timeout. 0/unset = per-scenario default.</summary>
@@ -78,7 +78,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// measurement: provider 5xx, dropped connection, model-load crash, "model has crashed", or a
         /// timeout. Default 1 extra attempt. A run that COMPLETED but scored low is never retried (a low
         /// score is the measurement), and harness (Framework) bugs are not retried either. This is
-        /// distinct from repetitions, which re-run successful scenarios for median stability.
+        /// distinct from repetitions, which re-run successful scenarios for mean stability.
         /// </summary>
         public const string EnvRetries = "COREAI_BENCHMARK_RETRIES";
 
@@ -347,6 +347,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             if (r.Attribution == FailureAttribution.Environment)
             {
                 return $"⚠ {r.ScenarioName} — provider/env failure (excluded)";
+            }
+
+            if (r.Attribution == FailureAttribution.NotGraded)
+            {
+                return $"⚪ {r.ScenarioName} — custom prompt (not scored)";
             }
 
             string glyph = r.Classification switch

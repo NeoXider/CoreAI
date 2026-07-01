@@ -99,6 +99,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ? $"Free build: {FreeBuildSubject()}"
                 : "Free build (visual)";
 
+            // Only a FULL prompt override is excluded — it replaces the goal verbatim with arbitrary
+            // operator text the built-in checkpoints were never designed for. A subject-only override
+            // still uses our own GenericGoal scaffold below (known structure, "at least 24 objects" etc.),
+            // so it stays gradeable with the existing generic-free-build checkpoints.
+            public override bool ExcludeFromScoring => HasFullCustomPrompt();
+
             public override string WhatItChecks =>
                 "Free-form build: the model designs and places a whole scene from scratch — judged loosely on scale and variety, shown as the report hero image.";
 
@@ -205,11 +211,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int namedDetailGroups = CountNamedDetailGroups(spawnCommands);
 
                 bool genericFreeBuild = IsCustomFreeBuild();
-                g.Add("substantial_scene", genericFreeBuild ? "built at least 18 scene pieces" : "built at least 24 castle pieces",
-                    genericFreeBuild ? 20 : 10, spawns >= (genericFreeBuild ? 18 : 24), mandatory: true,
+                g.Add("substantial_scene", genericFreeBuild ? "built at least 24 scene pieces" : "built at least 24 castle pieces",
+                    genericFreeBuild ? 20 : 10, spawns >= 24, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion, detail: $"{spawns} spawn commands");
                 g.Add("distinct_named_pieces", "used distinct target names", genericFreeBuild ? 15 : 10,
-                    distinctNames >= (genericFreeBuild ? 14 : 20),
+                    distinctNames >= (genericFreeBuild ? 20 : 20),
                     dimension: BenchmarkDimension.ToolCorrectness, detail: $"{distinctNames} distinct names");
                 g.Add("within_build_volume", "kept pieces inside the -9..9 build volume", genericFreeBuild ? 15 : 10,
                     boundViolations == 0, mandatory: true,
@@ -298,13 +304,35 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int violations = 0;
                 foreach (RecordedWorldCommand c in commands)
                 {
-                    if (c.X < -9f || c.X > 9f || c.Z < -9f || c.Z > 9f || c.Y < -1f || c.Y > 9f)
+                    (float hx, float hy, float hz) = HalfExtents(c);
+                    if (c.X - hx < -9f || c.X + hx > 9f ||
+                        c.Z - hz < -9f || c.Z + hz > 9f ||
+                        c.Y - hy < -1f || c.Y + hy > 9f)
                     {
                         violations++;
                     }
                 }
 
                 return violations;
+            }
+
+            private static (float x, float y, float z) HalfExtents(RecordedWorldCommand c)
+            {
+                float uniform = c.FloatValue > 0f ? c.FloatValue : 1f;
+                float sx = c.ScaleX > 0f ? c.ScaleX : uniform;
+                float sy = c.ScaleY > 0f ? c.ScaleY : uniform;
+                float sz = c.ScaleZ > 0f ? c.ScaleZ : uniform;
+
+                if (Contains(c.PrefabKeyOrName, "plane"))
+                {
+                    return (5f * sx, 0.01f * sy, 5f * sz);
+                }
+
+                float heightMultiplier = Contains(c.PrefabKeyOrName, "cylinder") ||
+                                         Contains(c.PrefabKeyOrName, "capsule")
+                    ? 1f
+                    : 0.5f;
+                return (0.5f * sx, heightMultiplier * sy, 0.5f * sz);
             }
 
             private static int CountCornerTowerQuadrants(List<RecordedWorldCommand> commands)
@@ -487,6 +515,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return groups.Count;
             }
 
+            private static bool HasFullCustomPrompt()
+                => Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null;
+
             private static bool IsCustomFreeBuild()
                 => Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null ||
                    Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT") != null;
@@ -495,8 +526,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 => string.Equals(c.Action, action, System.StringComparison.OrdinalIgnoreCase);
 
             private static bool IsTowerLike(RecordedWorldCommand c)
-                => Contains(c.TargetName, "tower") || Contains(c.PrefabKeyOrName, "cylinder") ||
-                   Contains(c.PrefabKeyOrName, "capsule");
+            {
+                if (!Contains(c.TargetName, "tower") &&
+                    !Contains(c.PrefabKeyOrName, "cylinder") &&
+                    !Contains(c.PrefabKeyOrName, "capsule"))
+                {
+                    return false;
+                }
+
+                (float hx, float hy, float hz) = HalfExtents(c);
+                float height = hy * 2f;
+                float footprint = System.Math.Max(hx * 2f, hz * 2f);
+                return height >= 2.5f && footprint >= 1f;
+            }
 
             private static bool IsWallLike(RecordedWorldCommand c)
                 => Contains(c.TargetName, "wall") || Contains(c.TargetName, "battlement") ||

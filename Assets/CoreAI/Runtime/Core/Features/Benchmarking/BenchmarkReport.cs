@@ -43,13 +43,15 @@ namespace CoreAI.Benchmarking
 
         /// <summary>
         /// Results that actually measure the model — excludes <see cref="FailureAttribution.Environment"/>
-        /// (provider/transport crashes) and <see cref="FailureAttribution.Framework"/> (harness bugs), so
-        /// infrastructure flakiness never corrupts the model's score. Those runs are still reported in the
-        /// tool stats, sessions, and the failure banner.
+        /// (provider/transport crashes), <see cref="FailureAttribution.Framework"/> (harness bugs), and
+        /// <see cref="FailureAttribution.NotGraded"/> (deliberately excluded, e.g. a fully custom-prompt
+        /// free-build), so infrastructure flakiness or an operator override never corrupts the model's
+        /// score. Those runs are still reported in the tool stats, sessions, and screenshots.
         /// </summary>
         private IEnumerable<ScenarioResult> GradedResults =>
             Results.Where(r => r.Attribution != FailureAttribution.Environment
-                               && r.Attribution != FailureAttribution.Framework);
+                               && r.Attribution != FailureAttribution.Framework
+                               && r.Attribution != FailureAttribution.NotGraded);
 
         /// <summary>
         /// One row per distinct scenario that produced a real model measurement, aggregated across
@@ -195,7 +197,7 @@ namespace CoreAI.Benchmarking
         /// </summary>
         public IReadOnlyList<DimensionScore> DimensionBreakdown()
         {
-            // Scenario-normalized, consistent with the per-scenario-median suite score: compute each
+            // Scenario-normalized, consistent with the per-scenario-mean suite score: compute each
             // scenario's per-dimension weighted pass-rate (averaged over its repetitions), then average
             // across scenarios. This stops a checkpoint-heavy scenario (or reps > 1) from dominating.
             Dictionary<BenchmarkDimension, List<double>> perScenario = new();
@@ -288,7 +290,7 @@ namespace CoreAI.Benchmarking
         public IReadOnlyDictionary<string, double> MeanBaseByScenario()
         {
             Dictionary<string, double> means = new();
-            foreach (IGrouping<string, ScenarioResult> group in Results.GroupBy(r => r.ScenarioId))
+            foreach (IGrouping<string, ScenarioResult> group in GradedResults.GroupBy(r => r.ScenarioId))
             {
                 means[group.Key] = group.Average(r => r.Score.Base);
             }

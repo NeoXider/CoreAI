@@ -1068,6 +1068,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public virtual bool FreeBuildLayout => false;
 
             /// <summary>
+            /// When true, this run is deliberately excluded from the model's score (<see cref="FailureAttribution.NotGraded"/>) —
+            /// still runs, still screenshots, just doesn't feed the aggregate. For a scenario whose prompt
+            /// was fully overridden by an operator env var, so the built-in checkpoints no longer describe
+            /// the task that was actually asked (see G6's <c>COREAI_BENCHMARK_FREEBUILD_PROMPT</c>).
+            /// </summary>
+            public virtual bool ExcludeFromScoring => false;
+
+            /// <summary>
             /// Overrides how many times THIS scenario runs, independent of the suite-wide
             /// <c>COREAI_BENCHMARK_REPS</c>. <c>null</c> (default) = inherit the suite repetition count.
             /// A concrete value (typically 1) is for heavy one-off scenarios — visual hero builds (G6) and
@@ -1442,6 +1450,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 actualTokens: totalTokens, tokenBudget: scenario.TokenBudget,
                 actualMs: obs.LatencyMs, timeBudgetMs: scenario.TimeBudgetMs);
 
+            // A genuine crash/timeout attribution always wins — ExcludeFromScoring only downgrades a
+            // CLEAN run (obs.Attribution == None) to "ran fine, just not comparable", never masks a
+            // real framework/environment failure.
+            FailureAttribution attribution = obs.Attribution == FailureAttribution.None && scenario.ExcludeFromScoring
+                ? FailureAttribution.NotGraded
+                : obs.Attribution;
+
             ScenarioResult result = new()
             {
                 ScenarioId = scenario.Id,
@@ -1449,7 +1464,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Group = scenario.Group,
                 ModelId = modelId,
                 Score = score,
-                Attribution = obs.Attribution,
+                Attribution = attribution,
                 Checkpoints = grading.Checkpoints,
                 Penalties = grading.Penalties,
                 Turns = obs.Turns,

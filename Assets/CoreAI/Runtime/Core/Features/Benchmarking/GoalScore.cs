@@ -31,7 +31,15 @@ namespace CoreAI.Benchmarking
         Model = 2,
 
         /// <summary>Backend unavailable, model load canceled, timeout before first token, etc.</summary>
-        Environment = 3
+        Environment = 3,
+
+        /// <summary>
+        /// Ran fine, but deliberately excluded from the model's score — e.g. a scenario whose prompt was
+        /// fully overridden by an operator env var, so the built-in checkpoints (tuned for the default
+        /// prompt) no longer describe the task that was actually asked. Still shown in screenshots/tool
+        /// stats/session transcript, just excluded from <see cref="BenchmarkReport"/>'s graded aggregates.
+        /// </summary>
+        NotGraded = 4
     }
 
     /// <summary>
