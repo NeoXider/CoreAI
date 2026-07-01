@@ -125,19 +125,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void SaveAsync_Then_TryLoadAsync_RoundTrips_WrittenData()
+        public async Task SaveAsync_Then_TryLoadAsync_RoundTrips_WrittenData()
         {
             string root = CreateTempRoot();
             try
             {
                 FileAgentMemoryStore store = new(null, root);
-                store.SaveAsync(_roleId, new AgentMemoryState
+                await store.SaveAsync(_roleId, new AgentMemoryState
                 {
                     Memory = "ASYNC_FACT:dragon_slain",
                     LastSystemPrompt = "npc"
-                }).GetAwaiter().GetResult();
+                });
 
-                AgentMemoryState loaded = store.TryLoadAsync(_roleId).GetAwaiter().GetResult();
+                AgentMemoryState loaded = await store.TryLoadAsync(_roleId);
                 Assert.IsNotNull(loaded, "TryLoadAsync should return the state written by SaveAsync");
                 Assert.AreEqual("ASYNC_FACT:dragon_slain", loaded.Memory);
                 Assert.AreEqual("npc", loaded.LastSystemPrompt);

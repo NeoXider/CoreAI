@@ -25,6 +25,12 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
         {
 #if UNITY_EDITOR
+            // CAIU001 (no ConfigureAwait(false)) targets WebGL-reachable code; this whole branch is
+            // #if UNITY_EDITOR and can never compile into a WebGL player. ConfigureAwait(false) here is
+            // required: Edit Mode tests/tooling sometimes block the managed main thread on Task.Wait while
+            // this continues on the thread pool, and resuming on the captured Editor main-thread context
+            // would deadlock against that blocked wait (see UnityMainThreadLlmAsyncMarshalerEditModeTests).
+#pragma warning disable CAIU001
             // Same bypass as !isPlaying below, but must not call Application.isPlaying off the managed
             if (ShouldInvokeToolBodyInlineInEditor())
             {
@@ -32,6 +38,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return await InvokeFactoryOnEditorUnityMainThreadAsync(factory, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CAIU001
 #else
             await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(cancellationToken);
             return await factory();
@@ -262,7 +269,12 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }, null);
 
+            // See the CAIU001 suppression note in InvokeAsync above: this method is #if UNITY_EDITOR-only
+            // and ConfigureAwait(false) here is required to avoid deadlocking a main thread that is
+            // synchronously blocked (Task.Wait/.Result) waiting on this same call.
+#pragma warning disable CAIU001
             return await tcs.Task.ConfigureAwait(false);
+#pragma warning restore CAIU001
         }
 
         /// <summary>
