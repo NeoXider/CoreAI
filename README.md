@@ -72,11 +72,14 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 | [Game-Creation Benchmark](#game-creation-benchmark) | Local LLM game-building benchmark and model ranking |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
+| [Integration examples & ideas](#-integration-examples--ideas) | Practical game-design patterns using CoreAI tools & memory |
 | [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
 | [Tests](#-tests) | EditMode & PlayMode |
+| [Multiplayer & Singleplayer](#-multiplayer-and-singleplayer) | Host-authoritative multiplayer, local singleplayer |
 | [Changelog](#changelog) | Unity + core release notes (single source of truth) |
+| [Author & Community](#-author-and-community) | Author, ecosystem, license, contact, support |
 
 ---
 
