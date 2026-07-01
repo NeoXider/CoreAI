@@ -1074,7 +1074,10 @@ namespace CoreAI.Infrastructure.Llm
                 JObject json = JObject.Parse(resultText);
                 foreach (JProperty property in json.Properties())
                 {
-                    if (string.Equals(property.Name, "error", StringComparison.OrdinalIgnoreCase))
+                    // A truthy "error" value is a failure signal. Many result contracts (e.g. MemoryResult)
+                    // always serialize an "Error" property, null on success - presence alone must not count.
+                    if (string.Equals(property.Name, "error", StringComparison.OrdinalIgnoreCase) &&
+                        IsTruthyErrorValue(property.Value))
                     {
                         return false;
                     }
@@ -1102,6 +1105,28 @@ namespace CoreAI.Infrastructure.Llm
                 // "success" as a failure.
                 return !ContainsLegacySuccessFalse(trimmed);
             }
+        }
+
+        private static bool IsTruthyErrorValue(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+            {
+                return false;
+            }
+
+            if (token.Type == JTokenType.String)
+            {
+                return !string.IsNullOrEmpty(token.Value<string>());
+            }
+
+            if (token.Type == JTokenType.Boolean)
+            {
+                // Some contracts use "error": false to mean "no error".
+                return token.Value<bool>();
+            }
+
+            // Non-null object/array/number error payloads are still a meaningful failure signal.
+            return true;
         }
 
         private static bool IsExplicitFalse(JToken token)

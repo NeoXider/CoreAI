@@ -981,6 +981,16 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess(resultText));
         }
 
+        [TestCase("{\"Success\":true,\"Error\":null,\"Message\":\"Content appended\"}")]
+        [TestCase("{\"Success\":true,\"error\":\"\"}")]
+        [TestCase("{\"Success\":true,\"error\":false}")]
+        public void IsToolResultSuccess_NullOrEmptyErrorProperty_ReturnsTrue(string resultText)
+        {
+            // Regression: many result contracts (e.g. MemoryResult) always serialize an "Error" property,
+            // null/empty on success. Presence of the key alone must not be treated as a failure signal.
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(resultText));
+        }
+
         [Test]
         public void IsToolResultSuccess_NormalContentMentioningSuccess_ReturnsTrue()
         {
