@@ -18,6 +18,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **README's per-model G6 castle gallery moved to `Docs/BENCHMARK.md`.** The main README keeps only the
   brief benchmark description, the single combined multi-model ranking, and links out; the full
   per-model screenshot gallery now lives in the benchmark guide's "Castle Gallery" section.
+- **Live preview now shows which model is currently building.** A HUD label rigidly parented to
+  `BenchmarkLivePreviewCamera` reads "Model: {modelId}" for the duration of each screenshot-capturing
+  scenario, so a recorded multi-model sweep video is self-explanatory without reading the console. Hidden
+  along with the rest of the live preview before the final hero screenshot, so it never appears in
+  report images.
 
 ### Tool-calling hardening (2026-07-01 audit)
 

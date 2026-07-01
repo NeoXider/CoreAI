@@ -482,6 +482,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // (objects pop in as commands stream), instead of staring at an empty view until the final shot.
             private UnityEngine.GameObject _liveCamGo;
             private UnityEngine.GameObject _liveLightGo;
+            private UnityEngine.TextMesh _liveModelLabel;
 
             public VisualBenchmarkWorldExecutor()
             {
@@ -520,6 +521,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // Frame the -9..9 build volume from a 3/4 angle so objects appear in place as they spawn.
                     cam.transform.position = new UnityEngine.Vector3(14f, 16f, -22f);
                     cam.transform.LookAt(new UnityEngine.Vector3(0f, 2f, 0f));
+
+                    // HUD label rigidly parented to the camera (fixed local transform => fixed screen
+                    // position) so a recorded sweep video always shows which model is currently building.
+                    UnityEngine.GameObject labelGo = new("BenchmarkLiveModelLabel");
+                    labelGo.transform.SetParent(cam.transform, false);
+                    labelGo.transform.localPosition = new UnityEngine.Vector3(-3.7f, 2.35f, 6f);
+                    labelGo.transform.localRotation = UnityEngine.Quaternion.identity;
+                    _liveModelLabel = labelGo.AddComponent<UnityEngine.TextMesh>();
+                    _liveModelLabel.text = "";
+                    _liveModelLabel.characterSize = 0.12f;
+                    _liveModelLabel.fontSize = 60;
+                    _liveModelLabel.fontStyle = UnityEngine.FontStyle.Bold;
+                    _liveModelLabel.anchor = UnityEngine.TextAnchor.UpperLeft;
+                    _liveModelLabel.alignment = UnityEngine.TextAlignment.Left;
+                    _liveModelLabel.color = UnityEngine.Color.white;
                 }
                 catch (Exception ex)
                 {
@@ -538,6 +554,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 if (_liveLightGo != null)
                 {
                     _liveLightGo.SetActive(false);
+                }
+            }
+
+            /// <summary>Sets the "now benchmarking: model" HUD text shown in the live preview Game view,
+            /// so a recorded multi-model sweep always shows which model is currently building.</summary>
+            public void SetLiveModelLabel(string modelId)
+            {
+                if (_liveModelLabel != null)
+                {
+                    _liveModelLabel.text = string.IsNullOrEmpty(modelId) ? "" : $"Model: {modelId}";
                 }
             }
 
@@ -1255,6 +1281,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // Free-build hero shots (the castle) drop per-object labels — dozens of model-named
                     // objects would overlap into unreadable garble.
                     visSetup.HideLabels = scenario.FreeBuildLayout;
+                    visSetup.SetLiveModelLabel(modelId);
                 }
 
                 config = scenario.BuildAgent(env);
