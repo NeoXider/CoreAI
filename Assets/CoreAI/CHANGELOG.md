@@ -5,13 +5,15 @@
 ### Tool-calling hardening (2026-07-01 audit)
 
 - **Reliable tool-result success detection.** `ToolExecutionPolicy.IsToolResultSuccess` no longer treats any
-  text lacking the word "success" as success: it now recognizes JSON `error` / `ok:false` /
+  text lacking the word "success" as success: it now recognizes a **truthy** JSON `error` / `ok:false` /
   `succeeded:false` / `success:false` (any casing) and plain-text failure prefixes, and classifies the
-  result **before** it is truncated.
+  result **before** it is truncated. A merely-present but null/empty/false `error` key (e.g. `MemoryResult`,
+  which always serializes `Error`, null on success) is no longer misclassified as a failure.
 - **Duplicate detection fixes.** Intra-batch duplicate calls of non-`AllowDuplicates` tools are now caught on
   the first turn (only the later identical calls are rejected, order preserved); duplicate signatures use the
   repaired **canonical** tool name so casing variants are detected; a repeated mixed batch still executes its
-  `AllowDuplicates` calls.
+  `AllowDuplicates` calls; a batch where every call is a duplicate now correctly counts toward the
+  consecutive-error guard instead of letting a repeating model loop past it silently.
 - **Fail-closed tool-name repair.** Ambiguous case-insensitive name matches (two tools colliding under
   `OrdinalIgnoreCase`) are rejected as unknown instead of silently routing to the first match.
 - **Atomic memory/skill mutations.** Added `IAtomicAgentMemoryStore.MutateAsync` + a keyed-lock fallback and
