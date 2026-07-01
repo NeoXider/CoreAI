@@ -4,6 +4,21 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Benchmark scene lighting + docs restructuring (2026-07-01)
+
+- **G6 scene shadows were nearly invisible despite being enabled.** Both the final hero-shot key light
+  and the live preview light defaulted to `LightShadows.Soft` with the default `shadowBias`/
+  `shadowNormalBias`, which are tuned for room/level-scale scenes and "peter-pan" (detach/hide) the
+  shadow on the ~1m benchmark primitives; `shadowStrength` was also only 0.75. Raised strength to 1,
+  set an explicit low bias, and bumped shadow resolution on both lights.
+- **Live preview light now orbits while a model builds.** `BenchmarkLivePreviewLight` spins its azimuth
+  a full 360 deg every 3 minutes (elevation fixed, so the scene never goes dark) purely for a more
+  watchable Game-view timelapse when recording a model's build session; the final hero screenshot uses
+  a separate, static light and is unaffected.
+- **README's per-model G6 castle gallery moved to `Docs/BENCHMARK.md`.** The main README keeps only the
+  brief benchmark description, the single combined multi-model ranking, and links out; the full
+  per-model screenshot gallery now lives in the benchmark guide's "Castle Gallery" section.
+
 ### Tool-calling hardening (2026-07-01 audit)
 
 - **Streaming fails closed on bad tool JSON.** In the streaming MEAI client, a held text-shaped tool-call

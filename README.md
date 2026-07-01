@@ -106,28 +106,7 @@ CoreAI includes a local game-creation benchmark that measures how well an LLM bu
 
 </details>
 
-Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed).
-
-### Castle gallery - G6 free-build visual
-
-The benchmark's G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability.
-
-| Model | Hero screenshot |
-|-------|-----------------|
-| **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (97.2/100) | ![Heretic](Docs/Images/castles/heretic.png) |
-| **qwen3.5-4b-mtp** (94.1/100)¹ | ![Qwen3.5 4B MTP](Docs/Images/castles/qwen3.5-4b-mtp.png) |
-| **deepreinforce-ai_ornith-1.0-9b** (88.4/100) | ![Ornith](Docs/Images/castles/ornith.png) |
-| **qwythos-9b-claude-mythos-5-1m** (86.2/100) | ![Qwythos](Docs/Images/castles/qwythos.png) |
-| **qwen3.6-27b-fable-5-experimental** (83.9/100) | ![Fable](Docs/Images/castles/fable.png) |
-| **qwen3.5-2b** (79.4/100) | ![Qwen3.5 2B](Docs/Images/castles/qwen3.5-2b.png) |
-| **qwen3.5-0.8b** (51.2/100) | ![Qwen3.5 0.8B](Docs/Images/castles/qwen3.5-0.8b.png) |
-
-> **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [BENCHMARK.md](Docs/BENCHMARK.md) for details.
-
-¹ Re-verified 2026-07-01 (reps=1) after this session's streaming-migration and tool-calling reliability
-fixes; the other rows are from the reps=3 sweep dated in the ranking table above and have not been re-run.
-See [the full example report](Docs/Images/example_report/example_report.md) for the complete
-per-scenario breakdown and transcripts behind this number.
+Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed). Per-model G6 free-build castle screenshots live in the [benchmark guide's gallery](Docs/BENCHMARK.md#castle-gallery---g6-free-build-visual).
 
 ---
 

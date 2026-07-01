@@ -184,3 +184,24 @@ Example 8-model ranking from `TestResults/CoreAI/Benchmarks/COMPARISON.md`:
 | 6 | `qwen3.5-2b` | **79.4** | 70.8% | 17/1/6 | 88.9 | 86.3 | 78.6 | 50 | 50.6 | 91.7 | 4.9 | 22.7% | 97549 | `20260629_235827` |
 | 7 | `qwen3.5-0.8b` | **51.2** | 33.3% | 8/4/12 | 83.3 | 61 | 70.6 | 50 | 37.3 | 55.6 | 3.2 | 12.1% | 52315 | `20260629_235214` |
 | 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 87038 | `20260630_000238` |
+
+## Castle Gallery - G6 Free-Build Visual
+
+The G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability.
+
+| Model | Hero screenshot |
+|-------|-----------------|
+| **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (97.2/100) | ![Heretic](Images/castles/heretic.png) |
+| **qwen3.5-4b-mtp** (94.1/100)¹ | ![Qwen3.5 4B MTP](Images/castles/qwen3.5-4b-mtp.png) |
+| **deepreinforce-ai_ornith-1.0-9b** (88.4/100) | ![Ornith](Images/castles/ornith.png) |
+| **qwythos-9b-claude-mythos-5-1m** (86.2/100) | ![Qwythos](Images/castles/qwythos.png) |
+| **qwen3.6-27b-fable-5-experimental** (83.9/100) | ![Fable](Images/castles/fable.png) |
+| **qwen3.5-2b** (79.4/100) | ![Qwen3.5 2B](Images/castles/qwen3.5-2b.png) |
+| **qwen3.5-0.8b** (51.2/100) | ![Qwen3.5 0.8B](Images/castles/qwen3.5-0.8b.png) |
+
+> **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [How To Run](#how-to-run) above for details.
+
+¹ Re-verified 2026-07-01 (reps=1) after a streaming-migration and tool-calling reliability
+fix pass; the other rows are from the reps=3 sweep dated in the ranking table above and have not been re-run.
+See [the full example report](Images/example_report/example_report.md) for the complete
+per-scenario breakdown and transcripts behind this number.
