@@ -52,9 +52,12 @@ namespace CoreAI.Infrastructure.Llm
             "set_active, play_animation, stop_animation, list_animations, show_text, " +
             "play_sound, set_volume, hide_panel, apply_force, set_velocity, list_objects. " +
             "Use 'spawn' to create objects (prefabKey can be a built-in primitive — " +
-            "cube, sphere, cylinder, capsule, quad, empty — or a registered prefab key). " +
+            "cube, sphere, cylinder, capsule, empty — or a registered prefab key). " +
             "For spawn, targetName and prefabKey are required; x/y/z, fx/fy/fz, scale/scaleX/scaleY/scaleZ, " +
             "and stringValue parent name are optional. One Unity unit is one meter. " +
+            "Unscaled primitive sizes differ by shape: cube/sphere are 1m; cylinder and capsule are " +
+            "2m TALL (not 1m) at 1m diameter — a plain cylinder is already twice as tall as a cube of the " +
+            "same scaleY, so account for that when sizing towers, pillars, or trunks. " +
             "Use 'change' to update any subset of position, rotation, scale, and parent on an existing object. " +
             "Use 'set_color' to tint an object with an HTML color in stringValue. " +
             "'destroy' to remove, " +
@@ -88,7 +91,8 @@ namespace CoreAI.Infrastructure.Llm
             ("scaleZ", "number", false,
                 "Optional local Z size/scale for non-uniform pieces. Use for wall thickness/depth."),
             ("prefabKey", "string", false,
-                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key"),
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, empty) or a registered prefab key. " +
+                "Unscaled sizes: cube/sphere are 1m; cylinder/capsule are 2m tall (not 1m) at 1m diameter."),
             ("animationName", "string", false, "Name of the animation to play/stop"),
             ("textToDisplay", "string", false, "Text for show_text"),
             ("stringValue", "string", false,
@@ -135,7 +139,8 @@ namespace CoreAI.Infrastructure.Llm
             float? scaleY = null,
             [Description("Optional local Z size/scale for non-uniform objects.")]
             float? scaleZ = null,
-            [Description("What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key")]
+            [Description("What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, empty) or a registered prefab key. " +
+                "Unscaled sizes: cube/sphere are 1m; cylinder/capsule are 2m tall (not 1m) at 1m diameter.")]
             string? prefabKey = null,
             [Description("Object name to target or spawn.")]
             string? targetName = null,
@@ -181,7 +186,8 @@ namespace CoreAI.Infrastructure.Llm
                 "Optional local Z size/scale for non-uniform objects. Use for wall thickness/depth.")]
             float? scaleZ = null,
             [Description(
-                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key")]
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, empty) or a registered prefab key. " +
+                "Unscaled sizes: cube/sphere are 1m; cylinder/capsule are 2m tall (not 1m) at 1m diameter.")]
             string? prefabKey = null,
             [Description(
                 "Object name to target or create. Required for spawn and most object actions.")]

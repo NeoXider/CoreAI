@@ -140,15 +140,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "action='spawn', a DISTINCT targetName for every object, prefabKey for what to create, and explicit " +
                 "x,y,z coordinates within the -9..9 range so the whole scene fits in one screenshot. One Unity unit " +
                 "is one meter (y is height, larger y = higher; ground at y=0).\n\n" +
-                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
-                "quad. For the ground, use a wide, flat, low cube with scaleX/scaleY/scaleZ (for example scaleX=16, " +
-                "scaleY=0.2, scaleZ=16 at y=0) or a quad.\n\n" +
+                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule. " +
+                "For the ground, use a wide, flat, low cube with scaleX/scaleY/scaleZ (for example scaleX=16, " +
+                "scaleY=0.2, scaleZ=16 at y=0). These primitives are NOT all the same base size: " +
+                "cube/sphere are 1m unscaled, but cylinder and capsule are already 2m TALL unscaled at 1m " +
+                "diameter — for a tower/pillar/trunk of height H standing on the ground, use scaleY = H/2 (not H) " +
+                "and place its pivot at y = H/2.\n\n" +
                 $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
                 "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
                 "detailed — quantity and structure come first.\n\n" +
-                "Give it natural variety — varied sizes and angles — so it does not read as a grid of identical " +
-                "and rotations fx/fy/fz for angled pieces, so it does not read as a grid of identical 1m cubes. " +
-                "Use scaleX/scaleY/scaleZ for long, tall, wide or thin parts.";
+                "Give it natural variety — varied sizes, angles and rotations fx/fy/fz for angled pieces — so it " +
+                "does not read as a grid of identical 1m cubes. Use scaleX/scaleY/scaleZ for long, tall, wide or " +
+                "thin parts.";
 
             private const string CastleGoal =
                 "Build the most impressive castle you can. This is a showcase of your 3D spatial reasoning: the more " +
@@ -156,15 +159,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "action='spawn', a DISTINCT targetName for every object, prefabKey for what to create, and explicit " +
                 "x,y,z coordinates within the -9..9 range so the whole castle fits in one screenshot. One Unity unit " +
                 "is one meter (y is height, larger y = higher; the ground is at y=0).\n\n" +
-                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
-                "quad. For example cylinders for round towers and flag poles, cubes for walls/keep/battlements, " +
-                "spheres for domes/treetops, and a wide flat low cube (or a quad) for the ground.\n\n" +
+                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule. " +
+                "For example cylinders for round towers and flag poles, cubes for walls/keep/battlements, " +
+                "spheres for domes/treetops, and a wide flat low cube for the ground. These primitives " +
+                "are NOT all the same base size: cube/sphere are 1m unscaled, but cylinder and capsule are " +
+                "already 2m TALL unscaled at 1m diameter — for a tower/pillar of height H standing on the ground, " +
+                "use scaleY = H/2 (not H) and place its pivot at y = H/2.\n\n" +
                 "A castle MUST have, at minimum: four corner towers, walls connecting them into a closed perimeter, a " +
                 "gate gap at the front, and a central keep. Then add grandeur: battlements along the walls, flags on " +
                 "top of the towers, roofs, a bridge, a moat ring, trees and torches outside.\n\n" +
                 "If you are unsure how to lay it out, follow this proven skeleton and then EXTEND it with more detail:\n" +
                 "- Ground: prefabKey='cube' at (0,0,0), scaleX=18, scaleY=0.2, scaleZ=18.\n" +
-                "- Four corner towers: prefabKey='cylinder' at (-6,1.5,-6), (6,1.5,-6), (-6,1.5,6), (6,1.5,6), scaleX=1.4, scaleY=3, scaleZ=1.4.\n" +
+                "- Four corner towers: prefabKey='cylinder' at (-6,1.5,-6), (6,1.5,-6), (-6,1.5,6), (6,1.5,6), scaleX=1.4, scaleY=1.5, scaleZ=1.4 " +
+                "(cylinder's 2m unscaled height × scaleY=1.5 = 3m tall tower standing on the ground).\n" +
                 "- Walls: cubes connecting towers. A wall piece is about 2 meters long and thin: scaleX=2, scaleY=1.2, scaleZ=0.35 for east-west walls, or scaleX=0.35, scaleY=1.2, scaleZ=2 for north-south walls. " +
                 "Leave the front edge z=6 open in the middle for the gate.\n" +
                 "- Keep: several cubes near (0,1,0), at least 3 meters wide/tall using scaleX/scaleY/scaleZ.\n" +

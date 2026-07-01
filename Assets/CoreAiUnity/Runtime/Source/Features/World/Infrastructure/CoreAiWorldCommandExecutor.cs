@@ -34,7 +34,7 @@ namespace CoreAI.Infrastructure.World
         /// </param>
         /// <param name="allowPrimitives">
         /// When true (default), <c>spawn</c> falls back to creating a built-in Unity primitive
-        /// (cube/sphere/cylinder/capsule/plane/quad/empty via <see cref="CoreAiPrimitiveFactory"/>) when the
+        /// (cube/sphere/cylinder/capsule/plane/empty via <see cref="CoreAiPrimitiveFactory"/>) when the
         /// requested <c>prefabKey</c> is not a registered prefab, so the tool works without a prefab registry.
         /// </param>
         public CoreAiWorldCommandExecutor(

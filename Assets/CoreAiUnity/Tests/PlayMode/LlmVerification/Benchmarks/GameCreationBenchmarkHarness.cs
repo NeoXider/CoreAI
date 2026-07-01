@@ -640,7 +640,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 => value > 0f ? UnityEngine.Mathf.Clamp(value, 0.01f, 100f) : fallback;
 
             // The model now chooses each object's primitive via prefabKey (cube/sphere/cylinder/capsule/
-            // plane/quad); the harness no longer guesses a shape from the object's name. ShapeFor maps that
+            // plane); the harness no longer guesses a shape from the object's name. ShapeFor maps that
             // key to a primitive + a sensible per-shape default scale, and HashColor gives each object a
             // stable distinct colour so the scene reads like a prototype instead of identical grey cubes.
             private static (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) ShapeFor(string prefabKey)
@@ -660,8 +660,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         return (prim, S(0.7f, 0.95f, 0.7f));
                     case UnityEngine.PrimitiveType.Plane:
                         return (prim, S(1.2f, 1f, 1.2f));
-                    case UnityEngine.PrimitiveType.Quad:
-                        return (prim, S(1f, 1f, 0.12f));
                     default: // Cube, Sphere
                         return (prim, S(0.9f, 0.9f, 0.9f));
                 }

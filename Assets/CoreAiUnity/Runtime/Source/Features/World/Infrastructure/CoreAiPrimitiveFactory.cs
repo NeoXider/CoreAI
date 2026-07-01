@@ -10,7 +10,7 @@ namespace CoreAI.Infrastructure.World
     public static class CoreAiPrimitiveFactory
     {
         /// <summary>Human-readable list of accepted primitive keys, for tool descriptions and docs.</summary>
-        public const string SupportedKeys = "cube, sphere, cylinder, capsule, plane, quad, empty";
+        public const string SupportedKeys = "cube, sphere, cylinder, capsule, plane, empty";
 
         /// <summary>True when <paramref name="key"/> names a built-in primitive or an empty object.</summary>
         public static bool IsPrimitiveKey(string key)
@@ -72,9 +72,6 @@ namespace CoreAI.Infrastructure.World
                     return true;
                 case "plane":
                     type = PrimitiveType.Plane;
-                    return true;
-                case "quad":
-                    type = PrimitiveType.Quad;
                     return true;
                 case "empty":
                     isEmpty = true;

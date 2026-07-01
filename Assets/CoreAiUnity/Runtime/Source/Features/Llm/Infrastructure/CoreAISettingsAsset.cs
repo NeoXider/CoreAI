@@ -314,7 +314,7 @@ namespace CoreAI.Infrastructure.Llm
         [Header("World Commands")]
         [Tooltip(
             "When on, the world_command 'spawn' action can create built-in Unity primitives " +
-            "(cube, sphere, cylinder, capsule, plane, quad, empty) directly when the prefabKey is not a " +
+            "(cube, sphere, cylinder, capsule, plane, empty) directly when the prefabKey is not a " +
             "registered prefab — so the world tool works out of the box with no prefab registry. " +
             "When off, spawn is restricted to registered prefab keys. Default: on.")]
         [SerializeField]
