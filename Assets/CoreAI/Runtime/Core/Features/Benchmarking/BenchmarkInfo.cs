@@ -32,6 +32,7 @@ namespace CoreAI.Benchmarking
             { "G6", 6 }, // free-build visual (bonus; default castle)
             { "G3", 7 }, // reasoning & design
             { "G4", 8 }, // playable game (simulated playthrough)
+            { "G7", 9 }, // comprehensive integration (world + Lua cross-consistency; one-off, like G6)
         };
 
         /// <summary>Difficulty (1–10) for a group id; 5 (mid) when the group is unknown.</summary>

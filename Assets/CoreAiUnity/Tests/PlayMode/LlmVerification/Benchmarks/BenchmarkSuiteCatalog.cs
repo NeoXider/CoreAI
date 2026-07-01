@@ -21,6 +21,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             all.AddRange(GamePlaythroughScenariosG4.All()); // G4 — playable game (simulated playthrough)
             all.AddRange(GameInstructionScenariosG5.All()); // G5 — strict instruction-following (subtractive)
             all.AddRange(GameFreeBuildScenariosG6.All());   // G6 — free-form visual build (default: castle)
+            all.AddRange(GameIntegrationScenariosG7.All()); // G7 — comprehensive: world + Lua consistency
             return all;
         }
     }

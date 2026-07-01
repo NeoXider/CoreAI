@@ -36,7 +36,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int Difficulty => 5;
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
-            public override bool Repeatable => false; // visual hero, never repeated/averaged
+            public override int? RepsOverride => 1; // visual hero, never repeated/averaged
             // Tool-call cap for the visual build. Default 1000 — effectively "build as much as you want" for
             // any real model, while still a HARD safety valve so a weak model that spams identical spawns
             // can never loop forever and hang the run. When the cap is hit

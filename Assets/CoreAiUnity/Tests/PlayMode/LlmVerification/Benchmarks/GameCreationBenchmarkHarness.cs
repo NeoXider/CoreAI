@@ -1067,8 +1067,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>When true, the screenshot preserves model-authored positions instead of using the grid layout.</summary>
             public virtual bool FreeBuildLayout => false;
 
-            /// <summary>When false, the scenario runs once even when the suite repeats (e.g. the G6 visual hero).</summary>
-            public virtual bool Repeatable => true;
+            /// <summary>
+            /// Overrides how many times THIS scenario runs, independent of the suite-wide
+            /// <c>COREAI_BENCHMARK_REPS</c>. <c>null</c> (default) = inherit the suite repetition count.
+            /// A concrete value (typically 1) is for heavy one-off scenarios — visual hero builds (G6) and
+            /// comprehensive/integration scenarios (G7) — that should never re-run just because the suite
+            /// is averaging cheaper scenarios over several repetitions.
+            /// </summary>
+            public virtual int? RepsOverride => null;
 
             /// <summary>
             /// Per-scenario tool-call roundtrip cap, propagated to <see cref="AiTaskRequest.MaxToolCallRoundtrips"/>

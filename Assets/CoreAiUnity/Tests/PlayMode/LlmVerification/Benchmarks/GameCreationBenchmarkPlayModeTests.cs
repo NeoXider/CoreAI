@@ -219,7 +219,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 int maxAttempts = ResolveMaxAttempts();
                 GameBenchmarkScenario[] scenarios = AllScenarios();
-                BenchmarkProgress.Begin(scenarios.Length * repetitions, modelId);
+                // Per-scenario RepsOverride (e.g. G6/G7 always run once) means the true total is not simply
+                // scenarios.Length * repetitions — sum each scenario's actual planned rep count instead, or
+                // the progress bar/ETA would overshoot 100% whenever any scenario overrides its rep count.
+                int totalPlannedRuns = 0;
+                foreach (GameBenchmarkScenario s in scenarios)
+                {
+                    totalPlannedRuns += s.RepsOverride ?? repetitions;
+                }
+
+                BenchmarkProgress.Begin(totalPlannedRuns, modelId);
 
                 // Soft whole-suite time budget: when crossed, stop starting NEW scenarios and fall through to
                 // writing the report/screenshots for whatever finished. This is graceful — unlike the NUnit
@@ -241,9 +250,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
 
                     float timeout = ResolveTimeoutSeconds(scenario);
-                    // Non-repeatable scenarios (e.g. the G6 castle hero — a one-off visual) always run once,
-                    // even when the suite repeats every other scenario for an averaged score.
-                    int scenarioReps = scenario.Repeatable ? repetitions : 1;
+                    // Scenarios with a RepsOverride (e.g. the G6 castle hero, G7 comprehensive integration)
+                    // always run their own fixed count, even when the suite repeats every other scenario
+                    // for an averaged score.
+                    int scenarioReps = scenario.RepsOverride ?? repetitions;
                     for (int rep = 1; rep <= scenarioReps; rep++)
                     {
                         BenchmarkProgress.StartScenario(

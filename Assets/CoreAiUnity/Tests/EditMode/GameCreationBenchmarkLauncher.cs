@@ -54,6 +54,7 @@ namespace CoreAI.Tests.EditMode
         public const string PrefG4 = PrefPrefix + "g4";
         public const string PrefG5 = PrefPrefix + "g5";
         public const string PrefG6 = PrefPrefix + "g6";
+        public const string PrefG7 = PrefPrefix + "g7";
         public const string PrefReps = PrefPrefix + "reps";
         public const string PrefRetries = PrefPrefix + "retries";
         public const string PrefTimeout = PrefPrefix + "timeout";
@@ -91,10 +92,11 @@ namespace CoreAI.Tests.EditMode
             bool g4 = EditorPrefs.GetBool(PrefG4, true);
             bool g5 = EditorPrefs.GetBool(PrefG5, true);
             bool g6 = EditorPrefs.GetBool(PrefG6, false);
+            bool g7 = EditorPrefs.GetBool(PrefG7, false);
             int reps = EditorPrefs.GetInt(PrefReps, 1);
             int retries = EditorPrefs.GetInt(PrefRetries, 1);
             int timeout = EditorPrefs.GetInt(PrefTimeout, 0);
-            string groups = GroupsCsv(g1, g2, g3, g4, g5, g6);
+            string groups = GroupsCsv(g1, g2, g3, g4, g5, g6, g7);
 
             // Override on: empty fields fall back to the project asset (so "model only" works). Off: pass
             // null connection so Configure clears the env vars and the asset is used.
@@ -118,7 +120,7 @@ namespace CoreAI.Tests.EditMode
         public static bool? ConnectionMode(int mode) => mode == 1 ? true : (mode == 2 ? false : (bool?)null);
 
         /// <summary>CSV of the enabled benchmark groups; empty string means "all groups".</summary>
-        public static string GroupsCsv(bool g1, bool g2, bool g3, bool g4, bool g5, bool g6)
+        public static string GroupsCsv(bool g1, bool g2, bool g3, bool g4, bool g5, bool g6, bool g7)
         {
             List<string> on = new();
             if (g2) { on.Add("G2"); }
@@ -127,7 +129,8 @@ namespace CoreAI.Tests.EditMode
             if (g4) { on.Add("G4"); }
             if (g5) { on.Add("G5"); }
             if (g6) { on.Add("G6"); }
-            return on.Count is 0 or 6 ? "" : string.Join(",", on);
+            if (g7) { on.Add("G7"); }
+            return on.Count is 0 or 7 ? "" : string.Join(",", on);
         }
 
         [MenuItem("CoreAI/Benchmarks/Open Latest Results", priority = 120)]
