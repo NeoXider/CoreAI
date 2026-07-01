@@ -1582,11 +1582,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     TintRenderer(gr, new UnityEngine.Color(0.17f, 0.18f, 0.21f));
                 }
 
-                // Key + cool fill so the cubes read as 3D instead of flat silhouettes.
+                // Key + cool fill so the cubes read as 3D instead of flat silhouettes. A freshly
+                // AddComponent'd Light defaults to LightShadows.None, so without setting it explicitly
+                // the "3D" scene renders with no shadows at all — only the key casts (soft), so there is
+                // one clean shadow direction instead of the fill adding a second, conflicting one.
                 keyGo = new UnityEngine.GameObject("BenchmarkKey");
                 UnityEngine.Light key = keyGo.AddComponent<UnityEngine.Light>();
                 key.type = UnityEngine.LightType.Directional;
                 key.intensity = 1.5f;
+                key.shadows = UnityEngine.LightShadows.Soft;
+                key.shadowStrength = 0.75f;
                 keyGo.transform.rotation = UnityEngine.Quaternion.Euler(48f, -32f, 0f);
 
                 fillGo = new UnityEngine.GameObject("BenchmarkFill");
@@ -1903,9 +1908,24 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 RoleFitness.Result fit = RoleFitness.Evaluate(report);
 
                 // --- header ---
+                // Long/hyphenated model ids (OpenRouter-style: "qwen3.6-27b-heretic-...-imatrix-max")
+                // must never overflow the card at a fixed size, or they run off the frustum edges.
+                // Shrink by length like the hero header does, but AddCameraText has no wrap/measure —
+                // so a hard truncation is the actual backstop for arbitrarily long ids, not the size floor.
                 System.Globalization.CultureInfo inv = System.Globalization.CultureInfo.InvariantCulture;
-                AddCameraText(p, $"{report.Metadata.ModelId} — {report.SuiteBaseScore.ToString("0", inv)}/100",
-                    new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.05f), 0.0135f, UnityEngine.Color.white, true);
+                string modelId = report.Metadata.ModelId ?? "";
+                if (modelId.Length > 68)
+                {
+                    modelId = modelId.Substring(0, 65) + "…";
+                }
+
+                string headerLine = $"{modelId} — {report.SuiteBaseScore.ToString("0", inv)}/100";
+                float headerSize = headerLine.Length > 60 ? 0.0060f
+                    : headerLine.Length > 46 ? 0.0080f
+                    : headerLine.Length > 34 ? 0.0100f
+                    : 0.0135f;
+                AddCameraText(p, headerLine,
+                    new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.05f), headerSize, UnityEngine.Color.white, true);
                 bool anyAssessed = false;
                 foreach (RoleFitness.RoleScore r in fit.Roles)
                 {
@@ -1993,7 +2013,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     new UnityEngine.Vector3(0.02f, 0.40f, zb - 0.05f), 0.0085f,
                     new UnityEngine.Color(0.62f, 0.66f, 0.72f), false, UnityEngine.TextAnchor.MiddleLeft);
 
-                const float barX0 = 0.55f, barW = 0.60f;
+                // barW is kept short of the ~1.326-unit perspective-frustum half-width so the rating
+                // number (up to "10", drawn from barX0+barW+0.02) never gets clipped at the right edge.
+                const float barX0 = 0.55f, barW = 0.48f;
                 for (int j = 0; j < fit.Roles.Count && j < 6; j++)
                 {
                     RoleFitness.RoleScore role = fit.Roles[j];
@@ -2011,7 +2033,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         AddQuad(p, new UnityEngine.Vector3(barX0 + fw * 0.5f, y, zb - 0.01f),
                             new UnityEngine.Vector2(fw, 0.05f), RatingColor(role.Rating));
                         AddCameraText(p, role.Rating.ToString("0.#", inv),
-                            new UnityEngine.Vector3(barX0 + barW + 0.04f, y, zb - 0.05f),
+                            new UnityEngine.Vector3(barX0 + barW + 0.02f, y, zb - 0.05f),
                             0.0078f, UnityEngine.Color.white, true, UnityEngine.TextAnchor.MiddleLeft);
                     }
                     else
