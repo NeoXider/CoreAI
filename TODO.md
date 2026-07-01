@@ -72,26 +72,30 @@
       `ToolCalls` too. Low severity (labeling nuance, not a scoring bug).
 - [ ] Make the benchmark's manually-built orchestrator turn-trace visible in the Agent Session Inspector
       (today it only resolves a trace reader from a scene DI scope).
-- [ ] G4 playthrough scenarios (Combat/Crafting/Shop) score PARTIAL on weak models mainly from failed Lua
-      calls right after a successful `logic_define` (`attempt to call a nil value`, `bad argument #1 to
-      'next'`) — the goal text explains how to define a logic slot but not how to invoke/verify it
-      afterward. Ambiguous per a 2026-07-01 Codex read of the qwen3.5-4b-mtp full-suite transcripts: could
-      be pure model weakness, or a documented `logic_eval`/test-call API gap worth adding. Needs a look at
-      the actual Lua the model wrote (not visible in the report Markdown) before deciding.
-- [ ] G1 world-building scenarios (Coin collector, Constraint budget) can PASS while spawning every object
-      at the same `(0,0,0)` position — checkpoints don't verify spatial spread/distinctness. Found via the
-      same 2026-07-01 Codex transcript read. Consider adding a spacing/overlap checkpoint if G1 is meant to
-      test layout, not just object count/type.
-- [ ] G6 free-build: generic-subject prompt says "AT LEAST 24 objects" but `substantial_scene` grading
-      accepts 18 for custom free-builds (`GameCastleScenarioG6.cs:149` vs `:208-210`) — prompt/grading
-      mismatch, found via 2026-07-01 Codex benchmark-harness audit.
-- [ ] G6 bounds grading (`CountBoundsViolations`) checks only the spawn pivot, not the scaled extent — a
-      cube at `x=8.9` with `scaleX=8` passes "within -9..9" while most of it sits outside the build volume.
-- [ ] G6 `IsTowerLike()` treats any cylinder/capsule near a corner as a tower regardless of scale/name —
-      four thin flag poles at the corners can satisfy `corner_towers`.
-- [ ] G5 `exact_count`-style constraints (e.g. `g5_exact_three`) count `env.World.Commands.Count`, not
-      actual tool-call attempts — a 4th malformed/failed `world_command` after 3 valid spawns still reads
-      as `total == 3`, so the constraint passes despite an extra action being issued.
+- [x] ~~G4 playthrough scenarios (Combat/Crafting/Shop) score PARTIAL on weak models mainly from failed Lua
+      calls right after a successful `logic_define`~~ — fixed 2026-07-01 (Codex audit): added a `VerificationNote`
+      to each G4 goal clarifying `logic_define` does not create a directly-callable global; the harness invokes
+      registered slots with hidden samples.
+- [x] ~~G1 world-building scenarios (Coin collector, Constraint budget) can PASS while spawning every object
+      at the same `(0,0,0)` position~~ — fixed 2026-07-01 (Codex audit): added `DistinctSpawnPositionCells` +
+      `spatial_spread` checkpoints and a prompt requirement for distinct x/z positions, across all three G1 scenarios.
+- [x] ~~G6 free-build: generic-subject prompt says "AT LEAST 24 objects" but `substantial_scene` grading
+      accepts 18 for custom free-builds~~ — fixed 2026-07-01 (Codex audit): generic-build grading now also
+      requires 24 objects / 20 distinct names, matching the prompt.
+- [x] ~~G6 bounds grading (`CountBoundsViolations`) checks only the spawn pivot, not the scaled extent~~ —
+      fixed 2026-07-01 (Codex audit): added `HalfExtents()` (per-primitive-shape, including the real 2m
+      cylinder/capsule height) and bounds now check the full scaled extent.
+- [x] ~~G6 `IsTowerLike()` treats any cylinder/capsule near a corner as a tower regardless of scale/name~~ —
+      fixed 2026-07-01 (Codex audit): now also requires height >= 2.5m and footprint >= 1m.
+- [x] ~~G5 `exact_count`-style constraints count `env.World.Commands.Count`, not actual tool-call attempts~~ —
+      fixed 2026-07-01 (Codex audit): `g5_exactly_three` now uses `max(recorded commands, actual world_command
+      tool-call attempts)`.
+- [x] ~~G6 full-prompt override (`COREAI_BENCHMARK_FREEBUILD_PROMPT`) was still graded against the built-in
+      castle/generic checkpoints, unfairly failing a custom task~~ — fixed 2026-07-01: added
+      `FailureAttribution.NotGraded` + `GameBenchmarkScenario.ExcludeFromScoring`; a full-prompt override now
+      still runs/screenshots but is excluded from `SuiteBaseScore`/pass-rate/dimension breakdown (a
+      subject-only override still uses the known `GenericGoal` scaffold and stays gradeable). Verified live
+      against qwen3.5-4b-mtp: a 3-cube custom prompt now shows "No graded groups" instead of a punishing FAIL.
 - [ ] `RoleFitness` "Orchestrator / Director" can rate a small model 9+/10 off G1-G7 alone, since almost
       every scenario resolves in a single LLM turn (`RunObservation.Turns` = 1 nearly everywhere) — high
       Reasoning/Intent scores reflect "parsed the instruction correctly in one shot", not sustained

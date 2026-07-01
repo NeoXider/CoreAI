@@ -99,6 +99,48 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Verified end to end on `qwen3.5-4b-mtp` (local LM Studio): EditMode 1361/1361, PlayMode `FastNoLlm`
   48/48, full G1-G6 live suite 94.1/100 (20 PASS / 3 PARTIAL / 1 FAIL).
 
+### Second benchmark audit pass: grading gaps + custom-prompt scoring (2026-07-01)
+
+- **`RoleFitness` "Orchestrator / Director" now carries an honest scope caveat.** A small model can rate
+  9+/10 off G1-G7 alone since almost every scenario resolves in a single LLM turn — high Reasoning/Intent
+  scores reflect "parsed the instruction correctly in one shot", not the sustained multi-turn orchestration
+  with error recovery the role's own description asks for. The weights/gates are unchanged (that is a
+  calibration decision, not a quiet fix); the role's reason text now says so explicitly.
+- **G6 free-build with a full custom prompt (`COREAI_BENCHMARK_FREEBUILD_PROMPT`) is no longer graded
+  against the built-in castle/generic checkpoints.** It still runs and screenshots, but a new
+  `FailureAttribution.NotGraded` + `GameBenchmarkScenario.ExcludeFromScoring` keep it out of
+  `SuiteBaseScore`/pass-rate/dimension breakdown — previously an arbitrary custom prompt (e.g. "spawn 3
+  cubes") failed hard against the "at least 24 objects" castle checkpoint. A subject-only override
+  (`COREAI_BENCHMARK_FREEBUILD_SUBJECT`) still uses the known `GenericGoal` scaffold and stays gradeable.
+- **G1 world-building scenarios can no longer PASS by stacking every object at the same position** —
+  added `spatial_spread` checkpoints (distinct occupied x/z cells) across all three G1 scenarios, plus a
+  prompt requirement to place objects at distinct positions.
+- **G6 free-build grading fixes**: the generic-subject prompt said "at least 24 objects" but grading only
+  required 18 (now unified to 24, with distinct-names raised from 14 to 20 to match); bounds checking
+  (`CountBoundsViolations`) checked only the spawn pivot, not the scaled extent, so an oversized object
+  could sit mostly outside the -9..9 build volume and still pass (now checks real half-extents, including
+  the true 2m cylinder/capsule height); `IsTowerLike()` accepted any cylinder/capsule near a corner
+  (four thin flag poles could satisfy "four corner towers") — now also requires height >= 2.5m and
+  footprint >= 1m.
+- **G5 `exact_count`-style constraints now count actual tool-call attempts, not just recorded world
+  commands** — a 4th malformed/failed `world_command` after 3 valid spawns previously still read as
+  `total == 3`; `g5_exactly_three` now uses `max(recorded commands, actual tool-call attempts)`.
+- **G4 playthrough scenarios now clarify that `logic_define` does not create a directly-callable global** —
+  weak models sometimes tried invoking their own defined slot as a plain Lua function afterward and hit
+  `attempt to call a nil value`; the harness invokes registered slots itself with hidden samples.
+- **`BenchmarkReport.MeanBaseByScenario()` now excludes `Environment`/`Framework`/`NotGraded` results**,
+  consistent with every other aggregate (`Scenarios()`, `SuiteBaseScore`, `DimensionBreakdown()`) — it
+  previously averaged over the raw, unfiltered result list.
+- Cleaned up stale `quad` references left over from its removal (README, `ICoreAISettings.cs`,
+  `LLM_TOOLS.md`, `WORLD_COMMANDS.md`, `JSON_COMMAND_FORMAT.md`, `TOOL_CALL_SPEC.md`) and stale
+  "median" comments/tooltips describing the (already mean-based) repetition aggregation.
+- Removed a blank placeholder entry from `CoreAiPrefabRegistry.asset` (harmless — `TryResolve` rejects
+  blank keys — but noisy in the inspector).
+- Two independent Codex audits (one scoped to `RoleFitness`, one a fresh full-harness sweep) found and
+  fixed all of the above; verified via `dotnet build`, EditMode 1361/1361, PlayMode `FastNoLlm` 48/48, and
+  a live G6 custom-prompt run against `qwen3.5-4b-mtp` confirming the excluded scenario now shows "No
+  graded groups" instead of a punishing FAIL.
+
 ### Benchmark report + harness fixes, G7 comprehensive scenario (2026-07-01)
 
 - **Modelcard PNG: fixed text overflow and role-fitness number clipping.** The header (model id + score)

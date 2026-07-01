@@ -7,6 +7,12 @@
 - `BenchmarkInfo.GroupDifficulty10` gained a `G7` entry (difficulty 9, hardest) for the new
   comprehensive-integration scenario group (world-building + Lua logic cross-consistency) added on the
   CoreAiUnity side — see `com.neoxider.coreaiunity`'s changelog for the scenario itself.
+- `FailureAttribution` gained a `NotGraded` value: a scenario that ran fine but is deliberately excluded
+  from the model's score (e.g. a fully custom-prompt free-build the built-in checkpoints weren't designed
+  for). `BenchmarkReport.GradedResults`/`MeanBaseByScenario()` now both exclude it, consistent with the
+  existing `Environment`/`Framework` exclusions.
+- `RoleFitness`'s "Orchestrator / Director" role text now notes the current suite mostly measures
+  task-level sequencing, not sustained multi-turn orchestration (weights/gates unchanged).
 
 ### Tool-calling hardening (2026-07-01 audit)
 
