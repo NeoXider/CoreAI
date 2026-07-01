@@ -88,12 +88,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_UsesReasoningContent()
+        public void ParseCompletion_EmptyContent_DoesNotExposeReasoningContent()
         {
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Hello from reasoning\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("Hello from reasoning", r.Text);
+            Assert.AreEqual("", r.Text);
         }
 
         [Test]
@@ -106,12 +106,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_UsesReasoningContent_CamelCase()
+        public void ParseCompletion_EmptyContent_DoesNotExposeReasoningContent_CamelCase()
         {
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoningContent\":\"Hello camel\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("Hello camel", r.Text);
+            Assert.AreEqual("", r.Text);
         }
 
         [Test]
@@ -232,6 +232,49 @@ namespace CoreAI.Tests.EditMode
             MEAI.FunctionCallContent beta = calls.Single(c => c.Name == "beta");
             Assert.AreEqual("call_b", beta.CallId);
             Assert.AreEqual(2L, Convert.ToInt64(beta.Arguments["y"]));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_ReusedIndexWithDifferentId_DoesNotMergeCalls()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_b\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":2}\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count);
+
+            MEAI.FunctionCallContent alpha = calls.Single(c => c.CallId == "call_a");
+            Assert.AreEqual("alpha", alpha.Name);
+            Assert.AreEqual(1L, Convert.ToInt64(alpha.Arguments["x"]));
+
+            MEAI.FunctionCallContent beta = calls.Single(c => c.CallId == "call_b");
+            Assert.AreEqual("beta", beta.Name);
+            Assert.AreEqual(2L, Convert.ToInt64(beta.Arguments["y"]));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_MissingIndexWithoutIdWhileMultiplePending_MarksParseError()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":2}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"unowned\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count);
+            Assert.IsTrue(calls.All(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)));
+            Assert.IsTrue(calls.All(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests)));
         }
 
         [Test]

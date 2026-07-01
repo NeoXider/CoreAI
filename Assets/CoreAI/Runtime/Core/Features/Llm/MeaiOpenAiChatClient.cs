@@ -1190,41 +1190,7 @@ namespace CoreAI.Infrastructure.Llm
                 return content;
             }
 
-            foreach (string key in new[] { "reasoning_content", "reasoningContent", "reasoning" })
-            {
-                JToken t = SelectPropertyCaseInsensitive(m, key);
-                if (t == null || t.Type == JTokenType.Null)
-                {
-                    continue;
-                }
-
-                if (t.Type != JTokenType.String)
-                {
-                    continue;
-                }
-
-                string reasoning = t.Value<string>() ?? "";
-                reasoning = StripRedactedThinkingBlock(reasoning);
-                if (!string.IsNullOrWhiteSpace(reasoning))
-                {
-                    return reasoning;
-                }
-            }
-
             return "";
-        }
-
-        private static JToken SelectPropertyCaseInsensitive(JObject obj, string name)
-        {
-            foreach (JProperty p in obj.Properties())
-            {
-                if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return p.Value;
-                }
-            }
-
-            return null;
         }
 
         private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw,
@@ -1314,7 +1280,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         foreach (JToken tc in toolCallsArray)
                         {
-                            int index = tc["index"]?.Value<int>() ?? 0;
+                            int? index = tc["index"]?.Value<int>();
                             string callId = tc["id"]?.ToString();
                             JToken func = tc["function"];
                             string name = func?["name"]?.ToString();
@@ -1482,8 +1448,8 @@ namespace CoreAI.Infrastructure.Llm
         internal static string ToolCallParseErrorKeyForTests => SseToolCallAccumulator.ParseErrorKey;
 
         /// <summary>
-        /// Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by tool-call index.
-        /// Each index is a distinct in-progress tool call, so parallel calls accumulate independently.
+        /// Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by stable call id when
+        /// present, otherwise by tool-call index. Parallel compliant calls accumulate independently.
         /// </summary>
         private sealed class SseToolCallAccumulator
         {
@@ -1493,8 +1459,11 @@ namespace CoreAI.Infrastructure.Llm
             /// <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
             internal const string ParseErrorKey = ToolCallArgumentMarkers.ParseErrorKey;
 
-            private readonly Dictionary<int, PendingToolCall> _pending = new();
+            private readonly List<PendingToolCall> _pending = new();
+            private readonly Dictionary<string, PendingToolCall> _pendingById = new(StringComparer.Ordinal);
+            private readonly Dictionary<int, PendingToolCall> _pendingByIndex = new();
             private readonly ILog _log;
+            private int _nextSequence;
 
             public SseToolCallAccumulator(ILog log = null)
             {
@@ -1507,17 +1476,19 @@ namespace CoreAI.Infrastructure.Llm
             /// always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
             /// arrive in any order across chunks.
             /// </summary>
-            public void Feed(int index, string callId, string name, string argumentsFragment)
+            public void Feed(int? index, string callId, string name, string argumentsFragment)
             {
-                if (!_pending.TryGetValue(index, out PendingToolCall entry))
+                string stableId = string.IsNullOrWhiteSpace(callId) ? null : callId;
+                PendingToolCall entry = ResolveEntry(index, stableId, name, argumentsFragment);
+                if (entry == null)
                 {
-                    entry = new PendingToolCall();
-                    _pending[index] = entry;
+                    return;
                 }
 
-                if (!string.IsNullOrEmpty(callId))
+                if (!string.IsNullOrEmpty(stableId) && string.IsNullOrEmpty(entry.Id))
                 {
-                    entry.Id = callId;
+                    entry.Id = stableId;
+                    _pendingById[stableId] = entry;
                 }
 
                 if (!string.IsNullOrEmpty(name))
@@ -1529,6 +1500,97 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     entry.Arguments.Append(argumentsFragment);
                 }
+            }
+
+            private PendingToolCall ResolveEntry(int? index, string stableId, string name, string argumentsFragment)
+            {
+                if (!string.IsNullOrEmpty(stableId) &&
+                    _pendingById.TryGetValue(stableId, out PendingToolCall byId))
+                {
+                    AttachIndexIfSafe(byId, index);
+                    return byId;
+                }
+
+                if (index.HasValue && _pendingByIndex.TryGetValue(index.Value, out PendingToolCall byIndex))
+                {
+                    if (!string.IsNullOrEmpty(stableId) &&
+                        !string.IsNullOrEmpty(byIndex.Id) &&
+                        !string.Equals(byIndex.Id, stableId, StringComparison.Ordinal))
+                    {
+                        return CreateEntry(index, stableId);
+                    }
+
+                    return byIndex;
+                }
+
+                if (!index.HasValue && string.IsNullOrEmpty(stableId))
+                {
+                    if (_pending.Count == 1)
+                    {
+                        return _pending[0];
+                    }
+
+                    if (_pending.Count > 1)
+                    {
+                        MarkAmbiguousMissingIndex(name, argumentsFragment);
+                        return null;
+                    }
+                }
+
+                return CreateEntry(index, stableId);
+            }
+
+            private void AttachIndexIfSafe(PendingToolCall entry, int? index)
+            {
+                if (!index.HasValue || entry.Index.HasValue)
+                {
+                    return;
+                }
+
+                if (_pendingByIndex.TryGetValue(index.Value, out PendingToolCall existing) &&
+                    !ReferenceEquals(existing, entry))
+                {
+                    return;
+                }
+
+                entry.Index = index;
+                _pendingByIndex[index.Value] = entry;
+            }
+
+            private PendingToolCall CreateEntry(int? index, string stableId)
+            {
+                PendingToolCall entry = new()
+                {
+                    Index = index,
+                    Id = stableId,
+                    Sequence = _nextSequence++
+                };
+                _pending.Add(entry);
+
+                if (index.HasValue)
+                {
+                    _pendingByIndex[index.Value] = entry;
+                }
+
+                if (!string.IsNullOrEmpty(stableId))
+                {
+                    _pendingById[stableId] = entry;
+                }
+
+                return entry;
+            }
+
+            private void MarkAmbiguousMissingIndex(string name, string argumentsFragment)
+            {
+                foreach (PendingToolCall pending in _pending)
+                {
+                    pending.ForceParseError = true;
+                }
+
+                _log.Warn(
+                    "MeaiOpenAiChatClient: streamed tool-call fragment had no id/index while multiple calls were pending; " +
+                    $"dropping ambiguous fragment instead of merging it (name='{name ?? ""}', args length={argumentsFragment?.Length ?? 0}).",
+                    LogTag.Llm);
             }
 
             public MEAI.ChatResponseUpdate Flush()
@@ -1543,9 +1605,10 @@ namespace CoreAI.Infrastructure.Llm
 
                 // Emit in ascending tool-call index order so the FunctionCallContent order is
                 // deterministic and matches the provider's tool_calls index order.
-                foreach (KeyValuePair<int, PendingToolCall> kvp in _pending.OrderBy(p => p.Key))
+                foreach (PendingToolCall pending in _pending
+                             .OrderBy(p => p.Index ?? int.MaxValue)
+                             .ThenBy(p => p.Sequence))
                 {
-                    PendingToolCall pending = kvp.Value;
                     string argsStr = pending.Arguments.ToString();
 
                     if (string.IsNullOrEmpty(pending.Name))
@@ -1555,7 +1618,7 @@ namespace CoreAI.Infrastructure.Llm
                         if (!string.IsNullOrEmpty(pending.Id) || !string.IsNullOrEmpty(argsStr))
                         {
                             _log.Warn(
-                                $"MeaiOpenAiChatClient: dropped streamed tool call at index {kvp.Key} - missing function name " +
+                                $"MeaiOpenAiChatClient: dropped streamed tool call at {pending.IdentityLabel} - missing function name " +
                                 $"(id='{pending.Id ?? ""}', args length={argsStr.Length}).",
                                 LogTag.Llm);
                         }
@@ -1563,13 +1626,15 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    Dictionary<string, object> args = ParseArguments(argsStr, pending.Name, kvp.Key);
+                    Dictionary<string, object> args = ParseArguments(argsStr, pending.Name, pending);
                     update.Contents.Add(new MEAI.FunctionCallContent(
                         pending.Id ?? $"sse_{pending.Name}_{Guid.NewGuid():N}",
                         pending.Name, args));
                 }
 
                 _pending.Clear();
+                _pendingById.Clear();
+                _pendingByIndex.Clear();
                 return update.Contents.Count > 0 ? update : null;
             }
 
@@ -1578,8 +1643,17 @@ namespace CoreAI.Infrastructure.Llm
             /// dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
             /// and a warning is logged, so callers can detect and recover from a broken stream.
             /// </summary>
-            private Dictionary<string, object> ParseArguments(string argsStr, string name, int index)
+            private Dictionary<string, object> ParseArguments(string argsStr, string name, PendingToolCall pending)
             {
+                if (pending.ForceParseError)
+                {
+                    _log.Warn(
+                        $"MeaiOpenAiChatClient: streamed tool call '{name}' ({pending.IdentityLabel}) was marked ambiguous - " +
+                        "surfacing raw arguments instead of invoking with possibly merged args.",
+                        LogTag.Llm);
+                    return BuildParseErrorArguments(argsStr);
+                }
+
                 if (string.IsNullOrEmpty(argsStr))
                 {
                     return new Dictionary<string, object>();
@@ -1597,11 +1671,16 @@ namespace CoreAI.Infrastructure.Llm
                 catch (JsonException ex)
                 {
                     _log.Warn(
-                        $"MeaiOpenAiChatClient: streamed tool call '{name}' (index {index}) had malformed/truncated " +
+                        $"MeaiOpenAiChatClient: streamed tool call '{name}' ({pending.IdentityLabel}) had malformed/truncated " +
                         $"arguments JSON - surfacing raw string instead of empty args: {ex.Message}",
                         LogTag.Llm);
                 }
 
+                return BuildParseErrorArguments(argsStr);
+            }
+
+            private static Dictionary<string, object> BuildParseErrorArguments(string argsStr)
+            {
                 return new Dictionary<string, object>
                 {
                     { RawArgumentsKey, argsStr },
@@ -1609,12 +1688,17 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            /// <summary>Mutable per-index accumulation state for one in-progress streamed tool call.</summary>
+            /// <summary>Mutable accumulation state for one in-progress streamed tool call.</summary>
             private sealed class PendingToolCall
             {
+                public int? Index;
                 public string Id;
                 public string Name;
+                public int Sequence;
+                public bool ForceParseError;
                 public readonly StringBuilder Arguments = new();
+
+                public string IdentityLabel => Index.HasValue ? $"index {Index.Value}" : $"sequence {Sequence}";
             }
         }
 
