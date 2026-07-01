@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Logging;
@@ -17,6 +19,8 @@ namespace CoreAI.Infrastructure.Lua
         private readonly MemoryLuaScriptVersionStore _memory = new();
         private readonly string _filePath;
         private readonly object _ioLock = new();
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
+            new(StringComparer.Ordinal);
 
         public FileLuaScriptVersionStore(IGameLogger logger)
         {
@@ -25,7 +29,7 @@ namespace CoreAI.Infrastructure.Lua
                 CoreAiPersistentPaths.LuaScriptVersions);
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "lua_script_versions.json");
-            LoadFromDisk();
+            ReadFromDisk(() => true);
         }
 
         /// <summary>Initializes a new instance of FileLuaScriptVersionStore.</summary>
@@ -39,52 +43,81 @@ namespace CoreAI.Infrastructure.Lua
                 Directory.CreateDirectory(dir);
             }
 
-            LoadFromDisk();
+            ReadFromDisk(() => true);
         }
 
         public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)
         {
-            return _memory.TryGetSnapshot(scriptKey, out snapshot);
+            LuaScriptVersionRecord loaded = null;
+            bool found = ReadFromDisk(() => _memory.TryGetSnapshot(scriptKey, out loaded));
+            snapshot = loaded;
+            return found;
         }
 
         public void RecordSuccessfulExecution(string scriptKey, string executedLuaSource)
         {
-            _memory.RecordSuccessfulExecution(scriptKey, executedLuaSource);
-            SaveToDisk();
+            MutateOnDisk(() => _memory.RecordSuccessfulExecution(scriptKey, executedLuaSource));
         }
 
         public void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false)
         {
-            _memory.SeedOriginal(scriptKey, originalLuaSource, overwriteExistingOriginal);
-            SaveToDisk();
+            MutateOnDisk(() => _memory.SeedOriginal(scriptKey, originalLuaSource, overwriteExistingOriginal));
         }
 
         public void ResetToOriginal(string scriptKey)
         {
-            _memory.ResetToOriginal(scriptKey);
-            SaveToDisk();
+            MutateOnDisk(() => _memory.ResetToOriginal(scriptKey));
         }
 
         public void ResetToRevision(string scriptKey, int revisionIndex)
         {
-            _memory.ResetToRevision(scriptKey, revisionIndex);
-            SaveToDisk();
+            MutateOnDisk(() => _memory.ResetToRevision(scriptKey, revisionIndex));
         }
 
         public void ResetAllToOriginal()
         {
-            _memory.ResetAllToOriginal();
-            SaveToDisk();
+            MutateOnDisk(() => _memory.ResetAllToOriginal());
         }
 
         public IReadOnlyList<string> GetKnownKeys()
         {
-            return _memory.GetKnownKeys();
+            return ReadFromDisk(() => _memory.GetKnownKeys());
         }
 
         public string BuildProgrammerPromptSection(string scriptKey)
         {
-            return _memory.BuildProgrammerPromptSection(scriptKey);
+            return ReadFromDisk(() => _memory.BuildProgrammerPromptSection(scriptKey));
+        }
+
+        private void MutateOnDisk(Action mutation)
+        {
+            SemaphoreSlim gate = FileLocks.GetOrAdd(Path.GetFullPath(_filePath), _ => new SemaphoreSlim(1, 1));
+            gate.Wait();
+            try
+            {
+                LoadFromDisk();
+                mutation();
+                SaveToDisk();
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        private T ReadFromDisk<T>(Func<T> read)
+        {
+            SemaphoreSlim gate = FileLocks.GetOrAdd(Path.GetFullPath(_filePath), _ => new SemaphoreSlim(1, 1));
+            gate.Wait();
+            try
+            {
+                LoadFromDisk();
+                return read();
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
 
         private void LoadFromDisk()

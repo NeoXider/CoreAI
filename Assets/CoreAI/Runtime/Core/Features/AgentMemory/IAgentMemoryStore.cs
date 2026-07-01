@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
@@ -36,6 +39,21 @@ namespace CoreAI.Ai
         ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0);
     }
 
+    /// <summary>
+    /// Optional store capability for atomic role-memory read/modify/write transactions.
+    /// </summary>
+    public interface IAtomicAgentMemoryStore
+    {
+        /// <summary>
+        /// Runs <paramref name="mutator"/> while the store holds a process-wide role key lock, then persists
+        /// the resulting state before releasing the lock.
+        /// </summary>
+        Task<TResult> MutateAsync<TResult>(
+            string roleId,
+            Func<AgentMemoryState, TResult> mutator,
+            CancellationToken cancellationToken = default);
+    }
+
     /// <summary>Serializable chat transcript entry.</summary>
     [Serializable]
     public struct ChatMessage
@@ -59,6 +77,54 @@ namespace CoreAI.Ai
     /// </summary>
     public static class AgentMemoryStoreExtensions
     {
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new();
+
+        /// <summary>
+        /// Atomically loads, mutates, and saves one role state. Stores that can map to a durable file/key
+        /// should implement <see cref="IAtomicAgentMemoryStore"/>; the fallback still serializes callers
+        /// process-wide by store type and role id.
+        /// </summary>
+        public static async Task<TResult> MutateAsync<TResult>(
+            this IAgentMemoryStore store,
+            string roleId,
+            Func<AgentMemoryState, TResult> mutator,
+            CancellationToken cancellationToken = default)
+        {
+            if (store == null)
+            {
+                throw new ArgumentNullException(nameof(store));
+            }
+
+            if (mutator == null)
+            {
+                throw new ArgumentNullException(nameof(mutator));
+            }
+
+            if (store is IAtomicAgentMemoryStore atomic)
+            {
+                return await atomic.MutateAsync(roleId, mutator, cancellationToken).ConfigureAwait(false);
+            }
+
+            string key = $"{store.GetType().FullName}:{roleId ?? ""}";
+            SemaphoreSlim gate = MutationLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (!store.TryLoad(roleId, out AgentMemoryState state) || state == null)
+                {
+                    state = new AgentMemoryState();
+                }
+
+                TResult result = mutator(state);
+                store.Save(roleId, state);
+                return result;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
         /// <summary>Returns retained memory versions for a role in chronological order.</summary>
         public static IReadOnlyList<AgentMemoryVersionSnapshot> ListVersions(this IAgentMemoryStore store,
             string roleId)

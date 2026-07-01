@@ -151,22 +151,37 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                if (_catalog.Get(skillId) != null || _store.TryLoad(skillId, out _))
+                SkillAuthoringResult result = _store.Mutate(
+                    skillId,
+                    current =>
+                    {
+                        if (_catalog.Get(skillId) != null || current != null)
+                        {
+                            return SkillStoreMutation<SkillAuthoringResult>.NoChange(
+                                SkillAuthoringResult.Failure(
+                                    $"create: a skill named '{skillId}' already exists. Use update to revise it."));
+                        }
+
+                        SkillRecord record = new(skillId, description ?? "", instructions ?? "",
+                            toolNames ?? new List<string>());
+                        if (!TryBuildSkill(record, out SkillSet skill, out string error, allowUnknownTools: false))
+                        {
+                            return SkillStoreMutation<SkillAuthoringResult>.NoChange(
+                                SkillAuthoringResult.Failure($"create: {error}"));
+                        }
+
+                        _catalog.AddOrReplace(skill);
+                        SkillAuthoringResult created =
+                            SkillAuthoringResult.Ok(record, $"Skill '{skillId}' created (version 0).");
+                        return SkillStoreMutation<SkillAuthoringResult>.SaveRecord(record, created);
+                    });
+
+                if (result.Success && result.Record != null)
                 {
-                    return SkillAuthoringResult.Failure(
-                        $"create: a skill named '{skillId}' already exists. Use update to revise it.");
+                    SeedVersion(result.Record);
                 }
 
-                SkillRecord record = new(skillId, description ?? "", instructions ?? "", toolNames ?? new List<string>());
-                if (!TryBuildSkill(record, out SkillSet skill, out string error, allowUnknownTools: false))
-                {
-                    return SkillAuthoringResult.Failure($"create: {error}");
-                }
-
-                _catalog.AddOrReplace(skill);
-                _store.Save(record);
-                SeedVersion(record);
-                return SkillAuthoringResult.Ok(record, $"Skill '{skillId}' created (version 0).");
+                return result;
             }
         }
 
@@ -186,37 +201,50 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                if (!_store.TryLoad(skillId, out SkillRecord current) || current == null)
-                {
-                    SkillSet existingSkill = _catalog.Get(skillId);
-                    if (existingSkill == null)
-                    {
-                        return SkillAuthoringResult.Failure(
-                            $"update: skill '{skillId}' not found. Use create to author it first.");
-                    }
-
-                    // Promote a host-registered (un-persisted) skill into an authored, versioned one.
-                    current = new SkillRecord(existingSkill.Name, existingSkill.Description,
-                        existingSkill.Instructions, existingSkill.ToolNames);
-                }
-
-                SkillRecord revised = new(
+                SkillAuthoringResult result = _store.Mutate(
                     skillId,
-                    description ?? current.Description,
-                    instructions ?? current.Instructions,
-                    toolNames != null ? new List<string>(toolNames) : current.ToolNames,
-                    current.Version + 1);
+                    current =>
+                    {
+                        if (current == null)
+                        {
+                            SkillSet existingSkill = _catalog.Get(skillId);
+                            if (existingSkill == null)
+                            {
+                                return SkillStoreMutation<SkillAuthoringResult>.NoChange(
+                                    SkillAuthoringResult.Failure(
+                                        $"update: skill '{skillId}' not found. Use create to author it first."));
+                            }
 
-                if (!TryBuildSkill(revised, out SkillSet skill, out string error, allowUnknownTools: false))
+                            // Promote a host-registered (un-persisted) skill into an authored, versioned one.
+                            current = new SkillRecord(existingSkill.Name, existingSkill.Description,
+                                existingSkill.Instructions, existingSkill.ToolNames);
+                        }
+
+                        SkillRecord revised = new(
+                            skillId,
+                            description ?? current.Description,
+                            instructions ?? current.Instructions,
+                            toolNames != null ? new List<string>(toolNames) : current.ToolNames,
+                            current.Version + 1);
+
+                        if (!TryBuildSkill(revised, out SkillSet skill, out string error, allowUnknownTools: false))
+                        {
+                            return SkillStoreMutation<SkillAuthoringResult>.NoChange(
+                                SkillAuthoringResult.Failure($"update: {error}"));
+                        }
+
+                        _catalog.AddOrReplace(skill);
+                        SkillAuthoringResult updated = SkillAuthoringResult.Ok(revised,
+                            $"Skill '{skillId}' updated (now version {revised.Version}).");
+                        return SkillStoreMutation<SkillAuthoringResult>.SaveRecord(revised, updated);
+                    });
+
+                if (result.Success && result.Record != null)
                 {
-                    return SkillAuthoringResult.Failure($"update: {error}");
+                    RecordRevision(result.Record);
                 }
 
-                _catalog.AddOrReplace(skill);
-                _store.Save(revised);
-                RecordRevision(revised);
-                return SkillAuthoringResult.Ok(revised,
-                    $"Skill '{skillId}' updated (now version {revised.Version}).");
+                return result;
             }
         }
 
@@ -231,15 +259,20 @@ namespace CoreAI.Ai
             string skillId = id.Trim();
             lock (_lock)
             {
-                bool inCatalog = _catalog.Remove(skillId);
-                bool inStore = _store.TryLoad(skillId, out _);
-                if (!inCatalog && !inStore)
-                {
-                    return SkillAuthoringResult.Failure($"delete: skill '{skillId}' not found.");
-                }
+                return _store.Mutate(
+                    skillId,
+                    current =>
+                    {
+                        bool inCatalog = _catalog.Remove(skillId);
+                        if (!inCatalog && current == null)
+                        {
+                            return SkillStoreMutation<SkillAuthoringResult>.NoChange(
+                                SkillAuthoringResult.Failure($"delete: skill '{skillId}' not found."));
+                        }
 
-                _store.Delete(skillId);
-                return SkillAuthoringResult.Ok(null, $"Skill '{skillId}' deleted.");
+                        return SkillStoreMutation<SkillAuthoringResult>.DeleteRecord(
+                            SkillAuthoringResult.Ok(null, $"Skill '{skillId}' deleted."));
+                    });
             }
         }
 

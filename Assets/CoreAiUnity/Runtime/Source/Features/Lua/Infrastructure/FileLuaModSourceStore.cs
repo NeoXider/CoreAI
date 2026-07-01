@@ -1,5 +1,6 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -51,6 +52,8 @@ namespace CoreAI.Infrastructure.Lua
         };
 
         private static readonly IReadOnlyList<LuaModManifest> Empty = new LuaModManifest[0];
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
+            new(StringComparer.Ordinal);
 
         private readonly string _dir;
         private readonly ILog _log;
@@ -85,14 +88,24 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            _gate.Wait();
+            string modDir = GetModDir(modId);
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(modDir, _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
             try
             {
-                SaveCore(modId, source ?? "", manifest);
+                _gate.Wait();
+                try
+                {
+                    SaveCore(modId, source ?? "", manifest);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -134,26 +147,35 @@ namespace CoreAI.Infrastructure.Lua
                 return false;
             }
 
-            _gate.Wait();
+            string modDir = GetModDir(modId);
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(modDir, _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
             try
             {
-                string modDir = GetModDir(modId);
-                string manifestPath = Path.Combine(modDir, ManifestFileName);
-                string sourcePath = Path.Combine(modDir, SourceFileName);
-                if (!File.Exists(manifestPath) || !File.Exists(sourcePath))
+                _gate.Wait();
+                try
                 {
-                    return false;
-                }
+                    string manifestPath = Path.Combine(modDir, ManifestFileName);
+                    string sourcePath = Path.Combine(modDir, SourceFileName);
+                    if (!File.Exists(manifestPath) || !File.Exists(sourcePath))
+                    {
+                        return false;
+                    }
 
-                LuaModManifest loaded = ReadManifest(manifestPath);
-                if (loaded == null)
+                    LuaModManifest loaded = ReadManifest(manifestPath);
+                    if (loaded == null)
+                    {
+                        return false;
+                    }
+
+                    source = File.ReadAllText(sourcePath);
+                    manifest = loaded;
+                    return true;
+                }
+                finally
                 {
-                    return false;
+                    _gate.Release();
                 }
-
-                source = File.ReadAllText(sourcePath);
-                manifest = loaded;
-                return true;
             }
             catch (Exception ex)
             {
@@ -164,38 +186,47 @@ namespace CoreAI.Infrastructure.Lua
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
         /// <inheritdoc />
         public IReadOnlyList<LuaModManifest> List()
         {
-            _gate.Wait();
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(RootLockKey(), _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
             try
             {
-                if (!Directory.Exists(_dir))
+                _gate.Wait();
+                try
                 {
-                    return Empty;
-                }
-
-                List<LuaModManifest> result = new();
-                foreach (string modDir in Directory.GetDirectories(_dir))
-                {
-                    string manifestPath = Path.Combine(modDir, ManifestFileName);
-                    if (!File.Exists(manifestPath))
+                    if (!Directory.Exists(_dir))
                     {
-                        continue;
+                        return Empty;
                     }
 
-                    LuaModManifest manifest = ReadManifest(manifestPath);
-                    if (manifest != null)
+                    List<LuaModManifest> result = new();
+                    foreach (string modDir in Directory.GetDirectories(_dir))
                     {
-                        result.Add(manifest);
-                    }
-                }
+                        string manifestPath = Path.Combine(modDir, ManifestFileName);
+                        if (!File.Exists(manifestPath))
+                        {
+                            continue;
+                        }
 
-                return result;
+                        LuaModManifest manifest = ReadManifest(manifestPath);
+                        if (manifest != null)
+                        {
+                            result.Add(manifest);
+                        }
+                    }
+
+                    return result;
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -204,7 +235,7 @@ namespace CoreAI.Infrastructure.Lua
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -217,25 +248,35 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            _gate.Wait();
+            string modDir = GetModDir(modId);
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(modDir, _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
             try
             {
-                string manifestPath = Path.Combine(GetModDir(modId), ManifestFileName);
-                if (!File.Exists(manifestPath))
+                _gate.Wait();
+                try
                 {
-                    return;
-                }
+                    string manifestPath = Path.Combine(modDir, ManifestFileName);
+                    if (!File.Exists(manifestPath))
+                    {
+                        return;
+                    }
 
-                LuaModManifest manifest = ReadManifest(manifestPath);
-                if (manifest == null)
+                    LuaModManifest manifest = ReadManifest(manifestPath);
+                    if (manifest == null)
+                    {
+                        return;
+                    }
+
+                    manifest.Active = active;
+                    string manifestJson = JsonConvert.SerializeObject(manifest, JsonSettings);
+                    AtomicWriteAllText(manifestPath, manifestJson, _log);
+                    PersistFsForWebGl();
+                }
+                finally
                 {
-                    return;
+                    _gate.Release();
                 }
-
-                manifest.Active = active;
-                string manifestJson = JsonConvert.SerializeObject(manifest, JsonSettings);
-                AtomicWriteAllText(manifestPath, manifestJson, _log);
-                PersistFsForWebGl();
             }
             catch (Exception ex)
             {
@@ -243,7 +284,7 @@ namespace CoreAI.Infrastructure.Lua
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -256,14 +297,23 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            _gate.Wait();
+            string modDir = GetModDir(modId);
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(modDir, _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
             try
             {
-                string modDir = GetModDir(modId);
-                if (Directory.Exists(modDir))
+                _gate.Wait();
+                try
                 {
-                    Directory.Delete(modDir, recursive: true);
-                    PersistFsForWebGl();
+                    if (Directory.Exists(modDir))
+                    {
+                        Directory.Delete(modDir, recursive: true);
+                        PersistFsForWebGl();
+                    }
+                }
+                finally
+                {
+                    _gate.Release();
                 }
             }
             catch (Exception ex)
@@ -272,7 +322,7 @@ namespace CoreAI.Infrastructure.Lua
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -300,6 +350,14 @@ namespace CoreAI.Infrastructure.Lua
         {
             string combined = Path.Combine(_dir, SanitizedFolderName(modId));
             return EnsureWithinRoot(combined);
+        }
+
+        private string RootLockKey()
+        {
+            string root = Path.GetFullPath(_dir);
+            return root.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? root
+                : root + Path.DirectorySeparatorChar;
         }
 
         /// <summary>

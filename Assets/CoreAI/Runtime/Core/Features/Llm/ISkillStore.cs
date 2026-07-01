@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace CoreAI.Ai
 {
@@ -36,6 +39,104 @@ namespace CoreAI.Ai
 
         /// <summary>Permanently removes the stored skill. No-op when absent.</summary>
         void Delete(string id);
+    }
+
+    /// <summary>Optional store capability for atomic skill read/modify/write transactions.</summary>
+    public interface IAtomicSkillStore
+    {
+        /// <summary>
+        /// Runs <paramref name="mutator"/> while holding the store's durable key lock, then applies the
+        /// requested save/delete before releasing it.
+        /// </summary>
+        TResult Mutate<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator);
+    }
+
+    /// <summary>Result of one atomic skill store mutation.</summary>
+    public sealed class SkillStoreMutation<TResult>
+    {
+        private SkillStoreMutation(TResult result, SkillRecord record, bool save, bool delete)
+        {
+            Result = result;
+            Record = record;
+            Save = save;
+            Delete = delete;
+        }
+
+        public TResult Result { get; }
+        public SkillRecord Record { get; }
+        public bool Save { get; }
+        public bool Delete { get; }
+
+        public static SkillStoreMutation<TResult> SaveRecord(SkillRecord record, TResult result)
+        {
+            return new SkillStoreMutation<TResult>(result, record, save: true, delete: false);
+        }
+
+        public static SkillStoreMutation<TResult> DeleteRecord(TResult result)
+        {
+            return new SkillStoreMutation<TResult>(result, null, save: false, delete: true);
+        }
+
+        public static SkillStoreMutation<TResult> NoChange(TResult result)
+        {
+            return new SkillStoreMutation<TResult>(result, null, save: false, delete: false);
+        }
+    }
+
+    /// <summary>Atomic mutation fallback for skill stores without a durable store-specific primitive.</summary>
+    public static class SkillStoreExtensions
+    {
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new();
+
+        public static TResult Mutate<TResult>(
+            this ISkillStore store,
+            string id,
+            Func<SkillRecord, SkillStoreMutation<TResult>> mutator)
+        {
+            if (store == null)
+            {
+                throw new ArgumentNullException(nameof(store));
+            }
+
+            if (mutator == null)
+            {
+                throw new ArgumentNullException(nameof(mutator));
+            }
+
+            if (store is IAtomicSkillStore atomic)
+            {
+                return atomic.Mutate(id, mutator);
+            }
+
+            string skillId = (id ?? "").Trim();
+            string key = $"{store.GetType().FullName}:{skillId}";
+            SemaphoreSlim gate = MutationLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+            gate.Wait();
+            try
+            {
+                store.TryLoad(skillId, out SkillRecord current);
+                SkillStoreMutation<TResult> mutation = mutator(current);
+                if (mutation == null)
+                {
+                    throw new InvalidOperationException("Skill store mutator returned null.");
+                }
+
+                if (mutation.Delete)
+                {
+                    store.Delete(skillId);
+                }
+                else if (mutation.Save && mutation.Record != null)
+                {
+                    store.Save(mutation.Record);
+                }
+
+                return mutation.Result;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
     }
 
     /// <summary>

@@ -38,8 +38,7 @@ namespace CoreAI.Ai
         }
 
 
-        // generating an unnecessary state machine. Returns Task.FromResult directly.
-        public Task<string> ExecuteAsync(
+        public async Task<string> ExecuteAsync(
             [Description("Action: read, write, append, clear, str_replace, insert, delete, or rename")]
             string action,
             [Description(
@@ -72,8 +71,7 @@ namespace CoreAI.Ai
 
             if (string.IsNullOrEmpty(action))
             {
-                return Task.FromResult(SerializeResult(new MemoryResult
-                    { Success = false, Error = "Action is required" }));
+                return SerializeResult(new MemoryResult { Success = false, Error = "Action is required" });
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -83,65 +81,69 @@ namespace CoreAI.Ai
                 switch (action)
                 {
                     case "read":
-                        return Task.FromResult(ReadMemory());
+                        return ReadMemory();
 
                     case "write":
                         if (string.IsNullOrEmpty(mutationContent))
                         {
-                            return Task.FromResult(SerializeResult(new MemoryResult
-                                { Success = false, Error = "content or new_text is required for write action" }));
+                            return SerializeResult(new MemoryResult
+                                { Success = false, Error = "content or new_text is required for write action" });
                         }
 
-                        return Task.FromResult(SaveMutation(action, mutationContent, "Memory saved"));
+                        return await SaveMutationAsync(action, mutationContent, "Memory saved", cancellationToken)
+                            .ConfigureAwait(false);
 
                     case "append":
                         if (string.IsNullOrEmpty(mutationContent))
                         {
-                            return Task.FromResult(SerializeResult(new MemoryResult
-                                { Success = false, Error = "content or new_text is required for append action" }));
+                            return SerializeResult(new MemoryResult
+                                { Success = false, Error = "content or new_text is required for append action" });
                         }
 
-                        string currentState = LoadMemory(out AgentMemoryState appendState);
+                        return await MutateMemoryAsync(
+                                action,
+                                current =>
+                                {
+                                    if (MemoryContainsLine(current, mutationContent))
+                                    {
+                                        return MemoryMutationPlan.NoChange(
+                                            $"Content already exists in memory for role: {_roleId}. Continue with your task.");
+                                    }
 
-                        if (MemoryContainsLine(currentState, mutationContent))
-                        {
-                            return Task.FromResult(SerializeResult(new MemoryResult
-                            {
-                                Success = true,
-                                Message =
-                                    $"Content already exists in memory for role: {_roleId}. Continue with your task."
-                            }));
-                        }
-
-                        string newMemory = string.IsNullOrEmpty(currentState)
-                            ? mutationContent
-                            : currentState + "\n" + mutationContent;
-
-                        return Task.FromResult(
-                            SaveMutation(appendState, currentState, action, newMemory, "Content appended"));
+                                    string next = string.IsNullOrEmpty(current)
+                                        ? mutationContent
+                                        : current + "\n" + mutationContent;
+                                    return MemoryMutationPlan.Change(next, "Content appended");
+                                },
+                                cancellationToken)
+                            .ConfigureAwait(false);
 
                     case "clear":
-                        return Task.FromResult(ClearMemory());
+                        return ClearMemory();
 
                     case "str_replace":
-                        return Task.FromResult(ExecuteStrReplace(old_text, mutationContent, replace_all));
+                        return await ExecuteStrReplaceAsync(old_text, mutationContent, replace_all, cancellationToken)
+                            .ConfigureAwait(false);
 
                     case "insert":
-                        return Task.FromResult(ExecuteInsert(mutationContent, anchor, line));
+                        return await ExecuteInsertAsync(mutationContent, anchor, line, cancellationToken)
+                            .ConfigureAwait(false);
 
                     case "delete":
-                        return Task.FromResult(ExecuteDelete(old_text ?? mutationContent, replace_all));
+                        return await ExecuteDeleteAsync(old_text ?? mutationContent, replace_all, cancellationToken)
+                            .ConfigureAwait(false);
 
                     case "rename":
-                        return Task.FromResult(ExecuteRename(old_text, mutationContent));
+                        return await ExecuteRenameAsync(old_text, mutationContent, cancellationToken)
+                            .ConfigureAwait(false);
 
                     default:
-                        return Task.FromResult(SerializeResult(new MemoryResult
+                        return SerializeResult(new MemoryResult
                         {
                             Success = false,
                             Error =
                                 $"Unknown action: '{action}'. Valid actions: read, write, append, clear, str_replace, insert, delete, rename"
-                        }));
+                        });
                 }
             }
             catch (Exception ex)
@@ -151,11 +153,11 @@ namespace CoreAI.Ai
                     Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
                 }
 
-                return Task.FromResult(SerializeResult(new MemoryResult
+                return SerializeResult(new MemoryResult
                 {
                     Success = false,
                     Error = $"Memory operation failed: {ex.Message}"
-                }));
+                });
             }
         }
 
@@ -193,97 +195,117 @@ namespace CoreAI.Ai
             });
         }
 
-        private string ExecuteStrReplace(string oldText, string newText, bool replaceAll)
+        private Task<string> ExecuteStrReplaceAsync(string oldText, string newText, bool replaceAll,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(oldText))
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "old_text is required for str_replace action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "old_text is required for str_replace action" }));
             }
 
             if (newText == null)
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "new_text or content is required for str_replace action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "new_text or content is required for str_replace action" }));
             }
 
-            string current = LoadMemory(out AgentMemoryState state);
-            if (!current.Contains(oldText, StringComparison.Ordinal))
-            {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "old_text was not found in memory" });
-            }
+            return MutateMemoryAsync(
+                "str_replace",
+                current =>
+                {
+                    if (!current.Contains(oldText, StringComparison.Ordinal))
+                    {
+                        return MemoryMutationPlan.Fail("old_text was not found in memory");
+                    }
 
-            string next = replaceAll
-                ? current.Replace(oldText, newText)
-                : ReplaceFirst(current, oldText, newText);
-            return SaveMutation(state, current, "str_replace", next,
-                replaceAll ? "Replaced all exact matches" : "Replaced first exact match");
+                    string next = replaceAll
+                        ? current.Replace(oldText, newText)
+                        : ReplaceFirst(current, oldText, newText);
+                    return MemoryMutationPlan.Change(next,
+                        replaceAll ? "Replaced all exact matches" : "Replaced first exact match");
+                },
+                cancellationToken);
         }
 
-        private string ExecuteInsert(string content, string anchor, int? line)
+        private Task<string> ExecuteInsertAsync(string content, string anchor, int? line,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(content))
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "Content is required for insert action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "Content is required for insert action" }));
             }
 
-            string current = LoadMemory(out AgentMemoryState state);
-            if (!TryInsert(current, content, anchor, line, out string next, out string error))
-            {
-                return SerializeResult(new MemoryResult { Success = false, Error = error });
-            }
+            return MutateMemoryAsync(
+                "insert",
+                current =>
+                {
+                    if (!TryInsert(current, content, anchor, line, out string next, out string error))
+                    {
+                        return MemoryMutationPlan.Fail(error);
+                    }
 
-            return SaveMutation(state, current, "insert", next,
-                line.HasValue ? $"Inserted before line {line.Value}" : "Inserted content");
+                    return MemoryMutationPlan.Change(next,
+                        line.HasValue ? $"Inserted before line {line.Value}" : "Inserted content");
+                },
+                cancellationToken);
         }
 
-        private string ExecuteDelete(string target, bool deleteAll)
+        private Task<string> ExecuteDeleteAsync(string target, bool deleteAll, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(target))
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "old_text or content is required for delete action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "old_text or content is required for delete action" }));
             }
 
-            string current = LoadMemory(out AgentMemoryState state);
-            if (!current.Contains(target, StringComparison.Ordinal))
-            {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "Delete target was not found in memory" });
-            }
+            return MutateMemoryAsync(
+                "delete",
+                current =>
+                {
+                    if (!current.Contains(target, StringComparison.Ordinal))
+                    {
+                        return MemoryMutationPlan.Fail("Delete target was not found in memory");
+                    }
 
-            string next = deleteAll
-                ? current.Replace(target, "")
-                : ReplaceFirst(current, target, "");
-            return SaveMutation(state, current, "delete", next,
-                deleteAll ? "Deleted all exact matches" : "Deleted first exact match");
+                    string next = deleteAll
+                        ? current.Replace(target, "")
+                        : ReplaceFirst(current, target, "");
+                    return MemoryMutationPlan.Change(next,
+                        deleteAll ? "Deleted all exact matches" : "Deleted first exact match");
+                },
+                cancellationToken);
         }
 
-        private string ExecuteRename(string oldLabel, string newLabel)
+        private Task<string> ExecuteRenameAsync(string oldLabel, string newLabel,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(oldLabel))
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "old_text is required for rename action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "old_text is required for rename action" }));
             }
 
             if (string.IsNullOrEmpty(newLabel))
             {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "new_text or content is required for rename action" });
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "new_text or content is required for rename action" }));
             }
 
-            string current = LoadMemory(out AgentMemoryState state);
-            if (!TryRenameLabel(current, oldLabel.Trim(), newLabel.Trim(), out string next))
-            {
-                return SerializeResult(new MemoryResult
-                    { Success = false, Error = "Rename label was not found in memory" });
-            }
+            return MutateMemoryAsync(
+                "rename",
+                current =>
+                {
+                    if (!TryRenameLabel(current, oldLabel.Trim(), newLabel.Trim(), out string next))
+                    {
+                        return MemoryMutationPlan.Fail("Rename label was not found in memory");
+                    }
 
-            return SaveMutation(state, current, "rename", next,
-                $"Renamed label '{oldLabel.Trim()}' to '{newLabel.Trim()}'");
+                    return MemoryMutationPlan.Change(next,
+                        $"Renamed label '{oldLabel.Trim()}' to '{newLabel.Trim()}'");
+                },
+                cancellationToken);
         }
 
         /// <summary>
@@ -310,39 +332,92 @@ namespace CoreAI.Ai
             return false;
         }
 
-        private string SaveMutation(string action, string nextMemory, string messagePrefix)
+        private Task<string> SaveMutationAsync(string action, string nextMemory, string messagePrefix,
+            CancellationToken cancellationToken)
         {
-            string previous = LoadMemory(out AgentMemoryState state);
-            return SaveMutation(state, previous, action, nextMemory, messagePrefix);
+            return MutateMemoryAsync(action, _ => MemoryMutationPlan.Change(nextMemory, messagePrefix),
+                cancellationToken);
         }
 
-        /// <summary>
-        /// Applies a memory mutation to an already-loaded <paramref name="state"/> and persists it,
-        /// avoiding a second store read (the previous code re-loaded inside SaveMutation, widening the
-        /// read-modify-write window). <paramref name="previous"/> is the memory text before the mutation,
-        /// used for the version diff note.
-        /// </summary>
-        private string SaveMutation(AgentMemoryState state, string previous, string action, string nextMemory,
-            string messagePrefix)
+        private Task<string> MutateMemoryAsync(string action, Func<string, MemoryMutationPlan> planner,
+            CancellationToken cancellationToken)
         {
-            state.Memory = nextMemory ?? "";
-            AgentMemoryVersionSnapshot snapshot = state.RecordVersion(action, state.Memory,
-                CreateMutationNote(previous, state.Memory));
-            _store.Save(_roleId, state);
+            return _store.MutateAsync(
+                _roleId,
+                state =>
+                {
+                    string previous = state.Memory ?? "";
+                    MemoryMutationPlan plan = planner(previous);
+                    if (!plan.Success)
+                    {
+                        return SerializeResult(new MemoryResult { Success = false, Error = plan.Error });
+                    }
 
-            if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+                    if (!plan.Changed)
+                    {
+                        return SerializeResult(new MemoryResult
+                        {
+                            Success = true,
+                            Message = plan.Message,
+                            MemoryLength = previous.Length
+                        });
+                    }
+
+                    state.Memory = plan.NextMemory ?? "";
+                    AgentMemoryVersionSnapshot snapshot = state.RecordVersion(action, state.Memory,
+                        CreateMutationNote(previous, state.Memory));
+
+                    if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+                    {
+                        Log.Instance.Info($"[Tool Call] memory: SUCCESS - {plan.MessagePrefix} for {_roleId}",
+                            LogTag.Memory);
+                    }
+
+                    return SerializeResult(new MemoryResult
+                    {
+                        Success = true,
+                        Message = $"DONE: {plan.MessagePrefix} for {_roleId}.",
+                        Version = snapshot.Version,
+                        MemoryLength = state.Memory.Length
+                    });
+                },
+                cancellationToken);
+        }
+
+        private sealed class MemoryMutationPlan
+        {
+            private MemoryMutationPlan(bool success, bool changed, string nextMemory, string messagePrefix,
+                string message, string error)
             {
-                Log.Instance.Info($"[Tool Call] memory: SUCCESS - {messagePrefix} for {_roleId}",
-                    LogTag.Memory);
+                Success = success;
+                Changed = changed;
+                NextMemory = nextMemory;
+                MessagePrefix = messagePrefix;
+                Message = message;
+                Error = error;
             }
 
-            return SerializeResult(new MemoryResult
+            public bool Success { get; }
+            public bool Changed { get; }
+            public string NextMemory { get; }
+            public string MessagePrefix { get; }
+            public string Message { get; }
+            public string Error { get; }
+
+            public static MemoryMutationPlan Change(string nextMemory, string messagePrefix)
             {
-                Success = true,
-                Message = $"DONE: {messagePrefix} for {_roleId}.",
-                Version = snapshot.Version,
-                MemoryLength = state.Memory.Length
-            });
+                return new MemoryMutationPlan(true, true, nextMemory, messagePrefix, null, null);
+            }
+
+            public static MemoryMutationPlan NoChange(string message)
+            {
+                return new MemoryMutationPlan(true, false, null, null, message, null);
+            }
+
+            public static MemoryMutationPlan Fail(string error)
+            {
+                return new MemoryMutationPlan(false, false, null, null, null, error);
+            }
         }
 
         private string ClearMemory()

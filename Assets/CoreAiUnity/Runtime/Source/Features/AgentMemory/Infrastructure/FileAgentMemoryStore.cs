@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,7 +24,8 @@ namespace CoreAI.Infrastructure.AiMemory
     /// The jslib runs <c>FS.syncfs</c> single-flight (<b>v1.7.2+</b>) so rapid successive writes do not overlap syncs.
     /// </para>
     /// </summary>
-    public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore, IDisposable
+    public sealed class FileAgentMemoryStore : IAgentMemoryStore, IAtomicAgentMemoryStore,
+        IConversationTranscriptStore, IDisposable
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")]
@@ -40,6 +42,9 @@ namespace CoreAI.Infrastructure.AiMemory
             try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
 #endif
         }
+
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
+            new(StringComparer.Ordinal);
 
         [Serializable]
         private sealed class Persisted
@@ -183,14 +188,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void Save(string roleId, AgentMemoryState state)
         {
-            _gate.Wait();
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            mutationGate.Wait();
             try
             {
-                SaveCore(roleId, state);
+                _gate.Wait();
+                try
+                {
+                    SaveCore(roleId, state);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -199,14 +213,60 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public async Task SaveAsync(string roleId, AgentMemoryState state)
         {
-            await _gate.WaitAsync().ConfigureAwait(false);
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await RunOffThread(() => SaveCore(roleId, state)).ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await RunOffThread(() => SaveCore(roleId, state)).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<TResult> MutateAsync<TResult>(
+            string roleId,
+            Func<AgentMemoryState, TResult> mutator,
+            CancellationToken cancellationToken = default)
+        {
+            if (mutator == null)
+            {
+                throw new ArgumentNullException(nameof(mutator));
+            }
+
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    return await RunOffThread(() =>
+                    {
+                        AgentMemoryState state = TryLoadCore(roleId) ?? new AgentMemoryState();
+                        TResult result = mutator(state);
+                        SaveCore(roleId, state);
+                        return result;
+                    }).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+            }
+            finally
+            {
+                mutationGate.Release();
             }
         }
 
@@ -244,14 +304,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void Clear(string roleId)
         {
-            _gate.Wait();
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            mutationGate.Wait();
             try
             {
-                ClearCore(roleId);
+                _gate.Wait();
+                try
+                {
+                    ClearCore(roleId);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -260,14 +329,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public async Task ClearAsync(string roleId)
         {
-            await _gate.WaitAsync().ConfigureAwait(false);
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await RunOffThread(() => ClearCore(roleId)).ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await RunOffThread(() => ClearCore(roleId)).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -295,14 +373,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
         {
-            _gate.Wait();
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            mutationGate.Wait();
             try
             {
-                ClearChatHistoryCore(roleId);
+                _gate.Wait();
+                try
+                {
+                    ClearChatHistoryCore(roleId);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -311,14 +398,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public async Task ClearChatHistoryAsync(string roleId)
         {
-            await _gate.WaitAsync().ConfigureAwait(false);
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await RunOffThread(() => ClearChatHistoryCore(roleId)).ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await RunOffThread(() => ClearChatHistoryCore(roleId)).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -363,6 +459,11 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             string combined = Path.Combine(_dir, $"{SanitizedFileStem(roleId)}.json");
             return EnsureWithinRoot(combined);
+        }
+
+        private SemaphoreSlim GetMutationGate(string roleId)
+        {
+            return MutationLocks.GetOrAdd(GetPath(roleId), _ => new SemaphoreSlim(1, 1));
         }
 
         /// <summary>
@@ -654,14 +755,23 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            _gate.Wait();
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            mutationGate.Wait();
             try
             {
-                AppendChatMessageCore(roleId, role, content, persistToDisk);
+                _gate.Wait();
+                try
+                {
+                    AppendChatMessageCore(roleId, role, content, persistToDisk);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -677,15 +787,24 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            await _gate.WaitAsync().ConfigureAwait(false);
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await RunOffThread(() => AppendChatMessageCore(roleId, role, content, persistToDisk))
-                    .ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await RunOffThread(() => AppendChatMessageCore(roleId, role, content, persistToDisk))
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -724,14 +843,23 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            _gate.Wait();
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            mutationGate.Wait();
             try
             {
-                AppendTranscriptEntryCore(roleId, entry, persistToDisk);
+                _gate.Wait();
+                try
+                {
+                    AppendTranscriptEntryCore(roleId, entry, persistToDisk);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 
@@ -747,15 +875,24 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
-            await _gate.WaitAsync().ConfigureAwait(false);
+            SemaphoreSlim mutationGate = GetMutationGate(roleId);
+            await mutationGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await RunOffThread(() => AppendTranscriptEntryCore(roleId, entry, persistToDisk))
-                    .ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await RunOffThread(() => AppendTranscriptEntryCore(roleId, entry, persistToDisk))
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             finally
             {
-                _gate.Release();
+                mutationGate.Release();
             }
         }
 

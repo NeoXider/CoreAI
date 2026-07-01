@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -23,7 +24,7 @@ namespace CoreAI.Infrastructure.Llm
     /// cannot corrupt an existing skill.
     /// </para>
     /// </summary>
-    public sealed class FileSkillStore : ISkillStore, IDisposable
+    public sealed class FileSkillStore : ISkillStore, IAtomicSkillStore, IDisposable
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")]
@@ -43,6 +44,8 @@ namespace CoreAI.Infrastructure.Llm
         };
 
         private static readonly IReadOnlyList<SkillRecord> Empty = new SkillRecord[0];
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
+            new(StringComparer.Ordinal);
 
         private readonly string _dir;
         private readonly ILog _log;
@@ -80,15 +83,7 @@ namespace CoreAI.Infrastructure.Llm
             _gate.Wait();
             try
             {
-                record.Id = id;
-                if (!Directory.Exists(_dir))
-                {
-                    Directory.CreateDirectory(_dir);
-                }
-
-                string json = JsonConvert.SerializeObject(record, JsonSettings);
-                AtomicWriteAllText(GetSkillPath(id), json, _log);
-                PersistFsForWebGl();
+                SaveCore(id, record);
             }
             catch (Exception ex)
             {
@@ -98,6 +93,79 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _gate.Release();
             }
+        }
+
+        /// <inheritdoc />
+        public TResult Mutate<TResult>(string id, Func<SkillRecord, SkillStoreMutation<TResult>> mutator)
+        {
+            if (mutator == null)
+            {
+                throw new ArgumentNullException(nameof(mutator));
+            }
+
+            string skillId = Normalize(id);
+            if (skillId.Length == 0)
+            {
+                return mutator(null).Result;
+            }
+
+            string path = GetSkillPath(skillId);
+            SemaphoreSlim mutationGate = MutationLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+            mutationGate.Wait();
+            try
+            {
+                _gate.Wait();
+                try
+                {
+                    SkillRecord current = File.Exists(path) ? ReadRecord(path) : null;
+                    SkillStoreMutation<TResult> mutation = mutator(current);
+                    if (mutation == null)
+                    {
+                        throw new InvalidOperationException("Skill store mutator returned null.");
+                    }
+
+                    if (mutation.Delete)
+                    {
+                        if (File.Exists(path))
+                        {
+                            File.Delete(path);
+                            PersistFsForWebGl();
+                        }
+                    }
+                    else if (mutation.Save && mutation.Record != null)
+                    {
+                        SaveCore(skillId, mutation.Record);
+                    }
+
+                    return mutation.Result;
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[FileSkillStore] Mutate failed for {skillId}: {ex}");
+                throw;
+            }
+            finally
+            {
+                mutationGate.Release();
+            }
+        }
+
+        private void SaveCore(string id, SkillRecord record)
+        {
+            record.Id = id;
+            if (!Directory.Exists(_dir))
+            {
+                Directory.CreateDirectory(_dir);
+            }
+
+            string json = JsonConvert.SerializeObject(record, JsonSettings);
+            AtomicWriteAllText(GetSkillPath(id), json, _log);
+            PersistFsForWebGl();
         }
 
         /// <inheritdoc />
