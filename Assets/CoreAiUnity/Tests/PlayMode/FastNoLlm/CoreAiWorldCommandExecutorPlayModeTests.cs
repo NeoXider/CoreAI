@@ -251,6 +251,13 @@ namespace CoreAI.Tests.PlayMode
 
                 yield return ExecuteToolSuccess(tool.ExecuteAsync("apply_force", targetName: blockName,
                     fx: 0f, fy: 2f, fz: 0f));
+                // Rigidbody.AddForce(Impulse) queues into the physics engine's force accumulator and only
+                // lands in linearVelocity on the next FixedUpdate - unlike TrySetVelocity's direct
+                // assignment. WorldLlmTool.ExecuteAsync's UniTask.SwitchToMainThread hop between these two
+                // async tool calls (unlike the synchronous executor.TryExecute calls earlier in this test)
+                // already lets a physics step slip in, so wait one out explicitly: otherwise the queued
+                // impulse can land AFTER set_velocity's assignment and silently add on top of it.
+                yield return new WaitForFixedUpdate();
                 yield return ExecuteToolSuccess(tool.ExecuteAsync("set_velocity", targetName: blockName,
                     fx: 1f, fy: 2f, fz: 3f));
                 AssertVector3(new Vector3(1f, 2f, 3f), rigidbody.linearVelocity, "tool set_velocity velocity");
