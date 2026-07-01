@@ -314,7 +314,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("core_task", "spawned Gate, Player, Flag", 40, allThree, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
-                bool orderOk = spawnNames.Count >= 3
+                // Exactly 3 (not >=3): the goal says Flag must be LAST, so a fourth spawn after Flag
+                // must fail this constraint even though the first three names are still correct.
+                bool orderOk = spawnNames.Count == 3
                                && string.Equals(spawnNames[0], "Gate", StringComparison.OrdinalIgnoreCase)
                                && string.Equals(spawnNames[1], "Player", StringComparison.OrdinalIgnoreCase)
                                && string.Equals(spawnNames[2], "Flag", StringComparison.OrdinalIgnoreCase);

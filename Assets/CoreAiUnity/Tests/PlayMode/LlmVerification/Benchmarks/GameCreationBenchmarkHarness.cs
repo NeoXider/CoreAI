@@ -564,6 +564,37 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     {
                         ro.transform.rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
                     }
+                    else if (action == "change"
+                             && _objects.TryGetValue(name, out UnityEngine.GameObject ch) && ch != null)
+                    {
+                        // 'change' is the current unified update action (position/rotation/scale/parent);
+                        // without this the scene screenshot silently showed the object's original spawn
+                        // transform even when the model correctly repositioned/rescaled/rotated it afterward.
+                        if (cmd.X != 0f || cmd.Y != 0f || cmd.Z != 0f)
+                        {
+                            ch.transform.position = new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z);
+                        }
+
+                        ApplyInlineTransform(ch, cmd);
+                    }
+                    else if (action == "set_color"
+                             && _objects.TryGetValue(name, out UnityEngine.GameObject col) && col != null
+                             && !string.IsNullOrWhiteSpace(cmd.StringValue))
+                    {
+                        string hex = cmd.StringValue.Trim();
+                        if (hex.Length > 0 && hex[0] != '#')
+                        {
+                            hex = "#" + hex;
+                        }
+
+                        if (UnityEngine.ColorUtility.TryParseHtmlString(hex, out UnityEngine.Color parsed))
+                        {
+                            foreach (UnityEngine.Renderer r in col.GetComponentsInChildren<UnityEngine.Renderer>())
+                            {
+                                TintRenderer(r, parsed);
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
