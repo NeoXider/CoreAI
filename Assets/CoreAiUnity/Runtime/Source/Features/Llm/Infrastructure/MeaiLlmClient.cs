@@ -40,6 +40,7 @@ namespace CoreAI.Infrastructure.Llm
         /// Initializes a new instance of the current component.
         /// </summary>
         private const int LiveUiStreamMaxCharsPerChunk = 48;
+        private const int HybridToolJsonHeldTailMaxChars = 64 * 1024;
 
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
             IAgentMemoryStore? memoryStore = null, bool supportsNativeToolCalling = false)
@@ -433,7 +434,7 @@ namespace CoreAI.Infrastructure.Llm
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Starting streaming with {chatMessages.Count} messages");
 
-            int maxToolIterations = Math.Max(1, _settings.MaxToolCallRetries + 1);
+            int maxToolIterations = ResolveStreamingMaxToolRoundtrips(request.MaxToolCallRoundtrips, _settings);
             int toolIteration = 0;
             bool emittedAnyVisibleText = false;
 
@@ -457,7 +458,7 @@ namespace CoreAI.Infrastructure.Llm
                 cancellationToken.ThrowIfCancellationRequested();
                 toolIteration++;
                 string streamModel = ResolveModelName();
-                if (toolIteration > maxToolIterations + 1)
+                if (maxToolIterations > 0 && toolIteration > maxToolIterations)
                 {
                     IReadOnlyList<LlmToolCallTrace> executedToolCalls = policy.ExecutedTraces.ToList();
                     if (emittedAnyVisibleText && executedToolCalls.Any(t => t.Success))
@@ -496,6 +497,7 @@ namespace CoreAI.Infrastructure.Llm
                 ThinkBlockStreamFilter thinkFilter = new();
                 List<string> visibleChunks = new();
                 System.Text.StringBuilder iterationVisible = new();
+                System.Text.StringBuilder rawIterationText = new();
                 List<MEAI.FunctionCallContent> nativeToolCalls = new();
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
@@ -509,6 +511,7 @@ namespace CoreAI.Infrastructure.Llm
                 bool emittedHybridHoldTypingHint = false;
                 bool emittedToolProgressTypingHint = false;
                 bool streamedVisibleToConsumer = false;
+                bool hybridToolJsonCandidateOverflow = false;
 
                 if (hybridToolJsonHold)
                 {
@@ -536,16 +539,28 @@ namespace CoreAI.Infrastructure.Llm
                 // emitted prose and skipped JSON, so downstream suffix reconciliation stays in sync.
                 IEnumerable<LlmStreamChunk> DrainHybridSafeSegments(string full)
                 {
-                    List<HybridProseSegment> segments = GetHybridSafeSegments(full, out int safeEnd);
+                    int scanStart = Math.Min(hybridRawExclusiveEndEmitted, full.Length);
+                    string scan = full.Substring(scanStart);
+                    List<HybridProseSegment> segments = GetHybridSafeSegments(scan, out int relativeSafeEnd);
+                    int safeEnd = scanStart + relativeSafeEnd;
+                    int heldLength = scan.Length - relativeSafeEnd;
+                    if (heldLength > HybridToolJsonHeldTailMaxChars)
+                    {
+                        hybridToolJsonCandidateOverflow = true;
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Held text-shaped tool-call candidate exceeded {HybridToolJsonHeldTailMaxChars} chars; failing closed instead of streaming the raw JSON tail.");
+                    }
+
                     foreach (HybridProseSegment segment in segments)
                     {
-                        if (segment.Start + segment.Length <= hybridRawExclusiveEndEmitted)
+                        int absoluteStart = scanStart + segment.Start;
+                        if (absoluteStart + segment.Length <= hybridRawExclusiveEndEmitted)
                         {
                             continue; // already consumed in a previous update
                         }
 
-                        int from = Math.Max(segment.Start, hybridRawExclusiveEndEmitted);
-                        int len = segment.Start + segment.Length - from;
+                        int from = Math.Max(absoluteStart, hybridRawExclusiveEndEmitted);
+                        int len = absoluteStart + segment.Length - from;
                         if (len <= 0)
                         {
                             continue;
@@ -620,6 +635,7 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
+                    rawIterationText.Append(raw);
                     string visible = thinkFilter.ProcessChunk(raw);
                     if (string.IsNullOrEmpty(visible))
                     {
@@ -679,6 +695,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 string visibleText = iterationVisible.ToString();
+                bool hiddenThinkToolCall = toolsDeclared &&
+                                           ContainsCompleteThinkBlockToolCall(rawIterationText.ToString());
                 if (string.IsNullOrWhiteSpace(visibleText) &&
                     nativeToolCalls.Count == 0 &&
                     !string.IsNullOrWhiteSpace(pendingFailedToolRetryInstruction) &&
@@ -761,7 +779,7 @@ namespace CoreAI.Infrastructure.Llm
                 // backend successfully bound AIFunctions. This way, a tool that was requested
                 // but couldn't be bound (e.g., MemoryLlmTool with a null store) still has its
                 // Resolve and cache required local values.
-                bool requestHadTools = (request.Tools?.Count ?? 0) > 0;
+                bool requestHadTools = toolsDeclared;
                 if (requestHadTools && TryExtractToolCallsFromText(visibleText,
                         out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
                 {
@@ -882,6 +900,86 @@ namespace CoreAI.Infrastructure.Llm
                         };
                         ApplyStreamingUsageFields(errChunk2, iterationUsage, streamModel);
                         yield return errChunk2;
+                        yield break;
+                    }
+
+                    continue;
+                }
+
+                if (hiddenThinkToolCall)
+                {
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        "MeaiLlmClient: Streaming dropped a complete text-shaped tool call inside a <think> block. " +
+                        "The hidden reasoning text was not streamed or executed; move tool-call JSON outside <think>.");
+                }
+
+                if (requestHadTools && TryBuildMalformedTextToolCall(
+                        visibleText,
+                        request.Tools,
+                        aiTools,
+                        out MEAI.FunctionCallContent malformedToolCall,
+                        out string malformedCleanedText,
+                        out string malformedReason,
+                        hybridToolJsonCandidateOverflow))
+                {
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"MeaiLlmClient: Streaming held malformed/truncated text-shaped tool JSON ({malformedReason}); failing closed without emitting it as assistant text.");
+
+                    if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(malformedCleanedText))
+                    {
+                        string sanitizedMalformedCleaned = SanitizeAssistantVisibleText(malformedCleanedText, request);
+                        if (!string.IsNullOrWhiteSpace(sanitizedMalformedCleaned))
+                        {
+                            emittedAnyVisibleText = true;
+                            yield return new LlmStreamChunk { Text = sanitizedMalformedCleaned };
+                        }
+                    }
+
+                    if (aiTools.Count == 0)
+                    {
+                        policy.RecordSyntheticTrace(malformedToolCall.Name ?? "", false, 0d, "parse-error",
+                            "Text-shaped tool JSON was malformed/truncated and no AIFunction is bound.");
+                        LlmStreamChunk doneParseStrip = new()
+                        {
+                            IsDone = true,
+                            Text = string.Empty,
+                            ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        };
+                        ApplyStreamingUsageFields(doneParseStrip, iterationUsage, streamModel);
+                        yield return doneParseStrip;
+                        yield break;
+                    }
+
+                    if (!emittedToolProgressTypingHint)
+                    {
+                        emittedToolProgressTypingHint = true;
+                        yield return new LlmStreamChunk
+                        {
+                            BufferedStreamingNoToolBinding = true,
+                            BufferedStreamingUseToolProgressHint = true
+                        };
+                    }
+
+                    List<MEAI.FunctionCallContent> malformedCalls = new() { malformedToolCall };
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                        malformedCalls.Cast<MEAI.AIContent>().ToList()));
+                    ToolExecutionPolicy.BatchToolCallResult malformedBatch =
+                        await policy.ExecuteBatchAsync(malformedCalls, chatOptions, cancellationToken);
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, malformedBatch.Results));
+                    pendingFailedToolRetryInstruction = malformedBatch.AllFailed
+                        ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
+                        : null;
+
+                    if (policy.IsMaxErrorsReached)
+                    {
+                        LlmStreamChunk errChunk3 = new()
+                        {
+                            IsDone = true,
+                            Error = "max consecutive tool errors reached",
+                            ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        };
+                        ApplyStreamingUsageFields(errChunk3, iterationUsage, streamModel);
+                        yield return errChunk3;
                         yield break;
                     }
 
@@ -1143,6 +1241,100 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return stripped;
+        }
+
+        internal static int ResolveStreamingMaxToolRoundtrips(int? requestMaxToolCallRoundtrips,
+            ICoreAISettings settings)
+        {
+            return requestMaxToolCallRoundtrips ?? settings.MaxToolCallRoundtrips;
+        }
+
+        internal static bool ContainsCompleteThinkBlockToolCall(string rawText)
+        {
+            if (string.IsNullOrWhiteSpace(rawText))
+            {
+                return false;
+            }
+
+            foreach (Match match in Regex.Matches(rawText, @"<think\b[^>]*>([\s\S]*?)</think>",
+                         RegexOptions.IgnoreCase))
+            {
+                string hidden = match.Groups.Count > 1 ? match.Groups[1].Value : string.Empty;
+                if (string.IsNullOrWhiteSpace(hidden))
+                {
+                    continue;
+                }
+
+                if (FindToolCallJsonSpans(StripCodeBlocks(hidden)).Count > 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static bool TryBuildMalformedTextToolCall(
+            string text,
+            IReadOnlyList<ILlmTool> requestedTools,
+            IReadOnlyList<MEAI.AIFunction> aiTools,
+            out MEAI.FunctionCallContent toolCall,
+            out string cleanedText,
+            out string reason,
+            bool forceMalformed = false)
+        {
+            toolCall = null;
+            cleanedText = text ?? string.Empty;
+            reason = string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            string search = StripCodeBlocks(text);
+            int incompleteStart = GetFirstIncompleteBraceStart(search);
+            if (incompleteStart >= 0 && incompleteStart < search.Length)
+            {
+                string candidate = text.Substring(incompleteStart);
+                if (forceMalformed || LooksLikeJsonObjectPrefix(candidate))
+                {
+                    string name = ResolveMalformedToolName(candidate, requestedTools, aiTools);
+                    toolCall = CreateMalformedToolCall(name, candidate);
+                    cleanedText = text.Substring(0, incompleteStart).TrimEnd();
+                    reason = forceMalformed
+                        ? "candidate-too-large"
+                        : "incomplete-json-object";
+                    return true;
+                }
+            }
+
+            foreach (JsonSpan span in FindBalancedObjectSpans(search))
+            {
+                if (span.Start >= text.Length || span.Start + span.Length > text.Length)
+                {
+                    continue;
+                }
+
+                string candidate = text.Substring(span.Start, span.Length);
+                if (!LooksLikeToolCallObject(candidate))
+                {
+                    continue;
+                }
+
+                if (TryParseToolCallJson(candidate))
+                {
+                    continue;
+                }
+
+                string name = ResolveMalformedToolName(candidate, requestedTools, aiTools);
+                toolCall = CreateMalformedToolCall(name, candidate);
+                cleanedText = (text.Substring(0, span.Start) +
+                               text.Substring(span.Start + span.Length)).Trim();
+                reason = "malformed-tool-json";
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -1425,6 +1617,150 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return spans;
+        }
+
+        private static List<JsonSpan> FindBalancedObjectSpans(string text)
+        {
+            List<JsonSpan> spans = new();
+            if (string.IsNullOrEmpty(text))
+            {
+                return spans;
+            }
+
+            int i = 0;
+            while (i < text.Length)
+            {
+                int braceStart = text.IndexOf('{', i);
+                if (braceStart < 0)
+                {
+                    break;
+                }
+
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                int j = braceStart;
+
+                for (; j < text.Length; j++)
+                {
+                    char c = text[j];
+                    if (escaped)
+                    {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (c == '\\' && inString)
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        continue;
+                    }
+
+                    if (c == '{')
+                    {
+                        depth++;
+                    }
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            spans.Add(new JsonSpan { Start = braceStart, Length = j - braceStart + 1 });
+                            break;
+                        }
+                    }
+                }
+
+                i = depth == 0 && j < text.Length ? j + 1 : braceStart + 1;
+            }
+
+            return spans;
+        }
+
+        private static bool LooksLikeJsonObjectPrefix(string candidate)
+        {
+            string trimmed = candidate?.TrimStart() ?? string.Empty;
+            return trimmed.StartsWith("{", StringComparison.Ordinal) &&
+                   (trimmed.Contains("\"name\"", StringComparison.Ordinal) ||
+                    trimmed.Contains("\"arguments\"", StringComparison.Ordinal) ||
+                    trimmed.Contains("\"arguments_json\"", StringComparison.Ordinal) ||
+                    Regex.IsMatch(trimmed, @"^\{\s*""[^""]+""\s*:"));
+        }
+
+        private static bool LooksLikeToolCallObject(string candidate)
+        {
+            return !string.IsNullOrWhiteSpace(candidate) &&
+                   candidate.Contains("\"name\"", StringComparison.Ordinal) &&
+                   (candidate.Contains("\"arguments\"", StringComparison.Ordinal) ||
+                    candidate.Contains("\"arguments_json\"", StringComparison.Ordinal));
+        }
+
+        private static bool TryParseToolCallJson(string candidate)
+        {
+            try
+            {
+                JObject json = JObject.Parse(candidate);
+                string functionName = json["name"]?.ToString()?.Trim();
+                JToken argsToken = json["arguments"] ?? json["arguments_json"];
+                if (string.IsNullOrWhiteSpace(functionName) || argsToken == null)
+                {
+                    return false;
+                }
+
+                string argsStr = argsToken.Type == JTokenType.String
+                    ? argsToken.ToString()
+                    : argsToken.ToString(Formatting.None);
+
+                return JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsStr) != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ResolveMalformedToolName(
+            string candidate,
+            IReadOnlyList<ILlmTool> requestedTools,
+            IReadOnlyList<MEAI.AIFunction> aiTools)
+        {
+            Match match = Regex.Match(candidate ?? string.Empty, @"""name""\s*:\s*""([^""]+)""");
+            if (match.Success && !string.IsNullOrWhiteSpace(match.Groups[1].Value))
+            {
+                return match.Groups[1].Value.Trim();
+            }
+
+            string boundName = aiTools?.FirstOrDefault()?.Name;
+            if (!string.IsNullOrWhiteSpace(boundName))
+            {
+                return boundName;
+            }
+
+            string requestedName = requestedTools?.FirstOrDefault()?.Name;
+            return string.IsNullOrWhiteSpace(requestedName)
+                ? "tool_call_parse_error"
+                : requestedName;
+        }
+
+        private static MEAI.FunctionCallContent CreateMalformedToolCall(string name, string raw)
+        {
+            Dictionary<string, object?> arguments = new()
+            {
+                { ToolCallArgumentMarkers.RawArgumentsKey, raw ?? string.Empty },
+                { ToolCallArgumentMarkers.ParseErrorKey, true }
+            };
+            return new MEAI.FunctionCallContent($"stream_parse_error_{Guid.NewGuid():N}", name, arguments);
         }
 
         /// <summary>
