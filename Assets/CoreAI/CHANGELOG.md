@@ -24,8 +24,6 @@
 - **Tool schema/contract truthfulness.** `DelegateLlmTool` derives `ParametersSchema` from its generated
   MEAI function schema; `CompatibilityLlmTool` description matches its `string[]` contract; `WaitLlmTool`
   states over-max seconds are clamped; `InventoryLlmTool` null-checks its provider.
-- Known follow-up: `world_command` `apply_force`/`set_velocity` still accept an all-zero vector (deferred while
-  the World Lua API refactor is in flight).
 
 - **Lua WorldEdit prompts/docs use the new world API.** Core Lua tool descriptions and built-in agent
   prompts now point agents at `coreai_world_spawn({...})`, `coreai_world_change(name, {...})`,

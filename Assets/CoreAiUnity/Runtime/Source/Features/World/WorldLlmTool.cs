@@ -504,6 +504,13 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
+            // Require at least one force component. A fully-omitted vector is a model mistake, not a zero-force
+            // request; an explicit 0 (e.g. fx=0) still counts as provided and is honored.
+            if (x is null && y is null && z is null)
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.ApplyForce(targetName, new Vector3(x ?? 0f, y ?? 0f, z ?? 0f));
         }
 
@@ -567,6 +574,13 @@ namespace CoreAI.Infrastructure.Llm
             float? fz)
         {
             if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
+            // Require at least one velocity component. A fully-omitted vector is a model mistake; an explicit
+            // 0 on any axis still counts as provided, so an intentional stop (fx=0, fy=0, fz=0) is honored.
+            if (fx is null && fy is null && fz is null)
             {
                 return null;
             }

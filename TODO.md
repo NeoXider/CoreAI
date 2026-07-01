@@ -58,7 +58,7 @@
 - [x] ~~Pin "raw tool-call JSON never leaks into visible Text"~~ — streaming now fails closed on incomplete/unparseable text-shaped tool JSON (2026-07-01); a dedicated hard leak test would still be nice.
 - [ ] Harden `ConversationHistoryPruner.ExtractToolNames` against `Full`-policy tool blocks (name-only markdown parse is brittle).
 - [x] ~~Fix `ToolExecutionPolicy.IsToolResultSuccess` lossy "contains 'success'" heuristic~~ — done 2026-07-01 (JSON `error`/`ok:false`/`succeeded:false` + failure prefixes, classified before truncation).
-- [ ] `world_command` `apply_force`/`set_velocity` accept an all-zero vector despite the "required component" error text (audit W4 #1) — deferred while the World Lua API refactor is in flight.
+- [x] ~~`world_command` `apply_force`/`set_velocity` accept an all-zero vector~~ — fixed 2026-07-01 (require at least one vector component; explicit per-axis `0` still honored).
 - [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI. *(`SseToolCallAccumulator` many-small-deltas coverage added 2026-07-01.)*
 - [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite.
 

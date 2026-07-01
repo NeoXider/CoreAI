@@ -19,6 +19,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `set_transform` returns a clear error on a no-op (no fields) call; the intentionally empty aggregate
   `ParametersSchema` on the multi-function Scene/Camera tools is documented (per-function MEAI schema is
   authoritative).
+- **`world_command` physics validation.** `apply_force` / `set_velocity` now require at least one vector
+  component: a fully-omitted vector returns the advertised missing-parameters error instead of silently
+  applying zero, while an explicit `0` on any axis is still honored (so an intentional `set_velocity` stop works).
 - Added EditMode tests for concurrency, streaming fail-closed, SSE accumulator, and per-tool correctness.
 
 - **World tools consolidated around `spawn` + `change`.** The public `world_command` surface now uses
