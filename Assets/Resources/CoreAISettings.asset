@@ -17,7 +17,7 @@ MonoBehaviour:
   autoPriority: 0
   apiBaseUrl: http://127.0.0.1:1234/v1
   apiKey: 
-  modelName: qwen3.5-4b
+  modelName: qwen3.5-4b-mtp
   visionSupport: 0
   enableTemperatureOverriding: 0
   temperature: 0.1
@@ -38,7 +38,7 @@ MonoBehaviour:
   llmUnityStartupTimeoutSeconds: 120
   llmUnityStartupDelaySeconds: 1
   llmUnityKeepAlive: 0
-  reasoningMode: 1
+  reasoningMode: 0
   thinkingBudgetTokens: 0
   extraBodyJson: 
   llmUnityMaxConcurrentChats: 1
@@ -56,7 +56,7 @@ MonoBehaviour:
   defaultToolTimeoutMs: 30000
   maxResponseChars: 0
   maxToolCallRoundtrips: 10
-  maxToolCallHistoryMessages: 20
+  maxToolCallHistoryMessages: 0
   maxParallelToolCalls: 4
   enableStreaming: 1
   webGlNativeStreaming: 1
