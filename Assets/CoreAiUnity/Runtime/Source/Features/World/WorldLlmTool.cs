@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,10 +25,6 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IGameLogger _logger;
         private readonly Func<string> _liveResultNote;
 
-        // Monotonic counter for auto-naming unnamed spawns with a readable name (e.g. "cube_1") instead of
-        // a GUID hash, so the hierarchy stays human-readable when the model omits targetName.
-        private int _autoNameCounter;
-
         /// <param name="liveResultNote">
         /// Optional callback returning a short note appended to EVERY successful result message (e.g. a live
         /// "time remaining" countdown the benchmark feeds the model after each spawn). Null = no note.
@@ -43,7 +40,7 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Name => "world_command";
 
-        // Multi-action tool: identical repeats are legitimate (apply_force/set_velocity/update_score etc.).
+        // Multi-action tool: identical repeats are legitimate (apply_force/set_velocity/show_text etc.).
         // The original duplicate-SPAWN spam is now prevented at the root by reasoning being enabled and the
         // self-describing [Description] schema (models emit distinct args), so blanket tool-level dedup is the
         // wrong layer — it would wrongly skip valid repeated physics/score calls.
@@ -51,18 +48,18 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
-            "Actions: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, " +
+            "Actions: spawn, change, set_color, destroy, load_scene, reload_scene, " +
             "set_active, play_animation, stop_animation, list_animations, show_text, " +
-            "play_sound, set_volume, hide_panel, update_score, " +
-            "apply_force, set_velocity, spawn_particles, list_objects. " +
+            "play_sound, set_volume, hide_panel, apply_force, set_velocity, list_objects. " +
             "Use 'spawn' to create objects (prefabKey can be a built-in primitive — " +
             "cube, sphere, cylinder, capsule, quad, empty — or a registered prefab key). " +
-            "During spawn you can ALSO set rotation (fx/fy/fz degrees) and scale (uniform) in the same call, " +
-            "or use separate 'rotate'/'set_scale' actions later. " +
-            "'move' to reposition, 'rotate' to rotate (fx/fy/fz degrees), 'set_scale' to resize (uniform scale), " +
-            "'parent' to attach a child to a parent (stringValue = parent name), 'destroy' to remove, " +
+            "For spawn, targetName and prefabKey are required; x/y/z, fx/fy/fz, scale/scaleX/scaleY/scaleZ, " +
+            "and stringValue parent name are optional. One Unity unit is one meter. " +
+            "Use 'change' to update any subset of position, rotation, scale, and parent on an existing object. " +
+            "Use 'set_color' to tint an object with an HTML color in stringValue. " +
+            "'destroy' to remove, " +
             "'play_animation'/'stop_animation' to control animations, 'list_animations' to get available animations, " +
-            "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel'/'update_score' for UI, " +
+            "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel' for UI, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
             "'apply_force'/'set_velocity' for physics. " +
             "Objects are targeted by 'targetName'. For play_animation, stop_animation, and list_animations " +
@@ -70,35 +67,38 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true,
-                "Command: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects"),
+                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects"),
             ("targetName", "string", false,
-                "Object name to target (required for move, rotate, set_scale, parent, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects."),
-            ("x", "number", false, "X coordinate (for spawn, move)"),
-            ("y", "number", false, "Y coordinate (for spawn, move)"),
-            ("z", "number", false, "Z coordinate (for spawn, move)"),
+                "Object name to target. Required for spawn and most object actions."),
+            ("x", "number", false, "World X coordinate in meters for spawn/change; omit to leave unchanged on change."),
+            ("y", "number", false, "World Y coordinate in meters for spawn/change; omit to leave unchanged on change."),
+            ("z", "number", false, "World Z coordinate in meters for spawn/change; omit to leave unchanged on change."),
             ("fx", "number", false,
-                "Rotation X in degrees. Works on 'rotate' AND directly on 'spawn' (spawn the object already turned). Also Force X for apply_force."),
+                "Rotation X in degrees for spawn/change. Also Force X for apply_force."),
             ("fy", "number", false,
-                "Rotation Y in degrees. Works on 'rotate' AND directly on 'spawn'. Also Force Y for apply_force."),
+                "Rotation Y in degrees for spawn/change. Also Force Y for apply_force."),
             ("fz", "number", false,
-                "Rotation Z in degrees. Works on 'rotate' AND directly on 'spawn'. Also Force Z for apply_force."),
+                "Rotation Z in degrees for spawn/change. Also Force Z for apply_force."),
             ("scale", "number", false,
-                "Uniform scale. Works on 'set_scale' AND directly on 'spawn' (spawn the object already sized, e.g. 0.5 = half, 2 = double, 3 = a tall tower). Omit or 0 = default size."),
+                "Uniform local scale for spawn/change. Omit or 0 = default on spawn, unchanged on change."),
+            ("scaleX", "number", false,
+                "Optional local X size/scale for non-uniform pieces. Use for wall length or platform width."),
+            ("scaleY", "number", false,
+                "Optional local Y size/scale for non-uniform pieces. Use for height."),
+            ("scaleZ", "number", false,
+                "Optional local Z size/scale for non-uniform pieces. Use for wall thickness/depth."),
             ("prefabKey", "string", false,
                 "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key"),
             ("animationName", "string", false, "Name of the animation to play/stop"),
-            ("textToDisplay", "string", false, "Text for show_text / update_score"),
+            ("textToDisplay", "string", false, "Text for show_text"),
             ("stringValue", "string", false,
-                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound, parent object name for parent)"),
+                "Generic string value (search pattern for list_objects, clip name for play_sound, parent object name for change/spawn, HTML color for set_color)"),
             ("volume", "number", false, "Volume level 0.0-1.0 for set_volume")
         );
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, float, float, float, float, float, float, float, string?, string?, string?, string?, string?,
-                float,
-                CancellationToken,
-                Task<string>> func = ExecuteAsync;
+            ExecuteWorldCommandDelegate func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -107,40 +107,91 @@ namespace CoreAI.Infrastructure.Llm
             return AIFunctionFactory.Create(func, options);
         }
 
+        private delegate Task<string> ExecuteWorldCommandDelegate(
+            [Description(
+                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
+            string action,
+            [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
+            float? x = null,
+            [Description("World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+            float? y = null,
+            [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
+            float? z = null,
+            [Description(
+                "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]
+            float? fx = null,
+            [Description(
+                "Rotation Y in degrees for spawn/change. Also Force Y for apply_force.")]
+            float? fy = null,
+            [Description(
+                "Rotation Z in degrees for spawn/change. Also Force Z for apply_force.")]
+            float? fz = null,
+            [Description(
+                "Uniform size for spawn/change. Omit or 0 = default on spawn, unchanged on change.")]
+            float? scale = null,
+            [Description("Optional local X size/scale for non-uniform objects.")]
+            float? scaleX = null,
+            [Description("Optional local Y size/scale for non-uniform objects.")]
+            float? scaleY = null,
+            [Description("Optional local Z size/scale for non-uniform objects.")]
+            float? scaleZ = null,
+            [Description("What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key")]
+            string? prefabKey = null,
+            [Description("Object name to target or spawn.")]
+            string? targetName = null,
+            [Description("Generic string value. For spawn/change this is the parent object name; for set_color it is an HTML color; for list_objects it is the search pattern.")]
+            string? stringValue = null,
+            [Description("Name of the animation to play/stop")]
+            string? animationName = null,
+            [Description("Text for show_text")]
+            string? textToDisplay = null,
+            [Description("Volume level 0.0-1.0 for set_volume")]
+            float volume = 1f,
+            CancellationToken cancellationToken = default);
+
         public async Task<string> ExecuteAsync(
             [Description(
-                "Command: spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects")]
+                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
-            [Description("X coordinate (for spawn, move)")]
-            float x = 0f,
-            [Description("Y coordinate (for spawn, move). Y is height: larger Y = higher; ground at y=0.")]
-            float y = 0f,
-            [Description("Z coordinate (for spawn, move)")]
-            float z = 0f,
+            [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
+            float? x = null,
+            [Description("World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+            float? y = null,
+            [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
+            float? z = null,
             [Description(
-                "Rotation X in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned). Also Force X for apply_force. Vary it so objects are not all axis-aligned.")]
-            float fx = 0f,
+                "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]
+            float? fx = null,
             [Description(
-                "Rotation Y in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned, e.g. 45 for angled towers/roofs). Also Force Y for apply_force.")]
-            float fy = 0f,
+                "Rotation Y in degrees for spawn/change. Also Force Y for apply_force.")]
+            float? fy = null,
             [Description(
-                "Rotation Z in degrees. Works on 'rotate' AND directly on 'spawn' (the object is created already turned). Also Force Z for apply_force.")]
-            float fz = 0f,
+                "Rotation Z in degrees for spawn/change. Also Force Z for apply_force.")]
+            float? fz = null,
             [Description(
-                "Uniform size. Works on 'set_scale' AND directly on 'spawn' (the object is created already sized, e.g. 0.5 = half, 2 = double, 3 = a tall tower). Omit or 0 = default size. Vary it for differently sized pieces.")]
-            float scale = 0f,
+                "Uniform local size for spawn/change. Omit or 0 = default on spawn, unchanged on change.")]
+            float? scale = null,
+            [Description(
+                "Optional local X size/scale for non-uniform objects. Use for wall length, bridge width, or platform width.")]
+            float? scaleX = null,
+            [Description(
+                "Optional local Y size/scale for non-uniform objects. Use for height.")]
+            float? scaleY = null,
+            [Description(
+                "Optional local Z size/scale for non-uniform objects. Use for wall thickness/depth.")]
+            float? scaleZ = null,
             [Description(
                 "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, quad, empty) or a registered prefab key")]
             string? prefabKey = null,
             [Description(
-                "Object name to target (required for move, rotate, set_scale, parent, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects.")]
+                "Object name to target or create. Required for spawn and most object actions.")]
             string? targetName = null,
             [Description(
-                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound, parent object name for parent)")]
+                "Generic string value (search pattern for list_objects, clip name for play_sound, parent object name for spawn/change, HTML color for set_color)")]
             string? stringValue = null,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
-            [Description("Text for show_text / update_score")]
+            [Description("Text for show_text")]
             string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
@@ -170,14 +221,19 @@ namespace CoreAI.Infrastructure.Llm
                     args.Append($" prefabKey={prefabKey}");
                 }
 
-                if (x != 0f || y != 0f || z != 0f)
+                if (x.HasValue || y.HasValue || z.HasValue)
                 {
                     args.Append($" pos=({x},{y},{z})");
                 }
 
-                if (fx != 0f || fy != 0f || fz != 0f)
+                if (fx.HasValue || fy.HasValue || fz.HasValue)
                 {
                     args.Append($" force=({fx},{fy},{fz})");
+                }
+
+                if (Positive(scale) || Positive(scaleX) || Positive(scaleY) || Positive(scaleZ))
+                {
+                    args.Append($" scale=({scale},{scaleX},{scaleY},{scaleZ})");
                 }
 
                 if (!string.IsNullOrEmpty(stringValue))
@@ -207,11 +263,9 @@ namespace CoreAI.Infrastructure.Llm
             {
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
-                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale),
-                    "move" => CreateMoveCommand(targetName, x, y, z),
-                    "rotate" => CreateRotateCommand(targetName, fx, fy, fz),
-                    "set_scale" => CreateSetScaleCommand(targetName, scale),
-                    "parent" => CreateParentCommand(targetName, stringValue),
+                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ, stringValue),
+                    "change" => CreateChangeCommand(targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ, stringValue),
+                    "set_color" => CreateSetColorCommand(targetName, stringValue),
                     "destroy" => CreateDestroyCommand(targetName),
                     "load_scene" => CreateLoadSceneCommand(stringValue),
                     "reload_scene" => CreateReloadSceneCommand(),
@@ -223,10 +277,8 @@ namespace CoreAI.Infrastructure.Llm
                     "set_volume" => CreateSetVolumeCommand(targetName, volume),
                     "show_text" => CreateShowTextCommand(targetName, textToDisplay ?? stringValue),
                     "hide_panel" => CreateHidePanelCommand(targetName),
-                    "update_score" => CreateUpdateScoreCommand(targetName, textToDisplay ?? stringValue),
                     "apply_force" => CreateApplyForceCommand(targetName, fx, fy, fz),
                     "set_velocity" => CreateSetVelocityCommand(targetName, fx, fy, fz),
-                    "spawn_particles" => CreateSpawnParticlesCommand(targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),
                     _ => null
                 };
@@ -278,11 +330,19 @@ namespace CoreAI.Infrastructure.Llm
                 // — this is how we verify whether models use inline rotation/scale, not just that spawn ran.
                 if (success && action == "spawn")
                 {
-                    bool hasRot = fx != 0f || fy != 0f || fz != 0f;
-                    bool hasScale = scale > 0f;
-                    string extra = $" at ({x:0.##},{y:0.##},{z:0.##})"
-                                   + (hasRot ? $" rot=({fx:0.#},{fy:0.#},{fz:0.#})" : "")
-                                   + (hasScale ? $" scale={scale:0.##}" : "");
+                    bool hasRot = fx.HasValue || fy.HasValue || fz.HasValue;
+                    bool hasScale = Positive(scale);
+                    bool hasAxisScale = Positive(scaleX) || Positive(scaleY) || Positive(scaleZ);
+                    string extra = string.Format(CultureInfo.InvariantCulture, " at ({0:0.##},{1:0.##},{2:0.##})", x ?? 0f, y ?? 0f, z ?? 0f)
+                                   + (hasRot
+                                       ? string.Format(CultureInfo.InvariantCulture, " rot=({0:0.#},{1:0.#},{2:0.#})", fx ?? 0f, fy ?? 0f, fz ?? 0f)
+                                       : "")
+                                   + (hasScale
+                                       ? string.Format(CultureInfo.InvariantCulture, " scale={0:0.##}", scale ?? 0f)
+                                       : "")
+                                   + (hasAxisScale
+                                       ? string.Format(CultureInfo.InvariantCulture, " scaleXYZ=({0:0.##},{1:0.##},{2:0.##})", scaleX ?? 0f, scaleY ?? 0f, scaleZ ?? 0f)
+                                       : "");
                     return SerializeResult(true,
                         $"World command 'spawn' executed successfully{extra}{LiveNote()}", action);
                 }
@@ -304,47 +364,77 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float x,
-            float y, float z, float fx, float fy, float fz, float scale)
+        private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float? x,
+            float? y, float? z, float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY, float? scaleZ,
+            string? parentName)
         {
-            if (string.IsNullOrEmpty(prefabKey))
+            if (string.IsNullOrEmpty(prefabKey) || string.IsNullOrEmpty(targetName))
             {
                 return null;
             }
 
-            // Prefer the model-supplied name. When it is omitted, generate a READABLE name from the prefab
-            // key plus a counter (e.g. "cube_1", "Enemy_2") rather than a GUID hash, so the scene hierarchy
-            // stays legible. A leading digit or empty fallback is guarded with a generic "object_N".
-            string name = targetName;
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                int n = ++_autoNameCounter;
-                string stem = string.IsNullOrWhiteSpace(prefabKey) ? "object" : prefabKey.Trim();
-                name = $"{stem}_{n}";
-            }
+            string name = targetName.Trim();
 
-            Vector3 pos = new(x, y, z);
+            Vector3 pos = new(x ?? 0f, y ?? 0f, z ?? 0f);
 
             // Only take the rotation+scale overload when the model actually asked for orientation or sizing,
             // so a plain spawn keeps the default rotation/scale (uniformScale <= 0 = leave at default).
-            bool hasRotation = fx != 0f || fy != 0f || fz != 0f;
-            bool hasScale = scale > 0f;
+            bool hasRotation = fx.HasValue || fy.HasValue || fz.HasValue;
+            bool hasScale = Positive(scale) || Positive(scaleX) || Positive(scaleY) || Positive(scaleZ);
             if (hasRotation || hasScale)
             {
-                return CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos, new Vector3(fx, fy, fz), scale);
+                CoreAiWorldCommandEnvelope env = CoreAiWorldCommandEnvelope.Spawn(
+                    prefabKey,
+                    name,
+                    pos,
+                    new Vector3(fx ?? 0f, fy ?? 0f, fz ?? 0f),
+                    Positive(scale) ? scale.Value : 0f,
+                    new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
+                        Positive(scaleZ) ? scaleZ.Value : 0f));
+                env.stringValue = parentName ?? "";
+                return env;
             }
 
-            return CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos);
+            CoreAiWorldCommandEnvelope plain = CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos);
+            plain.stringValue = parentName ?? "";
+            return plain;
         }
 
-        private static CoreAiWorldCommandEnvelope CreateMoveCommand(string? targetName, float x, float y, float z)
+        private static CoreAiWorldCommandEnvelope CreateChangeCommand(string? targetName, float? x, float? y, float? z,
+            float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY, float? scaleZ,
+            string? parentName)
         {
             if (string.IsNullOrEmpty(targetName))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.Move(targetName, new Vector3(x, y, z));
+            bool hasPosition = x.HasValue || y.HasValue || z.HasValue;
+            bool hasRotation = fx.HasValue || fy.HasValue || fz.HasValue;
+            bool hasScale = Positive(scale) || Positive(scaleX) || Positive(scaleY) || Positive(scaleZ);
+            bool hasParent = !string.IsNullOrWhiteSpace(parentName);
+            if (!hasPosition && !hasRotation && !hasScale && !hasParent)
+            {
+                return null;
+            }
+
+            return CoreAiWorldCommandEnvelope.Change(
+                targetName,
+                new Vector3(x ?? 0f, y ?? 0f, z ?? 0f),
+                hasPosition,
+                x.HasValue,
+                y.HasValue,
+                z.HasValue,
+                new Vector3(fx ?? 0f, fy ?? 0f, fz ?? 0f),
+                hasRotation,
+                fx.HasValue,
+                fy.HasValue,
+                fz.HasValue,
+                Positive(scale) ? scale.Value : 0f,
+                new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
+                    Positive(scaleZ) ? scaleZ.Value : 0f),
+                hasScale,
+                parentName);
         }
 
         private static CoreAiWorldCommandEnvelope CreateDestroyCommand(string? targetName)
@@ -407,59 +497,24 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ShowText(targetName, text);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? targetName, float x, float y, float z)
+        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? targetName, float? x, float? y, float? z)
         {
             if (string.IsNullOrEmpty(targetName))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.ApplyForce(targetName, new Vector3(x, y, z));
+            return CoreAiWorldCommandEnvelope.ApplyForce(targetName, new Vector3(x ?? 0f, y ?? 0f, z ?? 0f));
         }
 
-        private static CoreAiWorldCommandEnvelope CreateRotateCommand(string? targetName, float fx, float fy, float fz)
+        private static CoreAiWorldCommandEnvelope CreateSetColorCommand(string? targetName, string? htmlColor)
         {
-            if (string.IsNullOrEmpty(targetName))
+            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(htmlColor))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.Rotate(targetName, new Vector3(fx, fy, fz));
-        }
-
-        private static CoreAiWorldCommandEnvelope CreateSetScaleCommand(string? targetName, float scale)
-        {
-            if (string.IsNullOrEmpty(targetName) || scale <= 0f)
-            {
-                return null;
-            }
-
-            return CoreAiWorldCommandEnvelope.SetScale(targetName, scale);
-        }
-
-        private static CoreAiWorldCommandEnvelope CreateParentCommand(string? childName, string? parentName)
-        {
-            if (string.IsNullOrEmpty(childName) || string.IsNullOrEmpty(parentName))
-            {
-                return null;
-            }
-
-            return CoreAiWorldCommandEnvelope.Parent(childName, parentName);
-        }
-
-        private static CoreAiWorldCommandEnvelope CreateSpawnParticlesCommand(string? targetName, string? effectName)
-        {
-            if (string.IsNullOrEmpty(effectName))
-            {
-                return null;
-            }
-
-            if (string.IsNullOrEmpty(targetName))
-            {
-                return null;
-            }
-
-            return CoreAiWorldCommandEnvelope.SpawnParticles(targetName, effectName);
+            return CoreAiWorldCommandEnvelope.SetColor(targetName, htmlColor);
         }
 
         private static CoreAiWorldCommandEnvelope CreateListObjectsCommand(string? searchPattern)
@@ -508,25 +563,15 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.HidePanel(targetName);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateUpdateScoreCommand(string? targetName, string? text)
-        {
-            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(text))
-            {
-                return null;
-            }
-
-            return CoreAiWorldCommandEnvelope.UpdateScore(targetName, text);
-        }
-
-        private static CoreAiWorldCommandEnvelope CreateSetVelocityCommand(string? targetName, float fx, float fy,
-            float fz)
+        private static CoreAiWorldCommandEnvelope CreateSetVelocityCommand(string? targetName, float? fx, float? fy,
+            float? fz)
         {
             if (string.IsNullOrEmpty(targetName))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.SetVelocity(targetName, new Vector3(fx, fy, fz));
+            return CoreAiWorldCommandEnvelope.SetVelocity(targetName, new Vector3(fx ?? 0f, fy ?? 0f, fz ?? 0f));
         }
 
         private static CoreAiWorldCommandEnvelope CreateListAnimationsCommand(string? targetName)
@@ -539,19 +584,22 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ListAnimations(targetName);
         }
 
+        private static bool Positive(float? value)
+            => value.HasValue && value.Value > 0f;
+
         private const string ValidActionsText =
-            "spawn, move, rotate, set_scale, parent, destroy, load_scene, reload_scene, set_active, " +
+            "spawn, change, set_color, destroy, load_scene, reload_scene, set_active, " +
             "play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, " +
-            "update_score, apply_force, set_velocity, spawn_particles, list_objects";
+            "apply_force, set_velocity, list_objects";
 
         private static bool IsKnownWorldAction(string action)
         {
             return action switch
             {
-                "spawn" or "move" or "rotate" or "set_scale" or "parent" or "destroy" or "load_scene" or
+                "spawn" or "change" or "set_color" or "destroy" or "load_scene" or
                     "reload_scene" or "set_active" or "play_animation" or "stop_animation" or "list_animations" or
-                    "play_sound" or "set_volume" or "show_text" or "hide_panel" or "update_score" or "apply_force" or
-                    "set_velocity" or "spawn_particles" or "list_objects" => true,
+                    "play_sound" or "set_volume" or "show_text" or "hide_panel" or "apply_force" or
+                    "set_velocity" or "list_objects" => true,
                 _ => false
             };
         }
@@ -561,11 +609,9 @@ namespace CoreAI.Infrastructure.Llm
             return action switch
             {
                 "spawn" =>
-                    "Missing required parameters for action 'spawn': prefabKey is required; targetName is recommended.",
-                "move" => "Missing required parameters for action 'move': targetName is required.",
-                "rotate" => "Missing required parameters for action 'rotate': targetName and fx/fy/fz (degrees) are required.",
-                "set_scale" => "Missing required parameters for action 'set_scale': targetName and a positive scale are required.",
-                "parent" => "Missing required parameters for action 'parent': targetName (child) and stringValue (parent name) are required.",
+                    "Missing required parameters for action 'spawn': prefabKey and targetName are required.",
+                "change" =>
+                    "Missing required parameters for action 'change': targetName and at least one optional transform/parent value are required.",
                 "destroy" => "Missing required parameters for action 'destroy': targetName is required.",
                 "load_scene" =>
                     "Missing required parameters for action 'load_scene': stringValue must be the scene name.",
@@ -581,16 +627,12 @@ namespace CoreAI.Infrastructure.Llm
                 "show_text" =>
                     "Missing required parameters for action 'show_text': targetName and textToDisplay (or stringValue) are required.",
                 "hide_panel" => "Missing required parameters for action 'hide_panel': targetName is required.",
-                "update_score" =>
-                    "Missing required parameters for action 'update_score': targetName and textToDisplay (or stringValue) are required.",
                 "apply_force" =>
                     "Missing required parameters for action 'apply_force': targetName and force components are required.",
                 "set_velocity" =>
                     "Missing required parameters for action 'set_velocity': targetName and velocity components are required.",
                 "set_color" =>
                     "Missing required parameters for action 'set_color': targetName and stringValue (an HTML colour like #88aa33) are required.",
-                "spawn_particles" =>
-                    "Missing required parameters for action 'spawn_particles': targetName and stringValue are required.",
                 "list_objects" => "Missing required parameters for action 'list_objects'.",
                 _ => $"Missing required parameters for action '{action}'."
             };

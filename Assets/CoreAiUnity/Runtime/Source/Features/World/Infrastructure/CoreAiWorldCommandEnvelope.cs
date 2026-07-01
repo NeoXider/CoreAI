@@ -27,6 +27,22 @@ namespace CoreAI.Infrastructure.World
         public float fy;
         public float fz;
 
+        // Optional non-uniform scale. 0 means "use floatValue/default" for that axis.
+        public float scaleX;
+        public float scaleY;
+        public float scaleZ;
+
+        // Optional transform block flags for change/set_transform commands.
+        public bool hasPosition;
+        public bool hasRotation;
+        public bool hasScale;
+        public bool hasX;
+        public bool hasY;
+        public bool hasZ;
+        public bool hasFx;
+        public bool hasFy;
+        public bool hasFz;
+
         // Scene
         public string sceneName = "";
 
@@ -39,7 +55,8 @@ namespace CoreAI.Infrastructure.World
                 targetName = targetName ?? "",
                 x = pos.x,
                 y = pos.y,
-                z = pos.z
+                z = pos.z,
+                hasPosition = true
             };
         }
 
@@ -51,6 +68,11 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         public static CoreAiWorldCommandEnvelope Spawn(
             string prefabKeyOrName, string targetName, Vector3 pos, Vector3 eulerAngles, float uniformScale)
+            => Spawn(prefabKeyOrName, targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+
+        public static CoreAiWorldCommandEnvelope Spawn(
+            string prefabKeyOrName, string targetName, Vector3 pos, Vector3 eulerAngles, float uniformScale,
+            Vector3 nonUniformScale)
         {
             return new CoreAiWorldCommandEnvelope
             {
@@ -63,7 +85,13 @@ namespace CoreAI.Infrastructure.World
                 fx = eulerAngles.x,
                 fy = eulerAngles.y,
                 fz = eulerAngles.z,
-                floatValue = uniformScale
+                floatValue = uniformScale,
+                scaleX = nonUniformScale.x,
+                scaleY = nonUniformScale.y,
+                scaleZ = nonUniformScale.z,
+                hasPosition = true,
+                hasRotation = eulerAngles != Vector3.zero,
+                hasScale = uniformScale > 0f || nonUniformScale != Vector3.zero
             };
         }
 
@@ -96,10 +124,76 @@ namespace CoreAI.Infrastructure.World
             Vector3 pos,
             Vector3 eulerAngles,
             float uniformScale)
+            => SetTransform(targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+
+        public static CoreAiWorldCommandEnvelope SetTransform(
+            string targetName,
+            Vector3 pos,
+            Vector3 eulerAngles,
+            float uniformScale,
+            Vector3 nonUniformScale)
+        {
+            CoreAiWorldCommandEnvelope env = Change(
+                targetName,
+                pos,
+                true,
+                eulerAngles,
+                true,
+                uniformScale,
+                nonUniformScale,
+                true,
+                null);
+            env.action = "set_transform";
+            return env;
+        }
+
+        public static CoreAiWorldCommandEnvelope Change(
+            string targetName,
+            Vector3 pos,
+            bool hasPosition,
+            Vector3 eulerAngles,
+            bool hasRotation,
+            float uniformScale,
+            Vector3 nonUniformScale,
+            bool hasScale,
+            string parentName)
+            => Change(
+                targetName,
+                pos,
+                hasPosition,
+                hasPosition,
+                hasPosition,
+                hasPosition,
+                eulerAngles,
+                hasRotation,
+                hasRotation,
+                hasRotation,
+                hasRotation,
+                uniformScale,
+                nonUniformScale,
+                hasScale,
+                parentName);
+
+        public static CoreAiWorldCommandEnvelope Change(
+            string targetName,
+            Vector3 pos,
+            bool hasPosition,
+            bool hasX,
+            bool hasY,
+            bool hasZ,
+            Vector3 eulerAngles,
+            bool hasRotation,
+            bool hasFx,
+            bool hasFy,
+            bool hasFz,
+            float uniformScale,
+            Vector3 nonUniformScale,
+            bool hasScale,
+            string parentName)
         {
             return new CoreAiWorldCommandEnvelope
             {
-                action = "set_transform",
+                action = "change",
                 targetName = targetName ?? "",
                 x = pos.x,
                 y = pos.y,
@@ -107,7 +201,20 @@ namespace CoreAI.Infrastructure.World
                 fx = eulerAngles.x,
                 fy = eulerAngles.y,
                 fz = eulerAngles.z,
-                floatValue = uniformScale
+                floatValue = uniformScale,
+                scaleX = nonUniformScale.x,
+                scaleY = nonUniformScale.y,
+                scaleZ = nonUniformScale.z,
+                hasPosition = hasPosition,
+                hasRotation = hasRotation,
+                hasScale = hasScale,
+                hasX = hasX,
+                hasY = hasY,
+                hasZ = hasZ,
+                hasFx = hasFx,
+                hasFy = hasFy,
+                hasFz = hasFz,
+                stringValue = parentName ?? ""
             };
         }
 
@@ -158,12 +265,18 @@ namespace CoreAI.Infrastructure.World
         }
 
         public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale)
+            => SetScale(targetName, uniformScale, Vector3.zero);
+
+        public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale, Vector3 nonUniformScale)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "set_scale",
                 targetName = targetName ?? "",
-                floatValue = uniformScale
+                floatValue = uniformScale,
+                scaleX = nonUniformScale.x,
+                scaleY = nonUniformScale.y,
+                scaleZ = nonUniformScale.z
             };
         }
 
@@ -221,16 +334,6 @@ namespace CoreAI.Infrastructure.World
         }
 
 
-        public static CoreAiWorldCommandEnvelope SpawnParticles(string targetName, string effectName)
-        {
-            return new CoreAiWorldCommandEnvelope
-            {
-                action = "spawn_particles",
-                targetName = targetName ?? "",
-                stringValue = effectName ?? ""
-            };
-        }
-
         public static CoreAiWorldCommandEnvelope ListObjects(string searchPattern = "")
         {
             return new CoreAiWorldCommandEnvelope
@@ -274,16 +377,6 @@ namespace CoreAI.Infrastructure.World
             {
                 action = "hide_panel",
                 targetName = targetName ?? ""
-            };
-        }
-
-        public static CoreAiWorldCommandEnvelope UpdateScore(string targetName, string scoreText)
-        {
-            return new CoreAiWorldCommandEnvelope
-            {
-                action = "update_score",
-                targetName = targetName ?? "",
-                stringValue = scoreText ?? ""
             };
         }
 

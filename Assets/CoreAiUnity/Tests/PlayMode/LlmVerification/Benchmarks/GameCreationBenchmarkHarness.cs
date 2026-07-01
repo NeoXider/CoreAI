@@ -345,6 +345,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public float X, Y, Z;
             public float FloatValue;
             public float Fx, Fy, Fz;
+            public float ScaleX, ScaleY, ScaleZ;
         }
 
         public class RecordingWorldExecutor : ICoreAiWorldCommandExecutor
@@ -385,7 +386,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         FloatValue = env.floatValue,
                         Fx = env.fx,
                         Fy = env.fy,
-                        Fz = env.fz
+                        Fz = env.fz,
+                        ScaleX = env.scaleX,
+                        ScaleY = env.scaleY,
+                        ScaleZ = env.scaleZ
                     };
                     Commands.Add(recorded);
                     OnCommand(recorded);
@@ -511,6 +515,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             UnityEngine.GameObject go = BuildVisual(
                                 key, cmd.PrefabKeyOrName, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z),
                                 expected, ghost: false);
+                            ApplyInlineTransform(go, cmd);
                             _objects[key] = go;
                         }
                     }
@@ -546,6 +551,43 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     Debug.LogWarning($"[Benchmark] visual command failed: {ex.Message}");
                 }
             }
+
+            private static void ApplyInlineTransform(UnityEngine.GameObject go, RecordedWorldCommand cmd)
+            {
+                if (go == null || cmd == null)
+                {
+                    return;
+                }
+
+                if (cmd.Fx != 0f || cmd.Fy != 0f || cmd.Fz != 0f)
+                {
+                    go.transform.rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                }
+
+                if (cmd.FloatValue > 0f || cmd.ScaleX > 0f || cmd.ScaleY > 0f || cmd.ScaleZ > 0f)
+                {
+                    go.transform.localScale = ResolveScale(cmd);
+                }
+            }
+
+            private static UnityEngine.Vector3 ResolveScale(RecordedWorldCommand cmd)
+            {
+                float uniform = cmd.FloatValue > 0f
+                    ? UnityEngine.Mathf.Clamp(cmd.FloatValue, 0.01f, 100f)
+                    : 1f;
+                if (cmd.ScaleX <= 0f && cmd.ScaleY <= 0f && cmd.ScaleZ <= 0f)
+                {
+                    return UnityEngine.Vector3.one * uniform;
+                }
+
+                return new UnityEngine.Vector3(
+                    AxisScale(cmd.ScaleX, uniform),
+                    AxisScale(cmd.ScaleY, uniform),
+                    AxisScale(cmd.ScaleZ, uniform));
+            }
+
+            private static float AxisScale(float value, float fallback)
+                => value > 0f ? UnityEngine.Mathf.Clamp(value, 0.01f, 100f) : fallback;
 
             // The model now chooses each object's primitive via prefabKey (cube/sphere/cylinder/capsule/
             // plane/quad); the harness no longer guesses a shape from the object's name. ShapeFor maps that
@@ -1459,7 +1501,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 UnityEngine.Transform p = cam.transform;
                 UnityEngine.Color verdict = VerdictColor(header);
 
-                float topH = 0.42f * halfH;
+                float topH = 0.62f * halfH;
                 float topY = halfH - topH * 0.5f;
                 AddQuad(p, new UnityEngine.Vector3(0f, topY, zb), new UnityEngine.Vector2(fullW, topH),
                     new UnityEngine.Color(0.09f, 0.10f, 0.12f));
@@ -1469,18 +1511,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // with the scenario + score + verdict as the line below. Long hyphenated model ids are
                 // wrapped (and shrunk) so they never overflow the banner.
                 string m = model ?? "";
-                float mSize = m.Length > 42 ? 0.0072f : (m.Length > 26 ? 0.0100f : 0.0125f);
-                AddCameraText(p, WrapModel(m, 33), new UnityEngine.Vector3(0f, topY + 0.035f, zb - 0.02f),
+                float mSize = m.Length > 42 ? 0.0064f : (m.Length > 26 ? 0.0086f : 0.0112f);
+                AddCameraText(p, WrapModel(m, 30), new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.02f),
                     mSize, UnityEngine.Color.white, true);
-                AddCameraText(p, header ?? "", new UnityEngine.Vector3(0f, topY - 0.10f, zb - 0.02f),
-                    0.0078f, verdict, true);
+                AddCameraText(p, WrapText(header ?? "", 58), new UnityEngine.Vector3(0f, halfH - 0.225f, zb - 0.02f),
+                    0.0068f, verdict, true);
 
                 // Stats line (free-build hero only): tool-calls · spawns · generation time · tokens, in a
                 // muted colour just under the score line, so the effort behind the scene is on the image.
                 if (!string.IsNullOrEmpty(heroStats))
                 {
-                    AddCameraText(p, heroStats, new UnityEngine.Vector3(0f, topY - 0.135f, zb - 0.02f),
-                        0.0050f, new UnityEngine.Color(0.78f, 0.82f, 0.88f), false);
+                    AddCameraText(p, WrapText(heroStats, 72), new UnityEngine.Vector3(0f, halfH - 0.315f, zb - 0.02f),
+                        0.0044f, new UnityEngine.Color(0.78f, 0.82f, 0.88f), false);
                 }
 
                 string cap = WrapText(subtitle ?? "", 52);

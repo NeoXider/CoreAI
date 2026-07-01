@@ -39,29 +39,47 @@ namespace CoreAI.Tests.EditMode
             WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
-            string resultJson = await tool.ExecuteAsync("spawn", prefabKey: "Enemy", x: 1f, y: 2f, z: 3f);
+            string resultJson = await tool.ExecuteAsync("spawn", prefabKey: "Enemy", targetName: "Enemy_1",
+                x: 1f, y: 2f, z: 3f, scaleX: 2f, scaleY: 3f, scaleZ: 4f, stringValue: "Root");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
 
             Assert.IsTrue(result.Success);
             Assert.AreEqual("spawn", result.Action);
-            Assert.IsTrue(executor.LastCommandJson.Contains("spawn"));
-            Assert.IsTrue(executor.LastCommandJson.Contains("Enemy"));
+            Assert.AreEqual("spawn", envelope.action);
+            Assert.AreEqual("Enemy", envelope.prefabKeyOrName);
+            Assert.AreEqual("Enemy_1", envelope.targetName);
+            Assert.AreEqual(2f, envelope.scaleX);
+            Assert.AreEqual(3f, envelope.scaleY);
+            Assert.AreEqual(4f, envelope.scaleZ);
+            Assert.AreEqual("Root", envelope.stringValue);
         }
 
         [Test]
-        public async Task WorldLlmTool_ExecuteAsync_Move_ReturnsSuccess()
+        public async Task WorldLlmTool_ExecuteAsync_Change_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
-            string resultJson = await tool.ExecuteAsync("move", targetName: "obj1", x: 10f, y: 20f, z: 30f);
+            string resultJson = await tool.ExecuteAsync("change", targetName: "obj1", x: 0f, fy: 45f,
+                scaleY: 2.5f, stringValue: "Root");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
 
             Assert.IsTrue(result.Success);
-            Assert.AreEqual("move", result.Action);
-            Assert.IsTrue(executor.LastCommandJson.Contains("move"));
-            Assert.IsTrue(executor.LastCommandJson.Contains("obj1"));
+            Assert.AreEqual("change", result.Action);
+            Assert.AreEqual("change", envelope.action);
+            Assert.AreEqual("obj1", envelope.targetName);
+            Assert.IsTrue(envelope.hasX);
+            Assert.IsFalse(envelope.hasY);
+            Assert.AreEqual(0f, envelope.x);
+            Assert.IsTrue(envelope.hasFy);
+            Assert.AreEqual(45f, envelope.fy);
+            Assert.AreEqual(2.5f, envelope.scaleY);
+            Assert.AreEqual("Root", envelope.stringValue);
         }
 
         [Test]
@@ -198,6 +216,56 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task WorldLlmTool_ExecuteAsync_PublicActionSurface_ProducesCommands()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+            (string action, System.Func<Task<string>> execute)[] cases =
+            {
+                ("spawn", () => tool.ExecuteAsync("spawn", prefabKey: "cube", targetName: "Block",
+                    x: 1f, y: 2f, z: 3f, fx: 0f, fy: 45f, fz: 0f, scaleX: 2f, scaleY: 1f,
+                    scaleZ: 0.5f, stringValue: "Root")),
+                ("change", () => tool.ExecuteAsync("change", targetName: "Block", x: 0f, fy: 90f,
+                    scaleY: 3f, stringValue: "Root2")),
+                ("set_color", () => tool.ExecuteAsync("set_color", targetName: "Block", stringValue: "#3366ff")),
+                ("destroy", () => tool.ExecuteAsync("destroy", targetName: "Block")),
+                ("load_scene", () => tool.ExecuteAsync("load_scene", stringValue: "Level2")),
+                ("reload_scene", () => tool.ExecuteAsync("reload_scene")),
+                ("set_active", () => tool.ExecuteAsync("set_active", targetName: "Block")),
+                ("play_animation", () => tool.ExecuteAsync("play_animation", targetName: "Block",
+                    animationName: "Idle")),
+                ("stop_animation", () => tool.ExecuteAsync("stop_animation", targetName: "Block")),
+                ("list_animations", () => tool.ExecuteAsync("list_animations", targetName: "Block")),
+                ("play_sound", () => tool.ExecuteAsync("play_sound", targetName: "Speaker", stringValue: "ping",
+                    volume: 0.4f)),
+                ("set_volume", () => tool.ExecuteAsync("set_volume", targetName: "Speaker", volume: 0.25f)),
+                ("show_text", () => tool.ExecuteAsync("show_text", targetName: "Panel", textToDisplay: "Ready")),
+                ("hide_panel", () => tool.ExecuteAsync("hide_panel", targetName: "Panel")),
+                ("apply_force", () => tool.ExecuteAsync("apply_force", targetName: "Block", fx: 1f, fy: 2f,
+                    fz: 3f)),
+                ("set_velocity", () => tool.ExecuteAsync("set_velocity", targetName: "Block", fx: 4f, fy: 5f,
+                    fz: 6f)),
+                ("list_objects", () => tool.ExecuteAsync("list_objects", stringValue: "Block"))
+            };
+
+            foreach ((string action, System.Func<Task<string>> execute) in cases)
+            {
+                string resultJson = await execute();
+                WorldLlmTool.WorldResult result =
+                    JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+                CoreAiWorldCommandEnvelope envelope =
+                    JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
+
+                Assert.IsTrue(result.Success, $"{action}: {result.Message}");
+                Assert.AreEqual(action, result.Action);
+                Assert.IsNotNull(envelope, action);
+                Assert.AreEqual(action, envelope.action, action);
+            }
+        }
+
+        [Test]
         public async Task WorldLlmTool_ExecuteAsync_ListObjects_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
@@ -262,19 +330,18 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task WorldLlmTool_ExecuteAsync_MoveWithTargetName_IncludesTargetName()
+        public async Task WorldLlmTool_ExecuteAsync_LegacyMove_ReturnsUnknownAction()
         {
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+                new Infrastructure.Logging.NullGameLogger());
 
             string resultJson = await tool.ExecuteAsync("move", targetName: "Player", x: 10f, y: 20f, z: 30f);
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
 
-            Assert.IsTrue(result.Success);
-            Assert.AreEqual("move", result.Action);
-            Assert.IsTrue(executor.LastCommandJson.Contains("move"));
-            Assert.IsTrue(executor.LastCommandJson.Contains("Player"));
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains("Unknown action", result.Message);
+            Assert.IsNull(executor.LastCommandJson);
         }
 
         [Test]
@@ -320,9 +387,13 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("world_command", tool.Name);
             StringAssert.Contains("spawn", tool.Description);
-            StringAssert.Contains("move", tool.Description);
+            StringAssert.Contains("change", tool.Description);
+            StringAssert.Contains("set_color", tool.Description);
             StringAssert.Contains("destroy", tool.Description);
             StringAssert.Contains("action", tool.ParametersSchema);
+            Assert.IsFalse(tool.ParametersSchema.Contains("move"));
+            Assert.IsFalse(tool.ParametersSchema.Contains("update_score"));
+            Assert.IsFalse(tool.ParametersSchema.Contains("spawn_particles"));
         }
 
         #endregion

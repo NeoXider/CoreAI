@@ -107,8 +107,9 @@ When the model decides to invoke a tool, a structure equivalent to the following
 |----------|-------------|
 | `report(string)` | Send result back |
 | `add(a, b)` | Add two numbers |
-| `coreai_world_spawn(key, name, x, y, z, [rx, ry, rz, scale])` | Spawn object; optional rotation (degrees) and uniform scale |
-| `coreai_world_move(name, x, y, z)` | Move an object |
+| `coreai_world_spawn({prefab=..., name=..., x?, y?, z?, rx?, ry?, rz?, scale?, scaleX?, scaleY?, scaleZ?, parent?})` | Spawn object; `prefab` and `name` required, transform and parent optional |
+| `coreai_world_change(name, {x?, y?, z?, rx?, ry?, rz?, scale?, scaleX?, scaleY?, scaleZ?, parent?})` | Apply only supplied transform or parent fields |
+| `coreai_world_set_color(name, htmlColor)` | Set renderer colour |
 | `coreai_world_destroy(name)` | Destroy an object |
 | `coreai_world_set_active(name, active)` | Enable/disable an object |
 | `coreai_world_load_scene(sceneName)` | Load a scene |
@@ -117,7 +118,6 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | `coreai_world_list_animations(name)` | List animations |
 | `coreai_world_show_text(name, text)` | Show text |
 | `coreai_world_apply_force(name, fx, fy, fz)` | Apply force |
-| `coreai_world_spawn_particles(name, pfx)` | Spawn particles |
 | `coreai_world_list_objects(pattern)` | Search objects |
 | `coreai_component_add(name, type)` | Add a supported component |
 | `coreai_component_remove(name, type)` | Remove a supported component |
@@ -125,7 +125,6 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | `coreai_component_set_bool(name, type, property, value)` | Set boolean component property |
 | `coreai_component_set_text(name, type, property, value)` | Set text, colour, or enum component property |
 | `coreai_component_set_vector(name, type, property, x, y, z)` | Set vector component property |
-
 **On success:** Output of `report(...)` or `"Lua executed successfully"`  
 **On error:** `"[Error] MoonSharp runtime: <error description>"` or a platform
 unsupported failure when `SecureLuaEnvironment.IsSupported` is `false` (currently
@@ -137,7 +136,7 @@ WebGL player builds).
 {
   "name": "execute_lua",
   "arguments": {
-    "code": "-- Ambush spawn script\ncoreai_world_spawn('Enemy', 'ambush_1', 10, 0, 5)\ncoreai_world_spawn('Enemy', 'ambush_2', -10, 0, 5)\ncoreai_world_spawn('EliteBoss', 'ambush_boss', 0, 0, 15)\nreport('Ambush setup: 2 enemies + 1 boss')"
+    "code": "-- Ambush spawn script\ncoreai_world_spawn({prefab='Enemy', name='ambush_1', x=10, y=0, z=5})\ncoreai_world_spawn({prefab='Enemy', name='ambush_2', x=-10, y=0, z=5})\ncoreai_world_spawn({prefab='EliteBoss', name='ambush_boss', x=0, y=0, z=15, scaleX=2, scaleY=2, scaleZ=2})\nreport('Ambush setup: 2 enemies + 1 boss')"
   }
 }
 ```
@@ -148,7 +147,7 @@ WebGL player builds).
 
 **Roles:** Creator, Designer AI, custom agents with WorldTool
 
-### Spawn — create object
+### Spawn - create object
 ```json
 {
   "name": "world_command",
@@ -158,63 +157,50 @@ WebGL player builds).
     "targetName": "enemy_wave7_1",
     "x": 10,
     "y": 0,
-    "z": 5
+    "z": 5,
+    "fy": 90,
+    "scaleX": 2,
+    "scaleY": 1,
+    "scaleZ": 3,
+    "stringValue": "WaveRoot"
   }
 }
 ```
 
-`prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence; primitive fallback lets `spawn` work with no prefab registry.
+`prefabKey` and `targetName` are required. Position, rotation (`fx/fy/fz`), uniform `scale`, per-axis `scaleX/scaleY/scaleZ`, and parent (`stringValue`) are optional. `scale` is a uniform fallback; use per-axis scale for meter-accurate dimensions.
 
-### Spawn built-in primitive
+`prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence.
+
+### Change - partial transform/hierarchy edit
 ```json
 {
   "name": "world_command",
   "arguments": {
-    "action": "spawn",
-    "prefabKey": "cube",
-    "targetName": "test_cube",
-    "x": 0,
-    "y": 1,
-    "z": 0
+    "action": "change",
+    "targetName": "enemy_wave7_1",
+    "x": 12,
+    "fy": 180,
+    "scaleY": 1.5,
+    "stringValue": "none"
   }
 }
 ```
 
-### Spawn with rotation and scale (convenience)
+`change` applies only supplied fields. Omitted axes and fields stay unchanged. Use `stringValue: "none"` to detach from the current parent.
+
+### Set color
 ```json
 {
   "name": "world_command",
   "arguments": {
-    "action": "spawn",
-    "prefabKey": "cylinder",
-    "targetName": "tower_1",
-    "x": -6,
-    "y": 1.5,
-    "z": -6,
-    "fx": 0,
-    "fy": 0,
-    "fz": 0,
-    "scale": 1.5
-  }
-}
-```
-During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in the same call, or use separate `rotate`/`set_scale` actions later.
-
-### Move — reposition object
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "move",
-    "targetName": "Player",
-    "x": 100,
-    "y": 0,
-    "z": 50
+    "action": "set_color",
+    "targetName": "enemy_wave7_1",
+    "stringValue": "#ff3300"
   }
 }
 ```
 
-### Destroy — remove object
+### Destroy - remove object
 ```json
 {
   "name": "world_command",
@@ -225,7 +211,7 @@ During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in th
 }
 ```
 
-### List Objects — object list
+### List Objects - object list
 ```json
 {
   "name": "world_command",
@@ -235,7 +221,7 @@ During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in th
 }
 ```
 
-### List Objects — name filter
+### List Objects - name filter
 ```json
 {
   "name": "world_command",
@@ -246,7 +232,7 @@ During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in th
 }
 ```
 
-### Load Scene
+### Load / reload scene
 ```json
 {
   "name": "world_command",
@@ -257,7 +243,6 @@ During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in th
 }
 ```
 
-### Reload Scene
 ```json
 {
   "name": "world_command",
@@ -267,114 +252,61 @@ During spawn you can set rotation (`fx/fy/fz` degrees) and uniform `scale` in th
 }
 ```
 
-### Set Active — enable/disable object
+### Other runtime actions
 ```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "set_active",
-    "targetName": "SecretDoor"
-  }
-}
-```
-
-### Play Animation
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "play_animation",
-    "targetName": "Boss1",
-    "animationName": "rage_attack"
-  }
-}
-```
-
-### List Animations
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "list_animations",
-    "targetName": "Boss1"
-  }
-}
-```
-
-### Show Text
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "show_text",
-    "targetName": "Player",
-    "textToDisplay": "Quest completed! +500 XP"
-  }
-}
-```
-
-### Apply Force
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "apply_force",
-    "targetName": "Boulder",
-    "fx": 0,
-    "fy": 100,
-    "fz": 50
-  }
-}
-```
-
-### Spawn Particles
-```json
-{
-  "name": "world_command",
-  "arguments": {
-    "action": "spawn_particles",
-    "targetName": "Enemy1",
-    "stringValue": "ExplosionVFX"
-  }
-}
+{"name":"world_command","arguments":{"action":"set_active","targetName":"SecretDoor"}}
+{"name":"world_command","arguments":{"action":"play_animation","targetName":"Boss1","animationName":"rage_attack"}}
+{"name":"world_command","arguments":{"action":"stop_animation","targetName":"Boss1"}}
+{"name":"world_command","arguments":{"action":"list_animations","targetName":"Boss1"}}
+{"name":"world_command","arguments":{"action":"play_sound","targetName":"Alarm","stringValue":"alarm_clip","volume":0.8}}
+{"name":"world_command","arguments":{"action":"set_volume","targetName":"Alarm","volume":0.35}}
+{"name":"world_command","arguments":{"action":"show_text","targetName":"QuestPanel","textToDisplay":"Quest completed! +500 XP"}}
+{"name":"world_command","arguments":{"action":"hide_panel","targetName":"QuestPanel"}}
+{"name":"world_command","arguments":{"action":"apply_force","targetName":"Boulder","fx":0,"fy":100,"fz":50}}
+{"name":"world_command","arguments":{"action":"set_velocity","targetName":"Boulder","fx":0,"fy":0,"fz":10}}
 ```
 
 **Full parameter table:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `action` | string | Operation type (see below) |
-| `prefabKey` | string | Registered prefab key or primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) |
-| `targetName` | string | GameObject name in the scene |
-| `x`, `y`, `z` | float | Position coordinates |
-| `fx`, `fy`, `fz` | float | Rotation degrees or force vector components |
-| `scale` | float | Uniform scale value |
-| `stringValue` | string | Additional string parameter, such as a scene name, search query, particle key, or parent object name |
-| `animationName` | string | Animation name |
-| `textToDisplay` | string | Text to display |
+| `action` | string | Operation type. |
+| `prefabKey` | string | Registered prefab key or primitive key for `spawn`. |
+| `targetName` | string | GameObject name in the scene. |
+| `x`, `y`, `z` | float | Position coordinates or vector components. |
+| `fx`, `fy`, `fz` | float | Rotation degrees, force vector, or velocity vector depending on action. |
+| `scale` | float | Uniform scale fallback. |
+| `scaleX`, `scaleY`, `scaleZ` | float | Per-axis scale values. |
+| `stringValue` | string | Scene name, search query, parent object name, HTML colour, or sound key depending on action. |
+| `animationName` | string | Animation name. |
+| `textToDisplay` | string | Text to display. |
+| `volume` | float | Audio volume. |
 
-**All `action` values:**
+**All public `world_command` action values:**
 
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
-| `spawn` | Create registered prefab or built-in primitive | `prefabKey`, `targetName`, `x`, `y`, `z` |
-| `move` | Move | `targetName`, `x`, `y`, `z` |
-| `rotate` | Rotate in degrees | `targetName`, `fx`, `fy`, `fz` |
-| `set_scale` | Set uniform scale | `targetName`, `scale` |
-| `parent` | Parent under another object | `targetName`, `stringValue` (parent object name) |
+| `spawn` | Create registered prefab or built-in primitive | `prefabKey`, `targetName` |
+| `change` | Apply optional transform/parent changes | `targetName` |
+| `set_color` | Set renderer colour | `targetName`, `stringValue` |
 | `destroy` | Remove | `targetName` |
-| `list_objects` | List objects | — (optional `stringValue`) |
+| `list_objects` | List objects | optional `stringValue` |
 | `load_scene` | Load scene | `stringValue` |
-| `reload_scene` | Reload | — |
+| `reload_scene` | Reload | none |
 | `set_active` | Enable/disable | `targetName` |
 | `play_animation` | Animation | `targetName`, `animationName` |
+| `stop_animation` | Stop animation | `targetName` |
 | `list_animations` | List animations | `targetName` |
+| `play_sound` | Play audio | `targetName`, optional `stringValue`, `volume` |
+| `set_volume` | Set audio volume | `targetName`, `volume` |
 | `show_text` | Show text | `targetName`, `textToDisplay` |
+| `hide_panel` | Hide UI panel/object | `targetName` |
 | `apply_force` | Apply force | `targetName`, `fx`, `fy`, `fz` |
-| `spawn_particles` | Particles | `targetName`, `stringValue` |
+| `set_velocity` | Set Rigidbody velocity | `targetName`, `fx`, `fy`, `fz` |
+
+Removed public world actions: `move`, `rotate`, `set_scale`, `parent`, `set_transform`, `update_score`, and `spawn_particles`.
 
 ---
-
 ## 4. Component Command Tool (Creator / Designer / Programmer via Lua)
 
 **Roles:** Custom agents with `ComponentLlmTool`; Programmer through Lua `coreai_component_*` bindings.
@@ -569,7 +501,7 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 }
 ```
 
-### Set transform
+### Set transform (scene tool only)
 ```json
 {
   "name": "scene_tool",
@@ -580,6 +512,8 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
   }
 }
 ```
+
+`scene_tool.set_transform` is separate from `world_command`; use `world_command.change` for public name-based world edits.
 
 ---
 

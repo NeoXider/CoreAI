@@ -1,4 +1,4 @@
-﻿# Demo: Lua Mods
+# Demo: Lua Mods
 
 Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used by AI.
 
@@ -8,7 +8,7 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 - **`WaveDirectorMod.lua.txt`** is a mod with the `Read | WorldEdit` level:
   - `hooks_on("wave_started", ...)` spawns a wave of enemies in one transaction
     (`coreai_world_begin/commit`), and stores the wave counter in persistent store (`store_set/get`);
-  - `hooks_every(4.0, ...)` recolors `Boss` through `coreai_world_set_props`;
+  - `hooks_every(4.0, ...)` recolors `Boss` through `coreai_world_set_color`;
   - `events_emit("wave_spawned", n)` sends an event back to the game (`ModEventEmitted`).
 - **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
   `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every

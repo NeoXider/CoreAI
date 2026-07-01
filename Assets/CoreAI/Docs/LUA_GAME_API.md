@@ -35,7 +35,7 @@ needed.
 |---|---|
 | `Read` | `log_*`, versions, `coreai_world_exists/pos/find/list_prefabs/raycast` |
 | `Gameplay` | `time_*` (including `time_set_scale`) |
-| `WorldEdit` | `coreai_world_spawn/move/rotate/set_transform/destroy/...`, batches, transactions, `set_props`, `parent` |
+| `WorldEdit` | `coreai_world_spawn`, `coreai_world_change`, `coreai_world_set_color`, `coreai_world_destroy`, scenes, batches, transactions |
 | `LogicOverride` | `logic_define/reset/list`, mod APIs (`hooks_*`, `store_*`, `events_emit`) |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
 
@@ -89,7 +89,7 @@ modRuntime.UnloadMod("night_director");
 ```lua
 -- inside a mod (runs during LoadMod, registers hooks):
 hooks_on("wave_started", function(evt, payload)
-  coreai_world_spawn("enemy.basic", "wave_" .. payload, 0, 0, 10)
+  coreai_world_spawn({ prefab="enemy.basic", name="wave_" .. payload, x=0, y=0, z=10 })
 end)
 hooks_every(2.0, function() ... end)   -- interval >= 0.05 s
 store_set("kills", "42")               -- persistent per-mod k/v (strings)
@@ -121,19 +121,33 @@ coreai_world_spawn_batch({
   {prefab="wall", name="w2", x=2, y=0, z=0},
 })
 coreai_world_grid("floor_tile", "cell", 0, 0, 9, 9, 1, 0)  -- 10x10 max (<= 100 cells), names cell_ix_iz
-coreai_world_move("turret_1", 2, 0, 4)
-coreai_world_rotate("turret_1", 0, 90, 0)
-coreai_world_set_transform("turret_1", 2, 0, 4, 0, 180, 0, 1.5)
-coreai_world_parent("turret_1", "tower")                     -- "" or "none" = detach
-coreai_world_set_props("boss", {scale=2.5, color="#ff3300"}) -- whitelist: scale, color
+coreai_world_spawn({
+  prefab="turret",
+  name="turret_1",
+  x=0,
+  y=0,
+  z=4,
+  ry=90,
+  scaleX=2,
+  scaleY=1,
+  scaleZ=3,
+  parent="tower"
+})
+coreai_world_change("turret_1", { x=2, ry=180, scale=1.5, parent="none" })
+coreai_world_set_color("boss", "#ff3300")
 
 coreai_world_begin()      -- buffer instead of publishing
 coreai_world_grid("trap", "t", 0, 0, 4, 4, 1, 0)
 coreai_world_rollback()   -- changed our mind: nothing published
 coreai_world_begin()
-coreai_world_spawn("chest", "reward", 5, 0, 5)
+coreai_world_spawn({ prefab="chest", name="reward", x=5, y=0, z=5 })
 coreai_world_commit()     -- publish everything together
 ```
+
+`coreai_world_spawn` requires `prefab` and `name`. Position, rotation (`rx/ry/rz`), scale, per-axis
+scale (`scaleX/scaleY/scaleZ`), and `parent` are optional. `scale` is a uniform fallback; per-axis
+scale is preferred when meters matter. `coreai_world_change(name, {...})` applies only the supplied
+fields, so omitted axes and fields stay unchanged.
 
 One transaction per bindings instance; buffer overflow (256) triggers an automatic rollback with an error.
 There is no undo for already applied commands (see TODO).
@@ -260,10 +274,10 @@ unity_set_scale(id, 2, 1, 2)
 unity_parent(id, unity_find("LevelRoot"), true)
 ```
 
-Spawn, delete, hierarchy, and common transform control are intentionally available without Full
-through `WorldEdit`: use `coreai_world_spawn`, `coreai_world_destroy`, `coreai_world_parent`,
-`coreai_world_move`, `coreai_world_rotate`, and `coreai_world_set_transform` when object names and
-prefab keys are known. Full remains for diagnostics and reflection-only cases.
+Spawn, delete, hierarchy, colour, and common transform control are intentionally available without
+Full through `WorldEdit`: use `coreai_world_spawn`, `coreai_world_change`,
+`coreai_world_set_color`, and `coreai_world_destroy` when object names and prefab keys are known.
+Full remains for diagnostics and reflection-only cases.
 
 Demo: `Assets/CoreAI.Demos/FullAccess/`. For production, targeted bindings are preferable, or the
 future migration to MoonSharp `UserData.RegisterType` (see MOONSHARP_NATIVE_APIS.md).

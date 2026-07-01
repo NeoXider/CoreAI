@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Lua WorldEdit prompts/docs use the new world API.** Core Lua tool descriptions and built-in agent
+  prompts now point agents at `coreai_world_spawn({...})`, `coreai_world_change(name, {...})`,
+  `coreai_world_set_color`, and `coreai_world_destroy` instead of the legacy move/rotate/parent helper set.
+  `LUA_GAME_API.md` was updated to match the current Unity world-command surface and to call out
+  per-axis scale for meter-accurate objects.
 - **Optional per-request system-prompt override** (`AiTaskRequest.SystemPrompt`). When set, the prompt
   composer uses it as the role's base prompt while still prepending the universal prefix; empty = unchanged
   (the registered role prompt). Lets a caller give a task-specific system prompt on a shared role.

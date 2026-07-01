@@ -131,57 +131,107 @@ namespace CoreAI.Infrastructure.World
         public void RegisterGameplayApis(LuaApiRegistry registry)
         {
             registry.Register("coreai_world_spawn",
-                new Func<string, string, double, double, double, string>((prefabKeyOrName, targetName, x, y, z) =>
+                new Func<MoonSharp.Interpreter.Table, string>(props =>
                 {
-                    string key = (prefabKeyOrName ?? "").Trim();
-                    string name = (targetName ?? "").Trim();
-                    if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(name))
+                    if (props == null)
                     {
-                        return "";
+                        throw new ArgumentException("props table is required.");
                     }
 
-                    Publish(CoreAiWorldCommandEnvelope.Spawn(key, name, ValidatePosition(x, y, z)));
+                    string prefab = GetRequiredString(props, "prefab");
+                    string name = GetRequiredString(props, "name");
+                    Vector3 position = ValidatePosition(
+                        GetOptionalNumber(props, "x", 0d),
+                        GetOptionalNumber(props, "y", 0d),
+                        GetOptionalNumber(props, "z", 0d));
+                    Vector3 rotation = ValidateEulerAngles(
+                        GetOptionalNumber(props, "rx", 0d),
+                        GetOptionalNumber(props, "ry", 0d),
+                        GetOptionalNumber(props, "rz", 0d));
+                    float uniformScale = GetOptionalScale(props, "scale", 0f);
+                    Vector3 nonUniformScale = new(
+                        GetOptionalScale(props, "scaleX", 0f),
+                        GetOptionalScale(props, "scaleY", 0f),
+                        GetOptionalScale(props, "scaleZ", 0f));
+
+                    CoreAiWorldCommandEnvelope env = CoreAiWorldCommandEnvelope.Spawn(
+                        prefab,
+                        name,
+                        position,
+                        rotation,
+                        uniformScale,
+                        nonUniformScale);
+                    env.stringValue = GetOptionalString(props, "parent", "");
+                    Publish(env);
                     return name;
                 }));
 
-            registry.Register("coreai_world_move", new Action<string, double, double, double>((targetName, x, y, z) =>
-            {
-                string name = (targetName ?? "").Trim();
-                if (string.IsNullOrEmpty(name))
+            registry.Register("coreai_world_change",
+                new Action<string, MoonSharp.Interpreter.Table>((targetName, props) =>
                 {
-                    return;
-                }
-
-                Publish(CoreAiWorldCommandEnvelope.Move(name, ValidatePosition(x, y, z)));
-            }));
-
-            registry.Register("coreai_world_rotate", new Action<string, double, double, double>((targetName, x, y, z) =>
-            {
-                string name = (targetName ?? "").Trim();
-                if (string.IsNullOrEmpty(name))
-                {
-                    return;
-                }
-
-                Publish(CoreAiWorldCommandEnvelope.Rotate(name, ValidateEulerAngles(x, y, z)));
-            }));
-
-            registry.Register("coreai_world_set_transform",
-                new Action<string, double, double, double, double, double, double, double>(
-                    (targetName, x, y, z, rx, ry, rz, scale) =>
+                    string name = (targetName ?? "").Trim();
+                    if (string.IsNullOrEmpty(name))
                     {
-                        string name = (targetName ?? "").Trim();
-                        if (string.IsNullOrEmpty(name))
-                        {
-                            return;
-                        }
+                        return;
+                    }
 
-                        Publish(CoreAiWorldCommandEnvelope.SetTransform(
-                            name,
-                            ValidatePosition(x, y, z),
-                            ValidateEulerAngles(rx, ry, rz),
-                            ValidateUniformScale(scale)));
-                    }));
+                    if (props == null)
+                    {
+                        throw new ArgumentException("props table is required.");
+                    }
+
+                    bool hasX = Has(props, "x");
+                    bool hasY = Has(props, "y");
+                    bool hasZ = Has(props, "z");
+                    bool hasPosition = hasX || hasY || hasZ;
+                    bool hasRx = Has(props, "rx");
+                    bool hasRy = Has(props, "ry");
+                    bool hasRz = Has(props, "rz");
+                    bool hasRotation = hasRx || hasRy || hasRz;
+
+                    bool hasScale = HasAny(props, "scale", "scaleX", "scaleY", "scaleZ");
+                    string parent = GetOptionalString(props, "parent", "");
+                    bool hasParent = !string.IsNullOrWhiteSpace(parent);
+                    if (!hasPosition && !hasRotation && !hasScale && !hasParent)
+                    {
+                        return;
+                    }
+
+                    Vector3 position = hasPosition
+                        ? ValidatePosition(
+                            GetOptionalNumber(props, "x", 0d),
+                            GetOptionalNumber(props, "y", 0d),
+                            GetOptionalNumber(props, "z", 0d))
+                        : Vector3.zero;
+                    Vector3 rotation = hasRotation
+                        ? ValidateEulerAngles(
+                            GetOptionalNumber(props, "rx", 0d),
+                            GetOptionalNumber(props, "ry", 0d),
+                            GetOptionalNumber(props, "rz", 0d))
+                        : Vector3.zero;
+                    float uniformScale = GetOptionalScale(props, "scale", 0f);
+                    Vector3 nonUniformScale = new(
+                        GetOptionalScale(props, "scaleX", 0f),
+                        GetOptionalScale(props, "scaleY", 0f),
+                        GetOptionalScale(props, "scaleZ", 0f));
+
+                    Publish(CoreAiWorldCommandEnvelope.Change(
+                        name,
+                        position,
+                        hasPosition,
+                        hasX,
+                        hasY,
+                        hasZ,
+                        rotation,
+                        hasRotation,
+                        hasRx,
+                        hasRy,
+                        hasRz,
+                        uniformScale,
+                        nonUniformScale,
+                        hasScale,
+                        parent));
+                }));
 
             registry.Register("coreai_world_destroy", new Action<string>(targetName =>
             {
@@ -224,65 +274,17 @@ namespace CoreAI.Infrastructure.World
                 Publish(CoreAiWorldCommandEnvelope.SetActive(name, active));
             }));
 
-            registry.Register("coreai_world_parent", new Action<string, string>((childName, parentName) =>
+            registry.Register("coreai_world_set_color", new Action<string, string>((targetName, htmlColor) =>
             {
-                string child = (childName ?? "").Trim();
-                if (string.IsNullOrEmpty(child))
+                string name = (targetName ?? "").Trim();
+                string color = (htmlColor ?? "").Trim();
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(color))
                 {
-                    throw new ArgumentException("child name is required.");
+                    return;
                 }
 
-                Publish(CoreAiWorldCommandEnvelope.Parent(child, (parentName ?? "").Trim()));
+                Publish(CoreAiWorldCommandEnvelope.SetColor(name, color));
             }));
-
-            registry.Register("coreai_world_set_props",
-                new Action<string, MoonSharp.Interpreter.Table>((targetName, props) =>
-                {
-                    string name = (targetName ?? "").Trim();
-                    if (string.IsNullOrEmpty(name))
-                    {
-                        return;
-                    }
-
-                    if (props == null)
-                    {
-                        throw new ArgumentException("props table is required.");
-                    }
-
-                    foreach (MoonSharp.Interpreter.TablePair pair in props.Pairs)
-                    {
-                        if (pair.Key.Type != MoonSharp.Interpreter.DataType.String)
-                        {
-                            throw new ArgumentException("unsupported property key. Allowed keys: scale, color.");
-                        }
-
-                        string key = pair.Key.String;
-                        switch (key)
-                        {
-                            case "scale":
-                                if (pair.Value.Type != MoonSharp.Interpreter.DataType.Number)
-                                {
-                                    throw new ArgumentException("scale must be a number.");
-                                }
-
-                                Publish(CoreAiWorldCommandEnvelope.SetScale(
-                                    name,
-                                    ValidateUniformScale(pair.Value.Number)));
-                                break;
-                            case "color":
-                                if (pair.Value.Type != MoonSharp.Interpreter.DataType.String)
-                                {
-                                    throw new ArgumentException("color must be a string.");
-                                }
-
-                                Publish(CoreAiWorldCommandEnvelope.SetColor(name, pair.Value.String));
-                                break;
-                            default:
-                                throw new ArgumentException(
-                                    $"unsupported property '{key}'. Allowed keys: scale, color.");
-                        }
-                    }
-                }));
 
             registry.Register("coreai_world_spawn_batch",
                 new Func<MoonSharp.Interpreter.Table, int>(entries =>
@@ -469,6 +471,70 @@ namespace CoreAI.Infrastructure.World
 
             return value.Number;
         }
+
+        private static double GetOptionalNumber(MoonSharp.Interpreter.Table table, string key, double fallback)
+        {
+            MoonSharp.Interpreter.DynValue value = table.Get(key);
+            if (value.IsNil())
+            {
+                return fallback;
+            }
+
+            if (value.Type != MoonSharp.Interpreter.DataType.Number)
+            {
+                throw new ArgumentException($"'{key}' must be a number.");
+            }
+
+            return value.Number;
+        }
+
+        private static string GetOptionalString(MoonSharp.Interpreter.Table table, string key, string fallback)
+        {
+            MoonSharp.Interpreter.DynValue value = table.Get(key);
+            if (value.IsNil())
+            {
+                return fallback;
+            }
+
+            if (value.Type != MoonSharp.Interpreter.DataType.String)
+            {
+                throw new ArgumentException($"'{key}' must be a string.");
+            }
+
+            return value.String.Trim();
+        }
+
+        private static float GetOptionalScale(MoonSharp.Interpreter.Table table, string key, float fallback)
+        {
+            MoonSharp.Interpreter.DynValue value = table.Get(key);
+            if (value.IsNil())
+            {
+                return fallback;
+            }
+
+            if (value.Type != MoonSharp.Interpreter.DataType.Number)
+            {
+                throw new ArgumentException($"'{key}' must be a number.");
+            }
+
+            return ValidateUniformScale(value.Number);
+        }
+
+        private static bool HasAny(MoonSharp.Interpreter.Table table, params string[] keys)
+        {
+            foreach (string key in keys)
+            {
+                if (Has(table, key))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool Has(MoonSharp.Interpreter.Table table, string key)
+            => !table.Get(key).IsNil();
 
         private void Publish(CoreAiWorldCommandEnvelope env)
         {

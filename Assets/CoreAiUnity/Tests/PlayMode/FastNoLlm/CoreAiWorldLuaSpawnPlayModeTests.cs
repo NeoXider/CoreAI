@@ -43,12 +43,10 @@ namespace CoreAI.Tests.PlayMode
             MoonSharp.Interpreter.Script script = env.CreateScript(luaRegistry);
 
             env.RunChunk(script, @"
-coreai_world_spawn('enemy.basic', 'LuaSpawnedEnemySmoke', 12, 1, 12)
-coreai_world_rotate('LuaSpawnedEnemySmoke', 0, 90, 0)
-coreai_world_set_transform('LuaSpawnedEnemySmoke', 13, 1, 12, 0, 180, 0, 1.5)
-coreai_world_parent('LuaSpawnedEnemySmoke', 'LuaWorldParentSmoke')
+coreai_world_spawn({ prefab = 'enemy.basic', name = 'LuaSpawnedEnemySmoke', x = 12, y = 1, z = 12, ry = 90, scale = 1.25, parent = 'LuaWorldParentSmoke' })
+coreai_world_change('LuaSpawnedEnemySmoke', { x = 13, ry = 180, scale = 1.5 })
 ");
-            Assert.AreEqual(4, sink.Items.Count);
+            Assert.AreEqual(2, sink.Items.Count);
 
             CoreAiWorldCommandExecutor executor =
                 new(GameLoggerUnscopedFallback.Instance, registry);
@@ -74,7 +72,7 @@ coreai_world_parent('LuaSpawnedEnemySmoke', 'LuaWorldParentSmoke')
                 Assert.AreSame(parent.transform, spawned.transform.parent);
 
                 sink.Items.Clear();
-                env.RunChunk(script, "coreai_world_parent('LuaSpawnedEnemySmoke', 'none') coreai_world_destroy('LuaSpawnedEnemySmoke')");
+                env.RunChunk(script, "coreai_world_change('LuaSpawnedEnemySmoke', { parent = 'none' }) coreai_world_destroy('LuaSpawnedEnemySmoke')");
                 Assert.AreEqual(2, sink.Items.Count);
                 Assert.IsTrue(executor.TryExecute(sink.Items[0]));
                 Assert.IsNull(spawned.transform.parent);

@@ -110,8 +110,9 @@ namespace CoreAI.Infrastructure.World
                     return TryMove(env);
                 case "rotate":
                     return TryRotate(env);
+                case "change":
                 case "set_transform":
-                    return TrySetTransform(env);
+                    return TryChange(env);
                 case "destroy":
                     return TryDestroy(env);
                 case "set_active":
@@ -142,8 +143,6 @@ namespace CoreAI.Infrastructure.World
                     return TryShowText(env);
                 case "hide_panel":
                     return TryHidePanel(env);
-                case "update_score":
-                    return TryUpdateScore(env);
                 case "apply_force":
                     return TryApplyForce(env);
                 case "set_velocity":
@@ -194,11 +193,7 @@ namespace CoreAI.Infrastructure.World
                 rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
             }
 
-            float scale = 1f;
-            if (float.IsFinite(env.floatValue) && env.floatValue > 0f)
-            {
-                scale = Mathf.Clamp(env.floatValue, 0.01f, 100f);
-            }
+            Vector3 scale = ResolveScale(env);
 
             // Registered prefab takes precedence; otherwise fall back to a built-in primitive so the world
             // tool is usable without any prefab registry assigned.
@@ -206,7 +201,8 @@ namespace CoreAI.Infrastructure.World
             {
                 GameObject prefabGo = UnityEngine.Object.Instantiate(prefab, pos, rotation);
                 prefabGo.name = targetName;
-                if (scale != 1f) prefabGo.transform.localScale = Vector3.one * scale;
+                if (scale != Vector3.one) prefabGo.transform.localScale = scale;
+                TryParentSpawned(prefabGo, env.stringValue);
                 return true;
             }
 
@@ -216,7 +212,8 @@ namespace CoreAI.Infrastructure.World
                 primitive.name = targetName;
                 primitive.transform.position = pos;
                 primitive.transform.rotation = rotation;
-                if (scale != 1f) primitive.transform.localScale = Vector3.one * scale;
+                if (scale != Vector3.one) primitive.transform.localScale = scale;
+                TryParentSpawned(primitive, env.stringValue);
                 return true;
             }
 
@@ -420,44 +417,6 @@ namespace CoreAI.Infrastructure.World
             return true;
         }
 
-        private bool TryUpdateScore(CoreAiWorldCommandEnvelope env)
-        {
-            if (string.IsNullOrEmpty(env.stringValue))
-            {
-                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] update_score: text is empty");
-                return false;
-            }
-
-            if (!ResolveObject(env.targetName, out GameObject go))
-            {
-                _logger.LogWarning(GameLogFeature.MessagePipe,
-                    $"[World] update_score: object not found (name='{env.targetName}')");
-                return false;
-            }
-
-            UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
-            if (uiText != null)
-            {
-                uiText.text = env.stringValue;
-                _logger.LogInfo(GameLogFeature.MessagePipe,
-                    $"[World] update_score: UI.Text='{env.stringValue}' on '{go.name}'");
-                return true;
-            }
-
-            TextMesh textMesh = go.GetComponent<TextMesh>();
-            if (textMesh != null)
-            {
-                textMesh.text = env.stringValue;
-                _logger.LogInfo(GameLogFeature.MessagePipe,
-                    $"[World] update_score: TextMesh='{env.stringValue}' on '{go.name}'");
-                return true;
-            }
-
-            _logger.LogWarning(GameLogFeature.MessagePipe,
-                $"[World] update_score: no Text/TextMesh on '{go.name}'");
-            return false;
-        }
-
         private bool TryMove(CoreAiWorldCommandEnvelope env)
         {
             if (!ResolveObject(env.targetName, out GameObject go))
@@ -480,24 +439,81 @@ namespace CoreAI.Infrastructure.World
             return true;
         }
 
-        private bool TrySetTransform(CoreAiWorldCommandEnvelope env)
+        private bool TryChange(CoreAiWorldCommandEnvelope env)
         {
             if (!ResolveObject(env.targetName, out GameObject go))
             {
                 return false;
             }
 
-            if (float.IsNaN(env.floatValue) || float.IsInfinity(env.floatValue))
+            if (!IsFiniteScale(env))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[World] set_transform: non-finite scale rejected (name='{env.targetName}')");
                 return false;
             }
 
-            go.transform.SetPositionAndRotation(
-                new Vector3(env.x, env.y, env.z),
-                Quaternion.Euler(env.fx, env.fy, env.fz));
-            go.transform.localScale = Vector3.one * Mathf.Clamp(env.floatValue, 0.01f, 100f);
+            bool legacySetTransform = string.Equals(env.action, "set_transform", StringComparison.Ordinal);
+            if (legacySetTransform || (env.hasPosition && !HasAxisPositionFlags(env)))
+            {
+                go.transform.position = new Vector3(env.x, env.y, env.z);
+            }
+            else if (env.hasPosition || HasAxisPositionFlags(env))
+            {
+                Vector3 pos = go.transform.position;
+                if (env.hasX) { pos.x = env.x; }
+                if (env.hasY) { pos.y = env.y; }
+                if (env.hasZ) { pos.z = env.z; }
+                go.transform.position = pos;
+            }
+
+            if (legacySetTransform || (env.hasRotation && !HasAxisRotationFlags(env)))
+            {
+                go.transform.rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+            }
+            else if (env.hasRotation || HasAxisRotationFlags(env))
+            {
+                Vector3 rot = go.transform.eulerAngles;
+                if (env.hasFx) { rot.x = env.fx; }
+                if (env.hasFy) { rot.y = env.fy; }
+                if (env.hasFz) { rot.z = env.fz; }
+                go.transform.rotation = Quaternion.Euler(rot);
+            }
+
+            if (legacySetTransform)
+            {
+                go.transform.localScale = ResolveScale(env);
+            }
+            else if (env.hasScale)
+            {
+                go.transform.localScale = ResolveChangeScale(go.transform.localScale, env);
+            }
+
+            TryParentSpawned(go, env.stringValue);
+            return true;
+        }
+
+        private bool TryParentSpawned(GameObject child, string parentName)
+        {
+            if (child == null || string.IsNullOrWhiteSpace(parentName))
+            {
+                return false;
+            }
+
+            if (parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                child.transform.SetParent(null, true);
+                return true;
+            }
+
+            if (!ResolveObject(parentName, out GameObject parent))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] parent: parent not found (name='{parentName}')");
+                return false;
+            }
+
+            child.transform.SetParent(parent.transform, true);
             return true;
         }
 
@@ -590,17 +606,58 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            if (float.IsNaN(env.floatValue) || float.IsInfinity(env.floatValue))
+            if (!IsFiniteScale(env))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[World] set_scale: non-finite scale rejected (name='{env.targetName}')");
                 return false;
             }
 
-            float scale = Mathf.Clamp(env.floatValue, 0.01f, 100f);
-            go.transform.localScale = Vector3.one * scale;
+            go.transform.localScale = ResolveScale(env);
             return true;
         }
+
+        private static bool IsFiniteScale(CoreAiWorldCommandEnvelope env)
+            => float.IsFinite(env.floatValue) && float.IsFinite(env.scaleX) &&
+               float.IsFinite(env.scaleY) && float.IsFinite(env.scaleZ);
+
+        private static Vector3 ResolveScale(CoreAiWorldCommandEnvelope env)
+        {
+            float uniform = env.floatValue > 0f ? Mathf.Clamp(env.floatValue, 0.01f, 100f) : 1f;
+            if (env.scaleX <= 0f && env.scaleY <= 0f && env.scaleZ <= 0f)
+            {
+                return Vector3.one * uniform;
+            }
+
+            return new Vector3(
+                AxisScale(env.scaleX, uniform),
+                AxisScale(env.scaleY, uniform),
+                AxisScale(env.scaleZ, uniform));
+        }
+
+        private static float AxisScale(float axisValue, float fallback)
+            => axisValue > 0f ? Mathf.Clamp(axisValue, 0.01f, 100f) : fallback;
+
+        private static Vector3 ResolveChangeScale(Vector3 current, CoreAiWorldCommandEnvelope env)
+        {
+            Vector3 result = current;
+            if (env.floatValue > 0f)
+            {
+                float uniform = Mathf.Clamp(env.floatValue, 0.01f, 100f);
+                result = Vector3.one * uniform;
+            }
+
+            if (env.scaleX > 0f) { result.x = Mathf.Clamp(env.scaleX, 0.01f, 100f); }
+            if (env.scaleY > 0f) { result.y = Mathf.Clamp(env.scaleY, 0.01f, 100f); }
+            if (env.scaleZ > 0f) { result.z = Mathf.Clamp(env.scaleZ, 0.01f, 100f); }
+            return result;
+        }
+
+        private static bool HasAxisPositionFlags(CoreAiWorldCommandEnvelope env)
+            => env.hasX || env.hasY || env.hasZ;
+
+        private static bool HasAxisRotationFlags(CoreAiWorldCommandEnvelope env)
+            => env.hasFx || env.hasFy || env.hasFz;
 
         private bool TrySetColor(CoreAiWorldCommandEnvelope env)
         {
@@ -933,7 +990,48 @@ namespace CoreAI.Infrastructure.World
             if (!string.IsNullOrEmpty(name))
             {
                 gameObject = GameObject.Find(name);
-                return gameObject != null;
+                if (gameObject != null)
+                {
+                    return true;
+                }
+
+                Scene scene = SceneManager.GetActiveScene();
+                if (scene.IsValid())
+                {
+                    GameObject[] rootObjects = scene.GetRootGameObjects();
+                    for (int i = 0; i < rootObjects.Length; i++)
+                    {
+                        if (TryFindByNameIncludingInactive(rootObjects[i].transform, name, out gameObject))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryFindByNameIncludingInactive(Transform root, string name, out GameObject gameObject)
+        {
+            gameObject = null;
+            if (root == null)
+            {
+                return false;
+            }
+
+            if (string.Equals(root.name, name, StringComparison.Ordinal))
+            {
+                gameObject = root.gameObject;
+                return true;
+            }
+
+            for (int i = 0; i < root.childCount; i++)
+            {
+                if (TryFindByNameIncludingInactive(root.GetChild(i), name, out gameObject))
+                {
+                    return true;
+                }
             }
 
             return false;

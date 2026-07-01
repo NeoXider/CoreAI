@@ -26,8 +26,8 @@ namespace CoreAI.Ai
             "unity_set_rotation_euler(id,x,y,z), unity_set_scale(id,x,y,z), unity_parent(child,parent,worldPositionStays), " +
             "unity_get_children(id), unity_list_components(id), unity_get_member(id,component,member), " +
             "unity_set_member(id,component,member,value), and unity_call(id,component,method,args). " +
-            "WorldEdit APIs do not require Full mode: use coreai_world_spawn, coreai_world_move, coreai_world_rotate, coreai_world_set_transform, coreai_world_destroy, coreai_world_parent, and coreai_world_set_props for safe scene edits. " +
-            "For visible spawns, call coreai_world_list_prefabs first, then coreai_world_spawn/coreai_world_spawn_batch with a real prefab key; report() alone is not a spawn. " +
+            "WorldEdit APIs do not require Full mode: use coreai_world_spawn({prefab,name,x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_change(name,{x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_set_color, and coreai_world_destroy for safe scene edits. " +
+            "For visible spawns, call coreai_world_list_prefabs first, then coreai_world_spawn({ prefab='key', name='objectName', x=0, y=0, z=0 }) or coreai_world_spawn_batch with a real prefab key; report() alone is not a spawn. " +
             "Do not hard-code visual recipes; inspect the scene/components first, then use the smallest real API that matches the host. " +
             "Use report(message) to describe the applied change. Do not invent helper globals; " +
             "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
@@ -69,7 +69,7 @@ namespace CoreAI.Ai
         /// <param name="cancellationToken">Cancellation token.</param>
         public async Task<string> ExecuteAsync(
             [Description(
-                "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. WorldEdit mode: use coreai_world_list_prefabs, coreai_world_spawn, coreai_world_move, coreai_world_rotate, coreai_world_set_transform, coreai_world_destroy, coreai_world_parent, and coreai_world_set_props. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with the smallest real API that matches the host. Return compact JSON/string for diagnostics.")]
+                "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. WorldEdit mode: use coreai_world_list_prefabs, coreai_world_spawn({prefab,name,x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_change(name,{x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_set_color, and coreai_world_destroy. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with the smallest real API that matches the host. Return compact JSON/string for diagnostics.")]
             string code,
             CancellationToken cancellationToken = default)
         {

@@ -4,6 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **World tools consolidated around `spawn` + `change`.** The public `world_command` surface now uses
+  `spawn` for creation and `change` for partial position/rotation/scale/parent edits, with `prefabKey` and
+  `targetName` required for spawn and `scaleX/scaleY/scaleZ` available for meter-accurate non-uniform
+  pieces. `set_color` stays public; legacy public `move` / `rotate` / `set_scale` / `parent` /
+  `set_transform` are no longer advertised, and `update_score` / `spawn_particles` were removed from the
+  world-command surface. Lua WorldEdit mirrors the new shape with `coreai_world_spawn({...})`,
+  `coreai_world_change(name, {...})`, `coreai_world_set_color`, and `coreai_world_destroy`.
+- **G6 free-build benchmark is spatially scored.** The castle/free-build prompt now states that one Unity
+  unit is one meter and asks models to use `scaleX/scaleY/scaleZ`; the scorer now checks distinct names,
+  bounds, castle structure, transform variety, non-uniform scale, and generic free-build overrides (city,
+  character, etc.) without applying castle-only checks to custom subjects. The hero screenshot header has
+  more vertical space and wrapped text so model/score/stats lines do not overlap.
+- **World tool verification.** Added PlayMode coverage that runs a complex public `WorldLlmTool` task
+  through spawn/change/color/UI/audio/animation/physics/list/destroy, plus Lua WorldEdit spawn/change
+  coverage. EditMode now checks the complete public action surface and rejects legacy `move` from the
+  public LLM tool.
 - **Native tool schemas are self-describing.** Tool parameter descriptions now reach the model via
   `[System.ComponentModel.Description]` attributes on the delegate params (the `ParametersSchema` string
   only feeds the text path, not native tool-calling). Added across the World/Scene/Camera/Component tools —

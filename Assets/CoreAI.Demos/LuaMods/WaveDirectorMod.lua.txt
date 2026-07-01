@@ -11,7 +11,7 @@ hooks_on("wave_started", function(evt, payload)
     coreai_world_begin()
     for i = 1, count do
         local x = (i - (count + 1) / 2) * 1.6
-        coreai_world_spawn("enemy.basic", "wave" .. wave .. "_enemy" .. i, x, 1.5, 8)
+        coreai_world_spawn({ prefab = "enemy.basic", name = "wave" .. wave .. "_enemy" .. i, x = x, y = 1.5, z = 8 })
     end
     coreai_world_commit()
 
@@ -23,6 +23,6 @@ hooks_every(4.0, function()
     if coreai_world_exists("Boss") then
         local colors = { "#ff3300", "#ffaa00", "#33ccff", "#aa66ff" }
         local wave = tonumber(store_get("wave")) or 0
-        coreai_world_set_props("Boss", { color = colors[(wave % 4) + 1] })
+        coreai_world_set_color("Boss", colors[(wave % 4) + 1])
     end
 end)

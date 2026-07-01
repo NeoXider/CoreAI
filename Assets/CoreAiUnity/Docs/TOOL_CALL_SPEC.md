@@ -187,7 +187,7 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 ### 4. World command tool
 
-**Purpose:** Control the game world — spawn, move, destroy objects, animations, audio, scenes.
+**Purpose:** Control the game world: spawn, partially change, recolour, destroy objects, animations, audio, physics, UI, and scenes.
 
 **Format:**
 
@@ -197,63 +197,65 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
-| `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) | `prefabKey`, `targetName`, `x`, `y`, `z` |
-| `move` | Move an object | `targetName`, `x`, `y`, `z` |
-| `rotate` | Rotate an object in degrees | `targetName`, `fx`, `fy`, `fz` |
-| `set_scale` | Set uniform object scale | `targetName`, `scale` |
-| `parent` | Parent an object under another object | `targetName`, `stringValue` (parent object name) |
+| `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) | `prefabKey`, `targetName` |
+| `change` | Apply only supplied position, rotation, scale, or parent fields | `targetName` |
+| `set_color` | Set renderer colour from HTML colour | `targetName`, `stringValue` |
 | `destroy` | Remove an object | `targetName` |
-| `list_objects` | List objects | — (optional: `stringValue` for search) |
+| `list_objects` | List objects | optional: `stringValue` for search |
 | `load_scene` | Load a scene | `stringValue` (scene name) |
-| `reload_scene` | Reload the scene | — |
+| `reload_scene` | Reload the scene | none |
 | `set_active` | Enable / disable | `targetName` |
 | `play_animation` | Play an animation | `targetName`, `animationName` |
+| `stop_animation` | Stop animation playback | `targetName` |
 | `list_animations` | List animations | `targetName` |
+| `play_sound` | Play an AudioSource or named clip binding | `targetName`, optional `stringValue`, `volume` |
+| `set_volume` | Set AudioSource volume | `targetName`, `volume` |
 | `show_text` | Show text | `targetName`, `textToDisplay` |
+| `hide_panel` | Hide UI panel/object | `targetName` |
 | `apply_force` | Apply a force | `targetName`, `fx`, `fy`, `fz` |
-| `spawn_particles` | Spawn particles | `targetName`, `stringValue` |
+| `set_velocity` | Set Rigidbody velocity | `targetName`, `fx`, `fy`, `fz` |
 
-**Code:**
+`move`, `rotate`, `set_scale`, `parent`, `set_transform`, `update_score`, and `spawn_particles` are not public `world_command` actions.
 
-- `WorldTool.cs` — MEAI `AIFunction`
-- `WorldLlmTool.cs` — `ILlmTool` wrapper
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `action` | string | Operation type. |
+| `prefabKey` | string | Registered prefab key or primitive key for `spawn`. |
+| `targetName` | string | GameObject name in the scene. Required for object-targeted actions. |
+| `x`, `y`, `z` | float | Optional position coordinates for `spawn`/`change`, or vector components for physics actions. |
+| `fx`, `fy`, `fz` | float | Optional rotation degrees for `spawn`/`change`, or force/velocity vector components. |
+| `scale` | float | Optional uniform scale fallback. |
+| `scaleX`, `scaleY`, `scaleZ` | float | Optional per-axis scale for meter-accurate dimensions. |
+| `stringValue` | string | Scene name, search query, parent name, HTML colour, or clip key depending on action. |
+| `animationName` | string | Animation name. |
+| `textToDisplay` | string | Text to display. |
+| `volume` | float | Audio volume. |
 
 **Examples:**
 
 ```json
-// Spawn enemy at position
-{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "targetName": "enemy_1", "x": 10, "y": 0, "z": 5}}
+// Spawn with optional position, rotation, non-uniform scale, and parent
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "cube", "targetName": "wall_1", "x": 0, "y": 1, "z": 0, "fy": 90, "scaleX": 8, "scaleY": 2, "scaleZ": 0.5, "stringValue": "CastleRoot"}}
 
-// Move player to checkpoint (by targetName)
-{"name": "world_command", "arguments": {"action": "move", "targetName": "Player", "x": 100, "y": 0, "z": 50}}
+// Change only supplied fields
+{"name": "world_command", "arguments": {"action": "change", "targetName": "wall_1", "x": 2, "fy": 180, "scaleY": 3, "stringValue": "none"}}
 
-// Spawn built-in primitive without prefab registry
-{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "cube", "targetName": "test_cube", "x": 0, "y": 1, "z": 0}}
+// Set colour
+{"name": "world_command", "arguments": {"action": "set_color", "targetName": "wall_1", "stringValue": "#ff3300"}}
 
 // Destroy object by name
 {"name": "world_command", "arguments": {"action": "destroy", "targetName": "OldBuilding"}}
 
-// List all objects in scene
-{"name": "world_command", "arguments": {"action": "list_objects"}}
-
 // Search objects by name pattern
 {"name": "world_command", "arguments": {"action": "list_objects", "stringValue": "enemy"}}
-
-// Show text notification
-{"name": "world_command", "arguments": {"action": "show_text", "targetName": "Player", "textToDisplay": "Quest completed!"}}
-
-// Play animation on enemy
-{"name": "world_command", "arguments": {"action": "play_animation", "targetName": "Enemy1", "animationName": "attack"}}
-
-// List available animations
-{"name": "world_command", "arguments": {"action": "list_animations", "targetName": "Enemy1"}}
 
 // Load next level
 {"name": "world_command", "arguments": {"action": "load_scene", "stringValue": "Level_2"}}
 ```
 
-**When to use:** Creator / Designer AI that dynamically drives the world.
-
+**When to use:** Creator / Designer AI that dynamically drives the world. For scene inspection and instance-level scene operations, use `scene_tool`; it is separate from `world_command`.
 ### 5. Component command tool
 
 **Purpose:** Add, remove, configure, and list Unity components on existing GameObjects through a curated catalog. This tool does not use reflection.

@@ -68,8 +68,10 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("unity_describe_object", prompt);
             StringAssert.Contains("unity_set_member", prompt);
             StringAssert.Contains("coreai_world_spawn", prompt);
-            StringAssert.Contains("coreai_world_rotate", prompt);
-            StringAssert.Contains("coreai_world_set_transform", prompt);
+            StringAssert.Contains("coreai_world_change", prompt);
+            StringAssert.Contains("coreai_world_set_color", prompt);
+            Assert.IsFalse(prompt.Contains("coreai_world_rotate"));
+            Assert.IsFalse(prompt.Contains("coreai_world_set_transform"));
             StringAssert.Contains("WorldEdit APIs do not require Full mode", prompt);
             StringAssert.Contains("Success/Output/Error", prompt);
             StringAssert.Contains("game.enemies", prompt);
@@ -89,8 +91,10 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("unity_list_objects", prompt);
             StringAssert.Contains("unity_set_member", prompt);
             StringAssert.Contains("coreai_world_list_prefabs", prompt);
-            StringAssert.Contains("coreai_world_rotate", prompt);
-            StringAssert.Contains("coreai_world_set_transform", prompt);
+            StringAssert.Contains("coreai_world_change", prompt);
+            StringAssert.Contains("coreai_world_set_color", prompt);
+            Assert.IsFalse(prompt.Contains("coreai_world_rotate"));
+            Assert.IsFalse(prompt.Contains("coreai_world_set_transform"));
             StringAssert.Contains("WorldEdit Lua APIs do not require Full mode", prompt);
             StringAssert.Contains("Success/Output/Error", prompt);
             StringAssert.Contains("print()", prompt);
