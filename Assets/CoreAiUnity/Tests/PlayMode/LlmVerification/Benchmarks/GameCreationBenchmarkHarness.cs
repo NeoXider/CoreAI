@@ -529,7 +529,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     labelGo.transform.localRotation = UnityEngine.Quaternion.identity;
                     _liveModelLabel = labelGo.AddComponent<UnityEngine.TextMesh>();
                     _liveModelLabel.text = "";
-                    _liveModelLabel.characterSize = 0.12f;
+                    _liveModelLabel.characterSize = 0.035f;
                     _liveModelLabel.fontSize = 60;
                     _liveModelLabel.fontStyle = UnityEngine.FontStyle.Bold;
                     _liveModelLabel.anchor = UnityEngine.TextAnchor.UpperLeft;
