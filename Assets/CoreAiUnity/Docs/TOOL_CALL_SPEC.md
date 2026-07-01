@@ -197,7 +197,7 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
-| `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) | `prefabKey`, `targetName` |
+| `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) | `prefabKey`, `targetName` |
 | `change` | Apply only supplied position, rotation, scale, or parent fields | `targetName` |
 | `set_color` | Set renderer colour from HTML colour | `targetName`, `stringValue` |
 | `destroy` | Remove an object | `targetName` |

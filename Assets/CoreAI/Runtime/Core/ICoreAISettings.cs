@@ -107,7 +107,7 @@ namespace CoreAI
 
         /// <summary>
         /// When <c>true</c>, the native <c>world_command</c> <c>spawn</c> action may create built-in Unity
-        /// primitives (cube, sphere, cylinder, capsule, plane, quad, empty) directly when the requested
+        /// primitives (cube, sphere, cylinder, capsule, plane, empty) directly when the requested
         /// <c>prefabKey</c> is not a registered prefab — so the world tool is usable out of the box without a
         /// prefab registry. When <c>false</c>, spawn is restricted to registered prefab keys (legacy). Default <c>true</c>.
         /// </summary>

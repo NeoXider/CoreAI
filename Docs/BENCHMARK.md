@@ -44,7 +44,7 @@ Verdicts:
 | PARTIAL | Base score from 50 to 89. |
 | FAIL | Base score below 50. |
 
-When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. A purely visual one-off such as the G6 castle hero is marked non-repeatable, so it always runs exactly once even when the rest of the suite repeats.
+When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. A heavy one-off such as the G6 castle hero can set `RepsOverride = 1`, so it always runs exactly once even when the rest of the suite repeats.
 
 ## Game-Fitness Roles
 

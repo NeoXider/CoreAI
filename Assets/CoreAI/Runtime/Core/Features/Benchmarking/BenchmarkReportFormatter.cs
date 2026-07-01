@@ -134,7 +134,7 @@ namespace CoreAI.Benchmarking
                               $"{r.FailedToolCalls} | {r.InvalidCommands} | {tokens} |");
             }
 
-            // --- Per-scenario median (only meaningful when repetitions > 1) ---
+            // --- Per-scenario mean (only meaningful when repetitions > 1) ---
             IReadOnlyList<ScenarioSummary> summaries = report.Scenarios();
             bool repeated = false;
             foreach (ScenarioSummary s in summaries)

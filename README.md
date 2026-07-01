@@ -53,7 +53,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 - 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, Lua generation rate limit, rate-limit metrics + F10 token-budget overlay
 - 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
 - 🧩 **Optional modules** — no MoonSharp? No LLMUnity? Still compiles; features light up when packages appear
-- 🌍 **Unity world control** — spawn primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`), move/rotate/scale objects, and add configured components through the reflection-free `component_command` tool
+- 🌍 **Unity world control** — spawn primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`), move/rotate/scale objects, and add configured components through the reflection-free `component_command` tool
 
 ⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
 

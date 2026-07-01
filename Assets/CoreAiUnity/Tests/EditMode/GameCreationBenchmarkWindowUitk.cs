@@ -367,13 +367,13 @@ namespace CoreAI.Tests.EditMode
         private VisualElement BuildRunOptionsSection()
         {
             VisualElement section = Section("Run options");
-            // One control: a slider with an inline number field (1..5 runs per scenario, median kept).
+            // One control: a slider with an inline number field (1..5 runs per scenario, mean kept).
             SliderInt repsSlider = new(1, 5)
             {
                 label = "Repetitions",
                 value = _reps,
                 showInputField = true,
-                tooltip = "Runs per scenario; the report keeps the per-scenario median."
+                tooltip = "Runs per scenario; the report keeps the per-scenario mean."
             };
             repsSlider.RegisterValueChangedCallback(evt =>
             {

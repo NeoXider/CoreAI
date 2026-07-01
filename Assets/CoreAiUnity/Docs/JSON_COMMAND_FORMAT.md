@@ -169,7 +169,7 @@ WebGL player builds).
 
 `prefabKey` and `targetName` are required. Position, rotation (`fx/fy/fz`), uniform `scale`, per-axis `scaleX/scaleY/scaleZ`, and parent (`stringValue`) are optional. `scale` is a uniform fallback; use per-axis scale for meter-accurate dimensions.
 
-`prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `quad`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence.
+`prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence.
 
 ### Change - partial transform/hierarchy edit
 ```json

@@ -135,7 +135,6 @@ Accepted primitive keys:
 - `cylinder`
 - `capsule`
 - `plane`
-- `quad`
 - `empty`
 
 Primitive fallback is gated by `ICoreAISettings.AllowWorldPrimitives` (default `true`), surfaced on the CoreAI Settings asset as **World Commands -> Allow World Primitives**. Registered prefab keys still take precedence.
