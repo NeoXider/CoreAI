@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Benchmark: G7 comprehensive integration scenario (2026-07-01)
+
+- `BenchmarkInfo.GroupDifficulty10` gained a `G7` entry (difficulty 9, hardest) for the new
+  comprehensive-integration scenario group (world-building + Lua logic cross-consistency) added on the
+  CoreAiUnity side — see `com.neoxider.coreaiunity`'s changelog for the scenario itself.
+
 ### Tool-calling hardening (2026-07-01 audit)
 
 - **Reliable tool-result success detection.** `ToolExecutionPolicy.IsToolResultSuccess` no longer treats any

@@ -99,6 +99,46 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Verified end to end on `qwen3.5-4b-mtp` (local LM Studio): EditMode 1361/1361, PlayMode `FastNoLlm`
   48/48, full G1-G6 live suite 94.1/100 (20 PASS / 3 PARTIAL / 1 FAIL).
 
+### Benchmark report + harness fixes, G7 comprehensive scenario (2026-07-01)
+
+- **Modelcard PNG: fixed text overflow and role-fitness number clipping.** The header (model id + score)
+  used a fixed `characterSize` regardless of length — a long OpenRouter-style id could overflow the card;
+  it now shrinks by length and hard-truncates past 68 characters, matching the policy the hero screenshot
+  already used. Role-fitness rating numbers were clipped at the right edge of the perspective frustum
+  (`barX0+barW+0.04=1.19` vs a ~1.326-unit half-width, ~0.136 margin); `barW` and the number offset were
+  reduced so the margin is now ~0.276.
+- **Scene screenshots had no shadows.** `AddComponent<Light>()` defaults to `LightShadows.None`; neither the
+  key nor fill light in the benchmark's scene-screenshot setup ever enabled shadows. The key light now casts
+  soft shadows (fill stays shadowless, avoiding a second conflicting shadow direction).
+- **`quad` removed as a spawnable primitive.** Flat, single-sided, and a source of confusion; dropped from
+  `CoreAiPrimitiveFactory`, `world_command`'s tool schema/descriptions, the G6 free-build prompts, and the
+  `allowWorldPrimitives` tooltip. `plane` remains supported but unadvertised (unchanged).
+- **`world_command` now documents that cylinder/capsule are 2m tall unscaled** (cube/sphere/plane are 1m) —
+  found via a real bug this caused: G6's castle-skeleton prompt told the model `scaleY=3` for a corner
+  tower cylinder, which at the true 2m base height produced a 6m tower half-buried in the ground
+  (`y=-1.5..4.5`), with the "flag on top" landing inside the tower instead of above it. Fixed to
+  `scaleY=1.5` (3m tower, `y=0..3`), consistent with the battlements/flags already anchored at `y=3`/`y=4`.
+- **G5 "Ordered spawn" no longer passes with a trailing extra spawn.** `exact_order` checked only that the
+  first three spawn names were `Gate, Player, Flag` (`spawnNames.Count >= 3`); a fourth spawn after `Flag`
+  still satisfied it despite the goal saying "Flag must be the last". Now requires `Count == 3`.
+  (Found via a Codex audit of the benchmark harness.)
+- **Scene screenshots now reflect `change`/`set_color`.** `VisualBenchmarkWorldExecutor.OnCommand` handled
+  only the legacy `move`/`set_scale`/`rotate` actions; a model correctly using the current `change` action
+  to reposition/rescale/rotate an object after spawning it, or `set_color` to tint it, had that update
+  silently dropped from the screenshot. (Found via the same audit.)
+- **G7 — new "comprehensive integration" scenario group.** G1-G6 each isolate one skill, so even a 4B
+  reference model scores 90+ across the suite. G7's "Key Puzzle" requires `world_command` spawns (exact
+  zones/order/shapes) AND an `execute_lua` distance-threshold slot together, then feeds the model's OWN
+  recorded spawn position back into its OWN logic slot to check they stay consistent — a model can pass an
+  isolated spatial check and an isolated logic check while still being inconsistent between the two.
+  `Difficulty` 9 (hardest), runs once regardless of suite reps (see below).
+- **Per-scenario repeat count generalized.** `GameBenchmarkScenario.Repeatable` (bool) is now
+  `RepsOverride` (`int?`): `null` inherits the suite's `COREAI_BENCHMARK_REPS`, a concrete value (typically
+  `1`) always runs exactly that many times — used by both G6 (visual hero) and G7 (comprehensive). Also
+  fixed the progress-bar total, which previously assumed every scenario ran the full suite rep count.
+- Verified end to end on `qwen3.5-4b-mtp`: EditMode 1361/1361, PlayMode `FastNoLlm` 48/48 (re-run 3× across
+  this round's fixes), full G1-G7 live suite 91.3/100 (19 PASS / 4 PARTIAL / 1 FAIL, G7 100/100 1/1 pass).
+
 ## 4.17.0 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.17.0**.

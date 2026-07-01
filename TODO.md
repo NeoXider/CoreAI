@@ -82,6 +82,16 @@
       at the same `(0,0,0)` position — checkpoints don't verify spatial spread/distinctness. Found via the
       same 2026-07-01 Codex transcript read. Consider adding a spacing/overlap checkpoint if G1 is meant to
       test layout, not just object count/type.
+- [ ] G6 free-build: generic-subject prompt says "AT LEAST 24 objects" but `substantial_scene` grading
+      accepts 18 for custom free-builds (`GameCastleScenarioG6.cs:149` vs `:208-210`) — prompt/grading
+      mismatch, found via 2026-07-01 Codex benchmark-harness audit.
+- [ ] G6 bounds grading (`CountBoundsViolations`) checks only the spawn pivot, not the scaled extent — a
+      cube at `x=8.9` with `scaleX=8` passes "within -9..9" while most of it sits outside the build volume.
+- [ ] G6 `IsTowerLike()` treats any cylinder/capsule near a corner as a tower regardless of scale/name —
+      four thin flag poles at the corners can satisfy `corner_towers`.
+- [ ] G5 `exact_count`-style constraints (e.g. `g5_exact_three`) count `env.World.Commands.Count`, not
+      actual tool-call attempts — a 4th malformed/failed `world_command` after 3 valid spawns still reads
+      as `total == 3`, so the constraint passes despite an extra action being issued.
 
 ## Shipped (recent)
 
