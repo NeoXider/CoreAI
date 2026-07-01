@@ -22,6 +22,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **`world_command` physics validation.** `apply_force` / `set_velocity` now require at least one vector
   component: a fully-omitted vector returns the advertised missing-parameters error instead of silently
   applying zero, while an explicit `0` on any axis is still honored (so an intentional `set_velocity` stop works).
+- **Non-streaming `ExecutedToolCalls` no longer vanishes on an empty final response.** `MeaiLlmClient.CompleteAsync`
+  returned `Ok=false` for an empty final assistant response before copying the executed tool traces into the
+  result. A turn that genuinely ran a tool (e.g. a `world_command` spawn) and then trailed off into an empty
+  response silently lost all evidence that the tool ran for every `ExecutedToolCalls` consumer (orchestrator
+  history, logging, telemetry) — found via a live Game-Creation Benchmark report where the G6 hero caption
+  claimed `0 tool-calls` alongside `1 spawns`, a logical contradiction.
 - Added EditMode tests for concurrency, streaming fail-closed, SSE accumulator, and per-tool correctness.
 
 - **World tools consolidated around `spawn` + `change`.** The public `world_command` surface now uses
