@@ -27,6 +27,7 @@ namespace CoreAI.Tests.EditMode
         };
 
         private readonly HashSet<string> _expandedRuns = new();
+        private readonly HashSet<string> _collapsedModels = new();
         private readonly HashSet<string> _selectedModels = new();
         private readonly Dictionary<string, Texture2D> _thumbs = new();
 
@@ -688,9 +689,46 @@ namespace CoreAI.Tests.EditMode
                 return;
             }
 
-            int models = runs.Select(r => r.Summary.ModelId).Distinct().Count();
+            List<string> modelIds = runs.Select(r => r.Summary.ModelId).Distinct().ToList();
             RunEntry best = runs.OrderByDescending(r => r.Summary.SuiteBase).First();
-            _historyList.Add(Info($"{runs.Count} run(s), {models} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
+            _historyList.Add(Info($"{runs.Count} run(s), {modelIds.Count} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
+
+            VisualElement toolbar = Row();
+            toolbar.style.justifyContent = Justify.FlexEnd;
+            toolbar.style.marginTop = 2;
+            toolbar.style.marginBottom = 6;
+
+            ToolbarButton collapseAll = new(() =>
+            {
+                foreach (string id in modelIds)
+                {
+                    _collapsedModels.Add(id);
+                }
+
+                RefreshHistory();
+            })
+            {
+                text = "Collapse all",
+                tooltip = "Collapse every model's run list"
+            };
+            collapseAll.style.width = 90;
+            collapseAll.style.fontSize = 11;
+            toolbar.Add(collapseAll);
+
+            ToolbarButton expandAll = new(() =>
+            {
+                _collapsedModels.Clear();
+                RefreshHistory();
+            })
+            {
+                text = "Expand all",
+                tooltip = "Expand every model's run list"
+            };
+            expandAll.style.width = 90;
+            expandAll.style.fontSize = 11;
+            expandAll.style.marginLeft = 4;
+            toolbar.Add(expandAll);
+
             ToolbarButton clearAll = new(() =>
             {
                 if (EditorUtility.DisplayDialog("Clear benchmark history",
@@ -706,24 +744,55 @@ namespace CoreAI.Tests.EditMode
                 text = "Clear all",
                 tooltip = "Delete every saved benchmark report"
             };
-            clearAll.style.alignSelf = Align.FlexEnd;
             clearAll.style.width = 90;
             clearAll.style.fontSize = 11;
-            clearAll.style.marginTop = 2;
-            clearAll.style.marginBottom = 6;
-            _historyList.Add(clearAll);
+            clearAll.style.marginLeft = 4;
+            toolbar.Add(clearAll);
+
+            _historyList.Add(toolbar);
 
             foreach (IGrouping<string, RunEntry> group in runs.GroupBy(r => r.Summary.ModelId)
                          .OrderByDescending(g => g.Max(r => r.Summary.RunId)))
             {
-                VisualElement modelSection = Section($"{group.Key} ({group.Count()})");
-                foreach (RunEntry entry in group.OrderByDescending(r => r.Summary.RunId))
+                bool collapsed = _collapsedModels.Contains(group.Key);
+                VisualElement modelSection = Section(null);
+
+                VisualElement header = Row();
+                header.style.marginTop = 0;
+                header.RegisterCallback<MouseUpEvent>(evt =>
                 {
-                    modelSection.Add(RunRow(entry));
+                    if (evt.button == 0)
+                    {
+                        ToggleModelSection(group.Key);
+                    }
+                });
+                Button toggle = new(() => ToggleModelSection(group.Key)) { text = collapsed ? ">" : "v" };
+                toggle.style.width = 22;
+                toggle.RegisterCallback<MouseUpEvent>(evt => evt.StopPropagation());
+                header.Add(toggle);
+                header.Add(LabelBold($"{group.Key} ({group.Count()})"));
+                modelSection.Add(header);
+
+                if (!collapsed)
+                {
+                    foreach (RunEntry entry in group.OrderByDescending(r => r.Summary.RunId))
+                    {
+                        modelSection.Add(RunRow(entry));
+                    }
                 }
 
                 _historyList.Add(modelSection);
             }
+        }
+
+        private void ToggleModelSection(string modelId)
+        {
+            if (!_collapsedModels.Remove(modelId))
+            {
+                _collapsedModels.Add(modelId);
+            }
+
+            RefreshHistory();
         }
 
         private VisualElement RunRow(RunEntry entry)
