@@ -4,6 +4,23 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Tool-calling hardening (2026-07-01 audit)
+
+- **Streaming fails closed on bad tool JSON.** In the streaming MEAI client, a held text-shaped tool-call
+  object that is incomplete or unparseable is no longer leaked to visible output at turn end — it fails
+  closed like the native SSE path. The streaming tool loop now honors `MaxToolCallRoundtrips`
+  (request/settings, `0` = unlimited) instead of `MaxToolCallRetries + 1`, and the hybrid held-tail buffer is
+  bounded (64 KB cap) to avoid O(n²) rescans. A dropped `<think>` block that contained a tool-call-shaped
+  object is now logged.
+- **Atomic file stores.** `FileAgentMemoryStore` (now `IAtomicAgentMemoryStore`), `FileSkillStore`,
+  `FileLuaModSourceStore`, and `FileLuaScriptVersionStore` hold a process-wide per-key lock across
+  load→modify→save so concurrent turns cannot lose a `memory` append or a `manage_skills`/`manage_mods` write.
+- **Scene/Camera tool robustness.** `SceneLlmTool.find_objects` is null-safe for `searchMethod`/`searchTerm`;
+  `set_transform` returns a clear error on a no-op (no fields) call; the intentionally empty aggregate
+  `ParametersSchema` on the multi-function Scene/Camera tools is documented (per-function MEAI schema is
+  authoritative).
+- Added EditMode tests for concurrency, streaming fail-closed, SSE accumulator, and per-tool correctness.
+
 - **World tools consolidated around `spawn` + `change`.** The public `world_command` surface now uses
   `spawn` for creation and `change` for partial position/rotation/scale/parent edits, with `prefabKey` and
   `targetName` required for spawn and `scaleX/scaleY/scaleZ` available for meter-accurate non-uniform

@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Tool-calling hardening (2026-07-01 audit)
+
+- **Reliable tool-result success detection.** `ToolExecutionPolicy.IsToolResultSuccess` no longer treats any
+  text lacking the word "success" as success: it now recognizes JSON `error` / `ok:false` /
+  `succeeded:false` / `success:false` (any casing) and plain-text failure prefixes, and classifies the
+  result **before** it is truncated.
+- **Duplicate detection fixes.** Intra-batch duplicate calls of non-`AllowDuplicates` tools are now caught on
+  the first turn (only the later identical calls are rejected, order preserved); duplicate signatures use the
+  repaired **canonical** tool name so casing variants are detected; a repeated mixed batch still executes its
+  `AllowDuplicates` calls.
+- **Fail-closed tool-name repair.** Ambiguous case-insensitive name matches (two tools colliding under
+  `OrdinalIgnoreCase`) are rejected as unknown instead of silently routing to the first match.
+- **Atomic memory/skill mutations.** Added `IAtomicAgentMemoryStore.MutateAsync` + a keyed-lock fallback and
+  `ISkillStore` atomic mutation so `memory` append/edit and `manage_skills` create/update are process-wide
+  serialized read-modify-write — concurrent agent turns can no longer lose an append.
+- **SSE tool-call parsing.** `SseToolCallAccumulator` keys pending calls by stable id (falling back to index);
+  a differing id on an existing index starts a new call, and missing-index with multiple pending calls is
+  flagged instead of merging fragments. Provider-native `reasoning_content` is no longer surfaced as visible
+  assistant text (consistent with the streaming path).
+- **Tool schema/contract truthfulness.** `DelegateLlmTool` derives `ParametersSchema` from its generated
+  MEAI function schema; `CompatibilityLlmTool` description matches its `string[]` contract; `WaitLlmTool`
+  states over-max seconds are clamped; `InventoryLlmTool` null-checks its provider.
+- Known follow-up: `world_command` `apply_force`/`set_velocity` still accept an all-zero vector (deferred while
+  the World Lua API refactor is in flight).
+
 - **Lua WorldEdit prompts/docs use the new world API.** Core Lua tool descriptions and built-in agent
   prompts now point agents at `coreai_world_spawn({...})`, `coreai_world_change(name, {...})`,
   `coreai_world_set_color`, and `coreai_world_destroy` instead of the legacy move/rotate/parent helper set.

@@ -52,13 +52,14 @@
 
 ## Audit cleanup & cheap test gaps (from 2026-06-28 audit, non-blocking)
 
-- [ ] Remove now-dead `MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming` (superseded by `GetHybridSafeSegments`; only its own test references it) and bound the O(n²) per-delta hybrid rescan.
+- [ ] Remove now-dead `MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming` (superseded by `GetHybridSafeSegments`; only its own test references it). *(The O(n²) per-delta hybrid rescan is now bounded by a 64 KB held-tail cap — 2026-07-01.)*
 - [ ] Separate inter-token idle timeout (distinct from total request timeout) in SSE streaming.
-- [ ] Surface provider-native `reasoning_content` SSE deltas as a collapsible "thinking" channel (currently parsed and dropped).
-- [ ] Pin "raw tool-call JSON never leaks into visible Text" as a hard test (today the parity test tolerates a brief flash).
+- [ ] Surface provider-native `reasoning_content` SSE deltas as a collapsible "thinking" channel. *(Now handled consistently as internal — not surfaced as visible text in either path — 2026-07-01.)*
+- [x] ~~Pin "raw tool-call JSON never leaks into visible Text"~~ — streaming now fails closed on incomplete/unparseable text-shaped tool JSON (2026-07-01); a dedicated hard leak test would still be nice.
 - [ ] Harden `ConversationHistoryPruner.ExtractToolNames` against `Full`-policy tool blocks (name-only markdown parse is brittle).
-- [ ] Fix `ToolExecutionPolicy.IsToolResultSuccess` lossy "contains 'success'" heuristic; structured success contract for tool results.
-- [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; `SseToolCallAccumulator` state machine across many small deltas; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI.
+- [x] ~~Fix `ToolExecutionPolicy.IsToolResultSuccess` lossy "contains 'success'" heuristic~~ — done 2026-07-01 (JSON `error`/`ok:false`/`succeeded:false` + failure prefixes, classified before truncation).
+- [ ] `world_command` `apply_force`/`set_velocity` accept an all-zero vector despite the "required component" error text (audit W4 #1) — deferred while the World Lua API refactor is in flight.
+- [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI. *(`SseToolCallAccumulator` many-small-deltas coverage added 2026-07-01.)*
 - [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite.
 
 ## Shipped (recent)
