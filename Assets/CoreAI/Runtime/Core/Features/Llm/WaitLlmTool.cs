@@ -30,7 +30,8 @@ namespace CoreAI.Ai
             "Use for polling, cooldowns, async game state changes, or waiting for an external process.";
 
         public override string ParametersSchema => JsonParams(
-            ("seconds", "number", true, $"Seconds to wait. Must be greater than 0 and at most {_maxSeconds:0.###}."),
+            ("seconds", "number", true,
+                $"Seconds to wait. Must be greater than 0; values above {_maxSeconds:0.###} are clamped to that maximum."),
             ("reason", "string", false, "Short reason for the wait, used only for diagnostics.")
         );
 
@@ -48,7 +49,7 @@ namespace CoreAI.Ai
         }
 
         public async Task<string> ExecuteAsync(
-            [Description("Seconds to wait. Must be greater than 0 and at most the tool's configured maximum.")]
+            [Description("Seconds to wait. Must be greater than 0; values above the configured maximum are clamped.")]
             double seconds,
             [Description("Short reason for the wait, used only for diagnostics.")]
             string reason = "",

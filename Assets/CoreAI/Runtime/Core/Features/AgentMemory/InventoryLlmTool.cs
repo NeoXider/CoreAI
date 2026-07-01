@@ -1,3 +1,4 @@
+using System;
 using CoreAI.Ai;
 using Microsoft.Extensions.AI;
 
@@ -12,7 +13,7 @@ namespace CoreAI.Ai
 
         public InventoryLlmTool(InventoryTool.IInventoryProvider provider)
         {
-            _provider = provider;
+            _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         }
 
         public string Name => "get_inventory";

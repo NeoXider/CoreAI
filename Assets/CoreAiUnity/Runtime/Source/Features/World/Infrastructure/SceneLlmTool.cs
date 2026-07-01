@@ -20,6 +20,8 @@ namespace CoreAI.Ai
         public string Name => "scene_tool";
         public string Description => "Manipulate and inspect Unity GameObjects dynamically at runtime.";
         public bool AllowDuplicates => false;
+        // This wrapper expands into multiple native MEAI functions. The aggregate ILlmTool schema is
+        // intentionally empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
         public string ParametersSchema => "{}";
 
         public IEnumerable<AIFunction> CreateAIFunctions()
@@ -77,6 +79,16 @@ namespace CoreAI.Ai
             await UniTask.SwitchToMainThread(cancellationToken);
             try
             {
+                string method = string.IsNullOrWhiteSpace(searchMethod) ? "name" : searchMethod.Trim();
+                if (!string.Equals(method, "name", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(method, "tag", StringComparison.OrdinalIgnoreCase))
+                {
+                    return SerializeError("searchMethod must be 'name' or 'tag'.");
+                }
+
+                string term = searchTerm?.Trim();
+                bool listAll = string.IsNullOrWhiteSpace(term);
+
                 IEnumerable<GameObject> allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(
                     includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
                     FindObjectsSortMode.None);
@@ -85,12 +97,17 @@ namespace CoreAI.Ai
                 foreach (GameObject go in allObjects)
                 {
                     bool match = false;
-                    if (searchMethod.Equals("name", StringComparison.OrdinalIgnoreCase) && go.name.Contains(searchTerm))
+                    if (listAll)
                     {
                         match = true;
                     }
-                    else if (searchMethod.Equals("tag", StringComparison.OrdinalIgnoreCase) &&
-                             go.CompareTag(searchTerm))
+                    else if (string.Equals(method, "name", StringComparison.OrdinalIgnoreCase) &&
+                             go.name.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        match = true;
+                    }
+                    else if (string.Equals(method, "tag", StringComparison.OrdinalIgnoreCase) &&
+                             go.CompareTag(term))
                     {
                         match = true;
                     }
@@ -239,6 +256,16 @@ namespace CoreAI.Ai
                 Vector3 pos = t.position;
                 Vector3 rot = t.eulerAngles;
                 Vector3 scl = t.localScale;
+                bool hasChange =
+                    px.HasValue || py.HasValue || pz.HasValue ||
+                    rx.HasValue || ry.HasValue || rz.HasValue ||
+                    sx.HasValue || sy.HasValue || sz.HasValue;
+
+                if (!hasChange)
+                {
+                    return SerializeError(
+                        "At least one transform field (px, py, pz, rx, ry, rz, sx, sy, sz) must be provided.");
+                }
 
                 if (px.HasValue)
                 {

@@ -19,7 +19,9 @@ namespace CoreAI.Infrastructure.World
         public string Name => "camera_tool";
         public string Description => "Access scene cameras to take screenshots for visual analysis.";
         public bool AllowDuplicates => false;
-        public string ParametersSchema => "{}"; // managed by AIFunctionFactory
+        // This wrapper expands into native MEAI functions. The aggregate ILlmTool schema is intentionally
+        // empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
+        public string ParametersSchema => "{}";
 
         public IEnumerable<AIFunction> CreateAIFunctions()
         {

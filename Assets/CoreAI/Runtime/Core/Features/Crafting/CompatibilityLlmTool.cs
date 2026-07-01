@@ -28,13 +28,13 @@ namespace CoreAI.Crafting
 
         public override string Description =>
             "Check compatibility of ingredients/materials before crafting. " +
-            "Provide ingredient names as a comma-separated list. " +
+            "Provide ingredient names as a JSON array of strings. " +
             "Returns compatibility score (0-2), warnings, and bonuses. " +
             "Score 0 = incompatible, 1 = neutral, >1 = synergy bonus.";
 
         public override string ParametersSchema => JsonParams(
             ("ingredients", "array", true,
-                "Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")
+                "JSON array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")
         );
 
         /// <summary>
@@ -52,7 +52,7 @@ namespace CoreAI.Crafting
         }
 
         public Task<string> ExecuteAsync(
-            [Description("Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")]
+            [Description("JSON array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")]
             string[] ingredients,
             CancellationToken cancellationToken = default)
         {
