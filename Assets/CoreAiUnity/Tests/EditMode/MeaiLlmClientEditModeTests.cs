@@ -380,6 +380,45 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_ToolExecutedThenFinalTextEmpty_StillReturnsExecutedToolCalls()
+        {
+            // Regression: MeaiLlmClient.CompleteAsync used to return early on an empty final assistant
+            // response BEFORE copying functionClient.LastExecutedToolCalls into the result - so a turn
+            // that successfully ran a tool but then trailed off into an empty response silently lost all
+            // evidence that the tool ran (Ok=false, ExecutedToolCalls empty). Every terminal streaming
+            // chunk and the success non-streaming path already carry these traces; the empty-response
+            // non-streaming path must too.
+            ScriptedNonStreamChatClient inner = new(
+                new[]
+                {
+                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Saved before going blank\"}}",
+                    ""
+                });
+
+            StatefulMemoryStore memoryStore = new();
+            StubCoreSettings settings = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "You are test agent.",
+                UserPayload = "Create quiz",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            };
+
+            LlmCompletionResult result = await client.CompleteAsync(request, CancellationToken.None);
+
+            Assert.IsFalse(result.Ok, "Final empty assistant text should still surface as a failed turn.");
+            Assert.IsTrue(memoryStore.TryLoad("Teacher", out AgentMemoryState state));
+            Assert.That(state.Memory, Does.Contain("Saved before going blank"),
+                "The tool call must have actually executed despite the empty final response.");
+            Assert.IsNotNull(result.ExecutedToolCalls);
+            Assert.IsTrue(result.ExecutedToolCalls.Any(t => t.Name == "memory" && t.Success),
+                "ExecutedToolCalls must carry the successful tool trace even when the wrapping turn errors.");
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson()
         {
             StreamingScriptedChatClient inner = new(
@@ -790,6 +829,40 @@ namespace CoreAI.Tests.EditMode
             {
                 yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "x");
                 await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>Non-streaming scripted client: returns each queued text response in order, one per call.</summary>
+        private sealed class ScriptedNonStreamChatClient : MEAI.IChatClient
+        {
+            private readonly Queue<string> _responses;
+
+            public ScriptedNonStreamChatClient(params string[] responses)
+            {
+                _responses = new Queue<string>(responses ?? Array.Empty<string>());
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                string text = _responses.Count > 0 ? _responses.Dequeue() : "";
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text)));
+            }
+
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages, MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
             }
 
             public object GetService(Type serviceType, object serviceKey = null)

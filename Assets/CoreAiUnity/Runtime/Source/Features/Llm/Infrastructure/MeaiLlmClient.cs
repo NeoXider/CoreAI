@@ -266,12 +266,19 @@ namespace CoreAI.Infrastructure.Llm
 
             if (string.IsNullOrEmpty(text))
             {
+                // Even though the FINAL assistant text is empty, earlier iterations of this same
+                // non-streaming tool loop may have already executed real tools (e.g. a model that spawns
+                // an object, then goes blank instead of summarizing). Carry those traces out here too -
+                // same as the success path below and every terminal streaming chunk already does - so
+                // callers (orchestrator history, benchmarks, telemetry) don't silently lose evidence that
+                // a tool ran just because the wrapping turn ended in an empty-response error.
                 return new LlmCompletionResult
                 {
                     Ok = false,
                     Error = "Empty response from LLM",
                     ErrorCode = LlmErrorCode.EmptyResponse,
-                    Model = ResolveModelName()
+                    Model = ResolveModelName(),
+                    ExecutedToolCalls = functionClient.LastExecutedToolCalls
                 };
             }
 
