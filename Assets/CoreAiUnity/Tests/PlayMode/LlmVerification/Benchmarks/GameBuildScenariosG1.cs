@@ -195,7 +195,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Place the Player, coins, and Goal at distinct x/z positions so the layout is playable.\n" +
                 "2. With execute_lua, define two logic slots:\n" +
                 "logic_define('score_formula', function(coins) return coins end)\n" +
-                "logic_define('win_condition', function(score) return score >= 3 end)";
+                "logic_define('win_condition', function(score) return score >= 3 end)\n" +
+                GameBenchmarkScenario.LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

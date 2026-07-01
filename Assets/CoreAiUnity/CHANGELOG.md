@@ -4,6 +4,20 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### G1/G2/G3/G7: stop penalizing self-verification of logic_define slots (2026-07-02)
+
+- **`ToolCorrectness` was being dragged down by a documented-but-unwarned API gotcha, not real model
+  mistakes.** A live GLM-5.2 run showed the model repeatedly calling a slot it had just
+  `logic_define`'d directly as a plain Lua global (e.g. `wave_reward(5)`) to self-verify its own work —
+  every such call throws `attempt to call a nil value`, since a defined slot is not a real global; only
+  the harness can invoke it. This inflated `clean_lua`/`clean_tool` checkpoint failures across nearly
+  every G1/G2/G3/G7 scenario using `logic_define`, even ones that otherwise scored a clean Pass. G4 had
+  already been given a clarifying `VerificationNote` for this; the same clarification (as a new shared
+  `GameBenchmarkScenario.LuaVerificationNote`) is now appended to all 13 other `logic_define`-using Goal
+  prompts (G1 x1, G2 x5, G3 x6, G7 x1).
+- Verified via an independent Codex audit (no missed `logic_define` scenarios, no concatenation issues)
+  plus EditMode 1361/1361 and PlayMode `FastNoLlm` 48/48.
+
 ### Benchmark scene lighting + docs restructuring (2026-07-01)
 
 - **G6 scene shadows were nearly invisible despite being enabled.** Both the final hero-shot key light
@@ -25,6 +39,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scenario, so a recorded multi-model sweep video is self-explanatory without reading the console. Hidden
   along with the rest of the live preview before the final hero screenshot, so it never appears in
   report images.
+- **Full benchmark sweeps no longer inherit G6's 10-minute pacing window.** The soft whole-suite
+  `COREAI_BENCHMARK_SUITE_BUDGET` default is now 100 minutes, with the NUnit hard backstop raised above it;
+  G6 keeps its own 10-minute per-scenario timeout.
 
 ### Tool-calling hardening (2026-07-01 audit)
 

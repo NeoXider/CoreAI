@@ -97,7 +97,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Define a logic slot named 'score' that takes one argument 'combo': the score equals the " +
                 "combo squared, multiplied by 10. Install it with the execute_lua tool as " +
                 "logic_define('score', function(combo) ... end) — work out the body yourself, do not " +
-                "hardcode a table of values.";
+                "hardcode a table of values. " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -131,7 +131,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "the first 10 units cost 5 gold each; units 11 to 20 cost 4 gold each; every unit beyond 20 " +
                 "costs 3 gold each. price returns the TOTAL cost of buying qty units. Install it via " +
                 "execute_lua as logic_define('price', function(qty) ... end) — derive the piecewise formula " +
-                "yourself.";
+                "yourself. " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -173,7 +173,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Define a logic slot named 'regen' that takes three arguments (hp, amount, max_hp) for a " +
                 "healing system: it returns hp + amount, but the result must never exceed max_hp and never " +
                 "drop below 0. Install it via execute_lua as " +
-                "logic_define('regen', function(hp, amount, max_hp) ... end) — figure out the clamping yourself.";
+                "logic_define('regen', function(hp, amount, max_hp) ... end) — figure out the clamping yourself. " +
+                LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -213,7 +214,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Fibonacci number, where wave_reward(1)=1, wave_reward(2)=1, wave_reward(3)=2, " +
                 "wave_reward(4)=3, wave_reward(5)=5, and each next value is the sum of the two previous ones. " +
                 "It must compute the value for any n — do not hardcode a fixed list. Install it via " +
-                "execute_lua as logic_define('wave_reward', function(n) ... end).";
+                "execute_lua as logic_define('wave_reward', function(n) ... end). " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -269,7 +270,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "three objects named 'Player', 'Key', 'Door'. Then define a boolean logic slot named " +
                 "'can_win' that takes three arguments (has_key, at_door, boss_alive) so the player wins ONLY " +
                 "when they have the key AND are at the door AND the boss is NOT alive. Install it via " +
-                "execute_lua as logic_define('can_win', function(has_key, at_door, boss_alive) ... end).";
+                "execute_lua as logic_define('can_win', function(has_key, at_door, boss_alive) ... end). " +
+                LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -318,7 +320,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "'Enemy2', 'Enemy3', 'Enemy4'. Then define a logic slot named 'enemy_hp' that takes one " +
                 "argument 'name' and returns that enemy's HP. The four HP values must all be DIFFERENT, each " +
                 "between 50 and 200 inclusive, and add up to EXACTLY 400. Choose values that satisfy every " +
-                "constraint. Install it via execute_lua as logic_define('enemy_hp', function(name) ... end).";
+                "constraint. Install it via execute_lua as logic_define('enemy_hp', function(name) ... end). " +
+                LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

@@ -68,7 +68,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "The game has a runtime logic slot 'calculate_damage'. Players say the game is too easy. " +
                 "Using the execute_lua tool, run exactly:\n" +
                 "logic_define('calculate_damage', function() return 50 end)\n" +
-                "so that calculate_damage() returns 50.";
+                "so that calculate_damage() returns 50. " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -107,7 +107,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "The game has a logic slot 'calculate_damage'. Using execute_lua, define it so damage equals " +
                 "10 times the level passed as the first argument. Run exactly this shape:\n" +
                 "logic_define('calculate_damage', function(level) return 10 * level end)\n" +
-                "For example level 1 -> 10, level 5 -> 50.";
+                "For example level 1 -> 10, level 5 -> 50. " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -149,7 +149,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string Goal =>
                 "The game has a boolean logic slot 'win_condition'. Using execute_lua, define it so the player " +
                 "wins exactly when their score (first argument) is at least 100. Run exactly this shape:\n" +
-                "logic_define('win_condition', function(score) return score >= 100 end)";
+                "logic_define('win_condition', function(score) return score >= 100 end)\n" + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -191,7 +191,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Using execute_lua, define it so the result is base + level*10 - armor, but never below 0. " +
                 "Run a shape like:\n" +
                 "logic_define('calculate_damage', function(base, level, armor) " +
-                "local d = base + level*10 - armor; if d < 0 then d = 0 end; return d end)";
+                "local d = base + level*10 - armor; if d < 0 then d = 0 end; return d end)\n" + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -242,7 +242,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "  wood  + coal = torch\n" +
                 "Recipes are order-independent (wood+coal and coal+wood both give torch). " +
                 "Using execute_lua, define the slot, for example:\n" +
-                "logic_define('craft_result', function(a, b) ... return 'plank' ... end)";
+                "logic_define('craft_result', function(a, b) ... return 'plank' ... end)\n" + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

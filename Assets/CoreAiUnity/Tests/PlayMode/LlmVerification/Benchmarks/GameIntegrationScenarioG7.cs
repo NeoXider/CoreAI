@@ -119,7 +119,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "return true when the straight-line distance between (player_x, player_z) and " +
                 "(key_x, key_z) in the x/z plane is 2.0 units or less, and false otherwise — use " +
                 "math.sqrt((player_x-key_x)^2 + (player_z-key_z)^2) <= 2.0. Do not define any other logic " +
-                "slots.";
+                "slots. " + LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

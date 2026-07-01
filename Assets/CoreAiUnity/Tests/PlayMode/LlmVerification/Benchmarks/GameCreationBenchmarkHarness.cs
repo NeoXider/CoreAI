@@ -1086,6 +1086,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         public abstract class GameBenchmarkScenario
         {
+            /// <summary>Appended to any Goal that asks the model to <c>logic_define</c> a slot. Careful models
+            /// often try to self-verify by calling the slot name directly as a plain Lua global right after
+            /// defining it — that always throws "attempt to call a nil value" (a slot is not a real global;
+            /// only the harness can invoke it), which was inflating ToolCorrectness failures on models that
+            /// double-check their own work. See also G4's equivalent local <c>VerificationNote</c>.</summary>
+            public const string LuaVerificationNote =
+                "After defining a slot, do not call the slot name directly as a global Lua function to " +
+                "self-verify; the benchmark harness invokes registered logic slots with hidden samples.";
+
             public abstract string Id { get; }
             public abstract string Name { get; }
             public abstract string Group { get; }
