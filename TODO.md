@@ -61,6 +61,15 @@
 - [x] ~~`world_command` `apply_force`/`set_velocity` accept an all-zero vector~~ — fixed 2026-07-01 (require at least one vector component; explicit per-axis `0` still honored).
 - [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI. *(`SseToolCallAccumulator` many-small-deltas coverage added 2026-07-01.)*
 - [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite.
+- [x] ~~`MeaiLlmClient.CompleteAsync` drops `ExecutedToolCalls` on an empty final response~~ — fixed
+      2026-07-01, found via a live G6 benchmark report contradiction (`0 tool-calls` / `1 spawns`); the same
+      root cause explained every "tool ran but stats say 0" symptom (benchmark `ToolCalls`/`FailedToolCalls`
+      undercounts, `ToolErrorRate` misreporting, "used tool" checkpoints failing despite executor state
+      proving a tool ran). See `Docs/BENCHMARK_STATS_AUDIT_2026-07-01.md` (Codex audit) for the full trace.
+- [ ] Benchmark harness: `RecordingWorldExecutor.InvalidCommandCount` is tracked separately from `ToolCalls`
+      (invalid/malformed world commands are invisible in the "Tool calls" column). Defensible as a distinct
+      metric, but worth an explicit decision — either document the split or fold invalid attempts into
+      `ToolCalls` too. Low severity (labeling nuance, not a scoring bug).
 
 ## Shipped (recent)
 
