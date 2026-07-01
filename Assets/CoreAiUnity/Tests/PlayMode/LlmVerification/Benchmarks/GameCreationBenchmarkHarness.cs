@@ -232,6 +232,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 const int MaxContent = 4000;
                 const int MaxDetail = 600;
+                // The system prompt is not truncated to the same tight budget as per-turn content: it is
+                // captured once per scenario (not per turn), so bloat risk is low, and an auditor reading
+                // "why did the model behave this way" needs the exact instructions it received, not a
+                // clipped preview.
+                const int MaxSystemPrompt = 12000;
                 StringBuilder sb = new();
                 sb.AppendLine("```text");
                 sb.AppendLine($"GOAL: {Truncate(goal, MaxContent)}");
@@ -261,6 +266,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         sb.AppendLine($"USAGE: prompt={t.PromptTokens?.ToString() ?? "?"} " +
                                       $"completion={t.CompletionTokens?.ToString() ?? "?"}");
                     }
+                }
+
+                // Full system prompt, at the very end of the transcript (after every turn) so the top of
+                // the block stays scannable (goal + turns) while the exact instructions that shaped the
+                // model's behavior are still one scroll away for a real audit.
+                if (!string.IsNullOrWhiteSpace(_systemPrompt))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("--- system prompt ---");
+                    sb.AppendLine(Truncate(_systemPrompt, MaxSystemPrompt));
                 }
 
                 sb.AppendLine("```");
