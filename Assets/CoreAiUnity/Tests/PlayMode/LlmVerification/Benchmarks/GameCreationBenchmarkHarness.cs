@@ -1954,9 +1954,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 string fitTxt = anyAssessed
                     ? $"game-fit {fit.Overall.ToString("0.#", inv)}/10 · best {Shorten(fit.BestRole)}"
                     : "partial run";
-                AddCameraText(p,
-                    $"PASS {report.PassCount}  ·  PARTIAL {report.PartialCount}  ·  FAIL {report.FailCount}      {fitTxt}",
-                    new UnityEngine.Vector3(0f, halfH - 0.185f, zb - 0.05f), 0.0085f,
+                // Length varies with PASS/PARTIAL/FAIL digit counts and the best-role name — centered text
+                // at a fixed size can overflow BOTH frustum edges for a long combination (e.g. double-digit
+                // counts + "Programmer"), same failure mode as the header above — shrink by length too.
+                string summaryLine =
+                    $"PASS {report.PassCount}  ·  PARTIAL {report.PartialCount}  ·  FAIL {report.FailCount}      {fitTxt}";
+                float summarySize = summaryLine.Length > 70 ? 0.0060f
+                    : summaryLine.Length > 55 ? 0.0075f
+                    : 0.0085f;
+                AddCameraText(p, summaryLine,
+                    new UnityEngine.Vector3(0f, halfH - 0.185f, zb - 0.05f), summarySize,
                     new UnityEngine.Color(0.62f, 0.66f, 0.72f), false);
 
                 // --- radar (left) ---
