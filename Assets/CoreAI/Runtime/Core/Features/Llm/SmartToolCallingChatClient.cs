@@ -71,7 +71,12 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.ChatMessage> messages = chatMessages.ToList();
             int iteration = 0;
             int missingRequiredToolResponses = 0;
+            int emptyResponsesAfterToolCall = 0;
             bool executedToolCallInRequest = false;
+            // Distinct from executedToolCallInRequest (which means "attempted", used to leave
+            // required-tool-mode below): the empty-response nudge must only fire after a GENUINE success,
+            // not after a batch that entirely failed - that case belongs to the tool-error retry path.
+            bool anyToolCallSucceeded = false;
 
             // Assistant/Tool message pairs from iterations where *every* tool call failed.
             // They exist only as error feedback so the model can retry; once a later iteration
@@ -202,6 +207,37 @@ namespace CoreAI.Infrastructure.Llm
                             continue;
                         }
 
+                        // === Empty response mid-task ===
+                        // A COMPLETELY empty response (no text, no tool call) after this same request has
+                        // already executed at least one SUCCESSFUL tool call is the model trailing off
+                        // mid-task, not a deliberate "I'm done" - unlike a text-only response, which is
+                        // always a legitimate stop. Left alone, this used to end the whole task immediately
+                        // even when a generous roundtrip budget (e.g. the G6 free-build's 1000-call cap,
+                        // meant for a long iterative session) had barely been touched. Nudge the model to
+                        // continue or say it is finished, bounded the same way tool-error retries are,
+                        // instead of surfacing a hard failure on the very first empty turn. Gated on
+                        // anyToolCallSucceeded (not executedToolCallInRequest) so a batch that failed
+                        // entirely and then trailed into an empty response still falls through to the
+                        // ordinary failure/stop path below rather than being nudged as if it were progress.
+                        string thisTurnText = ConcatenateAssistantTextContents(response);
+                        if (string.IsNullOrWhiteSpace(thisTurnText) && anyToolCallSucceeded &&
+                            emptyResponsesAfterToolCall < Math.Max(1, _maxConsecutiveErrors))
+                        {
+                            emptyResponsesAfterToolCall++;
+                            if (_settings.LogMeaiToolCallingSteps)
+                            {
+                                _logger.Warn(
+                                    $"[SmartToolCall] Iteration {iteration}: empty response after a tool call; " +
+                                    $"nudging to continue ({emptyResponsesAfterToolCall}/{_maxConsecutiveErrors}).",
+                                    LogTag.Llm);
+                            }
+
+                            messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                                "Your last response had no text and no tool call. If the task is not finished, " +
+                                "continue with the next tool call now. If it is finished, reply with a short summary."));
+                            continue;
+                        }
+
                         if (_settings.LogMeaiToolCallingSteps)
                         {
                             _logger.Info(
@@ -234,6 +270,10 @@ namespace CoreAI.Infrastructure.Llm
                             .ConfigureAwait(false);
 #endif
                     executedToolCallInRequest = true;
+                    if (!batch.AllFailed)
+                    {
+                        anyToolCallSucceeded = true;
+                    }
 
                     if (policy.IsMaxErrorsReached)
                     {

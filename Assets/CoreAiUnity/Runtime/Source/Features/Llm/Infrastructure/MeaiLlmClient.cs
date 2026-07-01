@@ -459,6 +459,10 @@ namespace CoreAI.Infrastructure.Llm
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
             string? pendingFailedToolRetryInstruction = null;
             int emptyResponsesAfterToolFailure = 0;
+            int emptyResponsesAfterToolSuccess = 0;
+            // True only after a batch with at least one GENUINE success (!batch.AllFailed) - an
+            // all-failed batch must fall through to the emptyResponsesAfterToolFailure path above instead.
+            bool anyToolCallSucceededInStream = false;
 
             while (true)
             {
@@ -719,6 +723,29 @@ namespace CoreAI.Infrastructure.Llm
                     continue;
                 }
 
+                // Empty response after a genuinely SUCCESSFUL tool call (not a failed one, handled above)
+                // mid-task. Left alone this used to end the whole request immediately even when a generous
+                // roundtrip budget (e.g. the G6 free-build's 1000-call cap, meant for a long iterative
+                // session) had barely been used - the model did something, then trailed off. Nudge it to
+                // continue or say it is finished, bounded the same way tool-error retries are. Gated on
+                // anyToolCallSucceededInStream so a genuinely disengaged first response (no tool ever
+                // attempted), or a batch that failed entirely, still falls through to the normal
+                // empty-response path below instead of being nudged as if it were progress.
+                if (string.IsNullOrWhiteSpace(visibleText) &&
+                    nativeToolCalls.Count == 0 &&
+                    anyToolCallSucceededInStream &&
+                    emptyResponsesAfterToolSuccess < Math.Max(1, _settings.MaxToolCallRetries))
+                {
+                    emptyResponsesAfterToolSuccess++;
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                        "Your last response had no text and no tool call. If the task is not finished, " +
+                        "continue with the next tool call now. If it is finished, reply with a short summary."));
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        "MeaiLlmClient: Streaming model returned an empty response after a successful tool call; " +
+                        $"nudging to continue ({emptyResponsesAfterToolSuccess}/{Math.Max(1, _settings.MaxToolCallRetries)}).");
+                    continue;
+                }
+
                 // === Path 1: Native tool calls from SSE delta.tool_calls ===
                 if (nativeToolCalls.Count > 0 && aiTools.Count > 0)
                 {
@@ -757,6 +784,10 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    if (!batch.AllFailed)
+                    {
+                        anyToolCallSucceededInStream = true;
+                    }
                     pendingFailedToolRetryInstruction = batch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
@@ -889,6 +920,10 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    if (!batch.AllFailed)
+                    {
+                        anyToolCallSucceededInStream = true;
+                    }
                     pendingFailedToolRetryInstruction = batch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
@@ -973,6 +1008,10 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult malformedBatch =
                         await policy.ExecuteBatchAsync(malformedCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, malformedBatch.Results));
+                    if (!malformedBatch.AllFailed)
+                    {
+                        anyToolCallSucceededInStream = true;
+                    }
                     pendingFailedToolRetryInstruction = malformedBatch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
