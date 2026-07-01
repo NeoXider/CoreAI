@@ -472,10 +472,15 @@ namespace CoreAI.Infrastructure.Llm
                 if (maxToolIterations > 0 && toolIteration > maxToolIterations)
                 {
                     IReadOnlyList<LlmToolCallTrace> executedToolCalls = policy.ExecutedTraces.ToList();
-                    if (emittedAnyVisibleText && executedToolCalls.Any(t => t.Success))
+                    // Any successful tool call is enough for a clean completion — visible text must NOT be
+                    // required here: a ToolsOnly agent (e.g. the G6 free-build) never emits visible text, so
+                    // requiring it sent every capped-but-successful build down the error path, which dropped
+                    // the whole run's capture stats (turns/tool-calls/tokens all read 0 in the report while
+                    // the world clearly held the build).
+                    if (executedToolCalls.Any(t => t.Success))
                     {
                         _logger.LogWarning(GameLogFeature.Llm,
-                            "MeaiLlmClient: Streaming tool loop reached the iteration guard after successful tool calls and visible text; completing without surfacing an internal guard error.");
+                            "MeaiLlmClient: Streaming tool loop reached the iteration guard after successful tool calls; completing without surfacing an internal guard error.");
                         yield return new LlmStreamChunk
                         {
                             IsDone = true,

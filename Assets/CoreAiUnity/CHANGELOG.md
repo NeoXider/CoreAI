@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Streaming tool-loop cap no longer erases a successful run's stats (2026-07-02)
+
+- **`MeaiLlmClient`: the streaming iteration guard required visible text for a clean completion,
+  but a `ToolsOnly` agent (e.g. the G6 free-build) never emits any** — so a build that hit the
+  roundtrip cap after hundreds of successful tool calls always took the error path
+  ("tool loop exceeded max iterations"), and the benchmark capture recorded turns=0/tools=0/~1
+  token while the world plainly held the finished scene (observed live: 96-spawn colored castle,
+  report stats all zero). Any successful executed tool call is now sufficient to complete
+  cleanly; the guard still hard-terminates the loop either way. Verified via an independent
+  Codex audit (no consumer keys off the error string; no loop-masking) plus EditMode 1361/1361
+  and PlayMode FastNoLlm 48/48.
+
 ### Benchmark report images: 4K, left-column insets, close-up view (2026-07-02)
 
 - **All report images (scene/hero shots and the model card) now render at 4K (3840x2160)** instead of
