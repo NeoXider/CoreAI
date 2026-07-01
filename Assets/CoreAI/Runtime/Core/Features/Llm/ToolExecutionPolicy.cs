@@ -134,60 +134,139 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Check whether the given tool calls are a duplicate of a previously
-        /// executed set. Returns duplicate error messages if blocked, otherwise null.
+        /// Check whether the given tool calls contain duplicate slots. Returns duplicate
+        /// error messages for the suppressed slots if any were found, otherwise null.
         /// </summary>
         public List<MEAI.FunctionResultContent> CheckDuplicate(List<MEAI.FunctionCallContent> toolCalls)
         {
-            if (_allowDuplicateToolCalls)
+            DuplicatePlan plan = BuildDuplicatePlan(toolCalls);
+            if (!plan.HasDuplicates)
             {
                 return null;
             }
 
-            // Exclude tools that explicitly allow duplicates
-            List<MEAI.FunctionCallContent> toolsToCheck = toolCalls.Where(fc =>
+            List<MEAI.FunctionResultContent> errs = new();
+            for (int i = 0; i < plan.IndexedResults.Length; i++)
             {
-                ILlmTool match = _originalTools.FirstOrDefault(t =>
-                    string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
-                return match == null || !match.AllowDuplicates;
-            }).ToList();
-
-            if (toolsToCheck.Count == 0)
-            {
-                return null;
-            }
-
-            string batchSig = string.Join("|", toolsToCheck
-                .OrderBy(fc => fc.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(fc =>
+                if (plan.IsDuplicateIndex[i])
                 {
-                    string argsSig = "";
-                    try
-                    {
-                        argsSig = CanonicalizeArguments(fc.Arguments);
-                    }
-                    catch
-                    {
-                        /* swallow */
-                    }
+                    errs.Add(plan.IndexedResults[i].Result);
+                }
+            }
 
-                    return $"{fc.Name}({argsSig})";
-                }));
+            return errs;
+        }
 
+        private sealed class DuplicatePlan
+        {
+            public ToolCallResult[] IndexedResults = Array.Empty<ToolCallResult>();
+            public bool[] IsDuplicateIndex = Array.Empty<bool>();
+            public bool HasDuplicates;
+            public bool HasExecutable;
+        }
+
+        private DuplicatePlan BuildDuplicatePlan(List<MEAI.FunctionCallContent> toolCalls)
+        {
+            DuplicatePlan plan = new()
+            {
+                IndexedResults = new ToolCallResult[toolCalls?.Count ?? 0],
+                IsDuplicateIndex = new bool[toolCalls?.Count ?? 0],
+                HasExecutable = toolCalls != null && toolCalls.Count > 0
+            };
+
+            if (_allowDuplicateToolCalls || toolCalls == null || toolCalls.Count == 0)
+            {
+                return plan;
+            }
+
+            string[] signatures = new string[toolCalls.Count];
+            List<string> reducedSignatures = new();
+            for (int i = 0; i < toolCalls.Count; i++)
+            {
+                if (TryBuildDuplicateSignature(toolCalls[i], out string signature))
+                {
+                    signatures[i] = signature;
+                    reducedSignatures.Add(signature);
+                }
+            }
+
+            if (reducedSignatures.Count == 0)
+            {
+                return plan;
+            }
+
+            string batchSig = string.Join("|", reducedSignatures.OrderBy(s => s, StringComparer.Ordinal));
             if (!_executedSignatures.Add(batchSig))
             {
-                List<MEAI.FunctionResultContent> errs = new();
-                foreach (MEAI.FunctionCallContent fc in toolCalls)
+                for (int i = 0; i < toolCalls.Count; i++)
                 {
-                    string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
-                    AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
-                    errs.Add(new MEAI.FunctionResultContent(fc.CallId, duplicate));
+                    if (signatures[i] != null)
+                    {
+                        MarkDuplicate(plan, i, toolCalls[i]);
+                    }
                 }
 
-                return errs;
+                return plan;
             }
 
-            return null;
+            HashSet<string> seenInBatch = new(StringComparer.Ordinal);
+            for (int i = 0; i < toolCalls.Count; i++)
+            {
+                string signature = signatures[i];
+                if (signature == null)
+                {
+                    continue;
+                }
+
+                if (!seenInBatch.Add(signature))
+                {
+                    MarkDuplicate(plan, i, toolCalls[i]);
+                }
+            }
+
+            return plan;
+        }
+
+        private void MarkDuplicate(DuplicatePlan plan, int index, MEAI.FunctionCallContent fc)
+        {
+            string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
+            AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
+            plan.IndexedResults[index] = new ToolCallResult
+            {
+                Result = new MEAI.FunctionResultContent(fc.CallId, duplicate),
+                Succeeded = false
+            };
+            plan.IsDuplicateIndex[index] = true;
+            plan.HasDuplicates = true;
+            plan.HasExecutable = plan.IsDuplicateIndex.Any(isDuplicate => !isDuplicate);
+        }
+
+        private bool TryBuildDuplicateSignature(MEAI.FunctionCallContent fc, out string signature)
+        {
+            signature = null;
+            string canonicalName = GetCanonicalToolName(fc?.Name, out ILlmTool match, out bool ambiguous);
+            if (canonicalName == null)
+            {
+                canonicalName = fc?.Name ?? "";
+            }
+
+            if (match != null && match.AllowDuplicates)
+            {
+                return false;
+            }
+
+            string argsSig = "";
+            try
+            {
+                argsSig = CanonicalizeArguments(fc?.Arguments);
+            }
+            catch
+            {
+                /* swallow */
+            }
+
+            signature = $"{canonicalName}({argsSig})";
+            return true;
         }
 
         /// <summary>
@@ -229,26 +308,62 @@ namespace CoreAI.Infrastructure.Llm
                 return fc;
             }
 
-            if (_originalTools.Any(t => string.Equals(t.Name, fc.Name, StringComparison.Ordinal)))
+            string canonicalName = GetCanonicalToolName(fc.Name, out ILlmTool match, out bool ambiguous);
+            if (canonicalName != null && string.Equals(canonicalName, fc.Name, StringComparison.Ordinal))
             {
                 return fc;
             }
 
-            // Case-insensitive fallback
-            ILlmTool match =
-                _originalTools.FirstOrDefault(t => string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
+            if (ambiguous)
+            {
+                _logger.Warn(
+                    $"[ToolPolicy] Unknown tool name: '{fc.Name}' is ambiguous under case-insensitive repair. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
+                    LogTag.Llm);
+                return null;
+            }
 
-            if (match != null)
+            if (canonicalName != null)
             {
                 Interlocked.Increment(ref _toolNameRepairCount);
                 _logger.Warn(
-                    $"[ToolPolicy] Repaired tool name casing: '{fc.Name}' -> '{match.Name}'", LogTag.Llm);
-                return new MEAI.FunctionCallContent(fc.CallId, match.Name, fc.Arguments);
+                    $"[ToolPolicy] Repaired tool name casing: '{fc.Name}' -> '{canonicalName}'", LogTag.Llm);
+                return new MEAI.FunctionCallContent(fc.CallId, canonicalName, fc.Arguments);
             }
 
             _logger.Warn(
                 $"[ToolPolicy] Unknown tool name: '{fc.Name}' - no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
                 LogTag.Llm);
+            return null;
+        }
+
+        private string GetCanonicalToolName(string name, out ILlmTool match, out bool ambiguous)
+        {
+            match = null;
+            ambiguous = false;
+
+            if (_originalTools == null || _originalTools.Count == 0)
+            {
+                return name;
+            }
+
+            match = _originalTools.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+            if (match != null)
+            {
+                return match.Name;
+            }
+
+            List<ILlmTool> matches = _originalTools
+                .Where(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToList();
+
+            if (matches.Count == 1)
+            {
+                match = matches[0];
+                return match.Name;
+            }
+
+            ambiguous = matches.Count > 1;
             return null;
         }
 
@@ -406,6 +521,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 sw.Stop();
                 string resultText = NormalizeToolResultText(result);
+                bool succeeded = IsToolResultSuccess(resultText);
 
                 // === Tool result truncation ===
                 int maxResultChars = _settings.MaxToolResultChars;
@@ -418,8 +534,6 @@ namespace CoreAI.Infrastructure.Llm
                         $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {maxResultChars} chars",
                         LogTag.Llm);
                 }
-
-                bool succeeded = IsToolResultSuccess(resultText);
 
                 if (_settings.LogMeaiToolCallingSteps)
                 {
@@ -730,13 +844,13 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
-            // 1. Check for duplicates first (whole-batch signature) - unchanged.
-            List<MEAI.FunctionResultContent> duplicateResults = CheckDuplicate(toolCalls);
-            if (duplicateResults != null)
+            // 1. Check duplicates per slot so mixed batches can still execute allowed calls.
+            DuplicatePlan duplicatePlan = BuildDuplicatePlan(toolCalls);
+            if (duplicatePlan.HasDuplicates && !duplicatePlan.HasExecutable)
             {
                 return new BatchToolCallResult
                 {
-                    Results = duplicateResults.Cast<MEAI.AIContent>().ToList(),
+                    Results = duplicatePlan.IndexedResults.Select(r => (MEAI.AIContent)r.Result).ToList(),
                     AnyFailed = true,
                     AllFailed = true
                 };
@@ -751,10 +865,11 @@ namespace CoreAI.Infrastructure.Llm
                 bool seqAnyFailed = false;
                 bool seqAllFailed = true;
 
-                foreach (MEAI.FunctionCallContent fc in toolCalls)
+                for (int i = 0; i < toolCalls.Count; i++)
                 {
-                    ToolCallResult r =
-                        await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                    ToolCallResult r = duplicatePlan.IsDuplicateIndex[i]
+                        ? duplicatePlan.IndexedResults[i]
+                        : await ExecuteSingleAsync(toolCalls[i], chatOptions, cancellationToken).ConfigureAwait(false);
                     seqResults.Add(r.Result);
                     if (!r.Succeeded)
                     {
@@ -784,7 +899,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // 2b. Concurrent path with bounded parallelism + serialization of mutating built-ins.
-            ToolCallResult[] indexed = new ToolCallResult[toolCalls.Count];
+            ToolCallResult[] indexed = duplicatePlan.IndexedResults;
             using SemaphoreSlim gate = new(maxParallel, maxParallel);
 
             // Single ordered chain for all serialized (mutating) tool calls so none of them overlap.
@@ -796,6 +911,10 @@ namespace CoreAI.Infrastructure.Llm
             {
                 int index = i;
                 MEAI.FunctionCallContent fc = toolCalls[index];
+                if (duplicatePlan.IsDuplicateIndex[index])
+                {
+                    continue;
+                }
 
                 if (IsSerializedTool(fc))
                 {
@@ -935,9 +1054,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Determines whether a tool result indicates success. Uses proper JSON parsing
-        /// to check for a top-level "Success" or "success" property set to false.
-        /// Falls back to a string heuristic when the result is not valid JSON.
+        /// Determines whether a tool result indicates success. Uses top-level JSON
+        /// failure keys first, then conservative plain-text failure prefixes.
         /// </summary>
         internal static bool IsToolResultSuccess(string resultText)
         {
@@ -946,31 +1064,82 @@ namespace CoreAI.Infrastructure.Llm
                 return true; // empty result is not a failure signal
             }
 
-            // Fast path: if the text doesn't contain the word at all, it's a success.
-            if (!resultText.Contains("success", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
             // Attempt structured JSON parse for reliable detection.
             try
             {
                 JObject json = JObject.Parse(resultText);
-                JToken token =
-                    json["Success"] ?? json["success"] ?? json["SUCCESS"];
-                if (token != null && token.Type == JTokenType.Boolean)
+                foreach (JProperty property in json.Properties())
                 {
-                    return (bool)token;
+                    if (string.Equals(property.Name, "error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if ((string.Equals(property.Name, "ok", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(property.Name, "succeeded", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(property.Name, "success", StringComparison.OrdinalIgnoreCase)) &&
+                        IsExplicitFalse(property.Value))
+                    {
+                        return false;
+                    }
                 }
 
                 return true;
             }
             catch
             {
-                // This preserves backward compatibility for tools that return plain text.
-                return !resultText.Contains("\"Success\":false") &&
-                       !resultText.Contains("\"success\":false");
+                string trimmed = resultText.TrimStart();
+                if (StartsWithFailurePrefix(trimmed))
+                {
+                    return false;
+                }
+
+                // Preserve legacy non-JSON detection without treating ordinary text containing
+                // "success" as a failure.
+                return !ContainsLegacySuccessFalse(trimmed);
             }
+        }
+
+        private static bool IsExplicitFalse(JToken token)
+        {
+            if (token == null)
+            {
+                return false;
+            }
+
+            if (token.Type == JTokenType.Boolean)
+            {
+                return !token.Value<bool>();
+            }
+
+            if (token.Type == JTokenType.String &&
+                bool.TryParse(token.Value<string>(), out bool parsed))
+            {
+                return !parsed;
+            }
+
+            return false;
+        }
+
+        private static bool StartsWithFailurePrefix(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            string lower = text.ToLowerInvariant();
+            return lower.StartsWith("failed", StringComparison.Ordinal) ||
+                   lower.StartsWith("failure", StringComparison.Ordinal) ||
+                   lower.StartsWith("error:", StringComparison.Ordinal) ||
+                   lower.StartsWith("exception", StringComparison.Ordinal) ||
+                   lower.StartsWith("system.exception", StringComparison.Ordinal);
+        }
+
+        private static bool ContainsLegacySuccessFalse(string text)
+        {
+            return text.IndexOf("\"Success\":false", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   text.IndexOf("\"success\":false", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

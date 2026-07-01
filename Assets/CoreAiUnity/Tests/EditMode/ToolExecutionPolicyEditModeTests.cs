@@ -68,6 +68,7 @@ namespace CoreAI.Tests.EditMode
             public bool AllowDuplicateToolCalls => false;
             public bool EnableStreaming => true;
             public int MaxParallelToolCalls { get; set; } = 4;
+            public int MaxToolResultChars { get; set; } = 8000;
 
             public ILlmAsyncMarshaler ToolInvocationMarshaler =>
                 _toolMarshalerOverride ?? PassThroughLlmAsyncMarshaler.Instance;
@@ -574,6 +575,112 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteBatch_IntraBatchDuplicate_ExecutesFirstAndSuppressesLaterSlot()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings
+            {
+                MaxParallelToolCalls = 1
+            }.WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.FunctionCallContent first = MakeToolCall("dup", args);
+            MEAI.FunctionCallContent second = MakeToolCall("dup", args);
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { first, second },
+                opts,
+                CancellationToken.None);
+
+            Assert.IsTrue(batch.AnyFailed, "Later duplicate slot should make the batch partially failed");
+            Assert.IsFalse(batch.AllFailed, "The first occurrence should still execute successfully");
+            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call should invoke the tool");
+            Assert.AreEqual(first.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+        }
+
+        [Test]
+        public async Task ExecuteBatch_DuplicateSignature_UsesRepairedCanonicalName()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings
+            {
+                MaxParallelToolCalls = 1
+            }.WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "slot", "same" } };
+            MEAI.FunctionCallContent first = MakeToolCall("MEMORY", args);
+            MEAI.FunctionCallContent second = MakeToolCall("memory", args);
+            MEAI.ChatOptions opts = MakeChatOptions(("memory", "saved"));
+
+            ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { first, second },
+                opts,
+                CancellationToken.None);
+
+            Assert.AreEqual(1, countingMarshaler.InvokeCount,
+                "Casing variants of the same canonical tool name should collide in duplicate detection");
+            Assert.AreEqual(first.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual("saved", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+        }
+
+        [Test]
+        public async Task ExecuteBatch_RepeatedMixedBatch_StillExecutesAllowDuplicatesTool()
+        {
+            int repeatCount = 0;
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => "fixed-ok"),
+                new MEAI.AIFunctionFactoryOptions { Name = "fixed", Description = "Fixed tool" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => $"repeat-{++repeatCount}"),
+                new MEAI.AIFunctionFactoryOptions { Name = "repeat", Description = "Repeat tool" }));
+
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
+                new List<ILlmTool>
+                {
+                    new StubTool { Name = "fixed" },
+                    new StubTool { Name = "repeat", AllowDuplicates = true }
+                },
+                false, "test", 3);
+
+            Dictionary<string, object?> fixedArgs = new() { { "x", 1 } };
+            Dictionary<string, object?> repeatArgs = new() { { "x", 1 } };
+            ToolExecutionPolicy.BatchToolCallResult firstBatch = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent>
+                {
+                    MakeToolCall("fixed", fixedArgs),
+                    MakeToolCall("repeat", repeatArgs)
+                },
+                opts,
+                CancellationToken.None);
+            Assert.IsFalse(firstBatch.AnyFailed);
+
+            MEAI.FunctionCallContent fixedAgain = MakeToolCall("fixed", fixedArgs);
+            MEAI.FunctionCallContent repeatAgain = MakeToolCall("repeat", repeatArgs);
+            ToolExecutionPolicy.BatchToolCallResult secondBatch = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { fixedAgain, repeatAgain },
+                opts,
+                CancellationToken.None);
+
+            Assert.IsTrue(secondBatch.AnyFailed);
+            Assert.IsFalse(secondBatch.AllFailed, "AllowDuplicates call must still run in a repeated mixed batch");
+            Assert.AreEqual(fixedAgain.CallId, ((MEAI.FunctionResultContent)secondBatch.Results[0]).CallId);
+            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)secondBatch.Results[0]).Result.ToString());
+            Assert.AreEqual(repeatAgain.CallId, ((MEAI.FunctionResultContent)secondBatch.Results[1]).CallId);
+            Assert.AreEqual("repeat-2", ((MEAI.FunctionResultContent)secondBatch.Results[1]).Result.ToString());
+        }
+
+        [Test]
         public async Task ExecuteBatch_ToolFailure_DebugLog_RecordsFailStatusAndResultDetail()
         {
             StubLogger logger = new();
@@ -684,6 +791,21 @@ namespace CoreAI.Tests.EditMode
 
             MEAI.FunctionCallContent result = policy.TryRepairToolName(MakeToolCall("completely_unknown_tool_xyz"));
             Assert.IsNull(result, "Unknown tool should return null");
+        }
+
+        [Test]
+        public void TryRepairToolName_AmbiguousCaseInsensitiveMatch_ReturnsNull()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>
+                {
+                    new StubTool { Name = "Tool" },
+                    new StubTool { Name = "tool" }
+                },
+                false, "test", 3);
+
+            MEAI.FunctionCallContent result = policy.TryRepairToolName(MakeToolCall("TOOL"));
+            Assert.IsNull(result, "Ambiguous case-insensitive matches must fail closed");
         }
 
         [Test]
@@ -810,6 +932,44 @@ namespace CoreAI.Tests.EditMode
         public void IsToolResultSuccess_NoSuccessProperty_ReturnsTrue()
         {
             Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"result\":\"ok\",\"count\":42}"));
+        }
+
+        [TestCase("{\"error\":\"not found\"}")]
+        [TestCase("{\"Error\":\"not found\"}")]
+        [TestCase("{\"ok\":false}")]
+        [TestCase("{\"Succeeded\":false}")]
+        [TestCase("{\"SuCcEsS\":false}")]
+        [TestCase("Failed to load scene")]
+        [TestCase("Error: missing target")]
+        [TestCase("Exception: boom")]
+        public void IsToolResultSuccess_CommonFailureShapes_ReturnFalse(string resultText)
+        {
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess(resultText));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_NormalContentMentioningSuccess_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(
+                "The report discusses success criteria and failure analysis without reporting a tool error."));
+        }
+
+        [Test]
+        public async Task ExecuteSingle_ClassifiesUntruncatedResultBeforeReturningTruncatedPayload()
+        {
+            StubSettings settings = new() { MaxToolResultChars = 32 };
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool>(), false, "test", 3);
+
+            string longFailure = "{\"message\":\"" + new string('x', 80) + "\",\"success\":false}";
+            MEAI.ChatOptions opts = MakeChatOptions(("long_failure", longFailure));
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("long_failure"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded,
+                "Success classification must inspect the full result before truncating the returned payload");
+            StringAssert.Contains("[truncated:", result.Result.Result.ToString());
         }
 
         // ==================== Parallel batch execution (R1) ====================
