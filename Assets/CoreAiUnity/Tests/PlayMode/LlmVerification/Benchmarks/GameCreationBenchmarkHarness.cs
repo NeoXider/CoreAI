@@ -1259,7 +1259,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             obs.Turns = capture.Turns.Count;
             obs.CapturedTurns = capture.Turns;
             obs.ToolCalls = capture.ToolCalls;
-            obs.FailedToolCalls = capture.FailedToolCalls + env.Lua.FailedExecutions;
+            // `capture.FailedToolCalls` is the sole source: it counts every LlmToolCallTrace with
+            // Success=false, and every real execute_lua invocation that ILuaExecutor.ExecuteAsync ever
+            // runs (env.Lua.FailedExecutions) originates from exactly one such trace - there is no
+            // scenario-setup Lua seeding that would fail outside a captured turn. Adding
+            // env.Lua.FailedExecutions on top used to compensate for MeaiLlmClient dropping
+            // ExecutedToolCalls on an empty final response (fixed - see MeaiLlmClient.CompleteAsync);
+            // keeping the addition now double-counts every Lua tool failure.
+            obs.FailedToolCalls = capture.FailedToolCalls;
             obs.InvalidCommands = env.World.InvalidCommandCount;
 
             // A mid-build empty/blank response AFTER the model has already built something is the weak
