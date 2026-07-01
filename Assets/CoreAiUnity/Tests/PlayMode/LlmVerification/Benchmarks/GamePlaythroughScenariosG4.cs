@@ -33,6 +33,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override double TimeBudgetMs => 45000;
             public override float TimeoutSeconds => 300f;
 
+            protected const string VerificationNote =
+                "After defining the slots, do not call the slot names directly as global Lua functions; " +
+                "the benchmark harness will invoke the registered logic slots with hidden samples.";
+
             public override AgentConfig BuildAgent(BenchmarkEnvironment env) =>
                 new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
@@ -80,7 +84,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "2. 'apply_damage' (args: hp, damage) — returns the new hp after taking damage, never below 0.\n" +
                 "3. 'is_dead' (args: hp) — returns true when hp is 0 or less.\n" +
                 "Use logic_define('name', function(...) ... end) for each. Make the three rules consistent so " +
-                "a fight can be simulated with them.";
+                "a fight can be simulated with them.\n" +
+                VerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -163,7 +168,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "anything else = 0.\n" +
                 "2. 'can_buy' (args: gold, price) — returns true when gold is at least price.\n" +
                 "3. 'buy' (args: gold, price) — returns the remaining gold after paying price.\n" +
-                "Use logic_define for each. Keep them consistent so a shopping session can be simulated.";
+                "Use logic_define for each. Keep them consistent so a shopping session can be simulated.\n" +
+                VerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -242,7 +248,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "(order-independent): wood+wood=plank, plank+plank=table, wood+stone=axe. Any other pair " +
                 "returns the string 'none'. Install it via execute_lua as " +
                 "logic_define('craft', function(a, b) ... end) — make it consistent so a multi-step " +
-                "crafting chain can be simulated (e.g. wood into planks into a table).";
+                "crafting chain can be simulated (e.g. wood into planks into a table).\n" +
+                VerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {

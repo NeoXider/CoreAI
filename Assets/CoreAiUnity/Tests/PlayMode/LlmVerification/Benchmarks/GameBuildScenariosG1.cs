@@ -76,6 +76,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return names.Count;
             }
 
+            protected static int DistinctSpawnPositionCells(BenchmarkEnvironment env)
+            {
+                HashSet<string> cells = new(StringComparer.Ordinal);
+                foreach (RecordedWorldCommand c in env.World.Commands)
+                {
+                    if (string.Equals(c.Action, "spawn", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int x = (int)Math.Round(c.X);
+                        int z = (int)Math.Round(c.Z);
+                        cells.Add($"{x}:{z}");
+                    }
+                }
+
+                return cells.Count;
+            }
+
             /// <summary>Tool-correctness: used a tool, with no failed calls or invalid world commands.</summary>
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
             {
@@ -102,7 +118,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Build a small arena with the world_command tool. Spawn exactly five objects, each with " +
                 "action='spawn' and a distinct targetName. Choose a fitting primitive prefabKey for each: " +
                 "prefabKey='capsule' for 'Player', and prefabKey='sphere' for 'Enemy1', 'Enemy2', 'Enemy3', " +
-                "'Enemy4'. Do not spawn anything else.";
+                "'Enemy4'. Place them at distinct x/z positions so they do not all overlap. Do not spawn anything else.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -121,6 +137,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 int distinct = DistinctSpawnCount(env);
                 int totalSpawns = env.World.Count("spawn");
+                int occupiedCells = DistinctSpawnPositionCells(env);
 
                 g.Add("player", "spawned 'Player'", 20, player, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion);
@@ -129,6 +146,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("exact_five", "exactly five distinct objects, nothing extra", 20,
                     distinct == 5 && totalSpawns == 5, dimension: BenchmarkDimension.IntentSequence,
                     detail: $"{distinct} distinct / {totalSpawns} spawn commands");
+                g.Add("spatial_spread", "spread the arena objects across distinct x/z positions", 10,
+                    occupiedCells >= 3, dimension: BenchmarkDimension.TaskCompletion,
+                    detail: $"{occupiedCells} occupied position cells");
 
                 if (totalSpawns > 5)
                 {
@@ -172,6 +192,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Build a simple coin-collector game.\n" +
                 "1. With world_command action='spawn', spawn exactly five objects with distinct targetName and a " +
                 "fitting primitive prefabKey: 'Player' (capsule), 'Coin1', 'Coin2', 'Coin3' (cylinder), 'Goal' (cube).\n" +
+                "Place the Player, coins, and Goal at distinct x/z positions so the layout is playable.\n" +
                 "2. With execute_lua, define two logic slots:\n" +
                 "logic_define('score_formula', function(coins) return coins end)\n" +
                 "logic_define('win_condition', function(score) return score >= 3 end)";
@@ -193,6 +214,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 bool goal = SpawnedExactly(env, "Goal");
                 int totalSpawns = env.World.Count("spawn");
+                int occupiedCells = DistinctSpawnPositionCells(env);
 
                 bool scoreOk = Num(env, "score_formula", 0, 0.0) && Num(env, "score_formula", 1, 1.0)
                                && Num(env, "score_formula", 2, 2.0) && Num(env, "score_formula", 3, 3.0)
@@ -208,6 +230,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("goal", "Goal spawned", 6, goal, dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("no_junk", "exactly five objects, nothing extra", 8, totalSpawns == 5,
                     dimension: BenchmarkDimension.IntentSequence, detail: $"{totalSpawns} spawn commands");
+                g.Add("spatial_spread", "spread Player, coins, and Goal across distinct x/z positions", 8,
+                    occupiedCells >= 4, dimension: BenchmarkDimension.TaskCompletion,
+                    detail: $"{occupiedCells} occupied position cells");
                 g.Add("score_formula", "score_formula(n)==n on hidden samples", 22, scoreOk, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("win_below_false", "win_condition false for 0,1,2", 10, winBelow,
@@ -249,7 +274,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string Goal =>
                 "Spawn exactly three objects and do nothing else. Use world_command action='spawn' with distinct " +
                 "targetName and a fitting primitive prefabKey: 'Tree' (capsule), 'Rock' (sphere), 'Bush' (sphere). " +
-                "Do not spawn extra objects, do not move or destroy anything.";
+                "Place them at three distinct x/z positions. Do not spawn extra objects, do not move or destroy anything.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -259,6 +284,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool all = SpawnedExactly(env, "Tree") && SpawnedExactly(env, "Rock") && SpawnedExactly(env, "Bush");
                 int totalSpawns = env.World.Count("spawn");
                 int otherWorld = env.World.Commands.Count - totalSpawns;
+                int occupiedCells = DistinctSpawnPositionCells(env);
 
                 g.Add("three_named", "spawned Tree, Rock, Bush", 45, all, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion);
@@ -266,6 +292,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     dimension: BenchmarkDimension.IntentSequence, detail: $"{totalSpawns} spawns");
                 g.Add("no_other_actions", "no move/destroy/other world actions", 15, otherWorld == 0,
                     dimension: BenchmarkDimension.IntentSequence, detail: $"{otherWorld} other world command(s)");
+                g.Add("spatial_spread", "placed Tree, Rock, and Bush in distinct x/z positions", 10,
+                    occupiedCells >= 3, dimension: BenchmarkDimension.TaskCompletion,
+                    detail: $"{occupiedCells} occupied position cells");
 
                 if (totalSpawns > 3)
                 {

@@ -93,6 +93,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 return n;
             }
+
+            protected static int ToolCallsNamed(RunObservation run, string toolName)
+            {
+                int n = 0;
+                foreach (CapturedTurn turn in run.CapturedTurns)
+                {
+                    foreach (LlmToolCallTrace call in turn.Tools)
+                    {
+                        if (string.Equals(call.Name, toolName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            n++;
+                        }
+                    }
+                }
+
+                return n;
+            }
         }
 
         /// <summary>Prohibition: build something, but never touch the object named 'Chest'.</summary>
@@ -185,14 +202,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 bool named = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Goal")
                              && SpawnedExactly(env, "Hazard");
-                int total = env.World.Commands.Count;
+                int total = Math.Max(env.World.Commands.Count, ToolCallsNamed(run, "world_command"));
                 int luaCalls = env.Lua.ExecutionCount;
 
                 g.Add("core_task", "spawned Player, Goal, Hazard", 40, named, mandatory: true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int extraWorld = Math.Max(0, total - 3);
-                g.Constraint("exactly_three", "exactly three world actions, no extras", 40, total != 3,
+                g.Constraint("exactly_three", "exactly three world_command attempts, no extras", 40, total != 3,
                     penaltyPerOccurrence: 15, occurrences: extraWorld);
                 g.Constraint("no_other_tools", "no other tool (e.g. execute_lua) was used", 20, luaCalls > 0,
                     penaltyPerOccurrence: 15, occurrences: luaCalls);
