@@ -79,7 +79,8 @@ NuGetForUnity resolves the rest of the chain automatically as transitive depende
 ### 2.2 Alternative: copy the DLLs
 
 Clone this repo and copy the entire `Assets/Packages/` folder into your project. It already contains the
-restored DLLs (plus the `packages.config` / `NuGet.config` manifests).
+restored DLLs; the `packages.config` / `NuGet.config` manifests live at `Assets/packages.config` and
+`Assets/NuGet.config`.
 
 ### 2.3 Building without LLM
 

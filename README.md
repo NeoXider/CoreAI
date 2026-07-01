@@ -7,7 +7,7 @@
 **CoreAI is a Unity framework for LLM-powered NPCs and agents that call your game code** — function calling, tools, persistent memory, and runtime Lua — running on a **local 4 GB model** or any **OpenAI-compatible API**. No cloud keys required, no scripted dialogue trees.
 
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
-[![EditMode tests](https://img.shields.io/badge/EditMode-1332%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![EditMode tests](https://img.shields.io/badge/EditMode-1314%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI%20API-blue)](#-recommended-models)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
@@ -388,7 +388,7 @@ Executes: {"name":"memory", ...}  ← silently fixed, no error shown
 
 ### 🧪 PlayMode Test Results by Model Size
 
-All CoreAI PlayMode tests have been verified on real LLM backends. Results:
+The table below is a snapshot of a recorded PlayMode run against real LLM backends (results vary by model build, quantization, and provider). Reproduce it locally to confirm for your setup:
 
 | Test Category | 0.8B | 2B | 4B+ |
 |--------------|------|-----|------|
@@ -401,7 +401,7 @@ All CoreAI PlayMode tests have been verified on real LLM backends. Results:
 | Chat History (persistent context) | ❌ Too small | ⚠️ Mostly | ✅ Pass |
 | Player Chat (NPC dialogue) | ✅ Pass | ✅ Pass | ✅ Pass |
 
-> 🏆 **Qwen3.5-4B passes ALL tests.** This is the recommended minimum for production use.  
+> 🏆 **Qwen3.5-4B passed all tests in this recorded run.** This is the recommended minimum for production use.  
 > 📊 **Qwen3.5-0.8B passes most tests** — impressive for its size! Struggles only with complex multi-step tool calling chains.  
 > 📈 **2B is a solid middle ground** — occasional mistakes in multi-step scenarios, but mostly reliable.
 
@@ -495,19 +495,19 @@ NuGetForUnity resolves the rest of the dependency chain automatically. Do **not*
 
 <details><summary>Manual DLL alternative</summary>
 
-If you cannot use NuGetForUnity, clone this repo and copy the entire `Assets/Packages/` folder into your project. It contains the restored DLLs plus the `packages.config` / `NuGet.config` manifests.
+If you cannot use NuGetForUnity, clone this repo and copy the entire `Assets/Packages/` folder into your project. The restored DLLs live there; the `packages.config` / `NuGet.config` manifests are at `Assets/packages.config` and `Assets/NuGet.config`.
 
 | NuGet Package | Version | Required by |
 |---------------|---------|-------------|
-| `Microsoft.Extensions.AI` | 10.4.1 | CoreAI Core |
-| `Microsoft.Extensions.AI.Abstractions` | 10.4.1 | CoreAI Core |
-| `Microsoft.Bcl.AsyncInterfaces` | 10.0.4 | System dependency |
-| `System.Text.Json` | 10.0.4 | JSON serialization |
-| `System.Text.Encodings.Web` | 10.0.4 | System dependency |
-| `System.Numerics.Tensors` | 10.0.4 | System dependency |
-| `Microsoft.Extensions.Logging.Abstractions` | 10.0.4 | Logging |
-| `Microsoft.Extensions.DependencyInjection.Abstractions` | 10.0.4 | DI |
-| `System.Diagnostics.DiagnosticSource` | 10.0.4 | System dependency |
+| `Microsoft.Extensions.AI` | 10.7.0 | CoreAI Core |
+| `Microsoft.Extensions.AI.Abstractions` | 10.7.0 | CoreAI Core |
+| `Microsoft.Bcl.AsyncInterfaces` | 10.0.9 | System dependency |
+| `System.Text.Json` | 10.0.9 | JSON serialization |
+| `System.Text.Encodings.Web` | 10.0.9 | System dependency |
+| `System.Numerics.Tensors` | 10.0.9 | System dependency |
+| `Microsoft.Extensions.Logging.Abstractions` | 10.0.9 | Logging |
+| `Microsoft.Extensions.DependencyInjection.Abstractions` | 10.0.9 | DI |
+| `System.Diagnostics.DiagnosticSource` | 10.0.9 | System dependency |
 
 </details>
 

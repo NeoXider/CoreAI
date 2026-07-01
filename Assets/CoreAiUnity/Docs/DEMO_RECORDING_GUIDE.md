@@ -149,6 +149,11 @@ In **ScreenToGif:**
 
 ## 📁 Where to store demo files
 
+> **Note:** `Assets/CoreAiUnity/Docs/Media/` and the GIFs/video below do not exist yet —
+> the paths in this section are the **planned** layout and embed snippets to use **once**
+> the clips are recorded. Create `Media/` and drop the files there before referencing them
+> from a rendered README.
+
 ```
 Assets/CoreAiUnity/Docs/
 ├── Media/

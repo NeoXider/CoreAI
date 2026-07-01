@@ -11,8 +11,8 @@ extend the game at runtime through a host-defined Lua API.
 
 ## How it works
 
-The scene controller [`ModdableUnitsDemoController`](ModdableUnitsDemoController.cs)
-implements `IUnitForge` and registers [`UnitForgeLuaBindings`](UnitForgeLuaBindings.cs)
+The scene controller [`ModdableUnitsDemoController`](Scripts/ModdableUnitsDemoController.cs)
+implements `IUnitForge` and registers [`UnitForgeLuaBindings`](Scripts/UnitForgeLuaBindings.cs)
 through `GameLuaBindingsExtensibility` under the **WorldEdit** capability tier. Any mod
 granted WorldEdit (the default tier) therefore gets these extra Lua functions:
 

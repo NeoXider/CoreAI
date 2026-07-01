@@ -1,5 +1,17 @@
 # Tokens Per Second Fix Plan
 
+> **Implemented status (2026-07-01).** The core intent of this plan has landed. Honest relabeling is done:
+> the report/formatter no longer calls the metric "decode" or "LM Studio comparable" — it renders
+> `tok/s provider-call (prefill+decode)` alongside the effective end-to-end rate
+> (`BenchmarkReportFormatter.cs`), and the `GenerationMs` / `GenerationTokensPerSecond` XML docs now spell
+> out "prefill + decode, NOT decode-only" (`BenchmarkReport.cs`, `GameCreationBenchmarkHarness.cs`). The
+> LM-Studio-comparable decode-only measurement exists as a live TTFT-based probe
+> (`Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/TokensPerSecondPlayModeTests.cs`). What was **not**
+> adopted verbatim: the field/JSON renames to `ProviderCallMs` / `providerCallCompletionTokensPerSecond` /
+> `effectiveCompletionTokensPerSecond` (the existing `Generation*` names were kept, with clarified docs),
+> and the `ChooseCompletionTokens` source-marker refactor. The design below is retained as reference for
+> any future field-migration work.
+
 ## Scope
 
 This is a read-only analysis of the current benchmark token/throughput reporting. The only intended output is this plan. No C# files were changed.

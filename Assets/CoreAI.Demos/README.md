@@ -12,14 +12,19 @@ minimal scripts, and a README.
 | [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **A real LLM changes mechanics live through chat**: the Programmer role writes Lua → `execute_lua` pipeline → logic slots / `LuaModRuntime` / world commands | Yes |
 | [FullAccess](FullAccess/README.md) | `FullAccess/FullAccessDemo.unity` | Full-tier `unity_*` access (opt-in): Programmer can inspect scene objects, components, transforms, and hierarchy, then move/rotate/parent objects from Lua | Yes |
 | [ModdableUnits](ModdableUnits/README.md) | `ModdableUnits/ModdableUnitsDemo.unity` | **A whole game built from mods**: `forge_define`/`forge_spawn` let mods create new unit types and armies, `hooks_every`/`hooks_on` drive the fight; the host only runs the auto-battle | Yes |
+| [WebGlLuaSelfTest](WebGlLuaSelfTest/README.md) | script only (attach to any scene) | Runtime PASS/FAIL check that the Lua sandbox survives IL2CPP stripping in a WebGL player build (`SecureLuaEnvironment.TryRunSelfTest`) | No |
 
 ## Common requirements
 
 - Every scene has a `CoreAILifetimeScope` (CoreAI's DI composition). Settings come from
   `Resources/CoreAISettings` unless a dedicated asset is assigned in the Inspector.
 - Lua demos require MoonSharp in the project (define `COREAI_HAS_MOONSHARP`) and the absence of `COREAI_NO_LUA`.
-- The Skills demo needs a configured LLM backend in `CoreAISettings` (an LLMUnity model or HTTP API);
-  the other demos run fully offline.
+- Every scene **opens** without an LLM. The "Needs LLM" column above marks demos whose
+  **full behaviour** requires a configured backend in `CoreAISettings` (an LLMUnity model or
+  HTTP API): Skills, LiveMechanics, FullAccess, and ModdableUnits drive their gameplay through
+  a live model, so without one you can load the scene but the AI-driven part stays idle.
+  The remaining demos (LuaMods, WorldCommands) exercise the Lua/command pipeline directly and
+  run fully offline.
 
 > Demo scenes and assets were assembled through MCP for Unity (see `Assets/CoreAiUnity/Docs/DGF_SPEC.md`, §11) —
 > the same editor-automation channel the agent uses to run this repository's tests.

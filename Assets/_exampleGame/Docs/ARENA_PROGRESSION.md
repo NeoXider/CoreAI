@@ -33,6 +33,8 @@ Namespaces mirror the layer: `CoreAI.ExampleGame.<Feature>.<Domain|UseCases|Pres
 
 Create default assets from the menu **CoreAI Example -> Arena -> Generate Progression Assets (Defaults)** (writes to `Assets/_exampleGame/Settings/Progression/`).
 
+> **Note:** progression is **opt-in and generated on demand**. The `Assets/_exampleGame/Settings/` folder is not checked in, and in the shipped `RogueliteArena.unity` scene the `Arena Progression Content` and `Arena Unit Baseline Config` fields are **unassigned** - so `ArenaProgressionSessionHost` (XP/level, meta-save, draft UI) is **not active** by default. Run the menu above and assign the generated assets to enable it.
+
 - `ArenaUnitBaselineConfig` - starting stats for the player and companion
 - `ArenaRunBalanceConfig` - references to `LevelCurveDefinition` (session + meta), XP per kill, team split, rarity multipliers, card limits
 - `ArenaProgressionContent` - upgrade registry and references to `ChanceData` (rarity, categories by rarity, stat-pool weights)
@@ -62,7 +64,7 @@ Draft UI prefab: add `ArenaUpgradeChoiceView` + a pool of five `ArenaUpgradeCard
 
 Nonlinear Vampire Survivors-style difficulty: **overall harder toward the end of the run** (ramp by wave progress), while **individual waves can be softer** because of sine waves over enemy count and stats.
 
-- **Assignment:** **VS Wave Difficulty** field on `ArenaSurvivalProceduralSetup` (passed to `ArenaSurvivalDirector.Init` as an override) **or** **Wave Difficulty Profile** on `ArenaSurvivalDirector` itself if no override is assigned.
+- **Assignment:** **Wave Difficulty Profile** field on the `ArenaDirectorSettings` asset (referenced by `ArenaSurvivalProceduralSetup.directorSettings`). `ArenaSurvivalDirector.Init` reads it from `directorSettings.WaveDifficultyProfile`; if it is empty, only the plan / linear schedule is used.
 - **Asset:** `ArenaVsStyleWaveDifficulty` - menu **Assets -> Create -> CoreAI Example -> Arena -> VS-style Wave Difficulty**, or **CoreAI Example -> Arena -> Generate VS Wave Difficulty Asset** (writes to `Assets/_exampleGame/Settings/Arena/ArenaVsWaveDifficulty.asset`).
 - Multipliers are applied on top of the Creator plan / local plan / linear schedule (enemy count, HP, damage, speed, spawn interval). Telemetry keys are `arena.wave.vs.*_mult`.
 

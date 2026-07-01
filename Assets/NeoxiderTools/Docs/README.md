@@ -1,6 +1,8 @@
 # Neoxider Docs
 
-Добро пожаловать в канонический индекс документации **NeoxiderTools** `v7.8.0`.
+> **Documentation snapshot notice.** This `Docs/` folder is a point-in-time documentation snapshot vendored from the external package **`com.neoxider.tools`** (Neoxider Tools). It is not the package source itself. The package is consumed as a Git dependency (see `Packages/manifest.json`) and, in this repo, the installed version is **v7.13.19** (resolved under `Library/PackageCache/com.neoxider.tools@*`). Because this is only a docs snapshot, many internal links point to package **source files** (for example `Bonus/TimeReward/CooldownReward.md`, `Cards/CardComponent.md`, `Tools/Spawner/ObjectPool.md`, `../README.md`, `../DocsEn/README.md`) that live inside the installed package (`Library/PackageCache` or the upstream package repo), **not** in this repository — such links will not resolve here. Refer to the installed package for the authoritative, up-to-date documentation.
+
+Добро пожаловать в канонический индекс документации **NeoxiderTools** (installed package version `v7.13.19`).
 
 Используйте этот файл как главную точку входа в пользовательскую документацию.
 
@@ -13,7 +15,7 @@
 | Модуль | Описание | Документация |
 |--------|----------|--------------|
 | **Animations** | Float, Color, `Vector3` и другие runtime-анимации значений | [`Animations/README.md`](./Animations/README.md) |
-| **Audio** | `AudioManager`, микшер, random music и audio helper-компоненты | [`Audio/README.md`](./Audio/README.md) |
+| **Audio** | `AM (Audio Manager)`, микшер, random music и audio helper-компоненты | [`Audio/README.md`](./Audio/README.md) |
 | **Bonus** | Слоты, колесо фортуны, коллекции и награды по времени | [`Bonus/README.md`](./Bonus/README.md) |
 | **Cards** | MVP-архитектура, покер, «Пьяница» и карточный runtime-flow | [`Cards/README.md`](./Cards/README.md) |
 | **Core** | Уровень/XP (LevelComponent) и пулы ресурсов (HealthComponent) для Progression и RPG | [`Core/README.md`](./Core/README.md) |

@@ -103,9 +103,10 @@ Events emitted to mods:
 
 Ready prompt buttons insert prompts into the chat input:
 
-- Healer Aura: creates a regen + wave-cleared hook mod.
-- Battle Scaler: changes enemy count, HP, damage and rewards.
-- Modify Battle Scaler: asks the model to inspect and reload an existing mod.
+- Add healer aura: creates a regen + wave-cleared hook mod.
+- Make waves harder: changes enemy count, HP, damage and rewards.
+- Make rewards generous: asks the model to inspect and reload the existing difficulty mod so
+  enemies are less tanky but rewards go up.
 
 Visible spawn path:
 

@@ -1,5 +1,14 @@
 # CoreAI Full Lua vs RuntimeInspector Audit
 
+> **HISTORICAL — point-in-time comparison (superseded 2026-07-01).** This document captured a snapshot
+> when Full-tier Lua coercion was still minimal. Several gaps listed below (notably §2/§3: `Rect`, `Bounds`,
+> `Color32`, wider numeric types like `long`/`uint`/`short`/`byte`, and **Unity object-reference resolution
+> by instance id**) have since been **closed** in `CoreAiFullUnityLuaRuntimeBindings.cs` (see
+> `ConvertArg` at ~lines 1064-1191 and `ResolveUnityObject` at ~line 544). For the current capability
+> matrix, read `Docs/LUA_FULL_CAPABILITIES_AUDIT.md`. Treat the limitations sections here as history, not
+> as the present state; the architectural analysis (standalone reflection vs RuntimeInspector's UI model,
+> WebGL/IL2CPP stripping risk) remains valid.
+
 ## Question
 
 Is CoreAI's Full-tier Lua reflection in `Assets/CoreAiUnity/Runtime/Source/Features/Lua/Infrastructure/CoreAiFullUnityLuaRuntimeBindings.cs` built on RuntimeInspector logic, or on its own `System.Reflection` path?

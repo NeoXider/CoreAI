@@ -45,7 +45,7 @@ Below are practical roles from the core (**`BuiltInAgentRoleIds`**) and how to c
 
 1. Host builds `ArenaTelemetrySnapshot` (extend `SessionTelemetryCollector` / separate builder).
 2. `RunTaskAsync` with role **`Creator`**, `Hint` = serialized snapshot + difficulty budget.
-3. Response: schema JSON -> **validator** (min/max limits, type whitelist) -> if OK, **`IArenaWaveSchedule`** for the next interval or one-time parameter override in `ArenaSurvivalDirector` (better to extract `ArenaWaveDescriptor` and apply it between waves).
+3. Response: schema JSON -> **validator** (min/max limits, type whitelist) -> if OK, **`IArenaWaveSchedule`** for the next interval or one-time parameter override in `ArenaSurvivalDirector` (parsed into `ArenaWavePlan` and applied between waves).
 
 **Why not "just Lua":** for wave balance, **JSON + strict schema** is usually enough; keep Lua (**Programmer**) for narrow scenarios and tools.
 
@@ -86,7 +86,7 @@ Already used in the template (**F9**, Lua + `report`). In the arena: generate **
 ## 4. Implementation Priority
 
 1. Lock down a **JSON schema** for one wave and a validator in **CoreAI.ExampleGame** (without LLM).
-2. Connect **Creator** to filling `ArenaWaveDescriptor` between waves (host).
+2. Connect **Creator** to filling `ArenaWavePlan` between waves (host).
 3. Add **Analyzer** with 3-5 metrics from `ArenaSurvivalSession` + wave timers.
 4. Then NGO: replicate the wave descriptor and `NetworkObject` on enemies.
 

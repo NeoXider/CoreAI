@@ -22,10 +22,15 @@ The `D:\Git\GameDev-Last-War` project is a large production codebase: **Clean Ar
 
 For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is **not required**: it is enough to reuse the **layering idea** (Domain -> UseCases -> Presentation) and DI, then add networking/backend pieces only when needed.
 
-## Next Steps in the CoreAI Repository
+## Current Architecture in the CoreAI Repository
 
-1. Connect **CoreAI**: UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; copy the **`CoreAiUnity`** host if needed (tests, prompts in **Resources**, **`_mainCoreAI`** scene).
-2. Add **VContainer + MessagePipe + R3** to the example (as in Last-War, but with the minimal set).
-3. Scene `RogueliteBootstrap` with `ExampleRogueliteEntry` + later `LifetimeScope`.
-4. Prototype loop: spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks (without networking).
-5. Co-op: choose the stack (**Netcode for GameObjects** or another option) and move rule-change authority to the host.
+This example is already wired up in the monorepo. The pieces below are in place today:
+
+1. **CoreAI** is available via UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; the **`CoreAiUnity`** host provides tests, prompts in **Resources**, and the **`_mainCoreAI`** scene.
+2. **VContainer + MessagePipe + R3** are already dependencies in **`Packages/manifest.json`** (a minimal set compared to Last-War). Composition uses `RogueliteArenaLifetimeScope`.
+3. Playable scenes live in **`Assets/_exampleGame/Scenes/`**: **`RogueliteArena.unity`** (main arena, entry via `ExampleRogueliteEntry`), **`SymbiosisArena.unity`** (symbiosis mode), and **`New Scene.unity`** (scratch). See [UNITY_SETUP.md](UNITY_SETUP.md) for how the `RogueliteArena` hierarchy and `CoreAILifetimeScope` are set up.
+4. The prototype loop (spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks) runs locally without networking. Progression/meta details: [ARENA_PROGRESSION.md](ARENA_PROGRESSION.md).
+
+### Not Yet Implemented
+
+- **Co-op / networking:** the architecture separates an **AuthoritativeHost** role from a **ClientPresentationOnly** role (see [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md)), but a concrete stack (**Netcode for GameObjects** or another option) is not yet integrated. Rule-change authority is designed to move to the host when it is.

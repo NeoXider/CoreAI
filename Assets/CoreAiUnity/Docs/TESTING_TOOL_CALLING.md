@@ -17,7 +17,7 @@ Quick reference: which tests to run after touching `MeaiLlmClient`, `SmartToolCa
 | **Fast PlayMode (stub inner client)** | `MeaiLlmClient` tool pipeline in a player frame — **no** loaded model in this assembly | `ToolCallStreamingParityPlayModeTests` (**`CoreAI.Tests.PlayMode.FastNoLlm`**) |
 | **Real LLM (opt-in)** | live HTTP / LLMUnity tool execution | **LlmVerification:** `MerchantWithToolCallingPlayModeTests`, `AllToolCallsPlayModeTests`, `MultiToolChainPlayModeTests` (retry second hop if memory marker missing) |
 
-Filter by **assembly** in Test Runner; folder map: **`Tests/PlayMode/README.md`**.
+Filter by **assembly** in Test Runner; folder map: **`Tests/README.md`**.
 ---
 
 ## Run from Unity

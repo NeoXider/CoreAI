@@ -7,8 +7,8 @@ session, why each change exists, and how it was verified.
 
 | Suite | Result |
 |-------|--------|
-| EditMode (all) | **1332 / 1332 passing** |
-| PlayMode FastNoLlm | **46 / 46 passing** |
+| EditMode (all) | **1314 / 1314 passing** |
+| PlayMode FastNoLlm | **51 / 51 passing** |
 | PlayMode LlmVerification (live, on qwen3.5-4b-mtp) | **53 passed, 0 failed, 1 ignored** |
 
 All green. No regressions introduced by this session's changes.

@@ -91,6 +91,6 @@ Root product idea of the repository: [README.md](../../README.md) at the CoreAI 
 | `RogueliteArena/Features/` | **Example** features (waves, hub, run UI) - their own installers / child `LifetimeScope` |
 | `Docs/` | Game concept and notes (`ROGUELITE_PLAYBOOK.md`) |
 
-Entry point: `RogueliteArena/Features/ArenaBootstrap/ExampleRogueliteEntry.cs` (arena + **`CoreAiLuaHotkey`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/README.md`](../CoreAI/README.md) (UPM).
+Entry point: `RogueliteArena/Features/ArenaBootstrap/ExampleRogueliteEntry.cs` (arena + **`CoreAiLuaHotkey`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/Docs/README.md`](../CoreAI/Docs/README.md) (UPM).
 
 Pattern: root `CoreAILifetimeScope` (CoreAI core) +, if needed, a child `LifetimeScope` in this folder only for roguelite-example code.

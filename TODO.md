@@ -1,62 +1,11 @@
 # TODO
 
-> Updated 2026-06-28. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-07-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`. Priorities below reflect the
 > 2026-06-28 competitive audit (vs Cursor / Claude Code / Kilo / Cline) and the maintainer's ordering.
-> Test baseline: EditMode ~1238, PlayMode `FastNoLlm` ~50 (deterministic).
+> Test baseline: EditMode ~1314, PlayMode `FastNoLlm` ~50 (deterministic).
 
 ## Roadmap (prioritized)
-
-### [R1] Parallel tool-call execution  *(in progress)*
-
-> Today `ToolExecutionPolicy.ExecuteBatchAsync` runs a batch of tool calls strictly sequentially
-> (`foreach`). Cursor/Claude Code/Cline dispatch independent calls concurrently, so CoreAI multi-tool
-> turns are latency-bound. Make execution concurrent while preserving today's semantics.
-
-Plan:
-- [ ] Execute the calls of one batch concurrently (`Task.WhenAll`) with a bounded degree of parallelism
-      (new setting `MaxParallelToolCalls`, default e.g. 4; 1 = current sequential behavior).
-- [ ] **Preserve result order**: results/history entries appended in original call order regardless of
-      completion order (await an ordered array, not completion order).
-- [ ] **Serialize state-mutating built-ins** that share a store (e.g. `memory` append/edit, `manage_mods`)
-      — either run same-tool or same-store calls sequentially within the batch, or document that the model
-      must not issue racing writes. Pure/read tools and independent host tools run fully parallel.
-- [ ] Keep per-call timeout (linked CTS), duplicate-batch rejection, forced-tool reset, and the
-      consecutive-error counter semantics intact; a single failing call must not corrupt siblings' results.
-- [ ] Cancellation: cancel all in-flight calls on outer cancel; never fall back on `OperationCanceledException`.
-- [ ] Tests (orchestrator-written): order-preserved-under-parallelism, latency-improves (two slow tools run
-      concurrently), one-fails-others-succeed, duplicate detection still whole-batch, mutating-tool
-      serialization, cancellation cancels all.
-
-### [R2] PlayMode: configurable provider / API / model
-
-> The live PlayMode suite resolves the backend via `PlayModeProductionLikeLlmFactory` / settings / env, but
-> there is no single, easy place to point the whole live suite at a chosen OpenAI-compatible endpoint + key
-> + model. Make it first-class so anyone can run the live tests against their provider/model.
-- [ ] A single config surface (env vars + a gitignored config asset/JSON) for base URL, API key, model name,
-      and streaming/native-tools flags consumed by `PlayModeOpenAiTestConfig` / `PlayModeProductionLikeLlmFactory`.
-- [ ] Clear `Assert.Ignore` reason when unconfigured; doc in `Docs` on how to run the live suite.
-- [ ] Optional: per-test model override (vision-capable model for vision tests, etc.).
-
-### [R3] Real token counting (BPE) with heuristic fallback
-
-> No real tokenizer exists — only `CalibratingTokenEstimator` (char-weight + EMA vs provider `prompt_tokens`).
-> Use a real BPE tokenizer when available; fall back to the estimator when the encoding is unknown or the
-> runtime can't host the lib (IL2CPP / WebGL / AOT).
-- [ ] Integrate a BPE tokenizer for OpenAI-family models (cl100k/o200k) behind an `ITokenCounter` abstraction.
-- [ ] Resolve encoding by model name; on unknown model / unavailable lib, fall back to `CalibratingTokenEstimator`.
-- [ ] AOT/WebGL safety (encoding data load, stripping); keep the calibrating estimator as the universal fallback.
-- [ ] Tests: known model → exact-ish BPE counts vs recorded fixtures; unknown model → estimator path.
-
-### [R4] Skill authoring — model creates & saves new skills
-
-> The model can only `read_skill` / `call_skill_tool` (use EXISTING skills). It cannot author and persist a
-> NEW skill, nor refine one. Add agent-authorable, persistent, self-improving skills.
-- [ ] `ISkillStore` + file-backed impl (persist `SkillSet` name/description/instructions/tool-allowlist).
-- [ ] A `manage_skills` tool: `create` / `update` / `list` / `get` / `delete` (mirrors `manage_mods`), so the
-      model can write a new skill and reload it into its own catalog.
-- [ ] Self-improvement: let a skill's instructions be revised by the agent (versioned via `ILuaScriptVersionStore`-style history) — "the agent learns a procedure once, saves it as a skill, reuses it."
-- [ ] Tests: create→persist→appears in catalog→read_skill returns it; update revises; isolation per role/scope.
 
 ### [R5] Summarization & context-overflow — live verification
 
@@ -114,5 +63,28 @@ Plan:
 
 ## Shipped (recent)
 
+- 4.17.0 — tool-call history unlimited by default (`MaxToolCallHistoryMessages = 0`); per-agent / per-call
+  `MaxToolCallRoundtrips` override (`0` = unlimited, Programmer/Creator default unlimited), default cap raised
+  10 → 20; clearer cap-reached stop message; honest provider-call tok/s labeling; `BenchmarkInfo.GroupDifficulty10`
+  single source of difficulty. Full-tier Lua `unity_add_component` / `unity_destroy` + Unity-object-reference coercion;
+  `world_command` spawn accepts rotation + scale inline with schema docs; demos reorganized into `Scripts/` subfolders.
+- 4.16.0 — `AllowWorldPrimitives` setting; `component_command` curated reflection-free component catalog (+ `coreai_component_*`
+  Lua bindings); `unity_list_members` discovery + rich Color/Vector/Quaternion coercion + did-you-mean errors; G6 free-build
+  subject overridable; decode tok/s fix; configurable benchmark roundtrip cap.
+- 4.15.x — Game-Creation Benchmark reporting polish: G6 castle free-build hero, per-model model-card radar/role bars,
+  role-shaped scene screenshots with ghost markers, decode-vs-effective tok/s, cross-model comparison + Models leaderboard tab,
+  LM Studio multi-model sweep, mean-over-repetitions aggregation, `Repeatable` opt-out, model-name-on-screenshot, audit
+  material/mesh-leak fixes.
+- 4.14.0 — portable Game-Creation Benchmark scoring core + live PlayMode suite (G1–G5 scenario groups, 0..100 across six
+  dimensions, subtractive instruction-following, `RoleFitness` per game-dev role, gated efficiency bonus, self-explanatory
+  scene screenshots, per-model comparison card, Editor **CoreAI > Benchmarks** window).
+- 4.13.0 — **[R1] parallel tool-call execution** (`ToolExecutionPolicy.ExecuteBatchAsync` runs a batch concurrently,
+  bounded by `MaxParallelToolCalls`, default 4; order preserved, state-mutating built-ins serialized, timeout/duplicate/
+  forced-tool/consecutive-error/cancellation semantics intact). **[R3] real BPE token counting** (`ITokenCounter` +
+  `BpeTokenCounter` for cl100k/o200k via `BpeEncodingResolver` / `IBpeRanksProvider`, falls back to the calibrating
+  estimator). **[R4] agent-authored skills** (`manage_skills` create/update/list/get/delete + file-backed `FileSkillStore`,
+  versioned, surfaced into `read_skill`; `AgentBuilder.WithSkillAuthoring`). **[R2] configurable live PlayMode provider**
+  (`PlayModeOpenAiTestConfig`: env vars + gitignored `coreai-live-tests.local.json`, see `Docs/RUNNING_LIVE_TESTS.md`).
+  Also Hermes/Qwen-Agent XML tool-call parsing.
 - 4.12.1 — memory instruction now reaches native tool-calling roles (`AiToolContractPromptFormatter` early-return bug).
 - 4.12.0 — live streaming through tool calls, partial-SSE accumulation, WebGL Lua AOT hardening, stale-`<think>` prune, Lua mod versioning + diagnostics, vision host send path + gate + lift, P3 nits.

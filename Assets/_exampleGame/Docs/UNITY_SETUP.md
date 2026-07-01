@@ -22,7 +22,7 @@ In **Hierarchy**, under **`CompositionRoot`**, there is a child **`ArenaGameplay
 
 | Object | Components |
 |--------|------------|
-| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** - waves, player, HUD (field **Skip Runtime Floor** enabled: the scene floor is **ArenaGroundPlane**). VS-style progression: assign **Arena Progression Content** + **Arena Unit Baseline** and generate menu assets via **CoreAI Example -> Arena -> Generate Progression Assets** - see **[ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)**. |
+| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** - waves, player, HUD (field **Skip Runtime Floor** enabled: the scene floor is **ArenaGroundPlane**). VS-style progression is **opt-in**: in the shipped scene **Arena Progression Content** + **Arena Unit Baseline** are **unassigned**, so progression is off by default. To enable, generate assets via **CoreAI Example -> Arena -> Generate Progression Assets (Defaults)** (writes to `Assets/_exampleGame/Settings/`, not checked in) and assign them - see **[ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)**. |
 | **ArenaGroundPlane** | Mesh (Plane), **MeshCollider**, material - visible gameplay field about 44x44 m. |
 | **PlayerSpawn** | Empty Transform - player start position (**Player Spawn Anchor** in setup). |
 

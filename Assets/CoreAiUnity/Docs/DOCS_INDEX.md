@@ -21,7 +21,7 @@ Package manifests:
 | Understand architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md), [DGF_SPEC.md](DGF_SPEC.md) |
 | Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
 | Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md), [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
-| Run or extend tests | [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Test-specific docs listed below |
+| Run or extend tests | [../Tests/README.md](../Tests/README.md) | Test-specific docs listed below |
 
 ## First Run
 
@@ -96,7 +96,7 @@ Package manifests:
 
 | Document Or Test | Scope |
 |---|---|
-| [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Play Mode test layout and backend requirements. |
+| [../Tests/README.md](../Tests/README.md) | EditMode & PlayMode test requirements, layout, and backend needs. |
 | [../Tests/PlayMode/Scenarios/CraftingMemory_README.md](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | Crafting memory workflow scenario. |
 | [TESTING_TOOL_CALLING.md](TESTING_TOOL_CALLING.md) | How to run and extend tool-calling tests. |
 | `ThinkBlockStreamFilterEditModeTests` | Streaming `<think>` filter and split-tag cases. |

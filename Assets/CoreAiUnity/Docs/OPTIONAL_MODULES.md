@@ -11,7 +11,23 @@ takes to turn the feature on or off at compile time.
 
 Runtime code guards on `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` (Lua) and
 `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL` (local LLM). Demo and core assemblies never use
-these packages' types outside those guards, so the project builds with either module absent.
+these packages' types outside those guards.
+
+### About the asmdef references
+
+`CoreAI.Core.asmdef` and `CoreAI.Source.asmdef` do list `MoonSharp.Interpreter` (and
+`CoreAI.Source.asmdef` also lists `undream.llmunity.Runtime`) in their `references`. Those
+references are **name-based and optional in effect**: when the package is absent Unity simply
+cannot resolve the referenced assembly and drops it, and because every use of those types is
+behind the `#if` guards above, the assemblies still compile. This is verified in CI for
+MoonSharp — see below.
+
+> **Not overclaiming:** the "MoonSharp can be absent" path is proven by CI (the `no-lua` job
+> removes `org.moonsharp.moonsharp` from `Packages/manifest.json` entirely and the suite stays
+> green). For LLMUnity, CI currently only exercises `COREAI_NO_LLM` (which compiles out the LLM
+> *layer* via source guards) — it does **not** remove the `ai.undream.llm` package. So removal
+> of the LLMUnity package is expected to work by the same guard mechanism but is **not** covered
+> by an automated job today.
 
 ## Editor tool
 
