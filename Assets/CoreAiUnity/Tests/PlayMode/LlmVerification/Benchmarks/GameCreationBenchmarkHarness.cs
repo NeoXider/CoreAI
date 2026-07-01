@@ -1590,10 +1590,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             onResult?.Invoke(result);
         }
 
+        // 4K (2160p) output for every report image. The overlay (banner/caption/insets) is either
+        // world-space or sized relative to these, so the whole card scales with them.
+        private const int ShotWidth = 3840;
+        private const int ShotHeight = 2160;
+        private const int InsetWidth = 676;   // 16:9, three fit in the left column between the bars
+        private const int InsetHeight = 380;
+
         /// <summary>
-        /// Frames a camera over the spawned objects, renders to a 1280x720 RenderTexture, and returns PNG
-        /// bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null screenshot and
-        /// never breaks the run.
+        /// Frames a camera over the spawned objects, renders to a 4K (3840x2160) RenderTexture with three
+        /// extra-angle inset views (opposite side, top-down, close-up) composited into the left column, and
+        /// returns PNG bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null
+        /// screenshot and never breaks the run.
         /// </summary>
         private static IEnumerator CaptureSceneScreenshot(
             VisualBenchmarkWorldExecutor vis, string model, string header, string subtitle, bool freeBuildLayout,
@@ -1602,6 +1610,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.GameObject camGo = null;
             UnityEngine.GameObject camBGo = null;
             UnityEngine.GameObject camCGo = null;
+            UnityEngine.GameObject camDGo = null;
             UnityEngine.GameObject keyGo = null;
             UnityEngine.GameObject fillGo = null;
             UnityEngine.GameObject groundGo = null;
@@ -1609,6 +1618,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.RenderTexture rt = null;
             UnityEngine.RenderTexture rtB = null;
             UnityEngine.RenderTexture rtC = null;
+            UnityEngine.RenderTexture rtD = null;
             UnityEngine.Vector3 sceneCenter = UnityEngine.Vector3.zero;
             float sceneExt = 1.2f;
 
@@ -1684,7 +1694,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // text floating in the scene. Front-parallel quads never skew under perspective.
                 const float zb = 1.5f;
                 float halfH = zb * UnityEngine.Mathf.Tan(cam.fieldOfView * 0.5f * UnityEngine.Mathf.Deg2Rad);
-                float fullW = 2f * halfH * (1280f / 720f);
+                float fullW = 2f * halfH * (ShotWidth / (float)ShotHeight);
                 UnityEngine.Transform p = cam.transform;
                 UnityEngine.Color verdict = VerdictColor(header);
 
@@ -1723,7 +1733,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         0.0072f, new UnityEngine.Color(0.84f, 0.86f, 0.90f), false);
                 }
 
-                rt = new UnityEngine.RenderTexture(1280, 720, 24) { antiAliasing = 8 };
+                rt = new UnityEngine.RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
                 vis.FaceCamera(cam);
                 cam.targetTexture = rt;
             }
@@ -1747,14 +1757,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             try
             {
-                rtB = new UnityEngine.RenderTexture(300, 169, 24) { antiAliasing = 8 };
+                rtB = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camBGo = MakeInsetCamera("BenchmarkCameraB",
                     sceneCenter + new UnityEngine.Vector3(-sceneExt * 1.9f, sceneExt * 1.3f, sceneExt * 2.4f),
                     sceneCenter, rtB);
-                rtC = new UnityEngine.RenderTexture(300, 169, 24) { antiAliasing = 8 };
+                rtC = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camCGo = MakeInsetCamera("BenchmarkCameraC",
                     sceneCenter + new UnityEngine.Vector3(sceneExt * 0.25f, sceneExt * 3.0f, -sceneExt * 0.7f),
                     sceneCenter, rtC);
+                // Close-up "zoom" view: nearer to the scene, low angle, narrow FOV — a detail shot the
+                // wide hero framing can't show (larger models build compositions worth zooming into).
+                rtD = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                camDGo = MakeInsetCamera("BenchmarkCameraD",
+                    sceneCenter + new UnityEngine.Vector3(sceneExt * 1.0f, sceneExt * 0.4f, -sceneExt * 1.3f),
+                    sceneCenter, rtD, 32f);
             }
             catch (Exception ex)
             {
@@ -1767,13 +1783,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             byte[] png = null;
             UnityEngine.Texture2D texB = null;
             UnityEngine.Texture2D texC = null;
+            UnityEngine.Texture2D texD = null;
             try
             {
                 if (texMain != null)
                 {
                     texB = ReadRenderTexture(rtB);
                     texC = ReadRenderTexture(rtC);
-                    CompositeInsets(texMain, texB, texC);
+                    texD = ReadRenderTexture(rtD);
+                    CompositeInsets(texMain, texB, texC, texD);
                     png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
                 }
             }
@@ -1805,12 +1823,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 DestroyGo(camGo);
                 DestroyGo(camBGo);
                 DestroyGo(camCGo);
+                DestroyGo(camDGo);
                 DestroyTex(texMain);
                 DestroyTex(texB);
                 DestroyTex(texC);
+                DestroyTex(texD);
                 DestroyRt(rt);
                 DestroyRt(rtB);
                 DestroyRt(rtC);
+                DestroyRt(rtD);
                 DestroyGo(keyGo);
                 DestroyGo(fillGo);
                 DestroyGo(groundGo);
@@ -1851,13 +1872,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         private static UnityEngine.GameObject MakeInsetCamera(
-            string name, UnityEngine.Vector3 position, UnityEngine.Vector3 lookAt, UnityEngine.RenderTexture rt)
+            string name, UnityEngine.Vector3 position, UnityEngine.Vector3 lookAt, UnityEngine.RenderTexture rt,
+            float fieldOfView = 50f)
         {
             UnityEngine.GameObject go = new(name);
             UnityEngine.Camera c = go.AddComponent<UnityEngine.Camera>();
             c.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
             c.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
-            c.fieldOfView = 50f;
+            c.fieldOfView = fieldOfView;
             c.nearClipPlane = 0.05f;
             c.farClipPlane = 500f;
             c.allowMSAA = true;
@@ -1867,24 +1889,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return go;
         }
 
-        // Pastes the two extra-angle views into the right column of the hero shot (below the top banner).
+        // Pastes the three extra-angle views (opposite side, top-down, close-up) into the LEFT column
+        // of the hero shot, stacked below the top banner and above the bottom caption bar. All metrics
+        // scale from the main image height so the layout is resolution-independent.
         private static void CompositeInsets(
-            UnityEngine.Texture2D main, UnityEngine.Texture2D b, UnityEngine.Texture2D c)
+            UnityEngine.Texture2D main, UnityEngine.Texture2D b, UnityEngine.Texture2D c,
+            UnityEngine.Texture2D d)
         {
             if (main == null)
             {
                 return;
             }
 
-            const int iw = 300;
-            const int ih = 169;
-            const int margin = 16;
-            const int bannerPx = 151; // top results bar height, kept clear
-            int x = main.width - margin - iw;
+            const int iw = InsetWidth;
+            const int ih = InsetHeight;
+            int margin = UnityEngine.Mathf.RoundToInt(main.height * (16f / 720f));
+            int bannerPx = UnityEngine.Mathf.RoundToInt(main.height * (151f / 720f)); // top results bar, kept clear
+            int x = margin;
             int y1 = main.height - bannerPx - margin - ih;
             int y2 = y1 - margin - ih;
+            int y3 = y2 - margin - ih;
+            // The bottom caption bar (when a subtitle is present) is 0.42 * halfH tall = 21% of the
+            // image; without this clamp the third inset's bottom edge dips ~31px into it at 4K.
+            int captionPx = UnityEngine.Mathf.RoundToInt(main.height * (152f / 720f));
+            y3 = UnityEngine.Mathf.Max(y3, captionPx + 8);
             PasteInset(main, b, x, y1, iw, ih);
             PasteInset(main, c, x, y2, iw, ih);
+            PasteInset(main, d, x, y3, iw, ih);
             main.Apply();
         }
 
@@ -1896,7 +1927,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return;
             }
 
-            const int border = 3;
+            int border = UnityEngine.Mathf.Max(3, main.width / 640); // ~6px at 4K, matches the 3px-at-720p look
             int fx = UnityEngine.Mathf.Max(0, x - border);
             int fy = UnityEngine.Mathf.Max(0, y - border);
             int fw = UnityEngine.Mathf.Min(main.width - fx, w + 2 * border);
@@ -1941,7 +1972,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>
-        /// Renders a 1280x720 "model card" — a 6-axis radar of the benchmark dimensions plus a game-fitness
+        /// Renders a 4K (3840x2160) "model card" — a 6-axis radar of the benchmark dimensions plus a game-fitness
         /// bar per role and the headline score — so two models' cards can be compared at a glance (a strong
         /// model fills the hexagon; a weak one is small and spiky). Suite-level, so all six axes are present.
         /// </summary>
@@ -2128,7 +2159,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
-                rt = new UnityEngine.RenderTexture(1280, 720, 24) { antiAliasing = 8 };
+                rt = new UnityEngine.RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
                 cam.targetTexture = rt;
             }
             catch (Exception ex)

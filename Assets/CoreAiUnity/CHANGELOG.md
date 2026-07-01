@@ -4,6 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Benchmark report images: 4K, left-column insets, close-up view (2026-07-02)
+
+- **All report images (scene/hero shots and the model card) now render at 4K (3840x2160)** instead of
+  1280x720 — the overlay (banner, caption, radar, bars) is world-space and scales for free; only the
+  RenderTexture sizes and the pixel-composite metrics changed.
+- **The extra-angle inset views moved from the right column to the LEFT, and a third close-up view was
+  added**: opposite-side wide, top-down, and a new narrow-FOV (32 deg) low-angle zoom shot — larger
+  models build compositions worth zooming into (visible in the first 4K gpt-5.5 castle). Insets are
+  676x380 each, rendered natively at that size with 8x MSAA. Composite metrics (margins, banner
+  clearance, inset border) scale from the image dimensions; a clamp keeps the third inset clear of the
+  bottom caption bar (found by the independent Codex audit of this diff — the initial top-anchored
+  stack dipped ~31px into the caption at 4K).
+- Verified live: a G6 free-build run (codex/GPT-5.5 via the CLI bridge, 94/100 Pass, 60 spawns)
+  produced a 3840x2160 hero PNG with all three left insets and a 4K model card; EditMode 1361/1361 and
+  PlayMode FastNoLlm 48/48 green.
+
 ### G1/G2/G3/G7: stop penalizing self-verification of logic_define slots (2026-07-02)
 
 - **`ToolCorrectness` was being dragged down by a documented-but-unwarned API gotcha, not real model
