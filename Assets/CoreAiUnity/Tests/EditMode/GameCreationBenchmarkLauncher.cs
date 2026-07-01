@@ -244,24 +244,36 @@ namespace CoreAI.Tests.EditMode
             return list.OrderByDescending(e => e.Summary.RunId).ToList();
         }
 
-        /// <summary>Deletes a run's report files (.md + .json). Returns true on success.</summary>
+        /// <summary>
+        /// Deletes a run's report files: .md + .json plus every companion artifact sharing the same
+        /// stem (.svg chart, _modelcard.png, _g6_free_build_hero.png, per-scenario _gN_*.png screenshots).
+        /// Returns true on success.
+        /// </summary>
         public static bool DeleteRun(RunEntry entry)
         {
             try
             {
-                if (entry == null)
+                if (entry == null || string.IsNullOrEmpty(entry.JsonPath))
                 {
                     return false;
                 }
 
-                if (File.Exists(entry.JsonPath))
+                string dir = Path.GetDirectoryName(entry.JsonPath);
+                string stem = Path.GetFileNameWithoutExtension(entry.JsonPath);
+                if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(stem) || !Directory.Exists(dir))
                 {
-                    File.Delete(entry.JsonPath);
+                    return false;
                 }
 
-                if (File.Exists(entry.MdPath))
+                // "<stem>.*" catches .json/.md/.svg; "<stem>_*" catches modelcard/hero/per-scenario PNGs.
+                // Matching on the exact stem boundary (not a raw prefix) avoids deleting an unrelated run
+                // whose stem happens to start with this one's characters.
+                foreach (string pattern in new[] { stem + ".*", stem + "_*" })
                 {
-                    File.Delete(entry.MdPath);
+                    foreach (string file in Directory.GetFiles(dir, pattern))
+                    {
+                        File.Delete(file);
+                    }
                 }
 
                 return true;
