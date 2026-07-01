@@ -70,7 +70,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.WorldTool())
-                    .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     // High but finite cap (default 1000) — the model builds freely, yet can never loop
                     // forever. The per-scenario override (AiTaskRequest) is the channel that actually reaches

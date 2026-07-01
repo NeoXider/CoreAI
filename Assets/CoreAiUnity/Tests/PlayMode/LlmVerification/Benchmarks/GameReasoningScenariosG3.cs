@@ -73,7 +73,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.LuaTool())
-                    .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
@@ -252,7 +251,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.WorldTool())
                     .WithTool(env.LuaTool())
-                    .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();

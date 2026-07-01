@@ -47,7 +47,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 return b
-                    .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();

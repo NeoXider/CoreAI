@@ -111,7 +111,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 LlmCompletionRequest request,
                 [EnumeratorCancellation] CancellationToken cancellationToken = default)
             {
-                // Benchmarks force non-streaming, but a correct decorator must still delegate the stream.
                 StringBuilder text = new();
                 LlmStreamChunk last = null;
                 long t0 = Stopwatch.GetTimestamp();
@@ -129,13 +128,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 GenerationMs += (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
 
+                // ExecutedToolCalls must be carried from the terminal chunk - without it, Record() never
+                // sees any tool trace for a streamed turn, so ToolCalls/FailedToolCalls silently stay 0 no
+                // matter what the model actually did. This path used to be effectively dead (benchmarks
+                // forced non-streaming), which is exactly how the gap went unnoticed.
                 Record(request, new LlmCompletionResult
                 {
                     Ok = last?.Error == null,
                     Content = text.ToString(),
                     Error = last?.Error ?? "",
                     PromptTokens = last?.PromptTokens,
-                    CompletionTokens = last?.CompletionTokens
+                    CompletionTokens = last?.CompletionTokens,
+                    ExecutedToolCalls = last?.ExecutedToolCalls
                 });
             }
 
@@ -1109,6 +1113,42 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // ---------------------------------------------------------------------------------------------
 
         /// <summary>
+        /// Drives <paramref name="orch"/> through <see cref="AiOrchestrator.RunStreamingAsync"/> and
+        /// discards the chunks — every real observation (turns, tool calls, tokens, transcript) is already
+        /// captured identically to the non-streaming path by <c>SessionCapturingLlmClient.CompleteStreamingAsync</c>
+        /// (the wrapped <see cref="ILlmClient"/>). This wrapper exists purely so the resulting
+        /// <see cref="Task"/> has the exact same Faulted/Canceled/Exception semantics that
+        /// <see cref="AiOrchestrator.RunTaskAsync"/> gave <see cref="RunScenario"/> before: an
+        /// <c>await foreach</c> with <c>WithCancellation</c> naturally propagates cancellation and any
+        /// unhandled exception the same way a faulted/cancelled <c>Task&lt;string&gt;</c> would, so the
+        /// rest of <see cref="RunScenario"/>'s polling/classification logic needs no other change.
+        /// <para>
+        /// Benchmarks must exercise the SAME code path real players/production callers use. Production
+        /// CoreAI consumers (e.g. <c>CoreAiChatService</c>) always stream; non-streaming
+        /// (<see cref="ILlmClient.CompleteAsync"/>) is a test/automation convenience and must never be the
+        /// only path a benchmark measures.
+        /// </para>
+        /// </summary>
+        private static async Task DrainStreamingAsync(
+            AiOrchestrator orch, AiTaskRequest request, CancellationToken cancellationToken)
+        {
+            await foreach (LlmStreamChunk _ in orch.RunStreamingAsync(request, cancellationToken)
+                               .WithCancellation(cancellationToken))
+            {
+                // Intentionally empty: SessionCapturingLlmClient already recorded this turn via the
+                // wrapped ILlmClient.CompleteStreamingAsync. We only need to drive the enumerable to
+                // completion so this method's Task carries the terminal fault/cancellation state.
+            }
+
+            // RunStreamingAsync catches cancellation internally and yields a terminal {IsDone=true,
+            // Error="cancelled"} chunk instead of letting OperationCanceledException propagate, so the
+            // `await foreach` above completes normally even when cancellationToken fired - unlike the old
+            // RunTaskAsync, whose Task ended up Canceled. Re-throw here so this method's Task keeps the
+            // same Canceled/RanToCompletion semantics RunScenario's task.IsCanceled check (below) relies on.
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        /// <summary>
         /// Drives one scenario through the model and reports a graded <see cref="ScenarioResult"/> via
         /// <paramref name="onResult"/>. Never throws on model/timeout/fault — it records the failure and
         /// still grades + reports. Coroutine so it can await the model on the PlayMode loop.
@@ -1126,8 +1166,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             BenchmarkEnvironment env = new(settings, scenario.CaptureScene)
             {
                 // Tell the world tool when this scenario should finish, so it can feed the model a live
-                // countdown after each spawn (free-build mainly — lets the model pace and stop in time).
-                DeadlineUtc = System.DateTime.UtcNow.AddSeconds(timeoutSeconds)
+                // countdown after each spawn and pace an open-ended build. Free-build only (FreeBuildLayout,
+                // e.g. G6): every world_command result would otherwise carry "keep going, then stop when
+                // done" even for a fixed-count instruction-following scenario (e.g. G5's "exactly three
+                // actions"), which actively nudges the model toward extra, unwanted spawns.
+                DeadlineUtc = scenario.FreeBuildLayout
+                    ? System.DateTime.UtcNow.AddSeconds(timeoutSeconds)
+                    : (System.DateTime?)null
             };
             AgentConfig config = null;
             string setupError = null;
@@ -1185,7 +1230,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             RunObservation obs = new();
 
             using CancellationTokenSource cts = new();
-            Task task = orch.RunTaskAsync(new AiTaskRequest
+            // Streaming, not RunTaskAsync: production callers always stream (see DrainStreamingAsync doc),
+            // so the benchmark must exercise that same path rather than the non-streaming convenience.
+            Task task = DrainStreamingAsync(orch, new AiTaskRequest
             {
                 RoleId = scenario.RoleId,
                 SystemPrompt = scenario.SystemPrompt,
