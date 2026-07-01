@@ -13,8 +13,7 @@ using RunEntry = CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunEntry;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// UI Toolkit control panel for the game-creation benchmark. The IMGUI window stays available; this
-    /// window shares its EditorPrefs keys and launcher APIs.
+    /// UI Toolkit control panel for the game-creation benchmark.
     /// </summary>
     public sealed class GameCreationBenchmarkWindowUitk : EditorWindow
     {
@@ -70,11 +69,11 @@ namespace CoreAI.Tests.EditMode
         private int _retries = 1;
         private int _timeoutSeconds;
 
-        [MenuItem("CoreAI/Benchmarks/Benchmark Window (UITK)…", priority = 102)]
+        [MenuItem("CoreAI/Benchmarks/Benchmark Window…", priority = 101)]
         public static void OpenWindow()
         {
             GameCreationBenchmarkWindowUitk window =
-                GetWindow<GameCreationBenchmarkWindowUitk>(false, "CoreAI Benchmark UITK");
+                GetWindow<GameCreationBenchmarkWindowUitk>(false, "CoreAI Benchmark");
             window.minSize = new Vector2(620, 640);
             window.Show();
         }
@@ -673,6 +672,27 @@ namespace CoreAI.Tests.EditMode
             int models = runs.Select(r => r.Summary.ModelId).Distinct().Count();
             RunEntry best = runs.OrderByDescending(r => r.Summary.SuiteBase).First();
             _historyList.Add(Info($"{runs.Count} run(s), {models} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
+            ToolbarButton clearAll = new(() =>
+            {
+                if (EditorUtility.DisplayDialog("Clear benchmark history",
+                        "Delete ALL benchmark runs? This removes every saved report and cannot be undone.",
+                        "Delete all", "Cancel"))
+                {
+                    GameCreationBenchmarkLauncher.DeleteAllRuns();
+                    RefreshHistory();
+                    RefreshCompare();
+                }
+            })
+            {
+                text = "Clear all",
+                tooltip = "Delete every saved benchmark report"
+            };
+            clearAll.style.alignSelf = Align.FlexEnd;
+            clearAll.style.width = 90;
+            clearAll.style.fontSize = 11;
+            clearAll.style.marginTop = 2;
+            clearAll.style.marginBottom = 6;
+            _historyList.Add(clearAll);
 
             foreach (IGrouping<string, RunEntry> group in runs.GroupBy(r => r.Summary.ModelId)
                          .OrderByDescending(g => g.Max(r => r.Summary.RunId)))
