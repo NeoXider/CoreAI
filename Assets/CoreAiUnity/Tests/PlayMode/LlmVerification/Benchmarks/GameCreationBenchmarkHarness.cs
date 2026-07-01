@@ -502,7 +502,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // a fresh AddComponent'd Light defaults to LightShadows.None, and the default bias
                     // peter-pans shadows on these ~1m objects, so the live Game view looked flat too.
                     light.shadows = UnityEngine.LightShadows.Soft;
-                    light.shadowResolution = UnityEngine.Rendering.LightShadowResolution.High;
                     light.shadowStrength = 1f;
                     light.shadowBias = 0.01f;
                     light.shadowNormalBias = 0.2f;
@@ -1656,7 +1655,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 key.type = UnityEngine.LightType.Directional;
                 key.intensity = 1.5f;
                 key.shadows = UnityEngine.LightShadows.Soft;
-                key.shadowResolution = UnityEngine.Rendering.LightShadowResolution.High;
                 // Full strength + a small bias: the default bias is tuned for room/level-scale scenes and
                 // "peter-pans" (detaches/hides) the shadow on these ~1m benchmark objects, which was why
                 // shadows looked barely-there even with shadows correctly enabled.
