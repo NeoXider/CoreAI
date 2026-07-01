@@ -449,6 +449,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// Records commands like the base executor AND instantiates real primitive GameObjects so the
         /// scene can be screenshotted. Recording is identical to the base, so scores never change.
         /// </summary>
+        /// <summary>Spins a directional light's azimuth at a fixed elevation — a full circle every 3
+        /// minutes — so a recorded build timelapse has moving shadows instead of a static sun.</summary>
+        private sealed class LiveSunOrbit : UnityEngine.MonoBehaviour
+        {
+            private const float DegreesPerSecond = 360f / 180f;
+
+            private void Update()
+            {
+                transform.Rotate(0f, DegreesPerSecond * UnityEngine.Time.deltaTime, 0f, UnityEngine.Space.World);
+            }
+        }
+
         public sealed class VisualBenchmarkWorldExecutor : RecordingWorldExecutor
         {
             private readonly Dictionary<string, UnityEngine.GameObject> _objects =
@@ -494,6 +506,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     light.shadowBias = 0.01f;
                     light.shadowNormalBias = 0.2f;
                     _liveLightGo.transform.rotation = UnityEngine.Quaternion.Euler(48f, -32f, 0f);
+                    // Orbit the sun azimuth (elevation stays fixed, so the scene never goes dark) for a
+                    // more watchable build timelapse — a full 360 deg sweep every 3 minutes.
+                    _liveLightGo.AddComponent<LiveSunOrbit>();
 
                     _liveCamGo = new UnityEngine.GameObject("BenchmarkLivePreviewCamera");
                     UnityEngine.Camera cam = _liveCamGo.AddComponent<UnityEngine.Camera>();
