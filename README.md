@@ -106,7 +106,7 @@ CoreAI includes a local game-creation benchmark that measures how well an LLM bu
 
 </details>
 
-Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
+Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed).
 
 ### Castle gallery - G6 free-build visual
 
@@ -618,7 +618,8 @@ var storyteller = new AgentBuilder("Storyteller")
 Start from the index and pick the level that matches your goal:
 
 - **Game-Creation Benchmark:** live PlayMode benchmark guide and design for scored model-driven game creation:
-  [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
+  [full benchmark guide](Docs/BENCHMARK.md), [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md),
+  and [an example full report](Docs/Images/example_report/example_report.md).
 
 > 🧭 **[Docs/README.md](Docs/README.md)** — repository documentation entry point.
 > 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — CoreAI Unity map (Beginner → Intermediate → Architecture).
