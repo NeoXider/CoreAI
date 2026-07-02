@@ -1000,6 +1000,119 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
+        /// <summary>
+        /// Per-turn state for execute-as-you-stream: tool calls executed one by one AS THEY ARRIVE
+        /// in the SSE stream (see <see cref="ExecuteStreamedAsync"/>), while duplicate suppression
+        /// and the consecutive-error counter keep the same TURN-level semantics as
+        /// <see cref="ExecuteBatchAsync"/>. Create via <see cref="BeginStreamedTurn"/>, finish via
+        /// <see cref="CompleteStreamedTurn"/>.
+        /// </summary>
+        public sealed class StreamedTurn
+        {
+            internal readonly List<MEAI.AIContent> Results = new();
+            internal readonly List<string> Signatures = new();
+            internal readonly HashSet<string> SeenInTurn = new(StringComparer.Ordinal);
+            internal bool AnyFailed;
+            internal bool AllFailed = true;
+            internal int Count;
+        }
+
+        /// <summary>Starts a streamed turn (execute-as-you-stream counterpart of one batch).</summary>
+        public StreamedTurn BeginStreamedTurn() => new();
+
+        /// <summary>
+        /// Executes one tool call the moment it arrives in the stream. Mirrors the sequential batch
+        /// path per call: an exact repeat (same canonical name + key-sorted args) of a call already
+        /// executed EARLIER IN THIS TURN is suppressed with the same "Duplicate tool call" result the
+        /// batch path produces; tools with AllowDuplicates are exempt. The consecutive-error counter
+        /// is NOT touched here — the whole turn records once in <see cref="CompleteStreamedTurn"/>,
+        /// exactly like a batch.
+        /// </summary>
+        public async Task<ToolCallResult> ExecuteStreamedAsync(
+            StreamedTurn turn,
+            MEAI.FunctionCallContent fc,
+            MEAI.ChatOptions chatOptions,
+            CancellationToken cancellationToken)
+        {
+            ToolCallResult result;
+            string signature = null;
+            bool hasSignature = !_allowDuplicateToolCalls && TryBuildDuplicateSignature(fc, out signature);
+            if (hasSignature)
+            {
+                turn.Signatures.Add(signature);
+            }
+
+            // Cross-turn echo guard, batch parity for the single-call turn: a one-call batch
+            // registers the call's own signature as its turn signature, so when a model re-issues
+            // the identical single call it already ran last turn, ExecuteBatchAsync suppresses it —
+            // mirror that here. A multi-call echo turn cannot be detected mid-stream (its combined
+            // signature only exists once the turn ends); that direction is covered by the wire
+            // protocol sending every tool result (models stop re-issuing "unanswered" calls).
+            bool crossTurnEcho = hasSignature && _executedSignatures.Contains(signature);
+
+            if (hasSignature && (crossTurnEcho || !turn.SeenInTurn.Add(signature)))
+            {
+                string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
+                result = new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId, duplicate),
+                    Succeeded = false
+                };
+            }
+            else
+            {
+                result = await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+            }
+
+            turn.Count++;
+            turn.Results.Add(result.Result);
+            if (!result.Succeeded)
+            {
+                turn.AnyFailed = true;
+            }
+            else
+            {
+                turn.AllFailed = false;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Ends a streamed turn: records ONE success/failure against the consecutive-error counter
+        /// (batch parity) and registers the turn's combined signature so a later turn that re-sends
+        /// the exact same batch through <see cref="ExecuteBatchAsync"/> is still caught as an echo.
+        /// Returns the same shape <see cref="ExecuteBatchAsync"/> would for the whole turn.
+        /// </summary>
+        public BatchToolCallResult CompleteStreamedTurn(StreamedTurn turn)
+        {
+            if (turn.Count > 0)
+            {
+                if (!turn.AnyFailed)
+                {
+                    RecordSuccess();
+                }
+                else
+                {
+                    RecordFailure();
+                }
+            }
+
+            if (turn.Signatures.Count > 0)
+            {
+                _executedSignatures.Add(
+                    string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal)));
+            }
+
+            return new BatchToolCallResult
+            {
+                Results = turn.Results,
+                AnyFailed = turn.AnyFailed,
+                AllFailed = turn.Count > 0 && turn.AnyFailed && turn.AllFailed
+            };
+        }
+
         /// <summary>Record that all tools in the current iteration succeeded.</summary>
         public void RecordSuccess()
         {

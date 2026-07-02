@@ -75,9 +75,10 @@ namespace CoreAI.Ai
         public string[] AllowedToolNames { get; set; }
 
         /// <summary>
-        /// Per-call override of the LLM response token budget. <c>null</c> or <c>0</c> = use the
-        /// per-agent/default fallback chain. Positive value wins over per-agent and global defaults.
-        /// Propagated to
+        /// Per-call override of the LLM response token budget. <c>null</c> = use the
+        /// per-agent/default fallback chain; <c>0</c> = explicitly UNLIMITED (no <c>max_tokens</c>
+        /// sent to the provider — a reasoning model's thinking never eats the answer budget);
+        /// a positive value wins over per-agent and global defaults. Propagated to
         /// <see cref="LlmCompletionRequest.MaxOutputTokens"/> by the orchestrator. Honored uniformly
         /// by HTTP and LLMUnity backends.
         /// </summary>
@@ -86,7 +87,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Per-call override of the tool-call roundtrip cap. <c>null</c> = use the per-agent/global
         /// fallback chain; <c>0</c> = UNLIMITED (no safety valve); positive = that many roundtrips.
-        /// Unlike <see cref="MaxOutputTokens"/>, <c>0</c> is meaningful here (it means "no limit").
+        /// Like <see cref="MaxOutputTokens"/>, <c>0</c> is meaningful here (it means "no limit").
         /// Propagated to <see cref="LlmCompletionRequest.MaxToolCallRoundtrips"/> by the orchestrator.
         /// </summary>
         public int? MaxToolCallRoundtrips { get; set; }

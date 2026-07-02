@@ -418,6 +418,17 @@ namespace CoreAI.Infrastructure.Llm
                                 yield return update;
                             }
                         }
+
+                        // Execute-as-you-stream: surface every tool call whose arguments JSON is
+                        // already complete NOW, instead of holding all calls until the final Flush.
+                        // The consumer (MeaiLlmClient) can then run each call while the model is
+                        // still generating the rest of the turn.
+                        MEAI.ChatResponseUpdate completedCalls = toolAccumulator.DrainCompleted();
+                        if (completedCalls != null)
+                        {
+                            parsedSseDeltas++;
+                            yield return completedCalls;
+                        }
                     }
 
                     MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
@@ -1441,6 +1452,29 @@ namespace CoreAI.Infrastructure.Llm
             return accumulator.Flush();
         }
 
+        /// <summary>
+        /// EditMode tests: feed streaming <c>delta</c> data-line JSON payloads one by one and report,
+        /// per chunk, which tool calls DrainCompleted() surfaced at that point (execute-as-you-stream
+        /// timing), plus the final Flush() leftovers as the last element.
+        /// </summary>
+        internal static List<MEAI.ChatResponseUpdate> DrainPerChunkForTests(IEnumerable<string> dataJsonChunks)
+        {
+            SseToolCallAccumulator accumulator = new();
+            List<MEAI.ChatResponseUpdate> perChunk = new();
+            foreach (string dataJson in dataJsonChunks)
+            {
+                ExtractDeltaUpdate(dataJson, accumulator);
+                perChunk.Add(accumulator.DrainCompleted());
+            }
+
+            perChunk.Add(accumulator.Flush());
+            return perChunk;
+        }
+
+        /// <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
+        internal static bool IsCompleteJsonObjectForTests(string s) =>
+            SseToolCallAccumulator.IsCompleteJsonObject(s);
+
         /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
         internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
 
@@ -1593,6 +1627,135 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
             }
 
+            /// <summary>
+            /// Drains every pending call whose accumulated arguments already form one COMPLETE JSON
+            /// object, emitting it WITHOUT waiting for the stream to end. This is what lets the
+            /// client execute tool calls while the model is still generating the rest of the turn
+            /// (execute-as-you-stream): a provider that sends whole calls per chunk drains one call
+            /// per chunk, a provider that fragments arguments drains each call the moment its JSON
+            /// closes. Entries with no name yet, no argument text yet, or an ambiguity mark stay
+            /// pending for <see cref="Flush"/> (which also handles the malformed/truncated cases).
+            /// </summary>
+            public MEAI.ChatResponseUpdate DrainCompleted()
+            {
+                if (_pending.Count == 0)
+                {
+                    return null;
+                }
+
+                List<PendingToolCall> ready = null;
+                foreach (PendingToolCall pending in _pending)
+                {
+                    if (string.IsNullOrEmpty(pending.Name) || pending.ForceParseError)
+                    {
+                        continue;
+                    }
+
+                    string argsStr = pending.Arguments.ToString();
+                    if (argsStr.Length == 0 || !IsCompleteJsonObject(argsStr))
+                    {
+                        continue;
+                    }
+
+                    (ready ??= new List<PendingToolCall>()).Add(pending);
+                }
+
+                if (ready == null)
+                {
+                    return null;
+                }
+
+                MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
+                update.Contents = new List<MEAI.AIContent>();
+                foreach (PendingToolCall pending in ready
+                             .OrderBy(p => p.Index ?? int.MaxValue)
+                             .ThenBy(p => p.Sequence))
+                {
+                    Dictionary<string, object> args =
+                        ParseArguments(pending.Arguments.ToString(), pending.Name, pending);
+                    update.Contents.Add(new MEAI.FunctionCallContent(
+                        pending.Id ?? $"sse_{pending.Name}_{Guid.NewGuid():N}",
+                        pending.Name, args));
+
+                    _pending.Remove(pending);
+                    if (!string.IsNullOrEmpty(pending.Id))
+                    {
+                        _pendingById.Remove(pending.Id);
+                    }
+
+                    if (pending.Index.HasValue)
+                    {
+                        _pendingByIndex.Remove(pending.Index.Value);
+                    }
+                }
+
+                return update;
+            }
+
+            /// <summary>
+            /// True when <paramref name="s"/> is exactly one complete JSON object (balanced braces
+            /// outside strings, string/escape aware, only whitespace after the close). OpenAI tool
+            /// arguments are always a single object, so "balanced and closed" means "no more
+            /// fragments are coming" for a sane provider.
+            /// </summary>
+            internal static bool IsCompleteJsonObject(string s)
+            {
+                int i = 0;
+                while (i < s.Length && char.IsWhiteSpace(s[i]))
+                {
+                    i++;
+                }
+
+                if (i >= s.Length || s[i] != '{')
+                {
+                    return false;
+                }
+
+                int depth = 0;
+                bool inString = false;
+                for (; i < s.Length; i++)
+                {
+                    char c = s[i];
+                    if (inString)
+                    {
+                        if (c == '\\')
+                        {
+                            i++; // skip the escaped char (covers \" and \\)
+                        }
+                        else if (c == '"')
+                        {
+                            inString = false;
+                        }
+                    }
+                    else if (c == '"')
+                    {
+                        inString = true;
+                    }
+                    else if (c == '{')
+                    {
+                        depth++;
+                    }
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            for (i++; i < s.Length; i++)
+                            {
+                                if (!char.IsWhiteSpace(s[i]))
+                                {
+                                    return false; // trailing junk: not exactly one object
+                                }
+                            }
+
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
             public MEAI.ChatResponseUpdate Flush()
             {
                 if (_pending.Count == 0)
@@ -1702,7 +1865,14 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <summary>Test hook: exposes the wire-payload message serialization.</summary>
+        internal static List<Dictionary<string, object>> BuildMessagesPayloadForTests(List<MEAI.ChatMessage> msgs)
+            => BuildMessagesPayloadStatic(msgs);
+
         private List<Dictionary<string, object>> BuildMessagesPayload(List<MEAI.ChatMessage> msgs)
+            => BuildMessagesPayloadStatic(msgs);
+
+        private static List<Dictionary<string, object>> BuildMessagesPayloadStatic(List<MEAI.ChatMessage> msgs)
         {
             List<Dictionary<string, object>> messages = new();
             foreach (MEAI.ChatMessage msg in msgs)
@@ -1728,25 +1898,39 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
                 {
-                    MEAI.FunctionResultContent functionResult =
-                        msg.Contents.OfType<MEAI.FunctionResultContent>().FirstOrDefault();
-                    if (functionResult != null)
+                    // One MEAI Tool message can carry SEVERAL FunctionResultContent items (the tool
+                    // loop appends the whole turn's results as a single message). The OpenAI wire
+                    // protocol requires ONE tool-role message PER tool_call_id — serializing only the
+                    // first result left the model with N tool_calls but a single answer, and models
+                    // then legitimately re-issued the "unanswered" calls every round-trip (observed
+                    // live: a 5-spawn turn ballooned to 15 executed spawns).
+                    List<MEAI.FunctionResultContent> functionResults =
+                        msg.Contents.OfType<MEAI.FunctionResultContent>().ToList();
+                    if (functionResults.Count > 0)
                     {
-                        if (!string.IsNullOrEmpty(functionResult.CallId))
+                        foreach (MEAI.FunctionResultContent functionResult in functionResults)
                         {
-                            msgDict["tool_call_id"] = functionResult.CallId;
+                            Dictionary<string, object> resultDict = new()
+                            {
+                                { "role", "tool" }
+                            };
+                            if (!string.IsNullOrEmpty(functionResult.CallId))
+                            {
+                                resultDict["tool_call_id"] = functionResult.CallId;
+                            }
+
+                            string resultStr = functionResult.Result as string
+                                               ?? (functionResult.Result != null
+                                                   ? JsonConvert.SerializeObject(functionResult.Result)
+                                                   : "");
+                            resultDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
+                            messages.Add(resultDict);
                         }
 
-                        string resultStr = functionResult.Result as string
-                                           ?? (functionResult.Result != null
-                                               ? JsonConvert.SerializeObject(functionResult.Result)
-                                               : "");
-                        msgDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
+                        continue;
                     }
-                    else
-                    {
-                        msgDict["content"] = content;
-                    }
+
+                    msgDict["content"] = content;
                 }
                 else if (msg.Role == MEAI.ChatRole.Assistant && msg.Contents != null)
                 {

@@ -59,7 +59,12 @@ namespace CoreAI.Tests.EditMode
         public const string PrefRetries = PrefPrefix + "retries";
         public const string PrefTimeout = PrefPrefix + "timeout";
 
-        private const double TimeoutSeconds = 1900d;
+        // Must stay ABOVE the suite's own soft budget (COREAI_BENCHMARK_SUITE_BUDGET, default
+        // 6000s) plus report/screenshot time: this launcher-side watchdog is only a last-resort
+        // guard against a hung Test Runner, and when it fires the run dies WITHOUT a report.
+        // 1900s here killed a full Opus 4.8 cloud run mid-suite (slow ~5-7 min turns are normal
+        // for large CLI-bridged models, not a hang).
+        private const double TimeoutSeconds = 7200d;
         private static double _startedAt;
         private static TestRunnerApi _api;
         private static ICallbacks _callbacks;
@@ -316,6 +321,13 @@ namespace CoreAI.Tests.EditMode
                 EditorUtility.RevealInFinder(path);
             }
         }
+
+        /// <summary>
+        /// Parses one benchmark report JSON into a <see cref="ModelSummary"/> (null when the file is not
+        /// a parseable report). Public so editor scripts can build custom comparisons from hand-picked
+        /// report files via <see cref="WriteComparison"/> instead of the newest-per-model default.
+        /// </summary>
+        public static ModelSummary ParseSummary(string jsonPath) => TryParseSummary(jsonPath);
 
         private static ModelSummary TryParseSummary(string jsonPath)
         {

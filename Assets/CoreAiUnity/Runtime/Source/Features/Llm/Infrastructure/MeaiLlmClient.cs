@@ -515,6 +515,13 @@ namespace CoreAI.Infrastructure.Llm
                 System.Text.StringBuilder iterationVisible = new();
                 System.Text.StringBuilder rawIterationText = new();
                 List<MEAI.FunctionCallContent> nativeToolCalls = new();
+                // Execute-as-you-stream: when the SSE parser surfaces a complete native tool call
+                // mid-stream (see MeaiOpenAiChatClient's DrainCompleted), run it IMMEDIATELY instead
+                // of holding the whole turn's calls for one end-of-stream batch — a long build turn
+                // then mutates the world call by call while the model is still generating. The turn
+                // still closes with the exact batch protocol (assistant tool_calls + one tool-role
+                // results message), so the model sees no difference.
+                ToolExecutionPolicy.StreamedTurn streamedTurn = null;
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
@@ -625,6 +632,12 @@ namespace CoreAI.Infrastructure.Llm
                             if (content is MEAI.FunctionCallContent fcc)
                             {
                                 nativeToolCalls.Add(fcc);
+                                if (aiTools.Count > 0)
+                                {
+                                    streamedTurn ??= policy.BeginStreamedTurn();
+                                    await policy.ExecuteStreamedAsync(
+                                        streamedTurn, fcc, chatOptions, cancellationToken);
+                                }
                             }
                             else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
                             {
@@ -785,9 +798,12 @@ namespace CoreAI.Infrastructure.Llm
 
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
 
-                    // Execute through shared policy
-                    ToolExecutionPolicy.BatchToolCallResult batch =
-                        await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
+                    // Streamed turn: every call already ran the moment it arrived — close the turn
+                    // (one consecutive-error record + echo signature, batch parity) and reuse its
+                    // results. Otherwise fall back to the classic end-of-stream batch.
+                    ToolExecutionPolicy.BatchToolCallResult batch = streamedTurn != null
+                        ? policy.CompleteStreamedTurn(streamedTurn)
+                        : await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     if (!batch.AllFailed)
                     {
@@ -2211,15 +2227,25 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Resolves the effective <c>MaxOutputTokens</c> for a single MEAI <c>ChatOptions</c>:
-        /// per-request value wins; otherwise fall back to <see cref="ICoreAISettings.MaxTokens"/>
-        /// when it is positive; otherwise leave <c>null</c> so the provider uses its own default.
-        /// Both HTTP and LLMUnity backends honour the resulting value uniformly.
+        /// a positive per-request value wins; an EXPLICIT per-request <c>0</c> means "no limit"
+        /// (no <c>max_tokens</c> is sent — reasoning models can think as long as they need without
+        /// the thinking budget eating the answer budget); <c>null</c> falls back to
+        /// <see cref="ICoreAISettings.MaxTokens"/> when it is positive; otherwise <c>null</c> so the
+        /// provider uses its own default. Both HTTP and LLMUnity backends honour the result uniformly.
         /// </summary>
         private int? ResolveMaxOutputTokens(int? perRequest)
         {
-            if (perRequest.HasValue && perRequest.Value > 0)
+            if (perRequest.HasValue)
             {
-                return perRequest.Value;
+                if (perRequest.Value > 0)
+                {
+                    return perRequest.Value;
+                }
+
+                if (perRequest.Value == 0)
+                {
+                    return null; // explicit "unlimited" — do not fall back to the settings cap
+                }
             }
 
             int settingsValue = _settings?.MaxTokens ?? 0;

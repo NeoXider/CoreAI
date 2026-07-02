@@ -639,6 +639,155 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
         }
 
+        // ==================== Streamed turn (execute-as-you-stream) ====================
+
+        [Test]
+        public async Task StreamedTurn_ExecutesCallsOneByOne_TurnResultMatchesBatchShape()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "tool_a" } },
+                false, "test", 3);
+            policy.RecordFailure(); // pre-existing failure must be reset by a clean turn
+
+            MEAI.ChatOptions opts = MakeChatOptions(("tool_a", "ok"));
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+
+            MEAI.FunctionCallContent first = MakeToolCall("tool_a", new Dictionary<string, object?> { { "x", 1 } });
+            MEAI.FunctionCallContent second = MakeToolCall("tool_a", new Dictionary<string, object?> { { "x", 2 } });
+            ToolExecutionPolicy.ToolCallResult r1 =
+                await policy.ExecuteStreamedAsync(turn, first, opts, CancellationToken.None);
+            Assert.IsTrue(r1.Succeeded, "First call must execute immediately.");
+            Assert.AreEqual(1, policy.ConsecutiveErrors,
+                "Per-call streamed execution must NOT touch the consecutive-error counter mid-turn.");
+
+            await policy.ExecuteStreamedAsync(turn, second, opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.AreEqual(first.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "A clean streamed turn records ONE success, like a batch.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_IntraTurnDuplicate_SuppressedLikeBatch()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+
+            ToolExecutionPolicy.ToolCallResult r1 =
+                await policy.ExecuteStreamedAsync(turn, MakeToolCall("dup", args), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult r2 =
+                await policy.ExecuteStreamedAsync(turn, MakeToolCall("dup", args), opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
+
+            Assert.IsTrue(r1.Succeeded);
+            Assert.IsFalse(r2.Succeeded, "Exact repeat within the turn must be suppressed.");
+            StringAssert.Contains("Duplicate tool call", r2.Result.Result.ToString());
+            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call may invoke the tool.");
+            Assert.IsTrue(batch.AnyFailed);
+            Assert.IsFalse(batch.AllFailed);
+            Assert.IsTrue(policy.ExecutedTraces.Any(t => t.Source == "duplicate"));
+        }
+
+        [Test]
+        public async Task StreamedTurn_AllFailed_RecordsOneConsecutiveError()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), true, "test", 3);
+            MEAI.ChatOptions opts = MakeChatOptions(("known", "ok"));
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(turn, MakeToolCall("unknown_a"), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(turn, MakeToolCall("unknown_b"), opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
+
+            Assert.IsTrue(batch.AnyFailed);
+            Assert.IsTrue(batch.AllFailed);
+            Assert.AreEqual(1, policy.ConsecutiveErrors,
+                "A fully failed streamed turn records exactly ONE failure, like a failed batch.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_EchoOfWholeTurn_LaterIdenticalBatchIsBlocked()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(turn, MakeToolCall("dup", args), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(turn);
+
+            // The exact same batch sent again through the CLASSIC path must be caught as an echo —
+            // CompleteStreamedTurn registered the turn's combined signature.
+            ToolExecutionPolicy.BatchToolCallResult echo = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) }, opts, CancellationToken.None);
+            Assert.IsTrue(echo.AnyFailed, "A later identical batch must be blocked as an echo of the streamed turn.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_CrossTurnEchoOfSingleCall_SuppressedBeforeExecuting()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.StreamedTurn first = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", args), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(first);
+
+            // The model re-issues the identical single call in the NEXT streamed turn (an echo).
+            // Batch parity: a one-call batch registers the call's own signature, so the classic
+            // path would suppress this — the streamed path must too, WITHOUT invoking the tool.
+            ToolExecutionPolicy.StreamedTurn second = policy.BeginStreamedTurn();
+            ToolExecutionPolicy.ToolCallResult echo = await policy.ExecuteStreamedAsync(
+                second, MakeToolCall("dup", args), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(second);
+
+            Assert.IsFalse(echo.Succeeded, "Cross-turn echo of an identical single call must be suppressed.");
+            StringAssert.Contains("Duplicate tool call", echo.Result.Result.ToString());
+            Assert.AreEqual(1, countingMarshaler.InvokeCount, "The echo must not invoke the tool again.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_AllowDuplicatesTool_RepeatsExecute()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "repeat_action", AllowDuplicates = true } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("repeat_action", "ok"));
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+
+            ToolExecutionPolicy.ToolCallResult r1 = await policy.ExecuteStreamedAsync(
+                turn, MakeToolCall("repeat_action", args), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult r2 = await policy.ExecuteStreamedAsync(
+                turn, MakeToolCall("repeat_action", args), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(turn);
+
+            Assert.IsTrue(r1.Succeeded);
+            Assert.IsTrue(r2.Succeeded, "AllowDuplicates tools may repeat exactly, streamed or batched.");
+            Assert.AreEqual(2, countingMarshaler.InvokeCount);
+        }
+
         [Test]
         public async Task ExecuteBatch_DuplicateSignature_UsesRepairedCanonicalName()
         {

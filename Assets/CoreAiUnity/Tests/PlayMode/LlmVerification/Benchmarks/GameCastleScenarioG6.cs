@@ -60,7 +60,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override int? MaxToolCallRoundtripsOverride => FreeBuildRoundtrips();
             public override int TokenBudget => 6000;
-            public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
             // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
             // and counted down to after each spawn, so it can pace itself. 600s (10 min) is intentionally

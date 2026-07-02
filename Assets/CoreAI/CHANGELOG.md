@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Wire protocol: one tool message per tool result (2026-07-03)
+
+- **`MeaiOpenAiChatClient` now serializes a Tool-role message carrying several
+  `FunctionResultContent` items into one OpenAI `tool` message PER result** (each with its own
+  `tool_call_id`). Previously only the FIRST result reached the wire, so after a multi-call turn the
+  model saw N `tool_calls` but a single answer and legitimately re-issued the "unanswered" calls on
+  every round-trip — observed live in the game benchmark, where a 5-spawn turn ballooned into 15
+  executed spawns (5+4+3+2+1 echo cascade) and tanked instruction-adherence scores across models.
+
+### MaxOutputTokens: explicit 0 = unlimited (2026-07-02)
+
+OpenAI-compatible `max_tokens` counts REASONING tokens too, so any finite cap silently starves a
+long-thinking model: observed live with glm-5.2 on the benchmark's free-build scenario — the whole
+4800-token per-turn cap went to thinking (`finish_reason=length`), zero tool calls, empty scene.
+
+- **`0` now means "explicitly unlimited" at every level of the fallback chain** — per-call
+  (`AiTaskRequest.MaxOutputTokens`), per-agent (`AgentBuilder.WithMaxOutputTokens(0)`,
+  `AgentMemoryPolicy.SetMaxOutputTokens`), resolved by `AiOrchestrator` — and reaches the LLM client
+  as `0`, which suppresses the global `ICoreAISettings.MaxTokens` fallback entirely: no `max_tokens`
+  is sent, the provider uses its own default. `null`/negative still means "inherit the next level".
+  This matches the existing `MaxToolCallRoundtrips` convention where `0` = unlimited.
+
+### Text tool-call extractor: python-style keyword arguments (2026-07-02)
+
+- **`LlmToolCallTextExtractor` now parses `name(key=value, ...)` calls into real typed arguments**
+  (quoted strings unquoted, `true`/`false` → bool, numerics → numbers via invariant culture,
+  `{...}`/`[...]` → parsed JSON). Previously a message like
+  `world_command(action='spawn', targetName='Goal', x=0, y=0, z=2)` fell into the generic
+  positional branch and collapsed into `{"input":"action='spawn'"}`, failing the tool's
+  required-argument validation (observed live in the game benchmark). All-or-nothing gate: any
+  non-`key=value` part falls back to the legacy positional handling.
+
+### Execute-as-you-stream tool calls (2026-07-02)
+
+Real-API streaming end to end: with a streaming provider, each native tool call now executes the
+moment its argument JSON closes on the wire, instead of being buffered until the whole assistant
+turn finishes.
+
+- **`SseToolCallAccumulator.DrainCompleted()`** — while a streamed response is still arriving, any
+  pending tool call whose accumulated argument JSON is already a complete object (string/escape-aware
+  brace scan, trailing junk rejected) is emitted as a `FunctionCallContent` immediately and removed
+  from the pending set. Calls with malformed/truncated JSON never drain early; they still finalize
+  (with the parse-error marker) at end of stream.
+- **`ToolExecutionPolicy.StreamedTurn`** (`BeginStreamedTurn` / `ExecuteStreamedAsync` /
+  `CompleteStreamedTurn`) — executes calls one by one as they arrive while preserving the exact
+  batch semantics of `ExecuteBatchAsync`: intra-turn duplicate suppression (same trace message),
+  one success/failure record per turn for the consecutive-error guard, and end-of-turn echo
+  signature registration so a later batch that repeats the streamed turn is still recognized.
+
 ### Benchmark: G7 comprehensive integration scenario (2026-07-01)
 
 - `BenchmarkInfo.GroupDifficulty10` gained a `G7` entry (difficulty 9, hardest) for the new

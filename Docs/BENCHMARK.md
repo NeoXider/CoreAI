@@ -14,8 +14,9 @@ The benchmark answers the practical production question: is this model usable fo
 | G4 - Playthrough | 5/5 | Multi-slot rule systems that survive simulation | Combat, shop, and crafting-chain playthroughs checked step by step. |
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
 | G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle scene from the model's own positions; graded leniently on scale (12+ objects) and variety (20+), kept as the report hero image. |
+| G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
 
-Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks`. G1 and G6 capture scene screenshots because the built scene is part of the result; G2-G5 are primarily graded through logic execution and traces.
+Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks`. G6 (hero image) and G7 capture scene screenshots because the built scene is part of the result; the other groups are primarily graded through logic execution and traces.
 
 ## Scoring
 
@@ -82,7 +83,7 @@ The window has four tabs, plus toolbar **Open folder** / **Open report** shortcu
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups (G1-G6), repetitions, retries, timeout override, and start a run. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G7), repetitions, retries, timeout override, and start a run. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
 | Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
 | Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md` plus `COMPARISON.svg`. |
@@ -99,7 +100,7 @@ For batchmode or automation, launch the explicit PlayMode suite through:
 Unity.exe -batchmode -projectPath C:\Git\CoreAI `
   -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
   -coreAiBenchmarkModel qwen3.5-4b-mtp `
-  -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6 `
+  -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7 `
   -coreAiBenchmarkReps 3
 ```
 
@@ -127,7 +128,7 @@ foreach ($model in $models) {
   Unity.exe -batchmode -projectPath C:\Git\CoreAI `
     -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
     -coreAiBenchmarkModel $model `
-    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6 `
+    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7 `
     -coreAiBenchmarkReps 3
   lms unload $model
 }
@@ -149,6 +150,27 @@ There are two ordering modes:
 | Ranked descending | Default. Models are sorted by suite base score. |
 | Pinned first | One selected model is placed first, then the rest remain ranked. Useful for comparing a candidate against a baseline. |
 
+### Custom comparisons from hand-picked reports
+
+The Compare tab takes the *newest* JSON per model, but `GameCreationBenchmarkLauncher.ParseSummary`
+and `WriteComparison` are public — so an editor script can compare exactly the runs you choose (e.g.
+cloud models in one chart, local models in another, or an old run against a rerun of the same model):
+
+```csharp
+var picks = new[] {
+    "BENCHMARK_20260703_024825_codex-GPT-5.5.json",
+    "BENCHMARK_20260702_234351_glm-5.2.json",
+};
+var summaries = picks
+    .Select(f => GameCreationBenchmarkLauncher.ParseSummary(Path.Combine(root, f)))
+    .Where(s => s != null)
+    .ToList();
+GameCreationBenchmarkLauncher.WriteComparison(outputDir, summaries, pinnedModelId: null);
+```
+
+`WriteComparison` writes `COMPARISON.md` + `COMPARISON.svg` into `outputDir`, so different picks can
+live side by side (the README's cloud and local charts are built exactly this way).
+
 ## Results Example
 
 ![Model card radar and role bars](Images/example_modelcard.png)
@@ -157,7 +179,7 @@ _Model card: suite score, dimension profile, and role fitness in one image._
 
 ![Coin collector scene](Images/example_scene.png)
 
-_G1 scene example: the model built the coin-collector world and the report marks expected/missing/extra objects visually._
+_Scene capture example (a coin-collector build): the report marks expected/missing/extra objects visually. Current reports capture scenes for G6 (hero) and G7._
 
 ![Castle free-build hero](Images/example_castle.png)
 
@@ -172,36 +194,53 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
-Example 8-model ranking from `TestResults/CoreAI/Benchmarks/COMPARISON.md`:
+The current cloud-model and local-model ranking tables (suite v1.6, G1-G7, no token caps) live in the
+[README's benchmark section](../README.md#game-creation-benchmark), rebuilt from hand-picked report
+JSONs as described above. Example ranking (local models, 2026-07-02 sweep):
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 1 | `qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max` | **97.2** | 91.7% | 22/2/0 | 90.7 | 97.5 | 100 | 100 | 100 | 96.3 | 2.6 | 12.9% | 106463 | `20260630_015516` |
-| 2 | `qwen3.5-4b-mtp` | **91.1** | 79.2% | 19/3/2 | 88 | 98 | 94.2 | 100 | 96.3 | 77.8 | 4.8 | 24.7% | 111193 | `20260630_000446` |
-| 3 | `deepreinforce-ai_ornith-1.0-9b` | **88.4** | 62.5% | 15/7/2 | 74.1 | 100 | 93.8 | 100 | 88.9 | 88.9 | 3.1 | 54.7% | 97583 | `20260630_001730` |
-| 4 | `qwythos-9b-claude-mythos-5-1m` | **86.2** | 75% | 18/3/3 | 82.4 | 89 | 89.3 | 83.3 | 77.8 | 88.9 | 4.9 | 18.3% | 117850 | `20260630_004250` |
-| 5 | `qwen3.6-27b-fable-5-experimental` | **83.9** | 70.8% | 17/3/4 | 78.7 | 80.4 | 84.7 | 50 | 81.5 | 94.4 | 2.5 | 19.1% | 126110 | `20260630_012400` |
-| 6 | `qwen3.5-2b` | **79.4** | 70.8% | 17/1/6 | 88.9 | 86.3 | 78.6 | 50 | 50.6 | 91.7 | 4.9 | 22.7% | 97549 | `20260629_235827` |
-| 7 | `qwen3.5-0.8b` | **51.2** | 33.3% | 8/4/12 | 83.3 | 61 | 70.6 | 50 | 37.3 | 55.6 | 3.2 | 12.1% | 52315 | `20260629_235214` |
-| 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 87038 | `20260630_000238` |
+| 1 | `qwen3.6-27b-heretic-…-imatrix-max` | **93.1** | 87% | 20/1/2 | 98 | 96.1 | 96.8 | 100 | 100 | 88 | 1.3 | 9.7% | 52495 | `20260702_062928` |
+| 2 | `deepreinforce-ai_ornith-1.0-9b` | **92.1** | 68.2% | 15/7/0 | 68.8 | 93.3 | 99.5 | 100 | 100 | 83.8 | 2.6 | 15.6% | 96801 | `20260702_093857` |
+| 3 | `qwen3.5-4b-mtp` | **92** | 84% | 21/3/1 | 93 | 100 | 93.5 | 100 | 100 | 91.7 | 4.7 | 11.9% | 62773 | `20260702_205410` |
+| 4 | `qwen3.6-27b-fable-5-experimental` | **87.3** | 73.7% | 14/3/2 | 85.9 | 83.3 | 88.9 | 100 | 80 | 83.8 | 1.9 | 32.2% | 58974 | `20260702_054314` |
+| 5 | `qwen3.5-2b` | **84.8** | 75% | 18/2/4 | 92.6 | 100 | 83.3 | 100 | 66.7 | 91.2 | 4.4 | 8.5% | 57656 | `20260702_225056` |
+| 6 | `deepreinforce-ai_ornith-1.0-35b` | **81.1** | 65.2% | 15/4/4 | 83.3 | 87.5 | 91.3 | 100 | 95.8 | 78.7 | 3.5 | 16.8% | 70744 | `20260702_101519` |
+| 7 | `qwythos-9b-claude-mythos-5-1m` | **81** | 62.5% | 15/5/4 | 69.4 | 84.6 | 91.7 | 100 | 88.9 | 78.7 | 3.2 | 18.2% | 63570 | `20260702_052949` |
+| 8 | `qwen3.5-0.8b` | **57.8** | 41.7% | 10/4/10 | 94.4 | 80.1 | 91.4 | 100 | 55.6 | 38 | 2.4 | 1% | 43383 | `20260702_222625` |
+| 9 | `lfm2-8b-a1b` | **12.4** | 0% | 0/0/25 | 50.9 | 2.1 | 0 | 0 | 0 | 57.8 | 0 | 0% | 52430 | `20260702_051709` |
 
 ## Castle Gallery - G6 Free-Build Visual
 
-The G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability.
+The G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability. Scores are the model's overall suite score from its ranked run; heroes from the 2026-07-02+ runs use the daytime gate-angle camera with close-up insets.
+
+**Cloud models:**
 
 | Model | Hero screenshot |
 |-------|-----------------|
-| **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (97.2/100) | ![Heretic](Images/castles/heretic.png) |
-| **qwen3.5-4b-mtp** (94.1/100)¹ | ![Qwen3.5 4B MTP](Images/castles/qwen3.5-4b-mtp.png) |
-| **deepreinforce-ai_ornith-1.0-9b** (88.4/100) | ![Ornith](Images/castles/ornith.png) |
-| **qwythos-9b-claude-mythos-5-1m** (86.2/100) | ![Qwythos](Images/castles/qwythos.png) |
-| **qwen3.6-27b-fable-5-experimental** (83.9/100) | ![Fable](Images/castles/fable.png) |
-| **qwen3.5-2b** (79.4/100) | ![Qwen3.5 2B](Images/castles/qwen3.5-2b.png) |
-| **qwen3.5-0.8b** (51.2/100) | ![Qwen3.5 0.8B](Images/castles/qwen3.5-0.8b.png) |
+| **GPT-5.5** (97/100) | ![GPT-5.5](Images/castles/gpt-5.5.png) |
+| **glm-5.2** (93.5/100) | ![GLM-5.2](Images/castles/glm-5.2.png) |
+| **GPT-5.3 Codex Spark** (93.2/100) | ![GPT-5.3 Codex Spark](Images/castles/gpt-5.3-spark.png) |
+| **claude-opus-4.8** (92.9/100) | ![Claude Opus 4.8](Images/castles/claude-opus-4.8.png) |
+| **claude-haiku-4.5** (92.7/100) | ![Claude Haiku 4.5](Images/castles/claude-haiku-4.5.png) |
+| **claude-fable-5** (89.5/100) | ![Claude Fable 5](Images/castles/claude-fable-5.png) |
+| **claude-sonnet-5** (88.2/100)¹ | ![Claude Sonnet 5](Images/castles/claude-sonnet-5.png) |
+
+**Local models (LMStudio):**
+
+| Model | Hero screenshot |
+|-------|-----------------|
+| **qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max** (93.1/100) | ![Heretic](Images/castles/heretic.png) |
+| **deepreinforce-ai_ornith-1.0-9b** (92.1/100) | ![Ornith](Images/castles/ornith.png) |
+| **qwen3.5-4b-mtp** (92/100) | ![Qwen3.5 4B MTP](Images/castles/qwen3.5-4b-mtp.png) |
+| **qwen3.6-27b-fable-5-experimental** (87.3/100) | ![Fable 27B](Images/castles/fable.png) |
+| **qwen3.5-2b** (84.8/100) | ![Qwen3.5 2B](Images/castles/qwen3.5-2b.png) |
+| **qwythos-9b-claude-mythos-5-1m** (81/100) | ![Qwythos](Images/castles/qwythos.png) |
+| **qwen3.5-0.8b** (57.8/100) | ![Qwen3.5 0.8B](Images/castles/qwen3.5-0.8b.png) |
 
 > **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [How To Run](#how-to-run) above for details.
 
-¹ Re-verified 2026-07-01 (reps=1) after a streaming-migration and tool-calling reliability
-fix pass; the other rows are from the reps=3 sweep dated in the ranking table above and have not been re-run.
-See [the full example report](Images/example_report/example_report.md) for the complete
-per-scenario breakdown and transcripts behind this number.
+¹ Sonnet's hero image is from its G6-only verification rerun (94.2 on that scenario) after a
+chat-only bridge fix; its suite score in the table is from the full G1-G7 run.
+See [the full example report](Images/example_report/example_report.md) for a complete
+per-scenario breakdown and transcript example.

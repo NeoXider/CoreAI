@@ -1342,14 +1342,17 @@ namespace CoreAI.Ai
                    value.Substring(value.Length - tail).TrimStart();
         }
 
+        // 0 is meaningful: "explicitly unlimited" wins over the level below and reaches the LLM
+        // client as 0, which suppresses the settings MaxTokens fallback (no max_tokens sent — a
+        // reasoning model's thinking never eats the answer budget). Negative values = unset.
         private static int? ResolveMaxOutputTokens(int? perCall, int? perAgent)
         {
-            if (perCall.HasValue && perCall.Value > 0)
+            if (perCall.HasValue && perCall.Value >= 0)
             {
                 return perCall.Value;
             }
 
-            if (perAgent.HasValue && perAgent.Value > 0)
+            if (perAgent.HasValue && perAgent.Value >= 0)
             {
                 return perAgent.Value;
             }
@@ -1359,7 +1362,7 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Resolves the effective tool-call roundtrip override with priority per-call &gt; per-agent.
-        /// Unlike <see cref="ResolveMaxOutputTokens"/>, a value of <c>0</c> is MEANINGFUL here (unlimited),
+        /// Like <see cref="ResolveMaxOutputTokens"/>, a value of <c>0</c> is MEANINGFUL here (unlimited),
         /// so only <c>null</c> defers to the next source; <c>null</c> from both = inherit the global setting.
         /// </summary>
         private static int? ResolveMaxToolCallRoundtrips(int? perCall, int? perAgent)

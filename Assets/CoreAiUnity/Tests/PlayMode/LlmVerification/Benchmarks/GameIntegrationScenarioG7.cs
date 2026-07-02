@@ -35,7 +35,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool CaptureScene => true;
             public override int? RepsOverride => 1;
             public override int TokenBudget => 2500;
-            public override int MaxOutputTokens => 1200;
             public override double TimeBudgetMs => 40000;
             public override float TimeoutSeconds => 300f;
 

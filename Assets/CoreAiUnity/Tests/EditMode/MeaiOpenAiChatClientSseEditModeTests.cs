@@ -299,6 +299,105 @@ namespace CoreAI.Tests.EditMode
                 call.Arguments[MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests]);
         }
 
+        // --- Execute-as-you-stream: DrainCompleted must surface each call the moment its JSON closes ---
+
+        [Test]
+        public void DrainCompleted_WholeCallPerChunk_SurfacesImmediately()
+        {
+            // A bridge/provider that sends one COMPLETE call per SSE chunk: each call must drain on
+            // its own chunk, not wait for the final flush.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"spawn\",\"arguments\":\"{\\\"n\\\":\\\"t1\\\"}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",\"function\":{\"name\":\"spawn\",\"arguments\":\"{\\\"n\\\":\\\"t2\\\"}\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.AreEqual(3, perChunk.Count); // one per chunk + final flush
+            Assert.IsNotNull(perChunk[0], "First complete call must drain on its own chunk.");
+            Assert.AreEqual("t1",
+                perChunk[0].Contents.OfType<MEAI.FunctionCallContent>().Single().Arguments["n"]);
+            Assert.IsNotNull(perChunk[1], "Second complete call must drain on its own chunk.");
+            Assert.AreEqual("t2",
+                perChunk[1].Contents.OfType<MEAI.FunctionCallContent>().Single().Arguments["n"]);
+            Assert.IsNull(perChunk[2], "Nothing must be left for the final flush.");
+        }
+
+        [Test]
+        public void DrainCompleted_FragmentedArgs_DrainsOnlyWhenJsonCloses()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"qu\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"ery\\\":\\\"cat\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"s\\\"}\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNull(perChunk[0], "Args still open - must not drain.");
+            Assert.IsNull(perChunk[1], "Args still open - must not drain.");
+            Assert.IsNotNull(perChunk[2], "Args JSON closed - must drain NOW, not at flush.");
+            Assert.AreEqual("cats",
+                perChunk[2].Contents.OfType<MEAI.FunctionCallContent>().Single().Arguments["query"]);
+            Assert.IsNull(perChunk[3], "Nothing must be left for the final flush.");
+        }
+
+        [Test]
+        public void DrainCompleted_InterleavedCalls_EachDrainsAtItsOwnClose()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"ca\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"cb\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":2}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNull(perChunk[0], "alpha still open.");
+            Assert.IsNotNull(perChunk[1], "beta closed complete in one chunk - drains while alpha is open.");
+            Assert.AreEqual("beta",
+                perChunk[1].Contents.OfType<MEAI.FunctionCallContent>().Single().Name);
+            Assert.IsNotNull(perChunk[2], "alpha drains when its JSON closes.");
+            Assert.AreEqual("alpha",
+                perChunk[2].Contents.OfType<MEAI.FunctionCallContent>().Single().Name);
+            Assert.IsNull(perChunk[3]);
+        }
+
+        [Test]
+        public void DrainCompleted_MalformedNeverDrains_FlushSurfacesParseError()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"broken\",\"arguments\":\"{\\\"q\\\":\\\"unclo\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"sed\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNull(perChunk[0]);
+            Assert.IsNull(perChunk[1], "Unclosed JSON must never drain early.");
+            Assert.IsNotNull(perChunk[2], "Flush must still surface the malformed call with markers.");
+            MEAI.FunctionCallContent call =
+                perChunk[2].Contents.OfType<MEAI.FunctionCallContent>().Single();
+            Assert.IsTrue(call.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests));
+        }
+
+        [Test]
+        public void IsCompleteJsonObject_Detector_CoversStringsEscapesAndTrailingJunk()
+        {
+            Assert.IsTrue(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("{}"));
+            Assert.IsTrue(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("  {\"a\": {\"b\": \"}\"}} \n"));
+            Assert.IsTrue(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("{\"a\": \"x\\\"}\"}"));
+            Assert.IsFalse(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests(""));
+            Assert.IsFalse(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("{\"a\": 1"));
+            Assert.IsFalse(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("{\"a\": \"un"));
+            Assert.IsFalse(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("{} extra"));
+            Assert.IsFalse(MeaiOpenAiChatClient.IsCompleteJsonObjectForTests("[1,2]"));
+        }
+
         private sealed class DoneSentinelTransport : IOpenAiHttpTransport
         {
             private readonly string _sse;
@@ -486,6 +585,52 @@ namespace CoreAI.Tests.EditMode
             {
                 throw new NotSupportedException();
             }
+        }
+
+        [Test]
+        public void BuildMessagesPayload_ToolMessageWithMultipleResults_EmitsOneWireMessagePerResult()
+        {
+            // A Tool-role MEAI message carrying the whole turn's results must expand to one
+            // OpenAI tool message per tool_call_id — serializing only the first result made
+            // models re-issue the "unanswered" calls every round-trip (5 spawns became 15).
+            List<MEAI.ChatMessage> msgs = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionCallContent("call_1", "world_command",
+                        new Dictionary<string, object?> { ["action"] = "spawn" }),
+                    new MEAI.FunctionCallContent("call_2", "world_command",
+                        new Dictionary<string, object?> { ["action"] = "spawn" }),
+                    new MEAI.FunctionCallContent("call_3", "world_command",
+                        new Dictionary<string, object?> { ["action"] = "spawn" })
+                }),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionResultContent("call_1", "ok-1"),
+                    new MEAI.FunctionResultContent("call_2", "ok-2"),
+                    new MEAI.FunctionResultContent("call_3", "ok-3")
+                })
+            };
+
+            List<Dictionary<string, object>> payload =
+                MeaiOpenAiChatClient.BuildMessagesPayloadForTests(msgs);
+
+            List<Dictionary<string, object>> toolMessages =
+                payload.Where(m => (string)m["role"] == "tool").ToList();
+            Assert.AreEqual(3, toolMessages.Count,
+                "Every FunctionResultContent must become its own tool-role wire message.");
+            CollectionAssert.AreEqual(
+                new[] { "call_1", "call_2", "call_3" },
+                toolMessages.Select(m => (string)m["tool_call_id"]).ToArray());
+            CollectionAssert.AreEqual(
+                new[] { "ok-1", "ok-2", "ok-3" },
+                toolMessages.Select(m => (string)m["content"]).ToArray());
+
+            Dictionary<string, object> assistant =
+                payload.First(m => (string)m["role"] == "assistant");
+            Assert.AreEqual(3,
+                ((List<Dictionary<string, object>>)assistant["tool_calls"]).Count,
+                "All three calls must survive in the assistant message.");
         }
 
         private sealed class DoneSentinelSettings : IOpenAiHttpSettings

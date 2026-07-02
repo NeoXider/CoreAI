@@ -1112,8 +1112,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>Time budget in ms for the efficiency bonus (faster than this earns points).</summary>
             public virtual double TimeBudgetMs => 25000;
 
-            /// <summary>Per-agent output token cap (raised from the default to avoid truncation).</summary>
-            public virtual int MaxOutputTokens => 800;
+            /// <summary>
+            /// Per-agent output token cap. 0 = explicitly UNLIMITED (no max_tokens sent), which is the
+            /// suite-wide default: OpenAI-compatible max_tokens counts REASONING tokens too, so any finite
+            /// cap silently starves long-thinking models (observed live: glm-5.2 spent a whole 4800-token
+            /// G6 cap on thinking — finish_reason=length, zero tool calls, empty scene). The per-scenario
+            /// TimeoutSeconds is the real runaway guard; token appetite is priced by the efficiency bonus.
+            /// </summary>
+            public virtual int MaxOutputTokens => 0;
 
             /// <summary>Wall-clock timeout for one run of this scenario (seconds). Heavier scenarios override.</summary>
             public virtual float TimeoutSeconds => 200f;
@@ -1594,8 +1600,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // world-space or sized relative to these, so the whole card scales with them.
         private const int ShotWidth = 3840;
         private const int ShotHeight = 2160;
-        private const int InsetWidth = 676;   // 16:9, two per column between the top/bottom bars
-        private const int InsetHeight = 380;
+        // 16:9, two per column between the top/bottom bars. 960x540 = quarter width/height of the
+        // 4K frame per inset: at the old 676x380 the insets read as blurry thumbnails on a 4K report
+        // (user-reported). Layout check at 3840x2160: xLeft/xRight margins 85px, banner 453px,
+        // y2 bottom edge stays 335px above the frame bottom -- everything still fits clear of
+        // the hero center.
+        private const int InsetWidth = 960;
+        private const int InsetHeight = 540;
 
         // Shared by the main and inset scene cameras: a soft daylight sky instead of the old
         // near-black void, so report shots read as daytime scenes.
@@ -1603,7 +1614,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         /// <summary>
         /// Frames a camera over the spawned objects, renders to a 4K (3840x2160) RenderTexture with four
-        /// inset views composited in — two alternate wide angles (opposite side, top-down) in the RIGHT
+        /// inset views composited in — a gate-level close-up and a top-down overview in the RIGHT
         /// column, two close-up zoom shots at different magnifications in the LEFT column — and returns
         /// PNG bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null
         /// screenshot and never breaks the run.
@@ -1666,9 +1677,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 cam.allowMSAA = true;
                 // 1.5x closer than the old (1.7, 1.5, -2.7)*ext framing — free-build scenes sit on a
                 // large ground plate that inflates the bounds, which left the actual build tiny in the
-                // middle of empty ground.
+                // middle of empty ground. Flipped 180° around the scene center (was +X,-Z): models
+                // consistently build castles gate-forward toward -Z, so the old offset photographed
+                // every scene from BEHIND (user-reported); from (-X,+Z) the hero shot faces the front.
                 cam.transform.position =
-                    bounds.center + new UnityEngine.Vector3(ext * 1.13f, ext * 1.0f, -ext * 1.8f);
+                    bounds.center + new UnityEngine.Vector3(-ext * 1.13f, ext * 1.0f, ext * 1.8f);
                 cam.transform.LookAt(bounds.center);
 
                 // A grounded floor so the objects sit on a surface instead of floating in a void.
@@ -1785,14 +1798,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             try
             {
-                // RIGHT column — two alternate angles (opposite side, top-down), framed 2x closer than
-                // the original wide offsets: the ground plate inflates the bounds, so at the old
-                // distance the build was a speck in the middle of empty ground.
-                rtB = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                // RIGHT column — top slot is a GATE-LEVEL close-up: models build the entrance facing +Z
+                // (same convention as the hero camera flip), so stand just outside the front gate, low to
+                // the ground, and look through the gap toward the keep. Uses the zoom extent floor so a
+                // tiny scene still fits the narrow frustum. Below it stays the top-down overview.
+                float gateExt = UnityEngine.Mathf.Max(sceneExt, 2.8f);
+                rtB = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camBGo = MakeInsetCamera("BenchmarkCameraB",
-                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 0.95f, sceneExt * 0.65f, sceneExt * 1.2f),
-                    sceneCenter, rtB);
-                rtC = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                    sceneCenter + new UnityEngine.Vector3(gateExt * 0.06f, gateExt * 0.22f, gateExt * 1.25f),
+                    sceneCenter + new UnityEngine.Vector3(0f, gateExt * 0.08f, 0f), rtB, 42f);
+                rtC = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camCGo = MakeInsetCamera("BenchmarkCameraC",
                     sceneCenter + new UnityEngine.Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
                     sceneCenter, rtC);
@@ -1802,11 +1817,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // scene's own 1.2 minimum: at 20-32 deg FOV and these offsets, a tiny scene (a lone 1m
                 // cube) would not fit the frustum at all — found by the independent Codex audit.
                 float zoomExt = UnityEngine.Mathf.Max(sceneExt, 2.8f);
-                rtD = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                rtD = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camDGo = MakeInsetCamera("BenchmarkCameraD",
                     sceneCenter + new UnityEngine.Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
                     sceneCenter, rtD, 32f);
-                rtE = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
+                rtE = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camEGo = MakeInsetCamera("BenchmarkCameraE",
                     sceneCenter + new UnityEngine.Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
                     sceneCenter, rtE, 20f);
@@ -1828,10 +1843,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 if (texMain != null)
                 {
-                    texB = ReadRenderTexture(rtB);
-                    texC = ReadRenderTexture(rtC);
-                    texD = ReadRenderTexture(rtD);
-                    texE = ReadRenderTexture(rtE);
+                    texB = ReadRenderTextureDownscaled(rtB, InsetWidth, InsetHeight);
+                    texC = ReadRenderTextureDownscaled(rtC, InsetWidth, InsetHeight);
+                    texD = ReadRenderTextureDownscaled(rtD, InsetWidth, InsetHeight);
+                    texE = ReadRenderTextureDownscaled(rtE, InsetWidth, InsetHeight);
                     CompositeInsets(texMain, texB, texC, texD, texE);
                     png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
                 }
@@ -1889,6 +1904,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         // --- Screenshot composite helpers ---------------------------------------------------------------
 
+        /// <summary>
+        /// Reads a render texture downscaled to w×h through a bilinear blit. The inset cameras
+        /// render at 2× and land here: the supersampled downscale is what keeps the small side
+        /// views crisp in the 4K composite (straight 1:1 renders read as blurry thumbnails —
+        /// user-reported).
+        /// </summary>
+        private static UnityEngine.Texture2D ReadRenderTextureDownscaled(
+            UnityEngine.RenderTexture src, int w, int h)
+        {
+            if (src == null)
+            {
+                return null;
+            }
+
+            UnityEngine.RenderTexture small = UnityEngine.RenderTexture.GetTemporary(w, h, 0);
+            try
+            {
+                UnityEngine.Graphics.Blit(src, small);
+                return ReadRenderTexture(small);
+            }
+            finally
+            {
+                UnityEngine.RenderTexture.ReleaseTemporary(small);
+            }
+        }
+
         private static UnityEngine.Texture2D ReadRenderTexture(UnityEngine.RenderTexture rt)
         {
             if (rt == null)
@@ -1935,8 +1976,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return go;
         }
 
-        // Pastes the four extra views into the hero shot, stacked below the top banner: the two
-        // alternate wide angles (opposite side, top-down) down the RIGHT column, the two close-up zoom
+        // Pastes the four extra views into the hero shot, stacked below the top banner: the gate-level
+        // close-up and the top-down overview down the RIGHT column, the two close-up zoom
         // shots down the LEFT column. All metrics scale from the main image dimensions so the layout is
         // resolution-independent; two per column never reaches the bottom caption bar.
         private static void CompositeInsets(
@@ -1956,7 +1997,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int xRight = main.width - margin - iw;
             int y1 = main.height - bannerPx - margin - ih;
             int y2 = y1 - margin - ih;
-            PasteInset(main, b, xRight, y1, iw, ih); // wide: opposite side
+            PasteInset(main, b, xRight, y1, iw, ih); // gate-level close-up (front entrance)
             PasteInset(main, c, xRight, y2, iw, ih); // wide: top-down
             PasteInset(main, d, xLeft, y1, iw, ih);  // zoom: close-up
             PasteInset(main, e, xLeft, y2, iw, ih);  // zoom: tighter close-up

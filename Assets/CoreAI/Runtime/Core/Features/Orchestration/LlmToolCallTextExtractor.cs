@@ -469,9 +469,12 @@ namespace CoreAI.Ai
                     {
                         argsDict["skill_name"] = StripQuotes(parts[0]);
                     }
-                    else
+                    else if (!TryParseKeywordArguments(parts, argsDict))
                     {
-                        // Generic: first arg as "input"
+                        // Generic positional: first arg as "input". The keyword branch above handles
+                        // python-style calls — world_command(action='spawn', x=1) — which previously fell
+                        // through to here and collapsed into {"input":"action='spawn'"}, failing the
+                        // tool's required-argument validation (observed live in the game benchmark).
                         argsDict["input"] = StripQuotes(parts[0]);
                     }
                 }
@@ -481,6 +484,101 @@ namespace CoreAI.Ai
             matches.Add(new Match(funcName, argsJson, 0, text.Length));
             cleanedText = string.Empty;
             return true;
+        }
+
+        /// <summary>
+        /// Parses python-style keyword arguments — <c>action='spawn', targetName="Goal", x=1, solid=true</c> —
+        /// into typed values (quoted → string, true/false → bool, numeric → long/double, <c>{...}</c>/<c>[...]</c>
+        /// → parsed JSON, anything else → raw string). ALL parts must be <c>ident=value</c> pairs or the
+        /// method leaves <paramref name="argsDict"/> untouched and returns false, so positional calls keep
+        /// their legacy handling.
+        /// </summary>
+        private static readonly Regex KeywordArgRegex = new(
+            @"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
+        private static bool TryParseKeywordArguments(string[] parts, Dictionary<string, object> argsDict)
+        {
+            if (parts == null || parts.Length == 0)
+            {
+                return false;
+            }
+
+            Dictionary<string, object> parsed = new();
+            foreach (string part in parts)
+            {
+                System.Text.RegularExpressions.Match m = KeywordArgRegex.Match(part ?? "");
+                if (!m.Success)
+                {
+                    return false;
+                }
+
+                parsed[m.Groups[1].Value] = ParseKeywordValue(m.Groups[2].Value.Trim());
+            }
+
+            foreach (KeyValuePair<string, object> kv in parsed)
+            {
+                argsDict[kv.Key] = kv.Value;
+            }
+
+            return true;
+        }
+
+        private static object ParseKeywordValue(string raw)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                return "";
+            }
+
+            if (raw.Length >= 2 &&
+                ((raw[0] == '"' && raw[raw.Length - 1] == '"') ||
+                 (raw[0] == '\'' && raw[raw.Length - 1] == '\'')))
+            {
+                return raw.Substring(1, raw.Length - 2);
+            }
+
+            if (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(raw, "null", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(raw, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (long.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out long l))
+            {
+                return l;
+            }
+
+            if (double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double d))
+            {
+                return d;
+            }
+
+            if (raw[0] == '{' || raw[0] == '[')
+            {
+                try
+                {
+                    return JsonConvert.DeserializeObject<object>(raw);
+                }
+                catch
+                {
+                    // fall through: keep the raw text
+                }
+            }
+
+            return raw;
         }
 
         private static string StripQuotes(string s)

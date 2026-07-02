@@ -644,6 +644,46 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void PortableExtractor_FunctionCallSyntax_KeywordArguments()
+        {
+            // Live shape from the game benchmark (codex spark): a whole message that is one
+            // python-style call with key=value args. Before the keyword branch this collapsed
+            // into {"input":"action='spawn'"} and failed required-argument validation.
+            string input =
+                "world_command(action='spawn', targetName='Goal', prefabKey=\"Cube\", x=0, y=1.5, z=2, solid=true)";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Keyword-argument function-call syntax should be extracted.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("world_command", matches[0].Name);
+            var args = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, object>>(
+                matches[0].ArgumentsJson);
+            Assert.AreEqual("spawn", args["action"], "Quoted string values keep their content.");
+            Assert.AreEqual("Goal", args["targetName"]);
+            Assert.AreEqual("Cube", args["prefabKey"], "Double-quoted values are unquoted too.");
+            Assert.AreEqual(0L, args["x"], "Integers parse as numbers, not strings.");
+            Assert.AreEqual(1.5d, args["y"], "Decimals parse as numbers (invariant culture).");
+            Assert.AreEqual(true, args["solid"], "Booleans parse as booleans.");
+            Assert.That(args, Does.Not.ContainKey("input"),
+                "Keyword calls must not collapse into the generic positional 'input' argument.");
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_PositionalStillUsesInput()
+        {
+            // A single positional argument (no key=value) keeps the legacy generic behavior.
+            string input = "lookup_item(\"Flame Sword\")";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual(1, matches.Count);
+            StringAssert.Contains("input", matches[0].ArgumentsJson);
+            StringAssert.Contains("Flame Sword", matches[0].ArgumentsJson);
+        }
+
+        [Test]
         public void PortableExtractor_FunctionCallSyntax_DoesNotMatchProseWithParens()
         {
             // Prose with parentheses should NOT be extracted as a function call.

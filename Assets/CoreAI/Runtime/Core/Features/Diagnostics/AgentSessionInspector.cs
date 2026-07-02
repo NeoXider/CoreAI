@@ -922,14 +922,17 @@ namespace CoreAI.Diagnostics
             return filtered;
         }
 
+        // 0 is meaningful at both levels: "explicitly unlimited" — it wins over the level below and
+        // reaches the LLM client as 0, which suppresses the settings MaxTokens fallback entirely
+        // (no max_tokens sent). Negative values are treated as unset.
         private static int? ResolveMaxOutputTokens(int? perCall, int? perAgent)
         {
-            if (perCall.HasValue && perCall.Value > 0)
+            if (perCall.HasValue && perCall.Value >= 0)
             {
                 return perCall.Value;
             }
 
-            if (perAgent.HasValue && perAgent.Value > 0)
+            if (perAgent.HasValue && perAgent.Value >= 0)
             {
                 return perAgent.Value;
             }

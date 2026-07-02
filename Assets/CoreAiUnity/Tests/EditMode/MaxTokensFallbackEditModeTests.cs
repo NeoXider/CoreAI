@@ -63,6 +63,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_PerRequestZero_MeansExplicitlyUnlimited()
+        {
+            CapturingChatClient capturing = new();
+            MeaiLlmClient client = new(
+                capturing,
+                GameLoggerUnscopedFallback.Instance,
+                new StubSettings { MaxTokensValue = 1234 });
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Test",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                MaxOutputTokens = 0
+            }, CancellationToken.None);
+
+            Assert.IsNull(capturing.LastOptions?.MaxOutputTokens,
+                "Explicit 0 means unlimited: no max_tokens is sent and the settings fallback is skipped " +
+                "(a reasoning model's thinking must never eat the answer budget).");
+        }
+
+        [Test]
         public async Task CompleteAsync_SettingsZero_LeavesProviderDefault()
         {
             CapturingChatClient capturing = new();

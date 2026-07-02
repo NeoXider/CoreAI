@@ -4,6 +4,49 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Benchmark: custom comparisons from hand-picked reports (2026-07-03)
+
+- **`GameCreationBenchmarkLauncher.ParseSummary(jsonPath)` is now public** (wrapping the private
+  parser), so editor scripts can build comparison charts from any explicit set of report JSONs via
+  the already-public `WriteComparison` — e.g. cloud models and local models as two separate charts —
+  instead of the Compare tab's newest-per-model default. Documented in `Docs/BENCHMARK.md`.
+
+### Execute-as-you-stream tool calls in the streaming loop (2026-07-02)
+
+- **`MeaiLlmClient` now executes each native tool call the moment its streamed argument JSON is
+  complete** (via `SseToolCallAccumulator.DrainCompleted()` + `ToolExecutionPolicy.StreamedTurn`),
+  instead of collecting the whole assistant turn first. With a real streaming provider the world
+  visibly builds up call by call. EditMode parity tests cover intra-turn duplicate suppression, the
+  one-record-per-turn consecutive-error guard, cross-turn echo of a single-call turn (suppressed
+  before executing), and streamed-turn signatures blocking a later identical classic batch; a
+  multi-call echo turn cannot be detected mid-stream (its combined signature only exists at turn
+  end) and is prevented upstream by the wire protocol sending every tool result.
+
+### Benchmark suite: no per-turn token caps + gate-level inset (2026-07-02)
+
+- **All per-scenario `MaxOutputTokens` caps removed (suite default is now `0` = unlimited).**
+  OpenAI-compatible `max_tokens` counts reasoning tokens, so the old caps (800 base, up to 4800 on
+  the free-build) silently zeroed long-thinking models: glm-5.2 spent the entire free-build cap on
+  thinking — `finish_reason=length`, no tool calls, empty scene, floor score. The per-scenario
+  `TimeoutSeconds` stays as the real runaway guard, and token appetite is still priced by the
+  efficiency bonus. (See `com.neoxider.coreai`'s changelog for the `0 = unlimited` semantics.)
+- **The top-right report inset is now a gate-level close-up**: the camera stands just outside the
+  front entrance (+Z, where models consistently build the gate), low to the ground, looking through
+  the gap toward the keep — replacing the old opposite-side wide angle that duplicated the hero view.
+
+### Benchmark harness: front-facing hero shots, sharp insets, no G1 noise (2026-07-02)
+
+- **Hero camera flipped 180° to shoot from the front.** Models consistently build scenes gate-forward
+  toward +Z, and the old offset photographed every castle from behind; the report hero shot now uses
+  a front-right elevated offset.
+- **Side insets render at 960×540 with 2× supersampling** (render at 1920×1080, downscale) instead of
+  small direct-render thumbnails that came out blurry in the report.
+- **G1 scenario scene screenshots removed** (`CaptureScene => false`): three near-identical
+  primitive-spawn shots added noise to every report while scoring never used them.
+- **Benchmark launcher watchdog raised 1900s → 7200s.** A full 7-group cloud run (Opus) exceeded the
+  old cap mid-run; the watchdog destroyed the TestRunner callbacks and the run finished with no
+  report. 2h covers the slowest observed cloud model with margin.
+
 ### Example-game logic fixes from the independent demo audit (2026-07-02)
 
 - **RogueliteArena: wave difficulty scaling was silently ignored.** Enemies are instantiated from

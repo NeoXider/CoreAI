@@ -332,16 +332,20 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Set a response token cap for this agent. Null or non-positive values clear the per-agent override.
+        /// Set a response token cap for this agent. <c>null</c> or negative clears the per-agent
+        /// override (inherit the global <see cref="ICoreAISettings.MaxTokens"/> default);
+        /// <c>0</c> = explicitly UNLIMITED (no <c>max_tokens</c> sent — a reasoning model's thinking
+        /// is never squeezed out of the answer budget); a positive value caps the response.
         /// Per-call <see cref="AiTaskRequest.MaxOutputTokens"/> still has higher priority.
         /// </summary>
         /// <example>
         /// .WithMaxOutputTokens(256)   // Short NPC replies
+        /// .WithMaxOutputTokens(0)     // Unlimited (long free-form builds, heavy reasoning models)
         /// .WithMaxOutputTokens(2048)  // Longer planning agent
         /// </example>
         public AgentBuilder WithMaxOutputTokens(int? tokens)
         {
-            _maxOutputTokens = tokens.HasValue && tokens.Value > 0 ? tokens.Value : null;
+            _maxOutputTokens = tokens.HasValue && tokens.Value >= 0 ? tokens.Value : null;
             return this;
         }
 

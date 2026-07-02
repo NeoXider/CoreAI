@@ -28,7 +28,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public sealed override string Group => "G1";
             protected virtual bool UsesLua => true;
-            public override bool CaptureScene => true;
+            // No scene shots for G1: a handful of scattered primitives photographs as noise and
+            // adds nothing next to the G6 hero / G7 puzzle shots (user-reported). Scoring is
+            // unaffected — the visual checkpoints read the world state, not the screenshot.
+            public override bool CaptureScene => false;
             public override int Difficulty => 2;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)

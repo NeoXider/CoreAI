@@ -402,7 +402,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Set a per-role LLM response token cap. Null or non-positive values clear the override.
+        /// Set a per-role LLM response token cap. <c>null</c> or negative clears the override;
+        /// <c>0</c> = explicitly unlimited (kept and propagated to the request as 0);
+        /// a positive value caps the response.
         /// </summary>
         public void SetMaxOutputTokens(string roleId, int? maxOutputTokens)
         {
@@ -415,7 +417,7 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
-                existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
+                existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value >= 0
                     ? maxOutputTokens.Value
                     : null;
                 _roleConfigs[roleId] = existing;

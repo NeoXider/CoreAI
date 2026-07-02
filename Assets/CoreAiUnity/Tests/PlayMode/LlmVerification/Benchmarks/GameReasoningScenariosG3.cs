@@ -33,7 +33,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private abstract class G3Scenario : GameBenchmarkScenario
         {
             public sealed override string Group => "G3";
-            public override int MaxOutputTokens => 1200; // room to reason + write code
             public override int Difficulty => 4;
             public override int TokenBudget => 2600;
             public override double TimeBudgetMs => 35000;

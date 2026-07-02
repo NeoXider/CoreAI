@@ -27,7 +27,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private abstract class G4Scenario : GameBenchmarkScenario
         {
             public sealed override string Group => "G4";
-            public override int MaxOutputTokens => 1400;
             public override int Difficulty => 5;
             public override int TokenBudget => 3000;
             public override double TimeBudgetMs => 45000;
