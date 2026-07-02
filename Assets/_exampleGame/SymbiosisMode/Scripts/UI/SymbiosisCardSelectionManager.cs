@@ -18,6 +18,13 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         private void Start()
         {
+            if (cardsPanel == null || cardsContainer == null || cardPrefab == null)
+            {
+                Debug.LogWarning("[CardManager] cardsPanel/cardsContainer/cardPrefab not wired in the inspector; card selection disabled.");
+                enabled = false;
+                return;
+            }
+
             cardsPanel.SetActive(false);
             _session = FindAnyObjectByType<ArenaSurvivalSession>();
             if (_session != null)
@@ -47,8 +54,26 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         public void ShowCards()
         {
-            if (gameSettings == null || gameSettings.AvailableUpgrades == null ||
-                gameSettings.AvailableUpgrades.Length == 0)
+            if (cardsPanel == null || cardsContainer == null || cardPrefab == null)
+            {
+                return; // not wired — Start already warned and disabled the component
+            }
+
+            // A single empty inspector slot in AvailableUpgrades would otherwise crash the card
+            // screen at random (Setup dereferences the data), so nulls are filtered up front.
+            List<SymbiosisUpgradeData> available = new();
+            if (gameSettings != null && gameSettings.AvailableUpgrades != null)
+            {
+                foreach (SymbiosisUpgradeData u in gameSettings.AvailableUpgrades)
+                {
+                    if (u != null)
+                    {
+                        available.Add(u);
+                    }
+                }
+            }
+
+            if (available.Count == 0)
             {
                 Debug.LogWarning("[CardManager] No upgrades configured!");
                 return;
@@ -64,8 +89,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
             }
 
             // Pick 3 random cards for now (or all if < 3)
-            int count = Mathf.Min(3, gameSettings.AvailableUpgrades.Length);
-            List<SymbiosisUpgradeData> available = new(gameSettings.AvailableUpgrades);
+            int count = Mathf.Min(3, available.Count);
 
             for (int i = 0; i < count; i++)
             {

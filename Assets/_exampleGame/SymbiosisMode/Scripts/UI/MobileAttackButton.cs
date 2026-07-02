@@ -6,18 +6,23 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
     public class MobileAttackButton : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     {
         public static bool IsPressed { get; private set; }
-        public static bool WasJustPressed { get; private set; }
 
-        private void Update()
+        // Consume-on-read instead of clearing in Update: script execution order between this
+        // button and its reader is not guaranteed, so an Update-based reset could clear the
+        // press BEFORE the player script sampled it, silently dropping mobile attacks.
+        private static bool _pressLatched;
+
+        public static bool ConsumePress()
         {
-            // Reset frame-based flag
-            WasJustPressed = false;
+            bool pressed = _pressLatched;
+            _pressLatched = false;
+            return pressed;
         }
 
         public void OnPointerDown(PointerEventData eventData)
         {
             IsPressed = true;
-            WasJustPressed = true;
+            _pressLatched = true;
         }
 
         public void OnPointerUp(PointerEventData eventData)
@@ -28,7 +33,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
         private void OnDisable()
         {
             IsPressed = false;
-            WasJustPressed = false;
+            _pressLatched = false;
         }
     }
 }

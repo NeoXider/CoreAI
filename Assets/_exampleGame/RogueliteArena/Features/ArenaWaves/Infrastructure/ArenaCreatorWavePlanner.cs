@@ -19,7 +19,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     {
         [SerializeField] private bool enabledInExample = true;
 
-        [Tooltip("После стольких подряд невалидных ответов Creator переключаемся только на линейное расписание.")]
+        [Tooltip("After this many consecutive invalid Creator responses, switch to the linear schedule only.")]
         [SerializeField]
         [Min(1)]
         private int maxInvalidPlansBeforeLinear = 3;
@@ -111,6 +111,20 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
             return false;
         }
 
+        /// <summary>
+        /// The director gave up waiting for this wave's plan and moved on with the fallback
+        /// schedule. Clears the pending flag so the HUD's "AI thinking" indicator does not stay
+        /// on after gameplay has already continued; a late-arriving valid plan is still stored
+        /// for a future wave via <see cref="OnCommand"/>.
+        /// </summary>
+        public void NotifyPlanWaitAbandoned(int waveIndex1Based)
+        {
+            if (_pendingCreatorWave == waveIndex1Based)
+            {
+                _pendingCreatorWave = 0;
+            }
+        }
+
         private void OnCommand(ApplyAiGameCommand cmd)
         {
             if (!enabledInExample || cmd == null)
@@ -138,7 +152,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
             if (!ArenaWavePlanValidator.TryValidate(plan, waveKey, out string fail))
             {
                 Debug.LogWarning(
-                    $"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: план волны {waveKey} отклонён: {fail}");
+                    $"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: wave {waveKey} plan rejected: {fail}");
                 RegisterInvalidPlan(fail ?? "validate_failed");
                 return;
             }
@@ -157,7 +171,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
                 _forceLinear = true;
                 _pendingCreatorWave = 0;
                 Debug.LogWarning(
-                    $"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: достигнут лимит невалидных планов ({maxInvalidPlansBeforeLinear}), далее только линейное расписание.");
+                    $"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: invalid-plan limit reached ({maxInvalidPlansBeforeLinear}); using the linear schedule from now on.");
             }
         }
     }

@@ -43,7 +43,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 return;
             }
 
-            // Используем DelegateLlmTool для автоматической генерации JSON-схемы из C# методов
+            // DelegateLlmTool generates the JSON schema from the C# method signatures.
             List<ILlmTool> tools = new()
             {
                 new DelegateLlmTool("skeleton_attack_nearest",
@@ -59,8 +59,9 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                     (Action<string, string>)SetStance)
             };
 
-            // ВАЖНО: MeaiLlmUnityClient.SetTools перезаписывает список. 
-            // В идеале нужно дополнять, но для прототипа Symbiosis этого достаточно.
+            // NOTE: MeaiLlmUnityClient.SetTools REPLACES the client's tool list. Composing with
+            // already-registered tools would be better, but for the Symbiosis prototype (a
+            // dedicated scene with its own client) replacement is acceptable.
             _llmClient.SetTools(tools);
             _toolsRegistered = true;
             Debug.Log("[Symbiosis] CoreAI Tools registered for Skeletons.");
@@ -74,9 +75,10 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 return;
             }
 
-            // Trigger internal logic
-            Debug.Log($"[AI Tool] Skeleton {skeletonName} ordered to attack nearest.");
-            // skeleton.PerformAttackFallback(); // Assuming logic in companion
+            bool attacked = skeleton.TryAttackNearestEnemy();
+            Debug.Log(attacked
+                ? $"[AI Tool] Skeleton {skeletonName} attacked the nearest enemy."
+                : $"[AI Tool] Skeleton {skeletonName} could not attack (cooldown or no enemy in range).");
         }
 
         private void HealGhostPlayer(string skeletonName, float amount)
@@ -99,8 +101,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 return;
             }
 
-            Debug.Log($"[AI Tool] Skeleton {skeletonName} stance set to: {stance}.");
-            // skeleton.CurrentStance = stance; // To be implemented in companion if needed
+            skeleton.SetStance(stance);
+            Debug.Log($"[AI Tool] Skeleton {skeletonName} stance set to: {skeleton.CurrentStance}.");
         }
 
         private SymbiosisSkeletonCompanion FindSkeleton(string name)

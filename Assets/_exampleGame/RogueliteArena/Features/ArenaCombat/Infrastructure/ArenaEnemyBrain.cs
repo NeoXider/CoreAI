@@ -17,14 +17,22 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private float _moveSpeedRuntime;
         private int _contactDamageRuntime;
         private float _nextContact;
+        private bool _waveStatsApplied;
         private IArenaSessionAuthority _session;
         private NavMeshAgent _nav;
 
         private void Awake()
         {
-            _hp = maxHp;
-            _moveSpeedRuntime = moveSpeed;
-            _contactDamageRuntime = contactDamage;
+            // Enemies are instantiated from an INACTIVE template, so the director calls
+            // ApplyWaveStats BEFORE SetActive(true) — and Awake runs after it. Defaults must not
+            // clobber already-applied wave scaling (this silently disabled wave difficulty).
+            if (!_waveStatsApplied)
+            {
+                _hp = maxHp;
+                _moveSpeedRuntime = moveSpeed;
+                _contactDamageRuntime = contactDamage;
+            }
+
             _nav = GetComponent<NavMeshAgent>();
             if (_nav != null)
             {
@@ -42,9 +50,15 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 
         public void ApplyWaveStats(float hpMult, float damageMult, float moveSpeedMult)
         {
+            _waveStatsApplied = true;
             _hp = Mathf.Max(1, Mathf.RoundToInt(maxHp * Mathf.Max(0.01f, hpMult)));
             _contactDamageRuntime = Mathf.Max(1, Mathf.RoundToInt(contactDamage * Mathf.Max(0.01f, damageMult)));
             _moveSpeedRuntime = Mathf.Max(0.1f, moveSpeed * Mathf.Max(0.01f, moveSpeedMult));
+            if (_nav == null)
+            {
+                _nav = GetComponent<NavMeshAgent>(); // called pre-activation, before Awake fetched it
+            }
+
             if (_nav != null)
             {
                 _nav.speed = _moveSpeedRuntime;

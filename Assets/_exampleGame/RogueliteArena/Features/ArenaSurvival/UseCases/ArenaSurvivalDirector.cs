@@ -119,6 +119,13 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                         t += Time.unscaledDeltaTime;
                         yield return null;
                     }
+
+                    if (plan == null)
+                    {
+                        // Fallback path: clear the planner's pending flag so the HUD's
+                        // "AI thinking" indicator doesn't stay on after the wave has started.
+                        _creatorPlanner.NotifyPlanWaitAbandoned(wave);
+                    }
                 }
 
                 ArenaWaveDifficultySample vs = _waveDifficulty != null

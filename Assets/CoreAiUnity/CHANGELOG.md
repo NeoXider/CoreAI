@@ -4,6 +4,26 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Example-game logic fixes from the independent demo audit (2026-07-02)
+
+- **RogueliteArena: wave difficulty scaling was silently ignored.** Enemies are instantiated from
+  an inactive template, so `ArenaEnemyBrain.Awake` (running on `SetActive(true)`) reset HP/speed/
+  damage back to serialized defaults AFTER the director had already applied the wave multipliers.
+  Defaults now only apply when no wave stats were set.
+- **SymbiosisMode: the `skeleton_attack_nearest` and `skeleton_set_stance` LLM tools were no-ops**
+  (the real actions were commented out — the model could "successfully" call them with zero
+  gameplay effect). Wired to a new public `TryAttackNearestEnemy` (cooldown-honest) and a working
+  stance system (aggressive/defensive/balanced modify attack reach and follow leash).
+- **SymbiosisMode: mobile attack presses could be dropped** — the button cleared its
+  `WasJustPressed` flag in its own `Update` while the player read it in another, with no script
+  execution order guarantee. Replaced with an order-safe consume-on-read latch.
+- **SymbiosisMode: card selection hardened** — a single empty inspector slot in
+  `AvailableUpgrades` could randomly crash the card screen; missing panel/container/prefab wiring
+  now disables the component with a warning instead of NRE-ing at wave end.
+- **RogueliteArena: the HUD's "AI thinking" indicator no longer sticks** after the director stops
+  waiting for a Creator wave plan and falls back to the linear schedule.
+- Also translated the remaining Russian comments/log strings in the touched example-game files.
+
 ### Streaming tool-loop cap no longer erases a successful run's stats (2026-07-02)
 
 - **`MeaiLlmClient`: the streaming iteration guard required visible text for a clean completion,

@@ -79,9 +79,9 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 return;
             }
 
-            // 1. Follow Owner logic
+            // 1. Follow Owner logic (stance widens/tightens the leash)
             float dist = Vector3.Distance(transform.position, MyGhostOwner.transform.position);
-            if (dist > FollowRadius)
+            if (dist > FollowRadius * _stanceFollowMultiplier)
             {
                 transform.position = Vector3.MoveTowards(transform.position, MyGhostOwner.transform.position,
                     FollowSpeed * Time.deltaTime);
@@ -103,15 +103,31 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void AttackNearestEnemyFallback()
         {
+            TryAttackNearestEnemy();
+        }
+
+        /// <summary>
+        /// Attacks the nearest enemy inside the (stance-modified) attack range. Public entry point
+        /// for the LLM tool (`skeleton_attack_nearest`); respects the attack cooldown. Returns
+        /// false when on cooldown, no session, or no enemy in range — so a tool call is honest
+        /// about whether anything happened.
+        /// </summary>
+        public bool TryAttackNearestEnemy()
+        {
+            if (Time.time - _lastAttackTime < AttackCooldown)
+            {
+                return false;
+            }
+
             ArenaSurvivalSession session =
                 FindAnyObjectByType<ArenaSurvivalSession>();
             if (session == null)
             {
-                return;
+                return false;
             }
 
             ArenaEnemyBrain nearestEnemy = null;
-            float minDistance = AttackRange;
+            float minDistance = AttackRange * _stanceRangeMultiplier;
 
             foreach (ArenaEnemyBrain enemy in session.ActiveEnemiesList)
             {
@@ -123,9 +139,44 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 }
             }
 
-            if (nearestEnemy != null)
+            if (nearestEnemy == null)
             {
-                PerformAttack(nearestEnemy);
+                return false;
+            }
+
+            PerformAttack(nearestEnemy);
+            return true;
+        }
+
+        /// <summary>
+        /// Combat stance set by the LLM tool (`skeleton_set_stance`): aggressive extends attack
+        /// reach and lets the skeleton roam further from its ghost; defensive does the opposite;
+        /// balanced (default) is neutral. Unknown values fall back to balanced.
+        /// </summary>
+        public string CurrentStance { get; private set; } = "balanced";
+
+        private float _stanceRangeMultiplier = 1f;
+        private float _stanceFollowMultiplier = 1f;
+
+        public void SetStance(string stance)
+        {
+            switch ((stance ?? "").Trim().ToLowerInvariant())
+            {
+                case "aggressive":
+                    CurrentStance = "aggressive";
+                    _stanceRangeMultiplier = 1.5f;
+                    _stanceFollowMultiplier = 1.75f;
+                    break;
+                case "defensive":
+                    CurrentStance = "defensive";
+                    _stanceRangeMultiplier = 0.7f;
+                    _stanceFollowMultiplier = 0.6f;
+                    break;
+                default:
+                    CurrentStance = "balanced";
+                    _stanceRangeMultiplier = 1f;
+                    _stanceFollowMultiplier = 1f;
+                    break;
             }
         }
 

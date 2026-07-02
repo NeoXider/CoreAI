@@ -115,8 +115,11 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 transform.position += move * MoveSpeed * Time.deltaTime;
             }
 
-            // Attack logic: Check keyboard, mouse, and mobile button
-            if (attackPressed || UI.MobileAttackButton.WasJustPressed)
+            // Attack logic: keyboard/mouse, plus the mobile button via consume-on-read (an
+            // Update-order-safe latch — see MobileAttackButton.ConsumePress). Consumed
+            // unconditionally so a latched press can't linger past the frame and double-fire.
+            bool mobilePressed = UI.MobileAttackButton.ConsumePress();
+            if (attackPressed || mobilePressed)
             {
                 RequestAttackServerRpc();
             }
