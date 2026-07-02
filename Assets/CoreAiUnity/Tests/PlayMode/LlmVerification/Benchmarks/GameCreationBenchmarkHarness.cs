@@ -1798,14 +1798,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     sceneCenter, rtC);
                 // LEFT column — two close-up "zoom" shots at different magnifications (narrow FOV, near,
                 // low angle): detail views the wide hero framing can't show (larger models build
-                // compositions worth zooming into).
+                // compositions worth zooming into). The zoom cameras get a HIGHER extent floor than the
+                // scene's own 1.2 minimum: at 20-32 deg FOV and these offsets, a tiny scene (a lone 1m
+                // cube) would not fit the frustum at all — found by the independent Codex audit.
+                float zoomExt = UnityEngine.Mathf.Max(sceneExt, 2.8f);
                 rtD = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camDGo = MakeInsetCamera("BenchmarkCameraD",
-                    sceneCenter + new UnityEngine.Vector3(sceneExt * 1.0f, sceneExt * 0.4f, -sceneExt * 1.3f),
+                    sceneCenter + new UnityEngine.Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
                     sceneCenter, rtD, 32f);
                 rtE = new UnityEngine.RenderTexture(InsetWidth, InsetHeight, 24) { antiAliasing = 8 };
                 camEGo = MakeInsetCamera("BenchmarkCameraE",
-                    sceneCenter + new UnityEngine.Vector3(-sceneExt * 0.9f, sceneExt * 0.55f, sceneExt * 1.15f),
+                    sceneCenter + new UnityEngine.Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
                     sceneCenter, rtE, 20f);
             }
             catch (Exception ex)
