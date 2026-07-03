@@ -644,7 +644,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task StreamedTurn_ExecutesCallsOneByOne_TurnResultMatchesBatchShape()
         {
-            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+            // MaxParallelToolCalls pinned to 1: this test exercises the sequential streamed path
+            // (the pre-parallel semantics), where every call executes inline as it arrives.
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
                 new List<ILlmTool> { new StubTool { Name = "tool_a" } },
                 false, "test", 3);
             policy.RecordFailure(); // pre-existing failure must be reset by a clean turn
@@ -654,9 +656,10 @@ namespace CoreAI.Tests.EditMode
 
             MEAI.FunctionCallContent first = MakeToolCall("tool_a", new Dictionary<string, object?> { { "x", 1 } });
             MEAI.FunctionCallContent second = MakeToolCall("tool_a", new Dictionary<string, object?> { { "x", 2 } });
-            ToolExecutionPolicy.ToolCallResult r1 =
+            ToolExecutionPolicy.ToolCallResult? r1 =
                 await policy.ExecuteStreamedAsync(turn, first, opts, CancellationToken.None);
-            Assert.IsTrue(r1.Succeeded, "First call must execute immediately.");
+            Assert.IsTrue(r1.HasValue, "Sequential mode must return the executed result inline.");
+            Assert.IsTrue(r1.Value.Succeeded, "First call must execute immediately.");
             Assert.AreEqual(1, policy.ConsecutiveErrors,
                 "Per-call streamed execution must NOT touch the consecutive-error counter mid-turn.");
 
@@ -674,7 +677,8 @@ namespace CoreAI.Tests.EditMode
         public async Task StreamedTurn_IntraTurnDuplicate_SuppressedLikeBatch()
         {
             CountingMarshaler countingMarshaler = new();
-            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            StubSettings settings = new StubSettings { MaxParallelToolCalls = 1 }
+                .WithToolMarshaler(countingMarshaler);
             ToolExecutionPolicy policy = new(new StubLogger(), settings,
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", 3);
@@ -683,15 +687,16 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
 
-            ToolExecutionPolicy.ToolCallResult r1 =
+            ToolExecutionPolicy.ToolCallResult? r1 =
                 await policy.ExecuteStreamedAsync(turn, MakeToolCall("dup", args), opts, CancellationToken.None);
-            ToolExecutionPolicy.ToolCallResult r2 =
+            ToolExecutionPolicy.ToolCallResult? r2 =
                 await policy.ExecuteStreamedAsync(turn, MakeToolCall("dup", args), opts, CancellationToken.None);
             ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
 
-            Assert.IsTrue(r1.Succeeded);
-            Assert.IsFalse(r2.Succeeded, "Exact repeat within the turn must be suppressed.");
-            StringAssert.Contains("Duplicate tool call", r2.Result.Result.ToString());
+            Assert.IsTrue(r1.HasValue && r1.Value.Succeeded);
+            Assert.IsTrue(r2.HasValue, "Suppressed duplicates return their result inline in every mode.");
+            Assert.IsFalse(r2.Value.Succeeded, "Exact repeat within the turn must be suppressed.");
+            StringAssert.Contains("Duplicate tool call", r2.Value.Result.Result.ToString());
             Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call may invoke the tool.");
             Assert.IsTrue(batch.AnyFailed);
             Assert.IsFalse(batch.AllFailed);
@@ -701,7 +706,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task StreamedTurn_AllFailed_RecordsOneConsecutiveError()
         {
-            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
                 new List<ILlmTool>(), true, "test", 3);
             MEAI.ChatOptions opts = MakeChatOptions(("known", "ok"));
 
@@ -719,7 +724,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task StreamedTurn_EchoOfWholeTurn_LaterIdenticalBatchIsBlocked()
         {
-            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", 3);
             Dictionary<string, object?> args = new() { { "x", 1 } };
@@ -740,7 +745,8 @@ namespace CoreAI.Tests.EditMode
         public async Task StreamedTurn_CrossTurnEchoOfSingleCall_SuppressedBeforeExecuting()
         {
             CountingMarshaler countingMarshaler = new();
-            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            StubSettings settings = new StubSettings { MaxParallelToolCalls = 1 }
+                .WithToolMarshaler(countingMarshaler);
             ToolExecutionPolicy policy = new(new StubLogger(), settings,
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", 3);
@@ -755,12 +761,13 @@ namespace CoreAI.Tests.EditMode
             // Batch parity: a one-call batch registers the call's own signature, so the classic
             // path would suppress this — the streamed path must too, WITHOUT invoking the tool.
             ToolExecutionPolicy.StreamedTurn second = policy.BeginStreamedTurn();
-            ToolExecutionPolicy.ToolCallResult echo = await policy.ExecuteStreamedAsync(
+            ToolExecutionPolicy.ToolCallResult? echo = await policy.ExecuteStreamedAsync(
                 second, MakeToolCall("dup", args), opts, CancellationToken.None);
             policy.CompleteStreamedTurn(second);
 
-            Assert.IsFalse(echo.Succeeded, "Cross-turn echo of an identical single call must be suppressed.");
-            StringAssert.Contains("Duplicate tool call", echo.Result.Result.ToString());
+            Assert.IsTrue(echo.HasValue, "Suppressed duplicates return their result inline in every mode.");
+            Assert.IsFalse(echo.Value.Succeeded, "Cross-turn echo of an identical single call must be suppressed.");
+            StringAssert.Contains("Duplicate tool call", echo.Value.Result.Result.ToString());
             Assert.AreEqual(1, countingMarshaler.InvokeCount, "The echo must not invoke the tool again.");
         }
 
@@ -768,7 +775,8 @@ namespace CoreAI.Tests.EditMode
         public async Task StreamedTurn_MultiCallEchoTurn_SecondCompleteRecordsFailure()
         {
             CountingMarshaler countingMarshaler = new();
-            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            StubSettings settings = new StubSettings { MaxParallelToolCalls = 1 }
+                .WithToolMarshaler(countingMarshaler);
             ToolExecutionPolicy policy = new(new StubLogger(), settings,
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", 3);
@@ -805,7 +813,7 @@ namespace CoreAI.Tests.EditMode
         public async Task StreamedTurn_RepeatedMultiCallEchoTurns_TripMaxConsecutiveErrors()
         {
             const int maxConsecutiveErrors = 3;
-            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", maxConsecutiveErrors);
             Dictionary<string, object?> argsA = new() { { "x", 1 } };
@@ -838,7 +846,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task StreamedTurn_NonEchoSecondTurn_StillRecordsSuccess()
         {
-            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
                 false, "test", 3);
             MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
@@ -873,7 +881,8 @@ namespace CoreAI.Tests.EditMode
         public async Task StreamedTurn_AllowDuplicatesTool_RepeatsExecute()
         {
             CountingMarshaler countingMarshaler = new();
-            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            StubSettings settings = new StubSettings { MaxParallelToolCalls = 1 }
+                .WithToolMarshaler(countingMarshaler);
             ToolExecutionPolicy policy = new(new StubLogger(), settings,
                 new List<ILlmTool> { new StubTool { Name = "repeat_action", AllowDuplicates = true } },
                 false, "test", 3);
@@ -882,14 +891,15 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions opts = MakeChatOptions(("repeat_action", "ok"));
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
 
-            ToolExecutionPolicy.ToolCallResult r1 = await policy.ExecuteStreamedAsync(
+            ToolExecutionPolicy.ToolCallResult? r1 = await policy.ExecuteStreamedAsync(
                 turn, MakeToolCall("repeat_action", args), opts, CancellationToken.None);
-            ToolExecutionPolicy.ToolCallResult r2 = await policy.ExecuteStreamedAsync(
+            ToolExecutionPolicy.ToolCallResult? r2 = await policy.ExecuteStreamedAsync(
                 turn, MakeToolCall("repeat_action", args), opts, CancellationToken.None);
             policy.CompleteStreamedTurn(turn);
 
-            Assert.IsTrue(r1.Succeeded);
-            Assert.IsTrue(r2.Succeeded, "AllowDuplicates tools may repeat exactly, streamed or batched.");
+            Assert.IsTrue(r1.HasValue && r1.Value.Succeeded);
+            Assert.IsTrue(r2.HasValue && r2.Value.Succeeded,
+                "AllowDuplicates tools may repeat exactly, streamed or batched.");
             Assert.AreEqual(2, countingMarshaler.InvokeCount);
         }
 
@@ -1445,6 +1455,322 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(batch.AnyFailed);
             Assert.IsFalse(overlapped,
                 "Two state-mutating 'memory' calls must be serialized, never run concurrently.");
+        }
+
+        // ==================== Parallel streamed execution ====================
+
+        [Test]
+        public async Task StreamedTurn_ParallelMode_CallsOverlap_ResultsStayInArrivalOrder()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool>(), false, "test", 3);
+
+            // Hard overlap proof via rendezvous: "first" arrives first but refuses to complete until
+            // "second" has STARTED (impossible without concurrency - sequentially the wait times out
+            // and returns an error result, failing the test), then keeps running so "second" finishes
+            // first. Completion order is therefore the REVERSE of arrival order.
+            TaskCompletionSource<bool> secondStarted =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            List<string> completionOrder = new();
+            object completionLock = new();
+
+            Func<CancellationToken, Task<string>> firstBody = async ct =>
+            {
+                Task winner = await Task.WhenAny(secondStarted.Task, Task.Delay(3000, ct));
+                if (winner != secondStarted.Task)
+                {
+                    return "Error: calls never overlapped - 'second' did not start while 'first' ran.";
+                }
+
+                await Task.Delay(60, ct);
+                lock (completionLock)
+                {
+                    completionOrder.Add("first");
+                }
+
+                return "FIRST";
+            };
+            Func<CancellationToken, Task<string>> secondBody = async ct =>
+            {
+                secondStarted.TrySetResult(true);
+                await Task.Delay(5, ct);
+                lock (completionLock)
+                {
+                    completionOrder.Add("second");
+                }
+
+                return "SECOND";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(firstBody,
+                new MEAI.AIFunctionFactoryOptions { Name = "first", Description = "first" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(secondBody,
+                new MEAI.AIFunctionFactoryOptions { Name = "second", Description = "second" }));
+
+            MEAI.FunctionCallContent firstCall = MakeToolCall("first", new() { { "n", 1 } });
+            MEAI.FunctionCallContent secondCall = MakeToolCall("second", new() { { "n", 2 } });
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            ToolExecutionPolicy.ToolCallResult? scheduledFirst =
+                await policy.ExecuteStreamedAsync(turn, firstCall, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult? scheduledSecond =
+                await policy.ExecuteStreamedAsync(turn, secondCall, opts, CancellationToken.None);
+
+            Assert.IsFalse(scheduledFirst.HasValue,
+                "Parallel mode schedules the call and defers the result to turn completion.");
+            Assert.IsFalse(scheduledSecond.HasValue,
+                "Parallel mode schedules the call and defers the result to turn completion.");
+
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+
+            Assert.IsFalse(batch.AnyFailed,
+                "Both calls must succeed - a failed 'first' means they never actually overlapped.");
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.AreEqual(firstCall.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId,
+                "Results must collate in ARRIVAL order, not completion order.");
+            Assert.AreEqual("FIRST", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.AreEqual(secondCall.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            Assert.AreEqual("SECOND", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+            Assert.AreEqual("second", completionOrder[0],
+                "The later-arrived call must have completed first (reversed completion order).");
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "A clean parallel turn records one success.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_ParallelMode_SerializedMutatingTools_NeverOverlap()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool>
+                {
+                    new StubTool { Name = "memory" },
+                    new StubTool { Name = "manage_mods" },
+                    new StubTool { Name = "manage_skills" }
+                },
+                false, "test", 3);
+
+            int active = 0;
+            bool overlapped = false;
+            object gate = new();
+            Func<CancellationToken, Task<string>> body = async ct =>
+            {
+                lock (gate)
+                {
+                    active++;
+                    if (active > 1)
+                    {
+                        overlapped = true;
+                    }
+                }
+
+                await Task.Delay(40, ct);
+                lock (gate)
+                {
+                    active--;
+                }
+
+                return "ok";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            foreach (string name in new[] { "memory", "manage_mods", "manage_skills" })
+            {
+                opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
+                    new MEAI.AIFunctionFactoryOptions { Name = name, Description = name }));
+            }
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(
+                turn, MakeToolCall("memory", new() { { "n", 1 } }), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(
+                turn, MakeToolCall("manage_mods", new() { { "n", 2 } }), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(
+                turn, MakeToolCall("manage_skills", new() { { "n", 3 } }), opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual(3, batch.Results.Count);
+            Assert.IsFalse(overlapped,
+                "State-mutating built-ins in one streamed turn must be serialized, never concurrent.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_ParallelMode_IntraTurnDuplicate_SuppressedAtArrival()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings { MaxParallelToolCalls = 4 }
+                .WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+
+            MEAI.FunctionCallContent original = MakeToolCall("dup", args);
+            MEAI.FunctionCallContent repeat = MakeToolCall("dup", args);
+            ToolExecutionPolicy.ToolCallResult? scheduled =
+                await policy.ExecuteStreamedAsync(turn, original, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult? suppressed =
+                await policy.ExecuteStreamedAsync(turn, repeat, opts, CancellationToken.None);
+
+            Assert.IsFalse(scheduled.HasValue, "The executable call is scheduled (deferred result).");
+            Assert.IsTrue(suppressed.HasValue,
+                "The duplicate must be suppressed synchronously at arrival, exactly like sequential mode.");
+            Assert.IsFalse(suppressed.Value.Succeeded);
+            StringAssert.Contains("Duplicate tool call", suppressed.Value.Result.Result.ToString());
+
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+
+            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call may run.");
+            Assert.IsTrue(batch.AnyFailed);
+            Assert.IsFalse(batch.AllFailed);
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.AreEqual(original.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.AreEqual(repeat.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            StringAssert.Contains("Duplicate tool call",
+                ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+        }
+
+        [Test]
+        public async Task StreamedTurn_ParallelMode_WholeTurnEcho_RecordsExactlyOneFailure()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            int invoked = 0;
+            Func<CancellationToken, Task<string>> body = async ct =>
+            {
+                Interlocked.Increment(ref invoked);
+                await Task.Delay(10, ct);
+                return "ok";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
+                new MEAI.AIFunctionFactoryOptions { Name = "dup", Description = "dup" }));
+
+            Dictionary<string, object?> argsA = new() { { "x", 1 } };
+            Dictionary<string, object?> argsB = new() { { "x", 2 } };
+
+            ToolExecutionPolicy.StreamedTurn first = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+            await policy.CompleteStreamedTurnAsync(first, CancellationToken.None);
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "A clean first parallel turn records a success.");
+
+            // The model echoes the exact same TWO-call turn: only the COMBINED signature was
+            // registered, so the calls re-execute, but completion must flag the whole-turn echo
+            // with exactly ONE RecordFailure - identical to the sequential streamed semantics.
+            ToolExecutionPolicy.StreamedTurn second = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(second, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(second, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult echo =
+                await policy.CompleteStreamedTurnAsync(second, CancellationToken.None);
+
+            Assert.AreEqual(1, policy.ConsecutiveErrors,
+                "A whole-turn echo must record exactly ONE failure under parallel execution too.");
+            Assert.IsTrue(echo.AnyFailed, "The echo turn must report AnyFailed.");
+            Assert.IsTrue(echo.AllFailed, "The echo turn must report AllFailed.");
+            Assert.AreEqual(4, Volatile.Read(ref invoked),
+                "Multi-call echo calls still execute; only the turn-level accounting flags the echo.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_MaxParallelOne_ExecutesInlineAndReturnsResults()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeAsyncTools(("slow_a", 60, "A"), ("slow_b", 5, "B"));
+            MEAI.FunctionCallContent callA = MakeToolCall("slow_a", new() { { "n", 1 } });
+            MEAI.FunctionCallContent callB = MakeToolCall("slow_b", new() { { "n", 2 } });
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            Stopwatch sw = Stopwatch.StartNew();
+            ToolExecutionPolicy.ToolCallResult? r1 =
+                await policy.ExecuteStreamedAsync(turn, callA, opts, CancellationToken.None);
+            sw.Stop();
+
+            Assert.IsTrue(r1.HasValue, "MaxParallelToolCalls=1 must execute inline and return the result.");
+            Assert.IsTrue(r1.Value.Succeeded);
+            Assert.AreEqual("A", r1.Value.Result.Result.ToString());
+            Assert.GreaterOrEqual(sw.ElapsedMilliseconds, 40,
+                "Inline execution: awaiting ExecuteStreamedAsync must include the tool's own runtime.");
+
+            ToolExecutionPolicy.ToolCallResult? r2 =
+                await policy.ExecuteStreamedAsync(turn, callB, opts, CancellationToken.None);
+            Assert.IsTrue(r2.HasValue && r2.Value.Succeeded);
+
+            // Nothing was scheduled, so the SYNCHRONOUS completion stays valid (pre-parallel API).
+            ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.AreEqual(callA.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual(callB.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "A clean sequential turn records one success.");
+        }
+
+        [Test]
+        public async Task CompleteStreamedTurnAsync_CancelledWhileCallRuns_UnfinishedSlotBecomesFailure()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool> { new StubTool { Name = "hang" } },
+                false, "test", 3);
+
+            // The tool IGNORES its cancellation token (worst case): finalization must still return
+            // promptly once the outer token fires, without throwing, collating the unfinished slot
+            // as an explicit failure.
+            Func<CancellationToken, Task<string>> hangBody = async _ =>
+            {
+                await Task.Delay(2000, CancellationToken.None);
+                return "late";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(hangBody,
+                new MEAI.AIFunctionFactoryOptions { Name = "hang", Description = "hang" }));
+
+            CancellationTokenSource cts = new();
+            MEAI.FunctionCallContent call = MakeToolCall("hang", new() { { "n", 1 } });
+
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+            ToolExecutionPolicy.ToolCallResult? scheduled =
+                await policy.ExecuteStreamedAsync(turn, call, opts, cts.Token);
+            Assert.IsFalse(scheduled.HasValue, "Parallel mode defers the result to turn completion.");
+
+            cts.Cancel();
+
+            // async Task + try/catch instead of Assert.DoesNotThrowAsync (which would block the
+            // Unity main thread - the EditMode sync-over-async deadlock).
+            ToolExecutionPolicy.BatchToolCallResult batch = default;
+            Exception caught = null;
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                batch = await policy.CompleteStreamedTurnAsync(turn, cts.Token);
+            }
+            catch (Exception ex)
+            {
+                caught = ex;
+            }
+
+            sw.Stop();
+            Assert.IsNull(caught,
+                "Finalization must NEVER throw - it is also the mid-stream-abort accounting path.");
+            Assert.Less(sw.ElapsedMilliseconds, 1500,
+                "A cancelled token must bound the drain; a token-ignoring tool cannot hang finalization.");
+            Assert.AreEqual(1, batch.Results.Count);
+            Assert.AreEqual(call.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            StringAssert.Contains("did not complete",
+                ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.IsTrue(batch.AnyFailed);
+            Assert.IsTrue(batch.AllFailed);
+            Assert.AreEqual(1, policy.ConsecutiveErrors,
+                "The aborted turn records exactly ONE failure against the consecutive-error counter.");
         }
     }
 }

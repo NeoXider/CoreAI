@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Streaming-by-default task execution + transport-send retry (2026-07-03)
+
+Two changes that make streaming the default execution path everywhere and keep it reliable against
+local servers.
+
+- **`AiOrchestrator.RunTaskAsync` now streams by default.** Each completion for a non-interactive
+  agent task is obtained via `CompleteStreamingAsync` when `EnableStreaming` is on (new
+  `CompleteForTaskAsync` helper collapses the stream into an `LlmCompletionResult`), so task execution
+  runs through the same execute-as-you-stream tool path — including bounded-parallel tool calls — as
+  chat, instead of the non-streaming `CompleteAsync`. It falls back to `CompleteAsync` only when
+  streaming is disabled. All surrounding logic (context-overflow retry, structured-response
+  validation, tool-only content synthesis, empty-response handling) is unchanged.
+- **`MeaiOpenAiChatClient` retries a transport-level send failure on stream-open.** A pooled
+  keep-alive connection the local server has already closed surfaces as
+  `"An error occurred while sending the request"`; that no longer fails the whole request — a bounded
+  couple of quick retries open a fresh connection, and a genuinely-down backend still surfaces
+  promptly as `BackendUnavailable`.
+
+### Parallel execute-as-you-stream tool calls (2026-07-03)
+
+Until now only the batch path ran a turn's tool calls concurrently (`ExecuteBatchAsync`, bounded by
+`MaxParallelToolCalls`); the execute-as-you-stream path executed strictly one-by-one, so a slow tool
+stalled every call queued behind it even while the model kept streaming.
+
+- **`ToolExecutionPolicy.ExecuteStreamedAsync` now schedules each drained call concurrently**, on a
+  `SemaphoreSlim` bounded by the same `MaxParallelToolCalls` setting as the batch path. Its return type
+  becomes `Task<ToolCallResult?>` (null when a call was scheduled for parallel execution; the result
+  then surfaces at completion). Per-call duplicate suppression and the cross-turn echo guard are still
+  decided synchronously at arrival (arrival order defines the turn signature); the per-call timeout is
+  enforced inside `ExecuteSingleAsync` in each worker, exactly as on the batch path.
+- **Serialized mutating built-ins are unchanged**: `IsSerializedTool` calls (`memory`, `manage_mods`,
+  `manage_skills`) still chain on one ordered serial chain so two writes never overlap; independent
+  tools run fully in parallel.
+- **The turn closes through a new `CompleteStreamedTurnAsync`**: drains all in-flight calls (a
+  cancelled/unfinished call becomes a failed slot — finalization never throws, and it also runs on
+  mid-stream abort), collates results strictly in ARRIVAL order, then applies the existing turn-level
+  semantics unchanged — whole-turn echo → one `RecordFailure`; otherwise one success/failure record;
+  combined-signature registration. The drain is **bounded by the per-call tool timeout plus a small
+  margin**, so a tool that ignores its cancellation token cannot hang finalization even on the abort
+  path (which passes `CancellationToken.None`); only explicitly-disabled tool timeouts wait for natural
+  completion.
+- **`MaxParallelToolCalls <= 1` keeps the old strictly-sequential inline behavior byte-identical.**
+
 ### Streamed tool-call hardening from the independent audit (2026-07-03)
 
 Four fixes to the execute-as-you-stream path, all found by a two-track code audit of the streaming

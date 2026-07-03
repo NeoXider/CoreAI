@@ -4,6 +4,34 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Streaming-by-default task execution (2026-07-03)
+
+- **Agent task execution now streams by default.** `AiOrchestrator.RunTaskAsync` runs through the
+  streaming tool path (`CompleteStreamingAsync`) when `EnableStreaming` is on, so the parallel
+  execute-as-you-stream tool calls apply to tasks, not just chat; non-streaming stays as the fallback
+  when streaming is disabled.
+- **PlayMode tool-calling diagnostics.** `AllToolCallsPlayModeTests` now writes a per-step LLM debug
+  bundle under `TestResults/CoreAI/LlmDebug` — the system prompt (with the tool contract), the tools
+  actually offered to the model, the raw model response, and the executed tool-call history — so a
+  "model did not call the tool" result can be traced to prompt/tool wiring vs model behaviour vs a
+  transport failure. The tests' `CapturingLlmClient` now forwards `CompleteStreamingAsync` to the
+  inner client instead of collapsing it to non-streaming, so they exercise the real streamed path.
+- **EditMode:** coverage for the transport-send retry on stream-open (a first-attempt send failure
+  retries and the stream still completes).
+
+### Parallel execute-as-you-stream tool calls (2026-07-03)
+
+- **`MeaiLlmClient` now awaits the new `ToolExecutionPolicy.CompleteStreamedTurnAsync` on both the
+  happy path and the mid-stream-abort path**, closing out the newly parallel streamed turn: calls
+  drained mid-stream are scheduled concurrently (bounded by `MaxParallelToolCalls`, default 4), so a
+  long multi-call build turn now mutates the world up to `MaxParallelToolCalls` calls at a time while
+  the model is still streaming, instead of one-by-one. Results are collated in arrival order; a turn
+  aborted mid-stream is still finalized (unfinished calls become failed slots) before the failure
+  surfaces. (See `com.neoxider.coreai`'s changelog for the policy-side guarantees.)
+- **EditMode coverage added**: policy-level tests for bounded overlap, serialized mutating built-ins,
+  and streamed-turn echo semantics, plus a client-level parallel streaming test through
+  `MeaiLlmClient`.
+
 ### Streaming-loop and benchmark hardening from the independent audit (2026-07-03)
 
 - **A mid-stream transport failure no longer abandons a partially-executed streamed turn.**

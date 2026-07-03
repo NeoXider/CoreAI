@@ -127,6 +127,30 @@ legacy path). Guarantees preserved regardless of completion order:
 - Per-call timeout, whole-batch duplicate rejection, forced-tool reset, and the consecutive-error
   counter are unchanged; outer cancellation cancels all in-flight calls and propagates (never a fallback).
 
+#### Streamed path
+
+The execute-as-you-stream path (calls run the moment their streamed argument JSON closes) uses the
+**same bounded parallelism**: as each native call drains mid-stream, `ExecuteStreamedAsync` schedules it
+concurrently on a `SemaphoreSlim` bounded by `MaxParallelToolCalls`, and the turn closes through
+`CompleteStreamedTurnAsync`. Guarantees regardless of completion order:
+
+- **Result order matches arrival order** — `CompleteStreamedTurnAsync` awaits all in-flight calls and
+  collates results strictly in the order the calls arrived on the wire.
+- **State-mutating built-ins stay serialized** (`IsSerializedTool`: `memory`, `manage_mods`,
+  `manage_skills`) on one ordered serial chain — two writes never overlap.
+- **Per-call duplicate suppression and the cross-turn echo guard are decided synchronously at arrival**
+  (arrival order is what defines the turn signature); the **per-call timeout** is still enforced inside
+  `ExecuteSingleAsync` in each worker, exactly as on the batch path.
+- **Finalization is bounded**: `CompleteStreamedTurnAsync` waits for in-flight calls only up to the
+  per-call tool timeout plus a small margin, so a tool that ignores its cancellation token cannot hang
+  the turn (its slot collates as a failure). Only when tool timeouts are explicitly disabled does it
+  wait for natural completion.
+- **Finalization never throws** and also runs on mid-stream abort: a cancelled/unfinished call becomes
+  a failed slot, then the existing turn-level semantics apply unchanged (whole-turn echo → one
+  `RecordFailure`; otherwise one success/failure record; combined-signature registration).
+  `MeaiLlmClient` awaits `CompleteStreamedTurnAsync` on both the happy path and the abort path.
+- **`MaxParallelToolCalls <= 1` keeps the old strictly-sequential inline behavior byte-identical.**
+
 ### 7. Text-shaped tool calls (local GGUF models)
 
 When a backend returns tool intent as assistant *text* instead of native `tool_calls`,

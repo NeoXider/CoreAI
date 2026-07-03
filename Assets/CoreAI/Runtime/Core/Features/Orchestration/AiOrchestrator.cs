@@ -266,21 +266,13 @@ namespace CoreAI.Ai
                     Stopwatch sw = Stopwatch.StartNew();
                     try
                     {
-                        // WebGL player: do not detach from the captured Unity SynchronizationContext.
-                        // Single-threaded IL2CPP has no real thread pool, so ConfigureAwait(false) here
-                        // chat UI stays on typing dots even though the LLM result has arrived.
-#if UNITY_WEBGL && !UNITY_EDITOR
-                        result = await _llm
-                            .CompleteAsync(
-                                BuildCompletionRequest(bundle, task, user, maxOutputTokens),
-                                cancellationToken);
-#else
-                        result = await _llm
-                            .CompleteAsync(
-                                BuildCompletionRequest(bundle, task, user, maxOutputTokens),
-                                cancellationToken)
-                            .ConfigureAwait(false);
-#endif
+                        // Streaming by default (CompleteForTaskAsync): task execution runs through the
+                        // same execute-as-you-stream tool path as chat when EnableStreaming is on, and
+                        // falls back to non-streaming CompleteAsync otherwise. The helper handles the
+                        // WebGL SynchronizationContext discipline internally.
+                        result = await CompleteForTaskAsync(
+                            BuildCompletionRequest(bundle, task, user, maxOutputTokens),
+                            cancellationToken);
                     }
                     finally
                     {
@@ -369,15 +361,9 @@ namespace CoreAI.Ai
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
                 Stopwatch sw = Stopwatch.StartNew();
-#if UNITY_WEBGL && !UNITY_EDITOR
-                LlmCompletionResult second = await _llm.CompleteAsync(
+                LlmCompletionResult second = await CompleteForTaskAsync(
                     BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
                     cancellationToken);
-#else
-                LlmCompletionResult second = await _llm.CompleteAsync(
-                    BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
-                    cancellationToken).ConfigureAwait(false);
-#endif
                 sw.Stop();
                 _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok,
                     sw.Elapsed.TotalMilliseconds);
@@ -776,6 +762,173 @@ namespace CoreAI.Ai
 
                 yield break;
             }
+        }
+
+        /// <summary>
+        /// Obtains one completion for a task turn. Per the "streaming by default" policy, when
+        /// <see cref="ICoreAISettings.EnableStreaming"/> is on this drives
+        /// <see cref="ILlmClient.CompleteStreamingAsync"/> — so non-interactive task execution uses the
+        /// same execute-as-you-stream tool path (including bounded-parallel tool calls) as chat — and
+        /// collapses the streamed chunks into an <see cref="LlmCompletionResult"/>. When streaming is
+        /// disabled it falls back to the non-streaming <see cref="ILlmClient.CompleteAsync"/>. The
+        /// collapsed result mirrors the accumulation in <see cref="RunStreamingAsync"/>: final assistant
+        /// text, token counts, executed tool calls, and any terminal error/code. Callers keep their
+        /// existing tool-only-content, context-overflow, and empty-response handling unchanged.
+        /// </summary>
+        private async Task<LlmCompletionResult> CompleteForTaskAsync(
+            LlmCompletionRequest req, CancellationToken cancellationToken)
+        {
+            if (!_settings.EnableStreaming)
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                return await _llm.CompleteAsync(req, cancellationToken);
+#else
+                return await _llm.CompleteAsync(req, cancellationToken).ConfigureAwait(false);
+#endif
+            }
+
+            StringBuilder accumulated = new();
+            string terminalError = null;
+            LlmErrorCode terminalErrorCode = LlmErrorCode.None;
+            int? terminalHttpStatus = null;
+            int? terminalRetryAfterSeconds = null;
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
+            int? promptTokens = null;
+            int? completionTokens = null;
+            int? totalTokens = null;
+            int cacheReadTokens = 0;
+            int cacheWriteTokens = 0;
+
+            IAsyncEnumerator<LlmStreamChunk> enumerator;
+            try
+            {
+                enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+            }
+            catch (LlmClientException ex)
+            {
+                return BuildFailureResult(ex.Message, ex.ErrorCode, ex.HttpStatus, ex.RetryAfterSeconds);
+            }
+            catch (Exception ex)
+            {
+                return BuildFailureResult(ex.Message, LlmErrorCode.ProviderError, null, null);
+            }
+
+            try
+            {
+                while (true)
+                {
+                    LlmStreamChunk current;
+                    try
+                    {
+                        // No ConfigureAwait(false): WebGL has no working ThreadPool, so the continuation
+                        // must resume on UnitySynchronizationContext (mirrors RunStreamingAsync).
+                        if (!await enumerator.MoveNextAsync())
+                        {
+                            break;
+                        }
+
+                        current = enumerator.Current;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw; // RunTaskAsync distinguishes real cancellation from an empty response
+                    }
+                    catch (LlmClientException ex)
+                    {
+                        terminalError = ex.Message;
+                        terminalErrorCode = ex.ErrorCode;
+                        terminalHttpStatus = ex.HttpStatus;
+                        terminalRetryAfterSeconds = ex.RetryAfterSeconds;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        terminalError = ex.Message;
+                        terminalErrorCode = LlmErrorCode.ProviderError;
+                        break;
+                    }
+
+                    if (current == null)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(current.Text))
+                    {
+                        accumulated.Append(current.Text);
+                    }
+
+                    if (!string.IsNullOrEmpty(current.Error))
+                    {
+                        terminalError = current.Error;
+                        terminalErrorCode = current.ErrorCode;
+                        terminalHttpStatus = current.HttpStatus;
+                        terminalRetryAfterSeconds = current.RetryAfterSeconds;
+                    }
+
+                    if (current.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
+                    {
+                        executedToolCalls = current.ExecutedToolCalls;
+                    }
+
+                    if (current.PromptTokens > 0)
+                    {
+                        promptTokens = current.PromptTokens;
+                    }
+
+                    if (current.CompletionTokens > 0)
+                    {
+                        completionTokens = current.CompletionTokens;
+                    }
+
+                    if (current.TotalTokens > 0)
+                    {
+                        totalTokens = current.TotalTokens;
+                    }
+
+                    if (current.CacheReadTokens > 0)
+                    {
+                        cacheReadTokens = current.CacheReadTokens;
+                    }
+
+                    if (current.CacheWriteTokens > 0)
+                    {
+                        cacheWriteTokens = current.CacheWriteTokens;
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    await enumerator.DisposeAsync();
+                }
+                catch
+                {
+                    /* swallow */
+                }
+            }
+
+            if (!string.IsNullOrEmpty(terminalError))
+            {
+                LlmCompletionResult failure = BuildFailureResult(
+                    terminalError, terminalErrorCode, terminalHttpStatus, terminalRetryAfterSeconds);
+                failure.ExecutedToolCalls = executedToolCalls;
+                return failure;
+            }
+
+            return new LlmCompletionResult
+            {
+                Ok = true,
+                Content = accumulated.ToString(),
+                PromptTokens = promptTokens,
+                CompletionTokens = completionTokens,
+                TotalTokens = totalTokens,
+                CacheReadTokens = cacheReadTokens,
+                CacheWriteTokens = cacheWriteTokens,
+                ExecutedToolCalls = executedToolCalls
+            };
         }
 
         private sealed class RequestBundle

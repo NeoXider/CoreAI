@@ -251,6 +251,8 @@ namespace CoreAI.Tests.PlayMode
                         Debug.Log($"[AllToolCalls]  Memory written by tool call: {state1.Memory}");
                     }
 
+                    WriteLlmDebug("MemoryTool_Write", capturingLlm, handle, sink.Items.Count);
+
                     Assert.IsTrue(memorySaved,
                         "Memory must be saved by the required memory tool call, not by text response.");
                 }
@@ -306,6 +308,8 @@ namespace CoreAI.Tests.PlayMode
                         Debug.Log($"[AllToolCalls]  Memory appended by tool call: {state2.Memory}");
                     }
 
+                    WriteLlmDebug("MemoryTool_Append", capturingLlm, handle, sink.Items.Count);
+
                     Assert.IsTrue(memoryAppended,
                         "Memory must be appended by actual tool call. Expected both 'Iron Sword' and 'Steel Shield' in memory.");
                 }
@@ -341,6 +345,8 @@ namespace CoreAI.Tests.PlayMode
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
+                    WriteLlmDebug("MemoryTool_Clear", capturingLlm, handle, sink.Items.Count);
 
                     if (!HasCompletedMemoryAction("clear"))
                     {
@@ -479,6 +485,8 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
+                    WriteLlmDebug("ExecuteLua_Programmer", capturingLlm, handle, sink.Items.Count);
+
                     Assert.Greater(sink.Items.Count, 0,
                         "Should produce at least one command. Model must call the execute_lua tool, " +
                         "not respond with text. The Lua code must be valid and produce ApplyAiGameCommand.");
@@ -511,6 +519,87 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+        }
+
+        /// <summary>
+        /// Dumps exactly what the model saw and produced to a file under TestResults/CoreAI/LlmDebug,
+        /// so a "model did not call the tool" failure can be diagnosed: does the system prompt carry the
+        /// tool contract, were the tools actually offered (and as native function calls?), and did the
+        /// model emit a tool call or plain text? Uses the already-captured request fields plus the global
+        /// tool-call history snapshot (CoreAi.GetToolCallHistorySnapshot) — the ready memory/trace
+        /// extraction. Never throws: diagnostics must not mask the real assertion.
+        /// </summary>
+        private static void WriteLlmDebug(
+            string label, CapturingLlmClient cap, PlayModeProductionLikeLlmHandle handle, int commandsProduced)
+        {
+            try
+            {
+                System.Text.StringBuilder sb = new();
+                sb.AppendLine($"=== LLM DEBUG: {label} ===");
+                sb.AppendLine($"backend: {handle.ResolvedBackend}");
+                sb.AppendLine($"client: {handle.Client.GetType().Name}");
+                sb.AppendLine($"supportsNativeToolCalling: {handle.Client.SupportsNativeToolCalling}");
+                sb.AppendLine();
+
+                sb.AppendLine("--- TOOLS OFFERED TO THE MODEL ---");
+                if (cap.LastTools == null || cap.LastTools.Count == 0)
+                {
+                    sb.AppendLine("(NONE — the request carried no tools; the model literally cannot call one)");
+                }
+                else
+                {
+                    foreach (ILlmTool tool in cap.LastTools)
+                    {
+                        sb.AppendLine($"- {tool.Name}: {tool.Description}");
+                        sb.AppendLine($"    schema: {tool.ParametersSchema}");
+                    }
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("--- SYSTEM PROMPT (what the model was told, incl. tool contract) ---");
+                sb.AppendLine(cap.LastSystemPrompt ?? "(null)");
+                sb.AppendLine();
+                sb.AppendLine("--- USER PAYLOAD ---");
+                sb.AppendLine(cap.LastUserPayload ?? "(null)");
+                sb.AppendLine();
+                sb.AppendLine("--- MODEL RAW RESPONSE (text; empty when it emitted only a tool call) ---");
+                sb.AppendLine(string.IsNullOrEmpty(cap.LastContent) ? "(empty)" : cap.LastContent);
+                sb.AppendLine();
+                sb.AppendLine($"--- COMMANDS PRODUCED (game-side effects): {commandsProduced} ---");
+
+                sb.AppendLine();
+                sb.AppendLine("--- TOOL-CALL HISTORY (what actually executed) ---");
+                var history = CoreAi.GetToolCallHistorySnapshot();
+                if (history == null || history.Count == 0)
+                {
+                    sb.AppendLine("(none — no tool call reached execution)");
+                }
+                else
+                {
+                    foreach (var rec in history)
+                    {
+                        if (rec == null)
+                        {
+                            continue;
+                        }
+
+                        sb.AppendLine($"- {rec.Info.ToolName} [{rec.Status}] args={rec.Info.ArgumentsJson}");
+                    }
+                }
+
+                string dir = System.IO.Path.Combine(
+                    System.IO.Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath,
+                    "TestResults", "CoreAI", "LlmDebug");
+                System.IO.Directory.CreateDirectory(dir);
+                string safe = label.Replace(' ', '_').Replace(':', '-');
+                string path = System.IO.Path.Combine(dir, $"{safe}.txt");
+                System.IO.File.WriteAllText(path, sb.ToString());
+                Debug.Log($"[AllToolCalls] LLM debug bundle written: {path}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AllToolCalls] LLM debug dump failed (non-fatal): {ex.Message}");
+            }
         }
 
         private static bool HasCompletedMemoryAction(string action)
@@ -591,6 +680,31 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 return result;
+            }
+
+            // Forward the streaming path to the inner client instead of inheriting ILlmClient's default
+            // (which collapses to CompleteAsync): with streaming-by-default orchestration the tool tests
+            // must exercise the REAL execute-as-you-stream path, and still capture what the model saw/said.
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                System.Threading.CancellationToken cancellationToken = default)
+            {
+                LastSystemPrompt = request.SystemPrompt;
+                LastUserPayload = request.UserPayload;
+                LastTools = request.Tools;
+
+                System.Text.StringBuilder sb = new();
+                await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken))
+                {
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        sb.Append(chunk.Text);
+                        LastContent = sb.ToString();
+                    }
+
+                    yield return chunk;
+                }
             }
 
             public void SetTools(IReadOnlyList<ILlmTool> tools)

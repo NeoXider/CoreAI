@@ -38,6 +38,10 @@ namespace CoreAI.Infrastructure.Llm
 
         private static long _toolNameRepairCount;
 
+        // Extra grace added to the per-call tool timeout when draining a streamed turn's in-flight
+        // calls at completion, so a call already near its own timeout is not abandoned a hair early.
+        private const int DrainGraceMarginMs = 1000;
+
         private int _consecutiveErrors;
         private readonly HashSet<string> _executedSignatures = new();
         private readonly List<LlmToolCallTrace> _executedTraces = new();
@@ -1001,40 +1005,111 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Per-turn state for execute-as-you-stream: tool calls executed one by one AS THEY ARRIVE
-        /// in the SSE stream (see <see cref="ExecuteStreamedAsync"/>), while duplicate suppression
-        /// and the consecutive-error counter keep the same TURN-level semantics as
-        /// <see cref="ExecuteBatchAsync"/>. Create via <see cref="BeginStreamedTurn"/>, finish via
-        /// <see cref="CompleteStreamedTurn"/>.
+        /// Per-turn state for execute-as-you-stream: tool calls executed AS THEY ARRIVE in the SSE
+        /// stream (see <see cref="ExecuteStreamedAsync"/>), while duplicate suppression and the
+        /// consecutive-error counter keep the same TURN-level semantics as
+        /// <see cref="ExecuteBatchAsync"/>. With <see cref="ICoreAISettings.MaxParallelToolCalls"/>
+        /// &gt; 1 arrived calls are scheduled concurrently (mirroring the batch concurrent path) and
+        /// their results are collated back into ARRIVAL order at completion. Create via
+        /// <see cref="BeginStreamedTurn"/>, finish via <see cref="CompleteStreamedTurnAsync"/> (or
+        /// the synchronous <see cref="CompleteStreamedTurn"/> when nothing is left in flight).
         /// </summary>
         public sealed class StreamedTurn
         {
-            internal readonly List<MEAI.AIContent> Results = new();
+            /// <summary>
+            /// One slot per arrived call, in arrival order (batch parity: original call order).
+            /// A slot is filled inline (sequential mode, duplicate suppression) or by a scheduled
+            /// worker (parallel mode); a slot still empty at finalization means the call never
+            /// finished (cancellation / mid-stream abort) and collates as an explicit failure.
+            /// AnyFailed/AllFailed and the results list are computed at completion from these
+            /// slots - worker tasks never mutate shared turn flags.
+            /// </summary>
+            internal readonly List<StreamedSlot> Slots = new();
+
             internal readonly List<string> Signatures = new();
             internal readonly HashSet<string> SeenInTurn = new(StringComparer.Ordinal);
-            internal bool AnyFailed;
-            internal bool AllFailed = true;
-            internal int Count;
+
+            /// <summary>Scheduled (parallel-mode) call tasks, drained at turn completion.</summary>
+            internal readonly List<Task> InFlight = new();
+
+            /// <summary>
+            /// Single ordered chain for serialized (mutating) tool calls, batch parity: each
+            /// serialized call awaits the previous one so no two mutating built-ins ever overlap.
+            /// </summary>
+            internal Task SerialChain = Task.CompletedTask;
+
+            /// <summary>
+            /// Bounds in-flight concurrency in parallel mode; created lazily on the first
+            /// scheduled call so the sequential fast-path allocates nothing extra.
+            /// </summary>
+            internal SemaphoreSlim Gate;
+        }
+
+        /// <summary>
+        /// One arrival-indexed result slot of a <see cref="StreamedTurn"/>. The result is stored
+        /// as a boxed <see cref="ToolCallResult"/> behind a volatile reference: a reference
+        /// publish is atomic, so a finalizer that gave up waiting (cancelled token, see
+        /// <see cref="CompleteStreamedTurnAsync"/>) can never observe a torn struct write from a
+        /// worker that completes concurrently.
+        /// </summary>
+        internal sealed class StreamedSlot
+        {
+            internal readonly string CallId;
+            private object _boxedResult;
+
+            internal StreamedSlot(string callId)
+            {
+                CallId = callId;
+            }
+
+            internal void Set(ToolCallResult result)
+            {
+                Volatile.Write(ref _boxedResult, result);
+            }
+
+            internal bool TryGet(out ToolCallResult result)
+            {
+                object boxed = Volatile.Read(ref _boxedResult);
+                if (boxed == null)
+                {
+                    result = default;
+                    return false;
+                }
+
+                result = (ToolCallResult)boxed;
+                return true;
+            }
         }
 
         /// <summary>Starts a streamed turn (execute-as-you-stream counterpart of one batch).</summary>
         public StreamedTurn BeginStreamedTurn() => new();
 
         /// <summary>
-        /// Executes one tool call the moment it arrives in the stream. Mirrors the sequential batch
-        /// path per call: an exact repeat (same canonical name + key-sorted args) of a call already
-        /// executed EARLIER IN THIS TURN is suppressed with the same "Duplicate tool call" result the
-        /// batch path produces; tools with AllowDuplicates are exempt. The consecutive-error counter
-        /// is NOT touched here — the whole turn records once in <see cref="CompleteStreamedTurn"/>,
-        /// exactly like a batch.
+        /// Executes one tool call the moment it arrives in the stream. Mirrors the batch path per
+        /// call: an exact repeat (same canonical name + key-sorted args) of a call already
+        /// executed EARLIER IN THIS TURN is suppressed with the same "Duplicate tool call" result
+        /// the batch path produces; tools with AllowDuplicates are exempt. Signature bookkeeping,
+        /// the intra-turn duplicate check, and the cross-turn echo check always resolve
+        /// synchronously at arrival (arrival ORDER is what makes them deterministic), so a
+        /// suppressed call fills its slot immediately and returns its result in both modes.
+        /// <para>
+        /// Sequential mode (<see cref="ICoreAISettings.MaxParallelToolCalls"/> &lt;= 1): the call
+        /// executes inline and its result is returned, byte-identical to the pre-parallel
+        /// behavior. Parallel mode: the call's arrival slot is reserved and a bounded-concurrency
+        /// worker is scheduled mirroring the batch concurrent path (mutating built-ins join the
+        /// turn's single serialization chain, everything else is gate-bounded); the method
+        /// returns <c>null</c> and the result surfaces in <see cref="CompleteStreamedTurnAsync"/>,
+        /// collated in arrival order. The streaming caller discards the per-call return value
+        /// either way. The consecutive-error counter is NOT touched here — the whole turn records
+        /// once at completion, exactly like a batch.
+        /// </para>
         /// </summary>
-        public async Task<ToolCallResult> ExecuteStreamedAsync(
+        public async Task<ToolCallResult?> ExecuteStreamedAsync(
             StreamedTurn turn,
             MEAI.FunctionCallContent fc,
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
-            ToolCallResult result;
             string signature = null;
             bool hasSignature = !_allowDuplicateToolCalls && TryBuildDuplicateSignature(fc, out signature);
             if (hasSignature)
@@ -1050,46 +1125,237 @@ namespace CoreAI.Infrastructure.Llm
             // protocol sending every tool result (models stop re-issuing "unanswered" calls).
             bool crossTurnEcho = hasSignature && _executedSignatures.Contains(signature);
 
+            StreamedSlot slot = new(fc.CallId);
+            turn.Slots.Add(slot);
+
             if (hasSignature && (crossTurnEcho || !turn.SeenInTurn.Add(signature)))
             {
                 string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
-                result = new ToolCallResult
+                ToolCallResult suppressed = new()
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, duplicate),
                     Succeeded = false
                 };
+                slot.Set(suppressed);
+                return suppressed;
+            }
+
+            int maxParallel = Math.Max(1, _settings.MaxParallelToolCalls);
+            if (maxParallel <= 1)
+            {
+                // Sequential fast-path: byte-identical to the pre-parallel streamed behavior.
+                ToolCallResult executed =
+                    await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                slot.Set(executed);
+                return executed;
+            }
+
+            // Parallel scheduling, batch parity with the ExecuteBatchAsync concurrent path:
+            // mutating built-ins chain onto SerialChain so they never overlap; everything else
+            // runs gate-bounded. The per-call result is deferred to CompleteStreamedTurnAsync.
+            turn.Gate ??= new SemaphoreSlim(maxParallel, maxParallel);
+            if (IsSerializedTool(fc))
+            {
+                Task previous = turn.SerialChain;
+                Task chained = RunGuardedAsync(previous);
+                turn.SerialChain = chained;
+                turn.InFlight.Add(chained);
             }
             else
             {
-                result = await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                turn.InFlight.Add(RunGuardedAsync(Task.CompletedTask));
             }
 
-            turn.Count++;
-            turn.Results.Add(result.Result);
-            if (!result.Succeeded)
-            {
-                turn.AnyFailed = true;
-            }
-            else
-            {
-                turn.AllFailed = false;
-            }
+            return null;
 
-            return result;
+            // Local function captures slot/fc; the gate bounds total in-flight concurrency.
+            async Task RunGuardedAsync(Task waitFor)
+            {
+                if (waitFor != null && !waitFor.IsCompleted)
+                {
+                    // Serialization ordering: wait for the prior serialized call. Swallow its
+                    // fault/cancellation here (it is observed via its own slot) so chaining never throws.
+                    try
+                    {
+                        await waitFor.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        /* prior serialized call's outcome handled in its own slot */
+                    }
+                }
+
+                await turn.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    slot.Set(await ExecuteSingleAsync(fc, chatOptions, cancellationToken)
+                        .ConfigureAwait(false));
+                }
+                finally
+                {
+                    turn.Gate.Release();
+                }
+            }
         }
 
         /// <summary>
-        /// Ends a streamed turn: records ONE success/failure against the consecutive-error counter
-        /// (batch parity) and registers the turn's combined signature so a later turn that re-sends
-        /// the exact same batch through <see cref="ExecuteBatchAsync"/> is still caught as an echo.
-        /// If the combined signature was ALREADY registered earlier in this request, the whole turn
-        /// is a cross-turn echo: it records ONE failure (never a success) and reports AnyFailed and
-        /// AllFailed, exactly like the all-duplicate batch branch in <see cref="ExecuteBatchAsync"/>.
-        /// Otherwise returns the same shape <see cref="ExecuteBatchAsync"/> would for the whole turn.
+        /// Synchronous turn completion, valid ONLY when no scheduled call is still running — i.e.
+        /// the sequential path (<see cref="ICoreAISettings.MaxParallelToolCalls"/> &lt;= 1, nothing
+        /// is ever scheduled) or a parallel turn whose workers all happened to finish already.
+        /// A genuinely in-flight call cannot be awaited here without sync-over-async (which
+        /// deadlocks the Unity main thread), so that case throws instead of blocking: use
+        /// <see cref="CompleteStreamedTurnAsync"/>. See that overload for the completion semantics.
         /// </summary>
         public BatchToolCallResult CompleteStreamedTurn(StreamedTurn turn)
         {
+            foreach (Task inFlight in turn.InFlight)
+            {
+                if (!inFlight.IsCompleted)
+                {
+                    throw new InvalidOperationException(
+                        "CompleteStreamedTurn was called while a scheduled streamed tool call is " +
+                        "still in flight (MaxParallelToolCalls > 1). Use CompleteStreamedTurnAsync.");
+                }
+
+                // Observe faults/cancellations of completed workers so they never surface as
+                // UnobservedTaskException; the per-call outcomes are read from the slots.
+                _ = inFlight.Exception;
+            }
+
+            return FinalizeStreamedTurn(turn);
+        }
+
+        /// <summary>
+        /// Ends a streamed turn: drains every scheduled in-flight call, collates the slots
+        /// strictly in ARRIVAL order, records ONE success/failure against the consecutive-error
+        /// counter (batch parity) and registers the turn's combined signature so a later turn that
+        /// re-sends the exact same batch through <see cref="ExecuteBatchAsync"/> is still caught
+        /// as an echo. If the combined signature was ALREADY registered earlier in this request,
+        /// the whole turn is a cross-turn echo: it records ONE failure (never a success) and
+        /// reports AnyFailed and AllFailed, exactly like the all-duplicate batch branch in
+        /// <see cref="ExecuteBatchAsync"/>. Otherwise returns the same shape
+        /// <see cref="ExecuteBatchAsync"/> would for the whole turn.
+        /// <para>
+        /// Finalization never throws away the turn's accounting — it is also the mid-stream-abort
+        /// path. On outer cancellation (or a tool that ignores its token) it stops waiting once
+        /// <paramref name="cancellationToken"/> fires, marks the still-unfinished slots as failed
+        /// with an explicit result, and still records/registers the turn.
+        /// </para>
+        /// </summary>
+        public async Task<BatchToolCallResult> CompleteStreamedTurnAsync(
+            StreamedTurn turn,
+            CancellationToken cancellationToken)
+        {
+            if (turn.InFlight.Count > 0)
+            {
+                Task allInFlight = Task.WhenAll(turn.InFlight);
+                int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
+                if (!allInFlight.IsCompleted && (cancellationToken.CanBeCanceled || toolTimeoutMs > 0))
+                {
+                    // Bounded drain: workers observe cancellation cooperatively, but a tool body that
+                    // ignores its token must not hang finalization forever — the mid-stream-abort call
+                    // site relies on this method returning even though it passes an uncancellable token
+                    // (so the turn is recorded before the transport failure surfaces). Wait for whichever
+                    // fires first: every in-flight call finishing, the caller's token, or a grace deadline
+                    // covering a well-behaved per-call timeout with margin. A slot still unfinished after
+                    // that collates as an explicit failure below. The deadline is what protects the
+                    // CancellationToken.None abort path (a cancellation-ignoring tool can't wedge it).
+                    using CancellationTokenSource deadline =
+                        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    if (toolTimeoutMs > 0)
+                    {
+                        deadline.CancelAfter(toolTimeoutMs + DrainGraceMarginMs);
+                    }
+
+                    TaskCompletionSource<object> drainSignal =
+                        new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    using CancellationTokenRegistration registration = deadline.Token.Register(
+                        state => ((TaskCompletionSource<object>)state).TrySetResult(null),
+                        drainSignal);
+                    await Task.WhenAny(allInFlight, drainSignal.Task).ConfigureAwait(false);
+                }
+                else if (!allInFlight.IsCompleted)
+                {
+                    // Only reached when per-call tool timeouts are explicitly disabled
+                    // (DefaultToolTimeoutMs <= 0) AND the caller passed an uncancellable token: honour
+                    // the "no timeout" choice and wait for natural completion.
+                    try
+                    {
+                        await allInFlight.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        /* per-call outcomes are read from the slots below */
+                    }
+                }
+
+                if (allInFlight.IsCompleted)
+                {
+                    // Observe faults/cancellations so worker exceptions (only outer-cancellation
+                    // OCEs escape ExecuteSingleAsync) never surface as UnobservedTaskException.
+                    _ = allInFlight.Exception;
+                }
+                else
+                {
+                    // Gave up waiting (token fired first): observe the eventual fault off-line.
+                    _ = allInFlight.ContinueWith(
+                        t => _ = t.Exception,
+                        CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+            }
+
+            return FinalizeStreamedTurn(turn);
+        }
+
+        /// <summary>
+        /// Shared completion tail of <see cref="CompleteStreamedTurn"/> and
+        /// <see cref="CompleteStreamedTurnAsync"/>: arrival-order slot collation, the whole-turn
+        /// echo branch, and exactly one consecutive-error record for the turn.
+        /// </summary>
+        private BatchToolCallResult FinalizeStreamedTurn(StreamedTurn turn)
+        {
+            // Collate strictly in arrival order (batch parity: original call order), independent
+            // of completion order. A slot still empty here means its call never produced a result
+            // before finalization (cancelled / stream aborted mid-flight): it collates as an
+            // explicit failure so a partially-applied turn keeps full result accounting.
+            List<MEAI.AIContent> results = new(turn.Slots.Count);
+            bool anyFailed = false;
+            bool allFailed = true;
+            foreach (StreamedSlot slot in turn.Slots)
+            {
+                if (!slot.TryGet(out ToolCallResult r))
+                {
+                    r = new ToolCallResult
+                    {
+                        Result = new MEAI.FunctionResultContent(slot.CallId,
+                            "Error: Tool call did not complete - the turn was finalized (cancelled " +
+                            "or stream aborted) while the call was still in flight."),
+                        Succeeded = false
+                    };
+                }
+
+                results.Add(r.Result);
+                if (!r.Succeeded)
+                {
+                    anyFailed = true;
+                }
+                else
+                {
+                    allFailed = false;
+                }
+            }
+
+            // The gate is only safe to dispose once no worker can touch it; a worker abandoned by
+            // the bounded drain may still call Release, so in that case the gate is left to the GC
+            // (a SemaphoreSlim whose AvailableWaitHandle was never read holds no unmanaged state).
+            if (turn.Gate != null && turn.InFlight.TrueForAll(t => t.IsCompleted))
+            {
+                turn.Gate.Dispose();
+            }
+
             if (turn.Signatures.Count > 0)
             {
                 // Register the combined turn signature BEFORE recording the turn's outcome, mirroring
@@ -1107,22 +1373,22 @@ namespace CoreAI.Infrastructure.Llm
                 if (!_executedSignatures.Add(combined))
                 {
                     string echoDetail =
-                        $"Whole-turn echo: identical streamed turn ({turn.Count} calls) already executed " +
+                        $"Whole-turn echo: identical streamed turn ({turn.Slots.Count} calls) already executed " +
                         "earlier in this request - counted as a failed iteration.";
                     AddTrace(new LlmToolCallTrace("", false, 0d, "duplicate", echoDetail));
                     RecordFailure();
                     return new BatchToolCallResult
                     {
-                        Results = turn.Results,
+                        Results = results,
                         AnyFailed = true,
                         AllFailed = true
                     };
                 }
             }
 
-            if (turn.Count > 0)
+            if (turn.Slots.Count > 0)
             {
-                if (!turn.AnyFailed)
+                if (!anyFailed)
                 {
                     RecordSuccess();
                 }
@@ -1134,9 +1400,9 @@ namespace CoreAI.Infrastructure.Llm
 
             return new BatchToolCallResult
             {
-                Results = turn.Results,
-                AnyFailed = turn.AnyFailed,
-                AllFailed = turn.Count > 0 && turn.AnyFailed && turn.AllFailed
+                Results = results,
+                AnyFailed = anyFailed,
+                AllFailed = turn.Slots.Count > 0 && anyFailed && allFailed
             };
         }
 

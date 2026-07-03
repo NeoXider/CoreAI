@@ -164,7 +164,7 @@ namespace CoreAI.Tests.EditMode
             Assert.That(last.Error, Does.Contain("1 executed tool call"));
             Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "world_tool" && t.Success),
                 "The executed call's trace must ride the terminal chunk so the failure is graded, not retried blind.");
-            Assert.That(logger.Warnings.Any(w => w.Contains("already executed mid-stream")), Is.True,
+            Assert.That(logger.Warnings.Any(w => w.Contains("started mid-stream")), Is.True,
                 "Turn finalization must be logged when the stream dies after executed calls.");
         }
 
@@ -242,11 +242,57 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(tool.Executed, "Cancellation arrived after the tool already mutated state.");
             // The per-request ToolExecutionPolicy is method-local inside CompleteStreamingAsync, so
             // its ConsecutiveErrors/echo registry cannot be probed after the request dies; the
-            // finalization warning is logged strictly AFTER policy.CompleteStreamedTurn returns and
-            // is therefore the observable proof that the turn was recorded before cancellation.
+            // finalization warning is logged strictly AFTER policy.CompleteStreamedTurnAsync
+            // completes and is therefore the observable proof that the turn was recorded before
+            // cancellation.
             Assert.That(logger.Warnings.Any(w =>
-                    w.Contains("already executed mid-stream") && w.Contains("1 tool call")), Is.True,
-                "CompleteStreamedTurn must run (and be logged) before OperationCanceledException propagates.");
+                    w.Contains("started mid-stream") && w.Contains("1 tool call")), Is.True,
+                "CompleteStreamedTurnAsync must run (and be logged) before OperationCanceledException propagates.");
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_TwoNativeToolCallsWithParallelLimit_OverlapAndResultsInCallOrder()
+        {
+            OverlappingToolPair pair = new();
+            TwoNativeToolCallsScripted inner = new();
+            RecordingLogger logger = new();
+            MeaiLlmClient client = new(inner, logger, new StubSettings { MaxParallelToolCalls = 4 }, null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { pair.ToolAlpha, pair.ToolBeta }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.AreEqual(2, pair.MaxObservedConcurrency,
+                "With MaxParallelToolCalls >= 2 both streamed calls must run concurrently: each tool " +
+                "holds its slot until the other has started, so a sequential regression caps this at 1.");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "tool_alpha" && t.Success));
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "tool_beta" && t.Success));
+
+            // Wire protocol: the results ride ONE tool-role message, collated in CALL (arrival)
+            // order regardless of completion order, each result echoing its call's id.
+            Assert.IsNotNull(inner.SecondCallMessages,
+                "The tool-result roundtrip (second stream call) must have happened.");
+            MEAI.ChatMessage toolMessage = inner.SecondCallMessages
+                .LastOrDefault(m => m.Role == MEAI.ChatRole.Tool);
+            Assert.IsNotNull(toolMessage, "The second roundtrip must carry the tool-role results message.");
+            List<MEAI.FunctionResultContent> results =
+                toolMessage.Contents.OfType<MEAI.FunctionResultContent>().ToList();
+            Assert.AreEqual(2, results.Count, "Both tool results must ride the single tool-role message.");
+            Assert.AreEqual("call-alpha", results[0].CallId,
+                "Result order must match call order, not completion order.");
+            Assert.AreEqual("call-beta", results[1].CallId,
+                "Result order must match call order, not completion order.");
         }
 
         [Test]
@@ -386,6 +432,157 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Two tools that prove observable overlap: each call increments a shared concurrency
+        /// counter, then holds its slot (Task.Delay-based) until BOTH calls have started. Under
+        /// parallel scheduling the max observed concurrency reaches 2; under a sequential
+        /// regression the first call only stops waiting via the bounded timeout and the counter
+        /// never exceeds 1.
+        /// </summary>
+        private sealed class OverlappingToolPair
+        {
+            private readonly TaskCompletionSource<bool> _bothStarted =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            private int _startedCount;
+            private int _running;
+            private int _maxObservedConcurrency;
+
+            public OverlappingToolPair()
+            {
+                // Asymmetric tails: the FIRST call (alpha) finishes LAST, so the call-order
+                // assertion on the tool-role message genuinely distinguishes call order from
+                // completion order.
+                ToolAlpha = new OverlappingTool("tool_alpha", this, extraHoldMs: 150);
+                ToolBeta = new OverlappingTool("tool_beta", this, extraHoldMs: 1);
+            }
+
+            public OverlappingTool ToolAlpha { get; }
+            public OverlappingTool ToolBeta { get; }
+            public int MaxObservedConcurrency => Volatile.Read(ref _maxObservedConcurrency);
+
+            private async Task<string> RunAsync(int extraHoldMs, CancellationToken cancellationToken)
+            {
+                int running = Interlocked.Increment(ref _running);
+                InterlockedMax(ref _maxObservedConcurrency, running);
+                if (Interlocked.Increment(ref _startedCount) == 2)
+                {
+                    _bothStarted.TrySetResult(true);
+                }
+
+                // Deterministic overlap window: hold this slot until the other call starts too.
+                // Bounded so a sequential regression fails the concurrency assertion (~2s) instead
+                // of deadlocking the test run.
+                await Task.WhenAny(_bothStarted.Task, Task.Delay(2000, cancellationToken));
+                await Task.Delay(extraHoldMs, cancellationToken);
+                Interlocked.Decrement(ref _running);
+                return "{\"Success\":true}";
+            }
+
+            private static void InterlockedMax(ref int location, int value)
+            {
+                int current = Volatile.Read(ref location);
+                while (value > current)
+                {
+                    int previous = Interlocked.CompareExchange(ref location, value, current);
+                    if (previous == current)
+                    {
+                        break;
+                    }
+
+                    current = previous;
+                }
+            }
+
+            public sealed class OverlappingTool : ILlmTool, IAIFunctionLlmTool
+            {
+                private readonly OverlappingToolPair _pair;
+                private readonly int _extraHoldMs;
+
+                public OverlappingTool(string name, OverlappingToolPair pair, int extraHoldMs)
+                {
+                    Name = name;
+                    _pair = pair;
+                    _extraHoldMs = extraHoldMs;
+                }
+
+                public string Name { get; }
+                public string Description => "overlap probe tool";
+                public string ParametersSchema => "{}";
+                public bool AllowDuplicates => true;
+
+                public MEAI.AIFunction CreateAIFunction()
+                {
+                    Func<CancellationToken, Task<string>> func = ct => _pair.RunAsync(_extraHoldMs, ct);
+                    return MEAI.AIFunctionFactory.Create(func,
+                        new MEAI.AIFunctionFactoryOptions { Name = Name, Description = Description });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Inner client for the parallel streamed path: the first stream yields TWO native
+        /// FunctionCallContent updates (distinct tools, distinct call ids) and ends; the second
+        /// stream (tool-result roundtrip) snapshots the request messages - so the test can
+        /// inspect the tool-role protocol message - and yields plain text.
+        /// </summary>
+        private sealed class TwoNativeToolCallsScripted : MEAI.IChatClient
+        {
+            private int _streamCalls;
+
+            public List<MEAI.ChatMessage> SecondCallMessages { get; private set; }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                _streamCalls++;
+                if (_streamCalls == 1)
+                {
+                    yield return new MEAI.ChatResponseUpdate(
+                        MEAI.ChatRole.Assistant,
+                        new List<MEAI.AIContent>
+                        {
+                            new MEAI.FunctionCallContent(
+                                "call-alpha", "tool_alpha", new Dictionary<string, object>())
+                        });
+                    await Task.Yield();
+                    yield return new MEAI.ChatResponseUpdate(
+                        MEAI.ChatRole.Assistant,
+                        new List<MEAI.AIContent>
+                        {
+                            new MEAI.FunctionCallContent(
+                                "call-beta", "tool_beta", new Dictionary<string, object>())
+                        });
+                    await Task.Yield();
+                }
+                else
+                {
+                    // Snapshot: the streaming loop keeps mutating the same message list.
+                    SecondCallMessages = chatMessages.ToList();
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "Done.");
+                    await Task.Yield();
+                }
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
         private sealed class StreamingScripted : MEAI.IChatClient
         {
             private readonly Queue<string[]> _scripts;
@@ -474,6 +671,12 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
+
+            /// <summary>
+            /// Mirrors the ToolExecutionPolicyEditModeTests stub: explicit override of the
+            /// ICoreAISettings default-interface member (also 4) so tests can pin the mode.
+            /// </summary>
+            public int MaxParallelToolCalls { get; set; } = 4;
         }
     }
 }

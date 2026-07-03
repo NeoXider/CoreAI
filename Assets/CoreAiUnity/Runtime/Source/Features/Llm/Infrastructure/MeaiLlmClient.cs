@@ -522,9 +522,12 @@ namespace CoreAI.Infrastructure.Llm
                 // still closes with the exact batch protocol (assistant tool_calls + one tool-role
                 // results message), so the model sees no difference.
                 ToolExecutionPolicy.StreamedTurn streamedTurn = null;
-                // Local mirror of the streamed turn's executed-call count. StreamedTurn.Count is
-                // internal to CoreAI.Core (not visible from this assembly), and the mid-stream
-                // failure handler below must know whether any call already mutated the world.
+                // Local mirror of how many calls were handed to the policy this turn: executed
+                // inline in sequential mode, or scheduled for parallel execution (the policy
+                // returns null for those and their results surface at turn completion). The
+                // streamed turn's slot count is internal to CoreAI.Core (not visible from this
+                // assembly), and the mid-stream failure handler below must know whether any call
+                // may already have mutated the world.
                 int streamedExecutedCallCount = 0;
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
@@ -660,13 +663,20 @@ namespace CoreAI.Infrastructure.Llm
                             throw;
                         }
 
-                        // Tool calls already ran mid-stream: close the turn so the
-                        // consecutive-error counter records once and the turn signature is
-                        // registered (echo guard, batch parity) before the failure surfaces.
-                        policy.CompleteStreamedTurn(streamedTurn);
+                        // Tool calls were already handed to the policy mid-stream (with parallel
+                        // execution some may still be IN FLIGHT): close the turn so in-flight
+                        // calls are drained, the consecutive-error counter records once and the
+                        // turn signature is registered (echo guard, batch parity) before the
+                        // failure surfaces. CancellationToken.None on purpose: finalization of
+                        // already-started calls must not itself be cancelled - the per-call tasks
+                        // already carry the request token, and any slot left unfinished collates
+                        // as an explicit failed result inside the policy. CompleteStreamedTurnAsync
+                        // self-bounds the drain by the per-call tool timeout, so passing None here
+                        // still cannot hang finalization on a cancellation-ignoring tool.
+                        await policy.CompleteStreamedTurnAsync(streamedTurn, CancellationToken.None);
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming transport failed after {streamedExecutedCallCount} tool call(s) " +
-                            "already executed mid-stream; finalizing the partial turn instead of abandoning it " +
+                            "started mid-stream; finalizing the partial turn instead of abandoning it " +
                             $"({ex.GetType().Name}: {ex.Message}).");
 
                         if (ex is OperationCanceledException)
@@ -873,11 +883,12 @@ namespace CoreAI.Infrastructure.Llm
 
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
 
-                    // Streamed turn: every call already ran the moment it arrived — close the turn
-                    // (one consecutive-error record + echo signature, batch parity) and reuse its
+                    // Streamed turn: every call was executed or scheduled the moment it arrived —
+                    // close the turn (drain any in-flight parallel calls, one consecutive-error
+                    // record + echo signature, batch parity) and reuse its arrival-ordered
                     // results. Otherwise fall back to the classic end-of-stream batch.
                     ToolExecutionPolicy.BatchToolCallResult batch = streamedTurn != null
-                        ? policy.CompleteStreamedTurn(streamedTurn)
+                        ? await policy.CompleteStreamedTurnAsync(streamedTurn, cancellationToken)
                         : await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     if (!batch.AllFailed)

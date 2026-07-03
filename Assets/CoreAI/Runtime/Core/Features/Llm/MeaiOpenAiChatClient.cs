@@ -316,6 +316,22 @@ namespace CoreAI.Infrastructure.Llm
                 catch (Exception ex)
                 {
                     _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}", LogTag.Llm);
+
+                    // A transport-level SEND failure (typically a pooled keep-alive connection the local
+                    // server has already closed — System.Net.Http surfaces it as "An error occurred while
+                    // sending the request") is retryable: a fresh attempt opens a new connection. Bounded
+                    // to a few quick retries so a genuinely-down backend still surfaces promptly as
+                    // BackendUnavailable rather than spinning the full local-reload budget.
+                    const int transportSendRetryMaxAttempts = 3;
+                    if (attempt < transportSendRetryMaxAttempts && !cancellationToken.IsCancellationRequested)
+                    {
+                        _log.Info(
+                            "MeaiOpenAiChatClient: transient transport send failure on stream-open; retrying after backoff...",
+                            LogTag.Llm);
+                        await BackoffDelayAsync(Math.Min(2000, 300 * attempt), cancellationToken);
+                        continue;
+                    }
+
                     throw new LlmClientException($"HTTP stream send failed: {ex.Message}",
                         LlmErrorCode.BackendUnavailable);
                 }

@@ -168,6 +168,31 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetStreamingResponseAsync_TransportSendFailsOnce_RetriesAndCompletes()
+        {
+            const string sse =
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+                "data: [DONE]\n\n";
+            FailSendOnceSseTransport transport = new(sse);
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("hello", string.Concat(parts),
+                "The stream must complete after retrying a transient transport send failure on open.");
+            Assert.AreEqual(2, transport.Calls,
+                "A transport send failure on stream-open must trigger exactly one retry (2 opens total).");
+        }
+
+        [Test]
         public async Task GetStreamingResponseAsync_SlowConsumerBetweenUpdates_DoesNotTripStallTimeout()
         {
             // The streaming iterator is pull-based: the consumer (MeaiLlmClient) executes tool
@@ -522,6 +547,53 @@ namespace CoreAI.Tests.EditMode
             public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
                 CancellationToken cancellationToken = default)
             {
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+
+                return Task.FromResult(result.WithRawStream(new ThrowsAfterPayloadStream(_sse)));
+            }
+        }
+
+        /// <summary>
+        /// Fails the FIRST stream-open with a transport send error (as a stale pooled keep-alive
+        /// connection does), then serves a normal SSE stream — models the bounded transport-send retry.
+        /// </summary>
+        private sealed class FailSendOnceSseTransport : IOpenAiHttpTransport
+        {
+            private readonly string _sse;
+            private int _calls;
+
+            public FailSendOnceSseTransport(string sse)
+            {
+                _sse = sse;
+            }
+
+            public int Calls => _calls;
+            public string DebugLabel => "FailSendOnce";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                _calls++;
+                if (_calls == 1)
+                {
+                    throw new System.Net.Http.HttpRequestException(
+                        "An error occurred while sending the request");
+                }
+
                 OpenAiHttpSseOpenResult result = new()
                 {
                     StatusCode = 200,
