@@ -96,6 +96,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_RequireSpecific_MapsToRequiredModeAndNarrowsTools()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool>
+                {
+                    new ExplicitFunctionTool("memory"),
+                    new ExplicitFunctionTool("execute_lua")
+                },
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = "memory"
+            }, CancellationToken.None);
+
+            // Local llama.cpp / LM Studio servers 400 on a specific-function tool_choice, so
+            // RequireSpecific must map to "required" (RequireAny) with the tools narrowed to the single
+            // forced tool - never a RequiredChatToolMode carrying a specific RequiredFunctionName.
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(inner.LastOptions?.ToolMode,
+                "RequireSpecific must serialize as tool_choice=required, not a specific function.");
+            Assert.IsNull(((MEAI.RequiredChatToolMode)inner.LastOptions.ToolMode).RequiredFunctionName,
+                "A specific-function tool_choice is rejected (HTTP 400) by local OpenAI-compatible servers.");
+            Assert.IsNotNull(inner.LastOptions.Tools);
+            Assert.AreEqual(1, inner.LastOptions.Tools.Count,
+                "The tools list must be narrowed to just the forced tool so 'required' forces exactly it.");
+            Assert.AreEqual("memory", inner.LastOptions.Tools[0].Name);
+        }
+
+        [Test]
         public async Task CompleteAsync_NativeTools_AreCanonicalOrdinalByName()
         {
             CapturingChatClient inner = new();

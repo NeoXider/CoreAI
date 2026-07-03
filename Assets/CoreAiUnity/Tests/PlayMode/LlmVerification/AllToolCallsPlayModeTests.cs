@@ -446,8 +446,15 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);
 
                     //    native tool calling
+                    // The test sandbox exposes ONLY create_item(name, type, quality) and report(message)
+                    // (see TestLuaExecutor). The generic Programmer prompt advertises coreai_world_*/unity_*
+                    // APIs that do not exist here, so the hint must name the real API — this test verifies
+                    // tool calling with valid Lua, not blind API discovery in a stub sandbox.
                     string prompt =
-                        "Create a simple item called 'TestDagger' with quality 50 in the game.";
+                        "Create a simple item called 'TestDagger' with quality 50 in the game. " +
+                        "In this sandbox the only available Lua globals are " +
+                        "create_item(name, type, quality) and report(message); " +
+                        "call the execute_lua tool with Lua code that uses create_item.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");

@@ -99,8 +99,11 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! Move command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("move")),
-                $"Command move not found. Last was: {setup.WorldExecutor.LastCommandJson}");
+            // The tool schema advertises 'change' for position updates ('move' is only a legacy executor
+            // alias), so a model that emits change with the target coordinates has moved the object.
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j =>
+                    j.Contains("move") || (j.Contains("\"change\"") && j.Contains("\"hasPosition\":true"))),
+                $"No move/position-change command found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
         [UnityTest]

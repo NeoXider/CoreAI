@@ -228,6 +228,10 @@ namespace CoreAI.Tests.PlayMode
                         RoleId = BuiltInAgentRoleIds.Programmer,
                         Hint = "Generate Lua code for a weapon.\n" +
                                "Execute the Lua through the available tool and return a compact result.",
+                        // Live models occasionally reply with the Lua as text instead of invoking the
+                        // tool; this step verifies the execute_lua plumbing, so force the invocation.
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "execute_lua",
                         MaxOutputTokens = LiveModelMaxOutputTokens
                     }, cts.Token);
 

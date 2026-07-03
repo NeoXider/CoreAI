@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Forced-tool-mode compat + local-transport hardening (2026-07-03)
+
+- **`RequireSpecific` forced tool mode is now provider-portable.** Instead of MEAI's
+  `ChatToolMode.RequireSpecific(name)` (whose wire form — a forced-specific `tool_choice` — some
+  OpenAI-compatible local servers reject), `MeaiLlmClient.ApplyForcedToolMode` maps it to
+  `RequireAny` while narrowing `options.Tools` to the single requested tool; post-call iterations
+  restore the full tool list together with the usual switch back to `Auto`. An unknown
+  `RequiredToolName` degrades to plain `RequireAny` with a warning instead of a guaranteed provider
+  error.
+- **`HttpClientOpenAiTransport` bypasses the system proxy for its shared clients** (`UseProxy =
+  false`) so local LLM endpoints are never routed through a WinINET proxy/VPN driver. Deliberately
+  does NOT also assign `Proxy = null`: on Unity Mono, `HttpClientHandler` defers property writes to
+  an inner `MonoWebRequestHandler`, and that assignment throws `InvalidOperationException` lazily on
+  the first request, poisoning every request through the shared client.
+- **Stream-open failures now log the inner exception** (e.g. `WebException: ConnectFailure`) instead
+  of only the generic "An error occurred while sending the request" wrapper, so a refused TCP
+  connection is distinguishable from a mid-handshake reset in the log.
+
 ### Streaming-by-default task execution + transport-send retry (2026-07-03)
 
 Two changes that make streaming the default execution path everywhere and keep it reliable against

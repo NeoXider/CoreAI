@@ -315,7 +315,13 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (Exception ex)
                 {
-                    _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}", LogTag.Llm);
+                    // Include the inner exception: the outer "An error occurred while sending the request"
+                    // is a generic wrapper; the real cause (e.g. WebException ConnectFailure = the local
+                    // server refused the TCP connection, vs a read/reset mid-stream) only appears inside.
+                    string innerDetail = ex.InnerException != null
+                        ? $" ({ex.InnerException.GetType().Name}: {ex.InnerException.Message})"
+                        : "";
+                    _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}{innerDetail}", LogTag.Llm);
 
                     // A transport-level SEND failure (typically a pooled keep-alive connection the local
                     // server has already closed — System.Net.Http surfaces it as "An error occurred while

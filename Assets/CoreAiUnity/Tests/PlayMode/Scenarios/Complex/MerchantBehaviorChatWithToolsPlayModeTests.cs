@@ -136,7 +136,10 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
                     "Player says: 'I can spend at most 40 gold and I want one Iron Sword. " +
-                    "Can we make a deal and complete the purchase if the price fits?'");
+                    "Can we make a deal and complete the purchase if the price fits?' " +
+                    "As the merchant: if the price is above the player's budget, call apply_discount so it fits, " +
+                    "then ALWAYS finish the deal in this same turn by calling buy_item for Iron Sword x1 — " +
+                    "announcing the discount without the buy_item call does not complete the purchase.");
 
                 Assert.IsTrue(inventory.CallLog.Any(c => c.StartsWith("get_inventory", StringComparison.Ordinal)),
                     "Merchant should inspect inventory.");

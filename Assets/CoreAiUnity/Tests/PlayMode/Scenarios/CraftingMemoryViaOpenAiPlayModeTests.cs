@@ -139,7 +139,11 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
+                        Hint = prompt,
+                        // Live models occasionally reply with the Lua as text instead of invoking the
+                        // tool; the craft chain needs the real execute_lua record, so force the call.
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "execute_lua"
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 1");
@@ -176,7 +180,11 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
+                        Hint = prompt,
+                        // Live models occasionally reply with the Lua as text instead of invoking the
+                        // tool; the craft chain needs the real execute_lua record, so force the call.
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "execute_lua"
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 2");
@@ -213,7 +221,11 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
+                        Hint = prompt,
+                        // Live models occasionally reply with the Lua as text instead of invoking the
+                        // tool; the craft chain needs the real execute_lua record, so force the call.
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "execute_lua"
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 3");
@@ -685,10 +697,11 @@ namespace CoreAI.Tests.PlayMode
                   "Create a weapon that is distinct from the previous crafts recorded above.\n\n";
 
             string instructions =
-                "Apply the craft in the game through the available Lua execution capability. " +
+                "Apply the craft in the game by CALLING the execute_lua tool (a text reply with Lua code does " +
+                "not execute anything). " +
                 "Do not call memory(...) inside Lua; this test harness persists canonical memory after execute_lua. " +
                 "The created item should have a concrete name, type 'weapon', and a numeric quality value. " +
-                "Return Lua code that contains the concrete item name, for example local weapon_name = \"Name\".";
+                "Pass Lua code that contains the concrete item name, for example local weapon_name = \"Name\".";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -703,9 +716,10 @@ namespace CoreAI.Tests.PlayMode
                 : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
 
             string instructions =
-                "These ingredients were used before. Use the available Lua execution capability and the recorded craft memory to create the consistent result " +
+                "These ingredients were used before. CALL the execute_lua tool (a text reply with Lua code does " +
+                "not execute anything) using the recorded craft memory to recreate the consistent result " +
                 "that the game should produce for the same ingredients. Do not call memory(...) inside Lua; " +
-                "return Lua code that contains the concrete item name.";
+                "pass Lua code that contains the concrete item name.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -720,22 +734,25 @@ namespace CoreAI.Tests.PlayMode
                 return;
             }
 
-            if (Regex.IsMatch(
-                    payload,
-                    @",\s*['""]weapon['""]\s*,\s*quality\s*\)",
-                    RegexOptions.IgnoreCase))
-            {
-                Assert.Fail(
-                    $"[{label}] create_item must use a numeric quality literal, not the identifier quality. Payload:\n{payload}");
-            }
+            // The quality argument must be numeric. Accept either an integer literal directly in the
+            // call, or a Lua variable that the same code defines from numbers (reasoning models often
+            // compute quality from ingredient stats, e.g. local quality = (75 + 50) // 2). The original
+            // bug being guarded against is passing an UNDEFINED identifier such as create_item(...,
+            // 'weapon', quality) with no quality definition anywhere in the code.
+            bool hasNumericLiteralArg = Regex.IsMatch(
+                payload,
+                @"create_item\s*\([^)]*,\s*['""]weapon['""]\s*,\s*\d+",
+                RegexOptions.IgnoreCase);
+            bool definesNumericQuality = Regex.IsMatch(
+                payload,
+                @"\bqualit\w*\s*=\s*[^\r\n=]*\d",
+                RegexOptions.IgnoreCase);
 
-            if (!Regex.IsMatch(
-                    payload,
-                    @"create_item\s*\([^)]*,\s*['""]weapon['""]\s*,\s*\d+",
-                    RegexOptions.IgnoreCase))
+            if (!hasNumericLiteralArg && !definesNumericQuality)
             {
                 Assert.Fail(
-                    $"[{label}] create_item must pass an integer literal as the third argument. Payload:\n{payload}");
+                    $"[{label}] create_item must receive a numeric quality (integer literal or a variable " +
+                    $"defined from numbers in the same code). Payload:\n{payload}");
             }
         }
 
@@ -999,6 +1016,9 @@ namespace CoreAI.Tests.PlayMode
             new(@"\bitem_name\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
             new(@"\b(?:weapon|craft)_?name\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
             new(@"\b(?:weapon|craft)_?name\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
+            // Lua: return "Flameforged Steel Sword" (bare quoted name as the chunk result).
+            // Case-sensitive first letter: only capitalized item names, not lowercase status strings.
+            new(@"\breturn\s+\\?""([A-Z][A-Za-z0-9_' -]{2,}?)\\?"""),
             new("\"item_name\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase),
             new(@"\\\""item_name\\\""\s*:\s*\\\""([^""\\]+)\\\""", RegexOptions.IgnoreCase),
             new(@"\bname\s*=\s*'([^']+)'", RegexOptions.IgnoreCase),

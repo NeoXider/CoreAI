@@ -507,7 +507,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (toolIteration > 1 && chatOptions.ToolMode != null &&
                     chatOptions.ToolMode is not MEAI.AutoChatToolMode)
                 {
-                    iterationOptions = CloneOptionsWithAutoToolMode(chatOptions);
+                    iterationOptions = CloneOptionsWithAutoToolMode(chatOptions, aiTools);
                 }
 
                 ThinkBlockStreamFilter thinkFilter = new();
@@ -2288,17 +2288,17 @@ namespace CoreAI.Infrastructure.Llm
                         return;
                     }
 
-                    bool isAvailable = false;
+                    MEAI.AIFunction targetTool = null;
                     for (int i = 0; i < aiTools.Count; i++)
                     {
                         if (string.Equals(aiTools[i].Name, targetName, StringComparison.Ordinal))
                         {
-                            isAvailable = true;
+                            targetTool = aiTools[i];
                             break;
                         }
                     }
 
-                    if (!isAvailable)
+                    if (targetTool == null)
                     {
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"MeaiLlmClient: ForcedToolMode=RequireSpecific('{targetName}') but tool is not registered for this role - falling back to RequireAny.");
@@ -2306,7 +2306,14 @@ namespace CoreAI.Infrastructure.Llm
                         return;
                     }
 
-                    options.ToolMode = MEAI.ChatToolMode.RequireSpecific(targetName);
+                    // Force the specific tool WITHOUT an OpenAI specific-function tool_choice: local
+                    // llama.cpp / LM Studio servers reject {"type":"function","function":{"name":X}} with
+                    // HTTP 400. "required" (RequireAny) + a tools list narrowed to just the target forces
+                    // exactly that tool and is accepted by every OpenAI-compatible backend (cloud included).
+                    // The narrowing is undone for later tool-loop iterations (see CloneOptionsWithAutoToolMode,
+                    // which restores the full tool set), so only the first forced turn sees the single tool.
+                    options.ToolMode = MEAI.ChatToolMode.RequireAny;
+                    options.Tools = new List<MEAI.AITool> { targetTool };
                     return;
             }
         }
@@ -2344,15 +2351,21 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Returns a shallow copy of <paramref name="source"/> with <see cref="MEAI.ChatToolMode.Auto"/>.
         /// Used in the streaming loop after the first iteration so the model isn't forced
-        /// to keep emitting tool calls after each tool result is fed back.
+        /// to keep emitting tool calls after each tool result is fed back. The full tool set is
+        /// restored from <paramref name="fullTools"/> because a first-iteration
+        /// <see cref="LlmToolChoiceMode.RequireSpecific"/> narrows <c>source.Tools</c> to the single
+        /// forced tool — later iterations must see every tool again.
         /// </summary>
-        private static MEAI.ChatOptions CloneOptionsWithAutoToolMode(MEAI.ChatOptions source)
+        private static MEAI.ChatOptions CloneOptionsWithAutoToolMode(
+            MEAI.ChatOptions source, IReadOnlyList<MEAI.AIFunction> fullTools)
         {
             MEAI.ChatOptions clone = new()
             {
                 Temperature = source.Temperature,
                 MaxOutputTokens = source.MaxOutputTokens,
-                Tools = source.Tools,
+                Tools = fullTools != null && fullTools.Count > 0
+                    ? fullTools.Cast<MEAI.AITool>().ToList()
+                    : source.Tools,
                 ToolMode = MEAI.ChatToolMode.Auto
             };
             return clone;

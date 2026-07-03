@@ -4,6 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Live PlayMode suite green on a stricter local model (2026-07-03)
+
+- **`RequireSpecific` forced tool mode goes through the portable mapping** (`RequireAny` + tools
+  narrowed to the one requested function) with an EditMode test asserting the resulting
+  `ChatOptions` shape; see `com.neoxider.coreai`'s changelog for the rationale.
+- **Live-model PlayMode tests no longer reward prose over tool calls.** The whole LlmVerification
+  suite was re-run against a stricter reasoning model (qwythos-9b) and the failures were all
+  test-harness assumptions, not runtime bugs: the `AllToolCalls` Lua hint now names the actual
+  sandbox API (`create_item`/`report`) instead of letting the generic Programmer prompt advertise
+  world APIs the stub does not register; `WorldTool_MoveObject` accepts `change`+position (the tool
+  schema's documented way to move — `move` is only a legacy executor alias); the crafting and
+  multi-agent workflow steps that verify execute_lua plumbing force the call via
+  `ForcedToolMode.RequireSpecific`; the merchant negotiation step states that the purchase must be
+  completed with `buy_item` in the same turn; and the crafting quality assert accepts a numeric
+  quality computed in Lua from ingredient stats, not only an integer literal.
+
 ### Streaming-by-default task execution (2026-07-03)
 
 - **Agent task execution now streams by default.** `AiOrchestrator.RunTaskAsync` runs through the
