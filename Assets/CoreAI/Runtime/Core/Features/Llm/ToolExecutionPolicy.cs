@@ -1083,10 +1083,43 @@ namespace CoreAI.Infrastructure.Llm
         /// Ends a streamed turn: records ONE success/failure against the consecutive-error counter
         /// (batch parity) and registers the turn's combined signature so a later turn that re-sends
         /// the exact same batch through <see cref="ExecuteBatchAsync"/> is still caught as an echo.
-        /// Returns the same shape <see cref="ExecuteBatchAsync"/> would for the whole turn.
+        /// If the combined signature was ALREADY registered earlier in this request, the whole turn
+        /// is a cross-turn echo: it records ONE failure (never a success) and reports AnyFailed and
+        /// AllFailed, exactly like the all-duplicate batch branch in <see cref="ExecuteBatchAsync"/>.
+        /// Otherwise returns the same shape <see cref="ExecuteBatchAsync"/> would for the whole turn.
         /// </summary>
         public BatchToolCallResult CompleteStreamedTurn(StreamedTurn turn)
         {
+            if (turn.Signatures.Count > 0)
+            {
+                // Register the combined turn signature BEFORE recording the turn's outcome, mirroring
+                // ExecuteBatchAsync where BuildDuplicatePlan checks the whole-batch signature first.
+                // Add() returning false means this exact turn already executed earlier in the request:
+                // a whole-turn echo. The per-call guard in ExecuteStreamedAsync only catches single-call
+                // echoes (a multi-call turn's combined signature does not exist mid-stream — see the
+                // comment there), so a multi-call echo's calls have already re-executed by the time we
+                // get here. Batch parity is restored at the ERROR-ACCOUNTING level: without this branch
+                // the re-executed calls succeed, RecordSuccess() resets the counter, and a model stuck
+                // echoing the same batch never trips the max-consecutive-errors guard (it runs to the
+                // iteration cap instead). Suppressing the re-execution itself is intentionally out of
+                // scope: the results were already streamed back on the wire.
+                string combined = string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal));
+                if (!_executedSignatures.Add(combined))
+                {
+                    string echoDetail =
+                        $"Whole-turn echo: identical streamed turn ({turn.Count} calls) already executed " +
+                        "earlier in this request - counted as a failed iteration.";
+                    AddTrace(new LlmToolCallTrace("", false, 0d, "duplicate", echoDetail));
+                    RecordFailure();
+                    return new BatchToolCallResult
+                    {
+                        Results = turn.Results,
+                        AnyFailed = true,
+                        AllFailed = true
+                    };
+                }
+            }
+
             if (turn.Count > 0)
             {
                 if (!turn.AnyFailed)
@@ -1097,12 +1130,6 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     RecordFailure();
                 }
-            }
-
-            if (turn.Signatures.Count > 0)
-            {
-                _executedSignatures.Add(
-                    string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal)));
             }
 
             return new BatchToolCallResult

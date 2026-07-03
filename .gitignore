@@ -77,6 +77,9 @@ _coreai*_placeholder_lines.txt
 # Generated benchmark run artifacts (reports/screenshots) — keep curated gallery in Docs/Images only
 /[Tt]est[Rr]esults/
 
+# Unity Test Runner leftover scenes (auto-created at the Assets root during PlayMode runs)
+/[Aa]ssets/InitTestScene*
+
 # Crashlytics generated file
 crashlytics-build.properties
 

@@ -765,6 +765,111 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task StreamedTurn_MultiCallEchoTurn_SecondCompleteRecordsFailure()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+            Dictionary<string, object?> argsA = new() { { "x", 1 } };
+            Dictionary<string, object?> argsB = new() { { "x", 2 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.StreamedTurn first = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(first);
+            Assert.AreEqual(0, policy.ConsecutiveErrors, "A clean first multi-call turn records a success.");
+
+            // The model echoes the exact same TWO-call turn. The per-call cross-turn guard cannot
+            // catch this (only the COMBINED signature was registered, and it does not equal either
+            // per-call signature), so the calls re-execute — but CompleteStreamedTurn must detect
+            // the whole-turn echo and record ONE failure, like the all-duplicate batch branch.
+            ToolExecutionPolicy.StreamedTurn second = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(second, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(second, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult echo = policy.CompleteStreamedTurn(second);
+
+            Assert.AreEqual(1, policy.ConsecutiveErrors,
+                "A whole-turn echo must record a failure, not a success, or the model can loop forever.");
+            Assert.IsTrue(echo.AnyFailed, "The echo turn must report AnyFailed, like the batch echo branch.");
+            Assert.IsTrue(echo.AllFailed, "The echo turn must report AllFailed, like the batch echo branch.");
+            // Guard restoration only: the echoed calls still executed (their results already streamed
+            // back on the wire); the fix is the error accounting, not per-call suppression.
+            Assert.AreEqual(4, countingMarshaler.InvokeCount,
+                "Multi-call echo calls still execute; only the turn-level accounting flags the echo.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_RepeatedMultiCallEchoTurns_TripMaxConsecutiveErrors()
+        {
+            const int maxConsecutiveErrors = 3;
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", maxConsecutiveErrors);
+            Dictionary<string, object?> argsA = new() { { "x", 1 } };
+            Dictionary<string, object?> argsB = new() { { "x", 2 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            // First (non-echo) cycle executes cleanly.
+            ToolExecutionPolicy.StreamedTurn first = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+            await policy.ExecuteStreamedAsync(first, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(first);
+            Assert.AreEqual(0, policy.ConsecutiveErrors);
+
+            // A model stuck echoing the same multi-call batch: each echoed turn must increment the
+            // consecutive-error counter (its calls succeed, so without the whole-turn echo branch
+            // RecordSuccess would reset the counter every cycle and the guard would never trip).
+            for (int i = 1; i <= maxConsecutiveErrors; i++)
+            {
+                ToolExecutionPolicy.StreamedTurn echo = policy.BeginStreamedTurn();
+                await policy.ExecuteStreamedAsync(echo, MakeToolCall("dup", argsA), opts, CancellationToken.None);
+                await policy.ExecuteStreamedAsync(echo, MakeToolCall("dup", argsB), opts, CancellationToken.None);
+                policy.CompleteStreamedTurn(echo);
+
+                Assert.AreEqual(i, policy.ConsecutiveErrors, $"Echo cycle {i} must increment the error counter.");
+                Assert.AreEqual(i == maxConsecutiveErrors, policy.IsMaxErrorsReached,
+                    "The guard must trip exactly when the echo cycles reach maxConsecutiveErrors.");
+            }
+        }
+
+        [Test]
+        public async Task StreamedTurn_NonEchoSecondTurn_StillRecordsSuccess()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.StreamedTurn first = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(
+                first, MakeToolCall("dup", new Dictionary<string, object?> { { "x", 1 } }), opts,
+                CancellationToken.None);
+            await policy.ExecuteStreamedAsync(
+                first, MakeToolCall("dup", new Dictionary<string, object?> { { "x", 2 } }), opts,
+                CancellationToken.None);
+            policy.CompleteStreamedTurn(first);
+            Assert.AreEqual(0, policy.ConsecutiveErrors);
+
+            // One argument differs, so the combined turn signature is new: this is progress, not an
+            // echo, and the turn must record a success exactly as before the whole-turn echo guard.
+            ToolExecutionPolicy.StreamedTurn second = policy.BeginStreamedTurn();
+            await policy.ExecuteStreamedAsync(
+                second, MakeToolCall("dup", new Dictionary<string, object?> { { "x", 1 } }), opts,
+                CancellationToken.None);
+            await policy.ExecuteStreamedAsync(
+                second, MakeToolCall("dup", new Dictionary<string, object?> { { "x", 3 } }), opts,
+                CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(second);
+
+            Assert.IsFalse(batch.AnyFailed, "A non-echo turn with one changed argument must not be flagged.");
+            Assert.AreEqual(0, policy.ConsecutiveErrors,
+                "A successful non-echo turn must keep the consecutive-error counter at zero.");
+        }
+
+        [Test]
         public async Task StreamedTurn_AllowDuplicatesTool_RepeatsExecute()
         {
             CountingMarshaler countingMarshaler = new();

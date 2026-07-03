@@ -1600,11 +1600,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // world-space or sized relative to these, so the whole card scales with them.
         private const int ShotWidth = 3840;
         private const int ShotHeight = 2160;
-        // 16:9, two per column between the top/bottom bars. 960x540 = quarter width/height of the
-        // 4K frame per inset: at the old 676x380 the insets read as blurry thumbnails on a 4K report
-        // (user-reported). Layout check at 3840x2160: xLeft/xRight margins 85px, banner 453px,
-        // y2 bottom edge stays 335px above the frame bottom -- everything still fits clear of
-        // the hero center.
+        // 16:9, two per column between the top/bottom bars. Each 960x540 inset spans a quarter of the
+        // 4K frame PER AXIS (so 1/16 of the frame by area): at the old 676x380 the insets read as
+        // blurry thumbnails on a 4K report (user-reported). Layout check at 3840x2160 (see
+        // CompositeInsets): margins 48px, banner 453px, y1 = 1119, y2 = 531 -- the y2 inset's bottom
+        // edge sits 531px above the frame bottom, clear of the hero center and the bottom caption bar.
         private const int InsetWidth = 960;
         private const int InsetHeight = 540;
 

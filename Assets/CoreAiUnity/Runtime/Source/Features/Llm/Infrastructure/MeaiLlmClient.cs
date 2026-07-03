@@ -522,6 +522,10 @@ namespace CoreAI.Infrastructure.Llm
                 // still closes with the exact batch protocol (assistant tool_calls + one tool-role
                 // results message), so the model sees no difference.
                 ToolExecutionPolicy.StreamedTurn streamedTurn = null;
+                // Local mirror of the streamed turn's executed-call count. StreamedTurn.Count is
+                // internal to CoreAI.Core (not visible from this assembly), and the mid-stream
+                // failure handler below must know whether any call already mutated the world.
+                int streamedExecutedCallCount = 0;
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
@@ -620,10 +624,64 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                await foreach (MEAI.ChatResponseUpdate update in _innerClient
-                                   .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
+                // Manual enumeration instead of `await foreach`: MoveNextAsync sits inside a
+                // try/catch (yield-free, so legal in an iterator) to intercept mid-stream
+                // transport failures AFTER tool calls have already executed. Without this, an
+                // abandoned streamedTurn skipped CompleteStreamedTurn — no consecutive-error
+                // record, no echo-signature registration — and a partially-mutated world
+                // surfaced to callers as a clean, blind-retryable transport failure. The
+                // chunk-yielding body stays OUTSIDE the catch; the `await using` declaration
+                // disposes the enumerator on every exit path (try/finally is yield-safe).
+                IAsyncEnumerable<MEAI.ChatResponseUpdate> updateStream =
+                    _innerClient.GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken);
+                await using IAsyncEnumerator<MEAI.ChatResponseUpdate> updateEnumerator =
+                    updateStream.GetAsyncEnumerator(cancellationToken);
+                string? midStreamFailureMessage = null;
+                while (true)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    MEAI.ChatResponseUpdate update;
+                    try
+                    {
+                        if (!await updateEnumerator.MoveNextAsync())
+                        {
+                            break;
+                        }
+
+                        update = updateEnumerator.Current;
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (streamedTurn == null || streamedExecutedCallCount == 0)
+                        {
+                            // No tool has mutated the world yet: preserve legacy behavior and let
+                            // the exception escape (FallbackLlmClientDecorator relies on
+                            // pre-first-chunk failures propagating so it can fall back).
+                            throw;
+                        }
+
+                        // Tool calls already ran mid-stream: close the turn so the
+                        // consecutive-error counter records once and the turn signature is
+                        // registered (echo guard, batch parity) before the failure surfaces.
+                        policy.CompleteStreamedTurn(streamedTurn);
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Streaming transport failed after {streamedExecutedCallCount} tool call(s) " +
+                            "already executed mid-stream; finalizing the partial turn instead of abandoning it " +
+                            $"({ex.GetType().Name}: {ex.Message}).");
+
+                        if (ex is OperationCanceledException)
+                        {
+                            // Consumer is gone; turn state is finalized, cancellation propagates as before.
+                            throw;
+                        }
+
+                        // A partially-applied turn must surface as a graded failure WITH traces,
+                        // not as a retryable transport exception a caller might blindly replay.
+                        midStreamFailureMessage =
+                            $"stream failed after {streamedExecutedCallCount} executed tool call(s): {ex.Message}";
+                        break;
+                    }
+
                     int nativeToolCountBeforeUpdate = nativeToolCalls.Count;
                     if (update.Contents != null)
                     {
@@ -637,6 +695,7 @@ namespace CoreAI.Infrastructure.Llm
                                     streamedTurn ??= policy.BeginStreamedTurn();
                                     await policy.ExecuteStreamedAsync(
                                         streamedTurn, fcc, chatOptions, cancellationToken);
+                                    streamedExecutedCallCount++;
                                 }
                             }
                             else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
@@ -693,6 +752,22 @@ namespace CoreAI.Infrastructure.Llm
                             yield return part;
                         }
                     }
+                }
+
+                if (midStreamFailureMessage != null)
+                {
+                    // Mirror the max-errors terminal chunk: the consumer gets a graded failure
+                    // carrying every executed trace so the partial world mutation is visible and
+                    // attributable instead of looking like a retryable transport error.
+                    LlmStreamChunk streamFailChunk = new()
+                    {
+                        IsDone = true,
+                        Error = midStreamFailureMessage,
+                        ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                    };
+                    ApplyStreamingUsageFields(streamFailChunk, iterationUsage, streamModel);
+                    yield return streamFailChunk;
+                    yield break;
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -2231,7 +2306,10 @@ namespace CoreAI.Infrastructure.Llm
         /// (no <c>max_tokens</c> is sent — reasoning models can think as long as they need without
         /// the thinking budget eating the answer budget); <c>null</c> falls back to
         /// <see cref="ICoreAISettings.MaxTokens"/> when it is positive; otherwise <c>null</c> so the
-        /// provider uses its own default. Both HTTP and LLMUnity backends honour the result uniformly.
+        /// provider uses its own default. HTTP backends honour <c>null</c> by omitting
+        /// <c>max_tokens</c> from the request; the LLMUnity backend honours it by resetting
+        /// <c>numPredict</c> to its unbounded <c>-1</c> sentinel on every request instead of
+        /// retaining a previously applied cap.
         /// </summary>
         private int? ResolveMaxOutputTokens(int? perRequest)
         {

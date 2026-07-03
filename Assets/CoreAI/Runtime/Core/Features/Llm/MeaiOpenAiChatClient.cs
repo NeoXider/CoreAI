@@ -381,11 +381,6 @@ namespace CoreAI.Infrastructure.Llm
                                 LlmErrorCode.Timeout);
                         }
 
-                        if (!string.IsNullOrWhiteSpace(line))
-                        {
-                            lastProgressUtc = DateTime.UtcNow;
-                        }
-
                         if (IsSseDoneLine(line))
                         {
                             break;
@@ -428,6 +423,18 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             parsedSseDeltas++;
                             yield return completedCalls;
+                        }
+
+                        // Re-arm the stall clock only AFTER every update for this line has been
+                        // yielded and consumed. This iterator is pull-based: the consumer
+                        // (MeaiLlmClient) executes tool calls between MoveNexts, so re-arming on
+                        // line arrival would charge that consumer time against the transport
+                        // stall budget and abort healthy streams with slow tools. Measured this
+                        // way, the gap checked at the top of the loop is pure transport wait.
+                        // Whitespace-only keep-alive lines still do not count as progress.
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            lastProgressUtc = DateTime.UtcNow;
                         }
                     }
 
@@ -1496,6 +1503,17 @@ namespace CoreAI.Infrastructure.Llm
             private readonly List<PendingToolCall> _pending = new();
             private readonly Dictionary<string, PendingToolCall> _pendingById = new(StringComparer.Ordinal);
             private readonly Dictionary<int, PendingToolCall> _pendingByIndex = new();
+
+            // Tombstones for calls already surfaced by DrainCompleted(). One accumulator instance
+            // exists per stream response (created fresh per attempt in GetStreamingResponseAsync),
+            // so these are per-response by construction and need no explicit reset. They stop
+            // misbehaving OpenAI-compat servers that re-send cumulative argument strings (or
+            // trailing empty deltas) for a call that already drained and EXECUTED from creating a
+            // fresh pending entry and running the call a second time.
+            private readonly HashSet<int> _drainedIndexes = new();
+            private readonly HashSet<string> _drainedIds = new(StringComparer.Ordinal);
+            private bool _warnedIgnoredDrainedFragment;
+
             private readonly ILog _log;
             private int _nextSequence;
 
@@ -1538,6 +1556,21 @@ namespace CoreAI.Infrastructure.Llm
 
             private PendingToolCall ResolveEntry(int? index, string stableId, string name, string argumentsFragment)
             {
+                if (IsDrainedTombstone(index, stableId))
+                {
+                    if (!_warnedIgnoredDrainedFragment)
+                    {
+                        _warnedIgnoredDrainedFragment = true;
+                        _log.Warn(
+                            "MeaiOpenAiChatClient: ignoring streamed tool-call fragment for an already-drained call " +
+                            $"(index={(index.HasValue ? index.Value.ToString() : "n/a")}, id='{stableId ?? ""}') - " +
+                            "provider re-sent cumulative arguments or a trailing empty delta after the call executed.",
+                            LogTag.Llm);
+                    }
+
+                    return null;
+                }
+
                 if (!string.IsNullOrEmpty(stableId) &&
                     _pendingById.TryGetValue(stableId, out PendingToolCall byId))
                 {
@@ -1574,6 +1607,21 @@ namespace CoreAI.Infrastructure.Llm
                 return CreateEntry(index, stableId);
             }
 
+            /// <summary>
+            /// True when the fragment refers to a call that already drained (and executed). A fragment
+            /// carrying a FRESH stable id that merely reuses a drained index is a genuinely new call,
+            /// so the id check takes precedence over the index tombstone.
+            /// </summary>
+            private bool IsDrainedTombstone(int? index, string stableId)
+            {
+                if (!string.IsNullOrEmpty(stableId))
+                {
+                    return _drainedIds.Contains(stableId);
+                }
+
+                return index.HasValue && _drainedIndexes.Contains(index.Value);
+            }
+
             private void AttachIndexIfSafe(PendingToolCall entry, int? index)
             {
                 if (!index.HasValue || entry.Index.HasValue)
@@ -1604,6 +1652,9 @@ namespace CoreAI.Infrastructure.Llm
                 if (index.HasValue)
                 {
                     _pendingByIndex[index.Value] = entry;
+                    // A new call (fresh id) reusing a drained index takes the index over: id-less
+                    // follow-up fragments for it must route here, not be swallowed by the tombstone.
+                    _drainedIndexes.Remove(index.Value);
                 }
 
                 if (!string.IsNullOrEmpty(stableId))
@@ -1628,13 +1679,15 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             /// <summary>
-            /// Drains every pending call whose accumulated arguments already form one COMPLETE JSON
-            /// object, emitting it WITHOUT waiting for the stream to end. This is what lets the
+            /// Drains pending calls whose accumulated arguments already form one COMPLETE JSON
+            /// object, emitting them WITHOUT waiting for the stream to end. This is what lets the
             /// client execute tool calls while the model is still generating the rest of the turn
-            /// (execute-as-you-stream): a provider that sends whole calls per chunk drains one call
-            /// per chunk, a provider that fragments arguments drains each call the moment its JSON
-            /// closes. Entries with no name yet, no argument text yet, or an ambiguity mark stay
-            /// pending for <see cref="Flush"/> (which also handles the malformed/truncated cases).
+            /// (execute-as-you-stream). To preserve the provider's tool_calls index order across
+            /// chunks (dependent pairs like create -> configure must never run out of order), only
+            /// the longest CONTIGUOUS PREFIX of the (index, sequence) order in which every entry
+            /// is ready is drained: an entry that is not ready yet (no name, ambiguity mark, or
+            /// still-open JSON) blocks every later entry, which stays pending and drains on a
+            /// later call or at <see cref="Flush"/> (which also handles malformed/truncated cases).
             /// </summary>
             public MEAI.ChatResponseUpdate DrainCompleted()
             {
@@ -1644,17 +1697,13 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 List<PendingToolCall> ready = null;
-                foreach (PendingToolCall pending in _pending)
+                foreach (PendingToolCall pending in _pending
+                             .OrderBy(p => p.Index ?? int.MaxValue)
+                             .ThenBy(p => p.Sequence))
                 {
-                    if (string.IsNullOrEmpty(pending.Name) || pending.ForceParseError)
+                    if (!IsReadyToDrain(pending))
                     {
-                        continue;
-                    }
-
-                    string argsStr = pending.Arguments.ToString();
-                    if (argsStr.Length == 0 || !IsCompleteJsonObject(argsStr))
-                    {
-                        continue;
+                        break; // an unready entry blocks everything after it (index-order contract)
                     }
 
                     (ready ??= new List<PendingToolCall>()).Add(pending);
@@ -1667,9 +1716,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
                 update.Contents = new List<MEAI.AIContent>();
-                foreach (PendingToolCall pending in ready
-                             .OrderBy(p => p.Index ?? int.MaxValue)
-                             .ThenBy(p => p.Sequence))
+                foreach (PendingToolCall pending in ready)
                 {
                     Dictionary<string, object> args =
                         ParseArguments(pending.Arguments.ToString(), pending.Name, pending);
@@ -1681,15 +1728,28 @@ namespace CoreAI.Infrastructure.Llm
                     if (!string.IsNullOrEmpty(pending.Id))
                     {
                         _pendingById.Remove(pending.Id);
+                        _drainedIds.Add(pending.Id);
                     }
 
                     if (pending.Index.HasValue)
                     {
                         _pendingByIndex.Remove(pending.Index.Value);
+                        _drainedIndexes.Add(pending.Index.Value);
                     }
                 }
 
                 return update;
+            }
+
+            private static bool IsReadyToDrain(PendingToolCall pending)
+            {
+                if (string.IsNullOrEmpty(pending.Name) || pending.ForceParseError)
+                {
+                    return false;
+                }
+
+                string argsStr = pending.Arguments.ToString();
+                return argsStr.Length > 0 && IsCompleteJsonObject(argsStr);
             }
 
             /// <summary>

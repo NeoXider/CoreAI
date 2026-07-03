@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Streamed tool-call hardening from the independent audit (2026-07-03)
+
+Four fixes to the execute-as-you-stream path, all found by a two-track code audit of the streaming
+work below.
+
+- **Multi-call echo turns now trip the consecutive-error guard.** `CompleteStreamedTurn` registers
+  the turn's combined signature BEFORE recording the outcome and checks the `Add()` return value:
+  a whole-turn echo (identical streamed turn already executed this request) records ONE failure —
+  never a success — with a `duplicate` trace, mirroring the all-duplicate batch branch. Previously
+  the re-executed calls succeeded and `RecordSuccess()` kept resetting the counter, so a model stuck
+  echoing the same multi-call batch ran to the iteration cap instead of tripping max-consecutive-errors.
+- **The SSE stall clock no longer counts consumer time.** `lastProgressUtc` re-arms AFTER the parsed
+  updates for a line are yielded and consumed: the streaming iterator is pull-based and the consumer
+  executes tool calls between `MoveNext`s, so re-arming on line arrival charged tool-execution time
+  against the transport stall budget and aborted healthy streams with slow tools.
+- **`DrainCompleted()` drains in strict provider index order across chunks.** Only the longest
+  contiguous ready prefix of the `(index, sequence)` order is drained; a still-open earlier call
+  blocks later closed ones, so dependent pairs (create → configure) can no longer execute out of
+  order when a later call's JSON happens to close first.
+- **Drained calls leave tombstones.** Fragments referring to an already-drained call (by id, or by
+  index with no id) are ignored: OpenAI-compat servers that re-send cumulative argument strings or
+  trailing empty deltas after a call drained can no longer create a fresh pending entry and execute
+  the call a second time. A fresh id reusing a drained index is still treated as a genuinely new call.
+
 ### Wire protocol: one tool message per tool result (2026-07-03)
 
 - **`MeaiOpenAiChatClient` now serializes a Tool-role message carrying several

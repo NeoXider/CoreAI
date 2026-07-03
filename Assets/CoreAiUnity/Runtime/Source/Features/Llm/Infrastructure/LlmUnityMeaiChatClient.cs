@@ -147,10 +147,11 @@ namespace CoreAI.Infrastructure.Llm
                 _unityAgent.temperature = options.Temperature.Value;
             }
 
-            if (options?.MaxOutputTokens.HasValue == true)
-            {
-                _unityAgent.numPredict = options.MaxOutputTokens.Value;
-            }
+            // Always assign: _unityAgent is shared across requests, so skipping the assignment when
+            // MaxOutputTokens is null would leave the PREVIOUS request's cap stuck on the agent. LLMUnity
+            // maps numPredict straight to llama.cpp n_predict, where -1 = unlimited (generate until a stop
+            // condition / context end).
+            _unityAgent.numPredict = options?.MaxOutputTokens ?? -1;
         }
 
         public async Task<MEAI.ChatResponse> GetResponseAsync(

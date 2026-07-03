@@ -4,6 +4,30 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Streaming-loop and benchmark hardening from the independent audit (2026-07-03)
+
+- **A mid-stream transport failure no longer abandons a partially-executed streamed turn.**
+  `MeaiLlmClient`'s streaming loop enumerates the inner stream manually so a throw from
+  `MoveNextAsync` is intercepted: when tool calls already executed mid-stream, the turn is finalized
+  via `CompleteStreamedTurn` (consecutive-error record + echo-signature registration) and the
+  failure surfaces as a terminal chunk with `Error` + `ExecutedToolCalls` — a partially-applied turn
+  is a graded failure with traces, not a clean transport error a caller might blindly replay.
+  Failures before any executed call propagate exactly as before (keeps `FallbackLlmClientDecorator`
+  fallback semantics); cancellation finalizes the turn, then rethrows.
+- **LLMUnity backend: `MaxOutputTokens = null` now resets `numPredict` to `-1` (unlimited).**
+  The shared agent previously kept the PREVIOUS request's cap when a later request resolved to
+  "unlimited", silently truncating it (`ApplySamplingToAgent` only assigned on `HasValue`).
+- **Benchmark suite timeout chain is now self-consistent.** The soft suite budget (env
+  `COREAI_BENCHMARK_SUITE_BUDGET`) is clamped to `NUnit [Timeout] − report margin` (6300s with the
+  current 6600s/300s values, warning on clamp; default stays 6000s), and a scenario rep only starts
+  if its WORST case — all retry attempts at the full per-scenario timeout, including a
+  `COREAI_BENCHMARK_TIMEOUT` override — fits inside the budget. A rep starting just under the budget
+  (or hanging through every retry) can no longer blow through the NUnit hard abort, which writes no
+  artifacts. The launcher watchdog comment documents the required ordering: soft budget < NUnit
+  timeout < watchdog (7200s).
+- `.gitignore` now covers `Assets/InitTestScene*` (Unity Test Runner leftovers from aborted runs);
+  inset-layout comments in the report harness corrected to the actual 4K composite math.
+
 ### Benchmark: custom comparisons from hand-picked reports (2026-07-03)
 
 - **`GameCreationBenchmarkLauncher.ParseSummary(jsonPath)` is now public** (wrapping the private

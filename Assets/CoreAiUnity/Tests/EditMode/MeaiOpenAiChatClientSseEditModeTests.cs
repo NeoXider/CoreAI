@@ -168,6 +168,36 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetStreamingResponseAsync_SlowConsumerBetweenUpdates_DoesNotTripStallTimeout()
+        {
+            // The streaming iterator is pull-based: the consumer (MeaiLlmClient) executes tool
+            // calls (up to tens of seconds) between MoveNexts. Here the wall time between SSE
+            // lines exceeds the 1s transport timeout ONLY because of consumer-side delay, which
+            // must not count against the stall budget - the stream is healthy.
+            string[] chunks =
+            {
+                "data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            };
+            MeaiOpenAiChatClient client = new(new ShortTimeoutSettings(), new AsyncChunkedSseTransport(chunks));
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                    await Task.Delay(1200); // simulated slow tool execution between MoveNexts
+                }
+            }
+
+            Assert.AreEqual("AB", string.Concat(parts),
+                "A healthy stream with a slow consumer must complete without 'LLM SSE stalled'.");
+        }
+
+        [Test]
         public void AccumulateToolCallDeltas_ArgumentsSplitAcrossChunks_Reassemble()
         {
             string[] chunks =
@@ -345,8 +375,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void DrainCompleted_InterleavedCalls_EachDrainsAtItsOwnClose()
+        public void DrainCompleted_InterleavedCalls_EarlierOpenCallBlocksLaterClosedCall()
         {
+            // Contiguous-prefix contract: a later-indexed call whose JSON closes first must NOT
+            // drain (and execute) before an earlier-indexed call that is still open - dependent
+            // pairs (create -> configure) rely on provider index order across chunks.
             string[] chunks =
             {
                 "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"ca\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}",
@@ -357,13 +390,83 @@ namespace CoreAI.Tests.EditMode
             List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
 
             Assert.IsNull(perChunk[0], "alpha still open.");
-            Assert.IsNotNull(perChunk[1], "beta closed complete in one chunk - drains while alpha is open.");
-            Assert.AreEqual("beta",
-                perChunk[1].Contents.OfType<MEAI.FunctionCallContent>().Single().Name);
-            Assert.IsNotNull(perChunk[2], "alpha drains when its JSON closes.");
-            Assert.AreEqual("alpha",
-                perChunk[2].Contents.OfType<MEAI.FunctionCallContent>().Single().Name);
-            Assert.IsNull(perChunk[3]);
+            Assert.IsNull(perChunk[1],
+                "beta is ready but index 0 (alpha) is still open - beta must stay blocked.");
+            Assert.IsNotNull(perChunk[2], "alpha closed - the whole ready prefix drains now.");
+            List<MEAI.FunctionCallContent> calls =
+                perChunk[2].Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count, "alpha and beta must drain together once alpha closes.");
+            Assert.AreEqual("alpha", calls[0].Name, "Drained calls must surface in index order.");
+            Assert.AreEqual("beta", calls[1].Name, "Drained calls must surface in index order.");
+            Assert.IsNull(perChunk[3], "Nothing must be left for the final flush.");
+        }
+
+        [Test]
+        public void DrainCompleted_LaterIndexClosesFirst_NothingDrainsUntilPrefixReady()
+        {
+            // Both calls fragmented; index 1 closes before index 0. Nothing may drain until the
+            // earlier index closes, then both drain in ONE update, in index order.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"ca\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"cb\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"2}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNull(perChunk[0], "alpha still open.");
+            Assert.IsNull(perChunk[1], "both still open.");
+            Assert.IsNull(perChunk[2],
+                "beta closed but alpha (earlier index) is still open - nothing drains.");
+            Assert.IsNotNull(perChunk[3], "alpha closed - both drain in one update.");
+            List<MEAI.FunctionCallContent> calls =
+                perChunk[3].Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count);
+            Assert.AreEqual("alpha", calls[0].Name, "Index order must be preserved.");
+            Assert.AreEqual("beta", calls[1].Name, "Index order must be preserved.");
+            Assert.IsNull(perChunk[4], "Nothing must be left for the final flush.");
+        }
+
+        [Test]
+        public void DrainCompleted_CumulativeResendAfterDrain_IsIgnored()
+        {
+            // Known OpenAI-compat server misbehavior: after a call's arguments closed (and the
+            // call drained and EXECUTED), the provider re-sends the full cumulative argument
+            // string. That must not create a fresh pending entry and run the call a second time.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"spawn\",\"arguments\":\"{\\\"n\\\":\\\"t1\\\"}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"spawn\",\"arguments\":\"{\\\"n\\\":\\\"t1\\\"}\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNotNull(perChunk[0], "The call drains once, at its close.");
+            Assert.AreEqual("t1",
+                perChunk[0].Contents.OfType<MEAI.FunctionCallContent>().Single().Arguments["n"]);
+            Assert.IsNull(perChunk[1],
+                "Cumulative re-send of a drained call must be ignored, not re-drained.");
+            Assert.IsNull(perChunk[2], "Flush must emit nothing extra for the ignored re-send.");
+        }
+
+        [Test]
+        public void DrainCompleted_TrailingEmptyDeltaForDrainedIndex_NoGhostPending()
+        {
+            // Trailing empty-arguments delta for an already-drained index must not create a ghost
+            // pending entry that lingers into Flush.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"spawn\",\"arguments\":\"{\\\"n\\\":\\\"t1\\\"}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]}}]}"
+            };
+
+            List<MEAI.ChatResponseUpdate> perChunk = MeaiOpenAiChatClient.DrainPerChunkForTests(chunks);
+
+            Assert.IsNotNull(perChunk[0], "The call drains at its close.");
+            Assert.IsNull(perChunk[1], "Trailing empty delta for a drained index must be ignored.");
+            Assert.IsNull(perChunk[2], "Flush must emit nothing - no ghost entry may exist.");
         }
 
         [Test]
@@ -641,6 +744,22 @@ namespace CoreAI.Tests.EditMode
             public string Model => "dummy";
             public float Temperature => 0f;
             public int RequestTimeoutSeconds => 30;
+            public int MaxTokens => 256;
+            public bool LogLlmInput => false;
+            public bool LogLlmOutput => false;
+            public bool EnableHttpDebugLogging => false;
+            public IRequestHeaderProvider? HeaderProvider => null;
+        }
+
+        /// <summary>1-second transport timeout so consumer delays longer than the timeout are cheap to simulate.</summary>
+        private sealed class ShortTimeoutSettings : IOpenAiHttpSettings
+        {
+            public string ApiBaseUrl => "https://example.invalid/v1";
+            public string ApiKey => "";
+            public string AuthorizationHeader => "";
+            public string Model => "dummy";
+            public float Temperature => 0f;
+            public int RequestTimeoutSeconds => 1;
             public int MaxTokens => 256;
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;

@@ -62,8 +62,14 @@ namespace CoreAI.Tests.EditMode
         // Must stay ABOVE the suite's own soft budget (COREAI_BENCHMARK_SUITE_BUDGET, default
         // 6000s) plus report/screenshot time: this launcher-side watchdog is only a last-resort
         // guard against a hung Test Runner, and when it fires the run dies WITHOUT a report.
-        // 1900s here killed a full Opus 4.8 cloud run mid-suite (slow ~5-7 min turns are normal
-        // for large CLI-bridged models, not a hang).
+        // Required ordering across the whole timeout chain:
+        //   soft suite budget < NUnit [Timeout] (6600s) < launcher watchdog (7200s).
+        // The first inequality is enforced by the clamp in
+        // GameCreationBenchmarkPlayModeTests.ResolveSuiteBudgetSeconds (budget + report margin
+        // 300s <= 6600s; the rep start-gate reserves maxAttempts x timeout inside the budget, so
+        // scenario work always ends by the budget itself); this constant only has to stay above
+        // the NUnit [Timeout]. 1900s here killed a full Opus 4.8 cloud run mid-suite (slow ~5-7 min
+        // turns are normal for large CLI-bridged models, not a hang).
         private const double TimeoutSeconds = 7200d;
         private static double _startedAt;
         private static TestRunnerApi _api;

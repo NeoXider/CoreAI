@@ -29,6 +29,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     {
         private const string SuiteVersion = "1.6";
 
+        /// <summary>
+        /// NUnit hard-abort backstop (110 min). Attribute arguments must be compile-time constants, so the
+        /// soft-budget clamp below reuses this exact value instead of a second hand-maintained number.
+        /// </summary>
+        private const int NUnitTimeoutMs = 6_600_000;
+
+        /// <summary>Headroom reserved for report/screenshot/model-card writing after the last scenario.</summary>
+        private const double ReportMarginSeconds = 300;
+
         /// <summary>Env var (CSV of group ids, e.g. "G1,G2") to restrict which scenarios run. Empty = all.</summary>
         public const string EnvGroups = "COREAI_BENCHMARK_GROUPS";
 
@@ -42,24 +51,43 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public const string EnvRoundtrips = "COREAI_BENCHMARK_ROUNDTRIPS";
 
         /// <summary>
-        /// Env var (seconds) for the SOFT whole-suite time budget. When the elapsed wall-clock crosses this,
-        /// the suite stops starting new scenarios, then writes the report/screenshots for everything finished
-        /// so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts. Default 600s
-        /// (10 min). The NUnit [Timeout] is set well above this as a last-resort backstop.
+        /// Env var (seconds) for the SOFT whole-suite time budget. A scenario rep only STARTS when its
+        /// WORST case — every retry attempt running the full per-scenario timeout — still fits inside this
+        /// budget; once nothing more fits, the suite stops and writes the report/screenshots for everything
+        /// finished so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts.
+        /// Default 6000s (100 min). The effective value is clamped so that budget + report margin (300s)
+        /// never exceeds the NUnit [Timeout] (6600s), keeping the graceful path in charge even for
+        /// oversized env values.
         /// </summary>
         public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
 
         private static double ResolveSuiteBudgetSeconds()
         {
+            // Hard ceiling for the soft budget. The rep start-gate reserves the FULL worst case
+            // (maxAttempts x this rep's timeout) inside the budget, so scenario work always finishes by
+            // the budget itself; only the report/screenshot margin has to fit between the budget and the
+            // NUnit hard abort (which writes no artifacts).
+            double cap = NUnitTimeoutMs / 1000d - ReportMarginSeconds;
+
             string raw = Environment.GetEnvironmentVariable(EnvSuiteBudget);
             if (!string.IsNullOrWhiteSpace(raw)
                 && double.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double s) && s >= 30)
             {
+                if (s > cap)
+                {
+                    Debug.LogWarning(
+                        $"[Benchmark] {EnvSuiteBudget}={s:0}s exceeds the safe ceiling; clamped to {cap:0}s " +
+                        $"(NUnit [Timeout] {NUnitTimeoutMs / 1000d:0}s - report margin " +
+                        $"{ReportMarginSeconds:0}s), otherwise the NUnit hard abort could fire before the " +
+                        "report is written.");
+                    return cap;
+                }
+
                 return s;
             }
 
-            return 600; // 10 minutes
+            return Math.Min(6000, cap); // 100 minutes, kept under the NUnit-backstop ceiling
         }
 
         private static int ResolveBenchmarkRoundtrips()
@@ -152,8 +180,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest]
-        [Timeout(900000)] // 15 min — last-resort NUnit backstop; the SOFT 10-min suite budget (which still
-                          // writes artifacts) is the real terminator. NUnit's hard abort writes nothing.
+        [Timeout(NUnitTimeoutMs)] // 110 min — last-resort NUnit backstop; the SOFT suite budget (which still
+                                  // writes artifacts) is the real terminator, clamped in
+                                  // ResolveSuiteBudgetSeconds to this value minus a report margin (300s).
+                                  // The rep start-gate reserves maxAttempts x timeout inside the budget, so
+                                  // scenario work plus report writing always finishes before the hard abort.
+                                  // NUnit's hard abort writes nothing.
         [Category("Benchmark")]
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]
         public IEnumerator GameCreationBenchmark_Suite()
@@ -230,7 +262,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 BenchmarkProgress.Begin(totalPlannedRuns, modelId);
 
-                // Soft whole-suite time budget: when crossed, stop starting NEW scenarios and fall through to
+                // Soft whole-suite time budget: a scenario rep only starts when its FULL per-scenario timeout
+                // still fits in the remaining budget, so a rep can never start just under the wire and blow
+                // through the NUnit [Timeout] mid-run. Once nothing more fits, stop and fall through to
                 // writing the report/screenshots for whatever finished. This is graceful — unlike the NUnit
                 // [Timeout] which hard-aborts mid-scenario and writes nothing.
                 double suiteBudgetSeconds = ResolveSuiteBudgetSeconds();
@@ -239,16 +273,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 foreach (GameBenchmarkScenario scenario in scenarios)
                 {
-                    if (suiteClock.Elapsed.TotalSeconds >= suiteBudgetSeconds)
-                    {
-                        budgetHit = true;
-                        Debug.LogWarning(
-                            $"[Benchmark] Suite time budget ({suiteBudgetSeconds:0}s) reached after " +
-                            $"{report.Results.Count} scenario result(s); stopping early and writing the report " +
-                            "for everything finished so far.");
-                        break;
-                    }
-
                     float timeout = ResolveTimeoutSeconds(scenario);
                     // Scenarios with a RepsOverride (e.g. the G6 castle hero, G7 comprehensive integration)
                     // always run their own fixed count, even when the suite repeats every other scenario
@@ -256,6 +280,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     int scenarioReps = scenario.RepsOverride ?? repetitions;
                     for (int rep = 1; rep <= scenarioReps; rep++)
                     {
+                        // Start-gate on every rep (not just per scenario). The worst case for the NUnit
+                        // backstop is NOT one timeout: the retry loop below reruns a hard-failed attempt
+                        // up to maxAttempts times, each allowed the full per-scenario timeout (which the
+                        // COREAI_BENCHMARK_TIMEOUT env can raise well past the suite defaults). Reserve
+                        // the whole worst case, or a provider that hangs on every attempt blows straight
+                        // through the NUnit hard abort with no artifacts written.
+                        if (suiteClock.Elapsed.TotalSeconds + maxAttempts * (double)timeout > suiteBudgetSeconds)
+                        {
+                            budgetHit = true;
+                            Debug.LogWarning(
+                                $"[Benchmark] Suite time budget ({suiteBudgetSeconds:0}s) would be exceeded by " +
+                                $"{scenario.Name} ({maxAttempts} attempt(s) x {timeout:0}s timeout) after " +
+                                $"{report.Results.Count} scenario result(s); stopping early and writing the " +
+                                "report for everything finished so far.");
+                            break;
+                        }
+
                         BenchmarkProgress.StartScenario(
                             $"{scenario.Group} · {scenario.Name}  {Stars(BenchmarkInfo.DifficultyFor(scenario.Group))}" +
                             (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""),
@@ -295,6 +336,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             BenchmarkProgress.CompleteScenario($"⚠ {scenario.Name} — no result",
                                 Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
                         }
+                    }
+
+                    if (budgetHit)
+                    {
+                        break; // the gate covers both loops: stop the scenario loop too
                     }
                 }
             }

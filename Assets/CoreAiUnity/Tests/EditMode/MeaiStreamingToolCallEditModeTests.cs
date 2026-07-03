@@ -104,6 +104,152 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteStreamingAsync_NativeToolCallMidStream_ExecutesBeforeStreamEnds()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed);
+            RecordingLogger logger = new();
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.IsTrue(inner.ObservedToolExecutedBeforeStreamEnd == true,
+                "The tool must run the moment its call arrives, while later stream updates are still pending.");
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected error: {last.Error}");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "world_tool" && t.Success));
+            Assert.That(string.Concat(chunks.Select(c => c.Text)), Does.Contain("Done."));
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_StreamThrowsAfterExecutedToolCall_YieldsTerminalErrorChunkWithTraces()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                ThrowAfterToolCall = new InvalidOperationException("connection reset")
+            };
+            RecordingLogger logger = new();
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+
+            // Draining without a try/catch is part of the assertion: the partially-applied
+            // turn must surface as a terminal chunk, never as an escaping transport exception.
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.IsTrue(tool.Executed, "The tool must have executed before the transport failure.");
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.That(last.Error, Does.Contain("connection reset"));
+            Assert.That(last.Error, Does.Contain("1 executed tool call"));
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "world_tool" && t.Success),
+                "The executed call's trace must ride the terminal chunk so the failure is graded, not retried blind.");
+            Assert.That(logger.Warnings.Any(w => w.Contains("already executed mid-stream")), Is.True,
+                "Turn finalization must be logged when the stream dies after executed calls.");
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_StreamThrowsBeforeAnyToolCall_ExceptionPropagates()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed) { ThrowImmediately = true };
+            RecordingLogger logger = new();
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+
+            // async Task + try/catch instead of Assert.ThrowsAsync: ThrowsAsync blocks the Unity
+            // main thread while the awaited chain (Runtime code without ConfigureAwait(false))
+            // posts continuations back to it - the classic EditMode sync-over-async deadlock.
+            bool sawDone = false;
+            InvalidOperationException caught = null;
+            try
+            {
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                               {
+                                   AgentRoleId = "Role",
+                                   SystemPrompt = "sys",
+                                   UserPayload = "go",
+                                   Tools = new List<ILlmTool> { tool }
+                               }, CancellationToken.None))
+                {
+                    sawDone |= chunk.IsDone;
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "The pre-first-chunk failure must escape as its original exception.");
+            Assert.IsFalse(tool.Executed);
+            Assert.IsFalse(sawDone,
+                "No terminal chunk may be emitted when the failure precedes any tool execution - " +
+                "FallbackLlmClientDecorator relies on the exception escaping.");
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_CancelledAfterExecutedToolCall_PropagatesCancellationAfterFinalizingTurn()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                ThrowAfterToolCall = new OperationCanceledException()
+            };
+            RecordingLogger logger = new();
+            MeaiLlmClient client = new(inner, logger, new StubSettings(), null);
+
+            // async Task + try/catch instead of Assert.CatchAsync (which would block the Unity main
+            // thread - EditMode sync-over-async deadlock); the catch accepts derived cancellation
+            // types just like the production catch blocks do.
+            OperationCanceledException caught = null;
+            try
+            {
+                await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                               {
+                                   AgentRoleId = "Role",
+                                   SystemPrompt = "sys",
+                                   UserPayload = "go",
+                                   Tools = new List<ILlmTool> { tool }
+                               }, CancellationToken.None))
+                {
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "Cancellation must propagate to the consumer after finalization.");
+            Assert.IsTrue(tool.Executed, "Cancellation arrived after the tool already mutated state.");
+            // The per-request ToolExecutionPolicy is method-local inside CompleteStreamingAsync, so
+            // its ConsecutiveErrors/echo registry cannot be probed after the request dies; the
+            // finalization warning is logged strictly AFTER policy.CompleteStreamedTurn returns and
+            // is therefore the observable proof that the turn was recorded before cancellation.
+            Assert.That(logger.Warnings.Any(w =>
+                    w.Contains("already executed mid-stream") && w.Contains("1 tool call")), Is.True,
+                "CompleteStreamedTurn must run (and be logged) before OperationCanceledException propagates.");
+        }
+
+        [Test]
         public void ContainsCompleteThinkBlockToolCall_NormalThinkWithoutTool_ReturnsFalse()
         {
             Assert.IsFalse(MeaiLlmClient.ContainsCompleteThinkBlockToolCall("<think>private reasoning</think>Visible."));
@@ -134,6 +280,109 @@ namespace CoreAI.Tests.EditMode
             public MEAI.AIFunction CreateAIFunction()
             {
                 return MakeAIFunction(Name);
+            }
+        }
+
+        /// <summary>Tool whose AIFunction flips a flag when it actually executes.</summary>
+        private sealed class FlagTool : ILlmTool, IAIFunctionLlmTool
+        {
+            public FlagTool(string name)
+            {
+                Name = name;
+            }
+
+            public bool Executed { get; private set; }
+            public string Name { get; }
+            public string Description => "flag tool";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                Func<CancellationToken, Task<string>> func = _ =>
+                {
+                    Executed = true;
+                    return Task.FromResult("{\"Success\":true}");
+                };
+                return MEAI.AIFunctionFactory.Create(func,
+                    new MEAI.AIFunctionFactoryOptions { Name = Name, Description = Description });
+            }
+        }
+
+        /// <summary>
+        /// Inner client for the NATIVE tool-call streaming path: first stream yields one
+        /// FunctionCallContent update, then (when the consumer asks for the NEXT update -
+        /// i.e., after MeaiLlmClient has already awaited ExecuteStreamedAsync) observes the
+        /// tool's side effect and either throws a configured exception mid-stream or yields a
+        /// trailing text update. The second stream (tool-result roundtrip) yields plain text.
+        /// </summary>
+        private sealed class NativeToolCallScripted : MEAI.IChatClient
+        {
+            private readonly Func<bool> _observeToolRan;
+
+            public NativeToolCallScripted(Func<bool> observeToolRan)
+            {
+                _observeToolRan = observeToolRan;
+            }
+
+            public Exception ThrowAfterToolCall { get; set; }
+            public bool ThrowImmediately { get; set; }
+            public bool? ObservedToolExecutedBeforeStreamEnd { get; private set; }
+            public int StreamCalls { get; private set; }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamCalls++;
+                if (StreamCalls == 1)
+                {
+                    if (ThrowImmediately)
+                    {
+                        throw new InvalidOperationException("boom before any tool call");
+                    }
+
+                    yield return new MEAI.ChatResponseUpdate(
+                        MEAI.ChatRole.Assistant,
+                        new List<MEAI.AIContent>
+                        {
+                            new MEAI.FunctionCallContent(
+                                "call-1", "world_tool", new Dictionary<string, object>())
+                        });
+                    await Task.Yield();
+
+                    // Runs when the consumer requests the NEXT update - by then MeaiLlmClient
+                    // has already executed the call above via ExecuteStreamedAsync.
+                    ObservedToolExecutedBeforeStreamEnd = _observeToolRan?.Invoke();
+                    if (ThrowAfterToolCall != null)
+                    {
+                        throw ThrowAfterToolCall;
+                    }
+
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "tail");
+                }
+                else
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "Done.");
+                    await Task.Yield();
+                }
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
             }
         }
 
