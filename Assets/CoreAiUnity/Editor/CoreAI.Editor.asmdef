@@ -1,29 +1,31 @@
 {
-  "name": "CoreAI.Editor",
-  "rootNamespace": "CoreAI.Editor",
-  "references": [
-    "CoreAI.Core",
-    "CoreAI.Source",
-    "VContainer",
-    "undream.llmunity.Runtime"
-  ],
-  "includePlatforms": [
-    "Editor"
-  ],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "Newtonsoft.Json.dll"
-  ],
-  "autoReferenced": true,
-  "defineConstraints": [],
-  "versionDefines": [
-    {
-      "name": "ai.undream.llm",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_LLMUNITY"
-    }
-  ],
-  "noEngineReferences": false
+    "name": "CoreAI.Editor",
+    "rootNamespace": "CoreAI.Editor",
+    "references": [
+        "CoreAI.Core",
+        "CoreAI.Source",
+        "VContainer",
+        "undream.llmunity.Runtime",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "ai.undream.llm",
+            "expression": "1.0.0",
+            "define": "COREAI_HAS_LLMUNITY"
+        }
+    ],
+    "noEngineReferences": false
 }

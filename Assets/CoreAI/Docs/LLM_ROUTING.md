@@ -10,6 +10,8 @@
 - `ServerManagedApi` — production backend/proxy owns provider keys, subscriptions, quotas, model allowlists, usage, and audit.
 - `Offline` / `Stub` — deterministic fallback for tests and demos.
 
+**Runtime switching (host-side):** on Unity, the `CoreAiBackend` static facade switches between these modes at runtime (HTTP API / LLMUnity / Offline / Auto, plus hot model/key/URL changes and a health probe) by mutating the settings asset and hot-swapping the legacy-fallback primary client in the host `LlmClientRegistry`. Explicit route-table profiles are not modified. This is a `CoreAiUnity` feature, not part of the portable core — see [`../../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md`](../../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md).
+
 ## Portable Contracts
 
 - `LlmRouteProfile` describes a profile id, execution mode, model alias, context window, response cap, and capabilities.

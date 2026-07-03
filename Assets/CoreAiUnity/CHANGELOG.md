@@ -4,6 +4,34 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Runtime backend switching: CoreAiBackend facade + Canvas panel prefab (2026-07-03)
+
+- **New `CoreAiBackend` static facade** — switch the LLM backend at runtime without restarting the
+  scene or rebuilding the DI container: `ApplyHttpApi(baseUrl, apiKey, model, ...)`,
+  `ApplyServerManagedApi`, `ApplyLlmUnity(ggufModelPath?, agentName?, numGpuLayers?)`,
+  `ApplyOffline(...)`, `ApplyAuto()`, plus hot `SetModel` / `SetApiKey` / `SetApiBaseUrl`. A switch
+  mutates the shared `CoreAISettingsAsset` and hot-swaps the routed primary client in the live
+  `LlmClientRegistry` (via the new shared `LlmPipelineInstaller.BuildRoutedPrimaryClient`, so a
+  swapped client has identical semantics to a bootstrapped one — including the secondary-backend
+  fallback decorator); the very next request uses the new backend. Pre-bootstrap calls are
+  settings-only and return `false`.
+- **`CoreAiBackend.VerifyAsync`** — health probe through the active backend returning
+  ok/error/latency; never throws. **`CoreAiBackend.Status`** — current mode / base URL / model /
+  GGUF path / liveness snapshot. **`OnBackendChanged`** event for UI sync.
+- **Drop-in Canvas prefab `Assets/CoreAiUnity/Prefabs/CoreAiBackendPanel.prefab`** — uGUI/TMP panel
+  (backend dropdown Auto / LLMUnity / HTTP API / Offline, base URL + write-only API key + model
+  fields, Apply and Test buttons, status label) driven by the new `CoreAiBackendPanel` component.
+  Also creatable via `GameObject → CoreAI → Backend Panel (Canvas)`; the prefab can be regenerated
+  with `CoreAI → UI → Regenerate Backend Panel Prefab`.
+- **Settings:** `CoreAISettingsAsset` gains runtime setters `SetApiKey` / `SetModelName`.
+- **Docs:** new guide `Docs/RUNTIME_BACKEND_SWITCHING.md`; `DEVELOPER_GUIDE.md` links it from the
+  execution-modes section.
+- **Tests:** EditMode facade + panel coverage (switches mutate settings, events fire, empty key
+  field keeps the configured key, builder hierarchy fully wired); PlayMode end-to-end against a real
+  `CoreAILifetimeScope` (offline custom-response switch serves the next request, unreachable-HTTP
+  probe fails then offline recovers); live PlayMode test boots Offline and retargets to the
+  configured local server at runtime (probe + real model answer).
+
 ### Live PlayMode suite green on a stricter local model (2026-07-03)
 
 - **`RequireSpecific` forced tool mode goes through the portable mapping** (`RequireAny` + tools

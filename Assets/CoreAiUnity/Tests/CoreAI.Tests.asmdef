@@ -14,7 +14,9 @@
     "MessagePipe",
     "MessagePipe.VContainer",
     "UniTask",
-    "undream.llmunity.Runtime"
+    "undream.llmunity.Runtime",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [
     "Editor"

@@ -1053,6 +1053,18 @@ namespace CoreAI.Infrastructure.Llm
             apiBaseUrl = baseUrl;
         }
 
+        /// <summary>Sets the HTTP API key for the primary backend (runtime reconfiguration).</summary>
+        public void SetApiKey(string key)
+        {
+            apiKey = key ?? "";
+        }
+
+        /// <summary>Sets the model identifier for the primary backend (runtime reconfiguration).</summary>
+        public void SetModelName(string model)
+        {
+            modelName = model ?? "";
+        }
+
         /// <summary>Sets execution mode, legacy backend, and model identifiers for backend/model resolution.</summary>
         public void SetModelResolution(
             LlmExecutionMode mode,

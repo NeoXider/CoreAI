@@ -37,15 +37,8 @@ namespace CoreAI.Composition
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>(), settings);
-                ILlmClient primaryClient = ResolveLlmClient(settings, c.Resolve<IGameLogger>(),
-                    c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>());
-
-                // Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
-                if (settings != null && settings.HasValidFallbackBackend)
-                {
-                    ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
-                    primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, c.Resolve<ILog>());
-                }
+                ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
+                    c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
 
                 reg.SetLegacyFallback(primaryClient);
                 reg.ApplyManifest(routingManifest);
@@ -82,6 +75,31 @@ namespace CoreAI.Composition
             {
                 builder.Register<IAiOrchestrationMetrics, NullAiOrchestrationMetrics>(Lifetime.Singleton);
             }
+        }
+
+        /// <summary>
+        /// Builds the primary (legacy-fallback) client exactly as bootstrap does: execution-mode
+        /// resolution plus the optional secondary-backend <see cref="FallbackLlmClientDecorator"/>.
+        /// Shared by the container registration above and by <see cref="CoreAiBackend"/>'s runtime
+        /// backend switching, so a hot-swapped client has identical semantics to a bootstrapped one.
+        /// </summary>
+        internal static ILlmClient BuildRoutedPrimaryClient(
+            CoreAISettingsAsset settings,
+            IGameLogger logger,
+            IAgentMemoryStore memoryStore,
+            ILlmAgentProvider agentProvider,
+            ILog log)
+        {
+            ILlmClient primaryClient = ResolveLlmClient(settings, logger, memoryStore, agentProvider);
+
+            // Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
+            if (settings != null && settings.HasValidFallbackBackend)
+            {
+                ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
+                primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, log);
+            }
+
+            return primaryClient;
         }
 
         /// <summary>

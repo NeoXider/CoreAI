@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Runtime backend switching cross-reference (2026-07-03)
+
+- **Docs:** `LLM_ROUTING.md` now cross-references the host-side runtime backend switching feature
+  (`CoreAiBackend` in `com.neoxider.coreaiunity`) from the execution-modes section. The portable
+  core is unchanged — switching is implemented entirely in the Unity host package on top of the
+  existing `ILlmClientRegistry` legacy-fallback contract.
+
 ### Forced-tool-mode compat + local-transport hardening (2026-07-03)
 
 - **`RequireSpecific` forced tool mode is now provider-portable.** Instead of MEAI's
