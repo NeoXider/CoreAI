@@ -4,6 +4,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 4.18.1 — lockstep with com.neoxider.coreai 4.18.1 (2026-07-03)
+
+- Starved-SSE fallback to a non-streaming completion (see the core package changelog); the EditMode
+  regression test lives in this package's test assembly. SSE fixture: 32/32.
+
 ### Runtime backend switching: CoreAiBackend facade + Canvas panel prefab (2026-07-03)
 
 - **New `CoreAiBackend` static facade** — switch the LLM backend at runtime without restarting the

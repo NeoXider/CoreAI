@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 4.18.1 — starved SSE stream falls back to a non-streaming completion (2026-07-03)
+
+- **An SSE 200 with zero data deltas no longer eats the whole retry budget and no longer ends in
+  silence.** A starved stream (typically an upstream rate limit hidden behind a proxy: HTTP 200,
+  only keep-alive comments, no tokens — the "HTTP 200 but 0 parsed SSE deltas" warning) previously
+  retried the stream up to 10 times with backoff (~a minute of a busy chat turn) and then threw
+  `BackendUnavailable`, which surfaced to the player as no answer at all. Now the empty stream is
+  retried only 3 times, after which the SAME turn falls back to ONE plain (non-streaming)
+  completion — the same provider usually still answers it — and the answer is delivered through the
+  streaming iterator as simulated updates (the existing no-SSE-transport path). Only if the plain
+  completion also fails does the turn surface a typed error.
+- EditMode: `GetStreamingResponseAsync_EmptyStreamRepeated_FallsBackToNonStreamingCompletion`
+  (3 stream opens, exactly 1 non-streaming completion, fallback text surfaces through the stream).
+
 ### Runtime backend switching cross-reference (2026-07-03)
 
 - **Docs:** `LLM_ROUTING.md` now cross-references the host-side runtime backend switching feature

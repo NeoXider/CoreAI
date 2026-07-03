@@ -274,6 +274,8 @@ namespace CoreAI.Infrastructure.Llm
             string json = JsonConvert.SerializeObject(reqBody);
 
             const int transientLocalLlmReloadMaxAttempts = 10;
+            const int emptyStreamMaxAttempts = 3;
+            bool fallBackToNonStreaming = false;
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
@@ -469,28 +471,41 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (parsedSseDeltas == 0)
                     {
-                        bool canRetryEmptyStream = attempt < transientLocalLlmReloadMaxAttempts;
-                        if (canRetryEmptyStream)
+                        // An SSE 200 with zero deltas usually hides an upstream rate limit (e.g. an
+                        // OpenRouter 429 behind a proxy): the stream is starved, but the SAME provider
+                        // often still answers a plain completion. Retry the stream only a couple of
+                        // times, then fall back to ONE non-streaming completion (mirroring the
+                        // no-SSE-transport path) instead of burning ~a minute of backoff on a stream
+                        // that will not produce tokens - the chat stays "busy" that whole time.
+                        if (attempt < emptyStreamMaxAttempts)
                         {
                             int emptyStreamBackoffMs = Math.Min(6000, 900 * attempt);
                             _log.Warn(
                                 $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments - provider/model produced no tokens). " +
-                                $"Retrying (attempt {attempt + 1}/{transientLocalLlmReloadMaxAttempts}) after {emptyStreamBackoffMs}ms backoff...",
+                                $"Retrying (attempt {attempt + 1}/{emptyStreamMaxAttempts}) after {emptyStreamBackoffMs}ms backoff...",
                                 LogTag.Llm);
                             await BackoffDelayAsync(emptyStreamBackoffMs, cancellationToken);
                             continue;
                         }
 
                         _log.Warn(
-                            "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas after all retries - " +
-                            "upstream provider produced no tokens. Surface as backend-unavailable.",
+                            "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas after " +
+                            $"{emptyStreamMaxAttempts} attempts - falling back to a NON-streaming completion for this turn.",
                             LogTag.Llm);
-                        throw new LlmClientException(
-                            "Upstream model returned no tokens (only keep-alive comments) after all retries.",
-                            LlmErrorCode.BackendUnavailable);
+                        fallBackToNonStreaming = true;
+                        break;
                     }
 
                     yield break;
+                }
+            }
+
+            if (fallBackToNonStreaming)
+            {
+                MEAI.ChatResponse full = await GetResponseAsync(msgs, options, cancellationToken);
+                foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
+                {
+                    yield return u;
                 }
             }
         }

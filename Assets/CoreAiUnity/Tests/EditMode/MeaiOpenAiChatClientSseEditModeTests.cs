@@ -168,6 +168,33 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetStreamingResponseAsync_EmptyStreamRepeated_FallsBackToNonStreamingCompletion()
+        {
+            // An SSE 200 that carries only keep-alive comments (upstream rate limit hidden behind a
+            // proxy) must NOT burn the full 10-attempt backoff budget: after a few empty streams the
+            // turn falls back to ONE plain completion and the user still gets the answer.
+            EmptyStreamThenNonStreamingTransport transport = new();
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("fallback answer", string.Concat(parts),
+                "The non-streaming fallback answer must surface through the streaming iterator.");
+            Assert.AreEqual(3, transport.StreamOpens,
+                "An empty stream must retry only emptyStreamMaxAttempts (3) times.");
+            Assert.AreEqual(1, transport.NonStreamingCalls,
+                "After the empty-stream retries exactly one non-streaming completion runs.");
+        }
+
+        [Test]
         public async Task GetStreamingResponseAsync_TransportSendFailsOnce_RetriesAndCompletes()
         {
             const string sse =
@@ -557,6 +584,51 @@ namespace CoreAI.Tests.EditMode
                 };
 
                 return Task.FromResult(result.WithRawStream(new ThrowsAfterPayloadStream(_sse)));
+            }
+        }
+
+        /// <summary>
+        /// Streams always contain ONLY keep-alive comments (a starved upstream behind a proxy: SSE 200,
+        /// zero data lines), while the plain completion endpoint answers normally — models the
+        /// empty-stream → non-streaming fallback.
+        /// </summary>
+        private sealed class EmptyStreamThenNonStreamingTransport : IOpenAiHttpTransport
+        {
+            public int StreamOpens;
+            public int NonStreamingCalls;
+
+            public string DebugLabel => "EmptyStreamFallback";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                NonStreamingCalls++;
+                return Task.FromResult(new OpenAiHttpPostResult
+                {
+                    StatusCode = 200,
+                    BodyText =
+                        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"fallback answer\"}}]}",
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>()
+                });
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+
+                // Only comment keep-alives and the DONE sentinel — zero parsed deltas.
+                return Task.FromResult(result.WithRawStream(
+                    new ThrowsAfterPayloadStream(": keep-alive\n\n: keep-alive\n\ndata: [DONE]\n\n")));
             }
         }
 
