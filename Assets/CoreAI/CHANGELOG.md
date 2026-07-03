@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 4.18.2 — starved-stream watchdog: abort keep-alive-only SSE attempts early (2026-07-04)
+
+- **A starved SSE attempt no longer waits for the server to close the connection.** Confirmed in a
+  WebGL production build: a proxy hiding an upstream failure behind HTTP 200 held each streaming
+  attempt open for ~40s sending only `: keep-alive` comment lines, so the three empty-stream
+  retries alone exceeded the host's 120s turn watchdog — the turn was cancelled before the 4.18.1
+  non-streaming fallback could even start (`wallMs=120029 chunks=0 | cancelled`). Now, while an
+  attempt has produced ZERO parsed deltas and nothing but SSE comment/blank lines has arrived, the
+  attempt is aborted after `StarvedStreamFirstDeltaTimeoutSeconds` (default 15s) and the existing
+  empty-stream retry/fallback path takes over immediately (starved-aborted retries also skip the
+  extra backoff — the wait was already served). Worst case to fallback: ~45s instead of 2+ minutes.
+  A genuinely slow model that streams real data lines (or nothing at all) is unaffected — the
+  watchdog only fires on comment-only traffic before the first delta.
+- EditMode: `GetStreamingResponseAsync_EndlessKeepAliveStream_AbortsEarlyAndFallsBack` (a stream
+  that never closes and never sends a data line: 3 early-aborted attempts, exactly 1 non-streaming
+  completion, fallback text surfaces through the stream).
+
 ### 4.18.1 — starved SSE stream falls back to a non-streaming completion (2026-07-03)
 
 - **An SSE 200 with zero data deltas no longer eats the whole retry budget and no longer ends in

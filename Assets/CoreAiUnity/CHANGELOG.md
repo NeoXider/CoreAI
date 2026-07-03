@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 4.18.2 — lockstep with com.neoxider.coreai 4.18.2 (2026-07-04)
+
+- Starved-stream watchdog: keep-alive-only SSE attempts abort after 15s instead of waiting for the
+  server to close the connection (see the core package changelog); the EditMode regression test
+  lives in this package's test assembly.
+
 ### 4.18.1 — lockstep with com.neoxider.coreai 4.18.1 (2026-07-03)
 
 - Starved-SSE fallback to a non-streaming completion (see the core package changelog); the EditMode

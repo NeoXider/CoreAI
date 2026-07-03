@@ -52,6 +52,16 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IOpenAiHttpTransport _transport;
         private readonly ILog _log;
 
+        /// <summary>
+        /// Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
+        /// server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
+        /// this many seconds instead of waiting for the server to close the stream. A proxy that hides
+        /// an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
+        /// without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
+        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        /// </summary>
+        internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
+
         public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -276,6 +286,7 @@ namespace CoreAI.Infrastructure.Llm
             const int transientLocalLlmReloadMaxAttempts = 10;
             const int emptyStreamMaxAttempts = 3;
             bool fallBackToNonStreaming = false;
+            int starvedStreamFirstDeltaTimeoutSec = StarvedStreamFirstDeltaTimeoutSeconds;
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
@@ -386,6 +397,9 @@ namespace CoreAI.Infrastructure.Llm
 
                     SseToolCallAccumulator toolAccumulator = new(_log);
                     DateTime lastProgressUtc = DateTime.UtcNow;
+                    DateTime attemptStartUtc = DateTime.UtcNow;
+                    bool sawNonCommentLine = false;
+                    bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
 
                     // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
@@ -408,6 +422,30 @@ namespace CoreAI.Infrastructure.Llm
                         if (IsSseDoneLine(line))
                         {
                             break;
+                        }
+
+                        // Starved-stream early abort: a proxy hiding an upstream failure behind
+                        // HTTP 200 sends only SSE comment lines (": keep-alive") and can hold the
+                        // connection open far longer than callers' turn budgets. If the stream has
+                        // produced nothing but comments/blank lines for the first-delta window,
+                        // abandon this attempt now; the empty-stream retry/fallback below handles it.
+                        if (parsedSseDeltas == 0 && !sawNonCommentLine)
+                        {
+                            bool isCommentOrBlank = string.IsNullOrWhiteSpace(line)
+                                                    || line.StartsWith(":", StringComparison.Ordinal);
+                            if (!isCommentOrBlank)
+                            {
+                                sawNonCommentLine = true;
+                            }
+                            else if ((DateTime.UtcNow - attemptStartUtc).TotalSeconds
+                                     > starvedStreamFirstDeltaTimeoutSec)
+                            {
+                                _log.Warn(
+                                    $"MeaiOpenAiChatClient: SSE stream sent only keep-alive comments for {starvedStreamFirstDeltaTimeoutSec}s with 0 parsed deltas - aborting this streaming attempt early.",
+                                    LogTag.Llm);
+                                starvedAttemptAborted = true;
+                                break;
+                            }
                         }
 
                         foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
@@ -479,7 +517,10 @@ namespace CoreAI.Infrastructure.Llm
                         // that will not produce tokens - the chat stays "busy" that whole time.
                         if (attempt < emptyStreamMaxAttempts)
                         {
-                            int emptyStreamBackoffMs = Math.Min(6000, 900 * attempt);
+                            // A starved-aborted attempt already spent the whole first-delta window
+                            // waiting; retry immediately instead of stacking more backoff on top.
+                            int emptyStreamBackoffMs =
+                                starvedAttemptAborted ? 0 : Math.Min(6000, 900 * attempt);
                             _log.Warn(
                                 $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments - provider/model produced no tokens). " +
                                 $"Retrying (attempt {attempt + 1}/{emptyStreamMaxAttempts}) after {emptyStreamBackoffMs}ms backoff...",

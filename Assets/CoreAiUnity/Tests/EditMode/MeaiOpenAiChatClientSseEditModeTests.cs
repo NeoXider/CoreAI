@@ -195,6 +195,44 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetStreamingResponseAsync_EndlessKeepAliveStream_AbortsEarlyAndFallsBack()
+        {
+            // A proxy hiding an upstream failure can hold the SSE connection open indefinitely,
+            // sending only ": keep-alive" comment lines and never closing. Waiting for the server
+            // to end the stream would blow through callers' turn budgets (observed ~40s per attempt
+            // x 3 attempts > the 120s briefing watchdog). The starved-stream watchdog must abandon
+            // each attempt after the first-delta window and reach the non-streaming fallback.
+            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
+            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
+            try
+            {
+                EndlessKeepAliveTransport transport = new();
+                MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+                List<string> parts = new();
+
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                {
+                    if (!string.IsNullOrEmpty(update.Text))
+                    {
+                        parts.Add(update.Text);
+                    }
+                }
+
+                Assert.AreEqual("fallback answer", string.Concat(parts),
+                    "A never-closing keep-alive-only stream must still deliver the fallback answer.");
+                Assert.AreEqual(3, transport.StreamOpens,
+                    "Each starved attempt must be aborted early and retried only emptyStreamMaxAttempts (3) times.");
+                Assert.AreEqual(1, transport.NonStreamingCalls,
+                    "After the starved-stream retries exactly one non-streaming completion runs.");
+            }
+            finally
+            {
+                MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout;
+            }
+        }
+
+        [Test]
         public async Task GetStreamingResponseAsync_TransportSendFailsOnce_RetriesAndCompletes()
         {
             const string sse =
@@ -629,6 +667,99 @@ namespace CoreAI.Tests.EditMode
                 // Only comment keep-alives and the DONE sentinel — zero parsed deltas.
                 return Task.FromResult(result.WithRawStream(
                     new ThrowsAfterPayloadStream(": keep-alive\n\n: keep-alive\n\ndata: [DONE]\n\n")));
+            }
+        }
+
+        /// <summary>
+        /// Streams NEVER close and never send a data line — an endless drip of ": keep-alive" SSE
+        /// comments (a proxy holding a starved upstream connection open). Only the starved-stream
+        /// watchdog can end an attempt. The plain completion endpoint answers normally.
+        /// </summary>
+        private sealed class EndlessKeepAliveTransport : IOpenAiHttpTransport
+        {
+            public int StreamOpens;
+            public int NonStreamingCalls;
+
+            public string DebugLabel => "EndlessKeepAlive";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                NonStreamingCalls++;
+                return Task.FromResult(new OpenAiHttpPostResult
+                {
+                    StatusCode = 200,
+                    BodyText =
+                        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"fallback answer\"}}]}",
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>()
+                });
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+
+                return Task.FromResult(result.WithRawStream(new EndlessKeepAliveStream()));
+            }
+        }
+
+        private sealed class EndlessKeepAliveStream : Stream
+        {
+            private static readonly byte[] KeepAlive = Encoding.UTF8.GetBytes(": keep-alive\n\n");
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
+                CancellationToken cancellationToken)
+            {
+                await Task.Yield();
+                cancellationToken.ThrowIfCancellationRequested();
+                return Read(buffer, offset, count);
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                int toCopy = Math.Min(count, KeepAlive.Length);
+                Array.Copy(KeepAlive, 0, buffer, offset, toCopy);
+                return toCopy;
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
             }
         }
 
