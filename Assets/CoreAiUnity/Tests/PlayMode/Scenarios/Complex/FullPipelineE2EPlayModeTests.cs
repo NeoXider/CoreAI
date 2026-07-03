@@ -191,10 +191,36 @@ namespace CoreAI.Tests.PlayMode
                 return result;
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
-                CancellationToken ct = default)
+            // RunTaskAsync streams by default, so the capture MUST track the streaming path too —
+            // otherwise CallCount/LastOk/LastContent stay at their defaults and the test wrongly
+            // reports "LLM failed" for a perfectly successful streamed turn.
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
             {
-                return _inner.CompleteStreamingAsync(request, ct);
+                CallCount++;
+                Stopwatch sw = Stopwatch.StartNew();
+                StringBuilder text = new();
+                bool ok = true;
+                await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, ct))
+                {
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        text.Append(chunk.Text);
+                    }
+
+                    if (chunk.IsDone && !string.IsNullOrEmpty(chunk.Error))
+                    {
+                        ok = false;
+                    }
+
+                    yield return chunk;
+                }
+
+                sw.Stop();
+                TotalMs += sw.ElapsedMilliseconds;
+                LastOk = ok;
+                LastContent = text.ToString();
+                AllResponses.Add(LastContent);
             }
         }
 

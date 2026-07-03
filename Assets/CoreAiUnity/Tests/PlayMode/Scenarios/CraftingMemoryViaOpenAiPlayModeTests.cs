@@ -719,7 +719,8 @@ namespace CoreAI.Tests.PlayMode
                 "These ingredients were used before. CALL the execute_lua tool (a text reply with Lua code does " +
                 "not execute anything) using the recorded craft memory to recreate the consistent result " +
                 "that the game should produce for the same ingredients. Do not call memory(...) inside Lua; " +
-                "pass Lua code that contains the concrete item name.";
+                "pass Lua code that contains the concrete item name, " +
+                "for example local weapon_name = \"Name\".";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -1019,6 +1020,9 @@ namespace CoreAI.Tests.PlayMode
             // Lua: return "Flameforged Steel Sword" (bare quoted name as the chunk result).
             // Case-sensitive first letter: only capitalized item names, not lowercase status strings.
             new(@"\breturn\s+\\?""([A-Z][A-Za-z0-9_' -]{2,}?)\\?"""),
+            // Degenerate tool call where the WHOLE code argument is just the quoted item name:
+            // {"code":"\"Flamesteel Blade\""}
+            new(@"""code""\s*:\s*""\\""([A-Z][A-Za-z0-9_' -]{2,}?)\\"""""),
             new("\"item_name\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase),
             new(@"\\\""item_name\\\""\s*:\s*\\\""([^""\\]+)\\\""", RegexOptions.IgnoreCase),
             new(@"\bname\s*=\s*'([^']+)'", RegexOptions.IgnoreCase),
