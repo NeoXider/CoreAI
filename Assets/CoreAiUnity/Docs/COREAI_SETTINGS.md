@@ -84,7 +84,7 @@ Each profile can set mode, context window, HTTP settings, LLMUnity agent name, a
 
 ### Global streaming (Inspector)
 
-In the **`CoreAISettings`** custom inspector, the **Essentials** block includes **Global streaming** (`EnableStreaming`, default **on**). Effective streaming is still subject to the hierarchy: **`CoreAiChatConfig.EnableStreaming`** on the chat panel (if off → never streams) → per-role **`AgentBuilder.WithStreaming`** → this global toggle. **WebGL-only transport** lives under **Advanced Settings → WebGL player (browser build)**: **WebGL: native SSE (fetch)** (`WebGlNativeStreaming`, default **on** for new assets — incremental SSE in the browser; ensure **CORS** for your LLM host) and **WebGL: fetch credentials (same-origin)** (`SameOriginCredentials`, default **off** → fetch **`omit`** so Bearer APIs work with CORS `Access-Control-Allow-Origin: *` e.g. OpenRouter; turn **on** only for **`same-origin`** cookie cases). See [WebGL streaming (optional)](#webgl-streaming-optional) below.
+In the **`CoreAISettings`** custom inspector, the **Essentials** block includes **Global streaming** (`EnableStreaming`, default **on**). `EnableStreaming` is the **default execution path everywhere**, not just chat/live UI: `AiOrchestrator.RunTaskAsync` (agent/task execution) also runs through the streaming tool path (`CompleteStreamingAsync`, collapsed to a result) when this is on, so tasks use the same execute-as-you-stream tool loop as chat. Non-streaming (`CompleteAsync`) is the fallback only when `EnableStreaming` is off. Effective streaming is still subject to the hierarchy: **`CoreAiChatConfig.EnableStreaming`** on the chat panel (if off → never streams) → per-role **`AgentBuilder.WithStreaming`** → this global toggle. **WebGL-only transport** lives under **Advanced Settings → WebGL player (browser build)**: **WebGL: native SSE (fetch)** (`WebGlNativeStreaming`, default **on** for new assets — incremental SSE in the browser; ensure **CORS** for your LLM host) and **WebGL: fetch credentials (same-origin)** (`SameOriginCredentials`, default **off** → fetch **`omit`** so Bearer APIs work with CORS `Access-Control-Allow-Origin: *` e.g. OpenRouter; turn **on** only for **`same-origin`** cookie cases). See [WebGL streaming (optional)](#webgl-streaming-optional) below.
 
 ### Production validation
 
@@ -249,6 +249,7 @@ The Inspector includes an **LLMUnity status** panel:
 | **Tool Call Retries** | `3` | Max consecutive failed tool calls before aborting the agent (counter resets on success) |
 | **Max Tool Call Roundtrips** | `20` | Max tool-call roundtrips per request (one roundtrip = one LLM call + one tool-execution batch). Prevents infinite tool-calling loops. `0` = unlimited. Override priority: per-call `AiTaskRequest.MaxToolCallRoundtrips` > per-agent `AgentBuilder.WithMaxToolCallRoundtrips` > global setting. Built-in **Programmer** and **Creator** roles default to unlimited. |
 | **Context Overflow Retries** | `3` | Max bounded retries after `ContextLengthExceeded`; each retry applies a tighter `ContextRetryLevel` and drops roughly 25% more oldest history (`0` disables). |
+| **Max Parallel Tool Calls** | `4` | Max tool calls within one LLM turn (batch) that may execute **concurrently**, on **both** the batch and the streamed (execute-as-you-stream) path. `1` = strictly sequential/legacy. State-mutating built-ins (`memory`, `manage_mods`, `manage_skills`) are always serialized relative to each other; independent/read tools run in parallel. Result order is always preserved (original call order), independent of completion order. Portable contract: `ICoreAISettings.MaxParallelToolCalls`. |
 
 These fields live in the **Advanced** inspector under **Chat history summarization** (alongside **Enable LLM context compaction**):
 
@@ -289,7 +290,7 @@ Built-in tool result defaults: `Programmer` and `CoreMechanicAI` use `ToolResult
 because their iterative code/mechanics correctness depends on exact tool output across turns. `Creator`,
 `Analyzer`, `AINpc`, `Merchant`, `PlainChat`, and `SmartChat` keep the `CompactSummary` default.
 
-Global settings still gate some features: `EnableLlmContextCompaction` must be on before a role can use LLM-assisted compaction, `EnableStreaming` is the fallback when no role override exists, and temperature is sent only when temperature overriding is enabled.
+Global settings still gate some features: `EnableLlmContextCompaction` must be on before a role can use LLM-assisted compaction, `EnableStreaming` is the fallback when no role override exists (and, being the default execution path, governs task/agent execution too, not just chat), and temperature is sent only when temperature overriding is enabled.
 
 #### Universal system prompt prefix
 

@@ -4,6 +4,8 @@ How CoreAI streams tokens from LLMs into your UI — end-to-end, with every laye
 
 > **TL;DR.** Both HTTP SSE and local LLMUnity paths produce `IAsyncEnumerable<LlmStreamChunk>`. The chunks are scrubbed by a single stateful `ThinkBlockStreamFilter` (tag-safe across chunk boundaries) and delivered to `CoreAiChatPanel` on the Unity main thread. Whether streaming is used at all is decided by a **three-layer flag hierarchy** — UI → per-agent → global.
 
+> **Streaming is the default execution path for everything, not just chat.** Since the streaming-by-default change, non-interactive agent task execution (`AiOrchestrator.RunTaskAsync`) also obtains each completion via the streaming path when `EnableStreaming` is on — through a `CompleteForTaskAsync` helper that drives `CompleteStreamingAsync` and collapses the chunks into an `LlmCompletionResult`. Tasks therefore run through the same execute-as-you-stream tool path as chat (`RunStreamingAsync`). It falls back to non-streaming `CompleteAsync` only when `EnableStreaming` is disabled. See [§6](#6-orchestrator-streaming).
+
 **From any script (beginners and pros):** use the static API `CoreAi.StreamAsync` / `CoreAi.SmartAskAsync` — they delegate to `CoreAiChatService` and the same chunk pipeline. Full guide: [`COREAI_SINGLETON_API.md`](COREAI_SINGLETON_API.md). Orchestrator streaming (`CoreAi.OrchestrateStreamAsync`) is documented in [§6](#6-orchestrator-streaming) below.
 
 ---
@@ -66,6 +68,7 @@ Key files:
 - **Timeouts** → long streams use a **per-read stall budget** (see **`RequestTimeoutSeconds`**) on the **`HttpClient`** path; **`HttpClient.Timeout`** on the streaming client is kept high.
 - **Cancellation** → cooperative via **`CancellationToken`**.
 - **Errors** → logged; failures surface as **`LlmClientException`** / terminal stream chunks where supported.
+- **Stream-open send retry** → `MeaiOpenAiChatClient` **retries** a transport-level send failure when opening the SSE stream (bounded — a few quick backoff retries). A **stale pooled keep-alive connection** the local server already closed (`System.Net.Http` surfaces this as "An error occurred while sending the request") no longer fails the whole request — a fresh attempt opens a new connection. A genuinely-down backend still surfaces promptly as **`BackendUnavailable`** rather than spinning the full retry budget.
 
 ### Local (LLMUnity GGUF)
 
@@ -182,7 +185,7 @@ await foreach (string chunk in CoreAi.StreamAsync("Hello", "SmartChat"))
 
 ## 6. Orchestrator streaming
 
-Streaming is not limited to `CoreAiChatService`; it also flows through the full AI pipeline (`IAiOrchestrationService`). Differences:
+Streaming is not limited to `CoreAiChatService`; it flows through the full AI pipeline (`IAiOrchestrationService`) for **both** interactive chat (`RunStreamingAsync`) **and** non-interactive task execution (`RunTaskAsync`, via the `CompleteForTaskAsync` helper) — streaming is the default path whenever `EnableStreaming` is on. Differences between the two chat-facing entry points:
 
 | Layer | `CoreAiChatService.SendMessageStreamingAsync` | `IAiOrchestrationService.RunStreamingAsync` |
 |-------|-----------------------------------------------|---------------------------------------------|
@@ -253,6 +256,8 @@ Mechanism (`MeaiLlmClient`):
 Non-text-shaped (native) tool calls never appear in the visible text at all, so prose around them already streams live; the same progress marker is emitted when the first **`FunctionCallContent`** arrives.
 
 ### Shared execution policy
+
+Execute-as-you-stream tool calls run in **parallel**, bounded by `ICoreAISettings.MaxParallelToolCalls` (default **4**). Independent calls in a turn are scheduled concurrently with a `SemaphoreSlim` of that size; state-mutating built-ins are **serialized**; results are collated back into **arrival order** at completion; `MaxParallelToolCalls <= 1` is the sequential fast-path (byte-identical to the pre-parallel loop). The streamed turn finalizes via `ToolExecutionPolicy.CompleteStreamedTurnAsync` with a drain bounded by the per-call tool timeout.
 
 Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 

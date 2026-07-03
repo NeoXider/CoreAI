@@ -743,6 +743,12 @@ If you see this line repeatedly, that's the signal to either (a) flip `WithAllow
 
 > 💡 *Note: For some tools (e.g. `world_command` → `play_animation` or `execute_lua`), duplicates are always allowed at the tool level.*
 
+#### Forced tool choice (`ForcedToolMode`)
+
+Per call you can override how the model picks tools via `AiTaskRequest.ForcedToolMode` (`LlmToolChoiceMode` enum): `Auto` (default — model decides), `RequireAny` (must emit some tool call), `RequireSpecific` (must call the tool named in `AiTaskRequest.RequiredToolName`), or `None` (answer without tools). These map onto Microsoft.Extensions.AI `ChatToolMode`.
+
+> ⚠️ **Known limitation (local servers):** local **llama.cpp** / **LM Studio** OpenAI-compatible servers reject a forced-**specific** `tool_choice` (CoreAI `LlmToolChoiceMode.RequireSpecific`) with **HTTP 400**. `"required"` (`RequireAny`), `"auto"` (`Auto`), and none are accepted. When targeting such local servers, prefer `RequireAny` or `Auto` over `RequireSpecific`. Cloud providers (OpenAI, OpenRouter, etc.) generally accept the specific form.
+
 #### Generation temperature
 
 Temperature controls **creativity**. The global default is `CoreAISettings.Temperature` (default **0.1**), but you can override per agent.

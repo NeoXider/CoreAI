@@ -33,7 +33,7 @@ Filter by **assembly** in Test Runner; folder map: **`Tests/README.md`**.
 **PlayMode** — Test Runner → PlayMode tab:
 
 - `ToolCallStreamingParityPlayModeTests` ← stream + non-stream parity in a player frame
-- `MultiAgentCraftingWorkflowPlayModeTests` ← live multi-agent workflow; Programmer now retries with `ForcedToolMode.RequireSpecific("execute_lua")` when a local model stops after the memory tool.
+- `MultiAgentCraftingWorkflowPlayModeTests` ← live multi-agent workflow; Programmer now retries with `ForcedToolMode.RequireSpecific("execute_lua")` when a local model stops after the memory tool. **Note:** many local llama.cpp / LM Studio servers reject a forced-**specific** `tool_choice` with **HTTP 400** (`"auto"` / `"required"` are accepted); against such a backend the `RequireSpecific` retry cannot land — prefer `RequireAny`.
 - `MerchantWithToolCallingPlayModeTests` (real LLM, set `COREAI_PLAYMODE_LLM_BACKEND`)
 - `AllToolCallsPlayModeTests` (real LLM, broader coverage)
 

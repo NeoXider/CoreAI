@@ -231,6 +231,11 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 // 5. Result → model → final answer
 ```
 
+> ℹ️ **Streaming is the default execution path — not chat/UI-only.** `AiOrchestrator.RunTaskAsync`
+> (non-interactive agent tasks) runs through `CompleteStreamingAsync` whenever `ICoreAISettings.EnableStreaming`
+> is on, so tasks use the **same execute-as-you-stream tool path** (including bounded-parallel tool execution)
+> as chat. The non-streaming `CompleteAsync` shown above is the fallback used only when streaming is disabled.
+
 ---
 
 ## 🎯 Benefits of MEAI
@@ -294,6 +299,12 @@ await orch.RunTaskAsync(new AiTaskRequest
 
 For `RequireSpecific`, the name is checked against registered `AIFunction[]` for the role — if the tool is missing, a warning is logged and forced mode is downgraded to `RequireAny` (the model must still call something — better to fail loudly than silently get a non-tool answer).
 
+> ⚠️ **Local-server limitation (llama.cpp / LM Studio).** Many local OpenAI-compatible servers reject a
+> forced-**specific** `tool_choice` — i.e. `RequireSpecific` + `RequiredToolName`, which serializes to
+> `{"type":"function","function":{"name":X}}` — with **HTTP 400**. `tool_choice` `"auto"` / `"required"`
+> (absent) are accepted. Against such servers prefer `RequireAny` (`"required"`) or `Auto` rather than
+> `RequireSpecific`. This is a current, documented limitation and is not yet worked around in code.
+
 ### Streaming + ForcedToolMode (v0.25.0)
 
 In `MeaiLlmClient.CompleteStreamingAsync`, forced mode applies **only on the first iteration** of the tool loop. After we feed the model the tool result, options are cloned with `ChatToolMode.Auto` via `CloneOptionsWithAutoToolMode` — otherwise the model would stay locked in an infinite tool-call loop (each round would be forced again).
@@ -304,7 +315,7 @@ This matches how multi-step tool chains work in Claude Code / Cursor: the first 
 
 - **`Auto` (default).** 95% of cases. In `ToolsAndChat`, the model usually picks tools well on its own.
 - **`RequireAny`.** When you know deterministically that a tool is needed but not which one. E.g. an intent classifier detected “wants to test knowledge” — some interactive evaluation tool must run, not plain text.
-- **`RequireSpecific`.** Narrow integrations: rerun fixes, Lua repair, forcing a specific workflow. Use sparingly — forcing tool choice too often hurts dialogue naturalness.
+- **`RequireSpecific`.** Narrow integrations: rerun fixes, Lua repair, forcing a specific workflow. Use sparingly — forcing tool choice too often hurts dialogue naturalness. **Not supported by most local llama.cpp / LM Studio servers (HTTP 400 on a specific `tool_choice`); use `RequireAny` there** (see the note above).
 - **`None`.** Tools are registered for the role, but for this turn they must not run (e.g. post-tool reflection / summarization).
 
 ### Tests

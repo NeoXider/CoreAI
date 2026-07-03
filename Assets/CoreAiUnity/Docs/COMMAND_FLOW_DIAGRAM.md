@@ -338,8 +338,9 @@ sequenceDiagram
     Memory-->>Prompt: AgentMemoryState
     Prompt-->>Orch: System + User prompt
 
-    Orch->>LLM: CompleteAsync(request + tools)
-    LLM->>MEAI: IChatClient.GetResponseAsync()
+    Orch->>LLM: CompleteStreamingAsync (default) / CompleteAsync (fallback)
+    Note over Orch,LLM: Streaming is default when EnableStreaming is on<br/>(RunTaskAsync via CompleteForTaskAsync);<br/>CompleteAsync only when streaming is off
+    LLM->>MEAI: IChatClient.GetStreamingResponseAsync() / GetResponseAsync()
     MEAI->>MEAI: Send to model
 
     alt Model invoked a tool
@@ -448,7 +449,8 @@ LuaExecutionSucceeded { TraceId = "abc123" }
 |------------|------------|-------------|
 | **Queue** | Priority + CancellationScope | Reduces task spam |
 | **Prompt** | Universal Prefix | Shared rules for all agents |
-| **Tool calling** | SmartToolCallingChatClient | Duplicate detection, loop protection |
+| **Tool calling** | ToolExecutionPolicy (streaming) / SmartToolCallingChatClient (non-streaming) | Duplicate detection, loop protection |
+| **Tool parallelism** | MaxParallelToolCalls (4) | Bounded concurrent tool execution; mutating built-ins serialized; arrival-order results (`<=1` = sequential) |
 | **Tool retry** | MaxToolCallRetries (3) | Small models get another try |
 | **Lua** | SecureLuaEnvironment + Guard | Whitelist API, step limit, wall clock |
 | **World commands** | PrefabRegistryAsset | Whitelist prefabs for spawn |
