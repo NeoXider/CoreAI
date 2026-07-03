@@ -76,7 +76,10 @@ namespace CoreAI.Editor
             layout.padding = new RectOffset(20, 20, 16, 16);
             layout.spacing = 10;
             layout.childControlWidth = true;
-            layout.childControlHeight = false;
+            // MUST control child heights: rows carry their size via LayoutElement (SetHeight), which
+            // the layout group only honors when it controls the child height — otherwise every row
+            // keeps the default 100px RectTransform and overflows the panel background.
+            layout.childControlHeight = true;
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
 
