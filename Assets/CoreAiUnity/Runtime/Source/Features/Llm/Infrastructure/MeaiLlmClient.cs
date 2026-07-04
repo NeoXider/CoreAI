@@ -859,6 +859,14 @@ namespace CoreAI.Infrastructure.Llm
                                         streamedTurn, fcc, chatOptions, cancellationToken);
                                     streamedExecutedCallCount++;
                                 }
+                                else
+                                {
+                                    // No AIFunction is bound for this role: the call cannot execute.
+                                    // Trace it per-call (the session-start warning alone leaves these
+                                    // invisible in ExecutedTraces / diagnostics dashboards).
+                                    policy.RecordSyntheticTrace(fcc.Name ?? "", false, 0d, "unbound-native",
+                                        "Native tool call arrived but no MEAI AIFunction is bound for this role; call not executed.");
+                                }
                             }
                             else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
                             {
