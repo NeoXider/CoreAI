@@ -294,13 +294,13 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip(
             "Max tool call history messages retained in the MEAI message list during a single request's tool-calling loop. " +
-            "0 = no limit (default): the model keeps full sight of everything it did this turn, so long multi-step " +
-            "work (e.g. building a 30+ object scene, a multi-file refactor) never forgets and repeats earlier steps. " +
-            "Set a positive cap only if you must bound context growth; conversation summarization + overflow retry " +
-            "already handle very long sessions.")]
+            "Default 20: bounds context growth on long tool-calling sessions in BOTH the streaming and non-streaming " +
+            "loops (oldest resolved tool exchanges are dropped first; system + original user messages are always kept " +
+            "and assistant/tool pairs are removed whole). Set to 0 to explicitly opt out (unlimited: the model keeps " +
+            "full sight of everything it did this turn - useful for long free-build sessions).")]
         [SerializeField]
         [Min(0)]
-        private int maxToolCallHistoryMessages;
+        private int maxToolCallHistoryMessages = 20;
 
         [Tooltip(
             "Max tool calls within a single LLM turn (batch) that may execute concurrently. " +
@@ -764,8 +764,12 @@ namespace CoreAI.Infrastructure.Llm
         // falls back to the default 20.
         public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 0 ? 20 : maxToolCallRoundtrips;
 
-        /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit. Default: 0 (unlimited).</summary>
-        // A negative (corrupt) value falls back to 20; 0 is a valid value meaning unlimited.
+        /// <summary>
+        /// Max tool call history messages in the MEAI message list. Default 20; <c>0</c> is an
+        /// EXPLICIT opt-out meaning unlimited (no trimming). Assets serialized before the default
+        /// changed may carry <c>0</c> - they intentionally keep unlimited history.
+        /// </summary>
+        // A negative (corrupt) value falls back to the default 20; 0 is a valid value meaning unlimited.
         public int MaxToolCallHistoryMessages => maxToolCallHistoryMessages < 0 ? 20 : maxToolCallHistoryMessages;
 
         /// <summary>Max concurrent tool calls within one batch. 1 = sequential. Default 4.</summary>

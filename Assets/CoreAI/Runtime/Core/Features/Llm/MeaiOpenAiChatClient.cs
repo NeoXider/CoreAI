@@ -2163,6 +2163,15 @@ namespace CoreAI.Infrastructure.Llm
         private static List<Dictionary<string, object>> BuildMessagesPayloadStatic(List<MEAI.ChatMessage> msgs)
         {
             List<Dictionary<string, object>> messages = new();
+
+            // tool_call_id symmetry for calls that arrived WITHOUT a provider id: the assistant echo
+            // derives a deterministic synthetic id, and the matching tool-role reply must use the
+            // SAME id or the model sees an unanswered call (and a dangling reply). Ids are queued in
+            // emission order; the next tool result with an empty CallId consumes the next queued id
+            // (results always follow their assistant tool_calls message in protocol order).
+            Queue<string> pendingSyntheticToolCallIds = new();
+            int assistantToolCallMessageIndex = 0;
+
             foreach (MEAI.ChatMessage msg in msgs)
             {
                 string content = msg.Text ?? "";
@@ -2202,9 +2211,17 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 { "role", "tool" }
                             };
-                            if (!string.IsNullOrEmpty(functionResult.CallId))
+                            string toolCallId = functionResult.CallId;
+                            if (string.IsNullOrEmpty(toolCallId) && pendingSyntheticToolCallIds.Count > 0)
                             {
-                                resultDict["tool_call_id"] = functionResult.CallId;
+                                // Pair with the synthetic id the assistant echo emitted for the
+                                // id-less call this result answers (see queue comment above).
+                                toolCallId = pendingSyntheticToolCallIds.Dequeue();
+                            }
+
+                            if (!string.IsNullOrEmpty(toolCallId))
+                            {
+                                resultDict["tool_call_id"] = toolCallId;
                             }
 
                             string resultStr = functionResult.Result switch
@@ -2235,26 +2252,36 @@ namespace CoreAI.Infrastructure.Llm
                     if (funcCalls.Count > 0)
                     {
                         List<Dictionary<string, object>> toolCallsList = new();
-                        foreach (MEAI.FunctionCallContent call in funcCalls)
+                        for (int callIndex = 0; callIndex < funcCalls.Count; callIndex++)
                         {
+                            MEAI.FunctionCallContent call = funcCalls[callIndex];
+
+                            // Never invent a RANDOM id: a Guid here could not be reproduced on the
+                            // matching tool-role reply, leaving the model with an unanswered call it
+                            // then re-issues. Derive a deterministic synthetic id instead and queue
+                            // it so the paired tool result (also id-less) reuses the exact same id.
+                            string callId = call.CallId;
+                            if (string.IsNullOrEmpty(callId))
+                            {
+                                callId = $"synth_{assistantToolCallMessageIndex}_{callIndex}";
+                                pendingSyntheticToolCallIds.Enqueue(callId);
+                            }
+
                             toolCallsList.Add(new Dictionary<string, object>
                             {
-                                { "id", call.CallId ?? Guid.NewGuid().ToString() },
+                                { "id", callId },
                                 { "type", "function" },
                                 {
                                     "function", new Dictionary<string, object>
                                     {
                                         { "name", call.Name },
-                                        {
-                                            "arguments",
-                                            JsonConvert.SerializeObject(call.Arguments ??
-                                                                        new Dictionary<string, object?>())
-                                        }
+                                        { "arguments", SerializeToolCallArguments(call.Arguments) }
                                     }
                                 }
                             });
                         }
 
+                        assistantToolCallMessageIndex++;
                         msgDict["tool_calls"] = toolCallsList;
                         MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
                         msgDict["content"] = textContent?.Text ?? "";
@@ -2273,6 +2300,32 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return messages;
+        }
+
+        /// <summary>
+        /// Serializes a tool call's arguments for the assistant <c>tool_calls</c> echo. Parse-error
+        /// calls (arguments carrying <see cref="ToolCallArgumentMarkers.RawArgumentsKey"/>) echo the
+        /// model's ORIGINAL raw argument string instead of the internal marker dictionary - the
+        /// markers are a CoreAI-private contract and leaking
+        /// <c>{"__raw_arguments":...,"__parse_error":true}</c> onto the wire would show the model a
+        /// call shape it never produced.
+        /// </summary>
+        private static string SerializeToolCallArguments(IDictionary<string, object?> arguments)
+        {
+            if (arguments != null &&
+                arguments.TryGetValue(ToolCallArgumentMarkers.RawArgumentsKey, out object? rawArguments))
+            {
+                return rawArguments switch
+                {
+                    string s => s,
+                    System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String =>
+                        je.GetString() ?? "",
+                    null => "",
+                    _ => rawArguments.ToString() ?? ""
+                };
+            }
+
+            return JsonConvert.SerializeObject(arguments ?? new Dictionary<string, object?>());
         }
 
         /// <summary>

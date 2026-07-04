@@ -101,7 +101,8 @@
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
         private const int DefaultMaxToolCallRoundtrips = 20;
-        private const int DefaultMaxToolCallHistoryMessages = 0; // 0 = unlimited (never forget prior tool steps)
+        // Default 20 (bounds context growth out of the box); 0 = EXPLICIT opt-out (unlimited).
+        private const int DefaultMaxToolCallHistoryMessages = 20;
         private const int DefaultMaxParallelToolCalls = 4;
 
         internal const string DefaultUniversalSystemPromptPrefix =
@@ -402,7 +403,7 @@
 
         /// <summary>
         /// Max tool call history messages in the MEAI message list during tool-calling loop.
-        /// 0 = no limit. Default: 0 (unlimited).
+        /// Default: 20. <c>0</c> = explicit opt-out (no limit).
         /// </summary>
         public static int MaxToolCallHistoryMessages
         {

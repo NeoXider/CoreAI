@@ -458,6 +458,99 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteSingle_TypeConversionError_AppendsSchemaRetryHint()
+        {
+            // F7: an argument/JSON conversion failure must carry the same compact schema + retry
+            // suffix as the missing-required-argument path, so the model can fix its arguments.
+            const string schema =
+                "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\"}},\"required\":[\"count\"]}";
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "typed_tool", ParametersSchema = schema } },
+                false, "test", 3);
+
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(
+                (Func<string>)(() => throw new FormatException("Input string was not in a correct format.")),
+                new MEAI.AIFunctionFactoryOptions { Name = "typed_tool", Description = "Typed tool" }));
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("typed_tool", new Dictionary<string, object?> { { "count", "not-a-number" } }),
+                opts,
+                CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            string text = result.Result.Result.ToString();
+            StringAssert.Contains("matching this schema", text);
+            StringAssert.Contains("\"count\"", text, "The compact schema itself must be embedded");
+        }
+
+        [Test]
+        public async Task ExecuteSingle_TypeConversionError_NoSchemaRegistered_NoHintAppended()
+        {
+            // Conversion failure for a tool with no meaningful schema: nothing useful to append.
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "typed_tool", ParametersSchema = "{}" } },
+                false, "test", 3);
+
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(
+                (Func<string>)(() => throw new InvalidCastException("cannot convert value")),
+                new MEAI.AIFunctionFactoryOptions { Name = "typed_tool", Description = "Typed tool" }));
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("typed_tool"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.DoesNotContain("matching this schema", result.Result.Result.ToString());
+        }
+
+        [Test]
+        public async Task ExecuteSingle_NonConversionError_DoesNotAppendSchemaHint()
+        {
+            // A genuine tool-body failure must keep its plain error - the schema hint is only for
+            // argument-shape problems the model can actually fix by re-emitting arguments.
+            const string schema =
+                "{\"type\":\"object\",\"properties\":{\"count\":{\"type\":\"integer\"}},\"required\":[\"count\"]}";
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "typed_tool", ParametersSchema = schema } },
+                false, "test", 3);
+
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(
+                (Func<string>)(() => throw new InvalidOperationException("world is not loaded")),
+                new MEAI.AIFunctionFactoryOptions { Name = "typed_tool", Description = "Typed tool" }));
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("typed_tool", new Dictionary<string, object?> { { "count", 1 } }),
+                opts,
+                CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.DoesNotContain("matching this schema", result.Result.Result.ToString());
+        }
+
+        [Test]
+        public void LooksLikeArgumentConversionError_ClassifiesExceptionChain()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new FormatException("bad number")));
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new InvalidCastException("cast failed")));
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new ArgumentException("wrong arg")));
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new Newtonsoft.Json.JsonReaderException("unexpected token")));
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new Exception("Unable to CONVERT value to Int32")),
+                "Message-based detection must be case-insensitive");
+            Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new InvalidOperationException("wrapper", new FormatException("inner"))),
+                "Inner exceptions must be inspected (MEAI wraps the real conversion failure)");
+            Assert.IsFalse(ToolExecutionPolicy.LooksLikeArgumentConversionError(
+                new InvalidOperationException("world is not loaded")));
+        }
+
+        [Test]
         public async Task ExecuteSingle_UsesToolInvocationMarshaler_WhenProvided()
         {
             CountingMarshaler countingMarshaler = new();
@@ -609,8 +702,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task ExecuteBatch_IntraBatchDuplicate_ExecutesFirstAndSuppressesLaterSlot()
+        public async Task ExecuteBatch_IntraBatchIdenticalCalls_AllExecute()
         {
+            // "Spawn tree x3" in ONE turn is a legitimate request: intra-batch repeats must all
+            // execute (Claude/Cursor parity). Only the CROSS-turn whole-batch echo is suppressed.
             CountingMarshaler countingMarshaler = new();
             StubSettings settings = new StubSettings
             {
@@ -623,20 +718,56 @@ namespace CoreAI.Tests.EditMode
             Dictionary<string, object?> args = new() { { "x", 1 } };
             MEAI.FunctionCallContent first = MakeToolCall("dup", args);
             MEAI.FunctionCallContent second = MakeToolCall("dup", args);
+            MEAI.FunctionCallContent third = MakeToolCall("dup", args);
             MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
 
             ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
-                new List<MEAI.FunctionCallContent> { first, second },
+                new List<MEAI.FunctionCallContent> { first, second, third },
                 opts,
                 CancellationToken.None);
 
-            Assert.IsTrue(batch.AnyFailed, "Later duplicate slot should make the batch partially failed");
-            Assert.IsFalse(batch.AllFailed, "The first occurrence should still execute successfully");
-            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call should invoke the tool");
+            Assert.IsFalse(batch.AnyFailed, "Identical calls within ONE batch are all legitimate");
+            Assert.AreEqual(3, countingMarshaler.InvokeCount, "Every identical intra-batch call must execute");
             Assert.AreEqual(first.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
-            Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
             Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
-            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+            Assert.AreEqual(third.CallId, ((MEAI.FunctionResultContent)batch.Results[2]).CallId);
+            foreach (MEAI.AIContent content in batch.Results)
+            {
+                Assert.AreEqual("ok", ((MEAI.FunctionResultContent)content).Result.ToString());
+            }
+        }
+
+        [Test]
+        public async Task ExecuteBatch_IntraBatchIdenticalCalls_CrossTurnEchoStillBlocked()
+        {
+            // The cross-turn whole-batch echo guard must survive the intra-batch relaxation: a model
+            // re-sending the exact same (repeated) batch NEXT turn is still suppressed as an echo.
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings
+            {
+                MaxParallelToolCalls = 1
+            }.WithToolMarshaler(countingMarshaler);
+            ToolExecutionPolicy policy = new(new StubLogger(), settings,
+                new List<ILlmTool> { new StubTool { Name = "dup" } },
+                false, "test", 3);
+
+            Dictionary<string, object?> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+
+            ToolExecutionPolicy.BatchToolCallResult firstTurn = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args), MakeToolCall("dup", args) },
+                opts, CancellationToken.None);
+            Assert.IsFalse(firstTurn.AnyFailed);
+            Assert.AreEqual(2, countingMarshaler.InvokeCount);
+
+            ToolExecutionPolicy.BatchToolCallResult echoTurn = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args), MakeToolCall("dup", args) },
+                opts, CancellationToken.None);
+            Assert.IsTrue(echoTurn.AnyFailed, "Identical batch re-sent in a later turn is an echo");
+            Assert.IsTrue(echoTurn.AllFailed, "Every slot of a cross-turn echo batch is suppressed");
+            Assert.AreEqual(2, countingMarshaler.InvokeCount, "The echo turn must not invoke the tool again");
+            StringAssert.Contains("Duplicate tool call",
+                ((MEAI.FunctionResultContent)echoTurn.Results[0]).Result.ToString());
         }
 
         // ==================== Streamed turn (execute-as-you-stream) ====================
@@ -674,8 +805,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task StreamedTurn_IntraTurnDuplicate_SuppressedLikeBatch()
+        public async Task StreamedTurn_IntraTurnIdenticalCalls_AllExecute()
         {
+            // Batch parity with ExecuteBatch_IntraBatchIdenticalCalls_AllExecute: "spawn tree x3"
+            // streamed call-by-call must execute every repeat; only cross-turn echoes are suppressed.
             CountingMarshaler countingMarshaler = new();
             StubSettings settings = new StubSettings { MaxParallelToolCalls = 1 }
                 .WithToolMarshaler(countingMarshaler);
@@ -694,13 +827,12 @@ namespace CoreAI.Tests.EditMode
             ToolExecutionPolicy.BatchToolCallResult batch = policy.CompleteStreamedTurn(turn);
 
             Assert.IsTrue(r1.HasValue && r1.Value.Succeeded);
-            Assert.IsTrue(r2.HasValue, "Suppressed duplicates return their result inline in every mode.");
-            Assert.IsFalse(r2.Value.Succeeded, "Exact repeat within the turn must be suppressed.");
-            StringAssert.Contains("Duplicate tool call", r2.Value.Result.Result.ToString());
-            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call may invoke the tool.");
-            Assert.IsTrue(batch.AnyFailed);
-            Assert.IsFalse(batch.AllFailed);
-            Assert.IsTrue(policy.ExecutedTraces.Any(t => t.Source == "duplicate"));
+            Assert.IsTrue(r2.HasValue && r2.Value.Succeeded,
+                "An exact repeat WITHIN the same turn is a legitimate request and must execute.");
+            Assert.AreEqual(2, countingMarshaler.InvokeCount, "Both identical intra-turn calls must run.");
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.IsFalse(policy.ExecutedTraces.Any(t => t.Source == "duplicate"),
+                "No duplicate trace may be recorded for intra-turn repeats.");
         }
 
         [Test]
@@ -904,8 +1036,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task ExecuteBatch_DuplicateSignature_UsesRepairedCanonicalName()
+        public async Task ExecuteBatch_CrossTurnEcho_UsesRepairedCanonicalName()
         {
+            // Casing variants of the same canonical tool name must collide in the CROSS-turn echo
+            // guard: a turn re-sending "memory" after last turn's "MEMORY" (same args) is an echo.
             CountingMarshaler countingMarshaler = new();
             StubSettings settings = new StubSettings
             {
@@ -920,17 +1054,21 @@ namespace CoreAI.Tests.EditMode
             MEAI.FunctionCallContent second = MakeToolCall("memory", args);
             MEAI.ChatOptions opts = MakeChatOptions(("memory", "saved"));
 
-            ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
-                new List<MEAI.FunctionCallContent> { first, second },
-                opts,
-                CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult firstTurn = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { first }, opts, CancellationToken.None);
+            Assert.IsFalse(firstTurn.AnyFailed);
+            Assert.AreEqual(1, countingMarshaler.InvokeCount);
+            Assert.AreEqual("saved", ((MEAI.FunctionResultContent)firstTurn.Results[0]).Result.ToString());
+
+            ToolExecutionPolicy.BatchToolCallResult echoTurn = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { second }, opts, CancellationToken.None);
 
             Assert.AreEqual(1, countingMarshaler.InvokeCount,
-                "Casing variants of the same canonical tool name should collide in duplicate detection");
-            Assert.AreEqual(first.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
-            Assert.AreEqual("saved", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
-            Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
-            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+                "Casing variants of the same canonical tool name should collide in the echo guard");
+            Assert.IsTrue(echoTurn.AnyFailed);
+            Assert.AreEqual(second.CallId, ((MEAI.FunctionResultContent)echoTurn.Results[0]).CallId);
+            StringAssert.Contains("Duplicate tool call",
+                ((MEAI.FunctionResultContent)echoTurn.Results[0]).Result.ToString());
         }
 
         [Test]
@@ -1595,8 +1733,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task StreamedTurn_ParallelMode_IntraTurnDuplicate_SuppressedAtArrival()
+        public async Task StreamedTurn_ParallelMode_IntraTurnIdenticalCalls_AllExecute()
         {
+            // Parallel-mode counterpart of StreamedTurn_IntraTurnIdenticalCalls_AllExecute:
+            // identical calls in ONE turn are legitimate and both schedule/execute.
             CountingMarshaler countingMarshaler = new();
             StubSettings settings = new StubSettings { MaxParallelToolCalls = 4 }
                 .WithToolMarshaler(countingMarshaler);
@@ -1610,29 +1750,25 @@ namespace CoreAI.Tests.EditMode
 
             MEAI.FunctionCallContent original = MakeToolCall("dup", args);
             MEAI.FunctionCallContent repeat = MakeToolCall("dup", args);
-            ToolExecutionPolicy.ToolCallResult? scheduled =
+            ToolExecutionPolicy.ToolCallResult? scheduledFirst =
                 await policy.ExecuteStreamedAsync(turn, original, opts, CancellationToken.None);
-            ToolExecutionPolicy.ToolCallResult? suppressed =
+            ToolExecutionPolicy.ToolCallResult? scheduledSecond =
                 await policy.ExecuteStreamedAsync(turn, repeat, opts, CancellationToken.None);
 
-            Assert.IsFalse(scheduled.HasValue, "The executable call is scheduled (deferred result).");
-            Assert.IsTrue(suppressed.HasValue,
-                "The duplicate must be suppressed synchronously at arrival, exactly like sequential mode.");
-            Assert.IsFalse(suppressed.Value.Succeeded);
-            StringAssert.Contains("Duplicate tool call", suppressed.Value.Result.Result.ToString());
+            Assert.IsFalse(scheduledFirst.HasValue, "The executable call is scheduled (deferred result).");
+            Assert.IsFalse(scheduledSecond.HasValue,
+                "The intra-turn repeat is just as executable and must also be scheduled.");
 
             ToolExecutionPolicy.BatchToolCallResult batch =
                 await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
 
-            Assert.AreEqual(1, countingMarshaler.InvokeCount, "Only the first identical call may run.");
-            Assert.IsTrue(batch.AnyFailed);
-            Assert.IsFalse(batch.AllFailed);
+            Assert.AreEqual(2, countingMarshaler.InvokeCount, "Both identical intra-turn calls must run.");
+            Assert.IsFalse(batch.AnyFailed);
             Assert.AreEqual(2, batch.Results.Count);
             Assert.AreEqual(original.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
             Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
             Assert.AreEqual(repeat.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
-            StringAssert.Contains("Duplicate tool call",
-                ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
+            Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[1]).Result.ToString());
         }
 
         [Test]

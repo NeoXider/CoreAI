@@ -241,13 +241,15 @@ namespace CoreAI
 
         /// <summary>
         /// Maximum number of tool call message pairs (assistant + tool result) to keep in the
-        /// MEAI message list during a single request's tool-calling loop in <see cref="SmartToolCallingChatClient"/>.
-        /// When the count exceeds this limit, the oldest tool call pair is removed. <c>0</c> = unlimited
-        /// (default): the model never forgets earlier tool steps in the same turn, so long multi-step work
-        /// does not repeat itself.
-        /// <para>See the implementation details for usage guidance.</para>
+        /// MEAI message list during a single request's tool-calling loop (both the non-streaming
+        /// <c>SmartToolCallingChatClient</c> loop and the streaming loop in <c>MeaiLlmClient</c>).
+        /// When the count exceeds this limit, the oldest tool call pair is removed whole (assistant
+        /// tool-call turn + its tool results together, never split). Default 20, so a fresh install
+        /// bounds context growth out of the box; <c>0</c> is an EXPLICIT opt-out meaning unlimited
+        /// (the model never forgets earlier tool steps in the same turn - useful for very long
+        /// free-build sessions).
         /// </summary>
-        int MaxToolCallHistoryMessages => 0;
+        int MaxToolCallHistoryMessages => 20;
 
         /// <summary>
         /// Maximum number of tool calls within a single batch (one LLM turn) that may execute concurrently.

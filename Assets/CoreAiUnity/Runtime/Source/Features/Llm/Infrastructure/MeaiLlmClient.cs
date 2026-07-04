@@ -464,6 +464,144 @@ namespace CoreAI.Infrastructure.Llm
             // all-failed batch must fall through to the emptyResponsesAfterToolFailure path above instead.
             bool anyToolCallSucceededInStream = false;
 
+            // Set the moment the final tools-disabled summarization roundtrip starts, so that extra
+            // turn can never run twice (recursion/loop guard for RunFinalNoToolsSummaryTurnAsync).
+            bool finalSummaryTurnRan = false;
+
+            // === Final no-tools summarization turn ===
+            // When the roundtrip cap or the max-consecutive-errors guard ends the streamed turn, run
+            // EXACTLY ONE more model roundtrip with tools disabled so the consumer gets real prose
+            // about what was accomplished instead of a canned/empty terminal chunk (Claude/Cursor
+            // parity). The extra turn's visible text is buffered, stripped of any text-shaped tool
+            // JSON (nothing may execute here) and only then streamed out; when the roundtrip fails
+            // or yields no prose, the supplied fallback terminal chunk is emitted instead, so legacy
+            // terminal semantics are fully preserved on failure.
+            async IAsyncEnumerable<LlmStreamChunk> RunFinalNoToolsSummaryTurnAsync(
+                string stopReason,
+                LlmStreamChunk fallbackTerminal,
+                MEAI.UsageDetails usageSoFar,
+                string model)
+            {
+                if (finalSummaryTurnRan)
+                {
+                    ApplyStreamingUsageFields(fallbackTerminal, usageSoFar, model);
+                    yield return fallbackTerminal;
+                    yield break;
+                }
+
+                finalSummaryTurnRan = true;
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"MeaiLlmClient: {stopReason}; running one final tools-disabled roundtrip so the model can summarize.");
+
+                List<MEAI.ChatMessage> summaryMessages = new(chatMessages)
+                {
+                    new MEAI.ChatMessage(MEAI.ChatRole.User,
+                        "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
+                        "what you accomplished and what remains to be done.")
+                };
+
+                // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
+                // emit another native tool call in this extra roundtrip.
+                MEAI.ChatOptions summaryOptions = new()
+                {
+                    Temperature = chatOptions.Temperature,
+                    MaxOutputTokens = chatOptions.MaxOutputTokens,
+                    ToolMode = MEAI.ChatToolMode.None
+                };
+
+                ThinkBlockStreamFilter summaryFilter = new();
+                System.Text.StringBuilder summaryVisible = new();
+                MEAI.UsageDetails summaryUsage = usageSoFar;
+                bool summaryFailed = false;
+
+                IAsyncEnumerable<MEAI.ChatResponseUpdate> summaryStream =
+                    _innerClient.GetStreamingResponseAsync(summaryMessages, summaryOptions, cancellationToken);
+                await using IAsyncEnumerator<MEAI.ChatResponseUpdate> summaryEnumerator =
+                    summaryStream.GetAsyncEnumerator(cancellationToken);
+                while (true)
+                {
+                    MEAI.ChatResponseUpdate summaryUpdate;
+                    try
+                    {
+                        if (!await summaryEnumerator.MoveNextAsync())
+                        {
+                            break;
+                        }
+
+                        summaryUpdate = summaryEnumerator.Current;
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Consumer is gone; propagate exactly like the main streaming loop.
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        summaryFailed = true;
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmClient: Final tools-disabled summary roundtrip failed " +
+                            $"({ex.GetType().Name}: {ex.Message}); falling back to the terminal chunk.");
+                        break;
+                    }
+
+                    if (summaryUpdate.Contents != null)
+                    {
+                        foreach (MEAI.AIContent summaryContent in summaryUpdate.Contents)
+                        {
+                            if (summaryContent is MEAI.UsageContent summaryUsageContent &&
+                                summaryUsageContent.Details != null)
+                            {
+                                summaryUsage = AccumulateTurnUsage(summaryUsage, summaryUsageContent.Details);
+                            }
+                        }
+                    }
+
+                    string summaryRaw = GetStreamingUpdateText(summaryUpdate);
+                    if (!string.IsNullOrEmpty(summaryRaw))
+                    {
+                        string summaryChunk = summaryFilter.ProcessChunk(summaryRaw);
+                        if (!string.IsNullOrEmpty(summaryChunk))
+                        {
+                            summaryVisible.Append(summaryChunk);
+                        }
+                    }
+                }
+
+                summaryVisible.Append(summaryFilter.Flush());
+
+                // Fail closed: the buffered prose is stripped of any text-shaped tool JSON the model
+                // still tried to emit (it can never execute here) before reaching the consumer.
+                string summaryText = summaryFailed
+                    ? string.Empty
+                    : SanitizeAssistantVisibleText(
+                        StripEmbeddedToolCallJsonForDisplay(summaryVisible.ToString()), request);
+                if (string.IsNullOrWhiteSpace(summaryText))
+                {
+                    ApplyStreamingUsageFields(fallbackTerminal, summaryUsage, model);
+                    yield return fallbackTerminal;
+                    yield break;
+                }
+
+                foreach (string part in SplitForLiveUiStreaming(summaryText, LiveUiStreamMaxCharsPerChunk))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    emittedAnyVisibleText = true;
+                    yield return new LlmStreamChunk { Text = part };
+                }
+
+                // The model got to summarize, so the turn ends as a graceful stop: traces still
+                // carry every failure for telemetry, but the consumer sees prose, not a raw error.
+                LlmStreamChunk summaryTerminal = new()
+                {
+                    IsDone = true,
+                    Text = string.Empty,
+                    ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                };
+                ApplyStreamingUsageFields(summaryTerminal, summaryUsage, model);
+                yield return summaryTerminal;
+            }
+
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -479,23 +617,37 @@ namespace CoreAI.Infrastructure.Llm
                     // the world clearly held the build).
                     if (executedToolCalls.Any(t => t.Success))
                     {
-                        _logger.LogWarning(GameLogFeature.Llm,
-                            "MeaiLlmClient: Streaming tool loop reached the iteration guard after successful tool calls; completing without surfacing an internal guard error.");
-                        yield return new LlmStreamChunk
+                        // Cap reached with real progress: give the model one tools-disabled turn to
+                        // summarize; on any failure the legacy clean-but-empty terminal chunk goes out.
+                        LlmStreamChunk capFallback = new()
                         {
                             IsDone = true,
                             Text = string.Empty,
                             ExecutedToolCalls = executedToolCalls
                         };
+                        await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
+                                           "Streaming tool loop reached the roundtrip cap after successful tool calls",
+                                           capFallback, null, streamModel))
+                        {
+                            yield return summaryChunk;
+                        }
+
                         yield break;
                     }
 
-                    yield return new LlmStreamChunk
+                    LlmStreamChunk capErrorFallback = new()
                     {
                         IsDone = true,
                         Error = "tool loop exceeded max iterations",
                         ExecutedToolCalls = executedToolCalls
                     };
+                    await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
+                                       "Streaming tool loop exceeded the roundtrip cap without a successful tool call",
+                                       capErrorFallback, null, streamModel))
+                    {
+                        yield return summaryChunk;
+                    }
+
                     yield break;
                 }
 
@@ -884,6 +1036,23 @@ namespace CoreAI.Infrastructure.Llm
                         emittedAnyVisibleText = true;
                         yield return new LlmStreamChunk { Text = visibleText };
                     }
+                    else if (streamedVisibleToConsumer && hybridToolJsonHold &&
+                             hybridRawExclusiveEndEmitted < visibleText.Length)
+                    {
+                        // The hybrid hold streamed only the safe prefix; whatever prose it was still
+                        // holding when the native tool calls arrived must be flushed now or it is
+                        // silently dropped for this roundtrip (mirrors the text-extraction path).
+                        string heldSuffix = GetHybridUnemittedSuffix(visibleText, hybridRawExclusiveEndEmitted);
+                        if (!string.IsNullOrEmpty(heldSuffix))
+                        {
+                            foreach (string part in SplitForLiveUiStreaming(heldSuffix, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+                        }
+                    }
 
                     List<MEAI.AIContent> assistantContents = nativeToolCalls.Cast<MEAI.AIContent>().ToList();
                     if (!string.IsNullOrWhiteSpace(visibleText))
@@ -901,6 +1070,7 @@ namespace CoreAI.Infrastructure.Llm
                         ? await policy.CompleteStreamedTurnAsync(streamedTurn, cancellationToken)
                         : await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    TrimStreamingToolCallHistory(chatMessages);
                     if (!batch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;
@@ -921,8 +1091,13 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk, turnUsage, streamModel);
-                        yield return errChunk;
+                        await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
+                                           "Streaming tool loop hit max consecutive tool errors (native path)",
+                                           errChunk, turnUsage, streamModel))
+                        {
+                            yield return summaryChunk;
+                        }
+
                         yield break;
                     }
 
@@ -1037,6 +1212,7 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    TrimStreamingToolCallHistory(chatMessages);
                     if (!batch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;
@@ -1057,8 +1233,13 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk2, turnUsage, streamModel);
-                        yield return errChunk2;
+                        await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
+                                           "Streaming tool loop hit max consecutive tool errors (text-extraction path)",
+                                           errChunk2, turnUsage, streamModel))
+                        {
+                            yield return summaryChunk;
+                        }
+
                         yield break;
                     }
 
@@ -1125,6 +1306,7 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult malformedBatch =
                         await policy.ExecuteBatchAsync(malformedCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, malformedBatch.Results));
+                    TrimStreamingToolCallHistory(chatMessages);
                     if (!malformedBatch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;
@@ -1141,8 +1323,13 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk3, turnUsage, streamModel);
-                        yield return errChunk3;
+                        await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
+                                           "Streaming tool loop hit max consecutive tool errors (malformed-tool-json path)",
+                                           errChunk3, turnUsage, streamModel))
+                        {
+                            yield return summaryChunk;
+                        }
+
                         yield break;
                     }
 
@@ -1267,47 +1454,36 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Accumulates per-roundtrip provider usage into a whole-turn total so multi-roundtrip tool
-        /// turns report the sum of every roundtrip instead of only the last one.
+        /// turns report the sum of every roundtrip instead of only the last one. Delegates to the
+        /// shared <see cref="LlmUsageAccumulator"/> so the non-streaming loop
+        /// (<see cref="SmartToolCallingChatClient"/>) sums with identical semantics.
         /// </summary>
         private static MEAI.UsageDetails AccumulateTurnUsage(MEAI.UsageDetails total, MEAI.UsageDetails add)
         {
-            if (add == null)
+            return LlmUsageAccumulator.Accumulate(total, add);
+        }
+
+        /// <summary>
+        /// Streaming-loop counterpart of the non-streaming history trim: after every tool roundtrip
+        /// appends its assistant tool_calls + tool results to the message list, drop the oldest
+        /// resolved tool exchanges beyond <see cref="ICoreAISettings.MaxToolCallHistoryMessages"/>
+        /// via the shared <see cref="ToolCallHistoryTrimmer"/> (system + original user messages are
+        /// kept; units are removed whole so no tool message is ever orphaned). 0 = unlimited.
+        /// </summary>
+        private void TrimStreamingToolCallHistory(List<MEAI.ChatMessage> chatMessages)
+        {
+            int maxHistoryMessages = _settings.MaxToolCallHistoryMessages;
+            if (maxHistoryMessages <= 0)
             {
-                return total;
+                return;
             }
 
-            if (total == null)
+            int removed = ToolCallHistoryTrimmer.Trim(chatMessages, maxHistoryMessages);
+            if (removed > 0 && _settings.LogMeaiToolCallingSteps)
             {
-                total = new MEAI.UsageDetails();
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiLlmClient: Trimmed {removed} old tool call message(s) from the streaming loop, keeping {chatMessages.Count} total.");
             }
-
-            if (add.InputTokenCount.HasValue)
-            {
-                total.InputTokenCount = (total.InputTokenCount ?? 0) + add.InputTokenCount.Value;
-            }
-
-            if (add.OutputTokenCount.HasValue)
-            {
-                total.OutputTokenCount = (total.OutputTokenCount ?? 0) + add.OutputTokenCount.Value;
-            }
-
-            if (add.TotalTokenCount.HasValue)
-            {
-                total.TotalTokenCount = (total.TotalTokenCount ?? 0) + add.TotalTokenCount.Value;
-            }
-
-            if (add.AdditionalCounts != null)
-            {
-                total.AdditionalCounts ??= new MEAI.AdditionalPropertiesDictionary<long>();
-                foreach (System.Collections.Generic.KeyValuePair<string, long> kv in add.AdditionalCounts)
-                {
-                    total.AdditionalCounts[kv.Key] = total.AdditionalCounts.TryGetValue(kv.Key, out long existing)
-                        ? existing + kv.Value
-                        : kv.Value;
-                }
-            }
-
-            return total;
         }
 
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)

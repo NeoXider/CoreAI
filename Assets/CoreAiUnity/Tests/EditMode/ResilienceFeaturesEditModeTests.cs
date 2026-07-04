@@ -263,8 +263,8 @@ namespace CoreAI.Tests.EditMode
 
             try
             {
-                Assert.AreEqual(0, CoreAISettings.MaxToolCallHistoryMessages,
-                    "Default MaxToolCallHistoryMessages should be 0 (unlimited)");
+                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages,
+                    "Default MaxToolCallHistoryMessages should be 20 (0 = explicit opt-out, unlimited)");
             }
             finally
             {
@@ -284,8 +284,12 @@ namespace CoreAI.Tests.EditMode
                 CoreAISettings.MaxToolCallHistoryMessages = 6;
                 Assert.AreEqual(6, CoreAISettings.MaxToolCallHistoryMessages);
 
+                CoreAISettings.MaxToolCallHistoryMessages = 0;
+                Assert.AreEqual(0, CoreAISettings.MaxToolCallHistoryMessages,
+                    "0 must be honored as an explicit opt-out (unlimited)");
+
                 CoreAISettings.ResetOverrides();
-                Assert.AreEqual(0, CoreAISettings.MaxToolCallHistoryMessages, "Should reset to default (0 = unlimited)");
+                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages, "Should reset to default (20)");
             }
             finally
             {
@@ -1017,11 +1021,212 @@ namespace CoreAI.Tests.EditMode
             List<MEAI.ChatMessage> messages = new() { user, failedTool };
             List<MEAI.ChatMessage> pending = new() { failedAssistant, failedTool };
 
-            int removed = SmartToolCallingChatClient.RemoveResolvedErrorFeedback(messages, pending);
+            int removed = ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, pending);
 
             Assert.AreEqual(1, removed, "Only the message still present should count as removed");
             Assert.AreEqual(0, pending.Count, "Pending list must be cleared");
             CollectionAssert.AreEqual(new List<MEAI.ChatMessage> { user }, messages);
+        }
+
+        // ==================== ToolCallHistoryTrimmer (shared, F1) ====================
+
+        private static MEAI.ChatMessage ToolCallUnitAssistant(string callId, string toolName)
+        {
+            return new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { new MEAI.FunctionCallContent(callId, toolName) });
+        }
+
+        private static MEAI.ChatMessage ToolCallUnitResult(string callId, string result)
+        {
+            return new MEAI.ChatMessage(MEAI.ChatRole.Tool,
+                new List<MEAI.AIContent> { new MEAI.FunctionResultContent(callId, result) });
+        }
+
+        [Test]
+        public void Trimmer_KeepsSystemAndUserMessages_TrimsOldestUnitsFirst()
+        {
+            MEAI.ChatMessage system = new(MEAI.ChatRole.System, "sys");
+            MEAI.ChatMessage user = new(MEAI.ChatRole.User, "build a castle");
+            List<MEAI.ChatMessage> messages = new()
+            {
+                system,
+                user,
+                ToolCallUnitAssistant("c1", "tool_a"),
+                ToolCallUnitResult("c1", "a-ok"),
+                ToolCallUnitAssistant("c2", "tool_b"),
+                ToolCallUnitResult("c2", "b-ok"),
+                ToolCallUnitAssistant("c3", "tool_c"),
+                ToolCallUnitResult("c3", "c-ok")
+            };
+
+            // Cap 4 tool-related messages: 6 present, so exactly the OLDEST unit (2 messages) goes.
+            int removed = ToolCallHistoryTrimmer.Trim(messages, 4);
+
+            Assert.AreEqual(2, removed, "One whole oldest unit (assistant + tool result) is removed");
+            Assert.AreSame(system, messages[0], "System message must always be kept");
+            Assert.AreSame(user, messages[1], "Original user message must always be kept");
+            Assert.IsFalse(messages.Exists(m => HasFunctionCall(m) && CallName(m) == "tool_a"),
+                "The oldest tool exchange must be trimmed first");
+            Assert.IsTrue(messages.Exists(m => HasFunctionCall(m) && CallName(m) == "tool_c"),
+                "The newest tool exchange must survive");
+        }
+
+        [Test]
+        public void Trimmer_NeverOrphansToolResultFromItsAssistantMessage()
+        {
+            // A unit with MULTIPLE tool results must be removed whole - dropping only the assistant
+            // message (or only some results) produces the orphaned-tool-message HTTP 400.
+            MEAI.ChatMessage user = new(MEAI.ChatRole.User, "hi");
+            MEAI.ChatMessage multiAssistant = new(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionCallContent("m1", "tool_x"),
+                    new MEAI.FunctionCallContent("m2", "tool_x")
+                });
+            List<MEAI.ChatMessage> messages = new()
+            {
+                user,
+                multiAssistant,
+                ToolCallUnitResult("m1", "x1-ok"),
+                ToolCallUnitResult("m2", "x2-ok"),
+                ToolCallUnitAssistant("c2", "tool_y"),
+                ToolCallUnitResult("c2", "y-ok")
+            };
+
+            // Cap 2: the first unit (assistant + BOTH tool results, 3 tool messages) must go whole.
+            ToolCallHistoryTrimmer.Trim(messages, 2);
+
+            for (int i = 0; i < messages.Count; i++)
+            {
+                if (messages[i].Role == MEAI.ChatRole.Tool)
+                {
+                    Assert.Greater(i, 0);
+                    Assert.IsTrue(ToolCallHistoryTrimmer.HasFunctionCallContent(messages[i - 1]),
+                        "Every surviving Tool message must directly follow its assistant tool_calls message");
+                }
+            }
+
+            Assert.IsFalse(messages.Contains(multiAssistant), "The whole oldest unit is removed together");
+            Assert.IsTrue(messages.Exists(m => HasFunctionCall(m) && CallName(m) == "tool_y"));
+        }
+
+        [Test]
+        public void Trimmer_ZeroOrNegativeCap_IsUnlimited_NoTrimming()
+        {
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "hi"),
+                ToolCallUnitAssistant("c1", "tool_a"),
+                ToolCallUnitResult("c1", "a-ok"),
+                ToolCallUnitAssistant("c2", "tool_b"),
+                ToolCallUnitResult("c2", "b-ok")
+            };
+
+            Assert.AreEqual(0, ToolCallHistoryTrimmer.Trim(messages, 0), "0 = explicit opt-out (unlimited)");
+            Assert.AreEqual(0, ToolCallHistoryTrimmer.Trim(messages, -1), "Negative caps must be inert too");
+            Assert.AreEqual(5, messages.Count, "Nothing may be removed when trimming is disabled");
+        }
+
+        [Test]
+        public void Trimmer_UnderCap_NoTrimming()
+        {
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "hi"),
+                ToolCallUnitAssistant("c1", "tool_a"),
+                ToolCallUnitResult("c1", "a-ok")
+            };
+
+            Assert.AreEqual(0, ToolCallHistoryTrimmer.Trim(messages, 20));
+            Assert.AreEqual(3, messages.Count);
+        }
+
+        [Test]
+        public void SettingsAsset_MaxToolCallHistoryMessages_DefaultIs20_ZeroIsExplicitOptOut()
+        {
+            CoreAISettingsAsset asset = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                Assert.AreEqual(20, asset.MaxToolCallHistoryMessages,
+                    "A fresh settings asset must default to a bounded (20) tool-call history");
+
+                asset.SetMaxToolCallHistoryMessages(0);
+                Assert.AreEqual(0, asset.MaxToolCallHistoryMessages,
+                    "0 must be honored as an explicit opt-out (unlimited)");
+
+                asset.SetMaxToolCallHistoryMessages(-5);
+                Assert.AreEqual(20, asset.MaxToolCallHistoryMessages,
+                    "Negative (corrupt) values fall back to the default 20");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(asset);
+            }
+        }
+
+        // ==================== Cumulative usage in the non-streaming loop (F5) ====================
+
+        private static MEAI.ChatResponse WithUsage(MEAI.ChatResponse response, int input, int output)
+        {
+            response.Usage = new MEAI.UsageDetails
+            {
+                InputTokenCount = input,
+                OutputTokenCount = output,
+                TotalTokenCount = input + output
+            };
+            return response;
+        }
+
+        [Test]
+        public async Task GetResponseAsync_MultiRoundtrip_ReturnsSummedUsage()
+        {
+            ResilienceSettings settings = new();
+            Func<string> okFunc = () => "ok";
+            MEAI.ChatOptions opts = MakeChatOptions(("ok_tool", okFunc));
+
+            // Two tool roundtrips + a final text turn, each reporting its own usage: the returned
+            // response must carry the SUM (30/12/42), not just the last roundtrip's (10/2/12).
+            ScriptedChatClient inner = new(
+                () => WithUsage(AssistantToolCallResponse("call_1", "ok_tool"), 10, 4),
+                () => WithUsage(AssistantToolCallResponse("call_2", "ok_tool"), 10, 6),
+                () => WithUsage(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "done")),
+                    10, 2));
+
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true, new List<ILlmTool>(), "test", 3);
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(
+                new List<MEAI.ChatMessage> { new(MEAI.ChatRole.User, "hi") }, opts);
+
+            Assert.AreEqual("done", response.Text);
+            Assert.IsNotNull(response.Usage, "The terminal response must carry usage");
+            Assert.AreEqual(30, (int)(response.Usage.InputTokenCount ?? 0), "Input tokens must be summed");
+            Assert.AreEqual(12, (int)(response.Usage.OutputTokenCount ?? 0), "Output tokens must be summed");
+            Assert.AreEqual(42, (int)(response.Usage.TotalTokenCount ?? 0), "Total tokens must be summed");
+        }
+
+        [Test]
+        public async Task GetResponseAsync_SomeRoundtripsWithoutUsage_SumsWhatWasReported()
+        {
+            ResilienceSettings settings = new();
+            Func<string> okFunc = () => "ok";
+            MEAI.ChatOptions opts = MakeChatOptions(("ok_tool", okFunc));
+
+            ScriptedChatClient inner = new(
+                () => AssistantToolCallResponse("call_1", "ok_tool"), // provider omitted usage
+                () => WithUsage(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "done")),
+                    7, 3));
+
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true, new List<ILlmTool>(), "test", 3);
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(
+                new List<MEAI.ChatMessage> { new(MEAI.ChatRole.User, "hi") }, opts);
+
+            Assert.AreEqual("done", response.Text);
+            Assert.IsNotNull(response.Usage);
+            Assert.AreEqual(7, (int)(response.Usage.InputTokenCount ?? 0));
+            Assert.AreEqual(3, (int)(response.Usage.OutputTokenCount ?? 0));
         }
     }
 }

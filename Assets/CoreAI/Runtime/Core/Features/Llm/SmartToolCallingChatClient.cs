@@ -83,6 +83,11 @@ namespace CoreAI.Infrastructure.Llm
             // succeeds they are obsolete and removed from history to stop wasting tokens.
             List<MEAI.ChatMessage> pendingErrorFeedback = new();
 
+            // Whole-turn usage: providers report usage once per roundtrip; sum across the loop so
+            // the returned response carries the total tokens the turn burned, not just the last
+            // roundtrip's (parity with the streaming loop's AccumulateTurnUsage behavior).
+            MEAI.UsageDetails cumulativeUsage = null;
+
             // Fresh policy per top-level request so duplicates reset between independent calls
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
@@ -111,12 +116,26 @@ namespace CoreAI.Infrastructure.Llm
                             "(unlimited) via AgentBuilder.WithMaxToolCallRoundtrips(0), " +
                             "AiTaskRequest.MaxToolCallRoundtrips, or the global CoreAI settings.",
                             LogTag.Llm);
-                        return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+
+                        // Give the model ONE tools-disabled turn to summarize what it accomplished
+                        // (Claude/Cursor parity: a capped run ends in prose, not a canned string).
+                        MEAI.ChatResponse capSummary = await TryRunFinalNoToolsSummaryAsync(
+                            messages, options, cancellationToken);
+                        if (capSummary != null)
+                        {
+                            cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, capSummary.Usage);
+                            AttachCumulativeUsage(capSummary, cumulativeUsage);
+                            return capSummary;
+                        }
+
+                        MEAI.ChatResponse capResponse = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
                             $"Agent stopped: exceeded maximum of {maxRoundtrips} tool-call roundtrips " +
                             "(raise or disable via WithMaxToolCallRoundtrips / settings)."))
                         {
                             FinishReason = MEAI.ChatFinishReason.Stop
                         };
+                        AttachCumulativeUsage(capResponse, cumulativeUsage);
+                        return capResponse;
                     }
 
                     // can stall continuation chains on the single-threaded player loop. Inner awaits use
@@ -148,6 +167,8 @@ namespace CoreAI.Infrastructure.Llm
                         .GetResponseAsync(messages, iterationOptions, cancellationToken)
                         .ConfigureAwait(false);
 #endif
+
+                    cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, response.Usage);
 
                     List<MEAI.AIContent> allContents = FlattenAssistantContents(response);
 
@@ -193,7 +214,10 @@ namespace CoreAI.Infrastructure.Llm
 
                             if (missingRequiredToolResponses > _maxConsecutiveErrors)
                             {
-                                return BuildMissingRequiredToolResponse(requiredToolName);
+                                MEAI.ChatResponse missingToolResponse =
+                                    BuildMissingRequiredToolResponse(requiredToolName);
+                                AttachCumulativeUsage(missingToolResponse, cumulativeUsage);
+                                return missingToolResponse;
                             }
 
                             if (!string.IsNullOrWhiteSpace(assistantText))
@@ -251,6 +275,7 @@ namespace CoreAI.Infrastructure.Llm
                             TruncateResponseText(response, maxResponseChars);
                         }
 
+                        AttachCumulativeUsage(response, cumulativeUsage);
                         return response;
                     }
 
@@ -277,7 +302,30 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        return policy.BuildMaxErrorsResponse();
+                        // Same graceful ending as the roundtrip cap: one tools-disabled turn so the
+                        // model can explain what happened instead of a canned JSON error string.
+                        // Append the final failed exchange first so the summary turn can see it
+                        // (this branch returns before the regular assistant/tool append below).
+                        List<MEAI.AIContent> failedAssistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
+                        if (hasTextExtraction && !string.IsNullOrWhiteSpace(cleanedAssistantText))
+                        {
+                            failedAssistantContents.Add(new MEAI.TextContent(cleanedAssistantText));
+                        }
+
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, failedAssistantContents));
+                        messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                        MEAI.ChatResponse errorSummary = await TryRunFinalNoToolsSummaryAsync(
+                            messages, options, cancellationToken);
+                        if (errorSummary != null)
+                        {
+                            cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, errorSummary.Usage);
+                            AttachCumulativeUsage(errorSummary, cumulativeUsage);
+                            return errorSummary;
+                        }
+
+                        MEAI.ChatResponse maxErrorsResponse = policy.BuildMaxErrorsResponse();
+                        AttachCumulativeUsage(maxErrorsResponse, cumulativeUsage);
+                        return maxErrorsResponse;
                     }
 
                     // Build assistant turn for the next round. For text-mode extraction, we replace the
@@ -305,7 +353,8 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     else if (!batch.AnyFailed && pendingErrorFeedback.Count > 0)
                     {
-                        int removedFeedback = RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
+                        int removedFeedback =
+                            ToolCallHistoryTrimmer.RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
                         if (removedFeedback > 0 && _settings.LogMeaiToolCallingSteps)
                         {
                             _logger.Info(
@@ -614,73 +663,13 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Removes the oldest tool-call units (an Assistant tool-call turn together with the
-        /// Tool result turn(s) that answer it) to keep total tool-related messages within
-        /// <paramref name="maxToolMessages"/>. System and original user messages at the start are
-        /// preserved. Trimming is performed in whole units so an Assistant <c>tool_calls</c> message
-        /// is never separated from its paired Tool result(s): the provider rejects any orphaned
-        /// 'tool' role message ("messages with role 'tool' must be a response to a preceding message
-        /// with 'tool_calls'"), so a partial removal would break the very next request.
+        /// Delegates to the shared <see cref="ToolCallHistoryTrimmer"/> (also used by the streaming
+        /// loop in <c>MeaiLlmClient</c>) and logs the removal, keeping trim semantics identical
+        /// across both tool-calling modes. See the trimmer for the pairing/ordering guarantees.
         /// </summary>
         private void TrimToolCallHistory(List<MEAI.ChatMessage> messages, int maxToolMessages)
         {
-            // Count tool-related messages: any with role Tool, or Assistant with FunctionCallContent.
-            int toolMessageCount = 0;
-            for (int i = 0; i < messages.Count; i++)
-            {
-                if (messages[i].Role == MEAI.ChatRole.Tool)
-                {
-                    toolMessageCount++;
-                }
-                else if (messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]))
-                {
-                    toolMessageCount++;
-                }
-            }
-
-            if (toolMessageCount <= maxToolMessages)
-            {
-                return;
-            }
-
-            int toRemove = toolMessageCount - maxToolMessages;
-            int removed = 0;
-
-            // Remove oldest tool-call units as coupled blocks. Each unit starts at an Assistant
-            // tool-call message and extends through every Tool result message that immediately
-            // follows it. Removing the unit as a whole keeps every surviving Tool message paired
-            // with its preceding Assistant tool_calls message (OpenAI-valid). We may overshoot the
-            // exact target by at most one unit, but never split a unit, since splitting produces the
-            // orphaned-tool-message HTTP 400 this method exists to prevent.
-            int index = 0;
-            while (index < messages.Count && removed < toRemove)
-            {
-                bool isToolAssistant =
-                    messages[index].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[index]);
-
-                if (isToolAssistant)
-                {
-                    int unitToolMessages = 1; // the Assistant tool-call message itself
-
-                    // Drop the Assistant tool-call message, then every contiguous Tool result it owns.
-                    messages.RemoveAt(index);
-                    while (index < messages.Count && messages[index].Role == MEAI.ChatRole.Tool)
-                    {
-                        messages.RemoveAt(index);
-                        unitToolMessages++;
-                    }
-
-                    removed += unitToolMessages;
-                }
-                else
-                {
-                    // Preserve non-tool messages (system/user/plain assistant) and skip past them.
-                    // A leading Tool message without a preceding Assistant tool-call would already be
-                    // malformed; leave it untouched rather than orphan it further.
-                    index++;
-                }
-            }
-
+            int removed = ToolCallHistoryTrimmer.Trim(messages, maxToolMessages);
             if (removed > 0 && _settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(
@@ -690,46 +679,77 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Removes obsolete error-feedback messages (tracked failed Assistant tool-call turns and
-        /// their paired Tool result turns) from <paramref name="messages"/> after a successful retry.
-        /// Removal is by reference and always covers the full Assistant+Tool pair, so the remaining
-        /// history keeps every tool-call message paired with its tool-result message (OpenAI-valid).
-        /// Entries already trimmed by the general history trim are skipped silently.
-        /// Clears <paramref name="feedbackMessages"/> and returns how many messages were removed.
+        /// Attaches the accumulated whole-turn usage to a terminal response so callers report the
+        /// total tokens the turn burned across every roundtrip, not just the final one.
+        /// A <c>null</c> total leaves whatever the provider set untouched.
         /// </summary>
-        internal static int RemoveResolvedErrorFeedback(
-            List<MEAI.ChatMessage> messages,
-            List<MEAI.ChatMessage> feedbackMessages)
+        private static void AttachCumulativeUsage(MEAI.ChatResponse response, MEAI.UsageDetails cumulativeUsage)
         {
-            int removed = 0;
-            foreach (MEAI.ChatMessage feedback in feedbackMessages)
+            if (response != null && cumulativeUsage != null)
             {
-                if (messages.Remove(feedback))
-                {
-                    removed++;
-                }
+                response.Usage = cumulativeUsage;
             }
-
-            feedbackMessages.Clear();
-            return removed;
         }
 
-        private static bool HasFunctionCallContent(MEAI.ChatMessage message)
+        /// <summary>
+        /// Final no-tools summarization turn: when the roundtrip cap or the max-consecutive-errors
+        /// guard ends the loop, ask the model for EXACTLY ONE more completion with tools disabled so
+        /// the user gets real prose about what was accomplished instead of a canned string.
+        /// Calls <see cref="_innerClient"/> directly (never this client), so it cannot re-enter the
+        /// tool loop or execute further tools. Returns <c>null</c> when the extra completion fails
+        /// or produces no text - callers then fall back to the canned terminal response.
+        /// </summary>
+        private async Task<MEAI.ChatResponse> TryRunFinalNoToolsSummaryAsync(
+            List<MEAI.ChatMessage> messages,
+            MEAI.ChatOptions options,
+            CancellationToken cancellationToken)
         {
-            if (message.Contents == null)
+            try
             {
-                return false;
-            }
-
-            foreach (object item in message.Contents)
-            {
-                if (item is MEAI.FunctionCallContent)
+                List<MEAI.ChatMessage> summaryMessages = new(messages)
                 {
-                    return true;
-                }
-            }
+                    new MEAI.ChatMessage(MEAI.ChatRole.User,
+                        "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
+                        "what you accomplished and what remains to be done.")
+                };
 
-            return false;
+                // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
+                // emit another native tool call, so this extra turn can never loop.
+                MEAI.ChatOptions summaryOptions = new()
+                {
+                    Temperature = options?.Temperature,
+                    MaxOutputTokens = options?.MaxOutputTokens,
+                    ToolMode = MEAI.ChatToolMode.None
+                };
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+                MEAI.ChatResponse summary = await _innerClient
+                    .GetResponseAsync(summaryMessages, summaryOptions, cancellationToken);
+#else
+                MEAI.ChatResponse summary = await _innerClient
+                    .GetResponseAsync(summaryMessages, summaryOptions, cancellationToken)
+                    .ConfigureAwait(false);
+#endif
+
+                string text = summary?.Text;
+                if (string.IsNullOrEmpty(text))
+                {
+                    text = ConcatenateAssistantTextContents(summary);
+                }
+
+                return string.IsNullOrWhiteSpace(text) ? null : summary;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(
+                    $"[SmartToolCall] Final no-tools summary turn failed ({ex.GetType().Name}: {ex.Message}); " +
+                    "falling back to the canned terminal response.", LogTag.Llm);
+                return null;
+            }
         }
     }
 }

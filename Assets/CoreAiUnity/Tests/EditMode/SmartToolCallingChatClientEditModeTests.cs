@@ -42,8 +42,11 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
-            // Модель должна быть вызвана ровно 3 раза: ошибка 1, 2, 3 → break
-            Assert.AreEqual(3, callCount, "Agent must stop after 3 consecutive errors");
+            // 3 failed loop iterations trip the guard, then the loop makes EXACTLY ONE extra
+            // tools-disabled roundtrip so the model can summarize (F6). The scripted client answers
+            // that extra call with another tool call (no text), so the canned fallback is returned.
+            Assert.AreEqual(4, callCount,
+                "Agent must stop after 3 consecutive errors + 1 final no-tools summary roundtrip");
         }
 
         /// <summary>
@@ -72,8 +75,10 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
-            // iteration 1 (call 1) → tool; iteration 2 (call 2) → tool; iteration 3 → over cap → stop.
-            Assert.AreEqual(2, callCount, "Override of 2 must stop the loop after 2 roundtrips");
+            // iteration 1 (call 1) → tool; iteration 2 (call 2) → tool; iteration 3 → over cap →
+            // one final tools-disabled summary roundtrip (F6, call 3), then stop.
+            Assert.AreEqual(3, callCount,
+                "Override of 2 must stop the loop after 2 roundtrips + 1 final no-tools summary");
         }
 
         /// <summary>
@@ -233,8 +238,10 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
-            // 2 ошибки (consecutiveErrors 1,2) + 1 успех (reset→0) + 3 ошибки (1,2,3→break) = 6
-            Assert.AreEqual(6, callCount, "Expected 6 iterations: 2 fail + 1 success (reset) + 3 fail (stop)");
+            // 2 failures (consecutiveErrors 1,2) + 1 success (reset→0) + 3 failures (1,2,3→guard)
+            // + 1 final tools-disabled summary roundtrip (F6) = 7 model calls.
+            Assert.AreEqual(7, callCount,
+                "Expected 7 calls: 2 fail + 1 success (reset) + 3 fail (stop) + 1 final summary");
         }
 
         /// <summary>
@@ -487,8 +494,9 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
-            Assert.AreEqual(3, callCount,
-                "3 попытки подряд вызвать несуществующий тул → прерывание");
+            // 3 not-found failures trip the guard, then one final tools-disabled summary roundtrip (F6).
+            Assert.AreEqual(4, callCount,
+                "3 consecutive not-found tool calls trip the guard, then 1 final summary roundtrip");
         }
 
         /// <summary>
@@ -516,7 +524,9 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatResponse response = Task.Run(() =>
                 client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
-            Assert.AreEqual(3, callCount, "3 падения подряд → прерывание агента");
+            // 3 tool-body throws trip the guard, then one final tools-disabled summary roundtrip (F6).
+            Assert.AreEqual(4, callCount,
+                "3 consecutive tool exceptions trip the guard, then 1 final summary roundtrip");
             Assert.IsNotNull(response);
         }
 

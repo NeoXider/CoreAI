@@ -1182,6 +1182,94 @@ namespace CoreAI.Tests.EditMode
                 "All three calls must survive in the assistant message.");
         }
 
+        [Test]
+        public void BuildMessagesPayload_MissingCallId_UsesSameDeterministicIdOnEchoAndReply()
+        {
+            // F8: a call without a provider id must NOT get a random Guid in the assistant echo
+            // while its tool reply omits tool_call_id - both sides must share one deterministic
+            // synthetic id, or the model sees an unanswered call and re-issues it.
+            List<MEAI.ChatMessage> msgs = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionCallContent("call_real", "world_command",
+                        new Dictionary<string, object?> { ["action"] = "spawn" }),
+                    new MEAI.FunctionCallContent("", "world_command",
+                        new Dictionary<string, object?> { ["action"] = "move" })
+                }),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionResultContent("call_real", "ok-real"),
+                    new MEAI.FunctionResultContent("", "ok-synth")
+                })
+            };
+
+            List<Dictionary<string, object>> payload =
+                MeaiOpenAiChatClient.BuildMessagesPayloadForTests(msgs);
+
+            Dictionary<string, object> assistant = payload.First(m => (string)m["role"] == "assistant");
+            List<Dictionary<string, object>> toolCalls =
+                (List<Dictionary<string, object>>)assistant["tool_calls"];
+            Assert.AreEqual("call_real", (string)toolCalls[0]["id"]);
+            string syntheticId = (string)toolCalls[1]["id"];
+            Assert.IsNotEmpty(syntheticId, "The id-less call must still get an id in the echo");
+            StringAssert.StartsWith("synth_", syntheticId, "Synthetic ids are deterministic, never random");
+
+            List<Dictionary<string, object>> toolMessages =
+                payload.Where(m => (string)m["role"] == "tool").ToList();
+            Assert.AreEqual(2, toolMessages.Count);
+            Assert.AreEqual("call_real", (string)toolMessages[0]["tool_call_id"]);
+            Assert.IsTrue(toolMessages[1].ContainsKey("tool_call_id"),
+                "The reply to the id-less call must carry the synthetic id, not omit it");
+            Assert.AreEqual(syntheticId, (string)toolMessages[1]["tool_call_id"],
+                "Echo and reply must use the SAME synthetic id");
+
+            // Determinism: serializing the same history again yields the same synthetic id.
+            List<Dictionary<string, object>> payloadAgain =
+                MeaiOpenAiChatClient.BuildMessagesPayloadForTests(msgs);
+            Dictionary<string, object> assistantAgain =
+                payloadAgain.First(m => (string)m["role"] == "assistant");
+            Assert.AreEqual(syntheticId,
+                (string)((List<Dictionary<string, object>>)assistantAgain["tool_calls"])[1]["id"],
+                "Synthetic ids must be stable across serializations of the same history");
+        }
+
+        [Test]
+        public void BuildMessagesPayload_ParseErrorCall_EchoesRawArgumentsString()
+        {
+            // F9: a parse-error call's arguments carry internal marker keys; the assistant echo must
+            // emit the model's ORIGINAL raw argument string, never the marker dictionary.
+            const string rawArgs = "{\"action\":\"spawn\",\"prefab\":\"tre"; // truncated mid-stream
+            List<MEAI.ChatMessage> msgs = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionCallContent("call_1", "world_command",
+                        new Dictionary<string, object?>
+                        {
+                            [ToolCallArgumentMarkers.RawArgumentsKey] = rawArgs,
+                            [ToolCallArgumentMarkers.ParseErrorKey] = true
+                        })
+                }),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionResultContent("call_1", "Error: arguments JSON was truncated")
+                })
+            };
+
+            List<Dictionary<string, object>> payload =
+                MeaiOpenAiChatClient.BuildMessagesPayloadForTests(msgs);
+
+            Dictionary<string, object> assistant = payload.First(m => (string)m["role"] == "assistant");
+            Dictionary<string, object> call =
+                ((List<Dictionary<string, object>>)assistant["tool_calls"])[0];
+            string arguments = (string)((Dictionary<string, object>)call["function"])["arguments"];
+            Assert.AreEqual(rawArgs, arguments, "The raw argument string must be echoed verbatim");
+            StringAssert.DoesNotContain(ToolCallArgumentMarkers.RawArgumentsKey, arguments,
+                "Internal marker keys must never leak onto the wire");
+            StringAssert.DoesNotContain(ToolCallArgumentMarkers.ParseErrorKey, arguments);
+        }
+
         private sealed class DoneSentinelSettings : IOpenAiHttpSettings
         {
             public string ApiBaseUrl => "https://example.invalid/v1";

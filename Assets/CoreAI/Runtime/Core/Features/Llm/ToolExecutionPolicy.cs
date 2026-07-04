@@ -230,21 +230,11 @@ namespace CoreAI.Infrastructure.Llm
 
             plan.PendingBatchSignature = batchSig;
 
-            HashSet<string> seenInBatch = new(StringComparer.Ordinal);
-            for (int i = 0; i < toolCalls.Count; i++)
-            {
-                string signature = signatures[i];
-                if (signature == null)
-                {
-                    continue;
-                }
-
-                if (!seenInBatch.Add(signature))
-                {
-                    MarkDuplicate(plan, i, toolCalls[i]);
-                }
-            }
-
+            // Intra-batch repeats are deliberately NOT suppressed: "spawn tree x3" in one turn is a
+            // legitimate request and must execute all three (Claude/Cursor parity). The runaway-echo
+            // bug this used to guard (one turn's calls re-executing every roundtrip) is fixed at the
+            // wire level - every tool_call_id gets its own tool-role reply - and the cross-turn
+            // whole-batch echo branch above still catches a model re-sending an identical turn.
             return plan;
         }
 
@@ -601,16 +591,77 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                _logger.Error($"[ToolPolicy] {fc.Name} threw: {ex.Message}", LogTag.Llm);
-                _eventPublisher.PublishFailed(BuildInfo(fc), ex.Message, 0d);
-                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", ex.Message));
-                LogCallLine(fc, false, 0d, $"threw: {ex.Message}");
+                // Argument/JSON conversion failures (MEAI could not coerce the model's arguments
+                // into the delegate's parameter types) are actionable: append the tool's compact
+                // schema so the model can retry with correctly-shaped arguments instead of
+                // guessing from an opaque exception message.
+                string errorMessage = ex.Message;
+                if (LooksLikeArgumentConversionError(ex))
+                {
+                    string schemaHint = BuildSchemaRetryHint(fc.Name);
+                    if (!string.IsNullOrEmpty(schemaHint))
+                    {
+                        errorMessage = $"{errorMessage} {schemaHint}";
+                    }
+                }
+
+                _logger.Error($"[ToolPolicy] {fc.Name} threw: {errorMessage}", LogTag.Llm);
+                _eventPublisher.PublishFailed(BuildInfo(fc), errorMessage, 0d);
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", errorMessage));
+                LogCallLine(fc, false, 0d, $"threw: {errorMessage}");
                 return new ToolCallResult
                 {
-                    Result = new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"),
+                    Result = new MEAI.FunctionResultContent(fc.CallId, $"Error: {errorMessage}"),
                     Succeeded = false
                 };
             }
+        }
+
+        /// <summary>
+        /// Whether an exception thrown by a tool invocation looks like an argument/JSON type
+        /// conversion failure (as opposed to a genuine tool-body error). Checks the whole exception
+        /// chain: MEAI's AIFunctionFactory frequently wraps the real JsonException/FormatException
+        /// in an outer InvalidOperationException.
+        /// </summary>
+        internal static bool LooksLikeArgumentConversionError(Exception ex)
+        {
+            for (Exception current = ex; current != null; current = current.InnerException)
+            {
+                if (current is Newtonsoft.Json.JsonException ||
+                    current is System.Text.Json.JsonException ||
+                    current is InvalidCastException ||
+                    current is FormatException ||
+                    current is ArgumentException)
+                {
+                    return true;
+                }
+
+                if (current.Message != null &&
+                    current.Message.IndexOf("convert", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Builds the same compact-schema retry suffix the missing-required-argument path emits,
+        /// or an empty string when no meaningful schema is registered for the tool.
+        /// </summary>
+        private string BuildSchemaRetryHint(string toolName)
+        {
+            ILlmTool tool = _originalTools.FirstOrDefault(t =>
+                string.Equals(t.Name, toolName, StringComparison.Ordinal));
+            if (tool == null || string.IsNullOrWhiteSpace(tool.ParametersSchema) ||
+                tool.ParametersSchema.Trim() == "{}")
+            {
+                return "";
+            }
+
+            string schema = CompactSchema(tool.ParametersSchema, 1200);
+            return $"Retry the same tool call with JSON arguments matching this schema: {schema}";
         }
 
         private static string NormalizeToolResultText(object result)
@@ -1050,7 +1101,6 @@ namespace CoreAI.Infrastructure.Llm
             internal readonly List<StreamedSlot> Slots = new();
 
             internal readonly List<string> Signatures = new();
-            internal readonly HashSet<string> SeenInTurn = new(StringComparer.Ordinal);
 
             /// <summary>Scheduled (parallel-mode) call tasks, drained at turn completion.</summary>
             internal readonly List<Task> InFlight = new();
@@ -1109,12 +1159,13 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Executes one tool call the moment it arrives in the stream. Mirrors the batch path per
-        /// call: an exact repeat (same canonical name + key-sorted args) of a call already
-        /// executed EARLIER IN THIS TURN is suppressed with the same "Duplicate tool call" result
-        /// the batch path produces; tools with AllowDuplicates are exempt. Signature bookkeeping,
-        /// the intra-turn duplicate check, and the cross-turn echo check always resolve
-        /// synchronously at arrival (arrival ORDER is what makes them deterministic), so a
-        /// suppressed call fills its slot immediately and returns its result in both modes.
+        /// call: only a CROSS-turn echo (a single call whose signature was already registered by an
+        /// earlier turn in this request) is suppressed with the same "Duplicate tool call" result
+        /// the batch path produces; exact repeats WITHIN the same turn ("spawn tree x3") execute,
+        /// and tools with AllowDuplicates are exempt entirely. Signature bookkeeping and the
+        /// cross-turn echo check always resolve synchronously at arrival (arrival ORDER is what
+        /// makes them deterministic), so a suppressed call fills its slot immediately and returns
+        /// its result in both modes.
         /// <para>
         /// Sequential mode (<see cref="ICoreAISettings.MaxParallelToolCalls"/> &lt;= 1): the call
         /// executes inline and its result is returned, byte-identical to the pre-parallel
@@ -1151,7 +1202,9 @@ namespace CoreAI.Infrastructure.Llm
             StreamedSlot slot = new(fc.CallId);
             turn.Slots.Add(slot);
 
-            if (hasSignature && (crossTurnEcho || !turn.SeenInTurn.Add(signature)))
+            // Batch parity with BuildDuplicatePlan: only the CROSS-turn echo is suppressed. An exact
+            // repeat within the same turn ("spawn tree x3") is a legitimate request and executes.
+            if (hasSignature && crossTurnEcho)
             {
                 string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
