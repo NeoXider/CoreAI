@@ -146,6 +146,10 @@ namespace CoreAI.Composition
             {
                 try
                 {
+                    // Permanent breadcrumb: which Lua tier this composition actually granted. Answers
+                    // "why does my mod have no Full?" without a debugger (WebGL builds especially).
+                    UnityEngine.Debug.Log(
+                        $"[CoreAI] WorldCommands: Lua capability grant = {scriptCapabilities} (enableFullLuaAccess={enableFullLuaAccess})");
                     LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
                     runtime.RehydrateFromStore(scriptCapabilities,
                         allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);

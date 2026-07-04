@@ -60,7 +60,8 @@ namespace CoreAI.Sandbox
                     try
                     {
                         moonSharpCallback ??= CallbackFunction.FromDelegate(ctx.GetScript(), callback);
-                        return moonSharpCallback.Invoke(ctx, args.GetArray(), args.IsMethodCall);
+                        return moonSharpCallback.Invoke(ctx,
+                            CoerceArgsForDelegate(callback, args.GetArray()), args.IsMethodCall);
                     }
                     catch (InterpreterException)
                     {
@@ -98,6 +99,41 @@ namespace CoreAI.Sandbox
                     }
                 }, name);
             }
+        }
+
+        /// <summary>
+        /// Model-friendly argument coercion for typed host delegates: LLM-written Lua constantly
+        /// passes a whole entry from list-style results (a table like <c>{id=123, name=...}</c>)
+        /// where an API expects the numeric id - MoonSharp's marshaller then fails with
+        /// "cannot convert a table to a clr type System.Int32". When the delegate parameter is
+        /// numeric and the argument is a table carrying a numeric <c>id</c> field, substitute that
+        /// id so the intuitive code works instead of erroring.
+        /// </summary>
+        private static DynValue[] CoerceArgsForDelegate(Delegate callback, DynValue[] args)
+        {
+            ParameterInfo[] parameters = callback.Method.GetParameters();
+            for (int i = 0; i < args.Length && i < parameters.Length; i++)
+            {
+                if (args[i].Type != DataType.Table)
+                {
+                    continue;
+                }
+
+                Type parameterType = parameters[i].ParameterType;
+                if (parameterType != typeof(int) && parameterType != typeof(long) &&
+                    parameterType != typeof(double) && parameterType != typeof(float))
+                {
+                    continue;
+                }
+
+                DynValue id = args[i].Table.Get("id");
+                if (id.Type == DataType.Number)
+                {
+                    args[i] = id;
+                }
+            }
+
+            return args;
         }
 
         private static ScriptRuntimeException ToScriptRuntimeException(string name, Exception ex)

@@ -1,4 +1,4 @@
-﻿using CoreAI;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.AiMemory;
@@ -46,6 +46,13 @@ namespace CoreAI.Composition
         [Tooltip("When enabled, Lua with Full capability can access arbitrary GameObjects/components via reflection.")]
         [SerializeField]
         private bool enableFullLuaAccess;
+
+        /// <summary>
+        /// Whether this composition grants the Full Lua tier (unity_* reflection). Exposed so
+        /// scene helpers that autoload persisted mods (e.g. the mods-chat persistence demo)
+        /// can grant the SAME tier the host does instead of hardcoding a lower one.
+        /// </summary>
+        public bool FullLuaAccessEnabled => enableFullLuaAccess;
 
         [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
         [SerializeField]

@@ -182,7 +182,12 @@ namespace CoreAI.Demos
                         }
                         else
                         {
-                            _mods.LoadMod(modId, record.CurrentLua, LuaCapabilities.All);
+                            // Grant the same tier the host composition grants: a Full-tier mod
+                            // (unity_* APIs) autoloaded with a hardcoded All silently no-ops.
+                            LuaCapabilities autoloadCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
+                                ? LuaCapabilities.All | LuaCapabilities.Full
+                                : LuaCapabilities.All;
+                            _mods.LoadMod(modId, record.CurrentLua, autoloadCaps);
                         }
 
                         _autoloadedCount++;
