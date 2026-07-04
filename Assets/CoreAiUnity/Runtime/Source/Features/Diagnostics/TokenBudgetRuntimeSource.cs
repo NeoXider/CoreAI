@@ -19,6 +19,8 @@ namespace CoreAI.Diagnostics
 
         private CoreAILifetimeScope _scope;
         private IDisposable _usageSubscription;
+        private IDisposable _toolCompletedSubscription;
+        private IDisposable _toolFailedSubscription;
         private float _nextResolveAttempt;
 
         public TokenBudgetRuntimeSource(double windowSeconds)
@@ -60,6 +62,10 @@ namespace CoreAI.Diagnostics
         {
             _usageSubscription?.Dispose();
             _usageSubscription = null;
+            _toolCompletedSubscription?.Dispose();
+            _toolCompletedSubscription = null;
+            _toolFailedSubscription?.Dispose();
+            _toolFailedSubscription = null;
         }
 
         private void TryResolveServices()
@@ -103,6 +109,36 @@ namespace CoreAI.Diagnostics
                 catch (Exception)
                 {
                     _usageSubscription = null;
+                }
+            }
+
+            if (_toolCompletedSubscription == null)
+            {
+                try
+                {
+                    ISubscriber<LlmToolCallCompleted> completed =
+                        (ISubscriber<LlmToolCallCompleted>)_scope.Container.Resolve(
+                            typeof(ISubscriber<LlmToolCallCompleted>));
+                    _toolCompletedSubscription = completed.Subscribe(_ => Calculator.RecordToolCall(true));
+                }
+                catch (Exception)
+                {
+                    _toolCompletedSubscription = null;
+                }
+            }
+
+            if (_toolFailedSubscription == null)
+            {
+                try
+                {
+                    ISubscriber<LlmToolCallFailed> failed =
+                        (ISubscriber<LlmToolCallFailed>)_scope.Container.Resolve(
+                            typeof(ISubscriber<LlmToolCallFailed>));
+                    _toolFailedSubscription = failed.Subscribe(_ => Calculator.RecordToolCall(false));
+                }
+                catch (Exception)
+                {
+                    _toolFailedSubscription = null;
                 }
             }
 

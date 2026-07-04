@@ -22,7 +22,8 @@ namespace CoreAI.Diagnostics
                 $"Last request: {FormatTokenCount(calc.LastPromptTokens)} in / {FormatTokenCount(calc.LastCompletionTokens)} out / {FormatTokenCount(calc.LastTotalTokens)} total\n" +
                 $"Session: {calc.TotalPromptTokens} in / {calc.TotalCompletionTokens} out / {calc.TotalTokens} total\n" +
                 Invariant(
-                    $"Requests: {calc.TotalRequests} (with usage: {calc.RequestsWithUsage}) | avg {calc.AverageTokensPerRequest:F0} tok/req");
+                    $"Requests: {calc.TotalRequests} (with usage: {calc.RequestsWithUsage}) | avg {calc.AverageTokensPerRequest:F0} tok/req\n") +
+                $"Tool calls: {calc.ToolCallsSucceeded + calc.ToolCallsFailed} ({calc.ToolCallsSucceeded} ok / {calc.ToolCallsFailed} failed)";
         }
 
         /// <summary>

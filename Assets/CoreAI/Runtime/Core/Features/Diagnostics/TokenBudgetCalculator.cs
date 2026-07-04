@@ -47,6 +47,28 @@ namespace CoreAI.Diagnostics
         /// <summary>Total tokens of the most recent report (-1 when unknown).</summary>
         public int LastTotalTokens { get; private set; } = -1;
 
+        /// <summary>Total tool calls completed successfully this session.</summary>
+        public long ToolCallsSucceeded { get; private set; }
+
+        /// <summary>Total tool calls that failed this session.</summary>
+        public long ToolCallsFailed { get; private set; }
+
+        /// <summary>Records one finished tool call (thread-safe via the same lock as usage).</summary>
+        public void RecordToolCall(bool succeeded)
+        {
+            lock (_sync)
+            {
+                if (succeeded)
+                {
+                    ToolCallsSucceeded++;
+                }
+                else
+                {
+                    ToolCallsFailed++;
+                }
+            }
+        }
+
         /// <summary>Mean total tokens per usage-bearing request, 0 when none recorded.</summary>
         public double AverageTokensPerRequest
         {
@@ -168,6 +190,8 @@ namespace CoreAI.Diagnostics
                 LastPromptTokens = -1;
                 LastCompletionTokens = -1;
                 LastTotalTokens = -1;
+                ToolCallsSucceeded = 0;
+                ToolCallsFailed = 0;
                 _window.Clear();
             }
         }

@@ -444,6 +444,8 @@ namespace CoreAI.Infrastructure.Llm
             int maxToolIterations = ResolveStreamingMaxToolRoundtrips(request.MaxToolCallRoundtrips, _settings);
             int toolIteration = 0;
             bool emittedAnyVisibleText = false;
+            // One-shot guard for the reasoning-runaway rescue at the terminal path.
+            bool emptyResponseNudgeSent = false;
 
             if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
             {
@@ -1383,6 +1385,24 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Reasoning-runaway rescue: a reasoning model can burn the ENTIRE output budget on
+                // hidden thinking and end the roundtrip with zero visible text, zero tool calls and
+                // finish_reason=length - the user would see "Could not get a response". Retry ONCE
+                // with an explicit act-now nudge before surfacing the empty turn.
+                if (!emittedAnyVisibleText &&
+                    nativeToolCalls.Count == 0 &&
+                    string.IsNullOrWhiteSpace(SanitizeAssistantVisibleText(visibleText, request)) &&
+                    !emptyResponseNudgeSent)
+                {
+                    emptyResponseNudgeSent = true;
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        "MeaiLlmClient: roundtrip produced no visible text and no tool calls (likely reasoning runaway consumed the output budget) - retrying once with an act-now nudge.");
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                        "Your previous response was empty - you likely spent the whole token budget on hidden reasoning. " +
+                        "Act NOW: reply with the direct tool call or a short plain-text answer. Keep reasoning minimal."));
+                    continue;
+                }
 
                 LlmStreamChunk terminal = new()
                 {

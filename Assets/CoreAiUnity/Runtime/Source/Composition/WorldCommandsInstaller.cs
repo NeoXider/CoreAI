@@ -135,17 +135,20 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
 
             // Startup rehydration: reload every persisted active mod once the container is built.
-            // The host's configured capability tier (scriptCapabilities) is the grant ceiling;
-            // allowFull is always false here so a persisted mod can never silently regain Full
-            // reflection across a restart (it must be re-granted explicitly by a live load). With a
-            // Null/empty source store (e.g. WebGL) this is a harmless no-op. Best-effort: a rehydrate
-            // failure is swallowed so it never aborts container construction.
+            // The host's configured capability tier (scriptCapabilities) is the grant ceiling AND
+            // the Full gate: a persisted Full mod regains Full across a restart only when the host
+            // still has Full Lua enabled in this composition (inspector flag). A mod can never
+            // exceed what the host currently grants, but a correctly-written persistent mod (e.g. a
+            // day/night sun rotator using unity_*) keeps WORKING after a reload instead of silently
+            // rehydrating without its APIs. With a Null/empty source store this is a harmless no-op.
+            // Best-effort: a rehydrate failure is swallowed so it never aborts container construction.
             builder.RegisterBuildCallback(container =>
             {
                 try
                 {
                     LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
-                    runtime.RehydrateFromStore(scriptCapabilities, allowFull: false);
+                    runtime.RehydrateFromStore(scriptCapabilities,
+                        allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);
                 }
                 catch (VContainerException)
                 {
