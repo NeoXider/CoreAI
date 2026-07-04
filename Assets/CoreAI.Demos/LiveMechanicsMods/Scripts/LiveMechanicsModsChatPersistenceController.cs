@@ -427,7 +427,6 @@ namespace CoreAI.Demos
             DrawSavedInactiveMods();
             GUILayout.EndScrollView();
 
-            // Drag the window by its title bar.
             GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
         }
 

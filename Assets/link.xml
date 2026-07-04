@@ -27,6 +27,13 @@
   <assembly fullname="CoreAI.Core" preserve="all"/>
 
   <!-- Unity/WebGL: VContainer + DI цепочка к MessagePipe (см. CoreServicesInstaller / MessagePipeAiCommandSink) -->
+  <!-- WebGL/IL2CPP with Managed Stripping >= Medium: VContainer creates every DI type via
+       reflection (TypeAnalyzer), MoonSharp reflection-invokes Lua binding callbacks on AOT, and
+       nothing references those constructors directly - so the stripper removes them one by one
+       ("Type does not found injectable constructor" at container build). Preserving the whole
+       Unity integration assembly closes the entire class of failures; it is a thin layer, the
+       size cost is small next to the engine modules. -->
+  <assembly fullname="CoreAI.Source" preserve="all"/>
   <assembly fullname="CoreAI.Source">
     <type fullname="CoreAI.Infrastructure.Messaging.MessagePipeAiCommandSink" preserve="all"/>
 

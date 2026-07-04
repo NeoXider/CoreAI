@@ -125,7 +125,6 @@ namespace CoreAI.Ai
             public readonly Dictionary<string, List<Closure>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
             public readonly Queue<KeyValuePair<string, string>> Pending = new();
-            // Values/functions this mod published via mods_export for other mods to read/call.
             public readonly Dictionary<string, DynValue> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;

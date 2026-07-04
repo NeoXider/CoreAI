@@ -286,8 +286,6 @@ namespace CoreAI.Demos
             GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
         }
 
-        // ------------------------------------------------------------------ Lua sources (English only)
-
         /// <summary>Receiver half of the cross-mod event check: answers every ping with pong.</summary>
         private const string SelfTestBSource = @"
 -- name: Platform Self-Test B

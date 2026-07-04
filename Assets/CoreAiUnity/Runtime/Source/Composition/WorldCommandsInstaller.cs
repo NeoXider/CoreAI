@@ -116,7 +116,6 @@ namespace CoreAI.Composition
             builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton,
                 "CoreAI_LuaCoroutineRunner");
 
-            // Persistent mod runtime: long-lived Lua mods with hooks/timers/events + per-mod store.
             builder.Register(c => new FileLuaModStore(), Lifetime.Singleton)
                 .As<ILuaModStore>();
             // Package store: persists each mod's source + manifest so active mods survive a restart
@@ -227,7 +226,6 @@ namespace CoreAI.Composition
             builder.Register(c => new CoreAiComponentCommandExecutor(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ICoreAiComponentCommandExecutor>();
 
-            // Game Config: Unity SO-based config store
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IGameConfigStore>();
         }
