@@ -79,6 +79,7 @@ namespace CoreAI.Demos
             if (targetCube == null)
             {
                 GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
                 cube.name = "TargetCube";
                 cube.transform.position = new Vector3(0f, 0.5f, 0f);
                 targetCube = cube.transform;

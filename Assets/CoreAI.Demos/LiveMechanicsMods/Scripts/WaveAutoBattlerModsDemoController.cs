@@ -123,6 +123,7 @@ namespace CoreAI.Demos
             if (_heroVisual == null)
             {
                 _heroVisual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(_heroVisual);
                 _heroVisual.name = "AutoBattlerHero";
                 _heroVisual.transform.SetParent(heroAnchor, false);
                 _heroVisual.transform.localPosition = Vector3.zero;
@@ -305,6 +306,7 @@ namespace CoreAI.Demos
             for (int i = 0; i < count; i++)
             {
                 GameObject visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
                 visual.name = $"WaveEnemy_{wave}_{i + 1}";
                 visual.transform.SetParent(enemyRoot, false);
                 visual.transform.localScale = Vector3.one * 0.8f;

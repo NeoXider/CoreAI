@@ -163,6 +163,7 @@ namespace CoreAI.Demos
 
             GameObject visual = GameObject.CreatePrimitive(
                 archetype.Team == "ally" ? PrimitiveType.Capsule : PrimitiveType.Cube);
+            CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
             visual.name = $"{archetype.Name}_{visual.GetInstanceID()}";
             visual.transform.SetParent(unitRoot, false);
             visual.transform.position = position;

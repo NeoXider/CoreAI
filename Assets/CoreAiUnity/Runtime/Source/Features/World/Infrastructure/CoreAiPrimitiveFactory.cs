@@ -44,7 +44,71 @@ namespace CoreAI.Infrastructure.World
                 return null;
             }
 
-            return isEmpty ? new GameObject() : GameObject.CreatePrimitive(type);
+            if (isEmpty)
+            {
+                return new GameObject();
+            }
+
+            GameObject go = GameObject.CreatePrimitive(type);
+            EnsureRenderPipelineCompatibleMaterial(go);
+            return go;
+        }
+
+        private static Material _runtimeDefaultMaterial;
+
+        /// <summary>
+        /// Replaces the built-in Default-Material on a freshly created primitive when a scriptable
+        /// render pipeline is active. <see cref="GameObject.CreatePrimitive(PrimitiveType)"/> assigns
+        /// the built-in Standard material, which URP/HDRP do not support - in a player build the
+        /// object renders solid magenta (Hidden/InternalErrorShader). Safe to call on any object;
+        /// no-op without a renderer, without an SRP, or when the current shader is supported.
+        /// </summary>
+        public static void EnsureRenderPipelineCompatibleMaterial(GameObject go)
+        {
+            if (go == null || UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
+            {
+                return;
+            }
+
+            Renderer renderer = go.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return;
+            }
+
+            Material current = renderer.sharedMaterial;
+            if (current != null && current.shader != null && current.shader.isSupported &&
+                current.shader.name != "Standard")
+            {
+                return;
+            }
+
+            Material replacement = GetOrCreateRuntimeDefaultMaterial();
+            if (replacement != null)
+            {
+                renderer.sharedMaterial = replacement;
+            }
+        }
+
+        private static Material GetOrCreateRuntimeDefaultMaterial()
+        {
+            if (_runtimeDefaultMaterial != null)
+            {
+                return _runtimeDefaultMaterial;
+            }
+
+            // Shader.Find only resolves shaders included in the build; URP Lit is referenced by any
+            // URP scene material, Simple Lit / HDRP Lit are fallbacks for stripped-down setups.
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                            ?? Shader.Find("Universal Render Pipeline/Simple Lit")
+                            ?? Shader.Find("HDRP/Lit");
+            if (shader == null)
+            {
+                return null;
+            }
+
+            _runtimeDefaultMaterial = new Material(shader);
+            return _runtimeDefaultMaterial;
         }
 
         private static bool TryNormalize(string key, out bool isEmpty, out PrimitiveType type)

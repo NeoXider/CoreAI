@@ -59,6 +59,46 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Logs every active Graphic/Renderer whose shader reports unsupported on this device -
+        /// exactly the objects the player renders as magenta. SendMessage-compatible (arg unused).
+        /// </summary>
+        public void DumpUnsupportedShaders(string _ = null)
+        {
+            int hits = 0;
+            foreach (UnityEngine.UI.Graphic g in FindObjectsByType<UnityEngine.UI.Graphic>(
+                         FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                Material m = g.materialForRendering;
+                if (m != null && m.shader != null && !m.shader.isSupported)
+                {
+                    hits++;
+                    Debug.LogWarning(
+                        $"{LogPrefix} [shader-diag] UNSUPPORTED {BuildPath(g.transform)} mat={m.name} shader={m.shader.name}");
+                }
+            }
+
+            foreach (Renderer r in FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m != null && m.shader != null && !m.shader.isSupported)
+                    {
+                        hits++;
+                        Debug.LogWarning(
+                            $"{LogPrefix} [shader-diag] UNSUPPORTED {BuildPath(r.transform)} mat={m.name} shader={m.shader.name}");
+                    }
+                }
+            }
+
+            Debug.Log($"{LogPrefix} [shader-diag] done, unsupported={hits}");
+
+            static string BuildPath(Transform t)
+            {
+                return t.parent == null ? t.name : BuildPath(t.parent) + "/" + t.name;
+            }
+        }
+
+        /// <summary>
         /// Staged Lua diagnostic for the WebGL "RuntimeError: null function" trap (no LLM involved).
         /// Runs six escalating stages (bare Script → sandbox → host callback → Full unity_* bindings),
         /// logging before/after each; the last "stage-N: begin" without a matching "ok" pinpoints the
