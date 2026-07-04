@@ -21,9 +21,13 @@
     <!-- WebGL/IL2CPP: Lua game bindings register host callbacks as plain delegates; MoonSharp invokes
          them via reflection (InteropAccessMode.Reflection on AOT), so the managed-stripper never sees a
          direct call and may drop the lambda bodies. Preserve the binding types that run on the WebGL
-         player (every tier except Full) so their reflection-invoked methods survive. The Full-tier
-         CoreAiFullUnityLuaRuntimeBindings is intentionally NOT listed: it is disabled on WebGL, so
-         keeping it would only bloat the build. -->
+         player (every tier except Full) so their reflection-invoked methods survive. -->
+    <!-- Full-tier reflection bindings are used on WebGL when the host enables Full Lua (e.g. the
+         FullAccessDemo scene); preserved defensively. NOTE: this preserve alone does NOT fix the
+         known WebGL crash - any unity_* call from Lua still traps with "RuntimeError: null function"
+         (byte-identical wasm with/without this entry, so nothing was stripped; the fault is in the
+         IL2CPP/MoonSharp delegate-interop path and needs a development-build diagnosis). -->
+    <type fullname="CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.World.CoreAiWorldLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.World.CoreAiWorldQueryLuaBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.Lua.CoreAiVersioningLuaRuntimeBindings" preserve="all"/>
