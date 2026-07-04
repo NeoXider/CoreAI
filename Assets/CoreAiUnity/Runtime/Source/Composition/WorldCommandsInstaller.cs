@@ -153,6 +153,13 @@ namespace CoreAI.Composition
                     LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
                     runtime.RehydrateFromStore(scriptCapabilities,
                         allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);
+
+                    // Frame driver for mod timers/events. The ITickable entry-point registration
+                    // below never dispatched (see LuaModRuntimeTickDriver docs), so hooks_every
+                    // timers were frozen; a plain MonoBehaviour Update cannot fail that way.
+                    var tickerGo = new UnityEngine.GameObject("CoreAI_LuaModTicker");
+                    UnityEngine.Object.DontDestroyOnLoad(tickerGo);
+                    tickerGo.AddComponent<CoreAI.Infrastructure.Lua.LuaModRuntimeTickDriver>().Initialize(runtime);
                 }
                 catch (VContainerException)
                 {

@@ -872,6 +872,28 @@ namespace CoreAI.Ai
                     throw new ArgumentException("hooks_on: event name and function are required.");
                 }
 
+                // LLM-written mods routinely register hooks_on("tick"/"update"/"frame", fn)
+                // expecting a per-frame callback, but hooks_on only receives NAMED events and
+                // nothing emits those - the handler would sit dead forever (observed live: a
+                // day/night sun rotator that never rotated). Route the intuitive spelling to the
+                // timer machinery at the shortest allowed interval instead.
+                if (name is "tick" or "update" or "frame")
+                {
+                    if (mod.Timers.Count >= DefaultMaxTimersPerMod)
+                    {
+                        throw new InvalidOperationException(
+                            $"hooks_on('{name}'): timer limit reached ({DefaultMaxTimersPerMod}).");
+                    }
+
+                    mod.Timers.Add(new TimerEntry
+                    {
+                        IntervalSeconds = MinTimerIntervalSeconds,
+                        DueIn = MinTimerIntervalSeconds,
+                        Fn = fn
+                    });
+                    return true;
+                }
+
                 if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
                 {
                     throw new InvalidOperationException(
