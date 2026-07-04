@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### 4.18.3 — bounded HTTP 429 retries before the RateLimited error surfaces (2026-07-04)
+
+- **An HTTP 429 no longer fails the turn on the first hit.** Previously 429 was never retried:
+  the transient-retry classifier only matched local-model reload texts, so a burst-rate-limited
+  provider (routine on OpenRouter `:free` tiers — verified live in a WebGL build) surfaced
+  "Error: HTTP error 429" to the player immediately. Now both the non-streaming and the
+  stream-open paths absorb up to `RateLimitMaxRetries` (default 2) extra attempts, honoring the
+  `Retry-After` header when present (capped at 15s) and falling back to 2s/4s backoff, before the
+  typed `LlmErrorCode.RateLimited` error surfaces.
+- EditMode: `GetStreamingResponseAsync_RateLimited429Twice_RetriesAndCompletes` (two 429s absorbed,
+  3 opens) and `GetStreamingResponseAsync_RateLimited429Exhausted_ThrowsRateLimited` (three 429s →
+  typed RateLimited after exactly 1+2 attempts). SSE fixture: 35/35.
+
 ### 4.18.2 — starved-stream watchdog: abort keep-alive-only SSE attempts early (2026-07-04)
 
 - **A starved SSE attempt no longer waits for the server to close the connection.** Confirmed in a

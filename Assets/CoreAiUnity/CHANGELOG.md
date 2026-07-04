@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 4.18.3 — lockstep with com.neoxider.coreai 4.18.3 (2026-07-04)
+
+- Bounded HTTP 429 retries (2, Retry-After-aware) before the RateLimited error surfaces (see the
+  core package changelog); regression tests live in this package's test assembly. SSE fixture: 35/35.
+- New opt-in `CoreAiChatExternalDriver` (spawns only with `?coreai-external-driver=1` in the page
+  URL or `COREAI_EXTERNAL_DRIVER=1`): SendMessage bridge for WebGL/browser automation —
+  `SubmitPrompt` routes a prompt through the real chat turn pipeline, `ApplyBackendJson` switches
+  the LLM backend at runtime via `CoreAiBackend.ApplyHttpApi`. Synthetic DOM events cannot reach
+  Unity 6's Input System, so this is the supported headless path for WebGL smoke tests.
+
 ### 4.18.2 — lockstep with com.neoxider.coreai 4.18.2 (2026-07-04)
 
 - Starved-stream watchdog: keep-alive-only SSE attempts abort after 15s instead of waiting for the

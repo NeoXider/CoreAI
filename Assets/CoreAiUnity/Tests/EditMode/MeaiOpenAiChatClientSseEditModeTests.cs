@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using MEAI = Microsoft.Extensions.AI;
 using NUnit.Framework;
@@ -230,6 +231,61 @@ namespace CoreAI.Tests.EditMode
             {
                 MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout;
             }
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_RateLimited429Twice_RetriesAndCompletes()
+        {
+            // Free-tier providers (OpenRouter :free and similar) reject bursts with 429 routinely;
+            // the next window usually accepts. Two bounded rate-limit retries must absorb that
+            // instead of surfacing "Error: HTTP error 429" to the player on the first hit.
+            const string sse =
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+                "data: [DONE]\n\n";
+            RateLimit429ThenSseTransport transport = new(failures: 2, sse: sse);
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("ok", string.Concat(parts),
+                "The stream must complete after two 429s absorbed by rate-limit retries.");
+            Assert.AreEqual(3, transport.StreamOpens,
+                "Two 429 responses must consume exactly the two rate-limit retries (3 opens total).");
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_RateLimited429Exhausted_ThrowsRateLimited()
+        {
+            // Three 429s in a row: both retries consumed, the typed RateLimited error must surface.
+            // (Deliberately NOT Assert.ThrowsAsync: its sync-over-async wait can deadlock EditMode.)
+            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n");
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+
+            LlmClientException caught = null;
+            try
+            {
+                await foreach (MEAI.ChatResponseUpdate _ in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                {
+                }
+            }
+            catch (LlmClientException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "Exhausted rate-limit retries must surface a typed LlmClientException.");
+            Assert.AreEqual(LlmErrorCode.RateLimited, caught.ErrorCode);
+            Assert.AreEqual(3, transport.StreamOpens,
+                "1 initial attempt + 2 rate-limit retries, then the typed error.");
         }
 
         [Test]
@@ -760,6 +816,62 @@ namespace CoreAI.Tests.EditMode
             public override void Write(byte[] buffer, int offset, int count)
             {
                 throw new NotSupportedException();
+            }
+        }
+
+        /// <summary>
+        /// Rejects the first N stream-opens with HTTP 429 (Retry-After: 0.001 so tests stay fast),
+        /// then serves a normal SSE stream — models free-tier burst rate limiting.
+        /// </summary>
+        private sealed class RateLimit429ThenSseTransport : IOpenAiHttpTransport
+        {
+            private readonly int _failures;
+            private readonly string _sse;
+
+            public RateLimit429ThenSseTransport(int failures, string sse)
+            {
+                _failures = failures;
+                _sse = sse;
+            }
+
+            public int StreamOpens { get; private set; }
+            public string DebugLabel => "RateLimit429";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                if (StreamOpens <= _failures)
+                {
+                    OpenAiHttpSseOpenResult limited = new()
+                    {
+                        StatusCode = 429,
+                        ErrorBodyText = "{\"error\":{\"message\":\"rate-limited upstream\",\"code\":429}}",
+                        ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                        {
+                            { "Retry-After", new[] { "0.001" } },
+                            { "Content-Type", new[] { "application/json" } }
+                        }
+                    };
+                    return Task.FromResult(limited);
+                }
+
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+                return Task.FromResult(result.WithRawStream(new ThrowsAfterPayloadStream(_sse)));
             }
         }
 

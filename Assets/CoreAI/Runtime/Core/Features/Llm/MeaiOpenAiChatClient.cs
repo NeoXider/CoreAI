@@ -62,6 +62,30 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
 
+        /// <summary>
+        /// Extra attempts after an HTTP 429 before the typed <see cref="LlmErrorCode.RateLimited"/>
+        /// error surfaces (free-tier providers reject bursts routinely; one short retry usually lands in
+        /// the next window). The Retry-After header is honored when present, else 2s/4s backoff.
+        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        /// </summary>
+        internal static int RateLimitMaxRetries { get; set; } = 2;
+
+        /// <summary>Backoff before a rate-limit retry: Retry-After header when present (capped at 15s), else 2s * retry index.</summary>
+        private static int ResolveRateLimitBackoffMs(
+            IReadOnlyDictionary<string, IEnumerable<string>> headers, int retryIndex)
+        {
+            string retryAfter = TryGetHeaderFirstValue(headers, "Retry-After");
+            if (!string.IsNullOrWhiteSpace(retryAfter) &&
+                double.TryParse(retryAfter, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double seconds) &&
+                seconds > 0)
+            {
+                return (int)Math.Min(15000, seconds * 1000);
+            }
+
+            return Math.Min(15000, 2000 * Math.Max(1, retryIndex));
+        }
+
         public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -147,6 +171,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             const int transientLocalLlmReloadMaxAttempts = 10;
+            int rateLimitRetriesLeft = RateLimitMaxRetries;
 
             string responseJson = null;
 
@@ -189,6 +214,18 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiOpenAiChatClient: transient local LLM / reload response (attempt {attempt}/{transientLocalLlmReloadMaxAttempts}); retrying after backoff...",
                             LogTag.Llm);
                         await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                        continue;
+                    }
+
+                    if (postResult.StatusCode == 429 && rateLimitRetriesLeft > 0)
+                    {
+                        rateLimitRetriesLeft--;
+                        int rateLimitBackoffMs = ResolveRateLimitBackoffMs(
+                            postResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                        _log.Warn(
+                            $"MeaiOpenAiChatClient: HTTP 429 rate-limited - retrying after {rateLimitBackoffMs}ms ({rateLimitRetriesLeft} rate-limit retries left)...",
+                            LogTag.Llm);
+                        await BackoffDelayAsync(rateLimitBackoffMs, cancellationToken);
                         continue;
                     }
 
@@ -287,6 +324,7 @@ namespace CoreAI.Infrastructure.Llm
             const int emptyStreamMaxAttempts = 3;
             bool fallBackToNonStreaming = false;
             int starvedStreamFirstDeltaTimeoutSec = StarvedStreamFirstDeltaTimeoutSeconds;
+            int rateLimitRetriesLeft = RateLimitMaxRetries;
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
@@ -380,6 +418,18 @@ namespace CoreAI.Infrastructure.Llm
                                 "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...",
                                 LogTag.Llm);
                             await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                            continue;
+                        }
+
+                        if (openResult.StatusCode == 429 && rateLimitRetriesLeft > 0)
+                        {
+                            rateLimitRetriesLeft--;
+                            int rateLimitBackoffMs = ResolveRateLimitBackoffMs(
+                                openResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                            _log.Warn(
+                                $"MeaiOpenAiChatClient: HTTP 429 rate-limited on stream-open - retrying after {rateLimitBackoffMs}ms ({rateLimitRetriesLeft} rate-limit retries left)...",
+                                LogTag.Llm);
+                            await BackoffDelayAsync(rateLimitBackoffMs, cancellationToken);
                             continue;
                         }
 
