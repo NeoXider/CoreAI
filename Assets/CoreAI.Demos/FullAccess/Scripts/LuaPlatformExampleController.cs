@@ -126,8 +126,10 @@ namespace CoreAI.Demos
             _selfTestSummary = "Self-test running...";
             try
             {
-                if (_mods.IsLoaded(SelfTestAId)) _mods.UnloadMod(SelfTestAId);
-                if (_mods.IsLoaded(SelfTestBId)) _mods.UnloadMod(SelfTestBId);
+                // ForgetMod also purges stale persisted copies from older builds; a persisted A
+                // would autoload before B on restart and fail its load-time mods_get.
+                _mods.ForgetMod(SelfTestAId);
+                _mods.ForgetMod(SelfTestBId);
 
                 // B first so it is already listening when A emits ping from its load chunk.
                 _mods.LoadMod(SelfTestBId, SelfTestBSource, LuaCapabilities.All, persistToStore: false);
@@ -209,6 +211,13 @@ namespace CoreAI.Demos
             }
 
             _selfTestLines.Add(message);
+            if (message.StartsWith("FAIL", System.StringComparison.Ordinal))
+            {
+                // Failing checks surface in the player log too - the panel is not reachable from
+                // WebGL page scripting, the console is.
+                Debug.LogWarning($"[LuaPlatformExample] SELFTEST check failed: {message}");
+            }
+
             if (message.StartsWith("SELFTEST_DONE", System.StringComparison.Ordinal))
             {
                 _pendingSelfTestUnload = true;
@@ -388,7 +397,9 @@ hooks_every(1.5, function()
   if reported then return end
   reported = true
   mark('hooks_every_timer', timer_ticks >= 5)
-  mark('tick_alias_20hz', tick_alias >= 10)
+  -- Threshold is frame-rate tolerant: the alias fires at most once per rendered frame, and a
+  -- throttled/background WebGL tab can run at a few fps. Repeated firing is what's asserted.
+  mark('tick_alias_20hz', tick_alias >= 3)
   mark('cross_mod_events', pong_payload == '42!')
   local fails = 0
   for i = 1, #checks do
