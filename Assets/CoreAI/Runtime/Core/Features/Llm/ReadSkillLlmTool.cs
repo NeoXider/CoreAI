@@ -9,9 +9,10 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// LLM tool that reads skill instructions and metadata.
+    /// LLM tool that reads skill instructions and metadata. Public so hosts and installers can
+    /// attach a read_skill catalog to built-in roles that are not assembled via AgentBuilder.
     /// </summary>
-    internal static class ReadSkillLlmTool
+    public static class ReadSkillLlmTool
     {
         /// <summary>
         /// Creates the <c>read_skill</c> tool.

@@ -199,6 +199,16 @@ namespace CoreAI.Composition
                         new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaModsLlmTool(container.Resolve<LuaModRuntime>(), settings, log, scriptCapabilities));
+
+                    // Progressive disclosure for the built-in Programmer: the system prompt keeps the
+                    // survival-minimum API list, the full reference with worked examples loads on
+                    // demand via read_skill("Lua Modding") without bloating every request.
+                    SkillSet luaSkill = new(
+                        BuiltInLuaModdingSkillText.SkillName,
+                        BuiltInLuaModdingSkillText.SkillDescription,
+                        BuiltInLuaModdingSkillText.Instructions);
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        ReadSkillLlmTool.Create(new[] { luaSkill }));
                 }
                 catch (VContainerException)
                 {
