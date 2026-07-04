@@ -4,6 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.2 - fix no-Lua consumer compile (2026-07-05)
+
+- **`LuaModRuntimeTickDriver` is now guarded by `COREAI_HAS_MOONSHARP && !COREAI_NO_LUA`** - it was
+  the only Lua-referencing file without the guard, so projects without the MoonSharp package failed
+  to compile the package (`CS0246: LuaModRuntime could not be found`). Audited the whole Runtime
+  tree: every other Lua reference already sits behind the define.
+
 ### 5.0.1 - package ships the full WebGL link.xml (2026-07-05)
 
 - **`link.xml` now ships complete inside the package** (MoonSharp, `UnityEngine.Resources` /

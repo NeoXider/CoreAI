@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Ai;
 using UnityEngine;
 
@@ -26,3 +27,4 @@ namespace CoreAI.Infrastructure.Lua
         }
     }
 }
+#endif
