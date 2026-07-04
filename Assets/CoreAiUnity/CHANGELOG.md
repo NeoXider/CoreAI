@@ -4,6 +4,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.0 - skills via inspector/SO, runtime API, Resources override (2026-07-04)
+
+- **CoreAILifetimeScope "Role Skills"** - bind agent roles to `SkillSetAsset[]` in the inspector
+  (instructions from a TextAsset or inline text); registered automatically at container build.
+  The FullAccess demo ships `LuaModdingSkill.asset` wired to the Programmer role as the reference
+  setup.
+- **`CoreAi.AddSkillForRole(roleId, skill)`** - runtime code path over the same live catalog;
+  skills added mid-session are immediately readable via `read_skill`.
+- **`Resources/AgentSkills/LuaModding.txt`** - canonical text of the built-in Lua Modding skill;
+  a host can replace it the same way as `AgentPrompts/System` overrides. A test pins it equal to
+  the built-in fallback so the two never drift.
+- **WebGL survives Managed Stripping Medium.** `link.xml` preserves the whole `CoreAI.Source`
+  assembly (VContainer creates DI types via reflection, MoonSharp reflection-invokes binding
+  callbacks - per-type preserve lists broke one type per build); input bindings factory-registered;
+  verified in-browser (self-test 16/16, Tetris persists across reload). Recommended WebGL settings
+  (Medium + IL2CPP OptimizeSize, fixes the LLVM linker OOM) documented in LUA_ACCESS_MODES.md.
+- **Semver:** major (5.0), lockstep with **`com.neoxider.coreai` 5.0.0** - the on-demand skills platform for built-in roles.
+
 ### 4.20.0 - Mod timers actually tick; Lua input API; mod editor panel; Lua platform example (2026-07-04)
 
 - **Semver:** minor with **`com.neoxider.coreai` 4.20.0** (`hooks_on('tick')` alias, `{id=...}` table

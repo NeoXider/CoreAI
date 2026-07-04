@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 37f23231544511343bacb99fea375423, type: 3}
+  m_Name: LuaModdingSkill
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Unity.SkillSetAsset
+  skillName: Lua Modding
+  description: 'Full CoreAI Lua reference: every sandbox API with signatures, working
+    mod examples (timers, input, persistence, cross-mod calls, a complete mini-game
+    skeleton), and the common errors. Read this before writing any non-trivial Lua
+    mod.'
+  instructionsAsset: {fileID: 4900000, guid: c018995e332742d46837beaf4f2becf6, type: 3}
+  inlineInstructions: 

@@ -86,5 +86,41 @@ namespace CoreAI.Tests.EditMode
         {
             StringAssert.Contains("read_skill('Lua Modding')", BuiltInAgentSystemPromptTexts.Programmer);
         }
+
+        [Test]
+        public void ResourcesOverride_WhenPresent_MatchesTheBuiltInText()
+        {
+            // The txt is the canonical SO/Resources-facing copy of the built-in fallback; the two
+            // must never drift, otherwise editor hosts and code-only hosts see different references.
+            UnityEngine.TextAsset overrideAsset =
+                UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/LuaModding");
+            if (overrideAsset == null)
+            {
+                Assert.Ignore("No Resources/AgentSkills/LuaModding override in this project.");
+            }
+
+            Assert.AreEqual(BuiltInLuaModdingSkillText.Instructions, overrideAsset.text);
+        }
+
+        [Test]
+        public void AddSkillForRole_SameName_ReplacesInsteadOfDuplicating()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.AddSkillForRole("TestRole", BuildSkill());
+            policy.AddSkillForRole("TestRole",
+                SkillSet.FromTextContent(BuiltInLuaModdingSkillText.SkillName, "v2", "updated body"));
+
+            IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole("TestRole");
+            int readSkillCount = 0;
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool.Name == "read_skill")
+                {
+                    readSkillCount++;
+                }
+            }
+
+            Assert.AreEqual(1, readSkillCount, "meta-tools must be registered once per role");
+        }
     }
 }

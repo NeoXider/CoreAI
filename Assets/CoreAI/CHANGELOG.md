@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### 5.0.0 - on-demand skills for built-in roles; "Lua Modding" skill (2026-07-04)
+
+- **`AgentMemoryPolicy.AddSkillForRole(roleId, skill)`** - attaches an on-demand skill catalog to
+  ANY role (built-in or custom), not only AgentBuilder-assembled agents. First skill registers the
+  `read_skill` / `call_skill_tool` meta-tools once over a live `MutableSkillCatalog`; later skills
+  (even mid-session) are immediately readable; a same-name skill replaces the previous one.
+- **Built-in "Lua Modding" skill for the Programmer role.** The system prompt keeps the
+  survival-minimum API list and points at `read_skill('Lua Modding')`; the skill returns the full
+  ~9.5 KB reference: every sandbox API family with signatures, timers/input/persistence/cross-mod
+  patterns, a complete worked mini-game mod, and a catalog of common errors with causes (incl. the
+  JSON `
+` double-escaping failure mode observed with small models).
+- **`ReadSkillLlmTool` / `CallSkillToolLlmTool` are public** so hosts and installers can attach
+  skill catalogs to roles assembled outside AgentBuilder.
+- **Audit follow-up (MoonSharp idioms):** Lua `print()` routes to the project logger (and inside
+  mods into the same report pipeline as `report()`, honoring the mute flag) instead of MoonSharp's
+  invisible `Console.WriteLine`; `LuaExecutionGuard` documents its real guarantee (no CLR-call
+  preemption); `LuaApiRegistry` builds `CallbackFunction`s eagerly from the owning script and
+  caches `ParameterInfo[]` per registration.
+- **Semver:** major (5.0), lockstep with **`com.neoxider.coreaiunity` 5.0.0** - the on-demand skills platform for built-in roles.
+
 ### 4.20.0 - hooks_on('tick') alias; {id=...} table coercion for numeric params (2026-07-04)
 
 - **`hooks_on('tick'/'update'/'frame')` registers a real per-frame timer.** `hooks_on` receives only
