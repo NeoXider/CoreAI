@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 4.18.4 - lockstep with com.neoxider.coreai 4.18.4 (2026-07-04)
+
+- Transient-HTTP rescue chain (request -> retry -> non-streaming fallback -> typed error) for
+  429/408/5xx (see the core package changelog); regression tests live in this package. 36/36.
+- `CoreAiChatExternalDriver.ApplyBackendJson` accepts optional `maxTokens`/`temperature`/
+  `timeoutSeconds` (Groq counts max_tokens toward TPM); new `RunLuaDiag` staged Lua diagnostic for
+  the WebGL null-function investigation.
+- FullAccessDemo scene now ships the `CoreAiBackendPanel` prefab (runtime API settings UI).
+
 ### 4.18.3 — lockstep with com.neoxider.coreai 4.18.3 (2026-07-04)
 
 - Bounded HTTP 429 retries (2, Retry-After-aware) before the RateLimited error surfaces (see the

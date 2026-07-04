@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 4.18.4 - transient-HTTP chain: request -> retry -> non-streaming fallback -> typed error (2026-07-04)
+
+- **A transient HTTP failure (429/408/5xx) on the streamed path now walks the full rescue chain
+  before any error reaches the player.** Previously 429 got its bounded retries and then threw;
+  nothing fell back unless a SECOND backend was configured (FallbackLlmClientDecorator needs a
+  secondary). Now: 1 request -> `RateLimitMaxRetries` (default 1) Retry-After-aware retries -> ONE
+  plain non-streaming completion with a ZERO extra-retry budget -> only then the typed error
+  (RateLimited/BackendUnavailable/...). 408 and 5xx joined 429 as retryable transients; the
+  non-streaming path uses the same classification.
+- EditMode: `RateLimited429Once_RetriesAndCompletes` (2 opens),
+  `RateLimitedPersists_FallsBackToNonStreaming` (2 opens + exactly 1 completion),
+  `RateLimited429Exhausted_ThrowsRateLimited` (fallback also 429 -> typed error, no hidden rounds).
+  SSE fixture: 36/36.
+
 ### 4.18.3 — bounded HTTP 429 retries before the RateLimited error surfaces (2026-07-04)
 
 - **An HTTP 429 no longer fails the turn on the first hit.** Previously 429 was never retried:

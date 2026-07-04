@@ -59,9 +59,98 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Staged Lua diagnostic for the WebGL "RuntimeError: null function" trap (no LLM involved).
+        /// Runs six escalating stages (bare Script → sandbox → host callback → Full unity_* bindings),
+        /// logging before/after each; the last "stage-N: begin" without a matching "ok" pinpoints the
+        /// faulting layer even though a wasm trap halts the player. SendMessage-compatible (arg unused).
+        /// </summary>
+        public void RunLuaDiag(string _ = null)
+        {
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+            void Stage(string name, Action body)
+            {
+                Debug.Log($"{LogPrefix} [diag] {name}: begin");
+                try
+                {
+                    body();
+                    Debug.Log($"{LogPrefix} [diag] {name}: ok");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                }
+            }
+
+            GameObject probe = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            probe.name = "LuaDiagCube";
+            try
+            {
+                MoonSharp.Interpreter.Script bare = null;
+                Stage("s1-new-Script", () =>
+                {
+                    bare = new MoonSharp.Interpreter.Script(
+                        MoonSharp.Interpreter.CoreModules.Preset_HardSandbox |
+                        MoonSharp.Interpreter.CoreModules.Coroutine);
+                });
+
+                Stage("s2-bare-DoString", () =>
+                {
+                    MoonSharp.Interpreter.DynValue r = bare.DoString("return 1+1");
+                    Debug.Log($"{LogPrefix} [diag] s2 result={r.Number}");
+                });
+
+                CoreAI.Sandbox.SecureLuaEnvironment env = new();
+                Stage("s3-sandbox-RunChunk", () =>
+                {
+                    MoonSharp.Interpreter.Script s = env.CreateScript(null);
+                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return 2+2");
+                    Debug.Log($"{LogPrefix} [diag] s3 result={r.Number}");
+                });
+
+                Stage("s4-host-callback", () =>
+                {
+                    CoreAI.Sandbox.LuaApiRegistry reg = new();
+                    reg.Register("host_add", (Func<double, double, double>)((a, b) => a + b));
+                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
+                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return host_add(2,3)");
+                    Debug.Log($"{LogPrefix} [diag] s4 result={r.Number}");
+                });
+
+                Stage("s5-unity_find", () =>
+                {
+                    CoreAI.Sandbox.LuaApiRegistry reg = new();
+                    new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
+                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
+                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return unity_find('LuaDiagCube')");
+                    Debug.Log($"{LogPrefix} [diag] s5 id={r.Number}");
+                });
+
+                Stage("s6-unity_set_scale", () =>
+                {
+                    CoreAI.Sandbox.LuaApiRegistry reg = new();
+                    new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
+                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
+                    env.RunChunk(s, "local id = unity_find('LuaDiagCube'); unity_set_scale(id, 2, 2, 2)");
+                    Debug.Log($"{LogPrefix} [diag] s6 scale={probe.transform.localScale}");
+                });
+
+                Debug.Log($"{LogPrefix} [diag] ALL STAGES PASSED");
+            }
+            finally
+            {
+                Destroy(probe);
+            }
+#else
+            Debug.LogWarning($"{LogPrefix} RunLuaDiag ignored: Lua module not compiled in.");
+#endif
+        }
+
+        /// <summary>
         /// Switches the LLM backend at runtime via <see cref="CoreAI.CoreAiBackend"/>.
         /// SendMessage-compatible: takes one JSON string
-        /// <c>{"baseUrl":"...","apiKey":"...","model":"..."}</c> and calls
+        /// <c>{"baseUrl":"...","apiKey":"...","model":"...","maxTokens":4096,"temperature":0.7,"timeoutSeconds":120}</c>
+        /// (the last three optional; providers like Groq count <c>max_tokens</c> toward per-minute
+        /// token limits, so capping it per backend matters) and calls
         /// <c>CoreAiBackend.ApplyHttpApi</c>. The outcome is logged (<c>backend-applied</c> /
         /// <c>backend-failed</c>); the API key is never echoed.
         /// </summary>
@@ -73,8 +162,13 @@ namespace CoreAI.Chat
                 string baseUrl = (string)o["baseUrl"] ?? "";
                 string apiKey = (string)o["apiKey"] ?? "";
                 string model = (string)o["model"] ?? "";
-                bool hotSwapped = CoreAI.CoreAiBackend.ApplyHttpApi(baseUrl, apiKey, model);
+                float? temperature = (float?)o["temperature"];
+                int? timeoutSeconds = (int?)o["timeoutSeconds"];
+                int? maxTokens = (int?)o["maxTokens"];
+                bool hotSwapped = CoreAI.CoreAiBackend.ApplyHttpApi(
+                    baseUrl, apiKey, model, temperature, timeoutSeconds, maxTokens);
                 Debug.Log($"{LogPrefix} backend-applied: baseUrl={baseUrl} model={model} " +
+                          $"maxTokens={(maxTokens.HasValue ? maxTokens.Value.ToString() : "keep")} " +
                           $"hotSwapped={hotSwapped} keyLen={apiKey.Length}");
             }
             catch (Exception ex)

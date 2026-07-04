@@ -63,12 +63,19 @@ namespace CoreAI.Infrastructure.Llm
         internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
 
         /// <summary>
-        /// Extra attempts after an HTTP 429 before the typed <see cref="LlmErrorCode.RateLimited"/>
-        /// error surfaces (free-tier providers reject bursts routinely; one short retry usually lands in
-        /// the next window). The Retry-After header is honored when present, else 2s/4s backoff.
+        /// Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
+        /// the streamed path then falls back to ONE non-streaming completion, and only if that also
+        /// fails does the typed error surface - "request → retry → fallback request → error".
+        /// The Retry-After header is honored when present, else 2s backoff.
         /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
         /// </summary>
-        internal static int RateLimitMaxRetries { get; set; } = 2;
+        internal static int RateLimitMaxRetries { get; set; } = 1;
+
+        /// <summary>Transient HTTP statuses worth retrying: 408 timeout, 429 rate limit, any 5xx.</summary>
+        private static bool IsRetryableHttpStatus(int status)
+        {
+            return status == 408 || status == 429 || (status >= 500 && status < 600);
+        }
 
         /// <summary>Backoff before a rate-limit retry: Retry-After header when present (capped at 15s), else 2s * retry index.</summary>
         private static int ResolveRateLimitBackoffMs(
@@ -100,9 +107,24 @@ namespace CoreAI.Infrastructure.Llm
         }
 #endif
 
-        public async Task<MEAI.ChatResponse> GetResponseAsync(
+        public Task<MEAI.ChatResponse> GetResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            return GetResponseCoreAsync(chatMessages, options, RateLimitMaxRetries, cancellationToken);
+        }
+
+        /// <summary>
+        /// Non-streaming completion with an explicit transient-HTTP retry budget. The public
+        /// <see cref="GetResponseAsync"/> uses <see cref="RateLimitMaxRetries"/>; the streamed path's
+        /// LAST-RESORT fallback passes 0 so the whole turn stays at
+        /// "request → retry → one fallback request → typed error".
+        /// </summary>
+        private async Task<MEAI.ChatResponse> GetResponseCoreAsync(
+            IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions? options,
+            int transientHttpRetries,
             CancellationToken cancellationToken = default)
         {
             List<MEAI.ChatMessage> msgs = chatMessages.ToList();
@@ -171,7 +193,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             const int transientLocalLlmReloadMaxAttempts = 10;
-            int rateLimitRetriesLeft = RateLimitMaxRetries;
+            int transientHttpRetriesLeft = transientHttpRetries;
 
             string responseJson = null;
 
@@ -217,15 +239,15 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    if (postResult.StatusCode == 429 && rateLimitRetriesLeft > 0)
+                    if (IsRetryableHttpStatus(postResult.StatusCode) && transientHttpRetriesLeft > 0)
                     {
-                        rateLimitRetriesLeft--;
-                        int rateLimitBackoffMs = ResolveRateLimitBackoffMs(
-                            postResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                        transientHttpRetriesLeft--;
+                        int transientBackoffMs = ResolveRateLimitBackoffMs(
+                            postResult.ResponseHeaders, transientHttpRetries - transientHttpRetriesLeft);
                         _log.Warn(
-                            $"MeaiOpenAiChatClient: HTTP 429 rate-limited - retrying after {rateLimitBackoffMs}ms ({rateLimitRetriesLeft} rate-limit retries left)...",
+                            $"MeaiOpenAiChatClient: HTTP {postResult.StatusCode} (transient) - retrying after {transientBackoffMs}ms ({transientHttpRetriesLeft} retries left)...",
                             LogTag.Llm);
-                        await BackoffDelayAsync(rateLimitBackoffMs, cancellationToken);
+                        await BackoffDelayAsync(transientBackoffMs, cancellationToken);
                         continue;
                     }
 
@@ -421,16 +443,28 @@ namespace CoreAI.Infrastructure.Llm
                             continue;
                         }
 
-                        if (openResult.StatusCode == 429 && rateLimitRetriesLeft > 0)
+                        if (IsRetryableHttpStatus(openResult.StatusCode))
                         {
-                            rateLimitRetriesLeft--;
-                            int rateLimitBackoffMs = ResolveRateLimitBackoffMs(
-                                openResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                            if (rateLimitRetriesLeft > 0)
+                            {
+                                rateLimitRetriesLeft--;
+                                int transientBackoffMs = ResolveRateLimitBackoffMs(
+                                    openResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                                _log.Warn(
+                                    $"MeaiOpenAiChatClient: HTTP {openResult.StatusCode} (transient) on stream-open - retrying after {transientBackoffMs}ms ({rateLimitRetriesLeft} retries left)...",
+                                    LogTag.Llm);
+                                await BackoffDelayAsync(transientBackoffMs, cancellationToken);
+                                continue;
+                            }
+
+                            // Retries exhausted: LAST RESORT is one plain (non-streaming) completion in
+                            // the same turn - request → retry → fallback request → typed error. The
+                            // fallback runs with a ZERO transient budget so the turn ends after it.
                             _log.Warn(
-                                $"MeaiOpenAiChatClient: HTTP 429 rate-limited on stream-open - retrying after {rateLimitBackoffMs}ms ({rateLimitRetriesLeft} rate-limit retries left)...",
+                                $"MeaiOpenAiChatClient: HTTP {openResult.StatusCode} persisted after {RateLimitMaxRetries} stream retries - falling back to ONE non-streaming completion for this turn.",
                                 LogTag.Llm);
-                            await BackoffDelayAsync(rateLimitBackoffMs, cancellationToken);
-                            continue;
+                            fallBackToNonStreaming = true;
+                            break;
                         }
 
                         throw BuildHttpException(openResult.StatusCode, streamBody, streamErr,
@@ -593,7 +627,9 @@ namespace CoreAI.Infrastructure.Llm
 
             if (fallBackToNonStreaming)
             {
-                MEAI.ChatResponse full = await GetResponseAsync(msgs, options, cancellationToken);
+                // Zero transient budget: this IS the fallback request; if it fails too, the typed
+                // error surfaces (request → retry → fallback → error, no hidden extra rounds).
+                MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken);
                 foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
                 {
                     yield return u;

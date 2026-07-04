@@ -234,15 +234,15 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task GetStreamingResponseAsync_RateLimited429Twice_RetriesAndCompletes()
+        public async Task GetStreamingResponseAsync_RateLimited429Once_RetriesAndCompletes()
         {
             // Free-tier providers (OpenRouter :free and similar) reject bursts with 429 routinely;
-            // the next window usually accepts. Two bounded rate-limit retries must absorb that
-            // instead of surfacing "Error: HTTP error 429" to the player on the first hit.
+            // the next window usually accepts. The single bounded retry must absorb that instead of
+            // surfacing "Error: HTTP error 429" to the player on the first hit.
             const string sse =
                 "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
                 "data: [DONE]\n\n";
-            RateLimit429ThenSseTransport transport = new(failures: 2, sse: sse);
+            RateLimit429ThenSseTransport transport = new(failures: 1, sse: sse);
             MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
             List<string> parts = new();
 
@@ -256,17 +256,50 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual("ok", string.Concat(parts),
-                "The stream must complete after two 429s absorbed by rate-limit retries.");
-            Assert.AreEqual(3, transport.StreamOpens,
-                "Two 429 responses must consume exactly the two rate-limit retries (3 opens total).");
+                "The stream must complete after a 429 absorbed by the rate-limit retry.");
+            Assert.AreEqual(2, transport.StreamOpens,
+                "One 429 must consume exactly the single retry (2 opens total).");
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_RateLimitedPersists_FallsBackToNonStreaming()
+        {
+            // Request → retry → FALLBACK: when the stream keeps 429-ing after the retry budget,
+            // the turn must try ONE plain completion before surfacing any error.
+            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n")
+            {
+                NonStreamingBody = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"fallback answer\"}}]}"
+            };
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("fallback answer", string.Concat(parts),
+                "Persistent 429 on the stream must be rescued by the non-streaming fallback.");
+            Assert.AreEqual(2, transport.StreamOpens,
+                "1 initial attempt + 1 retry before the fallback.");
+            Assert.AreEqual(1, transport.NonStreamingCalls,
+                "Exactly one non-streaming fallback request.");
         }
 
         [Test]
         public async Task GetStreamingResponseAsync_RateLimited429Exhausted_ThrowsRateLimited()
         {
-            // Three 429s in a row: both retries consumed, the typed RateLimited error must surface.
+            // Stream 429s twice (initial + retry) AND the fallback completion 429s too:
+            // only now the typed RateLimited error surfaces, with no hidden extra rounds.
             // (Deliberately NOT Assert.ThrowsAsync: its sync-over-async wait can deadlock EditMode.)
-            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n");
+            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n")
+            {
+                NonStreamingBody = null // non-streaming endpoint also answers 429
+            };
             MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
 
             LlmClientException caught = null;
@@ -282,10 +315,12 @@ namespace CoreAI.Tests.EditMode
                 caught = ex;
             }
 
-            Assert.IsNotNull(caught, "Exhausted rate-limit retries must surface a typed LlmClientException.");
+            Assert.IsNotNull(caught, "Exhausted retries + failed fallback must surface a typed LlmClientException.");
             Assert.AreEqual(LlmErrorCode.RateLimited, caught.ErrorCode);
-            Assert.AreEqual(3, transport.StreamOpens,
-                "1 initial attempt + 2 rate-limit retries, then the typed error.");
+            Assert.AreEqual(2, transport.StreamOpens,
+                "1 initial attempt + 1 retry on the stream.");
+            Assert.AreEqual(1, transport.NonStreamingCalls,
+                "The fallback completion runs exactly once (zero extra retries), then the error surfaces.");
         }
 
         [Test]
@@ -835,13 +870,37 @@ namespace CoreAI.Tests.EditMode
             }
 
             public int StreamOpens { get; private set; }
+            public int NonStreamingCalls { get; private set; }
+
+            /// <summary>Non-streaming response body; null = the endpoint answers HTTP 429 as well.</summary>
+            public string NonStreamingBody { get; set; }
+
             public string DebugLabel => "RateLimit429";
             public bool SupportsSseStreaming => true;
 
             public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
                 CancellationToken cancellationToken = default)
             {
-                throw new NotSupportedException();
+                NonStreamingCalls++;
+                if (NonStreamingBody == null)
+                {
+                    return Task.FromResult(new OpenAiHttpPostResult
+                    {
+                        StatusCode = 429,
+                        BodyText = "{\"error\":{\"message\":\"rate-limited upstream\",\"code\":429}}",
+                        ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                        {
+                            { "Retry-After", new[] { "0.001" } }
+                        }
+                    });
+                }
+
+                return Task.FromResult(new OpenAiHttpPostResult
+                {
+                    StatusCode = 200,
+                    BodyText = NonStreamingBody,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>()
+                });
             }
 
             public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
