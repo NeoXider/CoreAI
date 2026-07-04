@@ -47,6 +47,8 @@ For mixed projects, use `LlmRoutingManifest` profiles. Each profile has its own 
 
 The portable core defines message contracts only. The Unity layer registers brokers in `CoreServicesInstaller` and publishes LLM routing/status/usage messages from `RoutingLlmClient`.
 
+**Usage is cumulative across tool roundtrips (4.19.0).** `MeaiLlmClient` no longer reports only the last roundtrip's token usage. The streaming path emits a usage-bearing `LlmStreamChunk` immediately as each roundtrip's usage arrives, so `RoutingLlmClient` publishes `LlmUsageReported` even when the turn later times out or is cancelled mid-stream. The non-streaming path sums provider usage across every tool roundtrip via the shared `LlmUsageAccumulator`, so a multi-tool-call turn reports whole-turn totals instead of just the final call's numbers.
+
 Since **v1.5.0**, tool lifecycle events (`LlmToolCallStarted`, `LlmToolCallCompleted`, `LlmToolCallFailed`) are published through a two-layer adapter chain:
 1. **`ToolExecutionPolicy`** (portable, `CoreAI.Core`) calls **`IToolCallEventPublisher.PublishStarted/Completed/Failed`** — no MessagePipe dependency.
 2. **`MessagePipeToolCallEventPublisher`** (Unity, `CoreAI.Source`) implements `IToolCallEventPublisher` and delegates to **`GlobalMessagePipe.GetPublisher<T>()`**.

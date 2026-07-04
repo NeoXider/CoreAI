@@ -110,6 +110,8 @@ A ship-ready uGUI/TextMeshPro settings panel over the same API:
 - **API key is write-only:** the configured key is never echoed back into the field; leaving it **empty** on Apply keeps the currently configured key.
 - **Apply** button: calls the matching `CoreAiBackend.Apply*` and reports "Applied (live)" vs "Saved to settings (no live scope yet)".
 - **Test** button: runs `VerifyAsync` (timeout via the `verifyTimeoutSeconds` serialized field, default 30) and shows OK + latency or the error in the status label.
+- **Close button:** a corner "x" hides the panel (`CoreAiBackendPanel.Close()`, wired via the `close` parameter of `Wire(...)`). Re-enable the GameObject to show the panel again.
+- **Background:** the regenerated prefab uses a translucent (0.6-alpha) panel background.
 - The panel subscribes to `CoreAiBackend.OnBackendChanged` and stays in sync when the backend is switched from code elsewhere. It also raises its own `OnApplied` event after a user-driven switch.
 
 ### Drop-in usage
@@ -117,7 +119,7 @@ A ship-ready uGUI/TextMeshPro settings panel over the same API:
 1. Drag `Assets/CoreAiUnity/Prefabs/CoreAiBackendPanel.prefab` into a scene (it is a Canvas-rooted panel), **or**
 2. Use the menu **GameObject → CoreAI → Backend Panel (Canvas)** to create one in the open scene.
 
-No wiring needed — the prefab has all references pre-assigned. For custom UIs, add the `CoreAiBackendPanel` component and either assign the serialized references in the Inspector or call `Wire(dropdown, baseUrl, apiKey, model, apply, test, status)` from code (this is also what the prefab builder and tests use).
+No wiring needed — the prefab has all references pre-assigned. For custom UIs, add the `CoreAiBackendPanel` component and either assign the serialized references in the Inspector or call `Wire(dropdown, baseUrl, apiKey, model, apply, test, status, close)` from code (this is also what the prefab builder and tests use; `close` is optional).
 
 ### Regenerating the prefab
 
