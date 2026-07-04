@@ -58,6 +58,7 @@ namespace CoreAI.Sandbox
             ThrowIfUnsupported();
 
             Script script = new(SandboxModules);
+            RouteDebugPrint(script);
             registry?.ApplyToGlobals(script.Globals);
 
             // Attach a debugger before loading host code so instruction limits cover all execution.
@@ -66,6 +67,17 @@ namespace CoreAI.Sandbox
 
             StripRiskyGlobals(script);
             return script;
+        }
+
+        /// <summary>
+        /// MoonSharp's default <c>print</c> goes to <c>Console.WriteLine</c>, which is invisible in a
+        /// Unity player — LLM-written Lua that reaches for <c>print</c> first would vanish silently.
+        /// Route it to the project logger; hosts with a richer pipeline (e.g. the mod runtime's
+        /// <c>report</c> events) may overwrite <c>Options.DebugPrint</c> again after creation.
+        /// </summary>
+        private static void RouteDebugPrint(Script script)
+        {
+            script.Options.DebugPrint = message => Logging.Log.Instance.Info($"[Lua print] {message}");
         }
 
         /// <summary>Runs Lua code inside a secured script with the optional execution guard.</summary>
@@ -93,6 +105,7 @@ namespace CoreAI.Sandbox
             ThrowIfUnsupported();
 
             Script script = new(SandboxModules);
+            RouteDebugPrint(script);
             registry?.ApplyToGlobals(script.Globals);
 
             InstructionLimitDebugger debugger = new(budgetPerResume, 500);

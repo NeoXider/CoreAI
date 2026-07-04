@@ -7,6 +7,13 @@ namespace CoreAI.Sandbox
 {
     /// <summary>
     /// Runs Lua functions with timeout and instruction-step limits.
+    /// <para>
+    /// Scope of the guarantee: limits are enforced <em>between Lua VM instructions</em> (via
+    /// <see cref="InstructionLimitDebugger"/>) plus a post-call wall-clock check. A single host
+    /// callback that blocks (slow reflection in <c>unity_call</c>, a large scene scan) cannot be
+    /// preempted mid-call — MoonSharp has no CLR-call interruption. Host bindings must therefore
+    /// bound their own worst case (result caps, clamped scan sizes) rather than rely on this guard.
+    /// </para>
     /// </summary>
     public sealed class LuaExecutionGuard
     {

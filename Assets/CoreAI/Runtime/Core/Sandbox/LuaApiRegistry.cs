@@ -7,7 +7,9 @@ using MoonSharp.Interpreter;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Registry of host callbacks exposed to secured Lua scripts.
+    /// Registry of host callbacks exposed to secured Lua scripts. One registry serves one
+    /// <see cref="Script"/>: <see cref="ApplyToGlobals"/> binds callbacks to the globals table's
+    /// owning script, so applying the same registry to a second script is not supported.
     /// </summary>
     public sealed class LuaApiRegistry
     {
@@ -53,15 +55,18 @@ namespace CoreAI.Sandbox
             {
                 string name = kv.Key;
                 Delegate callback = kv.Value;
-                CallbackFunction moonSharpCallback = null;
+                // Built eagerly from the owning script: registries are one-per-script, and a lazy
+                // ctx.GetScript() capture would only look safer while inviting cross-script reuse.
+                // ParameterInfo[] is reflected once here instead of on every call.
+                CallbackFunction moonSharpCallback = CallbackFunction.FromDelegate(globals.OwnerScript, callback);
+                ParameterInfo[] parameters = callback.Method.GetParameters();
 
                 globals[name] = DynValue.NewCallback((ctx, args) =>
                 {
                     try
                     {
-                        moonSharpCallback ??= CallbackFunction.FromDelegate(ctx.GetScript(), callback);
                         return moonSharpCallback.Invoke(ctx,
-                            CoerceArgsForDelegate(callback, args.GetArray()), args.IsMethodCall);
+                            CoerceArgsForDelegate(parameters, args.GetArray()), args.IsMethodCall);
                     }
                     catch (InterpreterException)
                     {
@@ -109,9 +114,8 @@ namespace CoreAI.Sandbox
         /// numeric and the argument is a table carrying a numeric <c>id</c> field, substitute that
         /// id so the intuitive code works instead of erroring.
         /// </summary>
-        private static DynValue[] CoerceArgsForDelegate(Delegate callback, DynValue[] args)
+        private static DynValue[] CoerceArgsForDelegate(ParameterInfo[] parameters, DynValue[] args)
         {
-            ParameterInfo[] parameters = callback.Method.GetParameters();
             for (int i = 0; i < args.Length && i < parameters.Length; i++)
             {
                 if (args[i].Type != DataType.Table)

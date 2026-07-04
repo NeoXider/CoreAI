@@ -414,6 +414,14 @@ namespace CoreAI.Ai
             RegisterModApis(registry, mod);
 
             Script script = _env.CreateScript(registry);
+            // print() inside a mod behaves like report(): same event pipeline, same LogReports mute.
+            script.Options.DebugPrint = message =>
+            {
+                if (mod.LogReports)
+                {
+                    ModReportEmitted?.Invoke(mod.Id, message ?? "");
+                }
+            };
             mod.Script = script;
 
             // The game bindings (and their world transaction state) are shared with the envelope
