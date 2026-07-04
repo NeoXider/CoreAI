@@ -35,6 +35,7 @@ namespace CoreAI.UI
         [SerializeField] private TMP_InputField? modelInput;
         [SerializeField] private Button? applyButton;
         [SerializeField] private Button? testButton;
+        [SerializeField] private Button? closeButton;
         [SerializeField] private TMP_Text? statusText;
 
         [Header("Behaviour")]
@@ -66,6 +67,11 @@ namespace CoreAI.UI
                 testButton.onClick.AddListener(Test);
             }
 
+            if (closeButton != null)
+            {
+                closeButton.onClick.AddListener(Close);
+            }
+
             if (backendDropdown != null)
             {
                 backendDropdown.onValueChanged.AddListener(OnBackendOptionChanged);
@@ -89,6 +95,11 @@ namespace CoreAI.UI
             if (testButton != null)
             {
                 testButton.onClick.RemoveListener(Test);
+            }
+
+            if (closeButton != null)
+            {
+                closeButton.onClick.RemoveListener(Close);
             }
 
             if (backendDropdown != null)
@@ -297,7 +308,8 @@ namespace CoreAI.UI
             TMP_InputField model,
             Button apply,
             Button test,
-            TMP_Text status)
+            TMP_Text status,
+            Button? close = null)
         {
             backendDropdown = dropdown;
             baseUrlInput = baseUrl;
@@ -306,6 +318,13 @@ namespace CoreAI.UI
             applyButton = apply;
             testButton = test;
             statusText = status;
+            closeButton = close;
+        }
+
+        /// <summary>Hides the panel (the close "X"). Re-enable the GameObject to show it again.</summary>
+        public void Close()
+        {
+            gameObject.SetActive(false);
         }
 
         #endregion

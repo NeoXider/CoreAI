@@ -530,7 +530,7 @@ namespace CoreAI.Infrastructure.Llm
                 // may already have mutated the world.
                 int streamedExecutedCallCount = 0;
                 int chunkCount = 0;
-                MEAI.UsageDetails iterationUsage = null;
+                MEAI.UsageDetails turnUsage = null;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
                 bool fullIterationBuffer =
                     toolsDeclared && request.BufferFullStreamingIterationWhenToolsDeclared == true;
@@ -710,7 +710,17 @@ namespace CoreAI.Infrastructure.Llm
                             }
                             else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
                             {
-                                iterationUsage = usageContent.Details;
+                                // Providers report usage once per roundtrip (final SSE chunk with
+                                // stream_options.include_usage); sum across roundtrips so a multi-tool
+                                // turn reports the whole turn, not just the last roundtrip.
+                                turnUsage = AccumulateTurnUsage(turnUsage, usageContent.Details);
+                                // Surface cumulative usage immediately: RoutingLlmClient keeps the last
+                                // usage-bearing chunk and publishes LlmUsageReported even when the turn
+                                // is later cancelled or times out mid-roundtrip, so token diagnostics
+                                // never show zero for a turn that already burned tokens.
+                                LlmStreamChunk usageProgress = new() { Text = string.Empty };
+                                ApplyStreamingUsageFields(usageProgress, turnUsage, streamModel);
+                                yield return usageProgress;
                             }
                         }
                     }
@@ -775,7 +785,7 @@ namespace CoreAI.Infrastructure.Llm
                         Error = midStreamFailureMessage,
                         ExecutedToolCalls = policy.ExecutedTraces.ToList()
                     };
-                    ApplyStreamingUsageFields(streamFailChunk, iterationUsage, streamModel);
+                    ApplyStreamingUsageFields(streamFailChunk, turnUsage, streamModel);
                     yield return streamFailChunk;
                     yield break;
                 }
@@ -911,7 +921,7 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk, iterationUsage, streamModel);
+                        ApplyStreamingUsageFields(errChunk, turnUsage, streamModel);
                         yield return errChunk;
                         yield break;
                     }
@@ -971,7 +981,7 @@ namespace CoreAI.Infrastructure.Llm
                             Text = string.Empty,
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(doneStrip, iterationUsage, streamModel);
+                        ApplyStreamingUsageFields(doneStrip, turnUsage, streamModel);
                         yield return doneStrip;
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming completed (text-only, JSON stripped, length={cleanedText?.Length ?? 0})");
@@ -1047,7 +1057,7 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk2, iterationUsage, streamModel);
+                        ApplyStreamingUsageFields(errChunk2, turnUsage, streamModel);
                         yield return errChunk2;
                         yield break;
                     }
@@ -1094,7 +1104,7 @@ namespace CoreAI.Infrastructure.Llm
                             Text = string.Empty,
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(doneParseStrip, iterationUsage, streamModel);
+                        ApplyStreamingUsageFields(doneParseStrip, turnUsage, streamModel);
                         yield return doneParseStrip;
                         yield break;
                     }
@@ -1131,7 +1141,7 @@ namespace CoreAI.Infrastructure.Llm
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
-                        ApplyStreamingUsageFields(errChunk3, iterationUsage, streamModel);
+                        ApplyStreamingUsageFields(errChunk3, turnUsage, streamModel);
                         yield return errChunk3;
                         yield break;
                     }
@@ -1185,7 +1195,7 @@ namespace CoreAI.Infrastructure.Llm
                     Text = string.Empty,
                     ExecutedToolCalls = policy.ExecutedTraces.ToList()
                 };
-                ApplyStreamingUsageFields(terminal, iterationUsage, streamModel);
+                ApplyStreamingUsageFields(terminal, turnUsage, streamModel);
                 yield return terminal;
                 string sanitizedForLog = SanitizeAssistantVisibleText(visibleText, request);
                 int emittedLen = sanitizedForLog.Length;
@@ -1253,6 +1263,51 @@ namespace CoreAI.Infrastructure.Llm
 
             const int maxChars = 240;
             return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
+        }
+
+        /// <summary>
+        /// Accumulates per-roundtrip provider usage into a whole-turn total so multi-roundtrip tool
+        /// turns report the sum of every roundtrip instead of only the last one.
+        /// </summary>
+        private static MEAI.UsageDetails AccumulateTurnUsage(MEAI.UsageDetails total, MEAI.UsageDetails add)
+        {
+            if (add == null)
+            {
+                return total;
+            }
+
+            if (total == null)
+            {
+                total = new MEAI.UsageDetails();
+            }
+
+            if (add.InputTokenCount.HasValue)
+            {
+                total.InputTokenCount = (total.InputTokenCount ?? 0) + add.InputTokenCount.Value;
+            }
+
+            if (add.OutputTokenCount.HasValue)
+            {
+                total.OutputTokenCount = (total.OutputTokenCount ?? 0) + add.OutputTokenCount.Value;
+            }
+
+            if (add.TotalTokenCount.HasValue)
+            {
+                total.TotalTokenCount = (total.TotalTokenCount ?? 0) + add.TotalTokenCount.Value;
+            }
+
+            if (add.AdditionalCounts != null)
+            {
+                total.AdditionalCounts ??= new MEAI.AdditionalPropertiesDictionary<long>();
+                foreach (System.Collections.Generic.KeyValuePair<string, long> kv in add.AdditionalCounts)
+                {
+                    total.AdditionalCounts[kv.Key] = total.AdditionalCounts.TryGetValue(kv.Key, out long existing)
+                        ? existing + kv.Value
+                        : kv.Value;
+                }
+            }
+
+            return total;
         }
 
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)

@@ -105,16 +105,14 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // Full tier uses unity_* reflection bindings; never expose it on the WebGL/IL2CPP player.
-#if UNITY_WEBGL && !UNITY_EDITOR
-            bool effectiveFullLuaAccess = false;
-#else
-            bool effectiveFullLuaAccess = enableFullLuaAccess;
-#endif
+            // Full tier works on WebGL/IL2CPP too: the former "null function" wasm trap was stripped
+            // UnityEngine.Resources/TextAsset members reflected by MoonSharp's script loader, fixed by
+            // preserving them in Assets/link.xml. Actual Lua availability on the WebGL player is still
+            // gated by SecureLuaEnvironment.WebGlLuaOptIn (ICoreAISettings.EnableLuaOnWebGl).
             builder.RegisterWorldCommands(
                 worldPrefabRegistry,
                 luaAllowedScenes,
-                effectiveFullLuaAccess,
+                enableFullLuaAccess,
                 enableFullLuaPrivateAccess);
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);

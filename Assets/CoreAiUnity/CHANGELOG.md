@@ -1,8 +1,17 @@
-﻿# Changelog - `com.neoxider.coreaiunity`
+# Changelog - `com.neoxider.coreaiunity`
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
 ## [Unreleased]
+
+### 4.19.0 - WebGL Full Lua on; SSE fetch bridge stabilized + tested; cumulative usage (2026-07-04)
+
+- **Semver:** minor with **`com.neoxider.coreai` 4.19.0** (WebGL Full-Lua crash fix, rate-limit window parsing, tool-error accounting - see the core changelog).
+- **Full Lua no longer force-disabled on the WebGL player.** `CoreAILifetimeScope` passes the inspector's `enableFullLuaAccess` through on WebGL now that the IL2CPP crash is fixed; availability is still gated by `SecureLuaEnvironment.WebGlLuaOptIn` (`EnableLuaOnWebGl`). Lua PlayMode test fixtures dropped their `!UNITY_WEBGL` guards (the blind spot that hid the crash).
+- **WebGL SSE fetch bridge stabilized + tested.** From a dedicated audit: missing `Content-Type: application/json` fixed (LM Studio's Express server hard-reset such requests as "Failed to fetch"; Groq tolerated them), per-chunk `stringToNewUTF8` allocations now freed (unbounded wasm-heap growth ended in tab OOM on long sessions), rolling body-inactivity watchdog (a stalled stream after headers aborts as a typed Timeout instead of hanging), `Timeout` surfaces as `LlmClientException(Timeout)` instead of a fake HTTP-0 "CORS/network" failure, terminal-state guard against double callbacks incl. synchronous `fetch()` throws, `abortReasons`/registration/parked-read leak fixes, and an empty-chunk dequeue can no longer signal a false EOF. Coverage: protocol helpers extracted to `FetchSseTransportProtocol` (18 EditMode tests) + a node harness driving the real `.jslib` with a mocked browser `fetch` (9 scenarios / 26 assertions, `Assets/CoreAiUnity/Tests/Node~/fetch_sse_jslib_test.js`).
+- **Streaming usage is cumulative and survives cancelled turns.** `MeaiLlmClient` sums provider usage across every tool roundtrip (was: last roundtrip only) and emits it immediately as a usage-bearing chunk, so `RoutingLlmClient` publishes `LlmUsageReported` even when the turn later times out - the token budget panel no longer shows zeros for a turn that burned tokens.
+- **Backend panel: close button + translucent background.** Regenerated prefab has a corner "x" (`CoreAiBackendPanel.Close()`, wired via `Wire(..., close)`) and a 0.6-alpha background.
+- **Chat tool bubbles render real results.** `CoreAiToolCallChatFormatter` unwraps `JsonElement` values instead of showing `{"ValueKind":N}`.
 
 ### 4.18.4 - lockstep with com.neoxider.coreai 4.18.4 (2026-07-04)
 

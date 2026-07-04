@@ -157,18 +157,29 @@ namespace CoreAI.Infrastructure.Llm
             if (States.TryGetValue(id, out StreamState state))
             {
                 string err = Marshal.PtrToStringUTF8(errPtr) ?? "Unknown error";
-                state.SignalError(IsCancelledMessage(err)
-                    ? new OperationCanceledException()
-                    : new Exception(err));
+                if (IsCancelledMessage(err))
+                {
+                    state.SignalError(new OperationCanceledException());
+                }
+                else if (string.Equals(err, "Timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    // The jslib watchdog (header timeout + rolling body-inactivity timer) aborts
+                    // with reason "Timeout". Surface it TYPED so the rescue chain and callers see
+                    // LlmErrorCode.Timeout instead of a fake HTTP-0 "CORS/network" failure.
+                    state.SignalError(new LlmClientException(
+                        "SSE transport timeout (no response activity within the transport window).",
+                        LlmErrorCode.Timeout));
+                }
+                else
+                {
+                    state.SignalError(new Exception(err));
+                }
             }
         }
 
         private static bool IsCancelledMessage(string message)
         {
-            return string.Equals(message, "cancelled", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(message, "canceled", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(message, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(message, "Canceled", StringComparison.OrdinalIgnoreCase);
+            return FetchSseTransportProtocol.IsCancelledMessage(message);
         }
 
         [DllImport("__Internal")]
@@ -189,40 +200,12 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string BuildHeaderString(IReadOnlyList<KeyValuePair<string, string>> headers)
         {
-            if (headers == null || headers.Count == 0) return "";
-            var sb = new StringBuilder();
-            foreach (KeyValuePair<string, string> h in headers)
-            {
-                sb.Append(h.Key).Append(':').Append(h.Value).Append('\n');
-            }
-
-            return sb.ToString().TrimEnd('\n');
+            return FetchSseTransportProtocol.BuildHeaderString(headers);
         }
 
         private static IReadOnlyDictionary<string, IEnumerable<string>> ParseFlatHeaders(string flat)
         {
-            Dictionary<string, IEnumerable<string>> map = new(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(flat)) return map;
-            foreach (string line in flat.Split('\n'))
-            {
-                int idx = line.IndexOf(':');
-                if (idx <= 0) continue;
-                string name = line.Substring(0, idx).Trim();
-                string value = line.Substring(idx + 1).Trim();
-                if (string.IsNullOrEmpty(name)) continue;
-                if (map.TryGetValue(name, out IEnumerable<string> existing))
-                {
-                    List<string> list = existing as List<string> ?? new List<string>(existing);
-                    list.Add(value);
-                    map[name] = list;
-                }
-                else
-                {
-                    map[name] = new List<string> { value };
-                }
-            }
-
-            return map;
+            return FetchSseTransportProtocol.ParseFlatHeaders(flat);
         }
 
         private sealed class StreamState : IDisposable
@@ -325,6 +308,13 @@ namespace CoreAI.Infrastructure.Llm
                 if (ex is OperationCanceledException)
                 {
                     _openTcs.TrySetCanceled();
+                }
+                else if (ex is LlmClientException)
+                {
+                    // Typed transport failures (e.g. the jslib Timeout watchdog) propagate as-is
+                    // from WaitForOpenAsync, so pre-header timeouts keep their LlmErrorCode
+                    // instead of degrading into a status-0 "CORS/network" open result.
+                    _openTcs.TrySetException(ex);
                 }
                 else
                 {
@@ -484,11 +474,14 @@ namespace CoreAI.Infrastructure.Llm
                     return toCopy;
                 }
 
-                if (_queue.TryDequeue(out string chunk))
+                // Loop instead of single-dequeue: an empty chunk must be SKIPPED, not returned as
+                // 0 bytes - Stream.Read returning 0 means EOF to consumers, which would silently
+                // drop everything still queued behind the empty entry.
+                while (_queue.TryDequeue(out string chunk))
                 {
-                    // through unchanged so the OpenAI SSE parser owns framing, [DONE],
+                    if (string.IsNullOrEmpty(chunk)) continue;
+                    // Bytes pass through unchanged so the OpenAI SSE parser owns framing, [DONE],
                     // tool_calls, role, finish_reason, etc.
-                    if (string.IsNullOrEmpty(chunk)) return 0;
                     _currentBytes = Encoding.UTF8.GetBytes(chunk);
                     _currentPos = 0;
                     int toCopy = Math.Min(count, _currentBytes.Length - _currentPos);
@@ -510,9 +503,15 @@ namespace CoreAI.Infrastructure.Llm
                 if (disposing)
                 {
                     _isDone = true;
-                    try { _signal.Set(); } catch { }
+                    // A read parked by ReadWithIdleTimeoutAsync and then abandoned must complete
+                    // (with EOF) here, otherwise its TCS and per-read cancellation registration
+                    // stay alive until the whole request token ends.
+                    PumpPendingRead();
                     try { CoreAi_FetchSseAbort(_owner.CallId); } catch { }
-                    States.TryRemove(_owner.CallId, out _);
+                    // Owner disposal also removes the States entry and drops the request-token
+                    // cancellation registration, which would otherwise pin this stream (queue,
+                    // buffered chunks and all) to the caller's token lifetime on the success path.
+                    try { _owner.Dispose(); } catch { }
                 }
 
                 base.Dispose(disposing);

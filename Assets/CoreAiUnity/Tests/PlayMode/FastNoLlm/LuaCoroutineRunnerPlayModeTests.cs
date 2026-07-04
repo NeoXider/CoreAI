@@ -1,4 +1,3 @@
-#if !UNITY_WEBGL
 using System.Collections;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
@@ -118,4 +117,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-#endif

@@ -65,7 +65,7 @@ namespace CoreAI.Editor
             // Panel background.
             GameObject panel = CreateUiObject("Panel", canvasGo.transform);
             Image bg = panel.AddComponent<Image>();
-            bg.color = new Color(0.08f, 0.09f, 0.11f, 0.95f);
+            bg.color = new Color(0.08f, 0.09f, 0.11f, 0.6f);
             RectTransform panelRt = panel.GetComponent<RectTransform>();
             panelRt.anchorMin = new Vector2(0.5f, 0.5f);
             panelRt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -113,9 +113,12 @@ namespace CoreAI.Editor
             status.textWrappingMode = TextWrappingModes.Normal;
             SetHeight(status.gameObject, 64);
 
+            // Close "X" pinned to the panel's top-right corner, outside the vertical layout flow.
+            Button close = CreateCloseButton(panel.transform);
+
             // Wire the component.
             CoreAiBackendPanel panelComponent = panel.AddComponent<CoreAiBackendPanel>();
-            panelComponent.Wire(dropdown, baseUrl, apiKey, model, apply, test, status);
+            panelComponent.Wire(dropdown, baseUrl, apiKey, model, apply, test, status, close);
 
             return canvasGo;
         }
@@ -266,6 +269,38 @@ namespace CoreAI.Editor
             TextMeshProUGUI label = labelGo.AddComponent<TextMeshProUGUI>();
             label.text = caption;
             label.fontSize = 18;
+            label.color = Color.white;
+            label.alignment = TextAlignmentOptions.Center;
+            return button;
+        }
+
+        private static Button CreateCloseButton(Transform parent)
+        {
+            GameObject go = CreateUiObject("CloseButton", parent);
+
+            // Opt out of the panel's VerticalLayoutGroup so the button pins to the corner instead
+            // of becoming a full-width row.
+            LayoutElement le = go.AddComponent<LayoutElement>();
+            le.ignoreLayout = true;
+
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-6f, -6f);
+            rt.sizeDelta = new Vector2(30f, 30f);
+
+            Image image = go.AddComponent<Image>();
+            image.color = new Color(0.75f, 0.25f, 0.28f, 0.9f);
+            Button button = go.AddComponent<Button>();
+            button.targetGraphic = image;
+
+            GameObject labelGo = CreateUiObject("Label", go.transform);
+            StretchFull(labelGo);
+            TextMeshProUGUI label = labelGo.AddComponent<TextMeshProUGUI>();
+            label.text = "×";
+            label.fontSize = 22;
+            label.fontStyle = FontStyles.Bold;
             label.color = Color.white;
             label.alignment = TextAlignmentOptions.Center;
             return button;

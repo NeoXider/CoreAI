@@ -172,8 +172,8 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(root.GetComponentInChildren<TMP_Dropdown>(true));
                 Assert.AreEqual(3, root.GetComponentsInChildren<TMP_InputField>(true).Length,
                     "Base URL + API key + model fields.");
-                Assert.AreEqual(2, root.GetComponentsInChildren<Button>(true).Length,
-                    "Apply + Test buttons.");
+                Assert.AreEqual(3, root.GetComponentsInChildren<Button>(true).Length,
+                    "Apply + Test + Close buttons.");
                 Assert.IsNotNull(root.GetComponent<Canvas>(), "Root must be a Canvas.");
             }
             finally

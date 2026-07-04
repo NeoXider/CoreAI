@@ -11,7 +11,6 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
-#if !UNITY_WEBGL
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
@@ -370,5 +369,4 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-#endif
 #endif

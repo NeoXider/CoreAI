@@ -1,6 +1,18 @@
 <linker>
   <!-- WebGL/IL2CPP: keep MoonSharp Lua marshalling/reflection metadata when Lua-on-WebGL is enabled -->
   <assembly fullname="MoonSharp.Interpreter" preserve="all"/>
+
+  <!-- WebGL/IL2CPP: MoonSharp's Script static ctor builds a UnityAssetsScriptLoader, which calls
+       UnityEngine.Resources.LoadAll(string, Type) and TextAsset.name/.text PURELY via reflection
+       (UnityAssetsScriptLoader.LoadResourcesWithReflection). Nothing references those members
+       directly, so the stripper drops their bodies; the reflection invoke then jumps to a null
+       method pointer and the whole wasm player traps ("RuntimeError: null function" in release,
+       "memory access out of bounds" in development). Preserving them makes the invoke real again.
+       Root cause pinpointed via a development build stack trace on 2026-07-04. -->
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.Resources" preserve="all"/>
+    <type fullname="UnityEngine.TextAsset" preserve="all"/>
+  </assembly>
   <!-- Microsoft.Extensions.AI core -->
   <assembly fullname="Microsoft.Extensions.AI" preserve="all"/>
   <assembly fullname="Microsoft.Extensions.AI.Abstractions" preserve="all"/>
@@ -23,10 +35,9 @@
          direct call and may drop the lambda bodies. Preserve the binding types that run on the WebGL
          player (every tier except Full) so their reflection-invoked methods survive. -->
     <!-- Full-tier reflection bindings are used on WebGL when the host enables Full Lua (e.g. the
-         FullAccessDemo scene); preserved defensively. NOTE: this preserve alone does NOT fix the
-         known WebGL crash - any unity_* call from Lua still traps with "RuntimeError: null function"
-         (byte-identical wasm with/without this entry, so nothing was stripped; the fault is in the
-         IL2CPP/MoonSharp delegate-interop path and needs a development-build diagnosis). -->
+         FullAccessDemo scene); preserved defensively. The former "null function" crash was NOT here:
+         it was stripped UnityEngine.Resources/TextAsset members reflected by MoonSharp's
+         UnityAssetsScriptLoader (see the UnityEngine.CoreModule preserve above). -->
     <type fullname="CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.World.CoreAiWorldLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.World.CoreAiWorldQueryLuaBindings" preserve="all"/>

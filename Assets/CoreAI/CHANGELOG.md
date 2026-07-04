@@ -1,6 +1,14 @@
-﻿# Changelog
+# Changelog
 
 ## [Unreleased]
+
+### 4.19.0 - WebGL Full Lua fixed; real 429 retry windows; tool-error accounting (2026-07-04)
+
+- **WebGL Full Lua fixed (the "RuntimeError: null function" player crash).** Root cause via a development-build stack trace: MoonSharp's `Script` static ctor loads resources through reflection (`UnityAssetsScriptLoader.LoadResourcesWithReflection` -> `Resources.LoadAll`), and IL2CPP stripped those reflection-only UnityEngine members, so the invoke jumped to a null method pointer and halted the whole wasm player. Fix: preserve `UnityEngine.Resources` + `UnityEngine.TextAsset` in `Assets/link.xml`. Verified live in a browser: the staged diagnostic (Script ctor -> sandbox -> host callback -> `unity_find` -> `unity_set_scale`) passes, and a real model turn found and scaled the demo cube via Full Lua.
+- **429 retry now waits the provider's REAL window.** On WebGL, fetch cannot read `Retry-After` (CORS), so the single transient retry used a 2s formula and always landed inside a still-closed TPM window, wasting the whole rescue chain. `ResolveRateLimitBackoffMs` now parses the window from the error body ("Please try again in 14.017s" - Groq format, minutes+seconds, capped 20s, +250ms margin), and `BuildHttpException` surfaces it as `RetryAfterSeconds` on the typed error.
+- **Tool-error accounting: partial success is progress.** The consecutive-error abort (3 strikes) now counts only ALL-failed batches/turns; a 4-of-5-successful spawn batch no longer pushes a run toward "max consecutive tool errors reached" (sequential, parallel and streamed paths).
+- **Failed tool calls stay retryable verbatim.** Duplicate/echo signatures register only after a batch/turn that made progress; previously a transiently-failed call could never be retried with identical (correct) args - the pre-execution registration suppressed exactly the retry the error feedback asked for.
+- **Tool-result wire hardening.** A `System.Text.Json.JsonElement` result can no longer reach the model as Newtonsoft's `{"ValueKind":N}` reflection garbage - the wire builder emits the element's actual JSON/string.
 
 ### 4.18.4 - transient-HTTP chain: request -> retry -> non-streaming fallback -> typed error (2026-07-04)
 

@@ -1,4 +1,3 @@
-#if !UNITY_WEBGL
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -77,4 +76,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-#endif

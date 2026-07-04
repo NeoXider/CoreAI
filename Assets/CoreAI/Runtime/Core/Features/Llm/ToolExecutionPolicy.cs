@@ -144,6 +144,13 @@ namespace CoreAI.Infrastructure.Llm
         public List<MEAI.FunctionResultContent> CheckDuplicate(List<MEAI.FunctionCallContent> toolCalls)
         {
             DuplicatePlan plan = BuildDuplicatePlan(toolCalls);
+            // This entry point has no execution phase, so register the signature immediately
+            // (legacy semantics: a checked batch counts as seen).
+            if (plan.PendingBatchSignature != null)
+            {
+                _executedSignatures.Add(plan.PendingBatchSignature);
+            }
+
             if (!plan.HasDuplicates)
             {
                 return null;
@@ -167,6 +174,14 @@ namespace CoreAI.Infrastructure.Llm
             public bool[] IsDuplicateIndex = Array.Empty<bool>();
             public bool HasDuplicates;
             public bool HasExecutable;
+
+            /// <summary>
+            /// Batch signature awaiting registration. Registered only AFTER the batch executes
+            /// with at least one success: a failed call must stay retryable with identical args
+            /// (e.g. after a transient tool timeout), otherwise the echo guard suppresses the
+            /// very retry the error feedback asks the model to make.
+            /// </summary>
+            public string PendingBatchSignature;
         }
 
         private DuplicatePlan BuildDuplicatePlan(List<MEAI.FunctionCallContent> toolCalls)
@@ -200,7 +215,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string batchSig = string.Join("|", reducedSignatures.OrderBy(s => s, StringComparer.Ordinal));
-            if (!_executedSignatures.Add(batchSig))
+            if (_executedSignatures.Contains(batchSig))
             {
                 for (int i = 0; i < toolCalls.Count; i++)
                 {
@@ -212,6 +227,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 return plan;
             }
+
+            plan.PendingBatchSignature = batchSig;
 
             HashSet<string> seenInBatch = new(StringComparer.Ordinal);
             for (int i = 0; i < toolCalls.Count; i++)
@@ -889,13 +906,17 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                if (!seqAnyFailed)
+                // Partial success IS forward progress: only a batch where EVERY call failed counts
+                // toward the consecutive-error abort. Otherwise three 4-of-5-successful spawn
+                // batches in a row would kill a run that is visibly building the scene.
+                if (seqAnyFailed && seqAllFailed)
                 {
-                    RecordSuccess();
+                    RecordFailure();
                 }
                 else
                 {
-                    RecordFailure();
+                    RecordSuccess();
+                    RegisterExecutedSignature(duplicatePlan);
                 }
 
                 return new BatchToolCallResult
@@ -986,14 +1007,16 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // 4. Update error counter once, after ordered collation (deterministic regardless of
-            // completion order): the whole batch counts as one failure if any call failed.
-            if (!anyFailed)
+            // completion order). Partial success is forward progress: only an ALL-failed batch
+            // counts toward the consecutive-error abort.
+            if (anyFailed && allFailed)
             {
-                RecordSuccess();
+                RecordFailure();
             }
             else
             {
-                RecordFailure();
+                RecordSuccess();
+                RegisterExecutedSignature(duplicatePlan);
             }
 
             return new BatchToolCallResult
@@ -1358,10 +1381,10 @@ namespace CoreAI.Infrastructure.Llm
 
             if (turn.Signatures.Count > 0)
             {
-                // Register the combined turn signature BEFORE recording the turn's outcome, mirroring
+                // Check the combined turn signature BEFORE recording the turn's outcome, mirroring
                 // ExecuteBatchAsync where BuildDuplicatePlan checks the whole-batch signature first.
-                // Add() returning false means this exact turn already executed earlier in the request:
-                // a whole-turn echo. The per-call guard in ExecuteStreamedAsync only catches single-call
+                // Contains() means this exact turn already executed earlier in the request: a
+                // whole-turn echo. The per-call guard in ExecuteStreamedAsync only catches single-call
                 // echoes (a multi-call turn's combined signature does not exist mid-stream — see the
                 // comment there), so a multi-call echo's calls have already re-executed by the time we
                 // get here. Batch parity is restored at the ERROR-ACCOUNTING level: without this branch
@@ -1370,7 +1393,7 @@ namespace CoreAI.Infrastructure.Llm
                 // iteration cap instead). Suppressing the re-execution itself is intentionally out of
                 // scope: the results were already streamed back on the wire.
                 string combined = string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal));
-                if (!_executedSignatures.Add(combined))
+                if (_executedSignatures.Contains(combined))
                 {
                     string echoDetail =
                         $"Whole-turn echo: identical streamed turn ({turn.Slots.Count} calls) already executed " +
@@ -1384,17 +1407,26 @@ namespace CoreAI.Infrastructure.Llm
                         AllFailed = true
                     };
                 }
+
+                // Register only when the turn made progress: a fully-failed turn must stay
+                // retryable with identical args (the error feedback explicitly asks for a retry).
+                if (!(anyFailed && allFailed))
+                {
+                    _executedSignatures.Add(combined);
+                }
             }
 
             if (turn.Slots.Count > 0)
             {
-                if (!anyFailed)
+                // Partial success is forward progress: only an ALL-failed turn counts toward the
+                // consecutive-error abort (see ExecuteBatchAsync for the same rule).
+                if (anyFailed && allFailed)
                 {
-                    RecordSuccess();
+                    RecordFailure();
                 }
                 else
                 {
-                    RecordFailure();
+                    RecordSuccess();
                 }
             }
 
@@ -1404,6 +1436,18 @@ namespace CoreAI.Infrastructure.Llm
                 AnyFailed = anyFailed,
                 AllFailed = turn.Slots.Count > 0 && anyFailed && allFailed
             };
+        }
+
+        /// <summary>
+        /// Registers a batch signature for the cross-turn echo guard. Called only after the batch
+        /// executed with at least one success, so a fully-failed batch stays retryable verbatim.
+        /// </summary>
+        private void RegisterExecutedSignature(DuplicatePlan plan)
+        {
+            if (plan?.PendingBatchSignature != null)
+            {
+                _executedSignatures.Add(plan.PendingBatchSignature);
+            }
         }
 
         /// <summary>Record that all tools in the current iteration succeeded.</summary>

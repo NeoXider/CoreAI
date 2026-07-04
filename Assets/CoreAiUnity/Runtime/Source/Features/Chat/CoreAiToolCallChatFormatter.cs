@@ -58,6 +58,12 @@ namespace CoreAI.Chat
                 string raw = value switch
                 {
                     string s => s,
+                    // Newtonsoft reflects over System.Text.Json's JsonElement struct and produces
+                    // the useless {"ValueKind":N} - render the element's actual JSON instead.
+                    System.Text.Json.JsonElement je =>
+                        je.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? je.GetString() ?? string.Empty
+                            : je.GetRawText(),
                     _ => JsonConvert.SerializeObject(value)
                 };
                 return Truncate(raw, maxChars);

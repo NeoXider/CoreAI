@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA && !UNITY_WEBGL && UNITY_EDITOR
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA && UNITY_EDITOR
 using System.Collections;
 using System.Collections.Generic;
 using CoreAI.Infrastructure.Logging;

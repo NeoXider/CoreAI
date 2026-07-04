@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA && !UNITY_WEBGL
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System.Collections;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;

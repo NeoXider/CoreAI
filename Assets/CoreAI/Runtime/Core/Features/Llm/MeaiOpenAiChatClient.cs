@@ -77,20 +77,71 @@ namespace CoreAI.Infrastructure.Llm
             return status == 408 || status == 429 || (status >= 500 && status < 600);
         }
 
-        /// <summary>Backoff before a rate-limit retry: Retry-After header when present (capped at 15s), else 2s * retry index.</summary>
+        /// <summary>
+        /// Backoff before a rate-limit retry: Retry-After header when present, else a retry window
+        /// parsed from the error body ("Please try again in 14.017s" - Groq puts it there, and on
+        /// WebGL the Retry-After header is invisible to fetch unless CORS exposes it), else
+        /// 2s * retry index. Capped at 20s so one retry can actually clear a typical TPM window
+        /// instead of guaranteed-failing into it.
+        /// </summary>
         private static int ResolveRateLimitBackoffMs(
-            IReadOnlyDictionary<string, IEnumerable<string>> headers, int retryIndex)
+            IReadOnlyDictionary<string, IEnumerable<string>> headers, int retryIndex, string errorBody = null)
         {
+            const int capMs = 20000;
             string retryAfter = TryGetHeaderFirstValue(headers, "Retry-After");
             if (!string.IsNullOrWhiteSpace(retryAfter) &&
                 double.TryParse(retryAfter, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out double seconds) &&
                 seconds > 0)
             {
-                return (int)Math.Min(15000, seconds * 1000);
+                return (int)Math.Min(capMs, seconds * 1000);
             }
 
-            return Math.Min(15000, 2000 * Math.Max(1, retryIndex));
+            double? bodySeconds = TryParseRetryWindowSecondsFromBody(errorBody);
+            if (bodySeconds.HasValue)
+            {
+                // +250ms margin: providers report the window with sub-second precision and a retry
+                // landing exactly on the boundary still gets rejected.
+                return (int)Math.Min(capMs, bodySeconds.Value * 1000 + 250);
+            }
+
+            return Math.Min(capMs, 2000 * Math.Max(1, retryIndex));
+        }
+
+        /// <summary>
+        /// Extracts a retry window from a rate-limit error body, e.g. Groq's
+        /// "Please try again in 14.0175s" or "try again in 2m3.5s". Returns null when absent.
+        /// </summary>
+        internal static double? TryParseRetryWindowSecondsFromBody(string errorBody)
+        {
+            if (string.IsNullOrEmpty(errorBody))
+            {
+                return null;
+            }
+
+            System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
+                errorBody,
+                @"try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)s",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success)
+            {
+                return null;
+            }
+
+            double total = 0;
+            if (m.Groups[1].Success &&
+                int.TryParse(m.Groups[1].Value, out int minutes))
+            {
+                total += minutes * 60;
+            }
+
+            if (double.TryParse(m.Groups[2].Value, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double secs))
+            {
+                total += secs;
+            }
+
+            return total > 0 ? total : (double?)null;
         }
 
         public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log = null)
@@ -243,7 +294,8 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         transientHttpRetriesLeft--;
                         int transientBackoffMs = ResolveRateLimitBackoffMs(
-                            postResult.ResponseHeaders, transientHttpRetries - transientHttpRetriesLeft);
+                            postResult.ResponseHeaders, transientHttpRetries - transientHttpRetriesLeft,
+                            postResult.BodyText);
                         _log.Warn(
                             $"MeaiOpenAiChatClient: HTTP {postResult.StatusCode} (transient) - retrying after {transientBackoffMs}ms ({transientHttpRetriesLeft} retries left)...",
                             LogTag.Llm);
@@ -449,7 +501,8 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 rateLimitRetriesLeft--;
                                 int transientBackoffMs = ResolveRateLimitBackoffMs(
-                                    openResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft);
+                                    openResult.ResponseHeaders, RateLimitMaxRetries - rateLimitRetriesLeft,
+                                    streamBody);
                                 _log.Warn(
                                     $"MeaiOpenAiChatClient: HTTP {openResult.StatusCode} (transient) on stream-open - retrying after {transientBackoffMs}ms ({rateLimitRetriesLeft} retries left)...",
                                     LogTag.Llm);
@@ -1098,6 +1151,17 @@ namespace CoreAI.Infrastructure.Llm
             int status = statusCode;
             LlmErrorCode code = MapHttpStatus(status, responseBody, errorDetail);
             int? retryAfter = TryParseRetryAfterHeaders(responseHeaders);
+            if (!retryAfter.HasValue)
+            {
+                // WebGL fetch cannot see Retry-After unless CORS exposes it; Groq-style bodies
+                // carry the window as "Please try again in 14.017s" - surface it on the typed
+                // error so upper layers can show a meaningful "retry in Ns" instead of nothing.
+                double? bodyWindow = TryParseRetryWindowSecondsFromBody(responseBody);
+                if (bodyWindow.HasValue)
+                {
+                    retryAfter = (int)Math.Ceiling(bodyWindow.Value);
+                }
+            }
 
             return new LlmClientException(
                 $"HTTP error {status}: {ExtractProviderMessage(responseBody, errorDetail)}",
@@ -2143,10 +2207,19 @@ namespace CoreAI.Infrastructure.Llm
                                 resultDict["tool_call_id"] = functionResult.CallId;
                             }
 
-                            string resultStr = functionResult.Result as string
-                                               ?? (functionResult.Result != null
-                                                   ? JsonConvert.SerializeObject(functionResult.Result)
-                                                   : "");
+                            string resultStr = functionResult.Result switch
+                            {
+                                string s => s,
+                                // Newtonsoft serializes System.Text.Json's JsonElement struct by
+                                // reflection into a useless {"ValueKind":N}, which would blind the
+                                // model to its own tool results - emit the element's real JSON.
+                                System.Text.Json.JsonElement je =>
+                                    je.ValueKind == System.Text.Json.JsonValueKind.String
+                                        ? je.GetString() ?? ""
+                                        : je.GetRawText(),
+                                null => "",
+                                _ => JsonConvert.SerializeObject(functionResult.Result)
+                            };
                             resultDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
                             messages.Add(resultDict);
                         }
