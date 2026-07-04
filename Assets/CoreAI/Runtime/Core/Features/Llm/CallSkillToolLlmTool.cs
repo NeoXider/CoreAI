@@ -12,7 +12,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool that invokes a named runtime skill.
     /// </summary>
-    internal static class CallSkillToolLlmTool
+    public static class CallSkillToolLlmTool
     {
         /// <summary>
         /// Creates the <c>call_skill_tool</c> tool.

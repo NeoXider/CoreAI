@@ -202,6 +202,48 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// Adds an on-demand skill to an agent role at runtime (the code path; the inspector path
+        /// is CoreAILifetimeScope's Role Skills list). The role gets a <c>read_skill</c> catalog on
+        /// first use; skills added later — even mid-session — are immediately readable. Build the
+        /// <see cref="SkillSet"/> from code, <see cref="SkillSet.FromTextContent"/> (e.g. a
+        /// <c>TextAsset.text</c>), <see cref="SkillSet.FromFile"/>, or
+        /// <c>SkillSetAsset.BuildSkillSet()</c>. Returns whether the skill was registered.
+        /// </summary>
+        public static bool AddSkillForRole(string roleId, SkillSet skill)
+        {
+            if (string.IsNullOrWhiteSpace(roleId) || skill == null)
+            {
+                return false;
+            }
+
+            lock (SyncRoot)
+            {
+                if (!TryResolve(out _, out _, out _) || _scope?.Container == null)
+                {
+                    LogFacadeWarning("[CoreAi] AddSkillForRole: CoreAI services not resolved.");
+                    return false;
+                }
+
+                try
+                {
+                    AgentMemoryPolicy policy = (AgentMemoryPolicy)_scope.Container.Resolve(typeof(AgentMemoryPolicy));
+                    if (policy == null)
+                    {
+                        return false;
+                    }
+
+                    policy.AddSkillForRole(roleId.Trim(), skill);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    LogFacadeWarning($"[CoreAi] AddSkillForRole failed: {ex.Message}");
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Autonomous-tool follow-up lift: after the model calls <c>capture_camera</c>, OpenAI tool results
         /// cannot carry images, so the host lifts the returned image into a follow-up USER <c>image_url</c>
         /// message before the next model call. Pass the raw <c>capture_camera</c> result JSON (e.g.

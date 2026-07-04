@@ -10,6 +10,7 @@ using CoreAI.Infrastructure.World;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Authority;
 using CoreAI.Infrastructure;
+using CoreAI.Unity;
 using System.IO;
 using UnityEngine;
 using VContainer;
@@ -57,6 +58,23 @@ namespace CoreAI.Composition
         [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
         [SerializeField]
         private bool enableFullLuaPrivateAccess;
+
+        [Header("Skills")]
+        [Tooltip("On-demand skills per agent role: the role gets a read_skill catalog with these " +
+                 "SkillSetAssets (instructions from a TextAsset or inline text). No code needed.")]
+        [SerializeField]
+        private RoleSkillsBinding[] roleSkills = System.Array.Empty<RoleSkillsBinding>();
+
+        /// <summary>Inspector row binding one agent role to its on-demand skill assets.</summary>
+        [System.Serializable]
+        public sealed class RoleSkillsBinding
+        {
+            [Tooltip("Agent role id, e.g. Programmer, SmartChat, or a custom role.")]
+            public string roleId = BuiltInAgentRoleIds.Programmer;
+
+            [Tooltip("Skills this role can load on demand via read_skill.")]
+            public SkillSetAsset[] skills = System.Array.Empty<SkillSetAsset>();
+        }
 
         [Header("Network / AI authority")]
         [Tooltip("Controls where LLM and orchestration execution is allowed.")]
@@ -123,6 +141,30 @@ namespace CoreAI.Composition
                 enableFullLuaPrivateAccess);
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
+
+            if (roleSkills is { Length: > 0 })
+            {
+                RoleSkillsBinding[] bindings = roleSkills;
+                builder.RegisterBuildCallback(container =>
+                {
+                    var policy = container.Resolve<AgentMemoryPolicy>();
+                    foreach (RoleSkillsBinding binding in bindings)
+                    {
+                        if (binding?.skills == null || string.IsNullOrWhiteSpace(binding.roleId))
+                        {
+                            continue;
+                        }
+
+                        foreach (SkillSetAsset asset in binding.skills)
+                        {
+                            if (asset != null)
+                            {
+                                policy.AddSkillForRole(binding.roleId, asset.BuildSkillSet());
+                            }
+                        }
+                    }
+                });
+            }
 
             if (networkPeerBehaviour != null)
             {

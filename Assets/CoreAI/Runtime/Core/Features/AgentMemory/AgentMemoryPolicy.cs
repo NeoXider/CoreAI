@@ -15,6 +15,8 @@ namespace CoreAI.Ai
         private readonly object _lock = new();
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
+        private readonly Dictionary<string, MutableSkillCatalog> _roleSkillCatalogs =
+            new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, IAgentRuntimeContextProvider> _runtimeContextProviders = new();
         private static readonly MemoryLlmTool _memoryToolInstance = new();
 
@@ -55,6 +57,44 @@ namespace CoreAI.Ai
                 }
 
                 list.Add(tool);
+            }
+        }
+
+        /// <summary>
+        /// Adds a skill to the role's on-demand catalog. The first skill for a role creates the
+        /// catalog and registers the <c>read_skill</c> / <c>call_skill_tool</c> meta-tools; every
+        /// later call only appends — the meta-tools read from a live catalog, so skills added at
+        /// any point (even mid-session) are immediately readable. A skill with an existing name
+        /// replaces the previous one. This is the code-path counterpart of assigning
+        /// SkillSetAssets in the inspector; build the <see cref="SkillSet"/> from code, a text
+        /// file (<see cref="SkillSet.FromFile"/>), or loaded content
+        /// (<see cref="SkillSet.FromTextContent"/>).
+        /// </summary>
+        public void AddSkillForRole(string roleId, SkillSet skill)
+        {
+            if (string.IsNullOrWhiteSpace(roleId) || skill == null)
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            MutableSkillCatalog catalog;
+            bool createdCatalog = false;
+            lock (_lock)
+            {
+                if (!_roleSkillCatalogs.TryGetValue(roleId, out catalog))
+                {
+                    catalog = new MutableSkillCatalog();
+                    _roleSkillCatalogs[roleId] = catalog;
+                    createdCatalog = true;
+                }
+            }
+
+            catalog.AddOrReplace(skill);
+            if (createdCatalog)
+            {
+                AddToolForRole(roleId, ReadSkillLlmTool.Create(catalog));
+                AddToolForRole(roleId, CallSkillToolLlmTool.Create(catalog));
             }
         }
 

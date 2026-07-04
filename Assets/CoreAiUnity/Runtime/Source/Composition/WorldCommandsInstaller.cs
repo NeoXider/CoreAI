@@ -70,8 +70,8 @@ namespace CoreAI.Composition
                 .As<IDataOverlayPayloadValidator>();
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
-            // Factory registration: the ctor's optional scene whitelist is supplied by the host
-            // (e.g. CoreAILifetimeScope inspector), not resolvable by VContainer.
+            // Factory registrations throughout: ctors with host-supplied or optional/default
+            // parameters are not resolvable by VContainer's Register<T>.
             builder.Register(c => new CoreAiWorldLuaRuntimeBindings(
                     c.Resolve<Messaging.IAiGameCommandSink>(),
                     allowedLuaScenes),
@@ -81,8 +81,7 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
-            // Factory (not Register<T>): IL2CPP managed stripping >= Medium removes the unused
-            // parameterless ctor, and VContainer's reflection TypeAnalyzer then fails on WebGL.
+            // Factory: stripping >= Medium removes the unused parameterless ctor on WebGL.
             builder.Register(c => new CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings(),
                 Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
@@ -93,12 +92,8 @@ namespace CoreAI.Composition
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            // Factory registration: the ctor's optional budget parameters (int/long defaults)
-            // are not resolvable by VContainer.
             builder.Register(c => new LuaLogicSlots(c.Resolve<Logging.ILog>()),
                 Lifetime.Singleton);
-            // Factory registration: the ctor's optional LuaCapabilities parameter (enum default)
-            // is not resolvable by VContainer.
             builder.Register(c => new AggregatingGameLuaRuntimeBindings(
                     c.Resolve<IGameLogger>(),
                     c.Resolve<CoreAiVersioningLuaRuntimeBindings>(),
@@ -118,8 +113,7 @@ namespace CoreAI.Composition
 
             builder.Register(c => new FileLuaModStore(), Lifetime.Singleton)
                 .As<ILuaModStore>();
-            // Package store: persists each mod's source + manifest so active mods survive a restart
-            // (rehydrated at startup) and can be exported/imported between hosts.
+            // Persists mod source + manifest: active mods survive restarts, export/import works.
             builder.Register(c => new FileLuaModSourceStore(), Lifetime.Singleton)
                 .As<ILuaModSourceStore>();
             builder.Register(c => new LuaModRuntime(
@@ -200,15 +194,15 @@ namespace CoreAI.Composition
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaModsLlmTool(container.Resolve<LuaModRuntime>(), settings, log, scriptCapabilities));
 
-                    // Progressive disclosure for the built-in Programmer: the system prompt keeps the
-                    // survival-minimum API list, the full reference with worked examples loads on
-                    // demand via read_skill("Lua Modding") without bloating every request.
-                    SkillSet luaSkill = new(
+                    // Full Lua reference on demand (read_skill) so the system prompt stays small.
+                    // A Resources/AgentSkills/LuaModding TextAsset overrides the built-in text,
+                    // same convention as the AgentPrompts/System overrides.
+                    UnityEngine.TextAsset skillOverride =
+                        UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/LuaModding");
+                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInLuaModdingSkillText.SkillName,
                         BuiltInLuaModdingSkillText.SkillDescription,
-                        BuiltInLuaModdingSkillText.Instructions);
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        ReadSkillLlmTool.Create(new[] { luaSkill }));
+                        skillOverride != null ? skillOverride.text : BuiltInLuaModdingSkillText.Instructions));
                 }
                 catch (VContainerException)
                 {
