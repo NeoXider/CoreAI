@@ -110,8 +110,24 @@ add its own actions without modifying the package.
 Verified on Unity 6000.3 WebGL with **Managed Stripping Level = Medium** and
 **IL2CPP Code Generation = Faster (smaller) builds** (`OptimizeSize`). Both are recommended:
 `OptimizeSize` shrinks MoonSharp's generic-method tables enough that the Emscripten linker does
-not run out of memory, and Medium stripping keeps the wasm small. Reflection-based Lua features
-keep working **only** with the preserve rules below (already present in `Assets/link.xml`):
+not run out of memory, and Medium stripping keeps the wasm small.
+
+**Consumer projects need no link.xml of their own**: the `com.neoxider.coreaiunity` package ships
+a `link.xml` at its root with all the preserve rules below, and Unity's linker picks up package
+link.xml files automatically. You only have to set the two player settings above (they cannot ship
+in a package): Managed Stripping Level = **Medium** (not High) and IL2CPP Code Generation =
+**Faster (smaller) builds**. Write your own `link.xml` only if you add your own Lua binding or
+DI-registered assemblies (template — replace the assembly name):
+
+```xml
+<linker>
+  <!-- your assembly with IGameLuaRuntimeBindings implementations or VContainer-registered types -->
+  <assembly fullname="YourGame.Mods" preserve="all"/>
+</linker>
+```
+
+Reflection-based Lua features keep working **only** with the preserve rules below (already present
+in the package `link.xml`):
 
 - `MoonSharp.Interpreter` — `preserve="all"`. MoonSharp invokes host delegates and its own
   loaders via reflection on AOT.

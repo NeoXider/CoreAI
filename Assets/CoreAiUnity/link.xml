@@ -1,7 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Ships inside the com.neoxider.coreaiunity package so consumer projects need NO link.xml of
+     their own for CoreAI: Unity's linker picks up link.xml files from packages automatically.
+     Consumers still must set Managed Stripping Level = Medium (not High) and IL2CPP Code
+     Generation = OptimizeSize for WebGL - player settings cannot ship in a package. See
+     CoreAI Docs/LUA_ACCESS_MODES.md, "WebGL / IL2CPP Stripping Requirements". -->
 <linker>
-    <!-- WebGL/IL2CPP: keep command sink + DI chain (factory registration in CoreServicesInstaller). -->
-    <assembly fullname="CoreAI.Source">
-        <type fullname="CoreAI.Infrastructure.Messaging.MessagePipeAiCommandSink" preserve="all"/>
-    </assembly>
+  <!-- WebGL/IL2CPP: keep MoonSharp Lua marshalling/reflection metadata when Lua-on-WebGL is enabled -->
+  <assembly fullname="MoonSharp.Interpreter" preserve="all"/>
+
+  <!-- WebGL/IL2CPP: MoonSharp's Script static ctor builds a UnityAssetsScriptLoader, which calls
+       UnityEngine.Resources.LoadAll(string, Type) and TextAsset.name/.text PURELY via reflection
+       (UnityAssetsScriptLoader.LoadResourcesWithReflection). Nothing references those members
+       directly, so the stripper drops their bodies; the reflection invoke then jumps to a null
+       method pointer and the whole wasm player traps ("RuntimeError: null function" in release,
+       "memory access out of bounds" in development). Preserving them makes the invoke real again.
+       Root cause pinpointed via a development build stack trace on 2026-07-04. -->
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.Resources" preserve="all"/>
+    <type fullname="UnityEngine.TextAsset" preserve="all"/>
+  </assembly>
+
+  <!-- Microsoft.Extensions.AI core -->
+  <assembly fullname="Microsoft.Extensions.AI" preserve="all"/>
+  <assembly fullname="Microsoft.Extensions.AI.Abstractions" preserve="all"/>
+
+  <!-- Dependencies MEAI resolves via reflection -->
+  <assembly fullname="Microsoft.Extensions.DependencyInjection.Abstractions" preserve="all"/>
+  <assembly fullname="Microsoft.Extensions.Logging.Abstractions" preserve="all"/>
+  <assembly fullname="System.Text.Json" preserve="all"/>
+  <assembly fullname="System.Threading.Channels" preserve="all"/>
+
+  <!-- MEAI reflection over CoreAI tool types (e.g. MemoryTool) -->
+  <assembly fullname="CoreAI.Core" preserve="all"/>
+
+  <!-- WebGL/IL2CPP with Managed Stripping >= Medium: VContainer creates every DI type via
+       reflection (TypeAnalyzer), MoonSharp reflection-invokes Lua binding callbacks on AOT
+       (InteropAccessMode.Reflection), and nothing references those constructors/lambdas directly,
+       so the stripper removes them one by one ("Type does not found injectable constructor" at
+       container build, "null function" wasm traps from bindings). Preserving the whole Unity
+       integration assembly closes the entire class of failures; it is a thin layer, the size cost
+       is small next to the engine modules. -->
+  <assembly fullname="CoreAI.Source" preserve="all"/>
 </linker>

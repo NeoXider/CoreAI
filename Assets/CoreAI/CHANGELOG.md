@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 5.0.1 - skill teaches editing existing mods (2026-07-05)
+
+- **Lua Modding skill**: explicit "improve an existing mod" workflow - `get_source` first, then
+  `reload` with the FULL updated source; every reload stores a revision (`versions` / `revert`);
+  `forget` = delete (unload + remove the persisted copy). Verified live: a 9B model reads,
+  rewrites and reloads an existing mod and deletes one via `forget` from chat alone.
+
 ### 5.0.0 - on-demand skills for built-in roles; "Lua Modding" skill (2026-07-04)
 
 - **`AgentMemoryPolicy.AddSkillForRole(roleId, skill)`** - attaches an on-demand skill catalog to

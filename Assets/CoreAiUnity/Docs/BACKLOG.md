@@ -36,7 +36,7 @@ Items here are intentionally not active TODO checkboxes.
 > **Shipped:** MoonSharp Lua now runs on the WebGL/IL2CPP player. `SecureLuaEnvironment.IsSupported` is gated by
 > the `SecureLuaEnvironment.WebGlLuaOptIn` capability flag (wired from `ICoreAISettings.EnableLuaOnWebGl` /
 > `CoreAISettingsAsset.EnableLuaOnWebGl`, on by default for new assets) instead of a hard `false`. IL2CPP
-> stripping is held off by `Assets/link.xml` (preserving `MoonSharp.Interpreter` plus the WebGL-active Lua
+> stripping is held off by the package `link.xml` (`Assets/CoreAiUnity/link.xml`, preserving `MoonSharp.Interpreter` plus the WebGL-active Lua
 > binding types). MoonSharp falls back to `InteropAccessMode.Reflection` on AOT, so host-callback marshalling
 > works without emitted IL. The `Full` reflection tier (`unity_*` bindings) stays disabled on WebGL —
 > `CoreAILifetimeScope` forces `effectiveFullLuaAccess = false` under `UNITY_WEBGL && !UNITY_EDITOR`. See the

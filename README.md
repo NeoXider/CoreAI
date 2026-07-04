@@ -204,6 +204,16 @@ gm.ApplyToPolicy(policy);
 
 Mix direct tools and skills freely: `WithTool(memory)` + `WithSkill(crafting)` — memory is always visible, crafting loads on demand.
 
+**Three ways to attach a skill (v5.0)** — pick whichever fits your workflow:
+
+| Path | How | Best for |
+|------|-----|----------|
+| 🖱️ Inspector | `CoreAILifetimeScope → Skills → Role Skills` + a `SkillSetAsset` (SO wrapping a TextAsset or inline text) | designers, no code |
+| 🧩 Code | `CoreAi.AddSkillForRole("Programmer", skillSet)` at runtime, or `AgentBuilder.WithSkill(...)` | custom roles, dynamic skills |
+| 📄 Resources override | drop `Resources/AgentSkills/<Name>.txt` to replace a built-in skill's text | tweaking shipped skills |
+
+Built-in roles come with skills too: the **Programmer** role ships a `Lua Modding` skill — a full Lua platform reference the model loads on demand with `read_skill('Lua Modding')` before writing non-trivial mods.
+
 Docs: [AGENT_BUILDER.md §Skills](Assets/CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md)
 
 ### 💬 Drop-in Chat UI

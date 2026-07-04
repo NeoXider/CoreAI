@@ -32,6 +32,10 @@ Contents: 1. Execution models  2. World API  3. Scene queries  4. Full tier (uni
   hooks there); handlers then run until `unload`. Mods auto-persist and reload on app restart.
   Actions: list, get_source, load, reload, unload, export, import, forget, versions, revert,
   diagnostics. A hook that throws at runtime surfaces in `diagnostics`, not in the load call.
+- Improving an existing mod: `get_source` first, edit that text, then `reload` with the FULL
+  updated source (reload replaces the whole mod; never send a fragment). Every reload stores a
+  revision: `versions` lists them, `revert` rolls back. `forget` = delete (unload + remove the
+  persisted copy) - the panel's Forget button does the same.
 - In the `code` JSON string write newlines as standard \n escapes. Never double-escape (\\n
   reaches Lua as a literal backslash and the whole source collapses into one broken line).
 - Sandbox: no io/os/require/load/debug. Instruction and time budgets apply; a handler burning

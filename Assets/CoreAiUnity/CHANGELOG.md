@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.1 - package ships the full WebGL link.xml (2026-07-05)
+
+- **`link.xml` now ships complete inside the package** (MoonSharp, `UnityEngine.Resources` /
+  `TextAsset`, MEAI assemblies, `CoreAI.Core`, `CoreAI.Source` preserves). Unity picks up package
+  link.xml automatically, so consumer projects need NO link.xml of their own - only the two player
+  settings (Managed Stripping = Medium, IL2CPP Code Generation = Faster (smaller) builds). The
+  project-level `Assets/link.xml` was removed; docs updated with a template for game-side binding
+  assemblies (`LUA_ACCESS_MODES.md`).
+- `Resources/AgentSkills/LuaModding.txt` regenerated with the edit-existing-mod workflow.
+
 ### 5.0.0 - skills via inspector/SO, runtime API, Resources override (2026-07-04)
 
 - **CoreAILifetimeScope "Role Skills"** - bind agent roles to `SkillSetAsset[]` in the inspector
