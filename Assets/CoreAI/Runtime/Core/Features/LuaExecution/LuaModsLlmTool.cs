@@ -84,7 +84,13 @@ namespace CoreAI.Ai
             "call that loaded it) - poll diagnostics, fix the mod, and reload it. " +
             "Use get_source before reload to edit existing behavior. " +
             "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
-            "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end.";
+            "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end. " +
+            "Extra globals inside mods: hooks_on('tick', fn) per-frame alias; store_set(key, value)/store_get(key) " +
+            "per-mod persistent strings; events_emit(name, payload) between mods; mods_export(name, valueOrFn), " +
+            "mods_get(modId, name), mods_call(modId, fnName, ...), mods_list_exports(modId) for cross-mod " +
+            "variables and function calls (by-value; nil/boolean/number/string/plain tables only); " +
+            "input_key/input_key_down/input_key_up/input_mouse_button/input_mouse_x/input_mouse_y/input_axis " +
+            "to read player input from timers.";
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(

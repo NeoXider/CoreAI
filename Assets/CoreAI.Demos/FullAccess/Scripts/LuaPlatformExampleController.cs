@@ -282,10 +282,19 @@ namespace CoreAI.Demos
         /// <summary>Receiver half of the cross-mod event check: answers every ping with pong.</summary>
         private const string SelfTestBSource = @"
 -- name: Platform Self-Test B
--- description: Replies 'pong' to every 'ping' (cross-mod event check receiver).
+-- description: Replies 'pong' to every 'ping'; exports a variable, a table and functions for A.
 hooks_on('ping', function(evt, payload)
   events_emit('pong', tostring(payload) .. '!')
 end)
+
+local hits = 0
+mods_export('greeting', 'hello_from_b')
+mods_export('config', { difficulty = 2, title = 'B' })
+mods_export('add', function(a, b)
+  hits = hits + 1
+  return a + b
+end)
+mods_export('hits', function() return hits end)
 ";
 
         /// <summary>
@@ -339,6 +348,23 @@ store_set('selftest_key', 'hello_store')
 mark('store_roundtrip', store_get('selftest_key') == 'hello_store')
 mark('mod_id', mod_id() == 'platform_selftest_a')
 
+-- Cross-mod surface: read another mod's exported variable/table, call its functions
+-- (stateful - B counts the calls), enumerate its exports.
+mark('cross_mod_get', mods_get('platform_selftest_b', 'greeting') == 'hello_from_b')
+mark('cross_mod_get_table', (function()
+  local cfg = mods_get('platform_selftest_b', 'config')
+  return type(cfg) == 'table' and cfg.difficulty == 2 and cfg.title == 'B'
+end)())
+mark('cross_mod_call', mods_call('platform_selftest_b', 'add', 20, 22) == 42)
+mark('cross_mod_call_state', (function()
+  mods_call('platform_selftest_b', 'add', 1, 1)
+  return mods_call('platform_selftest_b', 'hits') == 2
+end)())
+mark('cross_mod_list', (function()
+  local names = mods_list_exports('platform_selftest_b')
+  return type(names) == 'table' and #names == 4
+end)())
+
 local timer_ticks = 0
 local tick_alias = 0
 local pong_payload = nil
@@ -380,7 +406,7 @@ end)
         /// </summary>
         private const string TetrisSource = @"
 -- name: Tetris 3D
--- description: 3D falling-blocks game in one Lua mod. Controls: A/D move, S soft-drop; autopilot after 5 s idle.
+-- description: 3D falling-blocks game in one Lua mod. A/D move, S soft-drop, Space hard-drop; autopilot after 5 s idle.
 local W = 8
 local H = 14
 local OX = -16.0
@@ -459,9 +485,17 @@ local function can_place(cells, px, py)
   return true
 end
 
+-- Visual position trails the logical cell (exponential lerp on a 20 Hz timer) so moves and
+-- falling look animated instead of teleporting cell to cell.
+local vis_x, vis_y = 0, 0
+local last_vx, last_vy = 1e9, 1e9
+
 local function draw_piece()
   for i = 1, #piece.cells do
-    draw_cell(nm('_a' .. i), piece.x + piece.cells[i][1], piece.y + piece.cells[i][2])
+    coreai_world_change(nm('_a' .. i), {
+      x = world_x(vis_x + piece.cells[i][1]),
+      y = world_y(vis_y + piece.cells[i][2]),
+      z = OZ })
   end
 end
 
@@ -547,24 +581,44 @@ local function spawn_piece()
     reset_board()
     publish_hud()
   end
+  vis_x, vis_y = piece.x, piece.y + 2
   for i = 1, #piece.cells do
     coreai_world_set_color(nm('_a' .. i), piece.color)
   end
   draw_piece()
 end
 
--- Player input (Gameplay-tier input_* API): A/D steer, S soft-drop. Held keys are polled at
--- 20 Hz, which never misses like frame-edge checks would from a timer. Any input pauses the
--- autopilot; it resumes after ~5 s idle so the unattended demo keeps playing itself.
+-- Animation: ease the visual position toward the logical cell; skip world commands entirely
+-- while nothing moves.
+hooks_every(0.05, function()
+  if piece == nil then return end
+  vis_x = vis_x + (piece.x - vis_x) * 0.4
+  vis_y = vis_y + (piece.y - vis_y) * 0.4
+  if math.abs(piece.x - vis_x) < 0.02 then vis_x = piece.x end
+  if math.abs(piece.y - vis_y) < 0.02 then vis_y = piece.y end
+  if vis_x ~= last_vx or vis_y ~= last_vy then
+    last_vx, last_vy = vis_x, vis_y
+    draw_piece()
+  end
+end)
+
+-- Player input (Gameplay-tier input_* API): A/D steer, S soft-drop, Space hard-drop. Held keys
+-- are polled at 20 Hz, which never misses like frame-edge checks would from a timer. Any input
+-- pauses the autopilot; it resumes after ~5 s idle so the unattended demo keeps playing itself.
 local idle = 1000
 local move_cd = 0
 local soft_drop = false
+local space_was = false
 hooks_every(0.05, function()
   idle = idle + 1
   if move_cd > 0 then move_cd = move_cd - 1 end
   soft_drop = input_key('s')
   if soft_drop then idle = 0 end
-  if piece == nil then return end
+  local space_now = input_key('space')
+  if piece == nil then
+    space_was = space_now
+    return
+  end
   local dx = 0
   if input_key('a') then dx = -1 elseif input_key('d') then dx = 1 end
   if dx ~= 0 then
@@ -572,10 +626,19 @@ hooks_every(0.05, function()
     if move_cd == 0 and can_place(piece.cells, piece.x + dx, piece.y) then
       piece.x = piece.x + dx
       piece.target = piece.x
-      draw_piece()
       move_cd = 3
     end
   end
+  if space_now and not space_was then
+    -- Hard drop: release the piece straight to the floor and lock it.
+    idle = 0
+    while can_place(piece.cells, piece.x, piece.y - 1) do
+      piece.y = piece.y - 1
+    end
+    vis_x, vis_y = piece.x, piece.y
+    lock_piece()
+  end
+  space_was = space_now
 end)
 
 -- Gravity: one cell per 0.5 s, 5x with soft-drop (accumulator on a 0.1 s timer so the
@@ -598,7 +661,6 @@ hooks_every(0.1, function()
   end
   if can_place(piece.cells, piece.x, piece.y - 1) then
     piece.y = piece.y - 1
-    draw_piece()
   else
     lock_piece()
   end
@@ -611,7 +673,6 @@ hooks_on('tetris_move', function(evt, payload)
   if dx ~= 0 and can_place(piece.cells, piece.x + dx, piece.y) then
     piece.x = piece.x + dx
     piece.target = piece.x
-    draw_piece()
   end
 end)
 
@@ -622,8 +683,8 @@ hooks_every(5.0, publish_hud)
 local CAM = 'Main Camera'
 local cam_cx = OX + (W - 1) / 2
 local cam_cy = OY + H / 2
-local cam_r = 17.0
-local cam_h = 6.0
+local cam_r = 24.0
+local cam_h = 7.0
 local cam_a = 0.0
 if coreai_world_exists(CAM) then
   hooks_every(0.05, function()
@@ -632,7 +693,7 @@ if coreai_world_exists(CAM) then
       x = cam_cx + cam_r * math.sin(cam_a),
       y = cam_cy + cam_h,
       z = OZ - cam_r * math.cos(cam_a),
-      rx = 19, ry = -math.deg(cam_a), rz = 0,
+      rx = 16, ry = -math.deg(cam_a), rz = 0,
     })
   end)
 end

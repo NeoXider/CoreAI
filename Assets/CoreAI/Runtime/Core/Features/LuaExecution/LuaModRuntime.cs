@@ -78,6 +78,18 @@ namespace CoreAI.Ai
 
         public const int MaxErrorsBeforeUnload = 8;
 
+        /// <summary>Maximum values/functions one mod may publish via <c>mods_export</c>.</summary>
+        public const int DefaultMaxExportsPerMod = 64;
+
+        /// <summary>
+        /// Maximum nested <c>mods_call</c> depth (A calls B calls C ...). Bounds accidental
+        /// cross-mod recursion with a clear error instead of a Lua stack overflow.
+        /// </summary>
+        public const int MaxCrossCallDepth = 8;
+
+        /// <summary>Maximum table nesting marshalled across mods by <c>mods_get</c>/<c>mods_call</c>.</summary>
+        public const int CrossModTableDepth = 4;
+
         /// <summary>Shortest accepted <c>hooks_every</c> interval, so timers cannot degenerate into per-instruction spam.</summary>
         public const double MinTimerIntervalSeconds = 0.05;
 
@@ -113,6 +125,8 @@ namespace CoreAI.Ai
             public readonly Dictionary<string, List<Closure>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
             public readonly Queue<KeyValuePair<string, string>> Pending = new();
+            // Values/functions this mod published via mods_export for other mods to read/call.
+            public readonly Dictionary<string, DynValue> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;
             public DateTime LoadedAtUtc;
@@ -942,6 +956,90 @@ namespace CoreAI.Ai
                 return true;
             }));
 
+            registry.Register("mods_export", new Action<string, DynValue>((name, value) =>
+            {
+                string exportName = Normalize(name);
+                if (exportName.Length == 0)
+                {
+                    throw new ArgumentException("mods_export: name is required.");
+                }
+
+                lock (_gate)
+                {
+                    if (!mod.Exports.ContainsKey(exportName) && mod.Exports.Count >= DefaultMaxExportsPerMod)
+                    {
+                        throw new InvalidOperationException(
+                            $"mods_export: export limit reached ({DefaultMaxExportsPerMod}).");
+                    }
+
+                    mod.Exports[exportName] = value ?? DynValue.Nil;
+                }
+            }));
+
+            registry.Register("mods_get", new Func<string, string, DynValue>((targetId, name) =>
+            {
+                DynValue export = FindExport(targetId, name, out Mod _);
+                if (export.Type == DataType.Function || export.Type == DataType.ClrFunction)
+                {
+                    throw new ArgumentException(
+                        $"mods_get: '{Normalize(name)}' of mod '{Normalize(targetId)}' is a function - use mods_call.");
+                }
+
+                // Marshal by value: MoonSharp values are per-script, and sharing a live table
+                // between sandboxes would let one mod mutate another's state behind its back.
+                return FromPortable(mod.Script, ToPortable(export, CrossModTableDepth));
+            }));
+
+            // Varargs need raw CallbackArguments: a typed DynValue[] parameter would make
+            // MoonSharp try to squeeze the third Lua argument into the array itself.
+            registry.RegisterCallback("mods_call", (context, callbackArgs) =>
+                {
+                    string targetId = callbackArgs.Count > 0 ? callbackArgs[0].CastToString() : null;
+                    string name = callbackArgs.Count > 1 ? callbackArgs[1].CastToString() : null;
+                    DynValue export = FindExport(targetId, name, out Mod target);
+                    if (export.Type != DataType.Function)
+                    {
+                        throw new ArgumentException(
+                            $"mods_call: '{Normalize(name)}' of mod '{Normalize(targetId)}' is not a function - use mods_get.");
+                    }
+
+                    if (_crossCallDepth >= MaxCrossCallDepth)
+                    {
+                        throw new InvalidOperationException(
+                            $"mods_call: cross-mod call depth limit reached ({MaxCrossCallDepth}) - break the cycle.");
+                    }
+
+                    DynValue[] marshalled = new DynValue[Math.Max(0, callbackArgs.Count - 2)];
+                    for (int i = 0; i < marshalled.Length; i++)
+                    {
+                        marshalled[i] = FromPortable(target.Script, ToPortable(callbackArgs[i + 2], CrossModTableDepth));
+                    }
+
+                    _crossCallDepth++;
+                    try
+                    {
+                        DynValue result = _handlerGuard.Execute(target.Script, export, marshalled);
+                        return FromPortable(mod.Script, ToPortable(result, CrossModTableDepth));
+                    }
+                    finally
+                    {
+                        _crossCallDepth--;
+                    }
+                });
+
+            registry.Register("mods_list_exports", new Func<string, List<string>>(targetId =>
+            {
+                lock (_gate)
+                {
+                    if (!_mods.TryGetValue(Normalize(targetId), out Mod target))
+                    {
+                        throw new ArgumentException($"mods_list_exports: mod '{Normalize(targetId)}' is not loaded.");
+                    }
+
+                    return new List<string>(target.Exports.Keys);
+                }
+            }));
+
             if (_store != null)
             {
                 registry.Register("store_set", new Action<string, string>((key, value) =>
@@ -968,6 +1066,102 @@ namespace CoreAI.Ai
 
                 ModReportEmitted?.Invoke(mod.Id, message ?? "");
             }));
+        }
+
+        // Reentrancy depth of mods_call on the current thread (ticks run on the main thread; a
+        // second thread would only ever see its own chain).
+        [ThreadStatic] private static int _crossCallDepth;
+
+        /// <summary>Resolves a mod's export or throws a descriptive error naming what is missing.</summary>
+        private DynValue FindExport(string targetId, string name, out Mod target)
+        {
+            string modId = Normalize(targetId);
+            string exportName = Normalize(name);
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(modId, out target))
+                {
+                    throw new ArgumentException($"mod '{modId}' is not loaded.");
+                }
+
+                if (!target.Exports.TryGetValue(exportName, out DynValue export))
+                {
+                    throw new ArgumentException(
+                        $"mod '{modId}' has no export '{exportName}' (mods_list_exports lists available names).");
+                }
+
+                return export;
+            }
+        }
+
+        /// <summary>
+        /// Converts a Lua value to a script-independent representation: nil/boolean/number/string
+        /// plus tables up to <paramref name="depth"/> levels. MoonSharp values belong to one Script;
+        /// cross-mod reads/calls marshal BY VALUE so no mod can mutate another's live state.
+        /// </summary>
+        private static object ToPortable(DynValue value, int depth)
+        {
+            if (value == null || value.IsNil() || value.Type == DataType.Void)
+            {
+                return null;
+            }
+
+            switch (value.Type)
+            {
+                case DataType.Boolean:
+                    return value.Boolean;
+                case DataType.Number:
+                    return value.Number;
+                case DataType.String:
+                    return value.String;
+                case DataType.Table:
+                    if (depth <= 0)
+                    {
+                        throw new ArgumentException(
+                            $"cross-mod tables may nest at most {CrossModTableDepth} levels.");
+                    }
+
+                    List<KeyValuePair<object, object>> pairs = new();
+                    foreach (TablePair pair in value.Table.Pairs)
+                    {
+                        pairs.Add(new KeyValuePair<object, object>(
+                            ToPortable(pair.Key, depth - 1),
+                            ToPortable(pair.Value, depth - 1)));
+                    }
+
+                    return pairs;
+                default:
+                    throw new ArgumentException(
+                        $"cross-mod values must be nil/boolean/number/string/table (got {value.Type}).");
+            }
+        }
+
+        /// <summary>Rebuilds a <see cref="ToPortable"/> value inside the receiving mod's script.</summary>
+        private static DynValue FromPortable(Script script, object value)
+        {
+            switch (value)
+            {
+                case null:
+                    return DynValue.Nil;
+                case bool b:
+                    return DynValue.NewBoolean(b);
+                case double d:
+                    return DynValue.NewNumber(d);
+                case string s:
+                    return DynValue.NewString(s);
+                case List<KeyValuePair<object, object>> pairs:
+                {
+                    Table table = new(script);
+                    foreach (KeyValuePair<object, object> pair in pairs)
+                    {
+                        table.Set(FromPortable(script, pair.Key), FromPortable(script, pair.Value));
+                    }
+
+                    return DynValue.NewTable(table);
+                }
+                default:
+                    return DynValue.Nil;
+            }
         }
 
         private void EmitFromMod(Mod sender, string evt, string payload)
