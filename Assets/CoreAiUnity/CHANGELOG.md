@@ -4,6 +4,42 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 4.20.0 - Mod timers actually tick; Lua input API; mod editor panel; Lua platform example (2026-07-04)
+
+- **Semver:** minor with **`com.neoxider.coreai` 4.20.0** (`hooks_on('tick')` alias, `{id=...}` table
+  coercion - see the core changelog).
+- **Mod timers actually tick in players.** The `RegisterEntryPoint<ITickable>` registration never
+  produced a dispatched tickable (verified live: `ITickable` unresolvable, every `hooks_every` timer
+  frozen in editor AND WebGL). `LuaModRuntimeTickDriver` (plain MonoBehaviour on
+  `CoreAI_LuaModTicker`, created in the installer build callback) now drives `LuaModRuntime.Tick`
+  every frame. Startup rehydration + the ticker are **play-mode-only**: EditMode containers share the
+  real persistent mod store, so rehydrating there injected mods persisted by earlier runs into every
+  fresh container, and `DontDestroyOnLoad` throws outside play mode.
+- **NEW: Lua input API (Gameplay tier).** `CoreAiInputLuaRuntimeBindings`: `input_key` /
+  `input_key_down` / `input_key_up`, `input_mouse_button` / `input_mouse_down`, `input_mouse_x/y`,
+  `input_axis` - read-only over `UnityEngine.Input`, KeyCode names case-insensitive plus
+  `left/right/up/down` and digit aliases. Game logic (steering, clicks) can now live entirely in a
+  mod. Documented in `LUA_GAME_API.md`.
+- **Mod manager: per-mod source editor.** Every active/inactive mod row has an Edit button opening a
+  closable window with the mod source in a text area. Save reloads a running mod (compile error keeps
+  the old mod running and the window open with the error) or updates the stored source of an inactive
+  one; Close discards - the buffer is a private copy.
+- **Demo: Lua platform example (`LuaPlatformExampleController`, FullAccessDemo, F6).** Creates every
+  Lua script itself: a two-mod self-test (timers, tick alias, variables/closures, varargs, coroutines,
+  store roundtrip, cross-mod ping/pong events, input API - 11 checks, PASS verdict aggregated from
+  `report()`) and a 3D Tetris built from ONE WorldEdit-tier Lua mod: board state in Lua tables,
+  gravity/input/HUD/camera-orbit on four `hooks_every` timers, A/D steer + S soft-drop via the input
+  API, autopilot after 5 s idle, line clears, score persisted in the mod store, generation-suffixed
+  object names so reloads survive Unity's deferred destroy, camera orbit around the board via
+  `coreai_world_change('Main Camera', ...)`. Persisted with the mod store: the game auto-resumes
+  after restart (the restart test).
+- **Demo panels: programmatic + configurable toggling.** `PanelVisible` / `ToggleKey` public APIs on
+  the mod manager and the platform example; `KeyCode.None` disables the hotkey (matching the token
+  budget overlay convention).
+- **Mods-chat autoload grants the host tier.** The persistence controller autoloads saved mods with
+  `All|Full` when the scope enables Full Lua (was: hardcoded `All`, silently stripping `unity_*` mods
+  on every restart).
+
 ### 4.19.0 - WebGL Full Lua on; SSE fetch bridge stabilized + tested; cumulative usage (2026-07-04)
 
 - **Semver:** minor with **`com.neoxider.coreai` 4.19.0** (WebGL Full-Lua crash fix, rate-limit window parsing, tool-error accounting - see the core changelog).

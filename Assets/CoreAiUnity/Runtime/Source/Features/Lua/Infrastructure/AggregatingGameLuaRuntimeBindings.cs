@@ -22,6 +22,7 @@ namespace CoreAI.Infrastructure.Lua
         private readonly World.CoreAiWorldQueryLuaBindings _worldQuery;
         private readonly LuaLogicSlots _logicSlots;
         private readonly CoreAiFullUnityLuaRuntimeBindings _full;
+        private readonly CoreAiInputLuaRuntimeBindings _input;
         private readonly LuaCapabilities _capabilities;
 
         public AggregatingGameLuaRuntimeBindings(
@@ -33,7 +34,8 @@ namespace CoreAI.Infrastructure.Lua
             World.CoreAiWorldQueryLuaBindings worldQuery = null,
             LuaLogicSlots logicSlots = null,
             CoreAiFullUnityLuaRuntimeBindings full = null,
-            LuaCapabilities capabilities = LuaCapabilities.All)
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            CoreAiInputLuaRuntimeBindings input = null)
         {
             _logger = logger;
             _versioning = versioning;
@@ -43,6 +45,7 @@ namespace CoreAI.Infrastructure.Lua
             _worldQuery = worldQuery;
             _logicSlots = logicSlots;
             _full = full;
+            _input = input;
             _capabilities = capabilities;
         }
 
@@ -78,6 +81,7 @@ namespace CoreAI.Infrastructure.Lua
             if ((effective & LuaCapabilities.Gameplay) != 0)
             {
                 _time.RegisterTimeApis(registry);
+                _input?.RegisterGameplayApis(registry);
             }
 
             if ((effective & LuaCapabilities.LogicOverride) != 0)

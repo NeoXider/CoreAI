@@ -31,6 +31,7 @@ namespace CoreAI.Demos
         private string panelTitle = "Lua Mod Manager";
 
         // F9 toggles the mod manager; F10 is reserved for the Token Budget / usage overlay.
+        [Tooltip("Hotkey that toggles the mod manager. Set to None to disable keyboard toggling.")]
         [SerializeField]
         private KeyCode toggleKey = KeyCode.F9;
 
@@ -45,6 +46,7 @@ namespace CoreAI.Demos
         private string[] transientModIds = { "auto_repair_smoke" };
 
         private const int WindowId = 0x10D_0001;
+        private const int EditWindowId = 0x10D_0003;
 
         private LuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
@@ -54,6 +56,14 @@ namespace CoreAI.Demos
         private bool _isAutoloading;
         private Vector2 _scroll;
         private GUIStyle _richLabel;
+
+        // Mod source editor state. Non-null _editModId means the editor window is open; the buffer
+        // is a private copy, so closing without saving changes nothing anywhere.
+        private string _editModId;
+        private string _editBuffer = "";
+        private string _editError = "";
+        private Vector2 _editScroll;
+        private Rect _editRect = new(120, 60, 620, 480);
         private GUIStyle _activeBadge;
         private GUIStyle _inactiveBadge;
 
@@ -71,6 +81,20 @@ namespace CoreAI.Demos
                 Name = ReadMetadata(Source, "name") ?? Id;
                 Description = ReadMetadata(Source, "description") ?? "No description metadata.";
             }
+        }
+
+        /// <summary>Programmatic open/close of the mod manager panel (same effect as the hotkey).</summary>
+        public bool PanelVisible
+        {
+            get => showPanel;
+            set => showPanel = value;
+        }
+
+        /// <summary>Toggle hotkey; <see cref="KeyCode.None"/> disables keyboard toggling.</summary>
+        public KeyCode ToggleKey
+        {
+            get => toggleKey;
+            set => toggleKey = value;
         }
 
         public void Configure(string keyPrefix, string title, Rect rect, bool visible)
@@ -290,6 +314,89 @@ namespace CoreAI.Demos
             int inactiveCount = (_mods != null && _versions != null) ? GetInactiveSavedMods().Count : 0;
             string title = $"{panelTitle}  ({toggleKey})   active {activeCount} / inactive {inactiveCount}";
             panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, title);
+
+            if (_editModId != null)
+            {
+                _editRect.x = Mathf.Clamp(_editRect.x, 0f, Mathf.Max(0f, Screen.width - 160f));
+                _editRect.y = Mathf.Clamp(_editRect.y, 0f, Mathf.Max(0f, Screen.height - 60f));
+                _editRect = GUILayout.Window(EditWindowId, _editRect, DrawEditWindow, $"Edit mod: {_editModId}");
+            }
+        }
+
+        private void OpenEditor(string modId, string source)
+        {
+            _editModId = modId;
+            _editBuffer = source ?? "";
+            _editError = "";
+            _editScroll = Vector2.zero;
+        }
+
+        private void DrawEditWindow(int id)
+        {
+            _editScroll = GUILayout.BeginScrollView(_editScroll, GUILayout.ExpandHeight(true));
+            _editBuffer = GUILayout.TextArea(_editBuffer, GUILayout.ExpandHeight(true));
+            GUILayout.EndScrollView();
+
+            if (!string.IsNullOrEmpty(_editError))
+            {
+                GUILayout.Label($"<color=#FF7070>{_editError}</color>", _richLabel);
+            }
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Save", GUILayout.Width(90)))
+            {
+                SaveEditor();
+            }
+
+            if (GUILayout.Button("Close", GUILayout.Width(90)))
+            {
+                // Discard: the buffer was a copy, nothing was touched.
+                _editModId = null;
+            }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(_mods != null && _mods.IsLoaded(_editModId ?? "")
+                ? "Save reloads the running mod and persists the new source."
+                : "Save updates the saved source (mod stays inactive).", _richLabel);
+            GUILayout.EndHorizontal();
+            GUI.DragWindow(new Rect(0, 0, _editRect.width, 22f));
+        }
+
+        private void SaveEditor()
+        {
+            if (_editModId == null || _mods == null || _versions == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_editBuffer))
+            {
+                _editError = "Source is empty; nothing saved.";
+                return;
+            }
+
+            try
+            {
+                if (_mods.IsLoaded(_editModId))
+                {
+                    // Reload persists the new source and re-registers hooks; a compile/runtime error
+                    // throws here, keeps the old mod running, and leaves the editor open to fix it.
+                    _mods.ReloadMod(_editModId, _editBuffer);
+                }
+                else
+                {
+                    string key = MakeModKey(_editModId);
+                    _versions.SeedOriginal(key, "", false);
+                    _versions.RecordSuccessfulExecution(key, _editBuffer);
+                }
+
+                _status = $"Saved mod '{_editModId}'.";
+                _editModId = null;
+            }
+            catch (System.Exception ex)
+            {
+                _editError = ex.Message;
+            }
         }
 
         private void DrawWindow(int id)
@@ -373,6 +480,11 @@ namespace CoreAI.Demos
                     _status = $"Mod '{info.Id}' logs {(nextLogReports ? "enabled" : "disabled")}.";
                 }
 
+                if (GUILayout.Button("Edit", GUILayout.Width(44)))
+                {
+                    OpenEditor(info.Id, source);
+                }
+
                 if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
                 {
                     _mods.UnloadMod(info.Id);
@@ -408,6 +520,11 @@ namespace CoreAI.Demos
                 if (GUILayout.Button("Activate"))
                 {
                     ActivateSavedMod(descriptor);
+                }
+
+                if (GUILayout.Button("Edit", GUILayout.Width(44)))
+                {
+                    OpenEditor(descriptor.Id, descriptor.Source);
                 }
 
                 if (GUILayout.Button("Forget", GUILayout.Width(72)))

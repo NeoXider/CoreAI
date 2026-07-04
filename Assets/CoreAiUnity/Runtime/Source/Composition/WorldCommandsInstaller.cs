@@ -81,6 +81,7 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
+            builder.Register<CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
                     c.Resolve<IGameLogger>(),
                     enableFullLuaPrivateAccess,
@@ -104,7 +105,8 @@ namespace CoreAI.Composition
                     c.Resolve<CoreAiWorldQueryLuaBindings>(),
                     c.Resolve<LuaLogicSlots>(),
                     c.Resolve<CoreAiFullUnityLuaRuntimeBindings>(),
-                    scriptCapabilities), Lifetime.Singleton)
+                    scriptCapabilities,
+                    c.Resolve<CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings>()), Lifetime.Singleton)
                 .As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton)
                 .As<ILuaExecutionObserver>();
@@ -150,16 +152,25 @@ namespace CoreAI.Composition
                     // "why does my mod have no Full?" without a debugger (WebGL builds especially).
                     UnityEngine.Debug.Log(
                         $"[CoreAI] WorldCommands: Lua capability grant = {scriptCapabilities} (enableFullLuaAccess={enableFullLuaAccess})");
-                    LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
-                    runtime.RehydrateFromStore(scriptCapabilities,
-                        allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                    // Frame driver for mod timers/events. The ITickable entry-point registration
-                    // below never dispatched (see LuaModRuntimeTickDriver docs), so hooks_every
-                    // timers were frozen; a plain MonoBehaviour Update cannot fail that way.
-                    var tickerGo = new UnityEngine.GameObject("CoreAI_LuaModTicker");
-                    UnityEngine.Object.DontDestroyOnLoad(tickerGo);
-                    tickerGo.AddComponent<CoreAI.Infrastructure.Lua.LuaModRuntimeTickDriver>().Initialize(runtime);
+                    // Play mode only: startup rehydration and the frame ticker are player-runtime
+                    // behavior. EditMode containers (tests, tooling) share the REAL persistent mod
+                    // store, so rehydrating there injects mods persisted by earlier runs into every
+                    // fresh container ('already loaded' collisions); and DontDestroyOnLoad throws
+                    // outside play mode. EditMode consumers load mods and call Tick explicitly.
+                    if (UnityEngine.Application.isPlaying)
+                    {
+                        LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
+                        runtime.RehydrateFromStore(scriptCapabilities,
+                            allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);
+
+                        // Frame driver for mod timers/events. The ITickable entry-point registration
+                        // below never dispatched (see LuaModRuntimeTickDriver docs), so hooks_every
+                        // timers were frozen; a plain MonoBehaviour Update cannot fail that way.
+                        var tickerGo = new UnityEngine.GameObject("CoreAI_LuaModTicker");
+                        UnityEngine.Object.DontDestroyOnLoad(tickerGo);
+                        tickerGo.AddComponent<CoreAI.Infrastructure.Lua.LuaModRuntimeTickDriver>().Initialize(runtime);
+                    }
                 }
                 catch (VContainerException)
                 {

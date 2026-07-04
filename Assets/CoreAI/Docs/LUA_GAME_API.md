@@ -158,6 +158,33 @@ The bus lives inside `LuaModRuntime`: `events_emit` is delivered to all other mo
 and to the C# event `ModEventEmitted`; the game sends events to mods through `EmitEvent`. Game-side
 subscription is directly on the DI singleton `LuaModRuntime` (a MessagePipe adapter can be written in one line if needed).
 
+## Input (Gameplay tier)
+
+Mods and scripts with the `Gameplay` capability can read the keyboard and mouse, so game logic
+(piece steering, click handling, movement) can live entirely in Lua
+(`CoreAiInputLuaRuntimeBindings`, read-only over `UnityEngine.Input`):
+
+| Function | Returns |
+|---|---|
+| `input_key(name)` | `true` while the key is held |
+| `input_key_down(name)` / `input_key_up(name)` | `true` only on the press/release frame |
+| `input_mouse_button(i)` / `input_mouse_down(i)` | mouse button held / pressed (0 left, 1 right, 2 middle) |
+| `input_mouse_x()` / `input_mouse_y()` | cursor position in screen pixels (origin bottom-left) |
+| `input_axis(name)` | `Input.GetAxis` value; `0` when the axis is undefined |
+
+Key names are `KeyCode` spellings, case-insensitive (`'a'`, `'space'`, `'return'`, `'leftarrow'`),
+plus aliases `'left'/'right'/'up'/'down'` (arrows) and `'0'..'9'` (top-row digits). Frame-edge
+checks are true for a single frame — a mod timer slower than the frame rate can miss them, so poll
+held state from `hooks_every` timers (20 Hz is plenty) and reserve `input_key_down` for
+`hooks_on('tick')` handlers:
+
+```lua
+hooks_every(0.05, function()
+  if input_key('a') then move(-1) end
+  if input_key('d') then move(1) end
+end)
+```
+
 ## Persistence & Sharing
 
 By default a loaded mod lives only in memory. A host can make mods durable and shareable by wiring an

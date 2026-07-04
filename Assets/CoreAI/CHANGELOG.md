@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 4.20.0 - hooks_on('tick') alias; {id=...} table coercion for numeric params (2026-07-04)
+
+- **`hooks_on('tick'/'update'/'frame')` registers a real per-frame timer.** `hooks_on` receives only
+  NAMED events, but LLM-written mods routinely register these spellings expecting a frame callback and
+  got a handler that never fired (observed live: a day/night sun rotator that never rotated). The
+  intuitive spellings now route to the timer machinery at the minimum interval (0.05 s / 20 Hz),
+  counted against the mod's timer cap.
+- **Lua tables with an `id` field coerce to numeric parameters.** `LuaApiRegistry` delegate dispatch:
+  when a delegate parameter is numeric and the script passed a table (models constantly pass a whole
+  `unity_find_all` entry instead of `entry.id`), the table's numeric `id` member is substituted
+  instead of throwing "cannot convert a table to a clr type System.Int32".
+- **Semver:** minor, lockstep with **`com.neoxider.coreaiunity` 4.20.0** (mod tick driver, Lua input
+  API, mod source editor panel, Lua platform example demo - see that changelog).
+
 ### 4.19.0 - WebGL Full Lua fixed; real 429 retry windows; tool-error accounting (2026-07-04)
 
 - **WebGL Full Lua fixed (the "RuntimeError: null function" player crash).** Root cause via a development-build stack trace: MoonSharp's `Script` static ctor loads resources through reflection (`UnityAssetsScriptLoader.LoadResourcesWithReflection` -> `Resources.LoadAll`), and IL2CPP stripped those reflection-only UnityEngine members, so the invoke jumped to a null method pointer and halted the whole wasm player. Fix: preserve `UnityEngine.Resources` + `UnityEngine.TextAsset` in `Assets/link.xml`. Verified live in a browser: the staged diagnostic (Script ctor -> sandbox -> host callback -> `unity_find` -> `unity_set_scale`) passes, and a real model turn found and scaled the demo cube via Full Lua.
