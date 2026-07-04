@@ -81,7 +81,10 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
-            builder.Register<CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings>(Lifetime.Singleton);
+            // Factory (not Register<T>): IL2CPP managed stripping >= Medium removes the unused
+            // parameterless ctor, and VContainer's reflection TypeAnalyzer then fails on WebGL.
+            builder.Register(c => new CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings(),
+                Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
                     c.Resolve<IGameLogger>(),
                     enableFullLuaPrivateAccess,

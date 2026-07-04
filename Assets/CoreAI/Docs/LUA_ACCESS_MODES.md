@@ -104,3 +104,26 @@ add its own actions without modifying the package.
 
 - `LiveMechanics` - logic slots + chat + LLM.
 - `FullAccess` - Full mode + chat + LLM with explicit host opt-in.
+
+## WebGL / IL2CPP Stripping Requirements
+
+Verified on Unity 6000.3 WebGL with **Managed Stripping Level = Medium** and
+**IL2CPP Code Generation = Faster (smaller) builds** (`OptimizeSize`). Both are recommended:
+`OptimizeSize` shrinks MoonSharp's generic-method tables enough that the Emscripten linker does
+not run out of memory, and Medium stripping keeps the wasm small. Reflection-based Lua features
+keep working **only** with the preserve rules below (already present in `Assets/link.xml`):
+
+- `MoonSharp.Interpreter` — `preserve="all"`. MoonSharp invokes host delegates and its own
+  loaders via reflection on AOT.
+- `UnityEngine.CoreModule`: `UnityEngine.Resources` and `UnityEngine.TextAsset` —
+  MoonSharp's `UnityAssetsScriptLoader` reaches them purely via reflection; stripping them
+  crashes the player with `RuntimeError: null function`.
+- Every `IGameLuaRuntimeBindings` implementation the player uses
+  (`CoreAiWorldLuaRuntimeBindings`, `CoreAiWorldQueryLuaBindings`, `LuaTimeBindings`,
+  `CoreAiInputLuaRuntimeBindings`, `CoreAiFullUnityLuaRuntimeBindings`, ...) — their callback
+  bodies are reflection-invoked by MoonSharp.
+
+DI note: VContainer's `Register<T>()` finds constructors via reflection; under Medium stripping
+an unused parameterless ctor can be stripped and container build fails with
+"Type does not found injectable constructor". Register such types with a factory
+(`builder.Register(c => new T(), ...)`) or preserve the type in `link.xml`.

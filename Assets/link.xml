@@ -44,6 +44,7 @@
     <type fullname="CoreAI.Infrastructure.Lua.CoreAiVersioningLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.Lua.LoggingLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.Lua.LuaTimeBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings" preserve="all"/>
     <type fullname="CoreAI.Infrastructure.Lua.AggregatingGameLuaRuntimeBindings" preserve="all"/>
   </assembly>
 </linker>
