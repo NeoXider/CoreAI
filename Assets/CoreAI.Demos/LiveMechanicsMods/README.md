@@ -37,6 +37,10 @@ Both windows can be dragged by their title bar and toggled with their hotkey.
 - Saved/unloaded mods can be activated again from the panel.
 - Deactivated mods stay inactive across scene restarts until the user presses `Activate`.
 - `Forget` removes a saved source from the demo list.
+- `Edit` opens a closable window with the mod's source in a text area (a private buffer, not the live
+  source): `Save` reloads a running mod with the edited code, or updates the stored source of an
+  inactive one — a compile error keeps the old mod running and the window open with the error;
+  `Close` discards the edit.
 - Name and description come from Lua metadata comments:
 
 ```lua

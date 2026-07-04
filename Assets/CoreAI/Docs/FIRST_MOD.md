@@ -38,10 +38,16 @@ hooks_every(5.0, function()
 end)
 ```
 
-That mod needs only the `Read` tier: `log_info`, `hooks_on`, `hooks_every`, and `store_*` are all
-available without world editing. (Hook/timer registration is part of the `LogicOverride` tier when
-loaded as a persistent mod; see the table below — most demo hosts grant `All` minus `Full`, which
-includes it.)
+That mod needs only the `Read` tier for `log_info`; `hooks_on`, `hooks_every`, and `store_*` are part
+of the mod-runtime surface and are available to **every** loaded mod regardless of capability tier
+(even a mod loaded with no capabilities at all) — see the table below.
+
+`hooks_on("tick", fn)` is a convenience alias for `hooks_every(0.05, fn)` (a per-frame-ish callback at
+20 Hz) — useful for reading `input_*` state (`Gameplay` tier) every tick instead of writing your own
+timer. When a mod needs to react to another mod rather than poll it, `events_emit`/`hooks_on` and
+`mods_export`/`mods_call` cover two different needs: events are fire-and-forget broadcasts, exports
+let a mod read or call another mod's state directly by id — see
+[LUA_GAME_API.md § Cross-mod Exports](LUA_GAME_API.md#cross-mod-exports).
 
 ## Capability tiers (short version)
 
@@ -51,20 +57,26 @@ absent from the mod's globals.
 | Tier | What it unlocks |
 |---|---|
 | `Read` | `log_*`, world queries (`coreai_world_exists/pos/find/...`), versions |
-| `Gameplay` | `time_*` (time scale, etc.) |
+| `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
 | `WorldEdit` | `coreai_world_spawn/move/rotate/destroy/parent/...`, batches, transactions |
-| `LogicOverride` | `logic_define/reset/list`, mod APIs (`hooks_*`, `store_*`, `events_emit`) |
+| `LogicOverride` | `logic_define/reset/list` |
 | `Full` | reflection (`unity_*`) — **opt-in, off by default** |
 
 `LuaCapabilities.All` is every tier **except** `Full`. Full is granted only when the host explicitly
 enables it (see the security note at the end).
+
+The mod APIs — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`,
+`mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id` — aren't in this table:
+they belong to the mod runtime itself, not to a capability-gated game binding group, so any loaded
+mod has them regardless of tier.
 
 ## Three ways to load a mod
 
 ### (a) Via the agent — `manage_mods load`
 
 Ask the Programmer agent in chat to create a mod, or call the tool directly. The `manage_mods` tool
-accepts these actions: `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`.
+accepts these actions: `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
+`versions`, `revert`, `diagnostics`.
 
 ```json
 { "action": "load", "mod_id": "greeter", "code": "-- name: greeter\nhooks_on(\"wave_started\", function(evt, payload) log_info(payload) end)" }

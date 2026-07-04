@@ -34,10 +34,12 @@ needed.
 | Level | Opens |
 |---|---|
 | `Read` | `log_*`, versions, `coreai_world_exists/pos/find/list_prefabs/raycast` |
-| `Gameplay` | `time_*` (including `time_set_scale`) |
+| `Gameplay` | `time_*` (including `time_set_scale`), `input_*` (keyboard/mouse, read-only) |
 | `WorldEdit` | `coreai_world_spawn`, `coreai_world_change`, `coreai_world_set_color`, `coreai_world_destroy`, scenes, batches, transactions |
-| `LogicOverride` | `logic_define/reset/list`, mod APIs (`hooks_*`, `store_*`, `events_emit`) |
+| `LogicOverride` | `logic_define/reset/list` |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
+
+Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id`) are **not gated by a capability tier** — every loaded mod gets them regardless of its `LuaCapabilities`, since they are the mod-runtime surface itself rather than a game binding. See [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 ## Stage 1 - Reading the World (Query API)
 
@@ -92,11 +94,16 @@ hooks_on("wave_started", function(evt, payload)
   coreai_world_spawn({ prefab="enemy.basic", name="wave_" .. payload, x=0, y=0, z=10 })
 end)
 hooks_every(2.0, function() ... end)   -- interval >= 0.05 s
+hooks_on("tick", function() ... end)   -- alias for hooks_every(0.05, ...): per-frame-ish callback
 store_set("kills", "42")               -- persistent per-mod k/v (strings)
 local v = store_get("kills")
 events_emit("director_ready", "")      -- to other mods and the game
 log_info(mod_id())
 ```
+
+`hooks_on("tick"/"update"/"frame", fn)` is not a real per-frame event — it is routed to a
+`hooks_every(0.05, fn)` timer (20 Hz), since nothing emits those names as events. Prefer
+`hooks_every` directly when you want an explicit interval.
 
 `coreai_world_spawn` creates visible objects only when the host prefab registry contains the prefab
 key/name. Check `coreai_world_list_prefabs()` first; a `report("spawn...")` call is only a log.
@@ -157,6 +164,53 @@ There is no undo for already applied commands (see TODO).
 The bus lives inside `LuaModRuntime`: `events_emit` is delivered to all other mods (on the next `Tick`)
 and to the C# event `ModEventEmitted`; the game sends events to mods through `EmitEvent`. Game-side
 subscription is directly on the DI singleton `LuaModRuntime` (a MessagePipe adapter can be written in one line if needed).
+
+## Cross-mod Exports
+
+Besides events (fire-and-forget, broadcast), a mod can publish variables and functions for other
+mods to read or call directly by id:
+
+| Function | Effect |
+|---|---|
+| `mods_export(name, valueOrFn)` | Publishes a value or function under `name` for other mods (<= 64 exports per mod) |
+| `mods_get(modId, name)` | Reads another mod's exported value (throws if `name` is a function - use `mods_call`) |
+| `mods_call(modId, fnName, ...)` | Calls another mod's exported function and returns its result |
+| `mods_list_exports(modId)` | Lists the export names a mod currently publishes |
+
+Values cross by copy, not by reference: `nil`/boolean/number/string/plain tables only, tables nest
+at most 4 levels, and `mods_call` chains are capped at depth 8 — a mod can never mutate another
+mod's live state through an export, and cross-mod call cycles fail with a clear error instead of a
+stack overflow. Exports are dropped on `ReloadMod`/`UnloadMod`; a reloaded mod must call
+`mods_export` again.
+
+```lua
+-- name: economy
+-- description: Owns the gold total and exports a reader plus an add function.
+local gold = tonumber(store_get("gold")) or 0
+mods_export("gold", function() return gold end)
+mods_export("add_gold", function(amount)
+  gold = gold + amount
+  store_set("gold", tostring(gold))
+  return gold
+end)
+```
+
+```lua
+-- name: shop
+-- description: Reads and spends gold from the economy mod.
+hooks_on("item_bought", function(evt, price)
+  local current = mods_call("economy", "gold")
+  if current >= tonumber(price) then
+    mods_call("economy", "add_gold", -tonumber(price))
+    report("shop: purchase ok, gold now " .. mods_call("economy", "gold"))
+  else
+    report("shop: not enough gold")
+  end
+end)
+```
+
+Use `events_emit`/`hooks_on` when a mod just needs to announce something happened; use
+`mods_export`/`mods_call` when a mod needs to read or drive another mod's state directly.
 
 ## Input (Gameplay tier)
 

@@ -406,7 +406,7 @@ end)
         /// </summary>
         private const string TetrisSource = @"
 -- name: Tetris 3D
--- description: 3D falling-blocks game in one Lua mod. A/D move, S soft-drop, Space hard-drop; autopilot after 5 s idle.
+-- description: 3D falling-blocks game in one Lua mod. A/D move, W rotate, S soft-drop, Space hard-drop; autopilot after 5 s idle.
 local W = 8
 local H = 14
 local OX = -16.0
@@ -602,13 +602,41 @@ hooks_every(0.05, function()
   end
 end)
 
--- Player input (Gameplay-tier input_* API): A/D steer, S soft-drop, Space hard-drop. Held keys
+-- Player input (Gameplay-tier input_* API): A/D steer, W rotate, S soft-drop, Space hard-drop. Held keys
 -- are polled at 20 Hz, which never misses like frame-edge checks would from a timer. Any input
 -- pauses the autopilot; it resumes after ~5 s idle so the unattended demo keeps playing itself.
 local idle = 1000
 local move_cd = 0
 local soft_drop = false
 local space_was = false
+local rot_was = false
+
+-- W: rotate 90° clockwise around the piece's bounding box, normalized back to origin so
+-- can_place / draw keep using non-negative offsets. Never mutates the shared SHAPES tables.
+local function try_rotate()
+  local rc = {}
+  local minx, miny = 1e9, 1e9
+  for i = 1, #piece.cells do
+    local nx, ny = piece.cells[i][2], -piece.cells[i][1]
+    rc[i] = { nx, ny }
+    if nx < minx then minx = nx end
+    if ny < miny then miny = ny end
+  end
+  for i = 1, #rc do
+    rc[i][1] = rc[i][1] - minx
+    rc[i][2] = rc[i][2] - miny
+  end
+  -- Wall kick: accept the first horizontal nudge that makes the rotation legal.
+  for _, k in ipairs({ 0, -1, 1, -2, 2 }) do
+    if can_place(rc, piece.x + k, piece.y) then
+      piece.cells = rc
+      piece.x = piece.x + k
+      piece.target = piece.x
+      draw_piece()
+      return
+    end
+  end
+end
 hooks_every(0.05, function()
   idle = idle + 1
   if move_cd > 0 then move_cd = move_cd - 1 end
@@ -629,6 +657,12 @@ hooks_every(0.05, function()
       move_cd = 3
     end
   end
+  local rot_now = input_key('w')
+  if rot_now and not rot_was then
+    idle = 0
+    try_rotate()
+  end
+  rot_was = rot_now
   if space_now and not space_was then
     -- Hard drop: release the piece straight to the floor and lock it.
     idle = 0
@@ -674,6 +708,10 @@ hooks_on('tetris_move', function(evt, payload)
     piece.x = piece.x + dx
     piece.target = piece.x
   end
+end)
+
+hooks_on('tetris_rotate', function(evt, payload)
+  if piece ~= nil then try_rotate() end
 end)
 
 hooks_every(5.0, publish_hud)

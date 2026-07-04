@@ -13,10 +13,17 @@ If a capability is absent, the corresponding functions are physically absent fro
 | Mode | Flag | What Lua can do |
 |---|---|---|
 | Read-only | `Read` | Logs, world queries, versions, with no side effects |
-| Gameplay | `Gameplay` | Time scale, UI text, sound, animations |
+| Gameplay | `Gameplay` | Time scale, UI text, sound, animations, `input_*` (keyboard/mouse, read-only) |
 | WorldEdit | `WorldEdit` | Spawn/move/destroy, scenes, batch world commands |
-| Logic | `LogicOverride` | `logic_define`, mods (`hooks_on`, `manage_mods`) |
+| Logic | `LogicOverride` | `logic_define`/`logic_reset`/`logic_list` |
 | Full | `Full` | Reflection-style access to `GameObject`/components through `unity_*` APIs |
+
+The mod-runtime surface itself — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`,
+`mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id` — is **available to
+every loaded mod regardless of capability tier**, including a mod loaded with `LuaCapabilities.None`.
+These are not game bindings gated by `AggregatingGameLuaRuntimeBindings`; `LuaModRuntime` registers
+them unconditionally when it builds a mod's script. The capability tier only controls which *game*
+APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and timers can then call.
 
 `LuaCapabilities.All` includes standard tiers except `Full`. Full mode is enabled explicitly through:
 
@@ -79,8 +86,9 @@ file APIs that a host game exposes through components.
 
 ## Mod LLM Tools
 
-`manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`) and
-`execute_lua` are registered in `WorldCommandsInstaller`. Mod source is retrieved through
+`manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
+`versions`, `revert`, `diagnostics`) and `execute_lua` are registered in `WorldCommandsInstaller`.
+Mod source is retrieved through
 `LuaModRuntime.TryGetModSource`; `export`/`import`/`forget` move mods between players through the
 source store.
 

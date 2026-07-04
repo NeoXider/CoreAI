@@ -45,6 +45,14 @@ modRuntime.EmitEvent("wave_started", waveIndex.ToString());
 
 Per-mod capability is **already enforced**: a read-only mod will not receive world-edit APIs.
 
+For per-frame-ish logic, `hooks_on("tick", fn)` is a convenience alias for `hooks_every(0.05, fn)` —
+prefer polling held input (`input_key`, `Gameplay` tier) from a timer/tick handler over
+`input_key_down`/`input_key_up`, since a frame-edge check can be missed between timer ticks.
+
+When one mod needs another mod's help: `events_emit`/`hooks_on` for a fire-and-forget notification
+(broadcast, no reply), `mods_export`/`mods_get`/`mods_call` when a mod needs to read or call another
+mod's state directly by id (see [LUA_GAME_API.md § Cross-mod Exports](LUA_GAME_API.md#cross-mod-exports)).
+
 ### 3. Custom Functions Through `GameLuaBindingsExtensibility`
 
 Typed `Func`/`Action`, with no reflection in Lua:

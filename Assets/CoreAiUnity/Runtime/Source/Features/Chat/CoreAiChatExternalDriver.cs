@@ -36,7 +36,7 @@ namespace CoreAI.Chat
             GameObject go = new(DriverObjectName);
             DontDestroyOnLoad(go);
             go.AddComponent<CoreAiChatExternalDriver>();
-            Debug.Log($"{LogPrefix} spawned (opt-in flag detected). " +
+            Logging.Log.Instance.Info($"{LogPrefix} spawned (opt-in flag detected). " +
                       "Submit prompts via SendMessage('" + DriverObjectName + "', 'SubmitPrompt', text).");
         }
 
@@ -72,7 +72,7 @@ namespace CoreAI.Chat
                 if (m != null && m.shader != null && !m.shader.isSupported)
                 {
                     hits++;
-                    Debug.LogWarning(
+                    Logging.Log.Instance.Warn(
                         $"{LogPrefix} [shader-diag] UNSUPPORTED {BuildPath(g.transform)} mat={m.name} shader={m.shader.name}");
                 }
             }
@@ -84,13 +84,13 @@ namespace CoreAI.Chat
                     if (m != null && m.shader != null && !m.shader.isSupported)
                     {
                         hits++;
-                        Debug.LogWarning(
+                        Logging.Log.Instance.Warn(
                             $"{LogPrefix} [shader-diag] UNSUPPORTED {BuildPath(r.transform)} mat={m.name} shader={m.shader.name}");
                     }
                 }
             }
 
-            Debug.Log($"{LogPrefix} [shader-diag] done, unsupported={hits}");
+            Logging.Log.Instance.Info($"{LogPrefix} [shader-diag] done, unsupported={hits}");
 
             static string BuildPath(Transform t)
             {
@@ -109,15 +109,15 @@ namespace CoreAI.Chat
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             void Stage(string name, Action body)
             {
-                Debug.Log($"{LogPrefix} [diag] {name}: begin");
+                Logging.Log.Instance.Info($"{LogPrefix} [diag] {name}: begin");
                 try
                 {
                     body();
-                    Debug.Log($"{LogPrefix} [diag] {name}: ok");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] {name}: ok");
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                    Logging.Log.Instance.Warn($"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                 }
             }
 
@@ -136,7 +136,7 @@ namespace CoreAI.Chat
                 Stage("s2-bare-DoString", () =>
                 {
                     MoonSharp.Interpreter.DynValue r = bare.DoString("return 1+1");
-                    Debug.Log($"{LogPrefix} [diag] s2 result={r.Number}");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s2 result={r.Number}");
                 });
 
                 CoreAI.Sandbox.SecureLuaEnvironment env = new();
@@ -144,7 +144,7 @@ namespace CoreAI.Chat
                 {
                     MoonSharp.Interpreter.Script s = env.CreateScript(null);
                     MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return 2+2");
-                    Debug.Log($"{LogPrefix} [diag] s3 result={r.Number}");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s3 result={r.Number}");
                 });
 
                 Stage("s4-host-callback", () =>
@@ -153,7 +153,7 @@ namespace CoreAI.Chat
                     reg.Register("host_add", (Func<double, double, double>)((a, b) => a + b));
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return host_add(2,3)");
-                    Debug.Log($"{LogPrefix} [diag] s4 result={r.Number}");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s4 result={r.Number}");
                 });
 
                 Stage("s5-unity_find", () =>
@@ -162,7 +162,7 @@ namespace CoreAI.Chat
                     new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return unity_find('LuaDiagCube')");
-                    Debug.Log($"{LogPrefix} [diag] s5 id={r.Number}");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s5 id={r.Number}");
                 });
 
                 Stage("s6-unity_set_scale", () =>
@@ -171,17 +171,17 @@ namespace CoreAI.Chat
                     new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     env.RunChunk(s, "local id = unity_find('LuaDiagCube'); unity_set_scale(id, 2, 2, 2)");
-                    Debug.Log($"{LogPrefix} [diag] s6 scale={probe.transform.localScale}");
+                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s6 scale={probe.transform.localScale}");
                 });
 
-                Debug.Log($"{LogPrefix} [diag] ALL STAGES PASSED");
+                Logging.Log.Instance.Info($"{LogPrefix} [diag] ALL STAGES PASSED");
             }
             finally
             {
                 Destroy(probe);
             }
 #else
-            Debug.LogWarning($"{LogPrefix} RunLuaDiag ignored: Lua module not compiled in.");
+            Logging.Log.Instance.Warn($"{LogPrefix} RunLuaDiag ignored: Lua module not compiled in.");
 #endif
         }
 
@@ -207,13 +207,13 @@ namespace CoreAI.Chat
                 int? maxTokens = (int?)o["maxTokens"];
                 bool hotSwapped = CoreAI.CoreAiBackend.ApplyHttpApi(
                     baseUrl, apiKey, model, temperature, timeoutSeconds, maxTokens);
-                Debug.Log($"{LogPrefix} backend-applied: baseUrl={baseUrl} model={model} " +
+                Logging.Log.Instance.Info($"{LogPrefix} backend-applied: baseUrl={baseUrl} model={model} " +
                           $"maxTokens={(maxTokens.HasValue ? maxTokens.Value.ToString() : "keep")} " +
                           $"hotSwapped={hotSwapped} keyLen={apiKey.Length}");
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{LogPrefix} backend-failed: {ex.GetType().Name}: {ex.Message}");
+                Logging.Log.Instance.Warn($"{LogPrefix} backend-failed: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -228,11 +228,11 @@ namespace CoreAI.Chat
             CoreAiChatPanel panel = FindFirstObjectByType<CoreAiChatPanel>();
             if (panel == null)
             {
-                Debug.LogWarning($"{LogPrefix} SubmitPrompt ignored: no CoreAiChatPanel in the scene.");
+                Logging.Log.Instance.Warn($"{LogPrefix} SubmitPrompt ignored: no CoreAiChatPanel in the scene.");
                 return;
             }
 
-            Debug.Log($"{LogPrefix} submitting prompt ({prompt?.Length ?? 0} chars) to '{panel.name}'.");
+            Logging.Log.Instance.Info($"{LogPrefix} submitting prompt ({prompt?.Length ?? 0} chars) to '{panel.name}'.");
             SubmitAndReportAsync(panel, prompt).Forget();
         }
 
@@ -243,16 +243,16 @@ namespace CoreAI.Chat
                 string response = await panel.SubmitMessageFromExternalAsync(prompt);
                 if (response == null)
                 {
-                    Debug.LogWarning($"{LogPrefix} turn-failed: panel busy, canceled, or empty input.");
+                    Logging.Log.Instance.Warn($"{LogPrefix} turn-failed: panel busy, canceled, or empty input.");
                 }
                 else
                 {
-                    Debug.Log($"{LogPrefix} turn-complete ({response.Length} chars): {response}");
+                    Logging.Log.Instance.Info($"{LogPrefix} turn-complete ({response.Length} chars): {response}");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{LogPrefix} turn-failed: {ex.GetType().Name}: {ex.Message}");
+                Logging.Log.Instance.Warn($"{LogPrefix} turn-failed: {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -263,7 +263,7 @@ namespace CoreAI.Chat
         public static void Forget(this Task task)
         {
             task.ContinueWith(
-                t => Debug.LogWarning($"[CoreAiChatExternalDriver] unobserved failure: {t.Exception?.GetBaseException().Message}"),
+                t => Logging.Log.Instance.Warn($"[CoreAiChatExternalDriver] unobserved failure: {t.Exception?.GetBaseException().Message}"),
                 TaskContinuationOptions.OnlyOnFaulted);
         }
     }

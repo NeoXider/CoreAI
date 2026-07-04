@@ -51,6 +51,7 @@ namespace CoreAI.Presentation
         private IAiOrchestrationService _orchestrator;
         private LuaModAutoRepairPolicy _policy;
         private bool _ready;
+        private Logging.ILog _log = Logging.Log.Instance;
 
         /// <summary>Short human-readable status for HUDs/panels.</summary>
         public string StatusLine { get; private set; } = "Lua mod auto-repair: starting...";
@@ -85,6 +86,11 @@ namespace CoreAI.Presentation
                 SetStatus("Lua mod auto-repair disabled: no CoreAILifetimeScope.");
                 enabled = false;
                 yield break;
+            }
+
+            if (lifetimeScope.Container.TryResolve<Logging.ILog>(out Logging.ILog resolvedLog) && resolvedLog != null)
+            {
+                _log = resolvedLog;
             }
 
             if (!lifetimeScope.Container.TryResolve<LuaModRuntime>(out _mods) || _mods == null)
@@ -165,7 +171,7 @@ namespace CoreAI.Presentation
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[CoreAiLuaModAutoRepair] Repair task for '{modId}' failed to run: {ex.Message}");
+                _log.Warn($"[CoreAiLuaModAutoRepair] Repair task for '{modId}' failed to run: {ex.Message}");
             }
             finally
             {

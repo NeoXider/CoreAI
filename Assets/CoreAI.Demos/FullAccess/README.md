@@ -62,6 +62,24 @@ local desc = unity_describe_object(matches[1].id)
 return '{"found":true,"path":"' .. desc.path .. '","children":' .. desc.child_count .. '}'
 ```
 
+## Lua Platform Example (F6)
+
+`LuaPlatformExampleController` (also on the `FullAccessDemo` scene) is a no-LLM reference for what a
+Lua mod can do on its own: it writes and loads its Lua sources itself, no chat/model involved. Toggle
+its panel with **F6**.
+
+- **Run self-test** — loads a two-mod pair that checks timers, the `hooks_on('tick')` alias,
+  variables/closures, varargs, coroutines, the `store_*` roundtrip, cross-mod events, and the
+  `input_*` API, then reports a PASS/FAIL verdict per check.
+- **Start/Restart/Stop Tetris** — loads a single `WorldEdit`-tier mod that builds and runs a
+  self-playing 3D falling-blocks game entirely in Lua: board state in tables, gravity/animation/camera
+  on `hooks_every` timers, and player steering through the `input_*` API — **A/D** to move, **W** to rotate, **S** to
+  soft-drop, **Space** to hard-drop (an autopilot takes over after ~5 s idle). Score persists through
+  `store_set`/`store_get`, so the game resumes where it left off after a restart.
+
+WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample", "RunSelfTest" |
+"StartTetris" | "StopTetris" | "DumpStatus")`.
+
 ## Safety
 
 Full access is **opt-in** and gated behind the Full capability tier. Public-only is the

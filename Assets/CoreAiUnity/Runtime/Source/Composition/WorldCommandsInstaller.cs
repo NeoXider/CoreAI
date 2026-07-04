@@ -150,7 +150,7 @@ namespace CoreAI.Composition
                 {
                     // Permanent breadcrumb: which Lua tier this composition actually granted. Answers
                     // "why does my mod have no Full?" without a debugger (WebGL builds especially).
-                    UnityEngine.Debug.Log(
+                    Logging.Log.Instance.Info(
                         $"[CoreAI] WorldCommands: Lua capability grant = {scriptCapabilities} (enableFullLuaAccess={enableFullLuaAccess})");
 
                     // Play mode only: startup rehydration and the frame ticker are player-runtime
