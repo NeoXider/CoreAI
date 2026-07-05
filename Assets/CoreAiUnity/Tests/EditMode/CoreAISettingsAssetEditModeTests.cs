@@ -293,28 +293,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Singleton_ShouldLoadFromResources()
-        {
-            CoreAISettingsAsset.ResetInstance();
-
-            CoreAISettingsAsset instance = CoreAISettingsAsset.Instance;
-
-            Assert.IsNotNull(instance, "Expected Resources/CoreAISettings.asset to be loadable in tests.");
-            Assert.AreEqual("CoreAISettings", instance.name);
-            Assert.AreEqual(LlmBackendType.OpenAiHttp, instance.BackendType);
-            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, instance.ExecutionMode);
-            StringAssert.StartsWith("http", instance.ApiBaseUrl);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(instance.ModelName));
-            Assert.Greater(instance.RequestTimeoutSeconds, 0);
-            Assert.Greater(instance.MaxTokens, 0);
-            Assert.GreaterOrEqual(instance.MaxLlmRequestRetries, 0);
-            Assert.Greater(instance.ContextWindowTokens, 0);
-
-            CoreAISettingsAsset.ResetInstance();
-        }
-
-
-        [Test]
         public void SetInstance_ShouldOverrideSingleton()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();

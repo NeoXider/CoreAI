@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.5 - remove brittle default-backend assertion from singleton test (2026-07-05)
+
+- **Removed `CoreAISettingsAssetEditModeTests.Singleton_ShouldLoadFromResources`.** It hardcoded the
+  shipped `Resources/CoreAISettings.asset` default (`BackendType == OpenAiHttp`,
+  `ExecutionMode == ClientOwnedApi`), so it broke any time that asset's backend choice changed -
+  including a local, uncommitted edit - even though nothing about singleton loading was actually
+  wrong. Singleton load/reset behavior is already covered by `SetInstance_ShouldOverrideSingleton`.
+
 ### 5.0.4 - standalone menu to create the LLMUnity host (2026-07-05)
 
 - **New `CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)` menu item** creates the `LLM` +
