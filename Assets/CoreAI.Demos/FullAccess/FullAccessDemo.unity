@@ -1143,6 +1143,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.FullAccessDemoController
   targetCube: {fileID: 0}
+  _showPanel: 1
+  _toggleKey: 288
 --- !u!4 &1828887120
 Transform:
   m_ObjectHideFlags: 0
@@ -1298,6 +1300,8 @@ MonoBehaviour:
     Prompt: Check the cube in the scene and tell me its current position, scale,
       and important components. Do not change it.
   submitWhenInputUnavailable: 0
+  _showPanel: 1
+  _toggleKey: 289
 --- !u!4 &2100352201
 Transform:
   m_ObjectHideFlags: 0

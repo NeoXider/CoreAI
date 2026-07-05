@@ -180,6 +180,11 @@ namespace CoreAI.Diagnostics
 
         private void DrawWindow(int id)
         {
+            if (GUI.Button(new Rect(_windowRect.width - 58f, 2f, 52f, 18f), "Hide"))
+            {
+                _showOverlay = false;
+            }
+
             TokenBudgetRuntimeSource source = GetOrCreateSource();
 
             if (!Application.isPlaying || !source.IsResolved)
@@ -190,7 +195,7 @@ namespace CoreAI.Diagnostics
                         ? "  Waiting for CoreAILifetimeScope..."
                         : "  Enter Play Mode with a CoreAILifetimeScope in the scene.",
                     _valueStyle);
-                GUI.DragWindow();
+                GUI.DragWindow(new Rect(0, 0, _windowRect.width, 22f));
                 return;
             }
 
@@ -211,7 +216,7 @@ namespace CoreAI.Diagnostics
             GUILayout.Label(Indent(loadText), nearLimit ? _alertStyle : _valueStyle);
 
             GUILayout.Label($"\n[{_toggleKey}] toggle  |  drag to move", _valueStyle);
-            GUI.DragWindow();
+            GUI.DragWindow(new Rect(0, 0, _windowRect.width, 22f));
         }
 
         /// <summary>Prefixes every line with two spaces to match the section headers.</summary>

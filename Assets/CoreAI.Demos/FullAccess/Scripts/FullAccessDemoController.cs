@@ -14,6 +14,15 @@ namespace CoreAI.Demos
         [SerializeField]
         private Transform targetCube;
 
+        [Tooltip("Show or hide the instructions panel.")] [SerializeField]
+        private bool _showPanel = true;
+
+        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")] [SerializeField]
+        private KeyCode _toggleKey = KeyCode.F7;
+
+        private const float PanelWidth = 440f;
+        private const float PanelHeight = 150f;
+
         private void Awake()
         {
             // Guarantee unity_find('TargetCube') resolves to something even on a bare scene, so the
@@ -33,16 +42,29 @@ namespace CoreAI.Demos
             }
         }
 
+        private void Update()
+        {
+            if (_toggleKey != KeyCode.None && Input.GetKeyDown(_toggleKey))
+            {
+                _showPanel = !_showPanel;
+            }
+        }
+
         private void OnGUI()
         {
-            if (targetCube == null)
+            if (targetCube == null || !_showPanel)
             {
                 return;
             }
 
             Vector3 p = targetCube.position;
-            GUILayout.BeginArea(new Rect(12, 12, 440, 150), GUI.skin.box);
-            GUILayout.Label("<b>Full Access Demo</b> - enable Full Lua on CoreAILifetimeScope", Rich());
+            GUILayout.BeginArea(new Rect(12, 12, PanelWidth, PanelHeight), GUI.skin.box);
+            if (GUI.Button(new Rect(PanelWidth - 58f, 2f, 52f, 18f), "Hide"))
+            {
+                _showPanel = false;
+            }
+
+            GUILayout.Label($"<b>Full Access Demo</b> ({_toggleKey}) - enable Full Lua on CoreAILifetimeScope", Rich());
             GUILayout.Label("Programmer mods reach this cube via unity_find / unity_set_member.", Rich());
             GUILayout.Label("Private members need 'Enable Full Lua Private Access' (off by default).", Rich());
             GUILayout.Label($"TargetCube position: ({p.x:0.##}, {p.y:0.##}, {p.z:0.##})", Rich());

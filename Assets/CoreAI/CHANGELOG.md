@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### 5.0.6 - version lockstep with coreaiunity 5.0.6 (2026-07-05)
+
+- No changes; released to keep both packages on identical versions.
+
 ### 5.0.5 - version lockstep with coreaiunity 5.0.5 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.

@@ -24,6 +24,14 @@ namespace CoreAI.Infrastructure.Llm
 
             agent.remote = false;
             agent.llm = llm;
+
+            // CoreAI owns conversation-context management (LlmAssistedConversationContextManager builds
+            // the whole prompt and calls Chat(addToHistory: false)), so LLMUnity's own overflow handling
+            // has no history to act on. Force it to None so it can never silently truncate/summarize
+            // behind CoreAI's back and so the Inspector no longer implies LLMUnity manages the context -
+            // this mirrors the HTTP/OpenAI path, where the server never manages history either.
+            agent.overflowStrategy = UndreamAI.LlamaLib.ContextOverflowStrategy.None;
+
             llm.dontDestroyOnLoad = settings.LlmUnityDontDestroyOnLoad;
             llm.numGPULayers = settings.NumGPULayers;
             llm.flashAttention = true;

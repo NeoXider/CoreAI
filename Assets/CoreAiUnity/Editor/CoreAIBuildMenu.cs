@@ -385,6 +385,12 @@ namespace CoreAI.Editor
                 agent.remote = false;
                 agent.llm = llm;
 
+                // CoreAI builds the whole prompt and calls Chat(addToHistory: false), so LLMUnity's own
+                // context-overflow handling never has history to act on. Force it to None (mirrors the
+                // runtime LlmUnityHostConfigurator) so the Inspector doesn't imply LLMUnity manages the
+                // context and it can never truncate/summarize behind CoreAI's back.
+                agent.overflowStrategy = UndreamAI.LlamaLib.ContextOverflowStrategy.None;
+
                 CoreAISettingsAsset settings = AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
                 if (settings != null)
                 {

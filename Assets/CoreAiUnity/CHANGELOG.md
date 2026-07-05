@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.6 - force LLMUnity Overflow Strategy to None (CoreAI owns context) (2026-07-05)
+
+- **`LLMAgent.overflowStrategy` is now explicitly set to `ContextOverflowStrategy.None`** wherever CoreAI
+  creates the agent - runtime (`LlmUnityHostConfigurator.ApplyFromSettings`) and Editor
+  (`CoreAI/Setup/Create LLMUnity Objects` / scene creators). CoreAI builds the whole prompt itself and
+  calls `Chat(addToHistory: false)`, so the agent's internal chat history is always empty and LLMUnity's
+  built-in overflow handling (`Truncate` / `Summarize`) has nothing to act on - its Inspector default
+  (`Truncate`) only *implied* LLMUnity managed the context. Forcing `None` makes the LLMUnity path behave
+  like the HTTP/OpenAI path (server never manages history) and keeps context management solely in CoreAI's
+  backend-agnostic, role-aware, persisted compaction (`LlmAssistedConversationContextManager`).
+- Documented the rationale in `Docs/MemorySystem.md`.
+
 ### 5.0.5 - remove brittle default-backend assertion from singleton test (2026-07-05)
 
 - **Removed `CoreAISettingsAssetEditModeTests.Singleton_ShouldLoadFromResources`.** It hardcoded the

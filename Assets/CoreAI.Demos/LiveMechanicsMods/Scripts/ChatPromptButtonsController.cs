@@ -34,12 +34,26 @@ namespace CoreAI.Demos
 
         [SerializeField] private bool submitWhenInputUnavailable;
 
+        [Tooltip("Show or hide the prompt buttons panel.")] [SerializeField]
+        private bool _showPanel = true;
+
+        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")] [SerializeField]
+        private KeyCode _toggleKey = KeyCode.F8;
+
         private CoreAiChatPanel _chatPanel;
         private string _status = "Click a prompt to insert it into chat.";
 
         private void Awake()
         {
             _chatPanel = FindFirstObjectByType<CoreAiChatPanel>();
+        }
+
+        private void Update()
+        {
+            if (_toggleKey != KeyCode.None && Input.GetKeyDown(_toggleKey))
+            {
+                _showPanel = !_showPanel;
+            }
         }
 
         public void Configure(string panelTitle, Rect rect, PromptButton[] promptButtons)
@@ -51,7 +65,7 @@ namespace CoreAI.Demos
 
         private void OnGUI()
         {
-            if (prompts == null || prompts.Length == 0)
+            if (prompts == null || prompts.Length == 0 || !_showPanel)
             {
                 return;
             }
@@ -66,7 +80,12 @@ namespace CoreAI.Demos
             Rect rect = new(x, y, w, h);
 
             GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label($"<b>{title}</b>", RichLabel());
+            if (GUI.Button(new Rect(w - 58f, 2f, 52f, 18f), "Hide"))
+            {
+                _showPanel = false;
+            }
+
+            GUILayout.Label($"<b>{title}</b> ({_toggleKey})", RichLabel());
             GUILayout.Label(_status, RichLabel());
 
             foreach (PromptButton prompt in prompts)
