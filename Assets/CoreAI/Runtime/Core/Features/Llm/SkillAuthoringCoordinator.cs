@@ -77,7 +77,7 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                if (TryBuildSkill(record, out SkillSet skill, out _, allowUnknownTools: true))
+                if (TryBuildSkill(record, out SkillSet skill, out _, true))
                 {
                     _catalog.AddOrReplace(skill);
                     SeedVersion(record);
@@ -164,7 +164,7 @@ namespace CoreAI.Ai
 
                         SkillRecord record = new(skillId, description ?? "", instructions ?? "",
                             toolNames ?? new List<string>());
-                        if (!TryBuildSkill(record, out SkillSet skill, out string error, allowUnknownTools: false))
+                        if (!TryBuildSkill(record, out SkillSet skill, out string error, false))
                         {
                             return SkillStoreMutation<SkillAuthoringResult>.NoChange(
                                 SkillAuthoringResult.Failure($"create: {error}"));
@@ -227,7 +227,7 @@ namespace CoreAI.Ai
                             toolNames != null ? new List<string>(toolNames) : current.ToolNames,
                             current.Version + 1);
 
-                        if (!TryBuildSkill(revised, out SkillSet skill, out string error, allowUnknownTools: false))
+                        if (!TryBuildSkill(revised, out SkillSet skill, out string error, false))
                         {
                             return SkillStoreMutation<SkillAuthoringResult>.NoChange(
                                 SkillAuthoringResult.Failure($"update: {error}"));

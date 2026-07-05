@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
                 new[] { new StubTool("memory") },
                 new AiTaskRequest { RoleId = "Creator" },
                 new TestSettings(),
-                supportsNativeToolCalling: true);
+                true);
 
             StringAssert.Contains("call the memory tool", native,
                 "Native tool-calling roles with the memory tool must receive the positive memory instruction.");
@@ -111,7 +111,7 @@ namespace CoreAI.Tests.EditMode
                 new[] { new StubTool("world_command") },
                 new AiTaskRequest { RoleId = "Creator" },
                 new TestSettings(),
-                supportsNativeToolCalling: true);
+                true);
 
             StringAssert.DoesNotContain("call the memory tool", native,
                 "Roles without the memory tool must not receive memory guidance.");

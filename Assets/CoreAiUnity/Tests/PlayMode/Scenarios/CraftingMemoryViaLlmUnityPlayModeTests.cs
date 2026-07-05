@@ -80,7 +80,8 @@ namespace CoreAI.Tests.PlayMode
         /// Verifies that three LLMUnity crafting turns produce unique items and persist memory.
         /// </summary>
         [UnityTest]
-        [Explicit("Targeted backend-parity crafting probe. Mandatory full PlayMode keeps CraftingMemoryOpenAi_ThreeCrafts_AllUnique as the representative Lua-backed ThreeCrafts gate.")]
+        [Explicit(
+            "Targeted backend-parity crafting probe. Mandatory full PlayMode keeps CraftingMemoryOpenAi_ThreeCrafts_AllUnique as the representative Lua-backed ThreeCrafts gate.")]
         [Timeout(600000)]
         public IEnumerator CraftingMemoryLlmUnity_ThreeCrafts_AllUnique()
         {
@@ -167,7 +168,8 @@ namespace CoreAI.Tests.PlayMode
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
                     string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, "Iron", "Oak Wood"))
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, "Iron",
+                            "Oak Wood"))
                     {
                         yield break;
                     }
@@ -203,7 +205,8 @@ namespace CoreAI.Tests.PlayMode
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
                     string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, "Steel", "Hardwood"))
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, "Steel",
+                            "Hardwood"))
                     {
                         yield break;
                     }
@@ -239,7 +242,8 @@ namespace CoreAI.Tests.PlayMode
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
                     string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, "Mithril", "Enchanted Wood"))
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, "Mithril",
+                            "Enchanted Wood"))
                     {
                         yield break;
                     }
@@ -469,6 +473,7 @@ namespace CoreAI.Tests.PlayMode
 
             return header + ingredients + memorySection + instructions;
         }
+
         #region Logging Helpers
 
         /// <summary>
@@ -525,7 +530,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log(
                     "[CraftingMemory.LLMUnity] MEMORY: (empty in store after turn - may still be applied next frame, or filled by ExtractCraftInfo from payload)");
             }
-
         }
 
         private static bool ExtractCraftInfo(
@@ -724,7 +728,8 @@ namespace CoreAI.Tests.PlayMode
                     ? ""
                     : $"\nerror: {record.Error}";
 
-                return $"{record.Info.RoleId}:{record.Info.ToolName}:{record.Status} ({record.DurationMs:0}ms)\n{args}{result}{error}";
+                return
+                    $"{record.Info.RoleId}:{record.Info.ToolName}:{record.Status} ({record.DurationMs:0}ms)\n{args}{result}{error}";
             }
         }
     }

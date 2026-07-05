@@ -62,11 +62,12 @@ namespace CoreAI.Demos
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Object the mod moves via unity_* APIs. Auto-created as 'TargetCube' when empty.")]
-        [SerializeField] private Transform targetCube;
+        [Tooltip("Object the mod moves via unity_* APIs. Auto-created as 'TargetCube' when empty.")] [SerializeField]
+        private Transform targetCube;
 
         [Tooltip("Optional Lua source override. When unset, the embedded full_mode_cube source is used.")]
-        [SerializeField] private TextAsset modSourceOverride;
+        [SerializeField]
+        private TextAsset modSourceOverride;
 
         private LuaModRuntime _mods;
         private string _status = "";
@@ -79,7 +80,7 @@ namespace CoreAI.Demos
             if (targetCube == null)
             {
                 GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
+                Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
                 cube.name = "TargetCube";
                 cube.transform.position = new Vector3(0f, 0.5f, 0f);
                 targetCube = cube.transform;

@@ -242,7 +242,7 @@ namespace CoreAI.Tests.EditMode
             const string sse =
                 "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
                 "data: [DONE]\n\n";
-            RateLimit429ThenSseTransport transport = new(failures: 1, sse: sse);
+            RateLimit429ThenSseTransport transport = new(1, sse);
             MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
             List<string> parts = new();
 
@@ -266,9 +266,10 @@ namespace CoreAI.Tests.EditMode
         {
             // Request → retry → FALLBACK: when the stream keeps 429-ing after the retry budget,
             // the turn must try ONE plain completion before surfacing any error.
-            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n")
+            RateLimit429ThenSseTransport transport = new(99, "data: [DONE]\n\n")
             {
-                NonStreamingBody = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"fallback answer\"}}]}"
+                NonStreamingBody =
+                    "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"fallback answer\"}}]}"
             };
             MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
             List<string> parts = new();
@@ -296,7 +297,7 @@ namespace CoreAI.Tests.EditMode
             // Stream 429s twice (initial + retry) AND the fallback completion 429s too:
             // only now the typed RateLimited error surfaces, with no hidden extra rounds.
             // (Deliberately NOT Assert.ThrowsAsync: its sync-over-async wait can deadlock EditMode.)
-            RateLimit429ThenSseTransport transport = new(failures: 99, sse: "data: [DONE]\n\n")
+            RateLimit429ThenSseTransport transport = new(99, "data: [DONE]\n\n")
             {
                 NonStreamingBody = null // non-streaming endpoint also answers 429
             };
@@ -485,7 +486,8 @@ namespace CoreAI.Tests.EditMode
             List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
             Assert.AreEqual(2, calls.Count);
             Assert.IsTrue(calls.All(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)));
-            Assert.IsTrue(calls.All(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests)));
+            Assert.IsTrue(calls.All(c =>
+                c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests)));
         }
 
         [Test]

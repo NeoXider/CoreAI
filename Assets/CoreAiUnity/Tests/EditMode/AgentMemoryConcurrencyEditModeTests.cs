@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode
         private static string CreateTempRoot()
         {
             string root = Path.Combine(Path.GetTempPath(), "CoreAITestAgentMemoryConcurrency_" +
-                                                        Path.GetRandomFileName());
+                                                           Path.GetRandomFileName());
             Directory.CreateDirectory(root);
             return root;
         }
@@ -98,7 +98,7 @@ namespace CoreAI.Tests.EditMode
                     .Select(i => Task.Run(async () =>
                     {
                         await start.Task.ConfigureAwait(false);
-                        await tool.ExecuteAsync("append", content: $"tool_fact_{i:D2}")
+                        await tool.ExecuteAsync("append", $"tool_fact_{i:D2}")
                             .ConfigureAwait(false);
                     }))
                     .ToArray();

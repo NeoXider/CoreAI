@@ -15,14 +15,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameMechanicScenariosG2
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new FlatDamageBuff(),
-            new LevelScaledDamage(),
-            new ScoreWinCondition(),
-            new MultiArgDamage(),
-            new CraftingRules()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new FlatDamageBuff(),
+                new LevelScaledDamage(),
+                new ScoreWinCondition(),
+                new MultiArgDamage(),
+                new CraftingRules()
+            };
+        }
 
         private abstract class LuaSlotScenario : GameBenchmarkScenario
         {
@@ -30,21 +33,30 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int Difficulty => 2;
             protected abstract string Slot { get; }
 
-            public override void Prepare(BenchmarkEnvironment env) => env.Lua.DeclareSlot(Slot);
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.Lua.DeclareSlot(Slot);
+            }
 
-            public override AgentConfig BuildAgent(BenchmarkEnvironment env) =>
-                new AgentBuilder(RoleId)
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.LuaTool())
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
+            }
 
             protected bool NumberIs(BenchmarkEnvironment env, double expected, params object[] args)
-                => env.Lua.TryNumber(Slot, out double v, args) && System.Math.Abs(v - expected) < 1e-6;
+            {
+                return env.Lua.TryNumber(Slot, out double v, args) && System.Math.Abs(v - expected) < 1e-6;
+            }
 
             protected bool BoolIs(BenchmarkEnvironment env, bool expected, params object[] args)
-                => env.Lua.TryBool(Slot, out bool v, args) && v == expected;
+            {
+                return env.Lua.TryBool(Slot, out bool v, args) && v == expected;
+            }
 
             /// <summary>Common Tool-correctness checkpoint: the model ran Lua without failed executions.</summary>
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
@@ -77,9 +89,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool returns50 = NumberIs(env, 50);
 
                 AddToolHygiene(g, env, run);
-                g.Add("override_installed", "calculate_damage override installed", 30, installed, mandatory: true,
+                g.Add("override_installed", "calculate_damage override installed", 30, installed, true,
                     dimension: BenchmarkDimension.IntentSequence);
-                g.Add("returns_50", "calculate_damage() returns 50", 60, returns50, mandatory: true,
+                g.Add("returns_50", "calculate_damage() returns 50", 60, returns50, true,
                     dimension: BenchmarkDimension.TaskCompletion,
                     detail: installed ? null : "slot was never overridden");
 
@@ -113,16 +125,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
-                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), mandatory: true,
+                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), true,
                     dimension: BenchmarkDimension.IntentSequence);
                 g.Add("level_1", "damage(1) == 10", 10, NumberIs(env, 10, 1.0),
                     dimension: BenchmarkDimension.TaskCompletion);
-                g.Add("level_5", "damage(5) == 50", 10, NumberIs(env, 50, 5.0), mandatory: true,
+                g.Add("level_5", "damage(5) == 50", 10, NumberIs(env, 50, 5.0), true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool hidden = NumberIs(env, 0, 0.0) && NumberIs(env, 20, 2.0) && NumberIs(env, 30, 3.0)
                               && NumberIs(env, 70, 7.0) && NumberIs(env, 110, 11.0);
-                g.Add("hidden_samples", "damage(0,2,3,7,11) all == 10*level", 45, hidden, mandatory: true,
+                g.Add("hidden_samples", "damage(0,2,3,7,11) all == 10*level", 45, hidden, true,
                     dimension: BenchmarkDimension.TaskCompletion,
                     detail: hidden ? null : "fails on inputs not shown in the prompt");
 
@@ -155,16 +167,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
-                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), mandatory: true,
+                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), true,
                     dimension: BenchmarkDimension.IntentSequence);
-                g.Add("at_true", "win(100) == true", 15, BoolIs(env, true, 100.0), mandatory: true,
+                g.Add("at_true", "win(100) == true", 15, BoolIs(env, true, 100.0), true,
                     dimension: BenchmarkDimension.TaskCompletion);
-                g.Add("below_false", "win(99) == false", 15, BoolIs(env, false, 99.0), mandatory: true,
+                g.Add("below_false", "win(99) == false", 15, BoolIs(env, false, 99.0), true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool hidden = BoolIs(env, false, 0.0) && BoolIs(env, false, 50.0) && BoolIs(env, true, 101.0)
                               && BoolIs(env, true, 1000.0);
-                g.Add("hidden_samples", "win(0,50)=false, win(101,1000)=true", 45, hidden, mandatory: true,
+                g.Add("hidden_samples", "win(0,50)=false, win(101,1000)=true", 45, hidden, true,
                     dimension: BenchmarkDimension.TaskCompletion,
                     detail: hidden ? null : "fails on inputs not shown in the prompt");
 
@@ -197,9 +209,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
-                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), mandatory: true,
+                g.Add("installed", "override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot), true,
                     dimension: BenchmarkDimension.IntentSequence);
-                g.Add("basic", "damage(10,1,0) == 20", 20, NumberIs(env, 20, 10.0, 1.0, 0.0), mandatory: true,
+                g.Add("basic", "damage(10,1,0) == 20", 20, NumberIs(env, 20, 10.0, 1.0, 0.0), true,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("with_armor", "damage(10,2,5) == 25", 20, NumberIs(env, 25, 10.0, 2.0, 5.0),
                     dimension: BenchmarkDimension.TaskCompletion);
@@ -207,7 +219,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     NumberIs(env, 29, 0.0, 3.0, 1.0) && NumberIs(env, 12, 5.0, 1.0, 3.0),
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("clamped", "damage(0,0,50) == 0 (never negative)", 10, NumberIs(env, 0, 0.0, 0.0, 50.0),
-                    mandatory: true, dimension: BenchmarkDimension.TaskCompletion);
+                    true, dimension: BenchmarkDimension.TaskCompletion);
 
                 if (NumberIs(env, 20, 10.0, 1.0, 0.0) && NumberIs(env, 0, 0.0, 0.0, 50.0))
                 {
@@ -249,11 +261,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 g.Add("installed", "craft_result override installed", 10, env.Lua.LogicSlots.IsOverridden(Slot),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
 
                 bool recipes = Str(env, "plank", "wood", "wood") && Str(env, "table", "plank", "plank")
-                               && Str(env, "steel", "iron", "coal") && Str(env, "torch", "wood", "coal");
-                g.Add("recipes", "all four recipes craft correctly", 35, recipes, mandatory: true,
+                                                                 && Str(env, "steel", "iron", "coal") &&
+                                                                 Str(env, "torch", "wood", "coal");
+                g.Add("recipes", "all four recipes craft correctly", 35, recipes, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool symmetric = Str(env, "torch", "coal", "wood") && Str(env, "steel", "coal", "iron");
@@ -261,15 +274,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool rejects = Str(env, "none", "wood", "iron") && Str(env, "none", "coal", "coal")
-                               && Str(env, "none", "stone", "stone");
-                g.Add("rejects_unknown", "unknown pairs return 'none' (hidden)", 20, rejects, mandatory: true,
+                                                                && Str(env, "none", "stone", "stone");
+                g.Add("rejects_unknown", "unknown pairs return 'none' (hidden)", 20, rejects, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 // Determinism: the same inputs must yield the same output across repeated calls.
                 bool deterministic = SameTwice(env, "wood", "wood") && SameTwice(env, "iron", "coal")
-                                     && SameTwice(env, "stone", "stone");
+                                                                    && SameTwice(env, "stone", "stone");
                 g.Add("deterministic", "identical inputs give identical outputs", 20, deterministic,
-                    mandatory: true, dimension: BenchmarkDimension.Determinism,
+                    true, dimension: BenchmarkDimension.Determinism,
                     detail: deterministic ? null : "output changed between identical calls");
 
                 if (recipes && rejects && deterministic)

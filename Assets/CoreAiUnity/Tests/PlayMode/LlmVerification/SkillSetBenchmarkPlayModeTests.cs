@@ -407,7 +407,8 @@ Some merchants only trade specific item types.",
                     }
                     else if (t.IsCanceled)
                     {
-                        throw new OperationCanceledException("direct-tools benchmark task was canceled before timeout.");
+                        throw new OperationCanceledException(
+                            "direct-tools benchmark task was canceled before timeout.");
                     }
 
                     rB = new BenchmarkResult

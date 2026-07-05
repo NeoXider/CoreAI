@@ -228,7 +228,7 @@ namespace CoreAI.Tests.EditMode
 
             // allowFull:true keeps Full when the host grant also includes it.
             LuaModRuntime allowed = NewRuntime(store);
-            Assert.AreEqual(1, allowed.RehydrateFromStore(LuaCapabilities.All | LuaCapabilities.Full, allowFull: true));
+            Assert.AreEqual(1, allowed.RehydrateFromStore(LuaCapabilities.All | LuaCapabilities.Full, true));
             IReadOnlyList<LuaModInfo> allowedMods = allowed.ListMods();
             Assert.AreEqual(LuaCapabilities.Full, allowedMods[0].Capabilities & LuaCapabilities.Full,
                 "Full must survive rehydrate when allowFull is true and the host grant includes it.");
@@ -253,7 +253,7 @@ namespace CoreAI.Tests.EditMode
             // Import with allowFull:true keeps Full.
             FakeSourceStore allowedStore = new();
             LuaModRuntime allowed = NewRuntime(allowedStore);
-            Assert.IsTrue(allowed.ImportMod(bundle, LuaCapabilities.All | LuaCapabilities.Full, allowFull: true));
+            Assert.IsTrue(allowed.ImportMod(bundle, LuaCapabilities.All | LuaCapabilities.Full, true));
             Assert.AreEqual(LuaCapabilities.Full, allowed.ListMods()[0].Capabilities & LuaCapabilities.Full,
                 "Full must survive import when allowFull is true and the host grant includes it.");
         }

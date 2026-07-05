@@ -269,7 +269,7 @@ namespace CoreAI.Tests.EditMode
             // 'ping' invocations actually ran (the host resets these counters between ticks).
             int perModCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTick;
             int globalCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTickGlobal;
-            int receiverCount = (globalCap / perModCap) + 4;
+            int receiverCount = globalCap / perModCap + 4;
             string[] receivers = new string[receiverCount];
             for (int r = 0; r < receiverCount; r++)
             {
@@ -298,7 +298,7 @@ namespace CoreAI.Tests.EditMode
 
             // Drive enough ticks to drain every receiver. No single tick may dispatch more handler
             // invocations across all mods than the global budget allows.
-            int ticks = ((floodPerReceiver * receiverCount) / globalCap) + 4;
+            int ticks = floodPerReceiver * receiverCount / globalCap + 4;
             for (int tick = 0; tick < ticks; tick++)
             {
                 foreach (string id in receivers)
@@ -601,7 +601,7 @@ namespace CoreAI.Tests.EditMode
             // bounded number of ticks.
             int perModCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTick;
             int globalCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTickGlobal;
-            int modCount = (globalCap / perModCap) + 4;
+            int modCount = globalCap / perModCap + 4;
             string[] ids = new string[modCount];
             for (int m = 0; m < modCount; m++)
             {

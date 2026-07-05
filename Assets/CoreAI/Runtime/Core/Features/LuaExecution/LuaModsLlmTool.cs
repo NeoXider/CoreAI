@@ -285,7 +285,7 @@ namespace CoreAI.Ai
                 return Fail("import: bundle (or code) with the shareable mod JSON is required.");
             }
 
-            return _runtime.ImportMod(bundle, _grantedCapabilities, allowFull: false)
+            return _runtime.ImportMod(bundle, _grantedCapabilities, false)
                 ? Ok($"Mod imported and loaded (capabilities masked to {_grantedCapabilities}).")
                 : Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
         }

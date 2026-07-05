@@ -46,7 +46,12 @@ namespace CoreAI.Tests.EditMode
         public void ApplyHttpApi_MutatesSettings_FiresEvent_ReturnsFalseWithoutScope()
         {
             List<CoreAiBackendStatus> events = new();
-            void Handler(CoreAiBackendStatus s) => events.Add(s);
+
+            void Handler(CoreAiBackendStatus s)
+            {
+                events.Add(s);
+            }
+
             CoreAiBackend.OnBackendChanged += Handler;
             try
             {
@@ -103,7 +108,12 @@ namespace CoreAI.Tests.EditMode
             _testSettings.ConfigureClientOwnedApi("http://a/v1", "k", "m1");
 
             int fired = 0;
-            void Handler(CoreAiBackendStatus s) => fired++;
+
+            void Handler(CoreAiBackendStatus s)
+            {
+                fired++;
+            }
+
             CoreAiBackend.OnBackendChanged += Handler;
             try
             {
@@ -139,7 +149,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task VerifyAsync_WithoutScope_ReportsNotRunning()
         {
-            CoreAiBackendHealth health = await CoreAiBackend.VerifyAsync(timeoutSeconds: 2);
+            CoreAiBackendHealth health = await CoreAiBackend.VerifyAsync(2);
 
             Assert.IsFalse(health.Ok);
             StringAssert.Contains("scope", health.Error.ToLowerInvariant());
@@ -148,7 +158,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void EventHandlerException_DoesNotBreakSwitch()
         {
-            void Throwing(CoreAiBackendStatus s) => throw new System.InvalidOperationException("boom");
+            void Throwing(CoreAiBackendStatus s)
+            {
+                throw new System.InvalidOperationException("boom");
+            }
+
             CoreAiBackend.OnBackendChanged += Throwing;
             try
             {

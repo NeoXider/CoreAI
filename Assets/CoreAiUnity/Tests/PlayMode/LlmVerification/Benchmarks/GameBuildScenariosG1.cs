@@ -17,17 +17,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameBuildScenariosG1
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new SpawnArena(),
-            new CoinCollector(),
-            new ConstraintBudget()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new SpawnArena(),
+                new CoinCollector(),
+                new ConstraintBudget()
+            };
+        }
 
         private abstract class WorldBuildScenario : GameBenchmarkScenario
         {
             public sealed override string Group => "G1";
+
             protected virtual bool UsesLua => true;
+
             // No scene shots for G1: a handful of scattered primitives photographs as noise and
             // adds nothing next to the G6 hero / G7 puzzle shots (user-reported). Scoring is
             // unaffected — the visual checkpoints read the world state, not the screenshot.
@@ -111,10 +116,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public override string Id => "g1_spawn_arena";
             public override string Name => "Spawn arena";
+
             public override string WhatItChecks =>
                 "Spawns a Player + 4 uniquely-named enemies — checks correct named spawns and exact count.";
-            public override System.Collections.Generic.IReadOnlyList<string> ExpectedSceneObjectNames =>
+
+            public override IReadOnlyList<string> ExpectedSceneObjectNames =>
                 new[] { "Player", "Enemy1", "Enemy2", "Enemy3", "Enemy4" };
+
             protected override bool UsesLua => false;
 
             public override string Goal =>
@@ -142,7 +150,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int totalSpawns = env.World.Count("spawn");
                 int occupiedCells = DistinctSpawnPositionCells(env);
 
-                g.Add("player", "spawned 'Player'", 20, player, mandatory: true,
+                g.Add("player", "spawned 'Player'", 20, player, true,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("four_enemies", "spawned Enemy1..Enemy4 (unique names)", 45, enemies == 4,
                     dimension: BenchmarkDimension.TaskCompletion, detail: $"{enemies}/4 uniquely-named enemies");
@@ -176,10 +184,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public override string Id => "g1_coin_collector";
             public override string Name => "Coin collector";
+
             public override string WhatItChecks =>
                 "Builds a coin-collector (Player/Coins/Goal) and wires score+win Lua — checks world build + rule logic.";
-            public override System.Collections.Generic.IReadOnlyList<string> ExpectedSceneObjectNames =>
+
+            public override IReadOnlyList<string> ExpectedSceneObjectNames =>
                 new[] { "Player", "Coin1", "Coin2", "Coin3", "Goal" };
+
             public override int Difficulty => 3;
             public override int TokenBudget => 2200;
             public override double TimeBudgetMs => 35000;
@@ -199,7 +210,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "2. With execute_lua, define two logic slots:\n" +
                 "logic_define('score_formula', function(coins) return coins end)\n" +
                 "logic_define('win_condition', function(score) return score >= 3 end)\n" +
-                GameBenchmarkScenario.LuaVerificationNote;
+                LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -221,12 +232,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int occupiedCells = DistinctSpawnPositionCells(env);
 
                 bool scoreOk = Num(env, "score_formula", 0, 0.0) && Num(env, "score_formula", 1, 1.0)
-                               && Num(env, "score_formula", 2, 2.0) && Num(env, "score_formula", 3, 3.0)
-                               && Num(env, "score_formula", 5, 5.0) && Num(env, "score_formula", 9, 9.0);
+                                                                 && Num(env, "score_formula", 2, 2.0) &&
+                                                                 Num(env, "score_formula", 3, 3.0)
+                                                                 && Num(env, "score_formula", 5, 5.0) &&
+                                                                 Num(env, "score_formula", 9, 9.0);
                 bool winBelow = Bool(env, "win_condition", false, 0.0) && Bool(env, "win_condition", false, 1.0)
-                                && Bool(env, "win_condition", false, 2.0);
+                                                                       && Bool(env, "win_condition", false, 2.0);
                 bool winAt = Bool(env, "win_condition", true, 3.0) && Bool(env, "win_condition", true, 4.0)
-                             && Bool(env, "win_condition", true, 9.0);
+                                                                   && Bool(env, "win_condition", true, 9.0);
 
                 g.Add("player", "Player spawned", 8, player, dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("three_coins", "Coin1..Coin3 spawned (unique)", 15, coins == 3,
@@ -237,11 +250,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("spatial_spread", "spread Player, coins, and Goal across distinct x/z positions", 8,
                     occupiedCells >= 4, dimension: BenchmarkDimension.TaskCompletion,
                     detail: $"{occupiedCells} occupied position cells");
-                g.Add("score_formula", "score_formula(n)==n on hidden samples", 22, scoreOk, mandatory: true,
+                g.Add("score_formula", "score_formula(n)==n on hidden samples", 22, scoreOk, true,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("win_below_false", "win_condition false for 0,1,2", 10, winBelow,
                     dimension: BenchmarkDimension.TaskCompletion);
-                g.Add("win_at_true", "win_condition true for 3,4,9", 16, winAt, mandatory: true,
+                g.Add("win_at_true", "win_condition true for 3,4,9", 16, winAt, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 if (totalSpawns > 5)
@@ -258,20 +271,27 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static bool Num(BenchmarkEnvironment env, string slot, double expected, params object[] args)
-                => env.Lua.TryNumber(slot, out double v, args) && Math.Abs(v - expected) < 1e-6;
+            {
+                return env.Lua.TryNumber(slot, out double v, args) && Math.Abs(v - expected) < 1e-6;
+            }
 
             private static bool Bool(BenchmarkEnvironment env, string slot, bool expected, params object[] args)
-                => env.Lua.TryBool(slot, out bool v, args) && v == expected;
+            {
+                return env.Lua.TryBool(slot, out bool v, args) && v == expected;
+            }
         }
 
         private sealed class ConstraintBudget : WorldBuildScenario
         {
             public override string Id => "g1_constraint_budget";
             public override string Name => "Constraint budget";
+
             public override string WhatItChecks =>
                 "Spawns exactly Tree/Rock/Bush — checks instruction discipline (no extra or other actions).";
-            public override System.Collections.Generic.IReadOnlyList<string> ExpectedSceneObjectNames =>
+
+            public override IReadOnlyList<string> ExpectedSceneObjectNames =>
                 new[] { "Tree", "Rock", "Bush" };
+
             protected override bool UsesLua => false;
             public override int TokenBudget => 1200;
 
@@ -290,7 +310,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int otherWorld = env.World.Commands.Count - totalSpawns;
                 int occupiedCells = DistinctSpawnPositionCells(env);
 
-                g.Add("three_named", "spawned Tree, Rock, Bush", 45, all, mandatory: true,
+                g.Add("three_named", "spawned Tree, Rock, Bush", 45, all, true,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("exactly_three", "exactly three spawns, no more", 25, totalSpawns == 3,
                     dimension: BenchmarkDimension.IntentSequence, detail: $"{totalSpawns} spawns");

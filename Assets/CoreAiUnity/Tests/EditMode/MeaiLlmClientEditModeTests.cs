@@ -296,11 +296,11 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_MapsAdditionalCountsCacheTokens()
         {
             UsageChatClient inner = new(
-                promptTokens: 100,
-                completionTokens: 12,
-                totalTokens: 112,
-                cacheReadTokens: 80,
-                cacheWriteTokens: 20);
+                100,
+                12,
+                112,
+                80,
+                20);
             MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest

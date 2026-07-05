@@ -14,6 +14,7 @@ namespace CoreAI.Ai
     public sealed class LuaTool
     {
         public const string ExecuteLuaToolName = "execute_lua";
+
         public const string ExecuteLuaDescription =
             "Execute sandboxed Lua code using only globals exposed by the current game. " +
             "Runtime rule slots are changed through the logic_* API: call logic_list() when unsure, then use " +

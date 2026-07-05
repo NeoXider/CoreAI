@@ -19,6 +19,7 @@ using CoreAI.Messaging;
 using CoreAI.Sandbox;
 using CoreAI.Session;
 using MoonSharp.Interpreter;
+using UnityEngine;
 using Debug = UnityEngine.Debug;
 
 namespace CoreAI.Tests.PlayMode.Benchmarks
@@ -91,10 +92,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
 
-            public bool SupportsNativeToolCallingForRole(string agentRoleId) =>
-                _inner.SupportsNativeToolCallingForRole(agentRoleId);
+            public bool SupportsNativeToolCallingForRole(string agentRoleId)
+            {
+                return _inner.SupportsNativeToolCallingForRole(agentRoleId);
+            }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken cancellationToken = default)
@@ -260,7 +266,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     foreach (LlmToolCallTrace tool in t.Tools)
                     {
-                        string detail = string.IsNullOrEmpty(tool.Detail) ? "" : $" — {Truncate(tool.Detail, MaxDetail)}";
+                        string detail = string.IsNullOrEmpty(tool.Detail)
+                            ? ""
+                            : $" — {Truncate(tool.Detail, MaxDetail)}";
                         sb.AppendLine($"TOOL: {tool.Name} ({(tool.Success ? "ok" : "FAIL")}, " +
                                       $"{tool.DurationMs:0}ms, {tool.Source}){detail}");
                     }
@@ -316,9 +324,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 LogicSlots.RegisterApis(Registry);
             }
 
-            public void DeclareSlot(string name) => LogicSlots.DeclareSlot(name);
+            public void DeclareSlot(string name)
+            {
+                LogicSlots.DeclareSlot(name);
+            }
 
-            public void Seed(string luaCode) => ExecuteAsync(luaCode, default).GetAwaiter().GetResult();
+            public void Seed(string luaCode)
+            {
+                ExecuteAsync(luaCode, default).GetAwaiter().GetResult();
+            }
 
             public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
             {
@@ -342,13 +356,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             public bool TryNumber(string slot, out double value, params object[] args)
-                => LogicSlots.TryInvokeNumber(slot, out value, args);
+            {
+                return LogicSlots.TryInvokeNumber(slot, out value, args);
+            }
 
             public bool TryBool(string slot, out bool value, params object[] args)
-                => LogicSlots.TryInvokeBool(slot, out value, args);
+            {
+                return LogicSlots.TryInvokeBool(slot, out value, args);
+            }
 
             public bool TryString(string slot, out string value, params object[] args)
-                => LogicSlots.TryInvokeString(slot, out value, args);
+            {
+                return LogicSlots.TryInvokeString(slot, out value, args);
+            }
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -575,18 +595,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (action == "spawn")
                     {
                         string key = !string.IsNullOrEmpty(name) ? name :
-                            (!string.IsNullOrWhiteSpace(cmd.PrefabKeyOrName) ? cmd.PrefabKeyOrName.Trim() : "obj");
+                            !string.IsNullOrWhiteSpace(cmd.PrefabKeyOrName) ? cmd.PrefabKeyOrName.Trim() : "obj";
                         if (!_objects.ContainsKey(key))
                         {
                             bool expected = ExpectedNames.Count == 0 || ExpectedNames.Contains(key);
                             UnityEngine.GameObject go = BuildVisual(
                                 key, cmd.PrefabKeyOrName, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z),
-                                expected, ghost: false);
+                                expected, false);
                             ApplyInlineTransform(go, cmd);
                             _objects[key] = go;
                         }
                     }
-                    else if (action == "move" && _objects.TryGetValue(name, out UnityEngine.GameObject mv) && mv != null)
+                    else if (action == "move" && _objects.TryGetValue(name, out UnityEngine.GameObject mv) &&
+                             mv != null)
                     {
                         mv.transform.position = new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z);
                     }
@@ -685,7 +706,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static float AxisScale(float value, float fallback)
-                => value > 0f ? UnityEngine.Mathf.Clamp(value, 0.01f, 100f) : fallback;
+            {
+                return value > 0f ? UnityEngine.Mathf.Clamp(value, 0.01f, 100f) : fallback;
+            }
 
             // The model now chooses each object's primitive via prefabKey (cube/sphere/cylinder/capsule/
             // plane); the harness no longer guesses a shape from the object's name. ShapeFor maps that
@@ -693,8 +716,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // stable distinct colour so the scene reads like a prototype instead of identical grey cubes.
             private static (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) ShapeFor(string prefabKey)
             {
-                UnityEngine.Vector3 S(float x, float y, float z) => new(x, y, z);
-                if (!CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.TryGetPrimitiveType(
+                UnityEngine.Vector3 S(float x, float y, float z)
+                {
+                    return new Vector3(x, y, z);
+                }
+
+                if (!CoreAiPrimitiveFactory.TryGetPrimitiveType(
                         prefabKey, out UnityEngine.PrimitiveType prim))
                 {
                     prim = UnityEngine.PrimitiveType.Cube;
@@ -722,7 +749,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// tinted a stable hash colour. When <see cref="ExpectedNames"/> is set, unexpected/extra objects
             /// turn red and ghosts grey, and a ✓/✗ status label is drawn (unless <see cref="HideLabels"/>).
             /// </summary>
-            private static float Safe(float v) => UnityEngine.Mathf.Max(UnityEngine.Mathf.Abs(v), 0.05f);
+            private static float Safe(float v)
+            {
+                return UnityEngine.Mathf.Max(UnityEngine.Mathf.Abs(v), 0.05f);
+            }
 
             private UnityEngine.GameObject BuildVisual(
                 string key, string prefabKey, UnityEngine.Vector3 pos, bool expected, bool ghost)
@@ -756,10 +786,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return go;
                 }
 
-                string mark = ExpectedNames.Count == 0 ? "" : (ghost || !expected ? "  ✗" : "  ✓");
+                string mark = ExpectedNames.Count == 0 ? "" : ghost || !expected ? "  ✗" : "  ✓";
                 UnityEngine.Color labelColor =
                     ghost ? new UnityEngine.Color(0.72f, 0.74f, 0.78f) :
-                    expected || ExpectedNames.Count == 0 ? UnityEngine.Color.white : new UnityEngine.Color(1f, 0.62f, 0.58f);
+                    expected || ExpectedNames.Count == 0 ? UnityEngine.Color.white :
+                    new UnityEngine.Color(1f, 0.62f, 0.58f);
 
                 UnityEngine.GameObject labelGo = new("Label");
                 labelGo.transform.SetParent(go.transform, false);
@@ -767,7 +798,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // sit it a fixed world distance above the object's top regardless of that scale.
                 labelGo.transform.localScale = new UnityEngine.Vector3(
                     1f / Safe(scale.x), 1f / Safe(scale.y), 1f / Safe(scale.z));
-                labelGo.transform.localPosition = new UnityEngine.Vector3(0f, (scale.y * 0.5f + 0.5f) / Safe(scale.y), 0f);
+                labelGo.transform.localPosition =
+                    new UnityEngine.Vector3(0f, (scale.y * 0.5f + 0.5f) / Safe(scale.y), 0f);
                 UnityEngine.TextMesh tm = labelGo.AddComponent<UnityEngine.TextMesh>();
                 tm.text = (ghost ? key + " (missing)" : key) + mark;
                 tm.characterSize = 0.03f;
@@ -810,7 +842,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 missing.Sort(StringComparer.OrdinalIgnoreCase);
                 foreach (string name in missing)
                 {
-                    _ghosts.Add(BuildVisual(name, "", UnityEngine.Vector3.zero, expected: true, ghost: true));
+                    _ghosts.Add(BuildVisual(name, "", UnityEngine.Vector3.zero, true, true));
                 }
             }
 
@@ -956,7 +988,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// When set, the wall-clock instant the current scenario should finish by. The world tool feeds a
             /// live "time remaining" note to the model after each spawn so it can pace itself. Null = no clock.
             /// </summary>
-            public System.DateTime? DeadlineUtc { get; set; }
+            public DateTime? DeadlineUtc { get; set; }
 
             /// <summary>Live "X s left" note for tool results, or "" when no deadline is set or it has passed.</summary>
             public string TimeRemainingNote()
@@ -966,7 +998,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return "";
                 }
 
-                double secsLeft = (DeadlineUtc.Value - System.DateTime.UtcNow).TotalSeconds;
+                double secsLeft = (DeadlineUtc.Value - DateTime.UtcNow).TotalSeconds;
                 if (secsLeft <= 0)
                 {
                     return "TIME IS UP — stop building now and finish.";
@@ -975,8 +1007,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return $"~{secsLeft:0}s left to build — keep going, then stop when done.";
             }
 
-            public LuaLlmTool LuaTool() => new(Lua, Settings, CoreAI.Logging.NullLog.Instance);
-            public WorldLlmTool WorldTool() => new(World, Settings, new NullGameLogger(), TimeRemainingNote);
+            public LuaLlmTool LuaTool()
+            {
+                return new LuaLlmTool(Lua, Settings, CoreAI.Logging.NullLog.Instance);
+            }
+
+            public WorldLlmTool WorldTool()
+            {
+                return new WorldLlmTool(World, Settings, new NullGameLogger(), TimeRemainingNote);
+            }
         }
 
         public sealed class RunObservation
@@ -990,6 +1029,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             /// <summary>Wall-clock spent inside LLM calls only (generation), excluding tool execution.</summary>
             public double GenerationMs;
+
             public bool TimedOut;
             public string Failure = "";
             public FailureAttribution Attribution = FailureAttribution.None;
@@ -1061,10 +1101,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public void Add(string id, string description, double weight, bool passed,
                 bool mandatory = false, string detail = null,
                 BenchmarkDimension dimension = BenchmarkDimension.TaskCompletion)
-                => Checkpoints.Add(new BenchmarkCheckpoint(id, description, weight, passed, mandatory, detail,
+            {
+                Checkpoints.Add(new BenchmarkCheckpoint(id, description, weight, passed, mandatory, detail,
                     dimension));
+            }
 
-            public void Penalty(string reason, double points) => Penalties.Add(new BenchmarkPenalty(reason, points));
+            public void Penalty(string reason, double points)
+            {
+                Penalties.Add(new BenchmarkPenalty(reason, points));
+            }
 
             /// <summary>
             /// Subtractive instruction-following: adds a compliance checkpoint (InstructionAdherence) that
@@ -1188,7 +1233,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public int AppendCount { get; private set; }
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
-                => _states.TryGetValue(roleId ?? "", out state);
+            {
+                return _states.TryGetValue(roleId ?? "", out state);
+            }
 
             public void Save(string roleId, AgentMemoryState state)
             {
@@ -1196,22 +1243,34 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 SaveCount++;
             }
 
-            public void Clear(string roleId) => _states.Remove(roleId ?? "");
+            public void Clear(string roleId)
+            {
+                _states.Remove(roleId ?? "");
+            }
 
             public void ClearChatHistory(string roleId)
             {
             }
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
-                => AppendCount++;
+            {
+                AppendCount++;
+            }
 
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<ChatMessage>();
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -1277,8 +1336,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // done" even for a fixed-count instruction-following scenario (e.g. G5's "exactly three
                 // actions"), which actively nudges the model toward extra, unwanted spawns.
                 DeadlineUtc = scenario.FreeBuildLayout
-                    ? System.DateTime.UtcNow.AddSeconds(timeoutSeconds)
-                    : (System.DateTime?)null
+                    ? DateTime.UtcNow.AddSeconds(timeoutSeconds)
+                    : (DateTime?)null
             };
             AgentConfig config = null;
             string setupError = null;
@@ -1447,9 +1506,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // Classify it (so it is retried and excluded from the model's score) when the error text looks
             // transient OR the run produced no usable output at all despite a failed turn.
             if (!emptyResponseStop && !cancellationStop
-                && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
-                && capture.FailedTurnCount > 0
-                && (LooksTransient(capture.FirstProviderError) || !capture.AnyUsableOutput))
+                                   && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
+                                   && capture.FailedTurnCount > 0
+                                   && (LooksTransient(capture.FirstProviderError) || !capture.AnyUsableOutput))
             {
                 obs.Attribution = FailureAttribution.Environment;
                 obs.Failure = $"provider error: {capture.FirstProviderError}";
@@ -1481,7 +1540,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // Invalid (malformed) world commands are a harder error and never a normal recovery step.
             if (obs.InvalidCommands > 0)
             {
-                grading.Penalty($"{obs.InvalidCommands} invalid world command(s)", Math.Min(5 * obs.InvalidCommands, 15));
+                grading.Penalty($"{obs.InvalidCommands} invalid world command(s)",
+                    Math.Min(5 * obs.InvalidCommands, 15));
             }
 
             // An incomplete run (timeout/fault) cannot be a perfect build.
@@ -1599,7 +1659,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // 4K (2160p) output for every report image. The overlay (banner/caption/insets) is either
         // world-space or sized relative to these, so the whole card scales with them.
         private const int ShotWidth = 3840;
+
         private const int ShotHeight = 2160;
+
         // 16:9, two per column between the top/bottom bars. Each 960x540 inset spans a quarter of the
         // 4K frame PER AXIS (so 1/16 of the frame by area): at the old 676x380 the insets read as
         // blurry thumbnails on a 4K report (user-reported). Layout check at 3840x2160 (see
@@ -1749,7 +1811,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // with the scenario + score + verdict as the line below. Long hyphenated model ids are
                 // wrapped (and shrunk) so they never overflow the banner.
                 string m = model ?? "";
-                float mSize = m.Length > 42 ? 0.0064f : (m.Length > 26 ? 0.0086f : 0.0112f);
+                float mSize = m.Length > 42 ? 0.0064f : m.Length > 26 ? 0.0086f : 0.0112f;
                 AddCameraText(p, WrapModel(m, 30), new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.02f),
                     mSize, UnityEngine.Color.white, true);
                 AddCameraText(p, WrapText(header ?? "", 58), new UnityEngine.Vector3(0f, halfH - 0.225f, zb - 0.02f),
@@ -1999,8 +2061,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int y2 = y1 - margin - ih;
             PasteInset(main, b, xRight, y1, iw, ih); // gate-level close-up (front entrance)
             PasteInset(main, c, xRight, y2, iw, ih); // wide: top-down
-            PasteInset(main, d, xLeft, y1, iw, ih);  // zoom: close-up
-            PasteInset(main, e, xLeft, y2, iw, ih);  // zoom: tighter close-up
+            PasteInset(main, d, xLeft, y1, iw, ih); // zoom: close-up
+            PasteInset(main, e, xLeft, y2, iw, ih); // zoom: tighter close-up
             main.Apply();
         }
 
@@ -2085,7 +2147,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 float halfH = zb * UnityEngine.Mathf.Tan(cam.fieldOfView * 0.5f * UnityEngine.Mathf.Deg2Rad);
 
                 // --- data ---
-                System.Collections.Generic.Dictionary<BenchmarkDimension, double> dim = new();
+                Dictionary<BenchmarkDimension, double> dim = new();
                 foreach (DimensionScore d in report.DimensionBreakdown())
                 {
                     dim[d.Dimension] = d.Score;
@@ -2224,7 +2286,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     AddCameraText(p, Shorten(role.Role), new UnityEngine.Vector3(0.02f, y, zb - 0.05f),
                         0.0078f, UnityEngine.Color.white, false, UnityEngine.TextAnchor.MiddleLeft);
 
-                    AddQuad(p, new UnityEngine.Vector3(barX0 + barW * 0.5f, y, zb), new UnityEngine.Vector2(barW, 0.05f),
+                    AddQuad(p, new UnityEngine.Vector3(barX0 + barW * 0.5f, y, zb),
+                        new UnityEngine.Vector2(barW, 0.05f),
                         new UnityEngine.Color(0.16f, 0.17f, 0.20f));
 
                     if (role.Assessed)
@@ -2240,7 +2303,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     else
                     {
                         AddCameraText(p, "n/a", new UnityEngine.Vector3(barX0 + 0.04f, y, zb - 0.05f),
-                            0.0072f, new UnityEngine.Color(0.55f, 0.58f, 0.62f), false, UnityEngine.TextAnchor.MiddleLeft);
+                            0.0072f, new UnityEngine.Color(0.55f, 0.58f, 0.62f), false,
+                            UnityEngine.TextAnchor.MiddleLeft);
                     }
                 }
 
@@ -2308,20 +2372,56 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return "";
             }
 
-            if (role.StartsWith("NPC")) return "NPC";
-            if (role.StartsWith("Mechanic")) return "Mechanic";
-            if (role.StartsWith("Scene")) return "Tool Op";
-            if (role.StartsWith("Programmer")) return "Programmer";
-            if (role.StartsWith("Orchestrator")) return "Director";
-            if (role.StartsWith("QA")) return "QA";
+            if (role.StartsWith("NPC"))
+            {
+                return "NPC";
+            }
+
+            if (role.StartsWith("Mechanic"))
+            {
+                return "Mechanic";
+            }
+
+            if (role.StartsWith("Scene"))
+            {
+                return "Tool Op";
+            }
+
+            if (role.StartsWith("Programmer"))
+            {
+                return "Programmer";
+            }
+
+            if (role.StartsWith("Orchestrator"))
+            {
+                return "Director";
+            }
+
+            if (role.StartsWith("QA"))
+            {
+                return "QA";
+            }
+
             return role;
         }
 
         private static UnityEngine.Color RatingColor(double rating)
         {
-            if (rating >= 8.0) return new UnityEngine.Color(0.36f, 0.78f, 0.45f);
-            if (rating >= 6.5) return new UnityEngine.Color(0.55f, 0.80f, 0.40f);
-            if (rating >= 4.0) return new UnityEngine.Color(0.93f, 0.74f, 0.33f);
+            if (rating >= 8.0)
+            {
+                return new UnityEngine.Color(0.36f, 0.78f, 0.45f);
+            }
+
+            if (rating >= 6.5)
+            {
+                return new UnityEngine.Color(0.55f, 0.80f, 0.40f);
+            }
+
+            if (rating >= 4.0)
+            {
+                return new UnityEngine.Color(0.93f, 0.74f, 0.33f);
+            }
+
             return new UnityEngine.Color(0.88f, 0.42f, 0.40f);
         }
 
@@ -2381,7 +2481,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private static readonly int BaseColorId = UnityEngine.Shader.PropertyToID("_BaseColor");
         private static readonly int ColorId = UnityEngine.Shader.PropertyToID("_Color");
         private static readonly UnityEngine.MaterialPropertyBlock TintBlock = new();
-        private static readonly Dictionary<(UnityEngine.Color color, bool doubleSided), UnityEngine.Material> UnlitMaterialCache = new();
+
+        private static readonly Dictionary<(UnityEngine.Color color, bool doubleSided), UnityEngine.Material>
+            UnlitMaterialCache = new();
+
         private static readonly List<UnityEngine.Mesh> ScratchMeshes = new();
 
         /// <summary>Tints a renderer without touching renderer.material, which would instantiate a material.</summary>
@@ -2502,7 +2605,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             go.transform.localPosition = new UnityEngine.Vector3(0f, 0f, z);
             go.transform.localRotation = UnityEngine.Quaternion.identity;
             go.AddComponent<UnityEngine.MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<UnityEngine.MeshRenderer>().sharedMaterial = MakeUnlitMaterial(color, doubleSided: true);
+            go.AddComponent<UnityEngine.MeshRenderer>().sharedMaterial = MakeUnlitMaterial(color, true);
         }
 
         private static void DestroyScratchMeshes()
@@ -2526,7 +2629,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return text;
             }
 
-            System.Text.StringBuilder sb = new();
+            StringBuilder sb = new();
             int lineLen = 0;
             foreach (string word in text.Split(' '))
             {
@@ -2557,7 +2660,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return s;
             }
 
-            System.Text.StringBuilder sb = new();
+            StringBuilder sb = new();
             int lineLen = 0;
             for (int i = 0; i < s.Length; i++)
             {

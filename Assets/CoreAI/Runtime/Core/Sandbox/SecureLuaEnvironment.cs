@@ -130,7 +130,7 @@ namespace CoreAI.Sandbox
             System.Text.StringBuilder sb = new();
             bool allPassed = true;
 
-            void Check(string name, System.Func<bool> body)
+            void Check(string name, Func<bool> body)
             {
                 bool ok;
                 string detail = "";
@@ -159,10 +159,10 @@ namespace CoreAI.Sandbox
             Check("host callback marshalling (host_add(2,3) == 5)", () =>
             {
                 LuaApiRegistry registry = new();
-                registry.Register("host_add", (System.Func<double, double, double>)((a, b) => a + b));
+                registry.Register("host_add", (Func<double, double, double>)((a, b) => a + b));
                 Script script = env.CreateScript(registry);
                 DynValue result = env.RunChunk(script, "return host_add(2, 3)");
-                return result.Type == DataType.Number && System.Math.Abs(result.Number - 5d) < 0.0001d;
+                return result.Type == DataType.Number && Math.Abs(result.Number - 5d) < 0.0001d;
             });
 
             Check("risky globals stripped (os/io/require are nil)", () =>

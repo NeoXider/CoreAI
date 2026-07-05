@@ -112,7 +112,7 @@ namespace CoreAI.Tests.EditMode
         public void TryParseImageDataUri_ValidPngDataUri_ParsesBytesAndMediaType()
         {
             string b64 = System.Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
-            bool ok = CoreAI.Infrastructure.World.CameraLlmTool.TryParseImageDataUri(
+            bool ok = Infrastructure.World.CameraLlmTool.TryParseImageDataUri(
                 "data:image/png;base64," + b64, out DataContent image);
 
             Assert.IsTrue(ok);
@@ -120,14 +120,14 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("image/png", image.MediaType);
         }
 
-        [TestCase("data:text/plain;base64,aGk=")]   // not an image
+        [TestCase("data:text/plain;base64,aGk=")] // not an image
         [TestCase("data:image/png;base64,!!notbase64!!")]
-        [TestCase("data:image/png,nodelimiters")]    // no ';'
+        [TestCase("data:image/png,nodelimiters")] // no ';'
         [TestCase("plainstring")]
         [TestCase("")]
         public void TryParseImageDataUri_InvalidInputs_ReturnFalse(string dataUri)
         {
-            Assert.IsFalse(CoreAI.Infrastructure.World.CameraLlmTool.TryParseImageDataUri(dataUri, out DataContent image));
+            Assert.IsFalse(Infrastructure.World.CameraLlmTool.TryParseImageDataUri(dataUri, out DataContent image));
             Assert.IsNull(image);
         }
 
@@ -137,7 +137,7 @@ namespace CoreAI.Tests.EditMode
             string b64 = System.Convert.ToBase64String(new byte[] { 1, 2, 3 });
             string json = "{\"success\":true,\"dataUri\":\"data:image/jpeg;base64," + b64 + "\"}";
 
-            bool ok = CoreAI.Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
+            bool ok = Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
                 json, out DataContent image);
 
             Assert.IsTrue(ok);
@@ -145,12 +145,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [TestCase("{\"success\":false,\"dataUri\":\"data:image/jpeg;base64,AQID\"}")] // failed capture
-        [TestCase("{\"success\":true}")]                                              // missing dataUri
+        [TestCase("{\"success\":true}")] // missing dataUri
         [TestCase("not json at all")]
         [TestCase("")]
         public void TryExtractImageContentFromResult_NonImageOrFailed_ReturnsFalse(string json)
         {
-            Assert.IsFalse(CoreAI.Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
+            Assert.IsFalse(Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
                 json, out DataContent image));
             Assert.IsNull(image);
         }

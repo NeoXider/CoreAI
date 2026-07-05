@@ -40,6 +40,7 @@ namespace CoreAI.Infrastructure.Llm
         /// Initializes a new instance of the current component.
         /// </summary>
         private const int LiveUiStreamMaxCharsPerChunk = 48;
+
         private const int HybridToolJsonHeldTailMaxChars = 64 * 1024;
 
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
@@ -1085,6 +1086,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         anyToolCallSucceededInStream = true;
                     }
+
                     pendingFailedToolRetryInstruction = batch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
@@ -1227,6 +1229,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         anyToolCallSucceededInStream = true;
                     }
+
                     pendingFailedToolRetryInstruction = batch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
@@ -1321,6 +1324,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         anyToolCallSucceededInStream = true;
                     }
+
                     pendingFailedToolRetryInstruction = malformedBatch.AllFailed
                         ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
                         : null;
@@ -2313,16 +2317,16 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (span.Start > cursor)
                 {
-                    segments.Add(new HybridProseSegment(cursor, span.Start - cursor, isToolJson: false));
+                    segments.Add(new HybridProseSegment(cursor, span.Start - cursor, false));
                 }
 
-                segments.Add(new HybridProseSegment(span.Start, span.Length, isToolJson: true));
+                segments.Add(new HybridProseSegment(span.Start, span.Length, true));
                 cursor = span.Start + span.Length;
             }
 
             if (holdBoundary > cursor)
             {
-                segments.Add(new HybridProseSegment(cursor, holdBoundary - cursor, isToolJson: false));
+                segments.Add(new HybridProseSegment(cursor, holdBoundary - cursor, false));
             }
 
             exclusiveSafeEnd = holdBoundary;

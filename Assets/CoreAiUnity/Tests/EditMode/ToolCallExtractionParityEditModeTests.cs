@@ -657,7 +657,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(ok, "Keyword-argument function-call syntax should be extracted.");
             Assert.AreEqual(1, matches.Count);
             Assert.AreEqual("world_command", matches[0].Name);
-            var args = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, object>>(
+            Dictionary<string, object> args = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, object>>(
                 matches[0].ArgumentsJson);
             Assert.AreEqual("spawn", args["action"], "Quoted string values keep their content.");
             Assert.AreEqual("Goal", args["targetName"]);

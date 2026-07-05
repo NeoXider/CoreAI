@@ -23,10 +23,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameIntegrationScenariosG7
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new KeyPuzzle()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new KeyPuzzle()
+            };
+        }
 
         private abstract class G7Scenario : GameBenchmarkScenario
         {
@@ -38,14 +41,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override double TimeBudgetMs => 40000;
             public override float TimeoutSeconds => 300f;
 
-            public override AgentConfig BuildAgent(BenchmarkEnvironment env) =>
-                new AgentBuilder(RoleId)
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.WorldTool())
                     .WithTool(env.LuaTool())
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
+            }
 
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
             {
@@ -102,7 +107,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // logic_define throws "slot not declared by the game" for any name the game didn't pre-declare
             // (LuaLogicSlots.Define) — without this, the model's logic_define('key_found', ...) call would
             // always fail, exactly like G4's playthrough scenarios declare their slots up front.
-            public override void Prepare(BenchmarkEnvironment env) => env.Lua.DeclareSlot("key_found");
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.Lua.DeclareSlot("key_found");
+            }
 
             public override string Goal =>
                 "This is a comprehensive test combining spatial building and game logic. Follow every step " +
@@ -130,41 +138,44 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool hasGate = TryFindSpawn(spawns, "Gate", out RecordedWorldCommand gate);
                 bool hasKey = TryFindSpawn(spawns, "Key", out RecordedWorldCommand key);
                 bool spawnedAllThree = hasPlayer && hasGate && hasKey;
-                g.Add("spawned_all_three", "spawned Player, Gate, and Key", 15, spawnedAllThree, mandatory: true,
+                g.Add("spawned_all_three", "spawned Player, Gate, and Key", 15, spawnedAllThree, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 // Exactly 3 (not >=3) and in order: a 4th spawn after Key must fail this, matching the
                 // "do not spawn any other objects" instruction.
                 bool exactOrder = spawns.Count == 3
-                    && string.Equals(spawns[0].TargetName?.Trim(), "Player", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(spawns[1].TargetName?.Trim(), "Gate", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(spawns[2].TargetName?.Trim(), "Key", StringComparison.OrdinalIgnoreCase);
+                                  && string.Equals(spawns[0].TargetName?.Trim(), "Player",
+                                      StringComparison.OrdinalIgnoreCase)
+                                  && string.Equals(spawns[1].TargetName?.Trim(), "Gate",
+                                      StringComparison.OrdinalIgnoreCase)
+                                  && string.Equals(spawns[2].TargetName?.Trim(), "Key",
+                                      StringComparison.OrdinalIgnoreCase);
                 g.Constraint("exact_count_and_order", "spawned exactly 3 objects, in order Player, Gate, Key",
-                    15, !exactOrder, penaltyPerOccurrence: 5,
-                    occurrences: Math.Max(0, spawns.Count - 3));
+                    15, !exactOrder, 5,
+                    Math.Max(0, spawns.Count - 3));
 
                 bool zonesOk = spawnedAllThree
-                    && InRange(player.X, -6f, 6f) && InRange(player.Z, -8f, -4f)
-                    && InRange(gate.X, -6f, 6f) && InRange(gate.Z, 4f, 8f)
-                    && InRange(key.X, -6f, 6f) && InRange(key.Z, -3f, 3f);
+                               && InRange(player.X, -6f, 6f) && InRange(player.Z, -8f, -4f)
+                               && InRange(gate.X, -6f, 6f) && InRange(gate.Z, 4f, 8f)
+                               && InRange(key.X, -6f, 6f) && InRange(key.Z, -3f, 3f);
                 g.Add("zone_compliance", "each object placed within its required x/z zone", 15, zonesOk,
                     dimension: BenchmarkDimension.TaskCompletion,
                     detail: spawnedAllThree ? null : "missing object(s), zones not checked");
 
                 bool shapesOk = spawnedAllThree
-                    && IsPrefab(player, "capsule") && IsPrefab(gate, "cube") && IsPrefab(key, "sphere");
+                                && IsPrefab(player, "capsule") && IsPrefab(gate, "cube") && IsPrefab(key, "sphere");
                 g.Add("shape_compliance", "used the specified prefabKey for each object (capsule/cube/sphere)",
                     10, shapesOk, dimension: BenchmarkDimension.ToolCorrectness,
                     detail: spawnedAllThree ? null : "missing object(s), shapes not checked");
 
                 bool logicInstalled = env.Lua.LogicSlots.IsOverridden("key_found");
-                g.Add("logic_installed", "key_found logic slot installed", 10, logicInstalled, mandatory: true,
+                g.Add("logic_installed", "key_found logic slot installed", 10, logicInstalled, true,
                     dimension: BenchmarkDimension.IntentSequence);
 
                 bool unitOk = logicInstalled
-                    && Bool(env, "key_found", true, 0.0, 0.0, 0.0, 0.0)
-                    && Bool(env, "key_found", true, 2.0, 0.0, 0.0, 0.0)
-                    && Bool(env, "key_found", false, 3.0, 0.0, 0.0, 0.0);
+                              && Bool(env, "key_found", true, 0.0, 0.0, 0.0, 0.0)
+                              && Bool(env, "key_found", true, 2.0, 0.0, 0.0, 0.0)
+                              && Bool(env, "key_found", false, 3.0, 0.0, 0.0, 0.0);
                 g.Add("unit_correctness", "key_found(0,0,0,0)=true, (2,0,0,0)=true, (3,0,0,0)=false", 15,
                     unitOk, dimension: BenchmarkDimension.TaskCompletion);
 
@@ -197,13 +208,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return g;
             }
 
-            private static bool InRange(float value, float min, float max) => value >= min && value <= max;
+            private static bool InRange(float value, float min, float max)
+            {
+                return value >= min && value <= max;
+            }
 
             private static bool IsPrefab(RecordedWorldCommand c, string expectedPrefabKey)
-                => string.Equals(c.PrefabKeyOrName?.Trim(), expectedPrefabKey, StringComparison.OrdinalIgnoreCase);
+            {
+                return string.Equals(c.PrefabKeyOrName?.Trim(), expectedPrefabKey, StringComparison.OrdinalIgnoreCase);
+            }
 
             private static bool Bool(BenchmarkEnvironment env, string slot, bool expected, params object[] a)
-                => env.Lua.TryBool(slot, out bool v, a) && v == expected;
+            {
+                return env.Lua.TryBool(slot, out bool v, a) && v == expected;
+            }
         }
     }
 }

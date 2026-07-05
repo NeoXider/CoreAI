@@ -103,7 +103,8 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public static class ModelComparison
     {
-        public static string Build(IReadOnlyList<ModelSummary> models, string title = "Model comparison", string pinnedModelId = null)
+        public static string Build(IReadOnlyList<ModelSummary> models, string title = "Model comparison",
+            string pinnedModelId = null)
         {
             StringBuilder sb = new();
             sb.AppendLine($"# 🏆 CoreAI Benchmark — {title}");
@@ -220,20 +221,25 @@ namespace CoreAI.Benchmarking
 
             StringBuilder sb = new();
             sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
-              .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
+                .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
             sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
-            sb.Append($"<text x=\"24\" y=\"38\" fill=\"#e8e8ea\" font-size=\"22\" font-weight=\"bold\">{BenchmarkInfo.TitleWithVersion}</text>");
-            sb.Append("<text x=\"24\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">Suite base score (0–100, higher is better), ranked best-first</text>");
+            sb.Append(
+                $"<text x=\"24\" y=\"38\" fill=\"#e8e8ea\" font-size=\"22\" font-weight=\"bold\">{BenchmarkInfo.TitleWithVersion}</text>");
+            sb.Append(
+                "<text x=\"24\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">Suite base score (0–100, higher is better), ranked best-first</text>");
 
             for (int tick = 0; tick <= 100; tick += 25)
             {
                 int y = axisY - (int)System.Math.Round(chartHeight * tick / 100.0);
                 string gridColor = tick == 0 ? "#5a5f68" : "#33353b";
-                sb.Append($"<line x1=\"{left}\" y1=\"{y}\" x2=\"{width - right}\" y2=\"{y}\" stroke=\"{gridColor}\" stroke-width=\"1\"/>");
-                sb.Append($"<text x=\"{left - 12}\" y=\"{y + 4}\" fill=\"#9aa0a6\" font-size=\"11\" text-anchor=\"end\">{tick}%</text>");
+                sb.Append(
+                    $"<line x1=\"{left}\" y1=\"{y}\" x2=\"{width - right}\" y2=\"{y}\" stroke=\"{gridColor}\" stroke-width=\"1\"/>");
+                sb.Append(
+                    $"<text x=\"{left - 12}\" y=\"{y + 4}\" fill=\"#9aa0a6\" font-size=\"11\" text-anchor=\"end\">{tick}%</text>");
             }
 
-            sb.Append($"<line x1=\"{left}\" y1=\"{top}\" x2=\"{left}\" y2=\"{axisY}\" stroke=\"#5a5f68\" stroke-width=\"1\"/>");
+            sb.Append(
+                $"<line x1=\"{left}\" y1=\"{top}\" x2=\"{left}\" y2=\"{axisY}\" stroke=\"#5a5f68\" stroke-width=\"1\"/>");
 
             for (int i = 0; i < count; i++)
             {
@@ -249,18 +255,22 @@ namespace CoreAI.Benchmarking
                 string stroke = pinned ? "#e8e8ea" : "none";
                 int strokeWidth = pinned ? 2 : 0;
 
-                sb.Append($"<rect x=\"{barX}\" y=\"{barY}\" width=\"{barWidth}\" height=\"{barH}\" rx=\"5\" fill=\"{fill}\" ")
-                  .Append($"stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
-                sb.Append($"<text x=\"{centerX}\" y=\"{barY - 8}\" fill=\"#e8e8ea\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">")
-                  .Append(F(model.SuiteBase)).Append("</text>");
-                sb.Append($"<text x=\"{centerX - 4}\" y=\"{axisY + 24}\" fill=\"#c8ccd0\" font-size=\"11\" text-anchor=\"end\" ")
-                  .Append($"transform=\"rotate(-30 {centerX - 4} {axisY + 24})\">")
-                  .Append(Xml(Trunc(model.ModelId, 24))).Append("</text>");
+                sb.Append(
+                        $"<rect x=\"{barX}\" y=\"{barY}\" width=\"{barWidth}\" height=\"{barH}\" rx=\"5\" fill=\"{fill}\" ")
+                    .Append($"stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
+                sb.Append(
+                        $"<text x=\"{centerX}\" y=\"{barY - 8}\" fill=\"#e8e8ea\" font-size=\"12\" font-weight=\"bold\" text-anchor=\"middle\">")
+                    .Append(F(model.SuiteBase)).Append("</text>");
+                sb.Append(
+                        $"<text x=\"{centerX - 4}\" y=\"{axisY + 24}\" fill=\"#c8ccd0\" font-size=\"11\" text-anchor=\"end\" ")
+                    .Append($"transform=\"rotate(-30 {centerX - 4} {axisY + 24})\">")
+                    .Append(Xml(Trunc(model.ModelId, 24))).Append("</text>");
             }
 
             if (count == 0)
             {
-                sb.Append($"<text x=\"{width / 2}\" y=\"{top + chartHeight / 2}\" fill=\"#9aa0a6\" font-size=\"14\" text-anchor=\"middle\">No model reports found</text>");
+                sb.Append(
+                    $"<text x=\"{width / 2}\" y=\"{top + chartHeight / 2}\" fill=\"#9aa0a6\" font-size=\"14\" text-anchor=\"middle\">No model reports found</text>");
             }
 
             sb.Append("</svg>");
@@ -338,7 +348,7 @@ namespace CoreAI.Benchmarking
 
         private static string Bar(double pct, int width = 24)
         {
-            pct = double.IsNaN(pct) ? 0 : (pct < 0 ? 0 : (pct > 100 ? 100 : pct));
+            pct = double.IsNaN(pct) ? 0 : pct < 0 ? 0 : pct > 100 ? 100 : pct;
             int filled = (int)System.Math.Round(pct / 100.0 * width);
             return new string('█', filled) + new string('░', width - filled);
         }
@@ -365,7 +375,7 @@ namespace CoreAI.Benchmarking
                 return min;
             }
 
-            return value < min ? min : (value > max ? max : value);
+            return value < min ? min : value > max ? max : value;
         }
 
         private static string HexColor(double score)
@@ -389,7 +399,9 @@ namespace CoreAI.Benchmarking
                 .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
         }
 
-        private static string F(double v) =>
-            (double.IsNaN(v) || double.IsInfinity(v) ? 0d : v).ToString("0.#", CultureInfo.InvariantCulture);
+        private static string F(double v)
+        {
+            return (double.IsNaN(v) || double.IsInfinity(v) ? 0d : v).ToString("0.#", CultureInfo.InvariantCulture);
+        }
     }
 }

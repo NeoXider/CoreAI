@@ -81,7 +81,7 @@ namespace CoreAI.Ai
                 // real/estimated ratio back into scale units so repeated observations converge
                 // toward real/baseEstimate, not sqrt(real/baseEstimate).
                 double targetScale = _scale * realPromptTokens / estimatedPromptTokens;
-                _scale = Clamp((_scale * (1d - Alpha)) + (targetScale * Alpha), MinScale, MaxScale);
+                _scale = Clamp(_scale * (1d - Alpha) + targetScale * Alpha, MinScale, MaxScale);
                 updatedScale = _scale;
             }
 

@@ -373,7 +373,7 @@ namespace CoreAI
 
             try
             {
-                var registry = scope.Container.Resolve(typeof(ILlmClientRegistry)) as LlmClientRegistry;
+                LlmClientRegistry? registry = scope.Container.Resolve(typeof(ILlmClientRegistry)) as LlmClientRegistry;
                 if (registry == null)
                 {
                     LogWarning("Hot swap skipped: ILlmClientRegistry is not the built-in LlmClientRegistry.");

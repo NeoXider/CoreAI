@@ -55,8 +55,7 @@ namespace CoreAI.Composition
         /// </summary>
         public bool FullLuaAccessEnabled => enableFullLuaAccess;
 
-        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
-        [SerializeField]
+        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")] [SerializeField]
         private bool enableFullLuaPrivateAccess;
 
         [Header("Skills")]
@@ -114,7 +113,7 @@ namespace CoreAI.Composition
 
                 CoreAISettings.Instance = settings;
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-                CoreAI.Sandbox.SecureLuaEnvironment.WebGlLuaOptIn = settings.EnableLuaOnWebGl;
+                Sandbox.SecureLuaEnvironment.WebGlLuaOptIn = settings.EnableLuaOnWebGl;
 #endif
             }
 
@@ -147,7 +146,7 @@ namespace CoreAI.Composition
                 RoleSkillsBinding[] bindings = roleSkills;
                 builder.RegisterBuildCallback(container =>
                 {
-                    var policy = container.Resolve<AgentMemoryPolicy>();
+                    AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
                     foreach (RoleSkillsBinding binding in bindings)
                     {
                         if (binding?.skills == null || string.IsNullOrWhiteSpace(binding.roleId))

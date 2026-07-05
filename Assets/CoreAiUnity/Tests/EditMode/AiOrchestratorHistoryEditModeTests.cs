@@ -767,8 +767,8 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient updateLlm = new();
             await RunMemoryPlacementRequestAsync(
                 updateLlm,
-                memoryText: "Learner likes geometry puzzles.\nLearner prefers hints.",
-                cachedSnapshot: "Learner likes geometry puzzles.");
+                "Learner likes geometry puzzles.\nLearner prefers hints.",
+                "Learner likes geometry puzzles.");
 
             Assert.IsNotNull(updateLlm.LastRequest);
             StringAssert.Contains("Learner likes geometry puzzles.", updateLlm.LastRequest.SystemPrompt);

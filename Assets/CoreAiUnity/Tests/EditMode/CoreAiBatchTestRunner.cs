@@ -130,7 +130,8 @@ namespace CoreAI.Tests.EditMode
             {
                 if ((result.ResultState ?? "").StartsWith("Failed", StringComparison.Ordinal))
                 {
-                    Debug.LogError($"[CoreAiBatchTestRunner] Failed: {result.FullName}\n{result.Message}\n{result.StackTrace}");
+                    Debug.LogError(
+                        $"[CoreAiBatchTestRunner] Failed: {result.FullName}\n{result.Message}\n{result.StackTrace}");
                 }
             }
         }

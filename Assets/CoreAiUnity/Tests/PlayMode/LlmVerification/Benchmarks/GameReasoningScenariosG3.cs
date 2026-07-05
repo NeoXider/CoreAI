@@ -18,15 +18,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameReasoningScenariosG3
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new QuadraticScore(),
-            new TieredPricing(),
-            new ClampedRegen(),
-            new FibonacciRewards(),
-            new BooleanDungeon(),
-            new BalancedEnemies()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new QuadraticScore(),
+                new TieredPricing(),
+                new ClampedRegen(),
+                new FibonacciRewards(),
+                new BooleanDungeon(),
+                new BalancedEnemies()
+            };
+        }
 
         // --- bases -----------------------------------------------------------------------------------
 
@@ -66,21 +69,30 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             protected abstract string Slot { get; }
 
-            public override void Prepare(BenchmarkEnvironment env) => env.Lua.DeclareSlot(Slot);
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.Lua.DeclareSlot(Slot);
+            }
 
-            public override AgentConfig BuildAgent(BenchmarkEnvironment env) =>
-                new AgentBuilder(RoleId)
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.LuaTool())
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
+            }
 
             protected bool Num(BenchmarkEnvironment env, double expected, params object[] args)
-                => env.Lua.TryNumber(Slot, out double v, args) && Math.Abs(v - expected) < 1e-6;
+            {
+                return env.Lua.TryNumber(Slot, out double v, args) && Math.Abs(v - expected) < 1e-6;
+            }
 
             protected bool Bool(BenchmarkEnvironment env, bool expected, params object[] args)
-                => env.Lua.TryBool(Slot, out bool v, args) && v == expected;
+            {
+                return env.Lua.TryBool(Slot, out bool v, args) && v == expected;
+            }
         }
 
         // --- scenarios -------------------------------------------------------------------------------
@@ -103,11 +115,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 g.Add("installed", "score slot installed", 10, env.Lua.LogicSlots.IsOverridden(Slot),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
                 g.Add("stated", "score(1)==10", 10, Num(env, 10, 1.0), dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("derived", "score(0,2,3,5,10) == combo²·10", 65,
                     Num(env, 0, 0.0) && Num(env, 40, 2.0) && Num(env, 90, 3.0) && Num(env, 250, 5.0)
-                    && Num(env, 1000, 10.0), mandatory: true, dimension: BenchmarkDimension.Reasoning);
+                    && Num(env, 1000, 10.0), true, dimension: BenchmarkDimension.Reasoning);
 
                 if (Num(env, 1000, 10.0))
                 {
@@ -137,20 +149,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 g.Add("installed", "price slot installed", 10, env.Lua.LogicSlots.IsOverridden(Slot),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
 
                 // Within tier 1 — relatively easy.
                 g.Add("tier1", "price(5)==25 and price(10)==50", 15,
                     Num(env, 25, 5.0) && Num(env, 50, 10.0), dimension: BenchmarkDimension.TaskCompletion);
 
                 // Cross-tier — needs real piecewise reasoning.
-                bool reason = Num(env, 54, 11.0)   // 50 + 1*4
+                bool reason = Num(env, 54, 11.0) // 50 + 1*4
                               && Num(env, 70, 15.0) // 50 + 5*4
                               && Num(env, 90, 20.0) // 50 + 10*4
                               && Num(env, 105, 25.0) // 90 + 5*3
                               && Num(env, 120, 30.0); // 90 + 10*3
                 g.Add("cross_tier", "price(11,15,20,25,30) follow the tiers", 65, reason,
-                    mandatory: true, dimension: BenchmarkDimension.Reasoning);
+                    true, dimension: BenchmarkDimension.Reasoning);
 
                 if (reason)
                 {
@@ -180,15 +192,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 g.Add("installed", "regen slot installed", 10, env.Lua.LogicSlots.IsOverridden(Slot),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
                 g.Add("normal", "regen(50,30,100)==80", 15, Num(env, 80, 50.0, 30.0, 100.0),
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool clampHigh = Num(env, 100, 90.0, 20.0, 100.0) && Num(env, 100, 100.0, 50.0, 100.0);
                 bool clampLow = Num(env, 0, 10.0, -30.0, 100.0) && Num(env, 0, 0.0, -5.0, 100.0);
-                g.Add("clamp_high", "never exceeds max_hp", 35, clampHigh, mandatory: true,
+                g.Add("clamp_high", "never exceeds max_hp", 35, clampHigh, true,
                     dimension: BenchmarkDimension.Reasoning);
-                g.Add("clamp_low", "never drops below 0", 30, clampLow, mandatory: true,
+                g.Add("clamp_low", "never drops below 0", 30, clampLow, true,
                     dimension: BenchmarkDimension.Reasoning);
 
                 if (clampHigh && clampLow)
@@ -220,12 +232,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 g.Add("installed", "wave_reward slot installed", 10, env.Lua.LogicSlots.IsOverridden(Slot),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
                 g.Add("stated", "wave_reward(1)=1, (5)=5", 10, Num(env, 1, 1.0) && Num(env, 5, 5.0),
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 bool derived = Num(env, 8, 6.0) && Num(env, 13, 7.0) && Num(env, 55, 10.0) && Num(env, 144, 12.0);
-                g.Add("derived", "wave_reward(6,7,10,12) = 8,13,55,144", 60, derived, mandatory: true,
+                g.Add("derived", "wave_reward(6,7,10,12) = 8,13,55,144", 60, derived, true,
                     dimension: BenchmarkDimension.Reasoning);
 
                 bool deterministic = env.Lua.TryNumber(Slot, out double a, 10.0)
@@ -246,14 +258,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         private abstract class WorldLuaG3Scenario : G3Scenario
         {
-            public override AgentConfig BuildAgent(BenchmarkEnvironment env) =>
-                new AgentBuilder(RoleId)
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.WorldTool())
                     .WithTool(env.LuaTool())
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
                     .BuildDetached();
+            }
         }
 
         /// <summary>Boolean composition with negation across three flags.</summary>
@@ -262,7 +276,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string Id => "g3_boolean_dungeon";
             public override string Name => "Dungeon win logic";
 
-            public override void Prepare(BenchmarkEnvironment env) => env.Lua.DeclareSlot("can_win");
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.Lua.DeclareSlot("can_win");
+            }
 
             public override string Goal =>
                 "Build a tiny dungeon. First, with world_command (action='spawn', prefabKey='Cube'), spawn " +
@@ -277,20 +294,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
                 AddToolHygiene(g, env, run);
                 bool spawned = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Key")
-                               && SpawnedExactly(env, "Door");
+                                                             && SpawnedExactly(env, "Door");
                 g.Add("spawned", "Player, Key, Door spawned", 15, spawned,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("installed", "can_win slot installed", 10, env.Lua.LogicSlots.IsOverridden("can_win"),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
 
                 g.Add("win_case", "can_win(true,true,false)==true", 20, B(env, true, true, true, false),
-                    mandatory: true, dimension: BenchmarkDimension.TaskCompletion);
+                    true, dimension: BenchmarkDimension.TaskCompletion);
 
-                bool logic = B(env, false, true, true, true)    // boss alive -> false (negation)
+                bool logic = B(env, false, true, true, true) // boss alive -> false (negation)
                              && B(env, false, true, false, false) // not at door -> false
                              && B(env, false, false, true, false) // no key -> false
                              && B(env, false, false, false, false);
-                g.Add("logic", "all non-winning combinations are false", 50, logic, mandatory: true,
+                g.Add("logic", "all non-winning combinations are false", 50, logic, true,
                     dimension: BenchmarkDimension.Reasoning);
 
                 if (logic && B(env, true, true, true, false))
@@ -302,7 +319,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static bool B(BenchmarkEnvironment env, bool expected, bool hasKey, bool atDoor, bool bossAlive)
-                => env.Lua.TryBool("can_win", out bool v, hasKey, atDoor, bossAlive) && v == expected;
+            {
+                return env.Lua.TryBool("can_win", out bool v, hasKey, atDoor, bossAlive) && v == expected;
+            }
         }
 
         /// <summary>Constraint satisfaction: four distinct in-range HP values summing to exactly 400.</summary>
@@ -312,7 +331,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string Name => "Balanced enemy HP";
             public override int Difficulty => 5;
 
-            public override void Prepare(BenchmarkEnvironment env) => env.Lua.DeclareSlot("enemy_hp");
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.Lua.DeclareSlot("enemy_hp");
+            }
 
             public override string Goal =>
                 "Spawn four enemies with world_command (action='spawn', prefabKey='Cube') named 'Enemy1', " +
@@ -339,7 +361,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("spawned", "Enemy1..Enemy4 spawned", 15, spawns == 4,
                     dimension: BenchmarkDimension.TaskCompletion);
                 g.Add("installed", "enemy_hp slot installed", 10, env.Lua.LogicSlots.IsOverridden("enemy_hp"),
-                    mandatory: true, dimension: BenchmarkDimension.IntentSequence);
+                    true, dimension: BenchmarkDimension.IntentSequence);
 
                 List<double> hp = new();
                 bool allResolved = true;
@@ -371,7 +393,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     dimension: BenchmarkDimension.Reasoning);
                 g.Add("distinct", "all four HP values are different", 15, distinct,
                     dimension: BenchmarkDimension.Reasoning);
-                g.Add("sum_400", "HP values sum to exactly 400", 15, sums, mandatory: true,
+                g.Add("sum_400", "HP values sum to exactly 400", 15, sums, true,
                     dimension: BenchmarkDimension.Reasoning,
                     detail: allResolved ? $"sum={sum}" : "unresolved");
 

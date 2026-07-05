@@ -60,10 +60,18 @@ namespace CoreAI.Chat
         public const string DefaultWelcomeMessage = "Hello! How can I help?";
         public const string DefaultSendButtonText = ">";
         public const string DefaultStopButtonText = "X";
-        public const string DefaultSendButtonTooltip = "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435";
-        public const string DefaultStopButtonTooltip = "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u044e (Esc)";
+
+        public const string DefaultSendButtonTooltip =
+            "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435";
+
+        public const string DefaultStopButtonTooltip =
+            "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u044e (Esc)";
+
         public const string DefaultClearButtonText = "C";
-        public const string DefaultClearButtonTooltip = "\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442";
+
+        public const string DefaultClearButtonTooltip =
+            "\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442";
+
         public const string DefaultCollapseButtonText = "-";
         public const string DefaultCollapseButtonTooltip = "Collapse chat";
         public const string DefaultCollapseButtonWithEscTooltip = "Collapse chat (Esc)";

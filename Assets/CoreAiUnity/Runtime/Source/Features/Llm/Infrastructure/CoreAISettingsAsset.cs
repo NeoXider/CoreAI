@@ -208,7 +208,8 @@ namespace CoreAI.Infrastructure.Llm
         [Min(0)]
         private int thinkingBudgetTokens;
 
-        [Tooltip("Optional JSON object merged into OpenAI-compatible HTTP request bodies. Leave empty for provider default.")]
+        [Tooltip(
+            "Optional JSON object merged into OpenAI-compatible HTTP request bodies. Leave empty for provider default.")]
         [TextArea(2, 6)]
         [SerializeField]
         private string extraBodyJson = "";

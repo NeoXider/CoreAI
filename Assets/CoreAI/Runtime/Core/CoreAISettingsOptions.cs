@@ -37,11 +37,15 @@ namespace CoreAI
         public bool EnableConversationHistorySummarization { get; set; } = true;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
         public int ConversationRolledSummaryMaxTokens { get; set; }
+
         public float ConversationCompactionTriggerRatio { get; set; } =
             CoreAISettings.DefaultConversationCompactionTriggerRatio;
+
         public bool EnableContextPruning { get; set; } = CoreAISettings.DefaultEnableContextPruning;
+
         public int MaxRetainedToolResultMessages { get; set; } =
             CoreAISettings.DefaultMaxRetainedToolResultMessages;
+
         public ILlmAsyncMarshaler ToolInvocationMarshaler { get; set; } = PassThroughLlmAsyncMarshaler.Instance;
         public int MaxToolResultChars { get; set; } = 8000;
         public int DefaultToolTimeoutMs { get; set; } = 30000;

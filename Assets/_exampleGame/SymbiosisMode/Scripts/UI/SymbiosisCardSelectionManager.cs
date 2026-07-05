@@ -20,7 +20,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
         {
             if (cardsPanel == null || cardsContainer == null || cardPrefab == null)
             {
-                Debug.LogWarning("[CardManager] cardsPanel/cardsContainer/cardPrefab not wired in the inspector; card selection disabled.");
+                Debug.LogWarning(
+                    "[CardManager] cardsPanel/cardsContainer/cardPrefab not wired in the inspector; card selection disabled.");
                 enabled = false;
                 return;
             }

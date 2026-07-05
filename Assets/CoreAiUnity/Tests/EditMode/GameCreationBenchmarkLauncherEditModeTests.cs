@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
         {
             if (Directory.Exists(_tempDir))
             {
-                Directory.Delete(_tempDir, recursive: true);
+                Directory.Delete(_tempDir, true);
             }
         }
 

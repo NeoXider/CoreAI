@@ -24,6 +24,7 @@ namespace CoreAI.Editor
     public static class CoreAIModuleManager
     {
         private const string MoonSharpId = "org.moonsharp.moonsharp";
+
         private const string MoonSharpUrl =
             "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0";
 
@@ -100,7 +101,7 @@ namespace CoreAI.Editor
                 return;
             }
 
-            ListRequest list = Client.List(offlineMode: false, includeIndirectDependencies: false);
+            ListRequest list = Client.List(false, false);
             Pump(list, () =>
             {
                 string moonsharp = DescribePackage(list, MoonSharpId);
@@ -110,7 +111,7 @@ namespace CoreAI.Editor
                 string message =
                     $"MoonSharp package: {moonsharp}\n" +
                     $"COREAI_NO_LUA define: {(noLua ? "SET (Lua disabled)" : "not set")}\n" +
-                    $"-> Lua effective: {((moonsharp != "not installed" && !noLua) ? "ENABLED" : "disabled")}\n\n" +
+                    $"-> Lua effective: {(moonsharp != "not installed" && !noLua ? "ENABLED" : "disabled")}\n\n" +
                     $"LLMUnity package: {llmunity}\n" +
                     $"-> Local LLM effective: {(llmunity != "not installed" ? "ENABLED" : "disabled")}";
 

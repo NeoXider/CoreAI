@@ -261,7 +261,8 @@ namespace CoreAI.Tests.PlayMode
                 string receivedMessage = string.Empty;
 
                 AgentConfig helper = new AgentBuilder("TestHelper")
-                    .WithSystemPrompt("When asked to send a ping, send the provided message through the available action.")
+                    .WithSystemPrompt(
+                        "When asked to send a ping, send the provided message through the available action.")
                     .WithMode(AgentMode.ToolsOnly)
                     .WithAction("send_ping", "Send a ping message", new Action<string>((string message) =>
                     {

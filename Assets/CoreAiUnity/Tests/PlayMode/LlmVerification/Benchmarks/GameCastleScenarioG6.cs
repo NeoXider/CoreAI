@@ -13,10 +13,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameFreeBuildScenariosG6
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new FreeBuildScene()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new FreeBuildScene()
+            };
+        }
 
         private abstract class G6Scenario : GameBenchmarkScenario
         {
@@ -38,7 +41,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int Difficulty => 5;
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
+
             public override int? RepsOverride => 1; // visual hero, never repeated/averaged
+
             // Tool-call cap for the visual build. Default 1000 — effectively "build as much as you want" for
             // any real model, while still a HARD safety valve so a weak model that spams identical spawns
             // can never loop forever and hang the run. When the cap is hit
@@ -60,7 +65,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override int? MaxToolCallRoundtripsOverride => FreeBuildRoundtrips();
             public override int TokenBudget => 6000;
+
             public override double TimeBudgetMs => 45000;
+
             // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
             // and counted down to after each spawn, so it can pace itself. 600s (10 min) is intentionally
             // G6-specific; the whole-suite soft budget is much larger. Override via COREAI_BENCHMARK_TIMEOUT.
@@ -84,11 +91,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
             {
                 g.Add("used_tools", "issued at least one tool call", 10, run.ToolCalls >= 1,
-                    mandatory: true,
+                    true,
                     dimension: BenchmarkDimension.ToolCorrectness);
                 g.Add("clean_tools", "no failed tool calls or invalid world commands", 10,
                     run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
-                    mandatory: true,
+                    true,
                     dimension: BenchmarkDimension.ToolCorrectness,
                     detail: $"{run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
             }
@@ -97,6 +104,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private sealed class FreeBuildScene : G6Scenario
         {
             public override string Id => "g6_free_build";
+
             public override string Name => FreeBuildSubject() != null
                 ? $"Free build: {FreeBuildSubject()}"
                 : "Free build (visual)";
@@ -123,7 +131,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
             }
 
-            private static string FreeBuildSubject() => Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT");
+            private static string FreeBuildSubject()
+            {
+                return Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT");
+            }
 
             public override string Goal
             {
@@ -131,38 +142,41 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     string full = Env("COREAI_BENCHMARK_FREEBUILD_PROMPT");
                     string baseGoal = full
-                        ?? (FreeBuildSubject() is string subject ? GenericGoal(subject) : CastleGoal);
+                                      ?? (FreeBuildSubject() is string subject ? GenericGoal(subject) : CastleGoal);
 
                     // Tell the model it is on a clock and that every spawn result reports the time left, so it
                     // can pace itself and stop cleanly before the deadline rather than being cut off.
                     return baseGoal +
-                        "\n\nYou are on a time budget. After every spawn, the tool result tells you how many " +
-                        "seconds remain. Pace yourself: keep building steadily, and when the time is nearly up, " +
-                        "stop spawning and finish — a complete smaller scene beats a half-built large one.";
+                           "\n\nYou are on a time budget. After every spawn, the tool result tells you how many " +
+                           "seconds remain. Pace yourself: keep building steadily, and when the time is nearly up, " +
+                           "stop spawning and finish — a complete smaller scene beats a half-built large one.";
                 }
             }
 
-            private static string GenericGoal(string subject) =>
-                $"Build the most impressive {subject} you can. This is a showcase of your 3D spatial reasoning: " +
-                "the more complete, structured and detailed, the better you score. Use the world_command tool only, " +
-                "action='spawn', a DISTINCT targetName for every object, prefabKey for what to create, and explicit " +
-                "x,y,z coordinates within the -9..9 range so the whole scene fits in one screenshot. One Unity unit " +
-                "is one meter (y is height, larger y = higher; ground at y=0).\n\n" +
-                "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule. " +
-                "For the ground, use a wide, flat, low cube with scaleX/scaleY/scaleZ (for example scaleX=16, " +
-                "scaleY=0.2, scaleZ=16 at y=0). These primitives are NOT all the same base size: " +
-                "cube/sphere are 1m unscaled, but cylinder and capsule are already 2m TALL unscaled at 1m " +
-                "diameter — for a tower/pillar/trunk of height H standing on the ground, use scaleY = H/2 (not H) " +
-                "and place its pivot at y = H/2.\n\n" +
-                $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
-                "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
-                "detailed — quantity and structure come first.\n\n" +
-                "Give it natural variety — varied sizes, angles and rotations fx/fy/fz for angled pieces — so it " +
-                "does not read as a grid of identical 1m cubes. Use scaleX/scaleY/scaleZ for long, tall, wide or " +
-                "thin parts.\n\n" +
-                "COLOR the scene: use action='set_color' with targetName and stringValue as an HTML color " +
-                "(e.g. '#9aa0a8') to tint each major group appropriately — ground, structures, details. " +
-                "An all-grey scene loses points; color at least the main groups.";
+            private static string GenericGoal(string subject)
+            {
+                return
+                    $"Build the most impressive {subject} you can. This is a showcase of your 3D spatial reasoning: " +
+                    "the more complete, structured and detailed, the better you score. Use the world_command tool only, " +
+                    "action='spawn', a DISTINCT targetName for every object, prefabKey for what to create, and explicit " +
+                    "x,y,z coordinates within the -9..9 range so the whole scene fits in one screenshot. One Unity unit " +
+                    "is one meter (y is height, larger y = higher; ground at y=0).\n\n" +
+                    "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule. " +
+                    "For the ground, use a wide, flat, low cube with scaleX/scaleY/scaleZ (for example scaleX=16, " +
+                    "scaleY=0.2, scaleZ=16 at y=0). These primitives are NOT all the same base size: " +
+                    "cube/sphere are 1m unscaled, but cylinder and capsule are already 2m TALL unscaled at 1m " +
+                    "diameter — for a tower/pillar/trunk of height H standing on the ground, use scaleY = H/2 (not H) " +
+                    "and place its pivot at y = H/2.\n\n" +
+                    $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
+                    "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
+                    "detailed — quantity and structure come first.\n\n" +
+                    "Give it natural variety — varied sizes, angles and rotations fx/fy/fz for angled pieces — so it " +
+                    "does not read as a grid of identical 1m cubes. Use scaleX/scaleY/scaleZ for long, tall, wide or " +
+                    "thin parts.\n\n" +
+                    "COLOR the scene: use action='set_color' with targetName and stringValue as an HTML color " +
+                    "(e.g. '#9aa0a8') to tint each major group appropriately — ground, structures, details. " +
+                    "An all-grey scene loses points; color at least the main groups.";
+            }
 
             private const string CastleGoal =
                 "Build the most impressive castle you can. This is a showcase of your 3D spatial reasoning: the more " +
@@ -221,14 +235,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int namedDetailGroups = CountNamedDetailGroups(spawnCommands);
 
                 bool genericFreeBuild = IsCustomFreeBuild();
-                g.Add("substantial_scene", genericFreeBuild ? "built at least 24 scene pieces" : "built at least 24 castle pieces",
-                    genericFreeBuild ? 20 : 10, spawns >= 24, mandatory: true,
+                g.Add("substantial_scene",
+                    genericFreeBuild ? "built at least 24 scene pieces" : "built at least 24 castle pieces",
+                    genericFreeBuild ? 20 : 10, spawns >= 24, true,
                     dimension: BenchmarkDimension.TaskCompletion, detail: $"{spawns} spawn commands");
                 g.Add("distinct_named_pieces", "used distinct target names", genericFreeBuild ? 15 : 10,
                     distinctNames >= (genericFreeBuild ? 20 : 20),
                     dimension: BenchmarkDimension.ToolCorrectness, detail: $"{distinctNames} distinct names");
                 g.Add("within_build_volume", "kept pieces inside the -9..9 build volume", genericFreeBuild ? 15 : 10,
-                    boundViolations == 0, mandatory: true,
+                    boundViolations == 0, true,
                     dimension: BenchmarkDimension.InstructionAdherence,
                     detail: boundViolations == 0 ? "all checked spawns in bounds" : $"{boundViolations} out of bounds");
                 if (genericFreeBuild)
@@ -246,11 +261,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 if (!genericFreeBuild)
                 {
                     g.Add("corner_towers", "placed four recognizable corner towers", 15,
-                        cornerTowerQuadrants >= 4, mandatory: true,
+                        cornerTowerQuadrants >= 4, true,
                         dimension: BenchmarkDimension.TaskCompletion,
                         detail: $"{cornerTowerQuadrants}/4 tower quadrants");
                     g.Add("connected_perimeter", "built wall runs on all four sides", 15,
-                        wallSides >= 4, mandatory: true,
+                        wallSides >= 4, true,
                         dimension: BenchmarkDimension.TaskCompletion,
                         detail: $"{wallSides}/4 wall sides");
                     g.Add("front_gate_gap", "left a front gate gap between side wall runs", 8, gateGap,
@@ -265,7 +280,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     detail: $"{transformed} transformed spawns");
                 g.Add("non_uniform_scale", "used scaleX/scaleY/scaleZ for meter-sized parts",
                     genericFreeBuild ? 10 : 12, nonUniformScaled >= (genericFreeBuild ? 3 : 6),
-                    mandatory: !genericFreeBuild,
+                    !genericFreeBuild,
                     dimension: BenchmarkDimension.InstructionAdherence,
                     detail: $"{nonUniformScaled} non-uniform scaled spawns");
                 g.Add("detail_groups", genericFreeBuild
@@ -365,10 +380,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         continue;
                     }
 
-                    if (c.X < 0f && c.Z < 0f) { backLeft = true; }
-                    else if (c.X > 0f && c.Z < 0f) { backRight = true; }
-                    else if (c.X < 0f && c.Z > 0f) { frontLeft = true; }
-                    else if (c.X > 0f && c.Z > 0f) { frontRight = true; }
+                    if (c.X < 0f && c.Z < 0f)
+                    {
+                        backLeft = true;
+                    }
+                    else if (c.X > 0f && c.Z < 0f)
+                    {
+                        backRight = true;
+                    }
+                    else if (c.X < 0f && c.Z > 0f)
+                    {
+                        frontLeft = true;
+                    }
+                    else if (c.X > 0f && c.Z > 0f)
+                    {
+                        frontRight = true;
+                    }
                 }
 
                 return (backLeft ? 1 : 0) + (backRight ? 1 : 0) + (frontLeft ? 1 : 0) + (frontRight ? 1 : 0);
@@ -387,17 +414,48 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         continue;
                     }
 
-                    if (c.Z <= -4.8f && System.Math.Abs(c.X) <= 6.8f) { back++; }
-                    if (c.Z >= 4.8f && System.Math.Abs(c.X) <= 6.8f) { front++; }
-                    if (c.X <= -4.8f && System.Math.Abs(c.Z) <= 6.8f) { left++; }
-                    if (c.X >= 4.8f && System.Math.Abs(c.Z) <= 6.8f) { right++; }
+                    if (c.Z <= -4.8f && System.Math.Abs(c.X) <= 6.8f)
+                    {
+                        back++;
+                    }
+
+                    if (c.Z >= 4.8f && System.Math.Abs(c.X) <= 6.8f)
+                    {
+                        front++;
+                    }
+
+                    if (c.X <= -4.8f && System.Math.Abs(c.Z) <= 6.8f)
+                    {
+                        left++;
+                    }
+
+                    if (c.X >= 4.8f && System.Math.Abs(c.Z) <= 6.8f)
+                    {
+                        right++;
+                    }
                 }
 
                 int sides = 0;
-                if (back >= 3) { sides++; }
-                if (front >= 2) { sides++; }
-                if (left >= 3) { sides++; }
-                if (right >= 3) { sides++; }
+                if (back >= 3)
+                {
+                    sides++;
+                }
+
+                if (front >= 2)
+                {
+                    sides++;
+                }
+
+                if (left >= 3)
+                {
+                    sides++;
+                }
+
+                if (right >= 3)
+                {
+                    sides++;
+                }
+
                 return sides;
             }
 
@@ -413,9 +471,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         continue;
                     }
 
-                    if (c.X <= -1.5f) { leftFront = true; }
-                    else if (c.X >= 1.5f) { rightFront = true; }
-                    else { blockedCenter++; }
+                    if (c.X <= -1.5f)
+                    {
+                        leftFront = true;
+                    }
+                    else if (c.X >= 1.5f)
+                    {
+                        rightFront = true;
+                    }
+                    else
+                    {
+                        blockedCenter++;
+                    }
                 }
 
                 return leftFront && rightFront && blockedCenter == 0;
@@ -475,13 +542,40 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 foreach (RecordedWorldCommand c in commands)
                 {
                     string name = c.TargetName ?? "";
-                    if (Contains(name, "flag")) { groups.Add("flag"); }
-                    if (Contains(name, "battlement") || Contains(name, "crenel")) { groups.Add("battlement"); }
-                    if (Contains(name, "moat")) { groups.Add("moat"); }
-                    if (Contains(name, "bridge")) { groups.Add("bridge"); }
-                    if (Contains(name, "torch")) { groups.Add("torch"); }
-                    if (Contains(name, "tree")) { groups.Add("tree"); }
-                    if (Contains(name, "roof")) { groups.Add("roof"); }
+                    if (Contains(name, "flag"))
+                    {
+                        groups.Add("flag");
+                    }
+
+                    if (Contains(name, "battlement") || Contains(name, "crenel"))
+                    {
+                        groups.Add("battlement");
+                    }
+
+                    if (Contains(name, "moat"))
+                    {
+                        groups.Add("moat");
+                    }
+
+                    if (Contains(name, "bridge"))
+                    {
+                        groups.Add("bridge");
+                    }
+
+                    if (Contains(name, "torch"))
+                    {
+                        groups.Add("torch");
+                    }
+
+                    if (Contains(name, "tree"))
+                    {
+                        groups.Add("tree");
+                    }
+
+                    if (Contains(name, "roof"))
+                    {
+                        groups.Add("roof");
+                    }
                 }
 
                 return groups.Count;
@@ -520,7 +614,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 foreach (RecordedWorldCommand c in commands)
                 {
                     string name = c.TargetName ?? "";
-                    foreach (string token in new[] { "detail", "tree", "light", "lamp", "door", "roof", "road", "bridge", "flag", "window", "prop" })
+                    foreach (string token in new[]
+                             {
+                                 "detail", "tree", "light", "lamp", "door", "roof", "road", "bridge", "flag", "window",
+                                 "prop"
+                             })
                     {
                         if (Contains(name, token))
                         {
@@ -533,14 +631,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static bool HasFullCustomPrompt()
-                => Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null;
+            {
+                return Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null;
+            }
 
             private static bool IsCustomFreeBuild()
-                => Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null ||
-                   Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT") != null;
+            {
+                return Env("COREAI_BENCHMARK_FREEBUILD_PROMPT") != null ||
+                       Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT") != null;
+            }
 
             private static bool IsAction(RecordedWorldCommand c, string action)
-                => string.Equals(c.Action, action, System.StringComparison.OrdinalIgnoreCase);
+            {
+                return string.Equals(c.Action, action, System.StringComparison.OrdinalIgnoreCase);
+            }
 
             private static bool IsTowerLike(RecordedWorldCommand c)
             {
@@ -558,16 +662,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static bool IsWallLike(RecordedWorldCommand c)
-                => Contains(c.TargetName, "wall") || Contains(c.TargetName, "battlement") ||
-                   Contains(c.TargetName, "gate") || Contains(c.PrefabKeyOrName, "cube");
+            {
+                return Contains(c.TargetName, "wall") || Contains(c.TargetName, "battlement") ||
+                       Contains(c.TargetName, "gate") || Contains(c.PrefabKeyOrName, "cube");
+            }
 
             private static bool IsBlockLike(RecordedWorldCommand c)
-                => Contains(c.PrefabKeyOrName, "cube") || Contains(c.TargetName, "keep") ||
-                   Contains(c.TargetName, "wall");
+            {
+                return Contains(c.PrefabKeyOrName, "cube") || Contains(c.TargetName, "keep") ||
+                       Contains(c.TargetName, "wall");
+            }
 
             private static bool Contains(string value, string pattern)
-                => !string.IsNullOrEmpty(value) &&
-                   value.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase) >= 0;
+            {
+                return !string.IsNullOrEmpty(value) &&
+                       value.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase) >= 0;
+            }
         }
     }
 }

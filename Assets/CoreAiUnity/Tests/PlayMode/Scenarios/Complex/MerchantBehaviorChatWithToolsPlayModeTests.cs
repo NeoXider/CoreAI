@@ -67,7 +67,8 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
         }
 
         [UnityTest]
-        [Explicit("Long live-model negotiation scenario; run targeted when validating merchant behavior, not in mandatory full PlayMode.")]
+        [Explicit(
+            "Long live-model negotiation scenario; run targeted when validating merchant behavior, not in mandatory full PlayMode.")]
         [Timeout(600000)]
         public IEnumerator MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase()
         {

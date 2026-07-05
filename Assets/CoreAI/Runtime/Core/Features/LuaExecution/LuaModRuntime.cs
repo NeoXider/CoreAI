@@ -714,7 +714,7 @@ namespace CoreAI.Ai
             // shares the global budget fairly across all mods over successive ticks. Once the budget
             // is exhausted, the remaining mods keep their queued events untouched for later ticks.
             int count = _tickScratch.Count;
-            int start = count > 0 ? ((_dispatchRotation % count) + count) % count : 0;
+            int start = count > 0 ? (_dispatchRotation % count + count) % count : 0;
             _dispatchRotation++;
 
             int dispatchedThisTick = 0;
@@ -1000,39 +1000,39 @@ namespace CoreAI.Ai
             // Varargs need raw CallbackArguments: a typed DynValue[] parameter would make
             // MoonSharp try to squeeze the third Lua argument into the array itself.
             registry.RegisterCallback("mods_call", (context, callbackArgs) =>
+            {
+                string targetId = callbackArgs.Count > 0 ? callbackArgs[0].CastToString() : null;
+                string name = callbackArgs.Count > 1 ? callbackArgs[1].CastToString() : null;
+                DynValue export = FindExport(targetId, name, out Mod target);
+                if (export.Type != DataType.Function)
                 {
-                    string targetId = callbackArgs.Count > 0 ? callbackArgs[0].CastToString() : null;
-                    string name = callbackArgs.Count > 1 ? callbackArgs[1].CastToString() : null;
-                    DynValue export = FindExport(targetId, name, out Mod target);
-                    if (export.Type != DataType.Function)
-                    {
-                        throw new ArgumentException(
-                            $"mods_call: '{Normalize(name)}' of mod '{Normalize(targetId)}' is not a function - use mods_get.");
-                    }
+                    throw new ArgumentException(
+                        $"mods_call: '{Normalize(name)}' of mod '{Normalize(targetId)}' is not a function - use mods_get.");
+                }
 
-                    if (_crossCallDepth >= MaxCrossCallDepth)
-                    {
-                        throw new InvalidOperationException(
-                            $"mods_call: cross-mod call depth limit reached ({MaxCrossCallDepth}) - break the cycle.");
-                    }
+                if (_crossCallDepth >= MaxCrossCallDepth)
+                {
+                    throw new InvalidOperationException(
+                        $"mods_call: cross-mod call depth limit reached ({MaxCrossCallDepth}) - break the cycle.");
+                }
 
-                    DynValue[] marshalled = new DynValue[Math.Max(0, callbackArgs.Count - 2)];
-                    for (int i = 0; i < marshalled.Length; i++)
-                    {
-                        marshalled[i] = FromPortable(target.Script, ToPortable(callbackArgs[i + 2], CrossModTableDepth));
-                    }
+                DynValue[] marshalled = new DynValue[Math.Max(0, callbackArgs.Count - 2)];
+                for (int i = 0; i < marshalled.Length; i++)
+                {
+                    marshalled[i] = FromPortable(target.Script, ToPortable(callbackArgs[i + 2], CrossModTableDepth));
+                }
 
-                    _crossCallDepth++;
-                    try
-                    {
-                        DynValue result = _handlerGuard.Execute(target.Script, export, marshalled);
-                        return FromPortable(mod.Script, ToPortable(result, CrossModTableDepth));
-                    }
-                    finally
-                    {
-                        _crossCallDepth--;
-                    }
-                });
+                _crossCallDepth++;
+                try
+                {
+                    DynValue result = _handlerGuard.Execute(target.Script, export, marshalled);
+                    return FromPortable(mod.Script, ToPortable(result, CrossModTableDepth));
+                }
+                finally
+                {
+                    _crossCallDepth--;
+                }
+            });
 
             registry.Register("mods_list_exports", new Func<string, List<string>>(targetId =>
             {
@@ -1272,7 +1272,7 @@ namespace CoreAI.Ai
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
-                    LoadMod(modId, source, effectiveCaps, persistToStore: false);
+                    LoadMod(modId, source, effectiveCaps, false);
                     loaded++;
                 }
                 catch (Exception ex)
@@ -1299,7 +1299,7 @@ namespace CoreAI.Ai
                 if (_mods.TryGetValue(modId, out Mod mod))
                 {
                     source = mod.Source;
-                    manifest = BuildManifest(modId, mod.Caps, active: true);
+                    manifest = BuildManifest(modId, mod.Caps, true);
                 }
             }
 
@@ -1310,7 +1310,7 @@ namespace CoreAI.Ai
                     if (_sourceStore.TryLoad(modId, out string storedSource, out LuaModManifest storedManifest))
                     {
                         source = storedSource;
-                        manifest = storedManifest ?? BuildManifest(modId, LuaCapabilities.None, active: false);
+                        manifest = storedManifest ?? BuildManifest(modId, LuaCapabilities.None, false);
                     }
                 }
                 catch (Exception ex)
@@ -1387,7 +1387,7 @@ namespace CoreAI.Ai
                     // Run with the masked runtime tier, but persist the DECLARED capabilities from the
                     // bundle (not the masked tier) so a later allowFull rehydrate can restore the full
                     // request rather than the stripped-down version.
-                    LoadMod(modId, bundle.Source, effectiveCaps, persistToStore: false);
+                    LoadMod(modId, bundle.Source, effectiveCaps, false);
                     PersistMod(modId, bundle.Source, ParseCaps(capsText));
                 }
 
@@ -1403,11 +1403,9 @@ namespace CoreAI.Ai
         /// <summary>JSON shape of an export/import bundle: the manifest plus the raw Lua source.</summary>
         private sealed class LuaModBundle
         {
-            [JsonProperty("manifest")]
-            public LuaModManifest Manifest;
+            [JsonProperty("manifest")] public LuaModManifest Manifest;
 
-            [JsonProperty("source")]
-            public string Source = "";
+            [JsonProperty("source")] public string Source = "";
         }
 
         /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>
@@ -1420,7 +1418,7 @@ namespace CoreAI.Ai
 
             try
             {
-                _sourceStore.Save(modId, source, BuildManifest(modId, caps, active: true));
+                _sourceStore.Save(modId, source, BuildManifest(modId, caps, true));
             }
             catch (Exception ex)
             {
@@ -1474,7 +1472,8 @@ namespace CoreAI.Ai
         /// <paramref name="allowFull"/>, clears <see cref="LuaCapabilities.Full"/>. Persisted and shared
         /// mods route through here so they can never escalate beyond what the host currently allows.
         /// </summary>
-        private static LuaCapabilities ApplyHostGrant(LuaCapabilities requested, LuaCapabilities hostGrant, bool allowFull)
+        private static LuaCapabilities ApplyHostGrant(LuaCapabilities requested, LuaCapabilities hostGrant,
+            bool allowFull)
         {
             LuaCapabilities effective = requested & hostGrant;
             if (!allowFull)
@@ -1497,7 +1496,7 @@ namespace CoreAI.Ai
                 return LuaCapabilities.None;
             }
 
-            if (Enum.TryParse(text.Trim(), ignoreCase: true, out LuaCapabilities parsed))
+            if (Enum.TryParse(text.Trim(), true, out LuaCapabilities parsed))
             {
                 return parsed;
             }

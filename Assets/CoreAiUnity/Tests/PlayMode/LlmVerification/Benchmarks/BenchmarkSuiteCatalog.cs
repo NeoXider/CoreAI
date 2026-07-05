@@ -15,12 +15,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public static IReadOnlyList<GameBenchmarkScenario> All()
         {
             List<GameBenchmarkScenario> all = new();
-            all.AddRange(GameMechanicScenariosG2.All());  // G2 — runtime mechanic authoring
-            all.AddRange(GameBuildScenariosG1.All());      // G1 — build a game from a spec
-            all.AddRange(GameReasoningScenariosG3.All());  // G3 — reasoning & design (harder, intelligence)
+            all.AddRange(GameMechanicScenariosG2.All()); // G2 — runtime mechanic authoring
+            all.AddRange(GameBuildScenariosG1.All()); // G1 — build a game from a spec
+            all.AddRange(GameReasoningScenariosG3.All()); // G3 — reasoning & design (harder, intelligence)
             all.AddRange(GamePlaythroughScenariosG4.All()); // G4 — playable game (simulated playthrough)
             all.AddRange(GameInstructionScenariosG5.All()); // G5 — strict instruction-following (subtractive)
-            all.AddRange(GameFreeBuildScenariosG6.All());   // G6 — free-form visual build (default: castle)
+            all.AddRange(GameFreeBuildScenariosG6.All()); // G6 — free-form visual build (default: castle)
             all.AddRange(GameIntegrationScenariosG7.All()); // G7 — comprehensive: world + Lua consistency
             return all;
         }

@@ -42,7 +42,7 @@ namespace CoreAI.Tests.PlayMode
                 LogicSlots.RegisterApis(Registry);
             }
 
-            public Task<LuaTool.LuaResult> ExecuteAsync(string code, System.Threading.CancellationToken ct)
+            public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
             {
                 try
                 {

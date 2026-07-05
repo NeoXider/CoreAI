@@ -16,7 +16,7 @@ namespace CoreAI.Editor
     /// reports a duplicate-importer error — delete one of them. The importer is text-only and has no
     /// dependency on MoonSharp, so it works in no-Lua builds too.
     /// </remarks>
-    [ScriptedImporter(version: 1, ext: "lua")]
+    [ScriptedImporter(1, "lua")]
     public sealed class LuaScriptedImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)

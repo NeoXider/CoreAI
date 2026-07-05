@@ -73,7 +73,9 @@ namespace CoreAI.Tests.EditMode
 
             public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
                 CancellationToken cancellationToken = default)
-                => throw new System.NotSupportedException("streaming path not exercised by this test");
+            {
+                throw new System.NotSupportedException("streaming path not exercised by this test");
+            }
         }
 
         private sealed class DummyHttpSettings : IOpenAiHttpSettings

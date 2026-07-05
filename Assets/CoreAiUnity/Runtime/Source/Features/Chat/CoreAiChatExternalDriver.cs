@@ -37,7 +37,8 @@ namespace CoreAI.Chat
             DontDestroyOnLoad(go);
             go.AddComponent<CoreAiChatExternalDriver>();
             Logging.Log.Instance.Info($"{LogPrefix} spawned (opt-in flag detected). " +
-                      "Submit prompts via SendMessage('" + DriverObjectName + "', 'SubmitPrompt', text).");
+                                      "Submit prompts via SendMessage('" + DriverObjectName +
+                                      "', 'SubmitPrompt', text).");
         }
 
         private static bool IsOptedIn()
@@ -117,7 +118,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Logging.Log.Instance.Warn($"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                    Logging.Log.Instance.Warn(
+                        $"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                 }
             }
 
@@ -139,7 +141,7 @@ namespace CoreAI.Chat
                     Logging.Log.Instance.Info($"{LogPrefix} [diag] s2 result={r.Number}");
                 });
 
-                CoreAI.Sandbox.SecureLuaEnvironment env = new();
+                Sandbox.SecureLuaEnvironment env = new();
                 Stage("s3-sandbox-RunChunk", () =>
                 {
                     MoonSharp.Interpreter.Script s = env.CreateScript(null);
@@ -149,7 +151,7 @@ namespace CoreAI.Chat
 
                 Stage("s4-host-callback", () =>
                 {
-                    CoreAI.Sandbox.LuaApiRegistry reg = new();
+                    Sandbox.LuaApiRegistry reg = new();
                     reg.Register("host_add", (Func<double, double, double>)((a, b) => a + b));
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return host_add(2,3)");
@@ -158,8 +160,8 @@ namespace CoreAI.Chat
 
                 Stage("s5-unity_find", () =>
                 {
-                    CoreAI.Sandbox.LuaApiRegistry reg = new();
-                    new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
+                    Sandbox.LuaApiRegistry reg = new();
+                    new Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return unity_find('LuaDiagCube')");
                     Logging.Log.Instance.Info($"{LogPrefix} [diag] s5 id={r.Number}");
@@ -167,8 +169,8 @@ namespace CoreAI.Chat
 
                 Stage("s6-unity_set_scale", () =>
                 {
-                    CoreAI.Sandbox.LuaApiRegistry reg = new();
-                    new CoreAI.Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
+                    Sandbox.LuaApiRegistry reg = new();
+                    new Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
                     MoonSharp.Interpreter.Script s = env.CreateScript(reg);
                     env.RunChunk(s, "local id = unity_find('LuaDiagCube'); unity_set_scale(id, 2, 2, 2)");
                     Logging.Log.Instance.Info($"{LogPrefix} [diag] s6 scale={probe.transform.localScale}");
@@ -205,11 +207,11 @@ namespace CoreAI.Chat
                 float? temperature = (float?)o["temperature"];
                 int? timeoutSeconds = (int?)o["timeoutSeconds"];
                 int? maxTokens = (int?)o["maxTokens"];
-                bool hotSwapped = CoreAI.CoreAiBackend.ApplyHttpApi(
+                bool hotSwapped = CoreAiBackend.ApplyHttpApi(
                     baseUrl, apiKey, model, temperature, timeoutSeconds, maxTokens);
                 Logging.Log.Instance.Info($"{LogPrefix} backend-applied: baseUrl={baseUrl} model={model} " +
-                          $"maxTokens={(maxTokens.HasValue ? maxTokens.Value.ToString() : "keep")} " +
-                          $"hotSwapped={hotSwapped} keyLen={apiKey.Length}");
+                                          $"maxTokens={(maxTokens.HasValue ? maxTokens.Value.ToString() : "keep")} " +
+                                          $"hotSwapped={hotSwapped} keyLen={apiKey.Length}");
             }
             catch (Exception ex)
             {
@@ -232,7 +234,8 @@ namespace CoreAI.Chat
                 return;
             }
 
-            Logging.Log.Instance.Info($"{LogPrefix} submitting prompt ({prompt?.Length ?? 0} chars) to '{panel.name}'.");
+            Logging.Log.Instance.Info(
+                $"{LogPrefix} submitting prompt ({prompt?.Length ?? 0} chars) to '{panel.name}'.");
             SubmitAndReportAsync(panel, prompt).Forget();
         }
 
@@ -263,7 +266,8 @@ namespace CoreAI.Chat
         public static void Forget(this Task task)
         {
             task.ContinueWith(
-                t => Logging.Log.Instance.Warn($"[CoreAiChatExternalDriver] unobserved failure: {t.Exception?.GetBaseException().Message}"),
+                t => Logging.Log.Instance.Warn(
+                    $"[CoreAiChatExternalDriver] unobserved failure: {t.Exception?.GetBaseException().Message}"),
                 TaskContinuationOptions.OnlyOnFaulted);
         }
     }

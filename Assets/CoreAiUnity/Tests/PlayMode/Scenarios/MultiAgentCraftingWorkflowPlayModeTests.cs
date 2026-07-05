@@ -300,7 +300,8 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log($"[MultiAgent] Creator memory:      {creatorState.Memory}");
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
-                Debug.Log($"[MultiAgent] Programmer memory:  {(hasProgrammerMemory ? programmerState.Memory : "(none)")}");
+                Debug.Log(
+                    $"[MultiAgent] Programmer memory:  {(hasProgrammerMemory ? programmerState.Memory : "(none)")}");
 
                 Assert.AreNotEqual(creatorState.Memory, mechanicState.Memory,
                     "Creator and CoreMechanicAI must have DIFFERENT memory");
@@ -323,7 +324,8 @@ namespace CoreAI.Tests.PlayMode
         /// Runs a shorter Creator and CoreMechanicAI workflow to verify memory isolation.
         /// </summary>
         [UnityTest]
-        [Explicit("Targeted shorter duplicate of the full multi-agent workflow; run directly when triaging Creator/CoreMechanic memory isolation, not in mandatory full live-model suite.")]
+        [Explicit(
+            "Targeted shorter duplicate of the full multi-agent workflow; run directly when triaging Creator/CoreMechanic memory isolation, not in mandatory full live-model suite.")]
         [Timeout(600000)]
         public IEnumerator MultiAgent_CreatorThenMechanic_QuickWorkflow()
         {

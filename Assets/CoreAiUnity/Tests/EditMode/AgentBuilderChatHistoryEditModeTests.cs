@@ -139,8 +139,7 @@ namespace CoreAI.Tests.EditMode
         public void RoleMemoryConfig_DefaultContextTokens_ShouldInheritGlobalContextWindow()
         {
             CoreAISettingsOptions settings = new();
-            AgentMemoryPolicy.RoleMemoryConfig config =
-                new AgentMemoryPolicy.RoleMemoryConfig(true, MemoryToolAction.Append);
+            AgentMemoryPolicy.RoleMemoryConfig config = new(true, MemoryToolAction.Append);
 
             Assert.AreEqual(0, config.ContextTokens);
             Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, settings.ContextWindowTokens);

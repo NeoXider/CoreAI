@@ -27,8 +27,8 @@ namespace CoreAI.Benchmarking
         public sealed class RoleScore
         {
             public string Role { get; set; } = "";
-            public double Rating { get; set; }          // 0..10
-            public string Verdict { get; set; } = "";   // Strong fit / Usable / Limited / Not suitable / Not assessed
+            public double Rating { get; set; } // 0..10
+            public string Verdict { get; set; } = ""; // Strong fit / Usable / Limited / Not suitable / Not assessed
             public string Reason { get; set; } = "";
             public bool Agentic { get; set; }
 
@@ -58,45 +58,51 @@ namespace CoreAI.Benchmarking
             new()
             {
                 Name = "NPC / Dialogue", Agentic = false,
-                Weights = new() { [Tool] = .35, [Task] = .30, [Speed] = .25, [Instr] = .10 },
+                Weights = new Dictionary<string, double> { [Tool] = .35, [Task] = .30, [Speed] = .25, [Instr] = .10 },
                 Gates = new[] { (Tool, 40.0), (Task, 40.0) },
-                Note = "simple in-character turns with occasional tool use",
+                Note = "simple in-character turns with occasional tool use"
             },
             new()
             {
                 Name = "Mechanic / GameMaster", Agentic = true,
-                Weights = new() { [Instr] = .25, [Tool] = .25, [Task] = .20, [Speed] = .20, [Intent] = .10 },
+                Weights = new Dictionary<string, double>
+                    { [Instr] = .25, [Tool] = .25, [Task] = .20, [Speed] = .20, [Intent] = .10 },
                 Gates = new[] { (Tool, 65.0), (Instr, 60.0) },
-                Note = "drives runtime gameplay — needs strict instructions, valid tools, and speed",
+                Note = "drives runtime gameplay — needs strict instructions, valid tools, and speed"
             },
             new()
             {
                 Name = "Scene / Tool Operator", Agentic = true,
-                Weights = new() { [Tool] = .35, [Intent] = .20, [Instr] = .20, [Task] = .15, [Determ] = .10 },
+                Weights = new Dictionary<string, double>
+                    { [Tool] = .35, [Intent] = .20, [Instr] = .20, [Task] = .15, [Determ] = .10 },
                 Gates = new[] { (Tool, 75.0), (Instr, 65.0), (Intent, 55.0) },
-                Note = "builds/edits scenes — fails fast when tool calls or ordering are unreliable",
+                Note = "builds/edits scenes — fails fast when tool calls or ordering are unreliable"
             },
             new()
             {
                 Name = "Programmer / Logic Author", Agentic = true,
-                Weights = new() { [Reason] = .35, [Tool] = .25, [Task] = .20, [Instr] = .10, [Determ] = .10 },
+                Weights = new Dictionary<string, double>
+                    { [Reason] = .35, [Tool] = .25, [Task] = .20, [Instr] = .10, [Determ] = .10 },
                 Gates = new[] { (Reason, 70.0), (Tool, 65.0), (Task, 60.0) },
-                Note = "authors game logic — needs reasoning plus reliable tool use, not speed",
+                Note = "authors game logic — needs reasoning plus reliable tool use, not speed"
             },
             new()
             {
                 Name = "Orchestrator / Director", Agentic = true,
-                Weights = new() { [Reason] = .30, [Intent] = .25, [Instr] = .20, [Task] = .15, [Determ] = .10 },
+                Weights = new Dictionary<string, double>
+                    { [Reason] = .30, [Intent] = .25, [Instr] = .20, [Task] = .15, [Determ] = .10 },
                 Gates = new[] { (Reason, 80.0), (Intent, 75.0), (Instr, 75.0) },
-                Note = "multi-step control — current suite mostly measures task-level sequencing, not sustained multi-turn orchestration; needs high reasoning, sequencing, and instruction-following",
+                Note =
+                    "multi-step control — current suite mostly measures task-level sequencing, not sustained multi-turn orchestration; needs high reasoning, sequencing, and instruction-following"
             },
             new()
             {
                 Name = "QA / Regression Judge", Agentic = true,
-                Weights = new() { [Determ] = .30, [Instr] = .25, [Reason] = .20, [Task] = .15, [Tool] = .10 },
+                Weights = new Dictionary<string, double>
+                    { [Determ] = .30, [Instr] = .25, [Reason] = .20, [Task] = .15, [Tool] = .10 },
                 Gates = new[] { (Determ, 70.0), (Instr, 65.0), (Reason, 55.0) },
-                Note = "validation — needs stable, rule-following judgments",
-            },
+                Note = "validation — needs stable, rule-following judgments"
+            }
         };
 
         // Weight of each agentic role in the overall blend.
@@ -106,7 +112,7 @@ namespace CoreAI.Benchmarking
             ["Scene / Tool Operator"] = .20,
             ["Programmer / Logic Author"] = .20,
             ["Orchestrator / Director"] = .20,
-            ["QA / Regression Judge"] = .10,
+            ["QA / Regression Judge"] = .10
         };
 
         public static Result Evaluate(BenchmarkReport report)
@@ -209,7 +215,7 @@ namespace CoreAI.Benchmarking
                     Verdict = "Not assessed",
                     Reason = $"partial run — {string.Join(", ", missing)} not measured. {p.Note}.",
                     Agentic = p.Agentic,
-                    Assessed = false,
+                    Assessed = false
                 };
             }
 
@@ -245,7 +251,7 @@ namespace CoreAI.Benchmarking
                 Rating = Math.Round(rating, 1),
                 Verdict = verdict,
                 Reason = reason,
-                Agentic = p.Agentic,
+                Agentic = p.Agentic
             };
         }
 
@@ -274,7 +280,7 @@ namespace CoreAI.Benchmarking
                 BenchmarkDimension.Determinism => Determ,
                 BenchmarkDimension.Reasoning => Reason,
                 BenchmarkDimension.InstructionAdherence => Instr,
-                _ => d.ToString(),
+                _ => d.ToString()
             };
         }
 
@@ -289,10 +295,13 @@ namespace CoreAI.Benchmarking
                 Reason => "reasoning",
                 Instr => "instruction adherence",
                 Speed => "speed",
-                _ => key ?? "n/a",
+                _ => key ?? "n/a"
             };
         }
 
-        private static double Clamp(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
+        private static double Clamp(double v, double lo, double hi)
+        {
+            return v < lo ? lo : v > hi ? hi : v;
+        }
     }
 }

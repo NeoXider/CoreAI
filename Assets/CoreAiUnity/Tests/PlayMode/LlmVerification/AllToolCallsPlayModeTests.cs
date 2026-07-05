@@ -95,7 +95,7 @@ namespace CoreAI.Tests.PlayMode
                 }));
             }
 
-            public Task<LuaTool.LuaResult> ExecuteAsync(string code, System.Threading.CancellationToken ct)
+            public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
             {
                 try
                 {
@@ -576,14 +576,14 @@ namespace CoreAI.Tests.PlayMode
 
                 sb.AppendLine();
                 sb.AppendLine("--- TOOL-CALL HISTORY (what actually executed) ---");
-                var history = CoreAi.GetToolCallHistorySnapshot();
+                IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
                 if (history == null || history.Count == 0)
                 {
                     sb.AppendLine("(none — no tool call reached execution)");
                 }
                 else
                 {
-                    foreach (var rec in history)
+                    foreach (LlmToolCallRecord rec in history)
                     {
                         if (rec == null)
                         {
@@ -673,7 +673,7 @@ namespace CoreAI.Tests.PlayMode
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
-                System.Threading.CancellationToken cancellationToken = default)
+                CancellationToken cancellationToken = default)
             {
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
@@ -695,7 +695,7 @@ namespace CoreAI.Tests.PlayMode
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
                 LlmCompletionRequest request,
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
-                System.Threading.CancellationToken cancellationToken = default)
+                CancellationToken cancellationToken = default)
             {
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;

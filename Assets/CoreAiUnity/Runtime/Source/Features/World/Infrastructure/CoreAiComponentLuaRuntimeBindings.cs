@@ -95,29 +95,29 @@ namespace CoreAI.Infrastructure.World
                 }));
 
             registry.Register("coreai_component_set_vector",
-                new Action<string, string, string, double, double, double>(
-                    (targetName, componentType, propertyName, x, y, z) =>
+                new Action<string, string, string, double, double, double>((targetName, componentType, propertyName, x,
+                    y, z) =>
+                {
+                    if (!TryNormalizeTargetTypeAndProperty(
+                            targetName,
+                            componentType,
+                            propertyName,
+                            out string name,
+                            out string type,
+                            out string property))
                     {
-                        if (!TryNormalizeTargetTypeAndProperty(
-                                targetName,
-                                componentType,
-                                propertyName,
-                                out string name,
-                                out string type,
-                                out string property))
-                        {
-                            return;
-                        }
+                        return;
+                    }
 
-                        Publish(CoreAiComponentCommandEnvelope.SetVector(
-                            name,
-                            type,
-                            property,
-                            new Vector3(
-                                ValidateFiniteFloat(x),
-                                ValidateFiniteFloat(y),
-                                ValidateFiniteFloat(z))));
-                    }));
+                    Publish(CoreAiComponentCommandEnvelope.SetVector(
+                        name,
+                        type,
+                        property,
+                        new Vector3(
+                            ValidateFiniteFloat(x),
+                            ValidateFiniteFloat(y),
+                            ValidateFiniteFloat(z))));
+                }));
         }
 
         private static bool TryNormalizeTargetAndType(

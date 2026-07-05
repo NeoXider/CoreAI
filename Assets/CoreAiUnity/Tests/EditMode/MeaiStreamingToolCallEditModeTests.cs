@@ -207,7 +207,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CompleteStreamingAsync_CancelledAfterExecutedToolCall_PropagatesCancellationAfterFinalizingTurn()
+        public async Task
+            CompleteStreamingAsync_CancelledAfterExecutedToolCall_PropagatesCancellationAfterFinalizingTurn()
         {
             FlagTool tool = new("world_tool");
             NativeToolCallScripted inner = new(() => tool.Executed)
@@ -298,7 +299,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ContainsCompleteThinkBlockToolCall_NormalThinkWithoutTool_ReturnsFalse()
         {
-            Assert.IsFalse(MeaiLlmClient.ContainsCompleteThinkBlockToolCall("<think>private reasoning</think>Visible."));
+            Assert.IsFalse(
+                MeaiLlmClient.ContainsCompleteThinkBlockToolCall("<think>private reasoning</think>Visible."));
             Assert.IsTrue(MeaiLlmClient.ContainsCompleteThinkBlockToolCall(
                 "<think>{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}</think>"));
         }
@@ -453,8 +455,8 @@ namespace CoreAI.Tests.EditMode
                 // Asymmetric tails: the FIRST call (alpha) finishes LAST, so the call-order
                 // assertion on the tool-role message genuinely distinguishes call order from
                 // completion order.
-                ToolAlpha = new OverlappingTool("tool_alpha", this, extraHoldMs: 150);
-                ToolBeta = new OverlappingTool("tool_beta", this, extraHoldMs: 1);
+                ToolAlpha = new OverlappingTool("tool_alpha", this, 150);
+                ToolBeta = new OverlappingTool("tool_beta", this, 1);
             }
 
             public OverlappingTool ToolAlpha { get; }

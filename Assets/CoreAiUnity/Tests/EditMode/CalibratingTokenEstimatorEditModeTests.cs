@@ -15,9 +15,16 @@ namespace CoreAI.Tests.EditMode
         private sealed class StubRanks : IBpeRanksProvider
         {
             private readonly string _data;
-            public StubRanks(string data) { _data = data; }
-            public Stream OpenRanks(BpeEncoding encoding) =>
-                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_data));
+
+            public StubRanks(string data)
+            {
+                _data = data;
+            }
+
+            public Stream OpenRanks(BpeEncoding encoding)
+            {
+                return new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_data));
+            }
         }
 
         [TestCase("gpt-4o", BpeEncoding.O200kBase)]
@@ -149,7 +156,7 @@ namespace CoreAI.Tests.EditMode
         public void EstimateText_AllLatinAfterObservation_ReflectsScale()
         {
             CalibratingTokenEstimator estimator = new(new CoreAISettingsOptions());
-            string text = new string('a', 100);
+            string text = new('a', 100);
             int legacy = LegacyEstimate(text);
 
             estimator.RecordObservation(100, 200);

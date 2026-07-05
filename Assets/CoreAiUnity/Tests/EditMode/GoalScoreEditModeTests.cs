@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
             List<BenchmarkCheckpoint> cps = new()
             {
                 Cp("main", 95, true),
-                Cp("gate", 5, false, mandatory: true)
+                Cp("gate", 5, false, true)
             };
 
             GoalScore score = GoalScore.Compute(cps);
@@ -160,7 +160,7 @@ namespace CoreAI.Tests.EditMode
             List<BenchmarkCheckpoint> perfect = new() { Cp("a", 100, true) };
             List<BenchmarkPenalty> nanPenalty = new() { new BenchmarkPenalty("x", double.NaN) };
 
-            GoalScore score = GoalScore.Compute(perfect, nanPenalty, rawBonus: double.NaN,
+            GoalScore score = GoalScore.Compute(perfect, nanPenalty, double.NaN,
                 judgeScore: double.NaN, judgeWeight: 0.3,
                 actualTokens: double.NaN, tokenBudget: 1000, actualMs: double.PositiveInfinity, timeBudgetMs: 10000);
 

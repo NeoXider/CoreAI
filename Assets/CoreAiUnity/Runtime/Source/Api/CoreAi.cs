@@ -137,7 +137,8 @@ namespace CoreAI
             int height = 512,
             CancellationToken cancellationToken = default)
         {
-            return RequireChatService().AskWithCameraAsync(prompt, cameraName, roleId, width, height, cancellationToken);
+            return RequireChatService()
+                .AskWithCameraAsync(prompt, cameraName, roleId, width, height, cancellationToken);
         }
 
         /// <summary>
@@ -146,7 +147,7 @@ namespace CoreAI
         /// </summary>
         public static Task<string> AskWithCameraAsync(
             string prompt,
-            UnityEngine.Camera camera,
+            Camera camera,
             string roleId = BuiltInAgentRoleIds.SmartChat,
             int width = 512,
             int height = 512,

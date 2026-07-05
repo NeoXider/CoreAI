@@ -37,6 +37,5 @@ namespace CoreAI.Tests.EditMode
 
             return null;
         }
-
     }
 }

@@ -19,7 +19,9 @@ namespace CoreAI.Ai
     {
         public string Name => "scene_tool";
         public string Description => "Manipulate and inspect Unity GameObjects dynamically at runtime.";
+
         public bool AllowDuplicates => false;
+
         // This wrapper expands into multiple native MEAI functions. The aggregate ILlmTool schema is
         // intentionally empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
         public string ParametersSchema => "{}";
@@ -232,15 +234,24 @@ namespace CoreAI.Ai
             int instanceId,
             // Default values mark these optional in the MEAI function schema so the model (and callers)
             // can pass only the coordinates they want to change; missing values leave the axis untouched.
-            [Description("New world position X. Omit to leave unchanged.")] float? px = null,
-            [Description("New world position Y. Omit to leave unchanged.")] float? py = null,
-            [Description("New world position Z. Omit to leave unchanged.")] float? pz = null,
-            [Description("New Euler rotation X in degrees. Omit to leave unchanged.")] float? rx = null,
-            [Description("New Euler rotation Y in degrees. Omit to leave unchanged.")] float? ry = null,
-            [Description("New Euler rotation Z in degrees. Omit to leave unchanged.")] float? rz = null,
-            [Description("New local scale X. Omit to leave unchanged.")] float? sx = null,
-            [Description("New local scale Y. Omit to leave unchanged.")] float? sy = null,
-            [Description("New local scale Z. Omit to leave unchanged.")] float? sz = null,
+            [Description("New world position X. Omit to leave unchanged.")]
+            float? px = null,
+            [Description("New world position Y. Omit to leave unchanged.")]
+            float? py = null,
+            [Description("New world position Z. Omit to leave unchanged.")]
+            float? pz = null,
+            [Description("New Euler rotation X in degrees. Omit to leave unchanged.")]
+            float? rx = null,
+            [Description("New Euler rotation Y in degrees. Omit to leave unchanged.")]
+            float? ry = null,
+            [Description("New Euler rotation Z in degrees. Omit to leave unchanged.")]
+            float? rz = null,
+            [Description("New local scale X. Omit to leave unchanged.")]
+            float? sx = null,
+            [Description("New local scale Y. Omit to leave unchanged.")]
+            float? sy = null,
+            [Description("New local scale Z. Omit to leave unchanged.")]
+            float? sz = null,
             CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);

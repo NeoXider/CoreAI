@@ -290,15 +290,15 @@ namespace CoreAI.Chat
         /// <summary>
         /// Attempts to get persisted chat history and returns whether the operation succeeded.
         /// </summary>
-        public bool TryGetPersistedChatHistory(string roleId, out CoreAI.Ai.ChatMessage[] messages, int maxMessages = 0)
+        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages = 0)
         {
-            messages = Array.Empty<CoreAI.Ai.ChatMessage>();
+            messages = Array.Empty<Ai.ChatMessage>();
             if (_memoryStore == null || string.IsNullOrWhiteSpace(roleId))
             {
                 return false;
             }
 
-            CoreAI.Ai.ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
+            Ai.ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
             if (raw == null || raw.Length == 0)
             {
                 return false;

@@ -30,6 +30,7 @@ namespace CoreAI.Ai
         private sealed class ReadSkillProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
+
             // When the backing list is a live MutableSkillCatalog (skill authoring), the lookup is
             // rebuilt per call so a skill the model just created/updated is immediately visible here.
             private readonly bool _isLive;

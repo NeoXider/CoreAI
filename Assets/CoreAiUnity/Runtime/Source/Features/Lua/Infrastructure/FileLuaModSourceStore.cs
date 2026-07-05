@@ -52,6 +52,7 @@ namespace CoreAI.Infrastructure.Lua
         };
 
         private static readonly IReadOnlyList<LuaModManifest> Empty = new LuaModManifest[0];
+
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
             new(StringComparer.Ordinal);
 
@@ -307,7 +308,7 @@ namespace CoreAI.Infrastructure.Lua
                 {
                     if (Directory.Exists(modDir))
                     {
-                        Directory.Delete(modDir, recursive: true);
+                        Directory.Delete(modDir, true);
                         PersistFsForWebGl();
                     }
                 }

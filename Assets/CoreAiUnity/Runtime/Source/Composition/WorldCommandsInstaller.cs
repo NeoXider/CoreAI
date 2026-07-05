@@ -73,16 +73,16 @@ namespace CoreAI.Composition
             // Factory registrations throughout: ctors with host-supplied or optional/default
             // parameters are not resolvable by VContainer's Register<T>.
             builder.Register(c => new CoreAiWorldLuaRuntimeBindings(
-                    c.Resolve<Messaging.IAiGameCommandSink>(),
+                    c.Resolve<IAiGameCommandSink>(),
                     allowedLuaScenes),
                 Lifetime.Singleton);
             builder.Register(c => new CoreAiComponentLuaRuntimeBindings(
-                    c.Resolve<Messaging.IAiGameCommandSink>()),
+                    c.Resolve<IAiGameCommandSink>()),
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
             // Factory: stripping >= Medium removes the unused parameterless ctor on WebGL.
-            builder.Register(c => new CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings(),
+            builder.Register(c => new CoreAiInputLuaRuntimeBindings(),
                 Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
                     c.Resolve<IGameLogger>(),
@@ -104,7 +104,7 @@ namespace CoreAI.Composition
                     c.Resolve<LuaLogicSlots>(),
                     c.Resolve<CoreAiFullUnityLuaRuntimeBindings>(),
                     scriptCapabilities,
-                    c.Resolve<CoreAI.Infrastructure.Lua.CoreAiInputLuaRuntimeBindings>()), Lifetime.Singleton)
+                    c.Resolve<CoreAiInputLuaRuntimeBindings>()), Lifetime.Singleton)
                 .As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton)
                 .As<ILuaExecutionObserver>();
@@ -154,18 +154,18 @@ namespace CoreAI.Composition
                     // store, so rehydrating there injects mods persisted by earlier runs into every
                     // fresh container ('already loaded' collisions); and DontDestroyOnLoad throws
                     // outside play mode. EditMode consumers load mods and call Tick explicitly.
-                    if (UnityEngine.Application.isPlaying)
+                    if (Application.isPlaying)
                     {
                         LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
                         runtime.RehydrateFromStore(scriptCapabilities,
-                            allowFull: (scriptCapabilities & LuaCapabilities.Full) != 0);
+                            (scriptCapabilities & LuaCapabilities.Full) != 0);
 
                         // Frame driver for mod timers/events. The ITickable entry-point registration
                         // below never dispatched (see LuaModRuntimeTickDriver docs), so hooks_every
                         // timers were frozen; a plain MonoBehaviour Update cannot fail that way.
-                        var tickerGo = new UnityEngine.GameObject("CoreAI_LuaModTicker");
-                        UnityEngine.Object.DontDestroyOnLoad(tickerGo);
-                        tickerGo.AddComponent<CoreAI.Infrastructure.Lua.LuaModRuntimeTickDriver>().Initialize(runtime);
+                        GameObject tickerGo = new("CoreAI_LuaModTicker");
+                        Object.DontDestroyOnLoad(tickerGo);
+                        tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(runtime);
                     }
                 }
                 catch (VContainerException)
@@ -197,8 +197,8 @@ namespace CoreAI.Composition
                     // Full Lua reference on demand (read_skill) so the system prompt stays small.
                     // A Resources/AgentSkills/LuaModding TextAsset overrides the built-in text,
                     // same convention as the AgentPrompts/System overrides.
-                    UnityEngine.TextAsset skillOverride =
-                        UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/LuaModding");
+                    TextAsset skillOverride =
+                        Resources.Load<TextAsset>("AgentSkills/LuaModding");
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInLuaModdingSkillText.SkillName,
                         BuiltInLuaModdingSkillText.SkillDescription,
@@ -220,11 +220,11 @@ namespace CoreAI.Composition
             // Enforcing it here makes the native world_command tool honour the same restriction as the
             // Lua coreai_world_load_scene binding, instead of the native path bypassing it.
             builder.Register(c => new CoreAiWorldCommandExecutor(
-                    c.Resolve<IGameLogger>(),
-                    c.Resolve<ICoreAiPrefabRegistry>(),
-                    allowedLuaScenes,
-                    c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
-                Lifetime.Singleton)
+                        c.Resolve<IGameLogger>(),
+                        c.Resolve<ICoreAiPrefabRegistry>(),
+                        allowedLuaScenes,
+                        c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
+                    Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
 
             builder.Register(c => new CoreAiComponentCommandExecutor(c.Resolve<IGameLogger>()), Lifetime.Singleton)
@@ -252,7 +252,7 @@ namespace CoreAI.Composition
             {
                 if (_asset != null)
                 {
-                    UnityEngine.Object.Destroy(_asset);
+                    Object.Destroy(_asset);
                     _asset = null;
                 }
             }

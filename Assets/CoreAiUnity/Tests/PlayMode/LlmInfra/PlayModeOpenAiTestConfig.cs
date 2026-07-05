@@ -97,23 +97,23 @@ namespace CoreAI.Tests.PlayMode
             LocalFileConfig file = LoadLocalFile();
 
             string baseUrl = FirstNonEmpty(
-                                 GetEnv(EnvBaseUrl),
-                                 GetEnv(LegacyEnvBase),
-                                 file?.BaseUrl,
-                                 ProjectDefaultsEnabled() ? FallbackLmStudioBaseUrl : null);
+                GetEnv(EnvBaseUrl),
+                GetEnv(LegacyEnvBase),
+                file?.BaseUrl,
+                ProjectDefaultsEnabled() ? FallbackLmStudioBaseUrl : null);
             baseUrl = NormalizeBaseUrl(baseUrl);
 
             string apiKey = FirstNonEmpty(
-                                GetEnv(EnvApiKey),
-                                GetEnv(LegacyEnvApiKey),
-                                file?.ApiKey) ?? "";
+                GetEnv(EnvApiKey),
+                GetEnv(LegacyEnvApiKey),
+                file?.ApiKey) ?? "";
 
             string model = FirstNonEmpty(
-                               modelOverride,
-                               GetEnv(EnvModel),
-                               GetEnv(LegacyEnvModel),
-                               file?.Model,
-                               ProjectDefaultsEnabled() ? FallbackLmStudioModelId : null);
+                modelOverride,
+                GetEnv(EnvModel),
+                GetEnv(LegacyEnvModel),
+                file?.Model,
+                ProjectDefaultsEnabled() ? FallbackLmStudioModelId : null);
             model = model?.Trim();
 
             bool streaming = ResolveBool(GetEnv(EnvStreaming), file?.Streaming, true);
@@ -129,7 +129,7 @@ namespace CoreAI.Tests.PlayMode
         {
             config ??= Resolve();
             string missing = string.IsNullOrWhiteSpace(config.BaseUrl)
-                ? (string.IsNullOrWhiteSpace(config.Model) ? "base URL and model" : "base URL")
+                ? string.IsNullOrWhiteSpace(config.Model) ? "base URL and model" : "base URL"
                 : "model";
 
             return
@@ -147,10 +147,16 @@ namespace CoreAI.Tests.PlayMode
         // ---------------------------------------------------------------------
 
         /// <summary>Legacy entry point: resolved base URL or <c>null</c> when unconfigured.</summary>
-        public static string ResolveBaseUrl() => Resolve().BaseUrl;
+        public static string ResolveBaseUrl()
+        {
+            return Resolve().BaseUrl;
+        }
 
         /// <summary>Legacy entry point: resolved model id or <c>null</c> when unconfigured.</summary>
-        public static string ResolveModelId() => Resolve().Model;
+        public static string ResolveModelId()
+        {
+            return Resolve().Model;
+        }
 
         // ---------------------------------------------------------------------
         // Internals

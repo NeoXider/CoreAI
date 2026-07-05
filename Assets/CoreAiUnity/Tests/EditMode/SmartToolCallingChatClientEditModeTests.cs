@@ -70,7 +70,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 true, new List<Ai.ILlmTool>(), "TestRole", 5, "",
-                null, null, maxRoundtripsOverride: 2);
+                null, null, 2);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -104,7 +104,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 true, new List<Ai.ILlmTool>(), "TestRole", 50, "",
-                null, null, maxRoundtripsOverride: 0);
+                null, null, 0);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -595,7 +595,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(messages.Any(m => CallNameOf(m) == "tool_1"),
                 "Multi-result unit must be removed as one block (assistant turn gone)");
             Assert.IsFalse(messages.Any(m => m.Role == MEAI.ChatRole.Tool &&
-                    ResultCallIdOf(m).StartsWith("call_1")),
+                                             ResultCallIdOf(m).StartsWith("call_1")),
                 "Both contiguous Tool results of the trimmed unit must be removed together");
             Assert.IsTrue(messages.Any(m => CallNameOf(m) == "tool_2"),
                 "Newest unit must survive intact");

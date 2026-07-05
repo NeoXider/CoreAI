@@ -31,7 +31,7 @@ namespace CoreAI.Tests.PlayMode
             string searchPattern = $"CoreAiWorldCommand";
 
             CoreAiWorldCommandExecutor executor =
-                new(GameLoggerUnscopedFallback.Instance, prefabRegistry: null, allowPrimitives: true);
+                new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
             GameObject parent = new(parentName);
             GameObject secondParent = new(secondParentName);
             GameObject textObject = new(textName);
@@ -177,7 +177,7 @@ namespace CoreAI.Tests.PlayMode
             string soundName = $"WorldToolSound_{id}";
 
             CoreAiWorldCommandExecutor executor =
-                new(GameLoggerUnscopedFallback.Instance, prefabRegistry: null, allowPrimitives: true);
+                new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             WorldLlmTool tool = new(executor, settings, GameLoggerUnscopedFallback.Instance);
             GameObject parent = new(parentName);

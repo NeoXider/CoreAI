@@ -30,7 +30,9 @@ namespace CoreAI.Ai
         private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
+
             private readonly IReadOnlyCollection<string> _allowedToolNames;
+
             // When the backing list is a live MutableSkillCatalog (skill authoring), the tool map is
             // rebuilt per call so a tool exposed by a just-authored skill is immediately invocable.
             private readonly bool _isLive;
@@ -88,7 +90,8 @@ namespace CoreAI.Ai
                 string arguments_json,
                 CancellationToken cancellationToken = default)
             {
-                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(), cancellationToken);
+                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(),
+                    cancellationToken);
             }
         }
 

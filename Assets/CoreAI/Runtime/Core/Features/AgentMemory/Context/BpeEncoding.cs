@@ -12,7 +12,7 @@ namespace CoreAI.Ai
         Cl100kBase = 1,
 
         /// <summary>o200k_base — gpt-4o, gpt-4.1, o1/o3/o4 family.</summary>
-        O200kBase = 2,
+        O200kBase = 2
     }
 
     /// <summary>

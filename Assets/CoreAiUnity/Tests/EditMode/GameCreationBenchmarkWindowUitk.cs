@@ -20,6 +20,7 @@ namespace CoreAI.Tests.EditMode
         private const string NonePinned = "(none = ranked descending)";
 
         private static readonly string[] ConnModeOptions = { "Default (config)", "On", "Off" };
+
         private static readonly string[] DimOrder =
         {
             "ToolCorrectness", "IntentSequence", "TaskCompletion", "Determinism", "Reasoning",
@@ -173,11 +174,13 @@ namespace CoreAI.Tests.EditMode
             return toggle;
         }
 
-        private bool IsTabSelected(int index) =>
-            (index == 0 && _runPanel?.resolvedStyle.display != DisplayStyle.None)
-            || (index == 1 && _historyPanel?.resolvedStyle.display != DisplayStyle.None)
-            || (index == 2 && _comparePanel?.resolvedStyle.display != DisplayStyle.None)
-            || (index == 3 && _modelsPanel?.resolvedStyle.display != DisplayStyle.None);
+        private bool IsTabSelected(int index)
+        {
+            return (index == 0 && _runPanel?.resolvedStyle.display != DisplayStyle.None)
+                   || (index == 1 && _historyPanel?.resolvedStyle.display != DisplayStyle.None)
+                   || (index == 2 && _comparePanel?.resolvedStyle.display != DisplayStyle.None)
+                   || (index == 3 && _modelsPanel?.resolvedStyle.display != DisplayStyle.None);
+        }
 
         private void SelectTab(int index)
         {
@@ -237,17 +240,21 @@ namespace CoreAI.Tests.EditMode
             // Difficulty values come from the single source BenchmarkInfo.GroupDifficulty10, so the RUN-tab
             // rating can never disagree with the scenario/history rating.
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG2,
-                "G2 - runtime mechanic authoring (pure Lua)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G2"), _runG2, v => _runG2 = v));
+                "G2 - runtime mechanic authoring (pure Lua)", BenchmarkInfo.DifficultyFor("G2"), _runG2,
+                v => _runG2 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG1,
-                "G1 - build a game (world + Lua)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G1"), _runG1, v => _runG1 = v));
+                "G1 - build a game (world + Lua)", BenchmarkInfo.DifficultyFor("G1"), _runG1, v => _runG1 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG5,
-                "G5 - strict instruction-following (subtractive)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G5"), _runG5, v => _runG5 = v));
+                "G5 - strict instruction-following (subtractive)", BenchmarkInfo.DifficultyFor("G5"), _runG5,
+                v => _runG5 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG3,
-                "G3 - reasoning & design (harder, intelligence)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G3"), _runG3, v => _runG3 = v));
+                "G3 - reasoning & design (harder, intelligence)", BenchmarkInfo.DifficultyFor("G3"), _runG3,
+                v => _runG3 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG4,
-                "G4 - playable game (simulated playthrough)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G4"), _runG4, v => _runG4 = v));
+                "G4 - playable game (simulated playthrough)", BenchmarkInfo.DifficultyFor("G4"), _runG4,
+                v => _runG4 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG6,
-                "G6 - free-build visual (bonus; default: castle)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G6"), _runG6, v =>
+                "G6 - free-build visual (bonus; default: castle)", BenchmarkInfo.DifficultyFor("G6"), _runG6, v =>
                 {
                     _runG6 = v;
                     UpdateFreeBuildBoxVisibility();
@@ -255,7 +262,7 @@ namespace CoreAI.Tests.EditMode
             section.Add(BuildFreeBuildBox());
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG7,
                 "G7 - comprehensive integration (world + Lua consistency; one-off)",
-                CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G7"), _runG7, v => _runG7 = v));
+                BenchmarkInfo.DifficultyFor("G7"), _runG7, v => _runG7 = v));
             _groupWarning = Muted("Select at least one group.");
             _groupWarning.style.color = new Color(0.95f, 0.68f, 0.32f);
             section.Add(_groupWarning);
@@ -263,7 +270,8 @@ namespace CoreAI.Tests.EditMode
             return section;
         }
 
-        private VisualElement GroupToggle(string prefKey, string label, int difficulty10, bool value, Action<bool> assign)
+        private VisualElement GroupToggle(string prefKey, string label, int difficulty10, bool value,
+            Action<bool> assign)
         {
             VisualElement row = Row();
             Toggle toggle = new(label) { value = value };
@@ -303,7 +311,7 @@ namespace CoreAI.Tests.EditMode
             string subject = EditorPrefs.GetString(subjectKey, "");
 
             // Keep the env var the harness reads in sync with the persisted state on window open.
-            System.Environment.SetEnvironmentVariable(
+            Environment.SetEnvironmentVariable(
                 "COREAI_BENCHMARK_FREEBUILD_SUBJECT", overrideOn ? subject : "");
 
             _freeBuildBox = new VisualElement();
@@ -331,13 +339,14 @@ namespace CoreAI.Tests.EditMode
                 subjectInput.style.minHeight = 72;
                 subjectInput.style.unityTextAlign = TextAnchor.UpperLeft;
             }
+
             subjectField.RegisterValueChangedCallback(evt =>
             {
                 string v = (evt.newValue ?? "").Trim();
                 EditorPrefs.SetString(subjectKey, v);
                 if (EditorPrefs.GetBool(overrideKey, false))
                 {
-                    System.Environment.SetEnvironmentVariable("COREAI_BENCHMARK_FREEBUILD_SUBJECT", v);
+                    Environment.SetEnvironmentVariable("COREAI_BENCHMARK_FREEBUILD_SUBJECT", v);
                 }
             });
 
@@ -346,7 +355,7 @@ namespace CoreAI.Tests.EditMode
             {
                 EditorPrefs.SetBool(overrideKey, evt.newValue);
                 subjectField.style.display = evt.newValue ? DisplayStyle.Flex : DisplayStyle.None;
-                System.Environment.SetEnvironmentVariable(
+                Environment.SetEnvironmentVariable(
                     "COREAI_BENCHMARK_FREEBUILD_SUBJECT",
                     evt.newValue ? EditorPrefs.GetString(subjectKey, "") : "");
             });
@@ -475,7 +484,7 @@ namespace CoreAI.Tests.EditMode
             bar.style.height = 18;
             bar.style.backgroundColor = new Color(0f, 0f, 0f, 0.25f);
             bar.style.marginTop = 6;
-            _progressFill = new();
+            _progressFill = new VisualElement();
             _progressFill.style.height = Length.Percent(100);
             _progressFill.style.width = Length.Percent(0);
             _progressFill.style.backgroundColor = new Color(0.30f, 0.72f, 0.40f);
@@ -502,7 +511,8 @@ namespace CoreAI.Tests.EditMode
         {
             ScrollView root = new();
             root.style.flexGrow = 1;
-            root.Add(Header("Model comparison", "Select newest model reports and build COMPARISON.md + COMPARISON.svg."));
+            root.Add(
+                Header("Model comparison", "Select newest model reports and build COMPARISON.md + COMPARISON.svg."));
             Label help = Muted("Tick models, optionally pick a Pinned first model, then Build.");
             help.style.marginLeft = 12;
             help.style.marginRight = 12;
@@ -606,21 +616,21 @@ namespace CoreAI.Tests.EditMode
             if (_overrideConnection)
             {
                 GameCreationBenchmarkLauncher.Configure(
-                    model: GameCreationBenchmarkLauncher.OrConfigured(_model,
+                    GameCreationBenchmarkLauncher.OrConfigured(_model,
                         GameCreationBenchmarkLauncher.ConfiguredModel),
-                    baseUrl: GameCreationBenchmarkLauncher.OrConfigured(_baseUrl,
+                    GameCreationBenchmarkLauncher.OrConfigured(_baseUrl,
                         GameCreationBenchmarkLauncher.ConfiguredBaseUrl),
-                    apiKey: GameCreationBenchmarkLauncher.OrConfigured(_apiKey,
+                    GameCreationBenchmarkLauncher.OrConfigured(_apiKey,
                         GameCreationBenchmarkLauncher.ConfiguredApiKey),
-                    streaming: GameCreationBenchmarkLauncher.ConnectionMode(_streamingMode),
-                    nativeTools: GameCreationBenchmarkLauncher.ConnectionMode(_nativeToolsMode),
-                    groupsCsv: BuildGroups(),
-                    repetitions: _reps,
-                    retries: _retries,
-                    timeoutSeconds: _timeoutSeconds > 0 ? _timeoutSeconds : (int?)null);
+                    GameCreationBenchmarkLauncher.ConnectionMode(_streamingMode),
+                    GameCreationBenchmarkLauncher.ConnectionMode(_nativeToolsMode),
+                    BuildGroups(),
+                    _reps,
+                    _retries,
+                    _timeoutSeconds > 0 ? _timeoutSeconds : (int?)null);
             }
 
-            GameCreationBenchmarkLauncher.RunViaTestRunner(revealOnFinish: true, exitOnFinish: false);
+            GameCreationBenchmarkLauncher.RunViaTestRunner(true, false);
         }
 
         private void UpdateLiveStatus()
@@ -644,7 +654,9 @@ namespace CoreAI.Tests.EditMode
                 : GameCreationBenchmarkLauncher.LastStatus;
 
             float pct = active
-                ? Mathf.Clamp01(useScenarioClock ? BenchmarkProgress.ScenarioTimeFraction : BenchmarkProgress.Fraction) * 100f
+                ? Mathf.Clamp01(useScenarioClock
+                    ? BenchmarkProgress.ScenarioTimeFraction
+                    : BenchmarkProgress.Fraction) * 100f
                 : 0f;
             _progressFill.style.width = Length.Percent(pct);
             _progressText.text = active
@@ -691,7 +703,8 @@ namespace CoreAI.Tests.EditMode
 
             List<string> modelIds = runs.Select(r => r.Summary.ModelId).Distinct().ToList();
             RunEntry best = runs.OrderByDescending(r => r.Summary.SuiteBase).First();
-            _historyList.Add(Info($"{runs.Count} run(s), {modelIds.Count} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
+            _historyList.Add(Info(
+                $"{runs.Count} run(s), {modelIds.Count} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
 
             VisualElement toolbar = Row();
             toolbar.style.justifyContent = Justify.FlexEnd;
@@ -889,7 +902,8 @@ namespace CoreAI.Tests.EditMode
                 box.Add(Ellipsis(LabelBold($"Game-fitness {Inv(s.GameFitOverall)}/10 - best: {Fallback(s.BestRole)}")));
                 foreach (KeyValuePair<string, double> role in s.Roles.OrderByDescending(r => r.Value))
                 {
-                    box.Add(MetricBar(role.Key, role.Value, 10, $"{Inv(role.Value)}/10  {RoleVerdictShort(role.Value)}"));
+                    box.Add(MetricBar(role.Key, role.Value, 10,
+                        $"{Inv(role.Value)}/10  {RoleVerdictShort(role.Value)}"));
                 }
             }
 
@@ -952,7 +966,8 @@ namespace CoreAI.Tests.EditMode
                 tile.style.marginBottom = 8;
                 Image image = new() { image = tex, scaleMode = ScaleMode.ScaleToFit };
                 image.style.width = 150;
-                image.style.height = tex != null ? Mathf.Clamp(150f * tex.height / Mathf.Max(1, tex.width), 64f, 120f) : 84f;
+                image.style.height =
+                    tex != null ? Mathf.Clamp(150f * tex.height / Mathf.Max(1, tex.width), 64f, 120f) : 84f;
                 image.style.backgroundColor = new Color(0f, 0f, 0f, 0.2f);
                 image.RegisterCallback<MouseUpEvent>(_ => OpenImage(png));
                 tile.Add(image);
@@ -1015,7 +1030,9 @@ namespace CoreAI.Tests.EditMode
                 name.style.marginLeft = 4;
                 name.style.color = new Color(0.86f, 0.87f, 0.90f);
 
-                Label meta = Ellipsis(Muted($"{Inv(run.Summary.SuiteBase)} · reps {run.Summary.Repetitions} · {FormatRunDate(run.Summary.RunId)}"));
+                Label meta =
+                    Ellipsis(Muted(
+                        $"{Inv(run.Summary.SuiteBase)} · reps {run.Summary.Repetitions} · {FormatRunDate(run.Summary.RunId)}"));
                 meta.style.flexShrink = 0;
                 meta.style.width = 150;
                 meta.style.unityTextAlign = TextAnchor.MiddleRight;
@@ -1174,23 +1191,28 @@ namespace CoreAI.Tests.EditMode
         {
             return _modelSort switch
             {
-                "Speed" => (maxSpeed <= 0 ? 0 : s.TokensPerSecond / maxSpeed * 100.0, $"{Inv(s.TokensPerSecond)} tok/s"),
+                "Speed" => (maxSpeed <= 0 ? 0 : s.TokensPerSecond / maxSpeed * 100.0,
+                    $"{Inv(s.TokensPerSecond)} tok/s"),
                 "Pass-rate" => (s.PassRate * 100.0, $"{Inv(s.PassRate * 100)}%"),
                 "Game-fit" => (s.GameFitOverall * 10.0, $"{Inv(s.GameFitOverall)}/10"),
                 _ => (s.SuiteBase, Inv(s.SuiteBase))
             };
         }
 
-        private List<RunEntry> LatestRunsByModel() =>
-            GameCreationBenchmarkLauncher.ListRuns()
+        private List<RunEntry> LatestRunsByModel()
+        {
+            return GameCreationBenchmarkLauncher.ListRuns()
                 .GroupBy(r => r.Summary.ModelId)
                 .Select(g => g.OrderByDescending(r => r.Summary.RunId).First())
                 .OrderByDescending(r => r.Summary.SuiteBase)
                 .ThenBy(r => r.Summary.ModelId)
                 .ToList();
+        }
 
-        private string BuildGroups() =>
-            GameCreationBenchmarkLauncher.GroupsCsv(_runG1, _runG2, _runG3, _runG4, _runG5, _runG6, _runG7);
+        private string BuildGroups()
+        {
+            return GameCreationBenchmarkLauncher.GroupsCsv(_runG1, _runG2, _runG3, _runG4, _runG5, _runG6, _runG7);
+        }
 
         private void LoadPrefs()
         {
@@ -1258,7 +1280,8 @@ namespace CoreAI.Tests.EditMode
 
         private static DropdownField ModeDropdown(string label, int value, Action<int> changed)
         {
-            DropdownField field = new(label, ConnModeOptions.ToList(), Mathf.Clamp(value, 0, ConnModeOptions.Length - 1));
+            DropdownField field = new(label, ConnModeOptions.ToList(),
+                Mathf.Clamp(value, 0, ConnModeOptions.Length - 1));
             field.RegisterValueChangedCallback(evt =>
             {
                 int index = ConnModeOptions.ToList().IndexOf(evt.newValue);
@@ -1469,8 +1492,9 @@ namespace CoreAI.Tests.EditMode
                 : fn;
         }
 
-        private static string DimShort(string dim) =>
-            dim switch
+        private static string DimShort(string dim)
+        {
+            return dim switch
             {
                 "ToolCorrectness" => "Tools",
                 "IntentSequence" => "Intent",
@@ -1480,12 +1504,17 @@ namespace CoreAI.Tests.EditMode
                 "InstructionAdherence" => "Instr",
                 _ => dim
             };
+        }
 
-        private static string FormatTokens(long tokens) =>
-            tokens >= 1000 ? $"{Inv(tokens / 1000.0)}k tok" : $"{tokens} tok";
+        private static string FormatTokens(long tokens)
+        {
+            return tokens >= 1000 ? $"{Inv(tokens / 1000.0)}k tok" : $"{tokens} tok";
+        }
 
-        private static string Inv(double v, string fmt = "0.#") =>
-            v.ToString(fmt, CultureInfo.InvariantCulture);
+        private static string Inv(double v, string fmt = "0.#")
+        {
+            return v.ToString(fmt, CultureInfo.InvariantCulture);
+        }
 
         private static string FormatDuration(double ms)
         {
@@ -1532,8 +1561,10 @@ namespace CoreAI.Tests.EditMode
             return rating >= 4.0 ? "Limited" : "Not suitable";
         }
 
-        private static string Fallback(string value) =>
-            string.IsNullOrWhiteSpace(value) ? "(none)" : value;
+        private static string Fallback(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "(none)" : value;
+        }
 
         private static Color ScoreColor(double score)
         {

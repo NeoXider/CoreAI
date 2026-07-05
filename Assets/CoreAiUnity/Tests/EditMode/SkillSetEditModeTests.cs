@@ -380,7 +380,8 @@ namespace CoreAI.Tests.EditMode
             ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
             string json = await InvokeCallSkillToolAsync(proxy, "find_objects", "{\"query\":\"Player\"}");
 
-            Assert.IsTrue(inner.FindObjectsCalled, "IAIFunctionsLlmTool function should have been called by function name.");
+            Assert.IsTrue(inner.FindObjectsCalled,
+                "IAIFunctionsLlmTool function should have been called by function name.");
             Assert.That(json, Does.Contain("Player"));
         }
 
@@ -612,6 +613,7 @@ namespace CoreAI.Tests.EditMode
             public bool Called { get; private set; }
             public override string Name => "json_action";
             public override string Description => "Direct JSON skill action.";
+
             public override string ParametersSchema =>
                 "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}";
 
@@ -637,7 +639,11 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class StubTool : ILlmTool
         {
-            public StubTool(string name) { Name = name; }
+            public StubTool(string name)
+            {
+                Name = name;
+            }
+
             public string Name { get; }
             public string Description => "stub";
             public string ParametersSchema => "{}";
@@ -647,10 +653,26 @@ namespace CoreAI.Tests.EditMode
         private sealed class MemorySkillStore : ISkillStore
         {
             private readonly Dictionary<string, SkillRecord> _m = new(StringComparer.Ordinal);
-            public void Save(SkillRecord record) => _m[record.Id] = record;
-            public bool TryLoad(string id, out SkillRecord record) => _m.TryGetValue(id, out record);
-            public IReadOnlyList<SkillRecord> List() => new List<SkillRecord>(_m.Values);
-            public void Delete(string id) => _m.Remove(id);
+
+            public void Save(SkillRecord record)
+            {
+                _m[record.Id] = record;
+            }
+
+            public bool TryLoad(string id, out SkillRecord record)
+            {
+                return _m.TryGetValue(id, out record);
+            }
+
+            public IReadOnlyList<SkillRecord> List()
+            {
+                return new List<SkillRecord>(_m.Values);
+            }
+
+            public void Delete(string id)
+            {
+                _m.Remove(id);
+            }
         }
 
         private static SkillAuthoringCoordinator MakeCoordinator(
@@ -663,13 +685,14 @@ namespace CoreAI.Tests.EditMode
                     ? (ILlmTool)new StubTool("memory")
                     : null;
             return new SkillAuthoringCoordinator(
-                catalog, store, new MemoryLuaScriptVersionStore(), resolver, requireKnownTools: true);
+                catalog, store, new MemoryLuaScriptVersionStore(), resolver, true);
         }
 
         [Test]
         public void Create_PersistsAndAppearsInCatalog()
         {
-            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+            SkillAuthoringCoordinator coord =
+                MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
 
             SkillAuthoringResult r = coord.Create("greet", "greets the player", "Say hi warmly.", new[] { "memory" });
 
@@ -705,7 +728,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Update_RevisesInstructionsAndRecordsRevision()
         {
-            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+            SkillAuthoringCoordinator coord =
+                MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
             coord.Create("greet", "d", "v0 instructions", new[] { "memory" });
 
             SkillAuthoringResult u = coord.Update("greet", null, "v1 instructions", null);
@@ -720,7 +744,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Delete_RemovesFromCatalogAndStore()
         {
-            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+            SkillAuthoringCoordinator coord =
+                MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
             coord.Create("greet", "d", "i", new[] { "memory" });
 
             SkillAuthoringResult d = coord.Delete("greet");

@@ -1598,7 +1598,8 @@ namespace CoreAI.Infrastructure.Llm
             int completion = usage["completion_tokens"]?.ToObject<int>() ?? 0;
             int total = usage["total_tokens"]?.ToObject<int>() ?? 0;
             MEAI.AdditionalPropertiesDictionary<long> additionalCounts = BuildAdditionalUsageCounts(usage);
-            if (prompt == 0 && completion == 0 && total == 0 && (additionalCounts == null || additionalCounts.Count == 0))
+            if (prompt == 0 && completion == 0 && total == 0 &&
+                (additionalCounts == null || additionalCounts.Count == 0))
             {
                 return null;
             }
@@ -1707,8 +1708,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
-        internal static bool IsCompleteJsonObjectForTests(string s) =>
-            SseToolCallAccumulator.IsCompleteJsonObject(s);
+        internal static bool IsCompleteJsonObjectForTests(string s)
+        {
+            return SseToolCallAccumulator.IsCompleteJsonObject(s);
+        }
 
         /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
         internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
@@ -2155,10 +2158,14 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Test hook: exposes the wire-payload message serialization.</summary>
         internal static List<Dictionary<string, object>> BuildMessagesPayloadForTests(List<MEAI.ChatMessage> msgs)
-            => BuildMessagesPayloadStatic(msgs);
+        {
+            return BuildMessagesPayloadStatic(msgs);
+        }
 
         private List<Dictionary<string, object>> BuildMessagesPayload(List<MEAI.ChatMessage> msgs)
-            => BuildMessagesPayloadStatic(msgs);
+        {
+            return BuildMessagesPayloadStatic(msgs);
+        }
 
         private static List<Dictionary<string, object>> BuildMessagesPayloadStatic(List<MEAI.ChatMessage> msgs)
         {

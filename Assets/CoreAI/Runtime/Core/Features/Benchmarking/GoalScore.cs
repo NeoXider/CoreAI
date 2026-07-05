@@ -244,7 +244,7 @@ namespace CoreAI.Benchmarking
             if (hardCap.HasValue)
             {
                 int hc = hardCap.Value;
-                hardCap = hc < 0 ? 0 : (hc > 100 ? 100 : hc);
+                hardCap = hc < 0 ? 0 : hc > 100 ? 100 : hc;
             }
 
             double totalWeight = 0;
@@ -360,6 +360,9 @@ namespace CoreAI.Benchmarking
             return value > max ? max : value;
         }
 
-        private static double Finite(double value) => double.IsNaN(value) || double.IsInfinity(value) ? 0 : value;
+        private static double Finite(double value)
+        {
+            return double.IsNaN(value) || double.IsInfinity(value) ? 0 : value;
+        }
     }
 }

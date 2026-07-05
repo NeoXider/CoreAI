@@ -195,7 +195,8 @@ namespace CoreAI.Tests.PlayMode
             // otherwise CallCount/LastOk/LastContent stay at their defaults and the test wrongly
             // reports "LLM failed" for a perfectly successful streamed turn.
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
             {
                 CallCount++;
                 Stopwatch sw = Stopwatch.StartNew();

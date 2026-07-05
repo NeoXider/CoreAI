@@ -1,6 +1,7 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 #if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Benchmarking;
 using static CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkHarness;
@@ -17,15 +18,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameInstructionScenariosG5
     {
-        public static GameBenchmarkScenario[] All() => new GameBenchmarkScenario[]
+        public static GameBenchmarkScenario[] All()
         {
-            new ProtectedChest(),
-            new SpawnOnly(),
-            new ExactlyThree(),
-            new NoLuaTool(),
-            new ToolBudget(),
-            new OrderedSpawn()
-        };
+            return new GameBenchmarkScenario[]
+            {
+                new ProtectedChest(),
+                new SpawnOnly(),
+                new ExactlyThree(),
+                new NoLuaTool(),
+                new ToolBudget(),
+                new OrderedSpawn()
+            };
+        }
 
         private abstract class G5Scenario : GameBenchmarkScenario
         {
@@ -128,12 +132,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 bool core = SpawnedExactly(env, "Key") && SpawnedExactly(env, "Door");
-                g.Add("core_task", "spawned Key and Door", 40, core, mandatory: true,
+                g.Add("core_task", "spawned Key and Door", 40, core, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int chestHits = CommandsTargeting(env, "Chest");
                 g.Constraint("protect_chest", "never touched the Chest", 60, chestHits > 0,
-                    penaltyPerOccurrence: 20, occurrences: chestHits);
+                    20, chestHits);
 
                 if (!core)
                 {
@@ -164,13 +168,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 bool core = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Goal")
-                            && SpawnedExactly(env, "Hazard");
-                g.Add("core_task", "spawned Player, Goal, Hazard", 40, core, mandatory: true,
+                                                          && SpawnedExactly(env, "Hazard");
+                g.Add("core_task", "spawned Player, Goal, Hazard", 40, core, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int nonSpawn = NonSpawnCommands(env);
                 g.Constraint("spawn_only", "used only the spawn action", 60, nonSpawn > 0,
-                    penaltyPerOccurrence: 15, occurrences: nonSpawn);
+                    15, nonSpawn);
 
                 if (!core)
                 {
@@ -201,18 +205,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 bool named = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Goal")
-                             && SpawnedExactly(env, "Hazard");
+                                                           && SpawnedExactly(env, "Hazard");
                 int total = Math.Max(env.World.Commands.Count, ToolCallsNamed(run, "world_command"));
                 int luaCalls = env.Lua.ExecutionCount;
 
-                g.Add("core_task", "spawned Player, Goal, Hazard", 40, named, mandatory: true,
+                g.Add("core_task", "spawned Player, Goal, Hazard", 40, named, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int extraWorld = Math.Max(0, total - 3);
                 g.Constraint("exactly_three", "exactly three world_command attempts, no extras", 40, total != 3,
-                    penaltyPerOccurrence: 15, occurrences: extraWorld);
+                    15, extraWorld);
                 g.Constraint("no_other_tools", "no other tool (e.g. execute_lua) was used", 20, luaCalls > 0,
-                    penaltyPerOccurrence: 15, occurrences: luaCalls);
+                    15, luaCalls);
 
                 if (!named)
                 {
@@ -243,12 +247,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 bool core = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Goal");
-                g.Add("core_task", "spawned Player and Goal", 40, core, mandatory: true,
+                g.Add("core_task", "spawned Player and Goal", 40, core, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int luaCalls = Math.Max(env.Lua.ExecutionCount, run.TurnsUsingTool("execute_lua"));
                 g.Constraint("no_lua", "did not call execute_lua", 60, luaCalls > 0,
-                    penaltyPerOccurrence: 30, occurrences: luaCalls);
+                    30, luaCalls);
 
                 if (!core)
                 {
@@ -279,12 +283,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 ScenarioGrading g = new();
                 bool core = SpawnedExactly(env, "Player") && SpawnedExactly(env, "Enemy");
-                g.Add("core_task", "spawned Player and Enemy", 40, core, mandatory: true,
+                g.Add("core_task", "spawned Player and Enemy", 40, core, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 int over = Math.Max(0, run.ToolCalls - 3);
                 g.Constraint("tool_budget", "used at most 3 tool calls", 60, over > 0,
-                    penaltyPerOccurrence: 12, occurrences: over);
+                    12, over);
 
                 if (!core)
                 {
@@ -316,7 +320,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading g = new();
 
                 // Sequence of spawn target names, in command order.
-                var spawnNames = new System.Collections.Generic.List<string>();
+                List<string> spawnNames = new();
                 foreach (RecordedWorldCommand c in env.World.Commands)
                 {
                     if (string.Equals(c.Action, "spawn", StringComparison.OrdinalIgnoreCase)
@@ -327,8 +331,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 bool allThree = SpawnedExactly(env, "Gate") && SpawnedExactly(env, "Player")
-                                && SpawnedExactly(env, "Flag");
-                g.Add("core_task", "spawned Gate, Player, Flag", 40, allThree, mandatory: true,
+                                                            && SpawnedExactly(env, "Flag");
+                g.Add("core_task", "spawned Gate, Player, Flag", 40, allThree, true,
                     dimension: BenchmarkDimension.TaskCompletion);
 
                 // Exactly 3 (not >=3): the goal says Flag must be LAST, so a fourth spawn after Flag
@@ -338,7 +342,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                                && string.Equals(spawnNames[1], "Player", StringComparison.OrdinalIgnoreCase)
                                && string.Equals(spawnNames[2], "Flag", StringComparison.OrdinalIgnoreCase);
                 g.Constraint("exact_order", "spawned in the order Gate, Player, Flag", 60, !orderOk,
-                    penaltyPerOccurrence: 0, occurrences: 0);
+                    0, 0);
 
                 if (!allThree)
                 {

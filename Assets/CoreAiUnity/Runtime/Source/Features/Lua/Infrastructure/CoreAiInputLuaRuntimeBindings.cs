@@ -43,7 +43,7 @@ namespace CoreAI.Infrastructure.Lua
             ["6"] = KeyCode.Alpha6,
             ["7"] = KeyCode.Alpha7,
             ["8"] = KeyCode.Alpha8,
-            ["9"] = KeyCode.Alpha9,
+            ["9"] = KeyCode.Alpha9
         };
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
@@ -78,7 +78,7 @@ namespace CoreAI.Infrastructure.Lua
                     return cached;
                 }
 
-                KeyCode parsed = Enum.TryParse(key, ignoreCase: true, out KeyCode result) ? result : KeyCode.None;
+                KeyCode parsed = Enum.TryParse(key, true, out KeyCode result) ? result : KeyCode.None;
                 KeyCache[key] = parsed;
                 return parsed;
             }

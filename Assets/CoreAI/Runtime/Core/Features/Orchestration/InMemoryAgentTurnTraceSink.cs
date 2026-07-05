@@ -10,8 +10,10 @@ namespace CoreAI.Ai
     {
         private readonly object _gate = new();
         private readonly Queue<AgentTurnTrace> _traces = new();
+
         private readonly Dictionary<string, AgentTurnTrace> _latestByRole =
             new(System.StringComparer.Ordinal);
+
         private readonly int _capacity;
 
         /// <summary>Creates a bounded trace sink.</summary>

@@ -43,7 +43,8 @@ namespace CoreAI.Benchmarking
         /// a single long-running scenario (e.g. G6's free build alone, <see cref="Total"/> == 1) sits at a
         /// meaningless 0% count-based fraction for its whole multi-minute run otherwise.
         /// </summary>
-        public static bool HasScenarioClock => _currentScenarioStartedUtc.HasValue && _currentScenarioTimeoutSeconds > 0f;
+        public static bool HasScenarioClock =>
+            _currentScenarioStartedUtc.HasValue && _currentScenarioTimeoutSeconds > 0f;
 
         /// <summary>Seconds elapsed since the current scenario started, or 0 when no clock is set.</summary>
         public static float ScenarioElapsedSeconds => _currentScenarioStartedUtc.HasValue

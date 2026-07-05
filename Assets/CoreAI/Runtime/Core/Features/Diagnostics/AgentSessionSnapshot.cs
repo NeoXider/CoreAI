@@ -119,7 +119,7 @@ namespace CoreAI.Diagnostics
             AppendSystemPromptSections(sb);
             AppendSection(sb, "User Payload Estimate", UserPayloadEstimate);
             AppendTools(sb);
-            AppendHistorySections(sb, includeSystemMessages: true);
+            AppendHistorySections(sb, true);
 
             return sb.ToString();
         }
@@ -139,9 +139,10 @@ namespace CoreAI.Diagnostics
         {
             StringBuilder sb = new();
             AppendHeader(sb);
-            sb.AppendLine("System-role messages are omitted from this view. Use the System view for prompts, memory tails, and summaries.");
+            sb.AppendLine(
+                "System-role messages are omitted from this view. Use the System view for prompts, memory tails, and summaries.");
             sb.AppendLine();
-            AppendHistorySections(sb, includeSystemMessages: false);
+            AppendHistorySections(sb, false);
             return sb.ToString();
         }
 

@@ -131,7 +131,7 @@ namespace CoreAI.Tests.EditMode
                 GameLoggerUnscopedFallback.Instance,
                 new CoreAiVersioningLuaRuntimeBindings(null, null),
                 null,
-                components: new CoreAiComponentLuaRuntimeBindings(sink),
+                new CoreAiComponentLuaRuntimeBindings(sink),
                 capabilities: LuaCapabilities.All);
 
             bindings.RegisterGameplayApis(registry, LuaCapabilities.WorldEdit);

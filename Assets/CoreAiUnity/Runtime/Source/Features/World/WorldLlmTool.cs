@@ -117,7 +117,8 @@ namespace CoreAI.Infrastructure.Llm
             string action,
             [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
             float? x = null,
-            [Description("World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+            [Description(
+                "World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
             [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
             float? z = null,
@@ -139,17 +140,18 @@ namespace CoreAI.Infrastructure.Llm
             float? scaleY = null,
             [Description("Optional local Z size/scale for non-uniform objects.")]
             float? scaleZ = null,
-            [Description("What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, empty) or a registered prefab key. " +
+            [Description(
+                "What to spawn: a built-in primitive (cube, sphere, cylinder, capsule, empty) or a registered prefab key. " +
                 "Unscaled sizes: cube/sphere are 1m; cylinder/capsule are 2m tall (not 1m) at 1m diameter.")]
             string? prefabKey = null,
             [Description("Object name to target or spawn.")]
             string? targetName = null,
-            [Description("Generic string value. For spawn/change this is the parent object name; for set_color it is an HTML color; for list_objects it is the search pattern.")]
+            [Description(
+                "Generic string value. For spawn/change this is the parent object name; for set_color it is an HTML color; for list_objects it is the search pattern.")]
             string? stringValue = null,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
-            [Description("Text for show_text")]
-            string? textToDisplay = null,
+            [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             CancellationToken cancellationToken = default);
@@ -160,7 +162,8 @@ namespace CoreAI.Infrastructure.Llm
             string action,
             [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
             float? x = null,
-            [Description("World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+            [Description(
+                "World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
             [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
             float? z = null,
@@ -197,8 +200,7 @@ namespace CoreAI.Infrastructure.Llm
             string? stringValue = null,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
-            [Description("Text for show_text")]
-            string? textToDisplay = null,
+            [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             CancellationToken cancellationToken = default)
@@ -269,8 +271,10 @@ namespace CoreAI.Infrastructure.Llm
             {
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
-                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ, stringValue),
-                    "change" => CreateChangeCommand(targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ, stringValue),
+                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY,
+                        scaleZ, stringValue),
+                    "change" => CreateChangeCommand(targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ,
+                        stringValue),
                     "set_color" => CreateSetColorCommand(targetName, stringValue),
                     "destroy" => CreateDestroyCommand(targetName),
                     "load_scene" => CreateLoadSceneCommand(stringValue),
@@ -339,15 +343,19 @@ namespace CoreAI.Infrastructure.Llm
                     bool hasRot = fx.HasValue || fy.HasValue || fz.HasValue;
                     bool hasScale = Positive(scale);
                     bool hasAxisScale = Positive(scaleX) || Positive(scaleY) || Positive(scaleZ);
-                    string extra = string.Format(CultureInfo.InvariantCulture, " at ({0:0.##},{1:0.##},{2:0.##})", x ?? 0f, y ?? 0f, z ?? 0f)
+                    string extra = string.Format(CultureInfo.InvariantCulture, " at ({0:0.##},{1:0.##},{2:0.##})",
+                                       x ?? 0f, y ?? 0f, z ?? 0f)
                                    + (hasRot
-                                       ? string.Format(CultureInfo.InvariantCulture, " rot=({0:0.#},{1:0.#},{2:0.#})", fx ?? 0f, fy ?? 0f, fz ?? 0f)
+                                       ? string.Format(CultureInfo.InvariantCulture, " rot=({0:0.#},{1:0.#},{2:0.#})",
+                                           fx ?? 0f, fy ?? 0f, fz ?? 0f)
                                        : "")
                                    + (hasScale
                                        ? string.Format(CultureInfo.InvariantCulture, " scale={0:0.##}", scale ?? 0f)
                                        : "")
                                    + (hasAxisScale
-                                       ? string.Format(CultureInfo.InvariantCulture, " scaleXYZ=({0:0.##},{1:0.##},{2:0.##})", scaleX ?? 0f, scaleY ?? 0f, scaleZ ?? 0f)
+                                       ? string.Format(CultureInfo.InvariantCulture,
+                                           " scaleXYZ=({0:0.##},{1:0.##},{2:0.##})", scaleX ?? 0f, scaleY ?? 0f,
+                                           scaleZ ?? 0f)
                                        : "");
                     return SerializeResult(true,
                         $"World command 'spawn' executed successfully{extra}{LiveNote()}", action);
@@ -371,7 +379,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float? x,
-            float? y, float? z, float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY, float? scaleZ,
+            float? y, float? z, float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY,
+            float? scaleZ,
             string? parentName)
         {
             if (string.IsNullOrEmpty(prefabKey) || string.IsNullOrEmpty(targetName))
@@ -503,7 +512,8 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ShowText(targetName, text);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? targetName, float? x, float? y, float? z)
+        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? targetName, float? x, float? y,
+            float? z)
         {
             if (string.IsNullOrEmpty(targetName))
             {
@@ -605,7 +615,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private static bool Positive(float? value)
-            => value.HasValue && value.Value > 0f;
+        {
+            return value.HasValue && value.Value > 0f;
+        }
 
         private const string ValidActionsText =
             "spawn, change, set_color, destroy, load_scene, reload_scene, set_active, " +

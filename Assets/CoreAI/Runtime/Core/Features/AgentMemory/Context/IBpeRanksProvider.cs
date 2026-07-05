@@ -44,6 +44,9 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public Stream OpenRanks(BpeEncoding encoding) => null;
+        public Stream OpenRanks(BpeEncoding encoding)
+        {
+            return null;
+        }
     }
 }

@@ -78,7 +78,7 @@ namespace CoreAI.Tests.PlayMode
             public int CallCount { get; private set; }
 
             public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
-                System.Threading.CancellationToken cancellationToken)
+                CancellationToken cancellationToken)
             {
                 CallCount++;
                 return Task.FromResult(Inventory);
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
-                System.Threading.CancellationToken cancellationToken = default)
+                CancellationToken cancellationToken = default)
             {
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;

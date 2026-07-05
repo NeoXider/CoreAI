@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_BelowThreshold_Skips()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3);
+            LuaModAutoRepairPolicy policy = NewPolicy(3);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Skip, policy.Evaluate("m", 1, 0d, out int attempt));
             Assert.AreEqual(0, attempt);
@@ -23,7 +23,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_AtThreshold_RepairsAndCountsAttempt()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3);
+            LuaModAutoRepairPolicy policy = NewPolicy(3);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out int attempt));
             Assert.AreEqual(1, attempt);
@@ -33,7 +33,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_WhileInFlight_Skips()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3);
+            LuaModAutoRepairPolicy policy = NewPolicy(3);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out _));
             // A second error arriving before the in-flight repair finishes must not launch another.
@@ -43,7 +43,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_SecondAttempt_RequiresCooldownThenRepairs()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3, maxAttempts: 2, cooldown: 20d);
+            LuaModAutoRepairPolicy policy = NewPolicy(3, 2, 20d);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out _));
             policy.OnRepairCompleted("m");
@@ -58,7 +58,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_ExhaustedBudget_ReportsGaveUpOnceThenSkips()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3, maxAttempts: 1, cooldown: 0d);
+            LuaModAutoRepairPolicy policy = NewPolicy(3, 1, 0d);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out _));
             policy.OnRepairCompleted("m");
@@ -71,7 +71,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void OnModReloaded_WhileInFlight_KeepsAttemptBudget()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3, maxAttempts: 2, cooldown: 0d);
+            LuaModAutoRepairPolicy policy = NewPolicy(3, 2, 0d);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out _));
             // The repair's own manage_mods reload fires while still in flight: clears in-flight, keeps count.
@@ -83,7 +83,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void OnModReloaded_ExternalReload_ResetsAttemptBudget()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3, maxAttempts: 1, cooldown: 0d);
+            LuaModAutoRepairPolicy policy = NewPolicy(3, 1, 0d);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("m", 3, 0d, out _));
             policy.OnRepairCompleted("m");
@@ -98,7 +98,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_IndependentMods_TrackedSeparately()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 3);
+            LuaModAutoRepairPolicy policy = NewPolicy(3);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("a", 3, 0d, out _));
             Assert.AreEqual(LuaModAutoRepairDecision.Repair, policy.Evaluate("b", 3, 0d, out _));
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_EmptyModId_Skips()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 1);
+            LuaModAutoRepairPolicy policy = NewPolicy(1);
 
             Assert.AreEqual(LuaModAutoRepairDecision.Skip, policy.Evaluate("", 5, 0d, out _));
             Assert.AreEqual(LuaModAutoRepairDecision.Skip, policy.Evaluate(null, 5, 0d, out _));
@@ -118,7 +118,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Evaluate_ZeroMaxAttempts_NeverRepairs()
         {
-            LuaModAutoRepairPolicy policy = NewPolicy(minErrors: 1, maxAttempts: 0);
+            LuaModAutoRepairPolicy policy = NewPolicy(1, 0);
 
             // With no budget at all the very first qualifying error reports GaveUp, then goes quiet.
             Assert.AreEqual(LuaModAutoRepairDecision.GaveUp, policy.Evaluate("m", 1, 0d, out _));

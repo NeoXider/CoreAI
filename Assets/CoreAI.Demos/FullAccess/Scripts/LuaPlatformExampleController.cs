@@ -27,11 +27,13 @@ namespace CoreAI.Demos
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Hotkey that toggles the panel. Set to None to disable keyboard toggling.")]
-        [SerializeField] private KeyCode toggleKey = KeyCode.F6;
+        [Tooltip("Hotkey that toggles the panel. Set to None to disable keyboard toggling.")] [SerializeField]
+        private KeyCode toggleKey = KeyCode.F6;
+
         [SerializeField] private Rect panelRect = new(470, 92, 400, 330);
-        [Tooltip("Panel visibility on start; toggle at runtime via the hotkey or PanelVisible.")]
-        [SerializeField] private bool showPanel = true;
+
+        [Tooltip("Panel visibility on start; toggle at runtime via the hotkey or PanelVisible.")] [SerializeField]
+        private bool showPanel = true;
 
         /// <summary>Programmatic open/close of the panel (same effect as the hotkey).</summary>
         public bool PanelVisible
@@ -132,8 +134,8 @@ namespace CoreAI.Demos
                 _mods.ForgetMod(SelfTestBId);
 
                 // B first so it is already listening when A emits ping from its load chunk.
-                _mods.LoadMod(SelfTestBId, SelfTestBSource, LuaCapabilities.All, persistToStore: false);
-                _mods.LoadMod(SelfTestAId, SelfTestASource, LuaCapabilities.All, persistToStore: false);
+                _mods.LoadMod(SelfTestBId, SelfTestBSource, LuaCapabilities.All, false);
+                _mods.LoadMod(SelfTestAId, SelfTestASource, LuaCapabilities.All, false);
                 _mods.SetModReportLoggingEnabled(SelfTestAId, true);
                 _mods.SetModReportLoggingEnabled(SelfTestBId, true);
                 _status = "Self-test mods loaded; verdict arrives in ~2 s.";
@@ -162,7 +164,7 @@ namespace CoreAI.Demos
                 }
                 else
                 {
-                    _mods.LoadMod(TetrisId, TetrisSource, LuaCapabilities.All, persistToStore: true);
+                    _mods.LoadMod(TetrisId, TetrisSource, LuaCapabilities.All, true);
                 }
 
                 _mods.SetModReportLoggingEnabled(TetrisId, true);

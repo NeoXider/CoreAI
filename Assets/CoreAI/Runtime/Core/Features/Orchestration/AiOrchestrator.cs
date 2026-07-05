@@ -948,7 +948,8 @@ namespace CoreAI.Ai
             public int EstimatedPromptTokens;
         }
 
-        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted)>
+        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool
+                wasCompacted)>
             BuildChatHistoryAsync(
                 string roleId,
                 AgentMemoryPolicy.RoleMemoryConfig roleConfig,

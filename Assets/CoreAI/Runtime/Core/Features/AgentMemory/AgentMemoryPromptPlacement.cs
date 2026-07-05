@@ -95,7 +95,8 @@ namespace CoreAI.Ai
                 return MemoryUpdatesHeading + "\nNew memory since cached prefix:\n" + update.Trim();
             }
 
-            return MemoryUpdatesHeading + "\nCurrent canonical memory. This overrides older cached ## Memory if there is a conflict:\n" +
+            return MemoryUpdatesHeading +
+                   "\nCurrent canonical memory. This overrides older cached ## Memory if there is a conflict:\n" +
                    current.Trim();
         }
 

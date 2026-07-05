@@ -79,7 +79,7 @@ namespace CoreAI.Tests.EditMode
         public void FileLuaModSourceStore_List_ReturnsEveryStoredManifest()
         {
             _store.Save("a", "local a = 1", Manifest("a"));
-            _store.Save("b", "local b = 1", Manifest("b", active: false));
+            _store.Save("b", "local b = 1", Manifest("b", false));
 
             System.Collections.Generic.IReadOnlyList<LuaModManifest> manifests = _store.List();
 

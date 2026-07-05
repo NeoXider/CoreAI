@@ -15,24 +15,24 @@ namespace CoreAI.Infrastructure.Llm
         // returns false so a text-only model never receives an image part it cannot parse.
         private static readonly string[] VisionModelMarkers =
         {
-            "gpt-4o",      // gpt-4o, gpt-4o-mini (multimodal)
-            "gpt-4.1",     // gpt-4.1 family
+            "gpt-4o", // gpt-4o, gpt-4o-mini (multimodal)
+            "gpt-4.1", // gpt-4.1 family
             "gpt-4-turbo", // gpt-4-turbo (vision)
             "gpt-4-vision",
-            "o1",          // o1 / o1-mini reasoning (vision-capable)
+            "o1", // o1 / o1-mini reasoning (vision-capable)
             "o3",
             "o4",
             "vision",
-            "-vl",         // qwen-vl, qwen2-vl, internvl, etc.
+            "-vl", // qwen-vl, qwen2-vl, internvl, etc.
             "vl-",
             "llava",
-            "gemini",      // gemini 1.5/2.x are multimodal
-            "claude-3",    // claude 3 / 3.5 / 3.7 are multimodal
+            "gemini", // gemini 1.5/2.x are multimodal
+            "claude-3", // claude 3 / 3.5 / 3.7 are multimodal
             "claude-4",
             "claude-opus",
             "claude-sonnet",
             "pixtral",
-            "llama-3.2",   // llama 3.2 vision variants
+            "llama-3.2", // llama 3.2 vision variants
             "phi-3-vision",
             "phi-4-multimodal"
         };

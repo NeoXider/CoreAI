@@ -68,7 +68,9 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         public static CoreAiWorldCommandEnvelope Spawn(
             string prefabKeyOrName, string targetName, Vector3 pos, Vector3 eulerAngles, float uniformScale)
-            => Spawn(prefabKeyOrName, targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+        {
+            return Spawn(prefabKeyOrName, targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+        }
 
         public static CoreAiWorldCommandEnvelope Spawn(
             string prefabKeyOrName, string targetName, Vector3 pos, Vector3 eulerAngles, float uniformScale,
@@ -124,7 +126,9 @@ namespace CoreAI.Infrastructure.World
             Vector3 pos,
             Vector3 eulerAngles,
             float uniformScale)
-            => SetTransform(targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+        {
+            return SetTransform(targetName, pos, eulerAngles, uniformScale, Vector3.zero);
+        }
 
         public static CoreAiWorldCommandEnvelope SetTransform(
             string targetName,
@@ -157,7 +161,8 @@ namespace CoreAI.Infrastructure.World
             Vector3 nonUniformScale,
             bool hasScale,
             string parentName)
-            => Change(
+        {
+            return Change(
                 targetName,
                 pos,
                 hasPosition,
@@ -173,6 +178,7 @@ namespace CoreAI.Infrastructure.World
                 nonUniformScale,
                 hasScale,
                 parentName);
+        }
 
         public static CoreAiWorldCommandEnvelope Change(
             string targetName,
@@ -265,9 +271,12 @@ namespace CoreAI.Infrastructure.World
         }
 
         public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale)
-            => SetScale(targetName, uniformScale, Vector3.zero);
+        {
+            return SetScale(targetName, uniformScale, Vector3.zero);
+        }
 
-        public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale, Vector3 nonUniformScale)
+        public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale,
+            Vector3 nonUniformScale)
         {
             return new CoreAiWorldCommandEnvelope
             {

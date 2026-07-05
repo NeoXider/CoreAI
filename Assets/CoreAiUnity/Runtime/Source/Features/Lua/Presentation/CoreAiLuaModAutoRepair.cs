@@ -28,15 +28,16 @@ namespace CoreAI.Presentation
         private bool autoRepairEnabled = true;
 
         [Tooltip("Consecutive runtime errors a mod must hit before the first repair is attempted.")]
-        [Min(1)] [SerializeField]
+        [Min(1)]
+        [SerializeField]
         private int minConsecutiveErrors = LuaModAutoRepairPolicy.DefaultMinConsecutiveErrors;
 
         [Tooltip("Hard cap on auto-repair attempts per mod (loop guard). 0 disables auto-repair.")]
-        [Min(0)] [SerializeField]
+        [Min(0)]
+        [SerializeField]
         private int maxAttemptsPerMod = LuaModAutoRepairPolicy.DefaultMaxAttemptsPerMod;
 
-        [Tooltip("Minimum seconds between repair attempts for the same mod.")]
-        [Min(0f)] [SerializeField]
+        [Tooltip("Minimum seconds between repair attempts for the same mod.")] [Min(0f)] [SerializeField]
         private float cooldownSeconds = (float)LuaModAutoRepairPolicy.DefaultCooldownSeconds;
 
         [Tooltip("Optional persistence-key prefix (e.g. 'demo.live_mechanics.mods_chat.mod.') so the " +
@@ -100,7 +101,8 @@ namespace CoreAI.Presentation
                 yield break;
             }
 
-            if (!lifetimeScope.Container.TryResolve<IAiOrchestrationService>(out _orchestrator) || _orchestrator == null)
+            if (!lifetimeScope.Container.TryResolve<IAiOrchestrationService>(out _orchestrator) ||
+                _orchestrator == null)
             {
                 SetStatus("Lua mod auto-repair disabled: IAiOrchestrationService not registered.");
                 enabled = false;
@@ -140,7 +142,8 @@ namespace CoreAI.Presentation
             switch (decision)
             {
                 case LuaModAutoRepairDecision.GaveUp:
-                    SetStatus($"Auto-repair gave up on '{modId}' after {maxAttemptsPerMod} attempt(s). Last error: {error}");
+                    SetStatus(
+                        $"Auto-repair gave up on '{modId}' after {maxAttemptsPerMod} attempt(s). Last error: {error}");
                     return;
                 case LuaModAutoRepairDecision.Repair:
                     if (!_mods.TryGetModSource(modId, out string source))

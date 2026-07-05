@@ -80,8 +80,10 @@
         private const bool DefaultLogTokenUsage = true;
         private const bool DefaultLogLlmLatency = true;
         private const bool DefaultLogLlmConnectionErrors = true;
+
         /// <summary>Default model context window in tokens (128K = 131072).</summary>
         public const int DefaultContextWindowTokens = 131072;
+
         private const float DefaultTemperature = 0.1f;
         private const bool DefaultOverrideTemperature = false;
         private const int DefaultMaxToolCallRetries = 3;
@@ -100,7 +102,9 @@
         private const int DefaultMaxToolResultChars = 8000;
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
+
         private const int DefaultMaxToolCallRoundtrips = 20;
+
         // Default 20 (bounds context growth out of the box); 0 = EXPLICIT opt-out (unlimited).
         private const int DefaultMaxToolCallHistoryMessages = 20;
         private const int DefaultMaxParallelToolCalls = 4;

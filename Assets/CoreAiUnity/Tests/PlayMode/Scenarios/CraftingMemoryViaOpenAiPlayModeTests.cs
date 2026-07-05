@@ -414,7 +414,8 @@ namespace CoreAI.Tests.PlayMode
         ///   .
         /// </summary>
         [UnityTest]
-        [Explicit("Targeted duplicate of ThreeCrafts_AllUnique for same-ingredient drift; too expensive for mandatory full live-model suite.")]
+        [Explicit(
+            "Targeted duplicate of ThreeCrafts_AllUnique for same-ingredient drift; too expensive for mandatory full live-model suite.")]
         [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent()
         {
@@ -547,7 +548,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Explicit("Targeted live-model determinism check for repeated ingredients; run separately from mandatory full PlayMode.")]
+        [Explicit(
+            "Targeted live-model determinism check for repeated ingredients; run separately from mandatory full PlayMode.")]
         [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_RepeatIngredients_SecondMatchesFirst()
         {
@@ -807,7 +809,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log(
                     "[CraftingMemory.OpenAI]   MEMORY: (empty in store after turn - harness may sync after ExtractCraftInfo)");
             }
-
         }
 
         private static bool ExtractCraftInfo(
@@ -1121,8 +1122,8 @@ namespace CoreAI.Tests.PlayMode
 
             if (name.Contains("\\n", StringComparison.OrdinalIgnoreCase) ||
                 name.Contains("\\r", StringComparison.OrdinalIgnoreCase) ||
-                name.StartsWith("n", StringComparison.OrdinalIgnoreCase) && name.Length > 1 &&
-                JunkSingleWordNames.Contains(name.Substring(1)))
+                (name.StartsWith("n", StringComparison.OrdinalIgnoreCase) && name.Length > 1 &&
+                 JunkSingleWordNames.Contains(name.Substring(1))))
             {
                 return true;
             }

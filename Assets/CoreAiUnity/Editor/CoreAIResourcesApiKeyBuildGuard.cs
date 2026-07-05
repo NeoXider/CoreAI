@@ -45,7 +45,9 @@ namespace CoreAI.Editor
                 string path = AssetDatabase.GetAssetPath(asset);
                 string which = hasPrimary && hasSecondary
                     ? "apiKey and secondaryApiKey"
-                    : hasPrimary ? "apiKey" : "secondaryApiKey";
+                    : hasPrimary
+                        ? "apiKey"
+                        : "secondaryApiKey";
 
                 throw new BuildFailedException(
                     $"[CoreAI] The CoreAISettings asset at '{path}' lives under a Resources folder and has a " +

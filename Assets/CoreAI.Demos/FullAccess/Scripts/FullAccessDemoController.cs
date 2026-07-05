@@ -11,7 +11,8 @@ namespace CoreAI.Demos
     public sealed class FullAccessDemoController : MonoBehaviour
     {
         [Tooltip("Object the LLM manipulates via unity_* APIs. Auto-created as 'TargetCube' when empty.")]
-        [SerializeField] private Transform targetCube;
+        [SerializeField]
+        private Transform targetCube;
 
         private void Awake()
         {
@@ -20,7 +21,7 @@ namespace CoreAI.Demos
             if (targetCube == null)
             {
                 GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
+                Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
                 cube.name = "TargetCube";
                 cube.transform.position = new Vector3(0f, 0.5f, 0f);
                 targetCube = cube.transform;

@@ -36,13 +36,12 @@ namespace CoreAI.Infrastructure.Llm
         [TextArea(2, 6)]
         private string extraBodyJson = "";
 
-        [Tooltip("Provider Default leaves request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls.")]
+        [Tooltip(
+            "Provider Default leaves request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls.")]
         [SerializeField]
         private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
 
-        [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")]
-        [SerializeField]
-        [Min(0)]
+        [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")] [SerializeField] [Min(0)]
         private int thinkingBudgetTokens;
 
         [Header("Client limits")] [SerializeField] [Min(0)]

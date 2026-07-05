@@ -36,14 +36,16 @@ public class Agent : MonoBehaviour
     public void AskWithTools()
     {
         Debug.Log($"<color=cyan>[TEST]</color> Отправляем агенту С ИНСТРУМЕНТАМИ: {MessageWithTools}");
-        _agentWithTools.AskWithCallback(MessageWithTools, (s) => Debug.Log($"<color=green>[С ИНСТРУМЕНТАМИ]</color> Ответ: {s}"));
+        _agentWithTools.AskWithCallback(MessageWithTools,
+            (s) => Debug.Log($"<color=green>[С ИНСТРУМЕНТАМИ]</color> Ответ: {s}"));
     }
 
     [Button]
     public void AskChatOnly()
     {
         Debug.Log($"<color=cyan>[TEST]</color> Отправляем агенту ПРОСТО ЧАТ: {MessageChatOnly}");
-        _agentChatOnly.AskWithCallback(MessageChatOnly, (s) => Debug.Log($"<color=yellow>[ПРОСТО ЧАТ]</color> Ответ: {s}"));
+        _agentChatOnly.AskWithCallback(MessageChatOnly,
+            (s) => Debug.Log($"<color=yellow>[ПРОСТО ЧАТ]</color> Ответ: {s}"));
     }
 
     [Button]

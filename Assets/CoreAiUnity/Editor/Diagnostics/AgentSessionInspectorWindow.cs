@@ -36,7 +36,10 @@ namespace CoreAI.Editor.Diagnostics
         private string _sessionText = "No snapshot loaded.";
         private string _systemText = "No snapshot loaded.";
         private string _historyText = "No snapshot loaded.";
-        private string _status = "Pick a role and inspect the live CoreAI container, or the active scene's serialized CoreAILifetimeScope in Edit Mode.";
+
+        private string _status =
+            "Pick a role and inspect the live CoreAI container, or the active scene's serialized CoreAILifetimeScope in Edit Mode.";
+
         private double _nextKnownRolesRefreshTime;
         private int _modeIndex;
         private Vector2 _liveScroll;
@@ -134,7 +137,8 @@ namespace CoreAI.Editor.Diagnostics
                 _manualRoleId = EditorGUILayout.TextField("RoleId", _manualRoleId);
                 bool changed = EditorGUI.EndChangeCheck();
 
-                if (GUILayout.Button("Inspect", GUILayout.Width(90)) || changed && Event.current.keyCode == KeyCode.Return)
+                if (GUILayout.Button("Inspect", GUILayout.Width(90)) ||
+                    (changed && Event.current.keyCode == KeyCode.Return))
                 {
                     RefreshSnapshotOnly();
                     if (_modeIndex == 1)
@@ -269,7 +273,8 @@ namespace CoreAI.Editor.Diagnostics
             scroll.y = Mathf.Clamp(scroll.y, 0f, Mathf.Max(0f, contentHeight - panelHeight));
 
             scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(panelHeight));
-            EditorGUILayout.SelectableLabel(content, textStyle, GUILayout.ExpandWidth(true), GUILayout.Height(contentHeight));
+            EditorGUILayout.SelectableLabel(content, textStyle, GUILayout.ExpandWidth(true),
+                GUILayout.Height(contentHeight));
             EditorGUILayout.EndScrollView();
             return scroll;
         }
@@ -341,7 +346,7 @@ namespace CoreAI.Editor.Diagnostics
         {
             UpdateKnownRoles(inspector.GetKnownRoleIds());
             string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
-                ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
+                ? _roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : ""
                 : _manualRoleId.Trim();
 
             if (string.IsNullOrWhiteSpace(roleId))
@@ -379,7 +384,7 @@ namespace CoreAI.Editor.Diagnostics
         {
             UpdateKnownRoles(AgentSessionInspector.GetKnownRoleIds(context.Policy, context.PromptsDefinition));
             string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
-                ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
+                ? _roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : ""
                 : _manualRoleId.Trim();
 
             if (string.IsNullOrWhiteSpace(roleId))
@@ -405,7 +410,8 @@ namespace CoreAI.Editor.Diagnostics
                     context.SummaryStore,
                     context.FallbackSystemPrompts);
                 ApplySnapshotTexts();
-                _status = $"Snapshot refreshed for role '{roleId}' via edit-mode (serialized scene) from '{context.ScopeName}'.";
+                _status =
+                    $"Snapshot refreshed for role '{roleId}' via edit-mode (serialized scene) from '{context.ScopeName}'.";
             }
             catch (Exception ex)
             {
@@ -457,7 +463,7 @@ namespace CoreAI.Editor.Diagnostics
         private void RefreshLiveTurnOnly()
         {
             string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
-                ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
+                ? _roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : ""
                 : _manualRoleId.Trim();
 
             if (string.IsNullOrWhiteSpace(roleId))
@@ -497,7 +503,7 @@ namespace CoreAI.Editor.Diagnostics
                 return false;
             }
 
-            LifetimeScope[] scopes = UnityEngine.Object.FindObjectsByType<LifetimeScope>(
+            LifetimeScope[] scopes = FindObjectsByType<LifetimeScope>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
             if (scopes == null || scopes.Length == 0)
             {
@@ -628,11 +634,12 @@ namespace CoreAI.Editor.Diagnostics
             // Resolve from ANY live VContainer scope that registered the inspector — not just the concrete
             // CoreAILifetimeScope type. Demos and games may boot CoreAI through their own scope; this finds
             // whichever container exposes AgentSessionInspector.
-            LifetimeScope[] scopes = UnityEngine.Object.FindObjectsByType<LifetimeScope>(
+            LifetimeScope[] scopes = FindObjectsByType<LifetimeScope>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
             if (scopes == null || scopes.Length == 0)
             {
-                error = "No VContainer LifetimeScope found in the loaded scenes. Boot a scene that wires CoreAI, then click Refresh.";
+                error =
+                    "No VContainer LifetimeScope found in the loaded scenes. Boot a scene that wires CoreAI, then click Refresh.";
                 return false;
             }
 
@@ -670,7 +677,8 @@ namespace CoreAI.Editor.Diagnostics
                 return true;
             }
 
-            error = "Found LifetimeScope(s) but none register AgentSessionInspector. Ensure the scene boots CoreAI (RegisterCorePortable) and is in Play Mode.";
+            error =
+                "Found LifetimeScope(s) but none register AgentSessionInspector. Ensure the scene boots CoreAI (RegisterCorePortable) and is in Play Mode.";
             return false;
         }
 
@@ -755,7 +763,7 @@ namespace CoreAI.Editor.Diagnostics
         private static CoreAILifetimeScope FindActiveSceneCoreAiScope()
         {
             Scene activeScene = SceneManager.GetActiveScene();
-            CoreAILifetimeScope[] scopes = UnityEngine.Object.FindObjectsByType<CoreAILifetimeScope>(
+            CoreAILifetimeScope[] scopes = FindObjectsByType<CoreAILifetimeScope>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None);
             for (int i = 0; i < scopes.Length; i++)

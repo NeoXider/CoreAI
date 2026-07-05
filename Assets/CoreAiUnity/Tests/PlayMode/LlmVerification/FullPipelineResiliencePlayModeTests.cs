@@ -555,7 +555,7 @@ namespace CoreAI.Tests.PlayMode
                 // still fails hard, so a real tracing regression is still caught.
                 Debug.LogWarning("[FullPipeline5] Tool not called — model-dependent");
                 Assert.Inconclusive("Streaming trace test requires the model to execute the memory tool; " +
-                    "the backend model did not call it this run (model-dependent).");
+                                    "the backend model did not call it this run (model-dependent).");
             }
 
             // No JSON leak regardless

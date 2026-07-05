@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Capacity 1: the ring only holds the most recent trace, but the latest-per-role
             // map must still resolve the most recent trace for the queried role.
-            InMemoryAgentTurnTraceSink sink = new(capacity: 1);
+            InMemoryAgentTurnTraceSink sink = new(1);
             sink.Record(new AgentTurnTrace { RoleId = "Teacher", UserPayload = "old" });
             sink.Record(new AgentTurnTrace { RoleId = "Teacher", UserPayload = "new" });
 

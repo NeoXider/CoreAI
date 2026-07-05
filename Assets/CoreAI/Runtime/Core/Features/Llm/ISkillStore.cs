@@ -69,17 +69,17 @@ namespace CoreAI.Ai
 
         public static SkillStoreMutation<TResult> SaveRecord(SkillRecord record, TResult result)
         {
-            return new SkillStoreMutation<TResult>(result, record, save: true, delete: false);
+            return new SkillStoreMutation<TResult>(result, record, true, false);
         }
 
         public static SkillStoreMutation<TResult> DeleteRecord(TResult result)
         {
-            return new SkillStoreMutation<TResult>(result, null, save: false, delete: true);
+            return new SkillStoreMutation<TResult>(result, null, false, true);
         }
 
         public static SkillStoreMutation<TResult> NoChange(TResult result)
         {
-            return new SkillStoreMutation<TResult>(result, null, save: false, delete: false);
+            return new SkillStoreMutation<TResult>(result, null, false, false);
         }
     }
 

@@ -17,27 +17,22 @@ namespace CoreAI.Demos
         {
             public string Label = "Prompt";
 
-            [TextArea(3, 12)]
-            public string Prompt = "";
+            [TextArea(3, 12)] public string Prompt = "";
         }
 
-        [SerializeField]
-        private string title = "Prompt templates";
+        [SerializeField] private string title = "Prompt templates";
 
         [Tooltip("Width/height of the panel. It is auto-anchored to the bottom of the screen, " +
                  "just left of the chat, so it does not overlap the usage / mod panels.")]
         [SerializeField]
         private Rect panelRect = new(12, 420, 520, 180);
 
-        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")]
-        [SerializeField]
+        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")] [SerializeField]
         private float chatReserveWidth = 700f;
 
-        [SerializeField]
-        private PromptButton[] prompts = System.Array.Empty<PromptButton>();
+        [SerializeField] private PromptButton[] prompts = System.Array.Empty<PromptButton>();
 
-        [SerializeField]
-        private bool submitWhenInputUnavailable;
+        [SerializeField] private bool submitWhenInputUnavailable;
 
         private CoreAiChatPanel _chatPanel;
         private string _status = "Click a prompt to insert it into chat.";
@@ -65,7 +60,8 @@ namespace CoreAI.Demos
             // buttons sit next to the chat and never overlap the usage / mod-manager panels.
             float w = Mathf.Min(panelRect.width, Screen.width - 24f);
             float h = panelRect.height;
-            float x = Mathf.Clamp(Screen.width - chatReserveWidth - w - 12f, 12f, Mathf.Max(12f, Screen.width - w - 12f));
+            float x = Mathf.Clamp(Screen.width - chatReserveWidth - w - 12f, 12f,
+                Mathf.Max(12f, Screen.width - w - 12f));
             float y = Mathf.Max(12f, Screen.height - h - 12f);
             Rect rect = new(x, y, w, h);
 

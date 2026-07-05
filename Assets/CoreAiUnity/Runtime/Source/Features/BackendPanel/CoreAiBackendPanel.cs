@@ -28,8 +28,9 @@ namespace CoreAI.UI
             LlmExecutionMode.Offline
         };
 
-        [Header("Wiring (auto-filled by the prefab)")]
-        [SerializeField] private TMP_Dropdown? backendDropdown;
+        [Header("Wiring (auto-filled by the prefab)")] [SerializeField]
+        private TMP_Dropdown? backendDropdown;
+
         [SerializeField] private TMP_InputField? baseUrlInput;
         [SerializeField] private TMP_InputField? apiKeyInput;
         [SerializeField] private TMP_InputField? modelInput;
@@ -40,10 +41,11 @@ namespace CoreAI.UI
 
         [Header("Behaviour")]
         [Tooltip("Populate the fields from the current CoreAISettings on enable.")]
-        [SerializeField] private bool loadCurrentOnEnable = true;
+        [SerializeField]
+        private bool loadCurrentOnEnable = true;
 
-        [Tooltip("Health-check timeout in seconds for the Test button.")]
-        [SerializeField] private int verifyTimeoutSeconds = 30;
+        [Tooltip("Health-check timeout in seconds for the Test button.")] [SerializeField]
+        private int verifyTimeoutSeconds = 30;
 
         private bool _busy;
 

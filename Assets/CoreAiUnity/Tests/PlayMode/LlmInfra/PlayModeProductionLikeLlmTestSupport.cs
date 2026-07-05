@@ -467,8 +467,8 @@ namespace CoreAI.Tests.PlayMode
                 handle = new PlayModeProductionLikeLlmHandle(
                     httpClient,
                     PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                    openAiSettings: httpSettings,
-                    coreAiSettings: behavior,
+                    httpSettings,
+                    behavior,
                     ownsCoreAiSettings: true,
                     resolvedConfig: config);
                 ignoreReason = null;
@@ -520,7 +520,7 @@ namespace CoreAI.Tests.PlayMode
             // so honor COREAI_BENCHMARK_ROUNDTRIPS here too — otherwise the run is silently capped at 10.
             // Note: this is the GLOBAL fallback. A scenario can additionally set a PER-AGENT override via
             // AgentBuilder.WithMaxToolCallRoundtrips (G6 uses 0 = unlimited), which takes priority over this.
-            string roundtripsRaw = System.Environment.GetEnvironmentVariable("COREAI_BENCHMARK_ROUNDTRIPS");
+            string roundtripsRaw = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_ROUNDTRIPS");
             if (!string.IsNullOrWhiteSpace(roundtripsRaw)
                 && int.TryParse(roundtripsRaw, out int roundtrips) && roundtrips >= 1)
             {
@@ -606,9 +606,15 @@ namespace CoreAI.Tests.PlayMode
 
         public bool SupportsNativeToolCalling => false;
 
-        public bool SupportsNativeToolCallingForRole(string agentRoleId) => false;
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return false;
+        }
 
-        public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _inner.SetTools(tools);
+        }
 
         public Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,

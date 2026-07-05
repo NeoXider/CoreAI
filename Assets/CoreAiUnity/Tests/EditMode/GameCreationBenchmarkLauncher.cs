@@ -86,7 +86,7 @@ namespace CoreAI.Tests.EditMode
             // One-click run honors the last settings chosen in the Benchmark Window (groups, reps, and
             // connection override). Set them once in the window, then this menu reuses them.
             ApplySavedConfig();
-            RunViaTestRunner(revealOnFinish: true, exitOnFinish: false);
+            RunViaTestRunner(true, false);
         }
 
         /// <summary>
@@ -116,31 +116,62 @@ namespace CoreAI.Tests.EditMode
             string apiKey = over ? OrConfigured("", ConfiguredApiKey) : null;
 
             Configure(
-                model: model,
-                baseUrl: baseUrl,
-                apiKey: apiKey,
-                streaming: over ? ConnectionMode(EditorPrefs.GetInt(PrefStreaming, 0)) : (bool?)null,
-                nativeTools: over ? ConnectionMode(EditorPrefs.GetInt(PrefNativeTools, 0)) : (bool?)null,
-                groupsCsv: groups,
-                repetitions: reps,
-                retries: retries,
-                timeoutSeconds: timeout > 0 ? timeout : (int?)null);
+                model,
+                baseUrl,
+                apiKey,
+                over ? ConnectionMode(EditorPrefs.GetInt(PrefStreaming, 0)) : (bool?)null,
+                over ? ConnectionMode(EditorPrefs.GetInt(PrefNativeTools, 0)) : (bool?)null,
+                groups,
+                reps,
+                retries,
+                timeout > 0 ? timeout : (int?)null);
         }
 
         /// <summary>Tri-state connection toggle: 0 = use config (null), 1 = force On, 2 = force Off.</summary>
-        public static bool? ConnectionMode(int mode) => mode == 1 ? true : (mode == 2 ? false : (bool?)null);
+        public static bool? ConnectionMode(int mode)
+        {
+            return mode == 1 ? true : mode == 2 ? false : (bool?)null;
+        }
 
         /// <summary>CSV of the enabled benchmark groups; empty string means "all groups".</summary>
         public static string GroupsCsv(bool g1, bool g2, bool g3, bool g4, bool g5, bool g6, bool g7)
         {
             List<string> on = new();
-            if (g2) { on.Add("G2"); }
-            if (g1) { on.Add("G1"); }
-            if (g3) { on.Add("G3"); }
-            if (g4) { on.Add("G4"); }
-            if (g5) { on.Add("G5"); }
-            if (g6) { on.Add("G6"); }
-            if (g7) { on.Add("G7"); }
+            if (g2)
+            {
+                on.Add("G2");
+            }
+
+            if (g1)
+            {
+                on.Add("G1");
+            }
+
+            if (g3)
+            {
+                on.Add("G3");
+            }
+
+            if (g4)
+            {
+                on.Add("G4");
+            }
+
+            if (g5)
+            {
+                on.Add("G5");
+            }
+
+            if (g6)
+            {
+                on.Add("G6");
+            }
+
+            if (g7)
+            {
+                on.Add("G7");
+            }
+
             return on.Count is 0 or 7 ? "" : string.Join(",", on);
         }
 
@@ -205,7 +236,7 @@ namespace CoreAI.Tests.EditMode
                 return;
             }
 
-            WriteComparison(root, latestByModel.Values.ToList(), pinnedModelId: null);
+            WriteComparison(root, latestByModel.Values.ToList(), null);
         }
 
         /// <summary>
@@ -333,7 +364,10 @@ namespace CoreAI.Tests.EditMode
         /// a parseable report). Public so editor scripts can build custom comparisons from hand-picked
         /// report files via <see cref="WriteComparison"/> instead of the newest-per-model default.
         /// </summary>
-        public static ModelSummary ParseSummary(string jsonPath) => TryParseSummary(jsonPath);
+        public static ModelSummary ParseSummary(string jsonPath)
+        {
+            return TryParseSummary(jsonPath);
+        }
 
         private static ModelSummary TryParseSummary(string jsonPath)
         {
@@ -399,7 +433,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [MenuItem("CoreAI/Benchmarks/Run Game-Creation Benchmark", validate = true)]
-        private static bool NotRunning() => !IsRunning;
+        private static bool NotRunning()
+        {
+            return !IsRunning;
+        }
 
         /// <summary>Project-root <c>TestResults/CoreAI/Benchmarks</c> directory (created lazily by the suite).</summary>
         public static string ResultsRoot()
@@ -438,8 +475,8 @@ namespace CoreAI.Tests.EditMode
             SetOrClear(EnvModel, model);
             SetOrClear(EnvBaseUrl, baseUrl);
             SetOrClear(EnvApiKey, apiKey);
-            SetOrClear(EnvStreaming, streaming.HasValue ? (streaming.Value ? "1" : "0") : null);
-            SetOrClear(EnvNativeTools, nativeTools.HasValue ? (nativeTools.Value ? "1" : "0") : null);
+            SetOrClear(EnvStreaming, streaming.HasValue ? streaming.Value ? "1" : "0" : null);
+            SetOrClear(EnvNativeTools, nativeTools.HasValue ? nativeTools.Value ? "1" : "0" : null);
 
             Environment.SetEnvironmentVariable(EnvGroups, groupsCsv ?? "");
             SetOrClear(EnvRepetitions, repetitions?.ToString());
@@ -525,11 +562,11 @@ namespace CoreAI.Tests.EditMode
             int? reps = int.TryParse(repsRaw, out int r) ? r : (int?)null;
 
             Configure(
-                model: string.IsNullOrWhiteSpace(model) ? null : model,
+                string.IsNullOrWhiteSpace(model) ? null : model,
                 groupsCsv: string.IsNullOrWhiteSpace(groups) ? null : groups,
                 repetitions: reps);
 
-            RunViaTestRunner(revealOnFinish: false, exitOnFinish: true);
+            RunViaTestRunner(false, true);
         }
 
         private static void Watchdog()
@@ -550,16 +587,18 @@ namespace CoreAI.Tests.EditMode
 
         // --- Project CoreAISettings asset (used when no override / for empty override fields) ---
 
-        private static CoreAI.Infrastructure.Llm.CoreAISettingsAsset Asset =>
-            CoreAI.Infrastructure.Llm.CoreAISettingsAsset.Instance;
+        private static Infrastructure.Llm.CoreAISettingsAsset Asset =>
+            Infrastructure.Llm.CoreAISettingsAsset.Instance;
 
         public static string ConfiguredModel => Asset != null ? Asset.ModelName : "";
         public static string ConfiguredBaseUrl => Asset != null ? Asset.ApiBaseUrl : "";
         public static string ConfiguredApiKey => Asset != null ? Asset.ApiKey : "";
 
         /// <summary>Fills an empty override field from the project asset so "model only" overrides work.</summary>
-        public static string OrConfigured(string field, string configured) =>
-            string.IsNullOrWhiteSpace(field) ? configured : field;
+        public static string OrConfigured(string field, string configured)
+        {
+            return string.IsNullOrWhiteSpace(field) ? configured : field;
+        }
 
         private static string ReadArg(string[] args, string name)
         {
@@ -627,5 +666,4 @@ namespace CoreAI.Tests.EditMode
             }
         }
     }
-
 }

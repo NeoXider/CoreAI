@@ -21,8 +21,12 @@ namespace CoreAI.Infrastructure.Lua
     public sealed class CoreAiFullUnityLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
         private static readonly ConcurrentDictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
-        private static readonly ConcurrentDictionary<(Type type, string member, bool nonPublic), MemberInfo> MemberCache = new();
-        private static readonly ConcurrentDictionary<(Type type, bool nonPublic), List<MemberInfo>> SettableMemberCache = new();
+
+        private static readonly ConcurrentDictionary<(Type type, string member, bool nonPublic), MemberInfo>
+            MemberCache = new();
+
+        private static readonly ConcurrentDictionary<(Type type, bool nonPublic), List<MemberInfo>>
+            SettableMemberCache = new();
 
         private readonly IGameLogger _logger;
         private readonly bool _allowNonPublic;
@@ -71,7 +75,8 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("unity_get_position", new Func<int, Table>(GetPosition));
             registry.Register("unity_set_position", new Func<int, double, double, double, bool>(SetPosition));
             registry.Register("unity_get_transform", new Func<int, object>(GetTransform));
-            registry.Register("unity_set_rotation_euler", new Func<int, double, double, double, bool>(SetRotationEuler));
+            registry.Register("unity_set_rotation_euler",
+                new Func<int, double, double, double, bool>(SetRotationEuler));
             registry.Register("unity_set_scale", new Func<int, double, double, double, bool>(SetScale));
             registry.Register("unity_parent", new Func<int, int, bool, bool>(SetParent));
             registry.Register("unity_get_children", new Func<int, List<object>>(GetChildren));
@@ -220,7 +225,7 @@ namespace CoreAI.Infrastructure.Lua
         private object DescribeObject(int instanceId)
         {
             GameObject go = Resolve(instanceId);
-            return go == null ? null : BuildObjectSummary(go, includeTransform: true, includeComponents: true);
+            return go == null ? null : BuildObjectSummary(go, true, true);
         }
 
         private static bool SetActive(int instanceId, bool active)
@@ -371,8 +376,8 @@ namespace CoreAI.Infrastructure.Lua
             Transform t = go.transform;
             for (int i = 0; i < t.childCount; i++)
             {
-                children.Add(BuildObjectSummary(t.GetChild(i).gameObject, includeTransform: true,
-                    includeComponents: false));
+                children.Add(BuildObjectSummary(t.GetChild(i).gameObject, true,
+                    false));
             }
 
             return children;
@@ -482,7 +487,7 @@ namespace CoreAI.Infrastructure.Lua
             {
                 method = type.GetMethod(methodName, MemberFlags());
             }
-            catch (System.Reflection.AmbiguousMatchException)
+            catch (AmbiguousMatchException)
             {
                 throw new ScriptRuntimeException(
                     $"unity_call: method '{methodName}' is ambiguous on {type.Name} (overloaded); call is not supported.");
@@ -492,6 +497,7 @@ namespace CoreAI.Infrastructure.Lua
             {
                 throw new ScriptRuntimeException($"unity_call: method '{methodName}' not found on {type.Name}.");
             }
+
             EnsureMemberAllowed(method);
 
             ParameterInfo[] parameters = method.GetParameters();
@@ -613,7 +619,7 @@ namespace CoreAI.Infrastructure.Lua
 
             if (match == null || match(go, search))
             {
-                results.Add(BuildObjectSummary(go, includeTransform: false, includeComponents: false));
+                results.Add(BuildObjectSummary(go, false, false));
             }
 
             Transform t = go.transform;
@@ -806,7 +812,7 @@ namespace CoreAI.Infrastructure.Lua
                 member = type.GetField(memberName, flags) as MemberInfo ??
                          type.GetProperty(memberName, flags);
             }
-            catch (System.Reflection.AmbiguousMatchException)
+            catch (AmbiguousMatchException)
             {
                 throw new ScriptRuntimeException(
                     $"unity_call: member '{memberName}' is ambiguous on {type.Name} (overloaded); call is not supported.");
@@ -945,7 +951,8 @@ namespace CoreAI.Infrastructure.Lua
                     string prefix = HardDeniedNamespacePrefixes[i];
                     if (ns.Equals(prefix, StringComparison.Ordinal) ||
                         ns.StartsWith(prefix + ".", StringComparison.Ordinal) ||
-                        ns.StartsWith(prefix, StringComparison.Ordinal) && prefix.EndsWith(".", StringComparison.Ordinal))
+                        (ns.StartsWith(prefix, StringComparison.Ordinal) &&
+                         prefix.EndsWith(".", StringComparison.Ordinal)))
                     {
                         return true;
                     }
@@ -958,7 +965,7 @@ namespace CoreAI.Infrastructure.Lua
             if (typeof(Type).IsAssignableFrom(type) ||
                 typeof(MemberInfo).IsAssignableFrom(type) ||
                 typeof(Assembly).IsAssignableFrom(type) ||
-                typeof(System.Reflection.Module).IsAssignableFrom(type) ||
+                typeof(Module).IsAssignableFrom(type) ||
                 typeof(Delegate).IsAssignableFrom(type))
             {
                 return true;
@@ -1061,13 +1068,40 @@ namespace CoreAI.Infrastructure.Lua
 
             // Remaining numeric widths: route every other primitive numeric type through CastToNumber so a
             // Lua number can set a long/short/byte/uint/etc member instead of falling through to ChangeType.
-            if (targetType == typeof(long)) return (long)value.CastToNumber();
-            if (targetType == typeof(uint)) return (uint)value.CastToNumber();
-            if (targetType == typeof(ulong)) return (ulong)value.CastToNumber();
-            if (targetType == typeof(short)) return (short)value.CastToNumber();
-            if (targetType == typeof(ushort)) return (ushort)value.CastToNumber();
-            if (targetType == typeof(byte)) return (byte)value.CastToNumber();
-            if (targetType == typeof(sbyte)) return (sbyte)value.CastToNumber();
+            if (targetType == typeof(long))
+            {
+                return (long)value.CastToNumber();
+            }
+
+            if (targetType == typeof(uint))
+            {
+                return (uint)value.CastToNumber();
+            }
+
+            if (targetType == typeof(ulong))
+            {
+                return (ulong)value.CastToNumber();
+            }
+
+            if (targetType == typeof(short))
+            {
+                return (short)value.CastToNumber();
+            }
+
+            if (targetType == typeof(ushort))
+            {
+                return (ushort)value.CastToNumber();
+            }
+
+            if (targetType == typeof(byte))
+            {
+                return (byte)value.CastToNumber();
+            }
+
+            if (targetType == typeof(sbyte))
+            {
+                return (sbyte)value.CastToNumber();
+            }
 
             if (targetType.IsEnum && value.Type == DataType.String)
             {

@@ -22,7 +22,7 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public static string BuildHeaderString(IReadOnlyList<KeyValuePair<string, string>> headers)
         {
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             bool hasContentType = false;
             if (headers != null)
             {
@@ -58,14 +58,26 @@ namespace CoreAI.Infrastructure.Llm
         public static IReadOnlyDictionary<string, IEnumerable<string>> ParseFlatHeaders(string flat)
         {
             Dictionary<string, IEnumerable<string>> map = new(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(flat)) return map;
+            if (string.IsNullOrEmpty(flat))
+            {
+                return map;
+            }
+
             foreach (string line in flat.Split('\n'))
             {
                 int idx = line.IndexOf(':');
-                if (idx <= 0) continue;
+                if (idx <= 0)
+                {
+                    continue;
+                }
+
                 string name = line.Substring(0, idx).Trim();
                 string value = line.Substring(idx + 1).Trim();
-                if (string.IsNullOrEmpty(name)) continue;
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
                 if (map.TryGetValue(name, out IEnumerable<string> existing))
                 {
                     List<string> list = existing as List<string> ?? new List<string>(existing);

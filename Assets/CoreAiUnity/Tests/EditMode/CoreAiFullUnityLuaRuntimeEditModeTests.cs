@@ -246,7 +246,7 @@ return t.position.x == 4 and t.scale.z == 4
             {
                 SecureLuaEnvironment env = new();
                 LuaApiRegistry registry = new();
-                new CoreAiFullUnityLuaRuntimeBindings(null, allowNonPublicMembers: true)
+                new CoreAiFullUnityLuaRuntimeBindings(null, true)
                     .RegisterGameplayApis(registry);
                 MoonSharp.Interpreter.Script script = env.CreateScript(registry);
                 int id = GetObjectId(probe);
@@ -272,7 +272,7 @@ return t.position.x == 4 and t.scale.z == 4
                 LuaApiRegistry registry = new();
                 new CoreAiFullUnityLuaRuntimeBindings(
                         null,
-                        allowNonPublicMembers: false,
+                        false,
                         new DenyForgeProbePolicy())
                     .RegisterGameplayApis(registry);
                 MoonSharp.Interpreter.Script script = env.CreateScript(registry);
@@ -433,7 +433,7 @@ unity_set_member({probeId}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'linkedTra
                 int id = GetObjectId(probe);
 
                 Exception ex = Assert.Catch(() => env.RunChunk(script,
-                    $"unity_set_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'noSuchMember', 1)"),
+                        $"unity_set_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'noSuchMember', 1)"),
                     "Setting an unknown member must throw.");
 
                 StringAssert.Contains("publicValue", ex.Message,
@@ -494,7 +494,7 @@ unity_set_member({probeId}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'linkedTra
             }
         }
 
-        private static int GetObjectId(UnityEngine.Object obj)
+        private static int GetObjectId(Object obj)
         {
             if (obj == null)
             {

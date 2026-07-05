@@ -56,6 +56,7 @@ namespace CoreAI.Benchmarking
 
         /// <summary>Provider-reported prompt tokens when available (for BPE-vs-provider drift checks).</summary>
         public int? ProviderPromptTokens { get; set; }
+
         public int? ProviderCompletionTokens { get; set; }
 
         public double LatencyMs { get; set; }

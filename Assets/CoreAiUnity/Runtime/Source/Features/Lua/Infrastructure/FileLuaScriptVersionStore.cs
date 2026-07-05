@@ -19,6 +19,7 @@ namespace CoreAI.Infrastructure.Lua
         private readonly MemoryLuaScriptVersionStore _memory = new();
         private readonly string _filePath;
         private readonly object _ioLock = new();
+
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
             new(StringComparer.Ordinal);
 

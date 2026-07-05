@@ -24,22 +24,17 @@ namespace CoreAI.Demos
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [SerializeField]
-        private string modKeyPrefix = DefaultModKeyPrefix;
+        [SerializeField] private string modKeyPrefix = DefaultModKeyPrefix;
 
-        [SerializeField]
-        private string panelTitle = "Lua Mod Manager";
+        [SerializeField] private string panelTitle = "Lua Mod Manager";
 
         // F9 toggles the mod manager; F10 is reserved for the Token Budget / usage overlay.
-        [Tooltip("Hotkey that toggles the mod manager. Set to None to disable keyboard toggling.")]
-        [SerializeField]
+        [Tooltip("Hotkey that toggles the mod manager. Set to None to disable keyboard toggling.")] [SerializeField]
         private KeyCode toggleKey = KeyCode.F9;
 
-        [SerializeField]
-        private Rect panelRect = new(24, 92, 430, 460);
+        [SerializeField] private Rect panelRect = new(24, 92, 430, 460);
 
-        [SerializeField]
-        private bool showPanel = true;
+        [SerializeField] private bool showPanel = true;
 
         [Tooltip("Saved ids that are validation artifacts and must not autoload in the playable demo.")]
         [SerializeField]
@@ -188,7 +183,7 @@ namespace CoreAI.Demos
 
                     if (IsTransientModId(modId))
                     {
-                        ForgetSavedMod(modId, updateStatus: false);
+                        ForgetSavedMod(modId, false);
                         Debug.Log($"[LiveMechanicsModsChatDemo] Ignored transient saved Lua mod '{modId}'.");
                         continue;
                     }
@@ -239,7 +234,7 @@ namespace CoreAI.Demos
 
             if (IsTransientModId(modId))
             {
-                ForgetSavedMod(modId, updateStatus: false);
+                ForgetSavedMod(modId, false);
                 return;
             }
 
@@ -311,7 +306,7 @@ namespace CoreAI.Demos
             panelRect.y = Mathf.Clamp(panelRect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
 
             int activeCount = _mods?.ListMods().Count ?? 0;
-            int inactiveCount = (_mods != null && _versions != null) ? GetInactiveSavedMods().Count : 0;
+            int inactiveCount = _mods != null && _versions != null ? GetInactiveSavedMods().Count : 0;
             string title = $"{panelTitle}  ({toggleKey})   active {activeCount} / inactive {inactiveCount}";
             panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, title);
 
@@ -490,7 +485,9 @@ namespace CoreAI.Demos
                 }
 
                 GUILayout.EndHorizontal();
-                GUILayout.Label($"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}  logs={(info.LogReports ? "on" : "off")}", _richLabel);
+                GUILayout.Label(
+                    $"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}  logs={(info.LogReports ? "on" : "off")}",
+                    _richLabel);
                 GUILayout.Label(descriptor.Description, _richLabel);
                 GUILayout.EndVertical();
             }
@@ -528,7 +525,7 @@ namespace CoreAI.Demos
 
                 if (GUILayout.Button("Forget", GUILayout.Width(72)))
                 {
-                    ForgetSavedMod(descriptor.Id, updateStatus: true);
+                    ForgetSavedMod(descriptor.Id, true);
                 }
 
                 GUILayout.EndHorizontal();

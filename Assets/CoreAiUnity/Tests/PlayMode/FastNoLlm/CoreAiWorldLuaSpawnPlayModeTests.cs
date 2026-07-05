@@ -72,7 +72,8 @@ coreai_world_change('LuaSpawnedEnemySmoke', { x = 13, ry = 180, scale = 1.5 })
                 Assert.AreSame(parent.transform, spawned.transform.parent);
 
                 sink.Items.Clear();
-                env.RunChunk(script, "coreai_world_change('LuaSpawnedEnemySmoke', { parent = 'none' }) coreai_world_destroy('LuaSpawnedEnemySmoke')");
+                env.RunChunk(script,
+                    "coreai_world_change('LuaSpawnedEnemySmoke', { parent = 'none' }) coreai_world_destroy('LuaSpawnedEnemySmoke')");
                 Assert.AreEqual(2, sink.Items.Count);
                 Assert.IsTrue(executor.TryExecute(sink.Items[0]));
                 Assert.IsNull(spawned.transform.parent);

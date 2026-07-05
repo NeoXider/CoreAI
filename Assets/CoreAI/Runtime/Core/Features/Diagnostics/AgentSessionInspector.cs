@@ -695,7 +695,8 @@ namespace CoreAI.Diagnostics
 
             if (!roleConfig.WithChatHistory)
             {
-                snapshot.Notes.Add("Chat history is disabled for this role policy; stored history is still displayed if present.");
+                snapshot.Notes.Add(
+                    "Chat history is disabled for this role policy; stored history is still displayed if present.");
             }
 
             if (request.ForcedToolMode == LlmToolChoiceMode.None)
@@ -718,7 +719,8 @@ namespace CoreAI.Diagnostics
 
             if (!roleConfig.WithChatHistory)
             {
-                snapshot.Notes.Add("Chat history is disabled for this role policy; stored history is still displayed if present.");
+                snapshot.Notes.Add(
+                    "Chat history is disabled for this role policy; stored history is still displayed if present.");
             }
         }
 

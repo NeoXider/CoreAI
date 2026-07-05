@@ -15,8 +15,10 @@ namespace CoreAI.Ai
         private readonly object _lock = new();
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
+
         private readonly Dictionary<string, MutableSkillCatalog> _roleSkillCatalogs =
             new(StringComparer.OrdinalIgnoreCase);
+
         private readonly Dictionary<string, IAgentRuntimeContextProvider> _runtimeContextProviders = new();
         private static readonly MemoryLlmTool _memoryToolInstance = new();
 
@@ -283,7 +285,7 @@ namespace CoreAI.Ai
                 RoleMemoryConfig builtIn = new(
                     true,
                     MemoryToolAction.Append,
-                    withChatHistory: !isProgrammer,
+                    !isProgrammer,
                     toolResultMemory: needsExactToolOutput
                         ? ToolResultMemoryPolicy.Full
                         : ToolResultMemoryPolicy.CompactSummary,

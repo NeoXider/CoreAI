@@ -59,7 +59,8 @@ namespace CoreAI.Tests.EditMode
             // Set Rigidbody.mass (float) and useGravity (bool).
             Assert.IsTrue(Execute(CoreAiComponentCommandEnvelope.SetFloat(_targetName, "rigidbody", "mass", 7.5f)),
                 "set rigidbody.mass should succeed");
-            Assert.IsTrue(Execute(CoreAiComponentCommandEnvelope.SetBool(_targetName, "rigidbody", "useGravity", false)),
+            Assert.IsTrue(
+                Execute(CoreAiComponentCommandEnvelope.SetBool(_targetName, "rigidbody", "useGravity", false)),
                 "set rigidbody.useGravity should succeed");
 
             // Add a BoxCollider.
@@ -67,7 +68,8 @@ namespace CoreAI.Tests.EditMode
                 "add boxcollider should succeed");
 
             // Set BoxCollider.isTrigger (bool) and size (vector).
-            Assert.IsTrue(Execute(CoreAiComponentCommandEnvelope.SetBool(_targetName, "boxcollider", "isTrigger", true)),
+            Assert.IsTrue(
+                Execute(CoreAiComponentCommandEnvelope.SetBool(_targetName, "boxcollider", "isTrigger", true)),
                 "set boxcollider.isTrigger should succeed");
             Assert.IsTrue(Execute(CoreAiComponentCommandEnvelope.SetVector(
                     _targetName, "boxcollider", "size", new Vector3(2f, 3f, 4f))),

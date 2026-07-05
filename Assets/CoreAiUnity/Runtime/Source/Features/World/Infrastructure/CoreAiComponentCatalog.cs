@@ -178,7 +178,8 @@ namespace CoreAI.Infrastructure.World
             Dictionary<string, Action<Component, CoreAiComponentCommandEnvelope>> setters = NewSetters();
             setters["startwidth"] = (component, env) => ((LineRenderer)component).startWidth = env.floatValue;
             setters["endwidth"] = (component, env) => ((LineRenderer)component).endWidth = env.floatValue;
-            setters["positioncount"] = (component, env) => ((LineRenderer)component).positionCount = (int)env.floatValue;
+            setters["positioncount"] =
+                (component, env) => ((LineRenderer)component).positionCount = (int)env.floatValue;
             setters["loop"] = (component, env) => ((LineRenderer)component).loop = env.boolValue != 0;
             return setters;
         }

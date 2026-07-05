@@ -99,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
                 "http://127.0.0.1:59999/v1", "test-key", "test-model", timeoutSeconds: 3);
             Assert.IsTrue(live);
 
-            Task<CoreAiBackendHealth> verify = CoreAiBackend.VerifyAsync(timeoutSeconds: 8);
+            Task<CoreAiBackendHealth> verify = CoreAiBackend.VerifyAsync(8);
             yield return WaitTask(verify, 30f);
 
             Assert.IsFalse(verify.Result.Ok, "Unreachable endpoint must fail the health probe.");
@@ -123,7 +123,12 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator OnBackendChanged_FiresWithLiveStatus()
         {
             CoreAiBackendStatus? observed = null;
-            void Handler(CoreAiBackendStatus s) => observed = s;
+
+            void Handler(CoreAiBackendStatus s)
+            {
+                observed = s;
+            }
+
             CoreAiBackend.OnBackendChanged += Handler;
             try
             {

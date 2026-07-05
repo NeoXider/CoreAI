@@ -14,6 +14,7 @@ namespace CoreAI.Sandbox
     public sealed class LuaApiRegistry
     {
         private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
+
         private readonly Dictionary<string, Func<ScriptExecutionContext, CallbackArguments, DynValue>> _callbacks =
             new(StringComparer.Ordinal);
 

@@ -541,10 +541,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
                 new Newtonsoft.Json.JsonReaderException("unexpected token")));
             Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
-                new Exception("Unable to CONVERT value to Int32")),
+                    new Exception("Unable to CONVERT value to Int32")),
                 "Message-based detection must be case-insensitive");
             Assert.IsTrue(ToolExecutionPolicy.LooksLikeArgumentConversionError(
-                new InvalidOperationException("wrapper", new FormatException("inner"))),
+                    new InvalidOperationException("wrapper", new FormatException("inner"))),
                 "Inner exceptions must be inspected (MEAI wraps the real conversion failure)");
             Assert.IsFalse(ToolExecutionPolicy.LooksLikeArgumentConversionError(
                 new InvalidOperationException("world is not loaded")));
@@ -1111,7 +1111,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(secondBatch.AnyFailed);
             Assert.IsFalse(secondBatch.AllFailed, "AllowDuplicates call must still run in a repeated mixed batch");
             Assert.AreEqual(fixedAgain.CallId, ((MEAI.FunctionResultContent)secondBatch.Results[0]).CallId);
-            StringAssert.Contains("Duplicate tool call", ((MEAI.FunctionResultContent)secondBatch.Results[0]).Result.ToString());
+            StringAssert.Contains("Duplicate tool call",
+                ((MEAI.FunctionResultContent)secondBatch.Results[0]).Result.ToString());
             Assert.AreEqual(repeatAgain.CallId, ((MEAI.FunctionResultContent)secondBatch.Results[1]).CallId);
             Assert.AreEqual("repeat-2", ((MEAI.FunctionResultContent)secondBatch.Results[1]).Result.ToString());
         }
@@ -1447,8 +1448,8 @@ namespace CoreAI.Tests.EditMode
 
             // "slow" finishes after "fast" but must still come first in Results (original call order).
             MEAI.ChatOptions opts = MakeAsyncTools(("slow", 120, "SLOW"), ("fast", 5, "FAST"));
-            MEAI.FunctionCallContent callSlow = MakeToolCall("slow", new() { { "n", 1 } });
-            MEAI.FunctionCallContent callFast = MakeToolCall("fast", new() { { "n", 2 } });
+            MEAI.FunctionCallContent callSlow = MakeToolCall("slow", new Dictionary<string, object> { { "n", 1 } });
+            MEAI.FunctionCallContent callFast = MakeToolCall("fast", new Dictionary<string, object> { { "n", 2 } });
 
             ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
                 new List<MEAI.FunctionCallContent> { callSlow, callFast }, opts, CancellationToken.None);
@@ -1474,10 +1475,10 @@ namespace CoreAI.Tests.EditMode
                 ("a", 150, "A"), ("b", 150, "B"), ("c", 150, "C"), ("d", 150, "D"));
             List<MEAI.FunctionCallContent> calls = new()
             {
-                MakeToolCall("a", new() { { "n", 1 } }),
-                MakeToolCall("b", new() { { "n", 2 } }),
-                MakeToolCall("c", new() { { "n", 3 } }),
-                MakeToolCall("d", new() { { "n", 4 } }),
+                MakeToolCall("a", new Dictionary<string, object> { { "n", 1 } }),
+                MakeToolCall("b", new Dictionary<string, object> { { "n", 2 } }),
+                MakeToolCall("c", new Dictionary<string, object> { { "n", 3 } }),
+                MakeToolCall("d", new Dictionary<string, object> { { "n", 4 } })
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -1502,8 +1503,8 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions opts = MakeAsyncTools(("a", 120, "A"), ("b", 120, "B"));
             List<MEAI.FunctionCallContent> calls = new()
             {
-                MakeToolCall("a", new() { { "n", 1 } }),
-                MakeToolCall("b", new() { { "n", 2 } }),
+                MakeToolCall("a", new Dictionary<string, object> { { "n", 1 } }),
+                MakeToolCall("b", new Dictionary<string, object> { { "n", 2 } })
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -1534,9 +1535,9 @@ namespace CoreAI.Tests.EditMode
 
             List<MEAI.FunctionCallContent> calls = new()
             {
-                MakeToolCall("ok1", new() { { "n", 1 } }),
-                MakeToolCall("bad", new() { { "n", 2 } }),
-                MakeToolCall("ok3", new() { { "n", 3 } }),
+                MakeToolCall("ok1", new Dictionary<string, object> { { "n", 1 } }),
+                MakeToolCall("bad", new Dictionary<string, object> { { "n", 2 } }),
+                MakeToolCall("ok3", new Dictionary<string, object> { { "n", 3 } })
             };
 
             ToolExecutionPolicy.BatchToolCallResult batch =
@@ -1583,8 +1584,8 @@ namespace CoreAI.Tests.EditMode
 
             List<MEAI.FunctionCallContent> calls = new()
             {
-                MakeToolCall("memory", new() { { "n", 1 } }),
-                MakeToolCall("memory", new() { { "n", 2 } }),
+                MakeToolCall("memory", new Dictionary<string, object> { { "n", 1 } }),
+                MakeToolCall("memory", new Dictionary<string, object> { { "n", 2 } })
             };
 
             ToolExecutionPolicy.BatchToolCallResult batch =
@@ -1645,8 +1646,8 @@ namespace CoreAI.Tests.EditMode
             opts.Tools.Add(MEAI.AIFunctionFactory.Create(secondBody,
                 new MEAI.AIFunctionFactoryOptions { Name = "second", Description = "second" }));
 
-            MEAI.FunctionCallContent firstCall = MakeToolCall("first", new() { { "n", 1 } });
-            MEAI.FunctionCallContent secondCall = MakeToolCall("second", new() { { "n", 2 } });
+            MEAI.FunctionCallContent firstCall = MakeToolCall("first", new Dictionary<string, object> { { "n", 1 } });
+            MEAI.FunctionCallContent secondCall = MakeToolCall("second", new Dictionary<string, object> { { "n", 2 } });
 
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
             ToolExecutionPolicy.ToolCallResult? scheduledFirst =
@@ -1718,11 +1719,14 @@ namespace CoreAI.Tests.EditMode
 
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
             await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("memory", new() { { "n", 1 } }), opts, CancellationToken.None);
+                turn, MakeToolCall("memory", new Dictionary<string, object> { { "n", 1 } }), opts,
+                CancellationToken.None);
             await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("manage_mods", new() { { "n", 2 } }), opts, CancellationToken.None);
+                turn, MakeToolCall("manage_mods", new Dictionary<string, object> { { "n", 2 } }), opts,
+                CancellationToken.None);
             await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("manage_skills", new() { { "n", 3 } }), opts, CancellationToken.None);
+                turn, MakeToolCall("manage_skills", new Dictionary<string, object> { { "n", 3 } }), opts,
+                CancellationToken.None);
             ToolExecutionPolicy.BatchToolCallResult batch =
                 await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
 
@@ -1822,8 +1826,8 @@ namespace CoreAI.Tests.EditMode
                 new List<ILlmTool>(), false, "test", 3);
 
             MEAI.ChatOptions opts = MakeAsyncTools(("slow_a", 60, "A"), ("slow_b", 5, "B"));
-            MEAI.FunctionCallContent callA = MakeToolCall("slow_a", new() { { "n", 1 } });
-            MEAI.FunctionCallContent callB = MakeToolCall("slow_b", new() { { "n", 2 } });
+            MEAI.FunctionCallContent callA = MakeToolCall("slow_a", new Dictionary<string, object> { { "n", 1 } });
+            MEAI.FunctionCallContent callB = MakeToolCall("slow_b", new Dictionary<string, object> { { "n", 2 } });
 
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
             Stopwatch sw = Stopwatch.StartNew();
@@ -1871,7 +1875,7 @@ namespace CoreAI.Tests.EditMode
                 new MEAI.AIFunctionFactoryOptions { Name = "hang", Description = "hang" }));
 
             CancellationTokenSource cts = new();
-            MEAI.FunctionCallContent call = MakeToolCall("hang", new() { { "n", 1 } });
+            MEAI.FunctionCallContent call = MakeToolCall("hang", new Dictionary<string, object> { { "n", 1 } });
 
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
             ToolExecutionPolicy.ToolCallResult? scheduled =

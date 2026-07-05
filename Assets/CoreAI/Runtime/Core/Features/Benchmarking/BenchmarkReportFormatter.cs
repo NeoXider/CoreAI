@@ -63,13 +63,16 @@ namespace CoreAI.Benchmarking
                           $"streaming {m.Streaming} · temp {F(m.Temperature)} · reps {m.Repetitions} · " +
                           $"parallel-tools {m.MaxParallelToolCalls}");
             sb.AppendLine($"- **Run:** `{m.RunId}` ({m.TimestampUtc})" +
-                          (string.IsNullOrEmpty(m.UnityVersion) ? "" : $" · Unity {m.UnityVersion} · suite {m.SuiteVersion}"));
+                          (string.IsNullOrEmpty(m.UnityVersion)
+                              ? ""
+                              : $" · Unity {m.UnityVersion} · suite {m.SuiteVersion}"));
 
             if (report.FrameworkFailures > 0 || report.EnvironmentFailures > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine($"> ⚠ **Not a clean model measurement:** {report.FrameworkFailures} framework-failure(s), " +
-                              $"{report.EnvironmentFailures} environment-failure(s) — see details below.");
+                sb.AppendLine(
+                    $"> ⚠ **Not a clean model measurement:** {report.FrameworkFailures} framework-failure(s), " +
+                    $"{report.EnvironmentFailures} environment-failure(s) — see details below.");
             }
 
             // --- Summary by dimension: the suite split into comparable axes, with bars + a chart ---
@@ -208,7 +211,8 @@ namespace CoreAI.Benchmarking
                 foreach (BenchmarkCheckpoint cp in failed)
                 {
                     string detail = string.IsNullOrEmpty(cp.Detail) ? "" : $" — {cp.Detail}";
-                    sb.AppendLine($"- [{(cp.Mandatory ? "MANDATORY" : "opt")}] {cp.Description} (w{F(cp.Weight)}){detail}");
+                    sb.AppendLine(
+                        $"- [{(cp.Mandatory ? "MANDATORY" : "opt")}] {cp.Description} (w{F(cp.Weight)}){detail}");
                 }
 
                 foreach (BenchmarkPenalty p in r.Penalties)
@@ -267,20 +271,20 @@ namespace CoreAI.Benchmarking
 
             StringBuilder sb = new();
             sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
-              .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
+                .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
             sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
 
             // Header: model + big suite score.
             sb.Append($"<text x=\"20\" y=\"34\" fill=\"#e8e8ea\" font-size=\"18\" font-weight=\"bold\">")
-              .Append(Xml(report.Metadata.ModelId)).Append("</text>");
+                .Append(Xml(report.Metadata.ModelId)).Append("</text>");
             string scoreColor = HexColor(report.SuiteBaseScore);
             sb.Append($"<text x=\"{width - 20}\" y=\"44\" fill=\"{scoreColor}\" font-size=\"40\" ")
-              .Append($"font-weight=\"bold\" text-anchor=\"end\">{F(report.SuiteBaseScore)}</text>");
+                .Append($"font-weight=\"bold\" text-anchor=\"end\">{F(report.SuiteBaseScore)}</text>");
             sb.Append($"<text x=\"{width - 20}\" y=\"62\" fill=\"#9aa0a6\" font-size=\"11\" ")
-              .Append("text-anchor=\"end\">/ 100</text>");
+                .Append("text-anchor=\"end\">/ 100</text>");
             sb.Append($"<text x=\"20\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">")
-              .Append($"PASS {report.PassCount} · PARTIAL {report.PartialCount} · FAIL {report.FailCount} · ")
-              .Append($"{F(report.PassRate * 100)}% pass-rate</text>");
+                .Append($"PASS {report.PassCount} · PARTIAL {report.PartialCount} · FAIL {report.FailCount} · ")
+                .Append($"{F(report.PassRate * 100)}% pass-rate</text>");
 
             // Dimension bars.
             const int barX = 150;
@@ -290,20 +294,21 @@ namespace CoreAI.Benchmarking
             {
                 double pct = Clamp(d.Score, 0, 100);
                 sb.Append($"<text x=\"20\" y=\"{y + 11}\" fill=\"#c8ccd0\" font-size=\"12\">")
-                  .Append(Xml(DimName(d.Dimension))).Append("</text>");
+                    .Append(Xml(DimName(d.Dimension))).Append("</text>");
                 sb.Append($"<rect x=\"{barX}\" y=\"{y}\" width=\"{barW}\" height=\"14\" rx=\"3\" fill=\"#33353b\"/>");
                 int fill = (int)System.Math.Round(barW * pct / 100.0);
-                sb.Append($"<rect x=\"{barX}\" y=\"{y}\" width=\"{fill}\" height=\"14\" rx=\"3\" fill=\"{HexColor(d.Score)}\"/>");
+                sb.Append(
+                    $"<rect x=\"{barX}\" y=\"{y}\" width=\"{fill}\" height=\"14\" rx=\"3\" fill=\"{HexColor(d.Score)}\"/>");
                 sb.Append($"<text x=\"{barX + barW + 10}\" y=\"{y + 11}\" fill=\"#e8e8ea\" font-size=\"12\">")
-                  .Append(F(d.Score)).Append("</text>");
+                    .Append(F(d.Score)).Append("</text>");
                 y += 26;
             }
 
             // Footer: speed / tokens.
             sb.Append($"<text x=\"20\" y=\"{y + 20}\" fill=\"#9aa0a6\" font-size=\"11\">")
-              .Append($"{report.TotalCompletionTokens} gen tokens · {F(report.GenerationTokensPerSecond)} tok/s · ")
-              .Append($"{F(report.TotalLatencyMs / 1000.0)} s · bonus +{F(report.MeanEfficiencyBonus)} ")
-              .Append($"(tok +{F(report.MeanTokenBonus)}, time +{F(report.MeanTimeBonus)})</text>");
+                .Append($"{report.TotalCompletionTokens} gen tokens · {F(report.GenerationTokensPerSecond)} tok/s · ")
+                .Append($"{F(report.TotalLatencyMs / 1000.0)} s · bonus +{F(report.MeanEfficiencyBonus)} ")
+                .Append($"(tok +{F(report.MeanTokenBonus)}, time +{F(report.MeanTimeBonus)})</text>");
 
             sb.Append("</svg>");
             return sb.ToString();
@@ -322,13 +327,14 @@ namespace CoreAI.Benchmarking
 
             StringBuilder sb = new();
             sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
-              .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
+                .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
             sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
 
             int y = top;
             foreach (DimensionScore d in dims)
             {
-                AppendDimensionBar(sb, y, left, barW, valueX, DimName(d.Dimension), d.Score, d.Score, F(d.Score), "/100");
+                AppendDimensionBar(sb, y, left, barW, valueX, DimName(d.Dimension), d.Score, d.Score, F(d.Score),
+                    "/100");
                 y += rowH;
             }
 
@@ -364,11 +370,12 @@ namespace CoreAI.Benchmarking
             double pct = Clamp(fillPct, 0, 100);
             int fill = (int)System.Math.Round(barW * pct / 100.0);
             sb.Append($"<text x=\"20\" y=\"{y + 15}\" fill=\"#c8ccd0\" font-size=\"12\">")
-              .Append(Xml(label)).Append("</text>");
+                .Append(Xml(label)).Append("</text>");
             sb.Append($"<rect x=\"{left}\" y=\"{y}\" width=\"{barW}\" height=\"16\" rx=\"4\" fill=\"#33353b\"/>");
-            sb.Append($"<rect x=\"{left}\" y=\"{y}\" width=\"{fill}\" height=\"16\" rx=\"4\" fill=\"{HexColor(colorScore)}\"/>");
+            sb.Append(
+                $"<rect x=\"{left}\" y=\"{y}\" width=\"{fill}\" height=\"16\" rx=\"4\" fill=\"{HexColor(colorScore)}\"/>");
             sb.Append($"<text x=\"{valueX}\" y=\"{y + 13}\" fill=\"#e8e8ea\" font-size=\"12\">")
-              .Append(value).Append(Xml(suffix)).Append("</text>");
+                .Append(value).Append(Xml(suffix)).Append("</text>");
         }
 
         private static double Clamp(double value, double min, double max)
@@ -378,7 +385,7 @@ namespace CoreAI.Benchmarking
                 return min;
             }
 
-            return value < min ? min : (value > max ? max : value);
+            return value < min ? min : value > max ? max : value;
         }
 
         private static string HexColor(double score)
@@ -575,7 +582,10 @@ namespace CoreAI.Benchmarking
             return sb.ToString();
         }
 
-        private static string Verdict(ScenarioResult r) => VerdictText(r.Classification);
+        private static string Verdict(ScenarioResult r)
+        {
+            return VerdictText(r.Classification);
+        }
 
         private static string VerdictText(BenchmarkClassification c)
         {
@@ -627,7 +637,7 @@ namespace CoreAI.Benchmarking
                 pct = 0;
             }
 
-            pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+            pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
             int filled = (int)System.Math.Round(pct / 100.0 * width);
             return new string('█', filled) + new string('░', width - filled);
         }

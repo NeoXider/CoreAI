@@ -24,6 +24,9 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public int EstimateText(string text) => _counter.CountTokens(text, _modelName);
+        public int EstimateText(string text)
+        {
+            return _counter.CountTokens(text, _modelName);
+        }
     }
 }

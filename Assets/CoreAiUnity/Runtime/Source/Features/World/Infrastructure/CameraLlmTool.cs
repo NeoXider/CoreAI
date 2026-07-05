@@ -18,7 +18,9 @@ namespace CoreAI.Infrastructure.World
     {
         public string Name => "camera_tool";
         public string Description => "Access scene cameras to take screenshots for visual analysis.";
+
         public bool AllowDuplicates => false;
+
         // This wrapper expands into native MEAI functions. The aggregate ILlmTool schema is intentionally
         // empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
         public string ParametersSchema => "{}";
@@ -198,7 +200,7 @@ namespace CoreAI.Infrastructure.World
             string dataUri;
             try
             {
-                var parsed = JsonConvert.DeserializeObject<CaptureCameraResult>(toolResultJson);
+                CaptureCameraResult parsed = JsonConvert.DeserializeObject<CaptureCameraResult>(toolResultJson);
                 if (parsed == null || !parsed.success || string.IsNullOrWhiteSpace(parsed.dataUri))
                 {
                     return false;

@@ -64,7 +64,8 @@ namespace CoreAI.Demos
         }
 
         // Missing Lua arguments arrive as default(T) (null/0), so apply friendly defaults here.
-        private bool Define(string name, string team, double hp, double damage, double speed, double range, string color)
+        private bool Define(string name, string team, double hp, double damage, double speed, double range,
+            string color)
         {
             if (string.IsNullOrWhiteSpace(name))
             {

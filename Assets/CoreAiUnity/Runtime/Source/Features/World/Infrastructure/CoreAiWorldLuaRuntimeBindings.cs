@@ -534,7 +534,9 @@ namespace CoreAI.Infrastructure.World
         }
 
         private static bool Has(MoonSharp.Interpreter.Table table, string key)
-            => !table.Get(key).IsNil();
+        {
+            return !table.Get(key).IsNil();
+        }
 
         private void Publish(CoreAiWorldCommandEnvelope env)
         {

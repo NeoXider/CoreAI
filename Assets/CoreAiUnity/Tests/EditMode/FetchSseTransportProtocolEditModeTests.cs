@@ -14,7 +14,10 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public class FetchSseTransportProtocolEditModeTests
     {
-        private static KeyValuePair<string, string> H(string k, string v) => new(k, v);
+        private static KeyValuePair<string, string> H(string k, string v)
+        {
+            return new KeyValuePair<string, string>(k, v);
+        }
 
         [Test]
         public void BuildHeaderString_AddsContentTypeWhenMissing()

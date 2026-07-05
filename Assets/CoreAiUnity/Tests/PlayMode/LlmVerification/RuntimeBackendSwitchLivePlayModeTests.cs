@@ -81,7 +81,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, CoreAiBackend.Status.Mode);
 
             // Health probe round-trips through the real model.
-            Task<CoreAiBackendHealth> verify = CoreAiBackend.VerifyAsync(timeoutSeconds: 120);
+            Task<CoreAiBackendHealth> verify = CoreAiBackend.VerifyAsync(120);
             yield return WaitTask(verify, 180f);
             Assert.IsTrue(verify.Result.Ok,
                 $"Health probe must pass against the live backend. Error: {verify.Result.Error}");

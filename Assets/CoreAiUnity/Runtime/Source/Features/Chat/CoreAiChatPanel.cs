@@ -466,7 +466,8 @@ namespace CoreAI.Chat
             TryUnregisterCallback<ClickEvent>(ClearButton, OnClearClicked, ignoreReleasedElements);
             TryUnregisterCallback<ClickEvent>(CollapseButton, OnCollapseClicked, ignoreReleasedElements);
             TryUnregisterCallback<ClickEvent>(FabButton, OnFabClicked, ignoreReleasedElements);
-            TryUnregisterCallback<KeyDownEvent>(InputField, OnInputKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+            TryUnregisterCallback<KeyDownEvent>(InputField, OnInputKeyDown, ignoreReleasedElements,
+                TrickleDown.TrickleDown);
             TryUnregisterCallback<KeyDownEvent>(Root, OnRootKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
         }
 

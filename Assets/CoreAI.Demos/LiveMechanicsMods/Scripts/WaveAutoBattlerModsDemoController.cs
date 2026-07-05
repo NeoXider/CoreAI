@@ -29,11 +29,9 @@ namespace CoreAI.Demos
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [SerializeField]
-        private Transform heroAnchor;
+        [SerializeField] private Transform heroAnchor;
 
-        [SerializeField]
-        private Transform enemyRoot;
+        [SerializeField] private Transform enemyRoot;
 
         private readonly List<EnemyState> _enemies = new();
         private readonly List<string> _log = new();
@@ -123,7 +121,7 @@ namespace CoreAI.Demos
             if (_heroVisual == null)
             {
                 _heroVisual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(_heroVisual);
+                Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(_heroVisual);
                 _heroVisual.name = "AutoBattlerHero";
                 _heroVisual.transform.SetParent(heroAnchor, false);
                 _heroVisual.transform.localPosition = Vector3.zero;
@@ -306,11 +304,12 @@ namespace CoreAI.Demos
             for (int i = 0; i < count; i++)
             {
                 GameObject visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
+                Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
                 visual.name = $"WaveEnemy_{wave}_{i + 1}";
                 visual.transform.SetParent(enemyRoot, false);
                 visual.transform.localScale = Vector3.one * 0.8f;
-                SetRendererColor(visual, Color.Lerp(new Color(1f, 0.37f, 0.22f), Color.magenta, Mathf.Clamp01(wave / 18f)));
+                SetRendererColor(visual,
+                    Color.Lerp(new Color(1f, 0.37f, 0.22f), Color.magenta, Mathf.Clamp01(wave / 18f)));
                 _enemies.Add(new EnemyState { Visual = visual, Hp = hp, MaxHp = hp, Damage = damage });
             }
 
@@ -378,7 +377,9 @@ namespace CoreAI.Demos
             GUILayout.Label(
                 $"Wave <b>{_wave}</b>   Hero Lvl <b>{_heroLevel}</b>   HP <b>{Mathf.Max(0f, _heroHp):0.#}</b>/{_heroMaxHp:0.#}   Gold <b>{_gold}</b>   XP <b>{_xp:0.#}</b>",
                 RichLabel());
-            GUILayout.Label($"Enemies alive: <b>{_enemies.Count}</b>   Hero attack interval: {CurrentHeroAttackInterval():0.##}s", RichLabel());
+            GUILayout.Label(
+                $"Enemies alive: <b>{_enemies.Count}</b>   Hero attack interval: {CurrentHeroAttackInterval():0.##}s",
+                RichLabel());
 
             GUILayout.Space(4);
             GUILayout.Label("<b>Lua mod slots</b>", RichLabel());
@@ -401,7 +402,8 @@ namespace CoreAI.Demos
             {
                 foreach (LuaModInfo mod in mods)
                 {
-                    GUILayout.Label($"* {mod.Id} caps={mod.Capabilities} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
+                    GUILayout.Label(
+                        $"* {mod.Id} caps={mod.Capabilities} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
                 }
             }
 

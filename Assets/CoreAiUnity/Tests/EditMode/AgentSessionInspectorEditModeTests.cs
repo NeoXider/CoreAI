@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             AgentMemoryPolicy policy = new();
-            policy.ConfigureChatHistory("Teacher", true, 4096, true, maxChatHistoryMessages: 12);
+            policy.ConfigureChatHistory("Teacher", true, 4096, true, 12);
             policy.SetMaxOutputTokens("Teacher", 512);
             policy.SetAdditionalSystemPrompt("Teacher", "Additional teacher prompt.");
 
@@ -225,9 +225,9 @@ namespace CoreAI.Tests.EditMode
             AgentSessionInspector coreInspector = CreateInspectorWithPromptRole(null);
             AgentSessionInspector gameInspector = CreateInspectorWithPromptRole("Teacher");
 
-            int coreScore = InvokeCandidateScore(coreInspector, scopeDepth: 2);
-            int gameScore = InvokeCandidateScore(gameInspector, scopeDepth: 3);
-            int deeperCoreScore = InvokeCandidateScore(coreInspector, scopeDepth: 3);
+            int coreScore = InvokeCandidateScore(coreInspector, 2);
+            int gameScore = InvokeCandidateScore(gameInspector, 3);
+            int deeperCoreScore = InvokeCandidateScore(coreInspector, 3);
 
             Assert.Greater(gameScore, coreScore);
             Assert.Greater(deeperCoreScore, coreScore);

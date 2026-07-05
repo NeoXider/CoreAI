@@ -139,7 +139,8 @@ namespace CoreAI.Tests.EditMode
             Script script = env.CreateScript(reg);
 
             Assert.Throws<ScriptRuntimeException>(() =>
-                env.RunChunk(script, $"coreai_world_spawn({{ prefab = 'enemy.basic', name = 'e1', x = {x}, y = {y}, z = {z} }})"));
+                env.RunChunk(script,
+                    $"coreai_world_spawn({{ prefab = 'enemy.basic', name = 'e1', x = {x}, y = {y}, z = {z} }})"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 

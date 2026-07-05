@@ -627,7 +627,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             for (Exception current = ex; current != null; current = current.InnerException)
             {
-                if (current is Newtonsoft.Json.JsonException ||
+                if (current is JsonException ||
                     current is System.Text.Json.JsonException ||
                     current is InvalidCastException ||
                     current is FormatException ||
@@ -1155,7 +1155,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>Starts a streamed turn (execute-as-you-stream counterpart of one batch).</summary>
-        public StreamedTurn BeginStreamedTurn() => new();
+        public StreamedTurn BeginStreamedTurn()
+        {
+            return new StreamedTurn();
+        }
 
         /// <summary>
         /// Executes one tool call the moment it arrives in the stream. Mirrors the batch path per

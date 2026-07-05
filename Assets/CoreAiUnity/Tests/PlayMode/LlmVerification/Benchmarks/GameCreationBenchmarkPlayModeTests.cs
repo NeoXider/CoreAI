@@ -181,11 +181,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         [UnityTest]
         [Timeout(NUnitTimeoutMs)] // 110 min — last-resort NUnit backstop; the SOFT suite budget (which still
-                                  // writes artifacts) is the real terminator, clamped in
-                                  // ResolveSuiteBudgetSeconds to this value minus a report margin (300s).
-                                  // The rep start-gate reserves maxAttempts x timeout inside the budget, so
-                                  // scenario work plus report writing always finishes before the hard abort.
-                                  // NUnit's hard abort writes nothing.
+        // writes artifacts) is the real terminator, clamped in
+        // ResolveSuiteBudgetSeconds to this value minus a report margin (300s).
+        // The rep start-gate reserves maxAttempts x timeout inside the budget, so
+        // scenario work plus report writing always finishes before the hard abort.
+        // NUnit's hard abort writes nothing.
         [Category("Benchmark")]
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]
         public IEnumerator GameCreationBenchmark_Suite()
@@ -300,7 +300,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         BenchmarkProgress.StartScenario(
                             $"{scenario.Group} · {scenario.Name}  {Stars(BenchmarkInfo.DifficultyFor(scenario.Group))}" +
                             (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""),
-                            timeoutSeconds: timeout);
+                            timeout);
                         ScenarioResult captured = null;
                         // Retry on ANY hard failure that produced no measurement — provider/model crash,
                         // failed-to-load, timeout, dropped connection — so a crash never counts as a model
@@ -329,7 +329,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         {
                             captured.Repetition = rep;
                             report.Add(captured);
-                            BenchmarkProgress.CompleteScenario(ProgressLine(captured), Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
+                            BenchmarkProgress.CompleteScenario(ProgressLine(captured),
+                                Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
                         }
                         else
                         {
@@ -357,10 +358,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // A suite-level "model card" (radar of the six dimensions + game-fitness bars) so two models'
             // results are comparable at a glance — rendered with a throwaway camera while still in Play mode.
             byte[] modelCardPng = null;
-            if (UnityEngine.SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null
+            if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null
                 && report.Results.Count > 0)
             {
-                yield return GameCreationBenchmarkHarness.CaptureModelCard(report, png => modelCardPng = png);
+                yield return CaptureModelCard(report, png => modelCardPng = png);
             }
 
             string artifactPath = WriteArtifacts(report, modelCardPng);
@@ -383,7 +384,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         private static string Stars(int difficulty10)
         {
-            int d = difficulty10 < 1 ? 1 : (difficulty10 > 10 ? 10 : difficulty10);
+            int d = difficulty10 < 1 ? 1 : difficulty10 > 10 ? 10 : difficulty10;
             int half = d / 2;
             return $"{new string('●', half)}{new string('○', 5 - half)} {d}/10";
         }
@@ -593,7 +594,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
             }
 
-            string cleaned = new string(chars);
+            string cleaned = new(chars);
             return cleaned.Length > 60 ? cleaned.Substring(0, 60) : cleaned;
         }
     }

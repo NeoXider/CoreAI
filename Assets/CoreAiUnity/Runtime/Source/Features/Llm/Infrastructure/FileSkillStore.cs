@@ -44,6 +44,7 @@ namespace CoreAI.Infrastructure.Llm
         };
 
         private static readonly IReadOnlyList<SkillRecord> Empty = new SkillRecord[0];
+
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
             new(StringComparer.Ordinal);
 

@@ -27,12 +27,10 @@ namespace CoreAI.Demos
         private const float ArenaHalfWidth = 7f;
         private const float ArenaHalfDepth = 4.5f;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
-        [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Parent for spawned unit visuals. Created automatically when empty.")]
-        [SerializeField]
+        [Tooltip("Parent for spawned unit visuals. Created automatically when empty.")] [SerializeField]
         private Transform unitRoot;
 
         private sealed class Archetype
@@ -119,7 +117,8 @@ namespace CoreAI.Demos
 
         // ------------------------------------------------------------------ IUnitForge (called from Lua)
 
-        public bool Define(string name, string team, double hp, double damage, double speed, double range, string colorHex)
+        public bool Define(string name, string team, double hp, double damage, double speed, double range,
+            string colorHex)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -138,7 +137,8 @@ namespace CoreAI.Demos
                 Range = Mathf.Clamp((float)range, 0.3f, 8f),
                 Color = color
             };
-            Log($"Defined unit '{name}' [{normalizedTeam}] hp={hp:0.#} dmg={damage:0.#} spd={speed:0.#} rng={range:0.#}.");
+            Log(
+                $"Defined unit '{name}' [{normalizedTeam}] hp={hp:0.#} dmg={damage:0.#} spd={speed:0.#} rng={range:0.#}.");
             return true;
         }
 
@@ -163,7 +163,7 @@ namespace CoreAI.Demos
 
             GameObject visual = GameObject.CreatePrimitive(
                 archetype.Team == "ally" ? PrimitiveType.Capsule : PrimitiveType.Cube);
-            CoreAI.Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
+            Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
             visual.name = $"{archetype.Name}_{visual.GetInstanceID()}";
             visual.transform.SetParent(unitRoot, false);
             visual.transform.position = position;
@@ -354,7 +354,8 @@ namespace CoreAI.Demos
                 foreach (KeyValuePair<string, Archetype> entry in _archetypes)
                 {
                     Archetype a = entry.Value;
-                    GUILayout.Label($"* {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
+                    GUILayout.Label(
+                        $"* {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
                 }
             }
 
@@ -371,7 +372,8 @@ namespace CoreAI.Demos
                 {
                     foreach (LuaModInfo mod in mods)
                     {
-                        GUILayout.Label($"* {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
+                        GUILayout.Label(
+                            $"* {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
                     }
                 }
             }
@@ -390,7 +392,8 @@ namespace CoreAI.Demos
 
         private static string NormalizeTeam(string team)
         {
-            if (!string.IsNullOrWhiteSpace(team) && team.Trim().Equals("ally", System.StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(team) &&
+                team.Trim().Equals("ally", System.StringComparison.OrdinalIgnoreCase))
             {
                 return "ally";
             }
@@ -400,13 +403,14 @@ namespace CoreAI.Demos
 
         private static Color ResolveColor(string colorHex, string team, string name)
         {
-            if (!string.IsNullOrWhiteSpace(colorHex) && ColorUtility.TryParseHtmlString(colorHex.Trim(), out Color parsed))
+            if (!string.IsNullOrWhiteSpace(colorHex) &&
+                ColorUtility.TryParseHtmlString(colorHex.Trim(), out Color parsed))
             {
                 return parsed;
             }
 
             // Stable fallback: tint by team, vary hue by archetype name hash.
-            float hueJitter = (Mathf.Abs(name.GetHashCode()) % 100) / 100f * 0.12f;
+            float hueJitter = Mathf.Abs(name.GetHashCode()) % 100 / 100f * 0.12f;
             return team == "ally"
                 ? new Color(0.2f + hueJitter, 0.6f, 1f)
                 : new Color(1f, 0.35f + hueJitter, 0.25f);

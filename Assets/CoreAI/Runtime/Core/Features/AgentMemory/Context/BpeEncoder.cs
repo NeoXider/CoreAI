@@ -95,7 +95,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            var special = new Dictionary<string, int>(StringComparer.Ordinal);
+            Dictionary<string, int> special = new(StringComparer.Ordinal);
             if (specialTokens != null)
             {
                 foreach (KeyValuePair<string, int> kv in specialTokens)
@@ -200,7 +200,7 @@ namespace CoreAI.Ai
 
             // Segment boundaries: parts[i] is the start index of segment i; there are (count) segments
             // covering [parts[i], parts[i+1]). Initialize to one byte per segment.
-            var starts = new List<int>(n + 1);
+            List<int> starts = new(n + 1);
             for (int i = 0; i <= n; i++)
             {
                 starts.Add(i);
@@ -236,14 +236,14 @@ namespace CoreAI.Ai
 
         private int RankOf(byte[] piece, int start, int end)
         {
-            var key = new ByteSeq(piece, start, end);
+            ByteSeq key = new(piece, start, end);
             return _ranks.TryGetValue(key, out int rank) ? rank : -1;
         }
 
         private static Dictionary<ByteSeq, int> ParseRanks(Stream stream)
         {
-            var ranks = new Dictionary<ByteSeq, int>(ByteSeqComparer.Instance);
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 16, leaveOpen: true);
+            Dictionary<ByteSeq, int> ranks = new(ByteSeqComparer.Instance);
+            using StreamReader reader = new(stream, Encoding.UTF8, true, 1 << 16, true);
             string line;
             while ((line = reader.ReadLine()) != null)
             {
@@ -293,7 +293,7 @@ namespace CoreAI.Ai
                 return null;
             }
 
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             bool first = true;
             foreach (string token in specialTokens.Keys)
             {
@@ -345,7 +345,10 @@ namespace CoreAI.Ai
 
             public int Length => _length;
 
-            public byte At(int i) => _buffer[_start + i];
+            public byte At(int i)
+            {
+                return _buffer[_start + i];
+            }
 
             public int ComputeHash()
             {
@@ -386,9 +389,15 @@ namespace CoreAI.Ai
         {
             public static readonly ByteSeqComparer Instance = new();
 
-            public bool Equals(ByteSeq x, ByteSeq y) => x.ContentEquals(in y);
+            public bool Equals(ByteSeq x, ByteSeq y)
+            {
+                return x.ContentEquals(in y);
+            }
 
-            public int GetHashCode(ByteSeq obj) => obj.ComputeHash();
+            public int GetHashCode(ByteSeq obj)
+            {
+                return obj.ComputeHash();
+            }
         }
     }
 }

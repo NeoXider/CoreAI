@@ -19,12 +19,14 @@ namespace CoreAI.AgentMemory
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true, "Action: read, write, append, clear, str_replace, insert, delete, or rename"),
-            ("content", "string", false, "Memory content for write/append/insert, replacement fallback for str_replace/rename, or delete target fallback"),
+            ("content", "string", false,
+                "Memory content for write/append/insert, replacement fallback for str_replace/rename, or delete target fallback"),
             ("old_text", "string", false, "Exact text to replace/delete, or section/key label to rename"),
             ("new_text", "string", false, "Replacement text for str_replace, or new section/key label for rename"),
             ("anchor", "string", false, "For insert: exact anchor text; content is inserted after the anchor's line"),
             ("line", "integer", false, "For insert: 1-based line number to insert before; beyond end appends"),
-            ("replace_all", "boolean", false, "For str_replace/delete: true edits all exact matches; false edits the first match")
+            ("replace_all", "boolean", false,
+                "For str_replace/delete: true edits all exact matches; false edits the first match")
         );
     }
 }

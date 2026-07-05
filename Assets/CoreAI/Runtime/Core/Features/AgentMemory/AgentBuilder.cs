@@ -41,7 +41,9 @@ namespace CoreAI.Ai
         private readonly List<ILlmTool> _tools = new();
         private readonly List<SkillSet> _skills = new();
         private string _systemPrompt;
+
         private AgentMode _mode = AgentMode.ToolsAndChat;
+
         // Default chat history keeps agent continuity; callers can opt out to save prompt tokens.
         private bool _withChatHistory = true;
         private int? _contextWindowTokens;
@@ -654,6 +656,7 @@ namespace CoreAI.Ai
         /// positive = that cap. Set via <see cref="AgentBuilder.WithMaxToolCallRoundtrips"/>.
         /// </summary>
         public int? MaxToolCallRoundtrips { get; internal set; }
+
         public ToolResultMemoryPolicy ToolResultMemory { get; internal set; } = ToolResultMemoryPolicy.CompactSummary;
         public float? CompactionTriggerRatio { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }

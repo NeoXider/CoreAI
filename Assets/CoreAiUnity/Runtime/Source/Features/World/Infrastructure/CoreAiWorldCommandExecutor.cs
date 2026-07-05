@@ -201,7 +201,11 @@ namespace CoreAI.Infrastructure.World
             {
                 GameObject prefabGo = UnityEngine.Object.Instantiate(prefab, pos, rotation);
                 prefabGo.name = targetName;
-                if (scale != Vector3.one) prefabGo.transform.localScale = scale;
+                if (scale != Vector3.one)
+                {
+                    prefabGo.transform.localScale = scale;
+                }
+
                 TryParentSpawned(prefabGo, env.stringValue);
                 return true;
             }
@@ -212,7 +216,11 @@ namespace CoreAI.Infrastructure.World
                 primitive.name = targetName;
                 primitive.transform.position = pos;
                 primitive.transform.rotation = rotation;
-                if (scale != Vector3.one) primitive.transform.localScale = scale;
+                if (scale != Vector3.one)
+                {
+                    primitive.transform.localScale = scale;
+                }
+
                 TryParentSpawned(primitive, env.stringValue);
                 return true;
             }
@@ -461,9 +469,21 @@ namespace CoreAI.Infrastructure.World
             else if (env.hasPosition || HasAxisPositionFlags(env))
             {
                 Vector3 pos = go.transform.position;
-                if (env.hasX) { pos.x = env.x; }
-                if (env.hasY) { pos.y = env.y; }
-                if (env.hasZ) { pos.z = env.z; }
+                if (env.hasX)
+                {
+                    pos.x = env.x;
+                }
+
+                if (env.hasY)
+                {
+                    pos.y = env.y;
+                }
+
+                if (env.hasZ)
+                {
+                    pos.z = env.z;
+                }
+
                 go.transform.position = pos;
             }
 
@@ -474,9 +494,21 @@ namespace CoreAI.Infrastructure.World
             else if (env.hasRotation || HasAxisRotationFlags(env))
             {
                 Vector3 rot = go.transform.eulerAngles;
-                if (env.hasFx) { rot.x = env.fx; }
-                if (env.hasFy) { rot.y = env.fy; }
-                if (env.hasFz) { rot.z = env.fz; }
+                if (env.hasFx)
+                {
+                    rot.x = env.fx;
+                }
+
+                if (env.hasFy)
+                {
+                    rot.y = env.fy;
+                }
+
+                if (env.hasFz)
+                {
+                    rot.z = env.fz;
+                }
+
                 go.transform.rotation = Quaternion.Euler(rot);
             }
 
@@ -618,8 +650,10 @@ namespace CoreAI.Infrastructure.World
         }
 
         private static bool IsFiniteScale(CoreAiWorldCommandEnvelope env)
-            => float.IsFinite(env.floatValue) && float.IsFinite(env.scaleX) &&
-               float.IsFinite(env.scaleY) && float.IsFinite(env.scaleZ);
+        {
+            return float.IsFinite(env.floatValue) && float.IsFinite(env.scaleX) &&
+                   float.IsFinite(env.scaleY) && float.IsFinite(env.scaleZ);
+        }
 
         private static Vector3 ResolveScale(CoreAiWorldCommandEnvelope env)
         {
@@ -636,7 +670,9 @@ namespace CoreAI.Infrastructure.World
         }
 
         private static float AxisScale(float axisValue, float fallback)
-            => axisValue > 0f ? Mathf.Clamp(axisValue, 0.01f, 100f) : fallback;
+        {
+            return axisValue > 0f ? Mathf.Clamp(axisValue, 0.01f, 100f) : fallback;
+        }
 
         private static Vector3 ResolveChangeScale(Vector3 current, CoreAiWorldCommandEnvelope env)
         {
@@ -647,17 +683,33 @@ namespace CoreAI.Infrastructure.World
                 result = Vector3.one * uniform;
             }
 
-            if (env.scaleX > 0f) { result.x = Mathf.Clamp(env.scaleX, 0.01f, 100f); }
-            if (env.scaleY > 0f) { result.y = Mathf.Clamp(env.scaleY, 0.01f, 100f); }
-            if (env.scaleZ > 0f) { result.z = Mathf.Clamp(env.scaleZ, 0.01f, 100f); }
+            if (env.scaleX > 0f)
+            {
+                result.x = Mathf.Clamp(env.scaleX, 0.01f, 100f);
+            }
+
+            if (env.scaleY > 0f)
+            {
+                result.y = Mathf.Clamp(env.scaleY, 0.01f, 100f);
+            }
+
+            if (env.scaleZ > 0f)
+            {
+                result.z = Mathf.Clamp(env.scaleZ, 0.01f, 100f);
+            }
+
             return result;
         }
 
         private static bool HasAxisPositionFlags(CoreAiWorldCommandEnvelope env)
-            => env.hasX || env.hasY || env.hasZ;
+        {
+            return env.hasX || env.hasY || env.hasZ;
+        }
 
         private static bool HasAxisRotationFlags(CoreAiWorldCommandEnvelope env)
-            => env.hasFx || env.hasFy || env.hasFz;
+        {
+            return env.hasFx || env.hasFy || env.hasFz;
+        }
 
         private bool TrySetColor(CoreAiWorldCommandEnvelope env)
         {
