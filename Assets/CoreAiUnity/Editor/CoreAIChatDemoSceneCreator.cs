@@ -65,8 +65,15 @@ namespace CoreAI.Editor
             CreateCamera();
             CreateLight();
             CreateEventSystem();
-            CreateCoreAILifetimeScope();
+            GameObject scopeGo = CreateCoreAILifetimeScope();
             CreateChatCanvas(config, panelSettings);
+
+            CoreAISettingsAsset coreAiSettings =
+                AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
+            if (CoreAIBuildMenu.NeedsLlmUnity(coreAiSettings))
+            {
+                CoreAIBuildMenu.TryCreateLlmUnityObjects(scopeGo);
+            }
 
             bool saved = EditorSceneManager.SaveScene(scene, ScenePath);
             if (!saved)
@@ -126,7 +133,7 @@ namespace CoreAI.Editor
             esGo.AddComponent<StandaloneInputModule>();
         }
 
-        private static void CreateCoreAILifetimeScope()
+        private static GameObject CreateCoreAILifetimeScope()
         {
             GameObject scopeGo = new("CoreAILifetimeScope");
             CoreAILifetimeScope scope = scopeGo.AddComponent<CoreAILifetimeScope>();
@@ -151,6 +158,7 @@ namespace CoreAI.Editor
             so.ApplyModifiedPropertiesWithoutUndo();
 
             EditorUtility.SetDirty(scope);
+            return scopeGo;
         }
 
         private static void CreateChatCanvas(CoreAiChatConfig config, PanelSettings panelSettings)

@@ -53,6 +53,8 @@ This creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with:
 - `CoreAiChatPanel`
 - `CoreAiChatConfig_Demo.asset`
 - required default CoreAI assets
+- `LLM` + `LLMAgent` too, if `CoreAISettings` selects a local LLMUnity backend
+  (`ExecutionMode.LocalModel`, or `Auto` with `LlmUnityFirst` priority)
 
 Press **Play** and type in the chat panel.
 

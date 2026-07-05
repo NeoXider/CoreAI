@@ -4,6 +4,21 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.3 - Chat Demo scene creates the LLMUnity host too (2026-07-05)
+
+- **`CoreAI/Setup/Create Chat Demo Scene` now creates `LLM` + `LLMAgent`** in the generated scene
+  when `CoreAISettingsAsset` needs a local LLMUnity host (`ExecutionMode.LocalModel`, or `Auto` with
+  `AutoPriority.LlmUnityFirst`) - previously only the separate `Create Bare Scene (advanced)` menu
+  did this, so the primary, documented "first scene" workflow (`QUICK_START.md`) silently skipped it
+  and relied entirely on the runtime lazy-create fallback (`ConfigurableLlmAgentProvider`) to fill
+  the gap at play time, with no `LLM`/`LLMAgent` visible in the Editor to configure beforehand.
+- **`CoreAIBuildMenu.NeedsLlmUnity(CoreAISettingsAsset)` and `TryCreateLlmUnityObjects` are now
+  `internal`** (shared, not duplicated) so any scene creator in the `CoreAI.Editor` namespace can
+  reuse the same "does this scene need a local LLMUnity host" decision and creation logic.
+- Verified live: with `CoreAISettingsAsset.BackendType = LlmUnity`, `TryCreateLlmUnityObjects` is
+  idempotent (a second call detects the existing `LLM` and skips instead of creating a duplicate)
+  and `NeedsLlmUnity` returns `false` for a `null` settings reference.
+
 ### 5.0.2 - fix no-Lua consumer compile (2026-07-05)
 
 - **`LuaModRuntimeTickDriver` is now guarded by `COREAI_HAS_MOONSHARP && !COREAI_NO_LUA`** - it was

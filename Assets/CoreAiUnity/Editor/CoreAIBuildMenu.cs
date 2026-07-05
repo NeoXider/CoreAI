@@ -283,15 +283,7 @@ namespace CoreAI.Editor
             SetPropertyIfExists(so, "llmRoutingManifest", routing);
             so.ApplyModifiedPropertiesWithoutUndo();
 
-            bool needsLlmUnity = false;
-            if (coreAiSettings != null)
-            {
-                LlmExecutionMode mode = coreAiSettings.ExecutionMode;
-                needsLlmUnity = mode == LlmExecutionMode.LocalModel
-                                || (mode == LlmExecutionMode.Auto
-                                    && coreAiSettings.AutoPriority == LlmAutoPriority.LlmUnityFirst);
-            }
-
+            bool needsLlmUnity = NeedsLlmUnity(coreAiSettings);
             if (needsLlmUnity)
             {
                 TryCreateLlmUnityObjects(scopeGo);
@@ -307,6 +299,24 @@ namespace CoreAI.Editor
                 (needsLlmUnity ? " + LLM + LLMAgent." : "."));
         }
 
+        /// <summary>
+        /// True when <paramref name="settings"/> selects an execution mode that needs a local
+        /// LLMUnity host in the scene (<see cref="LlmExecutionMode.LocalModel"/>, or
+        /// <see cref="LlmExecutionMode.Auto"/> with <see cref="LlmAutoPriority.LlmUnityFirst"/>).
+        /// Shared by every scene creator so "does this scene need LLM + LLMAgent" has one answer.
+        /// </summary>
+        internal static bool NeedsLlmUnity(CoreAISettingsAsset settings)
+        {
+            if (settings == null)
+            {
+                return false;
+            }
+
+            LlmExecutionMode mode = settings.ExecutionMode;
+            return mode == LlmExecutionMode.LocalModel
+                   || (mode == LlmExecutionMode.Auto && settings.AutoPriority == LlmAutoPriority.LlmUnityFirst);
+        }
+
         private static void SetPropertyIfExists(SerializedObject so, string propertyName, UnityEngine.Object value)
         {
             SerializedProperty prop = so.FindProperty(propertyName);
@@ -316,8 +326,13 @@ namespace CoreAI.Editor
             }
         }
 
-        /// <summary>Creates LLMAgent scene objects needed for LLMUnity integration when they are missing.</summary>
-        private static void TryCreateLlmUnityObjects(GameObject parentScope)
+        /// <summary>
+        /// Creates LLMAgent scene objects needed for LLMUnity integration when they are missing.
+        /// Internal (not private) so other scene creators in this namespace (e.g. the Chat Demo
+        /// scene) can reuse the same "does this scene need LLMUnity objects" + creation logic
+        /// instead of duplicating it.
+        /// </summary>
+        internal static void TryCreateLlmUnityObjects(GameObject parentScope)
         {
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             try
