@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### 5.0.9 - version lockstep with coreaiunity 5.0.9 (2026-07-06)
+
+- No changes; released to keep both packages on identical versions. (The LLMUnity host-configuration
+  start-guard fix lives entirely in the Unity layer.)
+
 ### 5.0.8 - version lockstep with coreaiunity 5.0.8 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions. (The LLMUnity-as-OpenAI-server

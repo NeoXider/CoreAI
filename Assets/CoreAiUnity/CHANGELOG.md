@@ -4,6 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.9 - Don't trip LLMUnity's start guard when configuring an already-started LLM (2026-07-06)
+
+- **Fix: `LlmUnityHostConfigurator.ApplyFromSettings` no longer sets start-sensitive LLMUnity fields
+  (`remote`/`port`/`numGPULayers`/`flashAttention`/`model`) after the server has already started.** A
+  scene-placed `LLM` auto-starts in `Awake` before CoreAI's autostart discovers it, and setting those
+  guarded properties post-start made LLMUnity log `"This method can't be called when the LLM has started"`,
+  which failed any PlayMode test that merely loads such a scene (`FullAccessDemo_LoadsWithFullLuaAndTargetCube`,
+  `CoreAiChatDemo_RealModel_StreamsStopAndRecovers`). The configurator now skips that block with a clear
+  warning when `llm.started`, and still applies the full configuration on the normal path where CoreAI
+  creates the LLM inactive (so `started == false`). The unguarded `agent.llm` / `overflowStrategy` setup
+  still runs in both cases.
+- **Android build guidance:** bundling a multi-GB GGUF in `StreamingAssets` overflows Gradle's
+  `compressReleaseAssets` (`Required array size too large`, a >2 GB Java `byte[]`). Use LLMUnity's
+  **Download on Build** (`LLMManager.SetDownloadOnStart(true)`) so the model downloads to
+  `persistentDataPath` on first launch instead of being packed into the APK.
+
 ### 5.0.8 - LLMUnity runs as a local OpenAI server with native tool-calling (2026-07-05)
 
 - **The LLMUnity backend now runs the local GGUF model as its own built-in OpenAI-compatible server and
