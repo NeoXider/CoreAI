@@ -300,6 +300,35 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
+        /// Explicitly creates the <c>LLM</c> + <c>LLMAgent</c> objects in the current scene, regardless
+        /// of what <see cref="CoreAISettingsAsset.ExecutionMode"/>/<see cref="CoreAISettingsAsset.AutoPriority"/>
+        /// currently say. Use this when you want a local LLMUnity host without recreating the whole scene
+        /// (e.g. after switching an existing scene's backend to LLMUnity by hand).
+        /// </summary>
+        [MenuItem("CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)", priority = 9)]
+        public static void CreateLlmUnityObjectsMenuItem()
+        {
+            if (TryFindMonoBehaviourByTypeName("LLM") != null)
+            {
+                EditorUtility.DisplayDialog(
+                    "CoreAI - LLMUnity Setup",
+                    "LLM already exists in this scene.",
+                    "OK");
+                return;
+            }
+
+            CoreAILifetimeScope existingScope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
+            TryCreateLlmUnityObjects(existingScope != null ? existingScope.gameObject : null);
+
+            MonoBehaviour created = TryFindMonoBehaviourByTypeName("LLM");
+            if (created != null)
+            {
+                Selection.activeGameObject = created.gameObject;
+                EditorGUIUtility.PingObject(created.gameObject);
+            }
+        }
+
+        /// <summary>
         /// True when <paramref name="settings"/> selects an execution mode that needs a local
         /// LLMUnity host in the scene (<see cref="LlmExecutionMode.LocalModel"/>, or
         /// <see cref="LlmExecutionMode.Auto"/> with <see cref="LlmAutoPriority.LlmUnityFirst"/>).

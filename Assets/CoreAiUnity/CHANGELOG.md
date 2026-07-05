@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.4 - standalone menu to create the LLMUnity host (2026-07-05)
+
+- **New `CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)` menu item** creates the `LLM` +
+  `LLMAgent` objects in the current scene on demand, regardless of `CoreAISettingsAsset.ExecutionMode`
+  - useful when a scene already exists and you switch its backend to LLMUnity by hand instead of
+  recreating the scene via `Create Chat Demo Scene` / `Create Bare Scene (advanced)`. Reuses the same
+  `TryCreateLlmUnityObjects` (idempotent: warns instead of duplicating if `LLM` already exists) and
+  selects/pings the created object afterward.
+
 ### 5.0.3 - Chat Demo scene creates the LLMUnity host too (2026-07-05)
 
 - **`CoreAI/Setup/Create Chat Demo Scene` now creates `LLM` + `LLMAgent`** in the generated scene

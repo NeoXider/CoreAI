@@ -70,6 +70,17 @@ This creates the lifetime scope and required assets such as `CoreAISettings`,
 `GameLogSettings`, `AgentPromptsManifest`, `CoreAiPrefabRegistry`,
 `LlmRoutingManifest`, and `AiPermissions`.
 
+### Add LLMUnity To An Existing Scene
+
+If a scene already exists and you switch its backend to LLMUnity by hand, use:
+
+```text
+CoreAI -> Setup -> Create LLMUnity Objects (LLM + LLMAgent)
+```
+
+This adds `LLM` + `LLMAgent` to the current scene without recreating it. It is a
+no-op (with a warning) if `LLM` already exists.
+
 ## 4. Connect An LLM Backend
 
 Open `Resources/CoreAISettings` or create one from:
