@@ -4,6 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.10 - Self-spawning model-download indicator for mobile builds (2026-07-06)
+
+- **New `CoreAiModelDownloadOverlay`: a drop-in, self-spawning on-screen indicator for LLMUnity's
+  first-run model download.** With "Download on Build" the GGUF is fetched on first launch (in
+  `LLM.Awake` → `LLMManager.Setup`), but LLMUnity ships no progress UI - it only exposes the data
+  (`LLMManager.downloadProgress`, `LLM.modelSetupComplete/Failed`) and expects the app to draw its own
+  bar (the MobileDemo sample wires it by hand). CoreAI's download APKs therefore looked frozen. The new
+  overlay is built entirely in code (no prefab to place, no scene wiring): it auto-spawns on startup
+  (`[RuntimeInitializeOnLoadMethod]`, player builds only, gated on `UseLlmUnity` +
+  `LlmUnityAutostartLocalServer`), builds its own top-most screen-space canvas, polls the download state
+  from the main thread, **reveals only while a download is actually running, shows status + a progress
+  bar + percentage, and destroys itself when the model is ready** (or shows an error and clears). It only
+  observes the download; the fetch itself is still driven by LLMUnity's `LLM.Awake`.
+- Editor preview: **CoreAI ▸ Debug ▸ Preview Model Download Overlay** (run in Play Mode) animates a fake
+  download so you can see the indicator without a real multi-GB fetch.
+
 ### 5.0.9 - Don't trip LLMUnity's start guard when configuring an already-started LLM (2026-07-06)
 
 - **Fix: `LlmUnityHostConfigurator.ApplyFromSettings` no longer sets start-sensitive LLMUnity fields

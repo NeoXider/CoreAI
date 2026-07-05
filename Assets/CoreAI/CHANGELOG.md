@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### 5.0.10 - version lockstep with coreaiunity 5.0.10 (2026-07-06)
+
+- No changes; released to keep both packages on identical versions. (The self-spawning model-download
+  indicator lives entirely in the Unity layer.)
+
 ### 5.0.9 - version lockstep with coreaiunity 5.0.9 (2026-07-06)
 
 - No changes; released to keep both packages on identical versions. (The LLMUnity host-configuration
