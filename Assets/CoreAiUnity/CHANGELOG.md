@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.7 - warn when a hand-set LLMUnity field conflicts with CoreAI (2026-07-05)
+
+- **`LlmUnityHostConfigurator.ApplyFromSettings` now logs a clear warning** (once, when it configures the
+  agent) if the resolved `LLMAgent` has `remote == true` or `overflowStrategy != None` before CoreAI
+  overrides them. CoreAI owns both fields on the LLMUnity path (local in-process model; context managed by
+  CoreAI's own compaction), so a hand-set value was silently ignored - the warning makes it obvious *why*
+  and points `remote` users at CoreAI's `ClientOwnedApi` / `ServerManagedApi` (HTTP) instead, which is
+  unrelated to LLMUnity's own `remote` server feature.
+
 ### 5.0.6 - force LLMUnity Overflow Strategy to None (CoreAI owns context) (2026-07-05)
 
 - **`LLMAgent.overflowStrategy` is now explicitly set to `ContextOverflowStrategy.None`** wherever CoreAI

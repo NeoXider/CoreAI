@@ -22,6 +22,27 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
+            // These fields on the LLMUnity agent are owned by CoreAI at runtime - warn (once, on apply)
+            // before overriding a conflicting hand-set value so it is obvious the Inspector value was
+            // intentionally ignored rather than silently dropped.
+            if (agent.remote)
+            {
+                logger.LogWarning(
+                    GameLogFeature.Llm,
+                    $"LLMUnity: LLMAgent '{agent.name}' had remote=true, but CoreAI drives a local in-process " +
+                    "model on the LLMUnity path and forces remote=false. For a remote/server backend use " +
+                    "CoreAI's ClientOwnedApi / ServerManagedApi (HTTP) instead - it is unrelated to LLMUnity's remote.");
+            }
+
+            if (agent.overflowStrategy != UndreamAI.LlamaLib.ContextOverflowStrategy.None)
+            {
+                logger.LogWarning(
+                    GameLogFeature.Llm,
+                    $"LLMUnity: LLMAgent '{agent.name}' had overflowStrategy={agent.overflowStrategy}, but CoreAI " +
+                    "owns conversation-context management and forces it to None. LLMUnity's overflow handling never " +
+                    "runs here because CoreAI builds the whole prompt and calls Chat(addToHistory: false).");
+            }
+
             agent.remote = false;
             agent.llm = llm;
 
