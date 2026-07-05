@@ -59,7 +59,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                     (Action<string, string>)SetStance)
             };
 
-            // NOTE: MeaiLlmUnityClient.SetTools REPLACES the client's tool list. Composing with
+            // NOTE: ILlmClient.SetTools REPLACES the client's tool list. Composing with
             // already-registered tools would be better, but for the Symbiosis prototype (a
             // dedicated scene with its own client) replacement is acceptable.
             _llmClient.SetTools(tools);

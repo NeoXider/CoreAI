@@ -43,22 +43,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void CreateLlmUnity_RequiresAgent()
-        {
-            Exception ex = Assert.Catch<Exception>(() =>
-            {
-                MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance,
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
-            });
-
-#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            Assert.That(ex, Is.TypeOf<NotSupportedException>());
-#else
-            Assert.That(ex, Is.TypeOf<ArgumentNullException>());
-#endif
-        }
-
-        [Test]
         public void BuildAIFunctions_ShouldCreateMemoryTool()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();

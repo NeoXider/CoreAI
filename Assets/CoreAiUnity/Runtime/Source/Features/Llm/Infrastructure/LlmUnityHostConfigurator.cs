@@ -22,17 +22,14 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            // These fields on the LLMUnity agent are owned by CoreAI at runtime - warn (once, on apply)
-            // before overriding a conflicting hand-set value so it is obvious the Inspector value was
-            // intentionally ignored rather than silently dropped.
-            if (agent.remote)
-            {
-                logger.LogWarning(
-                    GameLogFeature.Llm,
-                    $"LLMUnity: LLMAgent '{agent.name}' had remote=true, but CoreAI drives a local in-process " +
-                    "model on the LLMUnity path and forces remote=false. For a remote/server backend use " +
-                    "CoreAI's ClientOwnedApi / ServerManagedApi (HTTP) instead - it is unrelated to LLMUnity's remote.");
-            }
+            // CoreAI drives LLMUnity as an OpenAI-compatible HTTP server rather than calling
+            // LLMAgent.Chat() in-process. llm.remote/llm.port MUST be set before anything can start
+            // the native service (CreateServiceAsync runs SetupServer(StartServer) then Start()) -
+            // flipping remote=true on an already-started LLM does not bind the socket. Setting them
+            // first here, ahead of any Start()/warmup, guarantees LLMUnity's llama.cpp server binds
+            // to CoreAI's configured port and exposes POST /v1/chat/completions with native tool_calls.
+            llm.remote = true;
+            llm.port = settings.LlmUnityServerPort;
 
             if (agent.overflowStrategy != UndreamAI.LlamaLib.ContextOverflowStrategy.None)
             {
@@ -43,7 +40,6 @@ namespace CoreAI.Infrastructure.Llm
                     "runs here because CoreAI builds the whole prompt and calls Chat(addToHistory: false).");
             }
 
-            agent.remote = false;
             agent.llm = llm;
 
             // CoreAI owns conversation-context management (LlmAssistedConversationContextManager builds

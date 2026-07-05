@@ -66,93 +66,6 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// : MeaiLlmClient.CreateLlmUnity      .
-        /// </summary>
-        [UnityTest]
-        [Timeout(600000)]
-        public IEnumerator MeaiLlmClient_CreateLlmUnity_ShouldCreateAndConnect()
-        {
-#if COREAI_NO_LLM
-            Assert.Ignore("COREAI_NO_LLM defined");
-#else
-            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
-            if (settings == null)
-            {
-                Assert.Ignore("CoreAISettingsAsset not found in Resources");
-            }
-
-            //   settings   LLMUnity/Auto   .
-            if (settings.BackendType != LlmBackendType.LlmUnity && settings.BackendType != LlmBackendType.Auto)
-            {
-                Assert.Ignore("Backend in settings is not LLMUnity/Auto: " + settings.BackendType);
-            }
-
-            Debug.Log("[MeaiLlmUnity.LLMUnity] Creating LLMUnity client...");
-
-            //    CoreAISettingsAsset
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null, // from settings
-                    0.2f,
-                    300,
-                    out PlayModeProductionLikeLlmHandle handle,
-                    out string ignore))
-            {
-                Assert.Ignore("Failed to create LLM client from settings: " + ignore);
-            }
-
-            Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
-            if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
-            {
-                handle.Dispose();
-                Assert.Ignore("Factory resolved non-LLMUnity backend: " + handle.ResolvedBackend);
-            }
-
-            //   LLMUnity    
-            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-            {
-                Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-            }
-
-            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            InMemoryStore store = new();
-
-#if COREAI_HAS_LLMUNITY
-            MeaiLlmClient client =
-                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger,
-                    settings,
-                    store);
-#else
-            MeaiLlmClient client =
-                MeaiLlmClient.CreateLlmUnity(null, logger, settings,
-                    store);
-#endif
-            Assert.IsNotNull(client, "MeaiLlmClient.CreateLlmUnity should not return null");
-
-            Debug.Log("[MeaiLlmClient.LLMUnity] Client created, sending request...");
-            LogAssert.ignoreFailingMessages = true;
-
-            LlmCompletionRequest request = new()
-            {
-                AgentRoleId = "TestAgent",
-                SystemPrompt = "You are a test agent. Respond with 'OK'.",
-                UserPayload = "Say OK"
-            };
-
-            Task<LlmCompletionResult> task = client.CompleteAsync(request);
-            yield return PlayModeTestAwait.WaitTask(task, 240f, "MeaiLlmClient LLMUnity request");
-
-            LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
-            Assert.IsTrue(result.Ok, $"LLMUnity request failed: {result?.Error}");
-            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "LLMUnity response content should not be empty");
-            Debug.Log(
-                $"[MeaiLlmClient.LLMUnity] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
-
-            handle.Dispose();
-#endif
-        }
-
-        /// <summary>
         /// : Factory methods should throw on null arguments.
         /// </summary>
         [Test]
@@ -163,14 +76,6 @@ namespace CoreAI.Tests.PlayMode
             Assert.Throws<ArgumentNullException>(() =>
                 MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null,
                     ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger));
-
-            Exception ex = Assert.Catch<Exception>(() =>
-                MeaiLlmClient.CreateLlmUnity(null, logger, ScriptableObject.CreateInstance<CoreAISettingsAsset>()));
-#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            Assert.That(ex, Is.TypeOf<NotSupportedException>());
-#else
-            Assert.That(ex, Is.TypeOf<ArgumentNullException>());
-#endif
         }
     }
 #endif

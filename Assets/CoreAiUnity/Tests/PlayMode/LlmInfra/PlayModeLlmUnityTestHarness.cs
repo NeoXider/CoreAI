@@ -33,6 +33,12 @@ namespace CoreAI.Tests.PlayMode
             agent.remote = false;
             agent.llm = llm;
 
+            // The chat pipeline now talks to LLMUnity's built-in OpenAI-compatible server over HTTP
+            // (native tool calling) instead of the in-process LLMAgent API, so the server must bind
+            // BEFORE Awake/Start runs below - setting remote/port after start does not rebind the socket.
+            llm.remote = true;
+            llm.port = CoreAISettingsAsset.Instance != null ? CoreAISettingsAsset.Instance.LlmUnityServerPort : 13333;
+
             IGameLogger log = GameLoggerUnscopedFallback.Instance;
 
             //     

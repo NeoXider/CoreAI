@@ -41,10 +41,12 @@ namespace CoreAI.Tests.PlayMode
                 return null;
             }
 
-            return new MeaiLlmClient(
-                new LlmUnityMeaiChatClient(_agent, GameLoggerUnscopedFallback.Instance),
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
+            string model = _llm != null && !string.IsNullOrWhiteSpace(_llm.model) ? _llm.model : "local";
+            return new OpenAiChatLlmClient(
+                new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, model, ""),
+                settings,
                 GameLoggerUnscopedFallback.Instance,
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 store);
         }
 

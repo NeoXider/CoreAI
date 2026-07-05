@@ -163,11 +163,11 @@ namespace CoreAI.Tests.PlayMode
 
                 //  LLMAgent  LLM  keepModelLoaded (  LLMUnity)
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-                MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
-                LLMAgent agent = llmUnityClient?.UnityAgent;
+                LLMAgent agent = handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity
+                    ? UnityEngine.Object.FindFirstObjectByType<LLMAgent>()
+                    : null;
                 LLM llm = agent?.llm ?? agent?.GetComponent<LLM>();
 #else
-                object llmUnityClient = null;
                 object llm = null;
 #endif
                 if (llm != null)

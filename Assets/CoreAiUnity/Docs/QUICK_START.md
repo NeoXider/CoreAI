@@ -99,6 +99,11 @@ Use this for local GGUF models inside Unity.
 2. Select a GGUF model on the LLMUnity object.
 3. Press Play. `CoreAILifetimeScope` discovers `LLMAgent` automatically.
 
+Since v5.0.8 the local model runs as LLMUnity's **built-in OpenAI-compatible server**
+(on `LlmUnityServerPort`, default 13333) and CoreAI drives it through the native HTTP
+pipeline — so you get real structured tool-calls and streaming, exactly like LM Studio,
+with no external server to install.
+
 LLMUnity is a package dependency. Plugin reference:
 [LLMUnity on GitHub](https://github.com/undreamai/LLMUnity).
 

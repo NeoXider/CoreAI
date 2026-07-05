@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreai",
-  "version": "5.0.7",
+  "version": "5.0.8",
   "displayName": "CoreAI",
   "unity": "6000.0",
   "description": "Portable C# core for CoreAI \u2014 LLM agents that call your game code. Orchestration, function-calling tools, agent memory, AgentBuilder, SkillSet, and production resilience (retries, timeouts, rate limits), with no UnityEngine dependency. LLM and Lua are optional modules (COREAI_NO_LLM / COREAI_NO_LUA), so the core compiles without them \u2014 install only what your game uses. Unity integration ships in com.neoxider.coreaiunity.",

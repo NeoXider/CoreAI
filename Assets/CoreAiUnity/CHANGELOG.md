@@ -4,6 +4,26 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.8 - LLMUnity runs as a local OpenAI server with native tool-calling (2026-07-05)
+
+- **The LLMUnity backend now runs the local GGUF model as its own built-in OpenAI-compatible server and
+  CoreAI drives it through the native HTTP pipeline** (same path as LM Studio / OpenAI), giving real
+  structured `tool_calls` instead of the old prompt-injected, regex-parsed text tool calls. Verified live:
+  LLMUnity's built-in server (`llm.remote = true` + port, set before the service initializes) exposes
+  `POST /v1/chat/completions` with native `tools`/`tool_calls` and SSE streaming - the same Qwen3.5-4B that
+  failed the text-parse memory/tool tests emits clean `finish_reason:"tool_calls"` through this path.
+- **New `CoreAISettingsAsset.LlmUnityServerPort`** (default 13333) + adapter `LlmUnityServerHttpSettings`
+  (`IOpenAiHttpSettings` pointed at `http://localhost:{port}/v1`, model name supplied explicitly since the
+  server implements only `/v1/chat/completions`). `LlmUnityHostConfigurator.ApplyFromSettings` now sets
+  `llm.remote = true` + port **before** the native service starts (ordering is required - flipping remote on
+  an already-started LLM does not bind the socket). `LlmUnityAutostartEntryPoint` additionally polls the
+  OpenAI endpoint until it accepts requests before declaring ready.
+- **Removed the legacy text-parse LLMUnity pipeline**: `LlmUnityMeaiChatClient`, `MeaiLlmUnityClient`, and
+  `MeaiLlmClient.CreateLlmUnity` are deleted; `LlmClientRegistry` / `LlmPipelineInstaller` build the native
+  `OpenAiChatLlmClient` over `LlmUnityServerHttpSettings` for the LLMUnity path. `MeaiLlmClient.TryExtractToolCallsFromText`
+  (a cross-backend text fallback) is unchanged. WebGL is unaffected (the whole LLMUnity path stays behind
+  `!UNITY_WEBGL`); Android ships the server-capable `libllamalib_android.so` (`LLM_Start_Server` exported).
+
 ### 5.0.7 - warn when a hand-set LLMUnity field conflicts with CoreAI (2026-07-05)
 
 - **`LlmUnityHostConfigurator.ApplyFromSettings` now logs a clear warning** (once, when it configures the

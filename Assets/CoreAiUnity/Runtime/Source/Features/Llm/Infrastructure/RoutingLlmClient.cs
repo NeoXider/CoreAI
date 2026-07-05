@@ -284,12 +284,6 @@ namespace CoreAI.Infrastructure.Llm
                 return "ServerManagedApi";
             }
 #endif
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            if (inner is MeaiLlmUnityClient)
-            {
-                return "LlmUnity";
-            }
-#endif
             if (inner is StubLlmClient)
             {
                 return "Stub";

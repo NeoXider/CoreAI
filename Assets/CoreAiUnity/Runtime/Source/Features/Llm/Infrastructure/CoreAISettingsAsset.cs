@@ -220,6 +220,13 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("GPU offload depth (0 = CPU only, 99 = all layers, LM Studio style).")] [SerializeField] [Min(0)]
         private int llmUnityNumGPULayers = 99;
 
+        [Tooltip(
+            "TCP port for the LLMUnity built-in OpenAI-compatible server. CoreAI runs the local model as this " +
+            "server and drives it through the native HTTP tool-calling pipeline (same as LM Studio). Default 13333.")]
+        [SerializeField]
+        [Range(1024, 65535)]
+        private int llmUnityServerPort = 13333;
+
         [Header("Shared agent defaults")]
         [Tooltip(
             "Universal system prefix prepended before every agent-specific system prompt.")]
@@ -679,6 +686,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Exported GPU offload depth.</summary>
         public int NumGPULayers => llmUnityNumGPULayers < 0 ? 0 : llmUnityNumGPULayers;
+
+        /// <summary>
+        /// Port for the LLMUnity built-in OpenAI server that CoreAI drives the local model through
+        /// (native tool-calling path). Clamped to a valid ephemeral-safe range; default 13333.
+        /// </summary>
+        public int LlmUnityServerPort => llmUnityServerPort is < 1024 or > 65535 ? 13333 : llmUnityServerPort;
 
         /// <summary>Universal system preamble.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";

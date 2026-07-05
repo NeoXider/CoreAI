@@ -43,17 +43,14 @@ namespace CoreAI.Tests.PlayMode
 
 #if COREAI_HAS_LLMUNITY
             // LLMUnity      MemoryStore
-            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity && handle._coreAiSettings != null)
             {
-                MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
-                if (llmUnityClient != null)
-                {
-                    return new MeaiLlmClient(
-                        new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
-                        GameLoggerUnscopedFallback.Instance,
-                        ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                        memoryStore);
-                }
+                CoreAISettingsAsset settings = handle._coreAiSettings;
+                return new OpenAiChatLlmClient(
+                    new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, settings.ModelName, ""),
+                    settings,
+                    GameLoggerUnscopedFallback.Instance,
+                    memoryStore);
             }
 #endif
 
@@ -576,7 +573,15 @@ namespace CoreAI.Tests.PlayMode
                 llm.dontDestroyOnLoad = true;
             }
 
-            MeaiLlmUnityClient client = new(agent, settings, GameLoggerUnscopedFallback.Instance, new InMemoryStore());
+            int port = settings != null ? settings.LlmUnityServerPort : 13333;
+            string model = settings != null && !string.IsNullOrWhiteSpace(settings.ModelName)
+                ? settings.ModelName
+                : "local";
+            ILlmClient client = new OpenAiChatLlmClient(
+                new LlmUnityServerHttpSettings(settings, port, model, ""),
+                settings,
+                GameLoggerUnscopedFallback.Instance,
+                new InMemoryStore());
             handle = new PlayModeProductionLikeLlmHandle(
                 client,
                 PlayModeProductionLikeLlmBackend.LlmUnity,

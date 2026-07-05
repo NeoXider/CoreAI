@@ -18,25 +18,20 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            MeaiLlmUnityClient llmClient = handle.Client as MeaiLlmUnityClient;
-            if (llmClient == null)
+            LLMAgent agent = UnityEngine.Object.FindFirstObjectByType<LLMAgent>();
+            if (agent == null)
             {
-                Debug.LogWarning("[LLMUnity Test] Could not get LLM client reference");
+                Debug.LogWarning("[LLMUnity Test] Could not get LLMAgent reference");
                 yield break;
             }
 
-            //    
-            LLMAgent agent = llmClient.UnityAgent;
-            if (agent != null)
+            if (agent.temperature != 0.2f)
             {
-                if (agent.temperature != 0.2f)
-                {
-                    agent.temperature = 0.2f;
-                    Debug.Log("[LLMUnity Test] Set LLMAgent temperature to 0.2 for reliable tool calling.");
-                }
+                agent.temperature = 0.2f;
+                Debug.Log("[LLMUnity Test] Set LLMAgent temperature to 0.2 for reliable tool calling.");
             }
 
-            LLM llm = llmClient.LLM;
+            LLM llm = agent.llm ?? agent.GetComponent<LLM>();
             if (llm == null)
             {
                 Debug.LogWarning("[LLMUnity Test] LLM component is null");

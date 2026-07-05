@@ -126,42 +126,6 @@ namespace CoreAI.Infrastructure.Llm
             return CreateHttp(adapter, settings, logger, memoryStore);
         }
 
-        /// <summary>
-        /// Creates a MEAI client that delegates completions to an LLMUnity agent.
-        /// </summary>
-        public static MeaiLlmClient CreateLlmUnity(
-#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            object unityAgent,
-#else
-            LLMAgent unityAgent,
-#endif
-            IGameLogger logger,
-            ICoreAISettings settings,
-            IAgentMemoryStore? memoryStore = null)
-        {
-#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            throw new NotSupportedException("LLMUnity backend is not supported on WebGL.");
-#else
-            if (unityAgent == null)
-            {
-                throw new ArgumentNullException(nameof(unityAgent));
-            }
-
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
-
-            if (settings == null)
-            {
-                throw new ArgumentNullException(nameof(settings));
-            }
-
-            LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
-            return new MeaiLlmClient(innerClient, logger, settings, memoryStore, false);
-#endif
-        }
-
         /// <inheritdoc />
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {

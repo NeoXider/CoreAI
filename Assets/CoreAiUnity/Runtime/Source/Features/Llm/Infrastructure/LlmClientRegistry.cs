@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -264,7 +265,22 @@ namespace CoreAI.Infrastructure.Llm
                         return new StubLlmClient();
                     }
 
-                    return new MeaiLlmUnityClient(agent, _settings, _logger, _memoryStore);
+                    if (_settings is not CoreAISettingsAsset llmUnityAssetSettings)
+                    {
+                        return new StubLlmClient();
+                    }
+
+                    string modelName = llm != null && !string.IsNullOrWhiteSpace(llm.model)
+                        ? llm.model
+                        : Path.GetFileName(llmUnityAssetSettings.GgufModelPath);
+                    if (string.IsNullOrWhiteSpace(modelName))
+                    {
+                        modelName = "local";
+                    }
+
+                    var adapter = new LlmUnityServerHttpSettings(
+                        llmUnityAssetSettings, llmUnityAssetSettings.LlmUnityServerPort, modelName, "");
+                    return new OpenAiChatLlmClient(adapter, _settings, _logger, _memoryStore);
 #endif
                 default:
                     return new StubLlmClient();

@@ -1,3 +1,4 @@
+using System.IO;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -331,7 +332,21 @@ namespace CoreAI.Composition
                 return null;
             }
 
-            return new MeaiLlmUnityClient(agent, settings, logger, memoryStore);
+            if (settings == null)
+            {
+                return null;
+            }
+
+            string modelName = llm != null && !string.IsNullOrWhiteSpace(llm.model)
+                ? llm.model
+                : Path.GetFileName(settings.GgufModelPath);
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                modelName = "local";
+            }
+
+            var adapter = new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, modelName, "");
+            return new OpenAiChatLlmClient(adapter, settings, logger, memoryStore);
 #endif
         }
 

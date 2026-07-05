@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### 5.0.8 - version lockstep with coreaiunity 5.0.8 (2026-07-05)
+
+- No changes; released to keep both packages on identical versions. (The LLMUnity-as-OpenAI-server
+  native tool-calling work lives entirely in the Unity layer.)
+
 ### 5.0.7 - version lockstep with coreaiunity 5.0.7 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.

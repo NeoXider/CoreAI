@@ -6,7 +6,10 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>OpenAI-compatible HTTP (<see cref="OpenAiChatLlmClient"/>).</summary>
         OpenAiHttp = 0,
 
-        /// <summary>Local LLMUnity backend (<see cref="MeaiLlmUnityClient"/>).</summary>
+        /// <summary>
+        /// Local LLMUnity backend: the GGUF model is served in-process as an OpenAI-compatible server
+        /// and driven through the native HTTP pipeline (<see cref="OpenAiChatLlmClient"/>) for native tool-calling.
+        /// </summary>
         LlmUnity = 1,
 
         /// <summary>Deterministic stub backend (<see cref="StubLlmClient"/>).</summary>
