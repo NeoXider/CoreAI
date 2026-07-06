@@ -26,10 +26,12 @@ namespace LuaVmComparison
         {
             try
             {
-                string report = LuaVmBench.RunAll();
+                // Correctness-only smoke: safe on single-threaded WebGL/WASM (no threads/timers), and forces
+                // Lua-CSharp's Lua.dll to run under IL2CPP/AOT — the point of the WebGL viability check.
+                string report = LuaVmBench.RunCorrectnessSmoke();
                 Debug.Log("[LuaVmComparison]\n" + report);
-                _summary = "LuaVmComparison ran OK — see console/player log for the full table.";
-                _ok = true;
+                _summary = "LuaVmComparison ran OK — " + report;
+                _ok = !report.Contains("FAIL");
             }
             catch (System.Exception e)
             {

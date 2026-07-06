@@ -75,6 +75,39 @@ namespace LuaVmComparison
             }
         }
 
+        /// <summary>
+        /// Single-threaded-safe smoke: runs ONLY the correctness corpus (no perf loops, no thread/timer-based
+        /// runaway halt), so it is safe on WebGL/WASM where threads do not exist. Its real purpose is to force
+        /// Lua-CSharp's <c>Lua.dll</c> to be exercised in an IL2CPP/AOT player, proving the VM survives AOT.
+        /// </summary>
+        public static string RunCorrectnessSmoke()
+        {
+            var runners = new IVmRunner[] { new MoonSharpRunner(), new LuaCSharpRunner() };
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("Lua VM WebGL/AOT smoke — correctness only (no threads/perf/runaway)");
+                bool allOk = true;
+                foreach (var c in Correctness)
+                {
+                    foreach (var r in runners)
+                    {
+                        string got = r.Eval(c.Code);
+                        bool ok = got == c.Expected;
+                        allOk &= ok;
+                        sb.AppendLine($"{(ok ? "OK  " : "FAIL")} {r.Name} {c.Name}: '{got}' (expected '{c.Expected}')");
+                    }
+                }
+
+                sb.AppendLine(allOk ? "RESULT: all correctness cases pass on both VMs under AOT." : "RESULT: a case FAILED — see above.");
+                return sb.ToString();
+            }
+            finally
+            {
+                foreach (var r in runners) r.Dispose();
+            }
+        }
+
         private static void AppendSandbox(StringBuilder sb, IVmRunner[] runners)
         {
             sb.AppendLine("## Sandbox — dangerous globals (want: absent on both)");
