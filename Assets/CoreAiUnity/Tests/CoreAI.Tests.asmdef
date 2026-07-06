@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Benchmarking",
     "CoreAI.Core",
+    "CoreAI.Mods",
     "CoreAI.Editor",
     "CoreAI.ExampleGame",
     "CoreAI.Source",

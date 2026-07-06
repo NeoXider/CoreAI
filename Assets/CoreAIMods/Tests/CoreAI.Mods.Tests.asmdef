@@ -1,0 +1,54 @@
+{
+  "name": "CoreAI.Mods.Tests",
+  "rootNamespace": "CoreAI.Tests",
+  "references": [
+    "CoreAI.Mods",
+    "CoreAI.Tests",
+    "CoreAI.Benchmarking",
+    "CoreAI.Core",
+    "CoreAI.Editor",
+    "CoreAI.ExampleGame",
+    "CoreAI.Source",
+    "MoonSharp.Interpreter",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner",
+    "VContainer",
+    "MessagePipe",
+    "MessagePipe.VContainer",
+    "UniTask",
+    "undream.llmunity.Runtime",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Microsoft.Extensions.AI.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "Newtonsoft.Json.dll",
+    "System.Text.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [
+    {
+      "name": "ai.undream.llm",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_LLMUNITY"
+    },
+    {
+      "name": "org.moonsharp.moonsharp",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_MOONSHARP"
+    }
+  ],
+  "noEngineReferences": false
+}

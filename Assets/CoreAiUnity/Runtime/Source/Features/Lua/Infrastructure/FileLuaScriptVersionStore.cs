@@ -20,6 +20,10 @@ namespace CoreAI.Infrastructure.Lua
         private readonly string _filePath;
         private readonly object _ioLock = new();
 
+        private bool _hasLoaded;
+        private bool _lastFileExists;
+        private DateTime _lastWriteTimeUtc;
+
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
             new(StringComparer.Ordinal);
 
@@ -125,8 +129,19 @@ namespace CoreAI.Infrastructure.Lua
         {
             lock (_ioLock)
             {
+                bool exists = File.Exists(_filePath);
+                DateTime writeTimeUtc = exists ? File.GetLastWriteTimeUtc(_filePath) : default;
+                if (_hasLoaded && exists == _lastFileExists && writeTimeUtc == _lastWriteTimeUtc)
+                {
+                    return;
+                }
+
+                _hasLoaded = true;
+                _lastFileExists = exists;
+                _lastWriteTimeUtc = writeTimeUtc;
+
                 _memory.ClearAll();
-                if (!File.Exists(_filePath))
+                if (!exists)
                 {
                     return;
                 }
@@ -220,6 +235,10 @@ namespace CoreAI.Infrastructure.Lua
 
                     string json = JsonUtility.ToJson(root, true);
                     File.WriteAllText(_filePath, json);
+
+                    _hasLoaded = true;
+                    _lastFileExists = true;
+                    _lastWriteTimeUtc = File.GetLastWriteTimeUtc(_filePath);
                 }
                 catch (Exception ex)
                 {

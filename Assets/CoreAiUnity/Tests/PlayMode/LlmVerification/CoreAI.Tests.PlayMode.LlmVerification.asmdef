@@ -6,6 +6,7 @@
     "CoreAI.Tests.PlayMode.LlmInfra",
     "CoreAI.Benchmarking",
     "CoreAI.Core",
+    "CoreAI.Mods",
     "CoreAI.Source",
     "MessagePipe",
     "undream.llmunity.Runtime",

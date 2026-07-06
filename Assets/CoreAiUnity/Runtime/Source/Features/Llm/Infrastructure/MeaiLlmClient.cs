@@ -15,7 +15,6 @@ using CoreAI.Infrastructure.World;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
-using LuaLlmTool = CoreAI.Ai.LuaLlmTool;
 using WorldLlmTool = CoreAI.Infrastructure.Llm.WorldLlmTool;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;

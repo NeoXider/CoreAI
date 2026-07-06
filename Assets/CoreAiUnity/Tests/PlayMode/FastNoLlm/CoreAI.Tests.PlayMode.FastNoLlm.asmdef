@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Tests.PlayMode.Shared",
     "CoreAI.Core",
+    "CoreAI.Mods",
     "CoreAI.Source",
     "MessagePipe",
     "MoonSharp.Interpreter",

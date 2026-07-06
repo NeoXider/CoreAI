@@ -171,7 +171,7 @@ namespace CoreAI.Tests.PlayMode
                 () => null,
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
-            AiGameCommandRouter router = new(subscriber, new NoOpGameLogger(), lua, new NullWorldExecutor());
+            AiGameCommandRouter router = new(subscriber, new NoOpGameLogger(), new NullWorldExecutor());
 
             bool received = false;
             int receivedThreadId = -1;
@@ -249,7 +249,7 @@ namespace CoreAI.Tests.PlayMode
                 () => queued,
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
-            AiGameCommandRouter router = new(bus, new NoOpGameLogger(), lua, new NullWorldExecutor());
+            AiGameCommandRouter router = new(bus, new NoOpGameLogger(), new NullWorldExecutor());
 
             bool received = false;
             int receivedThreadId = -1;

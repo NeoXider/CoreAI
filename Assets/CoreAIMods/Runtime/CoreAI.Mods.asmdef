@@ -1,0 +1,49 @@
+{
+  "name": "CoreAI.Mods",
+  "rootNamespace": "CoreAI",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "MoonSharp.Interpreter",
+    "MessagePipe",
+    "MessagePipe.VContainer",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI",
+    "undream.llmunity.Runtime",
+    "UniTask",
+    "VContainer",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll",
+    "Microsoft.Extensions.AI.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "Microsoft.Extensions.Logging.Abstractions.dll",
+    "System.Text.Json.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "ai.undream.llm",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_LLMUNITY"
+    },
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_INPUT_SYSTEM"
+    },
+    {
+      "name": "org.moonsharp.moonsharp",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_MOONSHARP"
+    }
+  ],
+  "noEngineReferences": false
+}

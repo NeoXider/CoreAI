@@ -1,9 +1,7 @@
 {
   "name": "CoreAI.Core",
   "rootNamespace": "CoreAI",
-  "references": [
-    "MoonSharp.Interpreter"
-  ],
+  "references": [],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
@@ -17,12 +15,6 @@
   ],
   "autoReferenced": true,
   "defineConstraints": [],
-  "versionDefines": [
-    {
-      "name": "org.moonsharp.moonsharp",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_MOONSHARP"
-    }
-  ],
+  "versionDefines": [],
   "noEngineReferences": true
 }

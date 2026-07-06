@@ -3,6 +3,7 @@
   "rootNamespace": "",
   "references": [
     "CoreAI.Core",
+    "CoreAI.Mods",
     "CoreAI.Source",
     "MessagePipe",
     "MoonSharp.Interpreter",

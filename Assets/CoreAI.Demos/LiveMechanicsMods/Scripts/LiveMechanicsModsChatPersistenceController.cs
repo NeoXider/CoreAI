@@ -52,6 +52,15 @@ namespace CoreAI.Demos
         private Vector2 _scroll;
         private GUIStyle _richLabel;
 
+        // Cached mod lists. Rebuilt only on ModSourceLoaded/ModSourceUnloaded and after user actions
+        // in this panel (Activate/Deactivate/Forget/Save) — never from OnGUI or a Draw method. See
+        // Docs/coreai-mod-system.md §6.
+        private List<LuaModInfo> _cachedActiveMods = new();
+        private List<ModDescriptor> _cachedActiveDescriptors = new();
+        private List<ModDescriptor> _cachedInactiveMods = new();
+        private int _cachedActiveCount;
+        private int _cachedInactiveCount;
+
         // Mod source editor state. Non-null _editModId means the editor window is open; the buffer
         // is a private copy, so closing without saving changes nothing anywhere.
         private string _editModId;
@@ -138,6 +147,7 @@ namespace CoreAI.Demos
             _mods.ModSourceUnloaded += OnModSourceUnloaded;
 
             AutoloadSavedMods();
+            RecomputeModLists();
             _status = _autoloadedCount == 0
                 ? "Mods-chat persistence ready. Load mods with manage_mods from the chat."
                 : $"Mods-chat persistence ready. Autoloaded {_autoloadedCount} saved mod(s).";
@@ -227,6 +237,13 @@ namespace CoreAI.Demos
 
         private void OnModSourceLoaded(string modId, string source, LuaCapabilities capabilities)
         {
+            // Autoloading recomputes once, after the whole batch, in Start(); recomputing per mod
+            // here would be O(n^2) over the saved-mod count at scene start.
+            if (!_isAutoloading)
+            {
+                RecomputeModLists();
+            }
+
             if (_isAutoloading || _versions == null || string.IsNullOrWhiteSpace(modId))
             {
                 return;
@@ -247,6 +264,11 @@ namespace CoreAI.Demos
 
         private void OnModSourceUnloaded(string modId, string source, LuaCapabilities capabilities)
         {
+            if (!_isAutoloading)
+            {
+                RecomputeModLists();
+            }
+
             if (_isAutoloading || _versions == null || string.IsNullOrWhiteSpace(modId))
             {
                 return;
@@ -305,9 +327,8 @@ namespace CoreAI.Demos
             panelRect.x = Mathf.Clamp(panelRect.x, 0f, Mathf.Max(0f, Screen.width - 120f));
             panelRect.y = Mathf.Clamp(panelRect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
 
-            int activeCount = _mods?.ListMods().Count ?? 0;
-            int inactiveCount = _mods != null && _versions != null ? GetInactiveSavedMods().Count : 0;
-            string title = $"{panelTitle}  ({toggleKey})   active {activeCount} / inactive {inactiveCount}";
+            string title =
+                $"{panelTitle}  ({toggleKey})   active {_cachedActiveCount} / inactive {_cachedInactiveCount}";
             panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, title);
 
             if (_editModId != null)
@@ -387,6 +408,7 @@ namespace CoreAI.Demos
 
                 _status = $"Saved mod '{_editModId}'.";
                 _editModId = null;
+                RecomputeModLists();
             }
             catch (System.Exception ex)
             {
@@ -449,7 +471,10 @@ namespace CoreAI.Demos
 
         private void DrawActiveMods()
         {
-            IReadOnlyList<LuaModInfo> active = _mods.ListMods();
+            // Local copies: RecomputeModLists() (triggered by Deactivate below) replaces the cached
+            // fields with new list instances, so this loop keeps iterating its own stable snapshot.
+            List<LuaModInfo> active = _cachedActiveMods;
+            List<ModDescriptor> descriptors = _cachedActiveDescriptors;
             GUILayout.Label($"<b>Active mods</b>  ({active.Count})", _richLabel);
             if (active.Count == 0)
             {
@@ -457,10 +482,10 @@ namespace CoreAI.Demos
                 return;
             }
 
-            foreach (LuaModInfo info in active)
+            for (int i = 0; i < active.Count; i++)
             {
-                _mods.TryGetModSource(info.Id, out string source);
-                ModDescriptor descriptor = new(info.Id, source);
+                LuaModInfo info = active[i];
+                ModDescriptor descriptor = descriptors[i];
                 GUILayout.BeginVertical(GUI.skin.box);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("[ACTIVE]", _activeBadge, GUILayout.Width(64));
@@ -476,12 +501,13 @@ namespace CoreAI.Demos
 
                 if (GUILayout.Button("Edit", GUILayout.Width(44)))
                 {
-                    OpenEditor(info.Id, source);
+                    OpenEditor(info.Id, descriptor.Source);
                 }
 
                 if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
                 {
                     _mods.UnloadMod(info.Id);
+                    RecomputeModLists();
                 }
 
                 GUILayout.EndHorizontal();
@@ -495,7 +521,8 @@ namespace CoreAI.Demos
 
         private void DrawSavedInactiveMods()
         {
-            List<ModDescriptor> inactive = GetInactiveSavedMods();
+            // Local copy: see the comment in DrawActiveMods.
+            List<ModDescriptor> inactive = _cachedInactiveMods;
             GUILayout.Label($"<b>Saved / inactive mods</b>  ({inactive.Count})", _richLabel);
             if (inactive.Count == 0)
             {
@@ -531,6 +558,37 @@ namespace CoreAI.Demos
                 GUILayout.EndHorizontal();
                 GUILayout.EndVertical();
             }
+        }
+
+        /// <summary>
+        /// Rebuilds the cached active/inactive lists and counts from the runtime and the version
+        /// store. This is the only place allowed to call the disk-backed store enumeration
+        /// (GetKnownKeys/TryGetSnapshot via GetInactiveSavedMods) and ListMods/TryGetModSource/
+        /// ReadMetadata; OnGUI and the Draw* methods must only read the cached fields.
+        /// </summary>
+        private void RecomputeModLists()
+        {
+            if (_mods == null || _versions == null)
+            {
+                return;
+            }
+
+            IReadOnlyList<LuaModInfo> active = _mods.ListMods();
+            List<LuaModInfo> activeMods = new(active.Count);
+            List<ModDescriptor> activeDescriptors = new(active.Count);
+            foreach (LuaModInfo info in active)
+            {
+                _mods.TryGetModSource(info.Id, out string source);
+                activeMods.Add(info);
+                activeDescriptors.Add(new ModDescriptor(info.Id, source));
+            }
+
+            _cachedActiveMods = activeMods;
+            _cachedActiveDescriptors = activeDescriptors;
+            _cachedActiveCount = activeMods.Count;
+
+            _cachedInactiveMods = GetInactiveSavedMods();
+            _cachedInactiveCount = _cachedInactiveMods.Count;
         }
 
         private List<ModDescriptor> GetInactiveSavedMods()
@@ -580,6 +638,8 @@ namespace CoreAI.Demos
                 _status = $"Activation failed: {ex.Message}";
                 Debug.LogWarning($"[LiveMechanicsModsChatDemo] Activation failed for '{descriptor.Id}': {ex}");
             }
+
+            RecomputeModLists();
         }
 
         private void ForgetSavedMod(string modId, bool updateStatus)
@@ -592,6 +652,8 @@ namespace CoreAI.Demos
             {
                 _status = $"Forgot saved mod '{modId}'.";
             }
+
+            RecomputeModLists();
         }
 
         private bool IsTransientModId(string modId)
