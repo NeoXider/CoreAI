@@ -1955,6 +1955,7 @@ namespace CoreAI.Chat
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
                 bubble.AddToClassList("coreai-ai-message");
+                MakeTextSelectable(bubble);
 
                 ApplyAvatarSprite(avatar);
                 AddBubbleContent(row, contentSlot, bubble);
@@ -1967,11 +1968,24 @@ namespace CoreAI.Chat
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
                 bubble.AddToClassList("coreai-user-message");
+                MakeTextSelectable(bubble);
 
                 AddBubbleContent(row, contentSlot, bubble);
             }
 
             return row;
+        }
+
+        /// <summary>
+        /// Lets the user highlight and copy (Ctrl/Cmd+C) part of a chat message. UI Toolkit
+        /// <see cref="Label"/>s are not selectable by default, so message bubbles could not be copied.
+        /// </summary>
+        private static void MakeTextSelectable(Label label)
+        {
+            label.selection.isSelectable = true;
+            label.selection.doubleClickSelectsWord = true;
+            label.selection.tripleClickSelectsLine = true;
+            label.focusable = true; // required so Ctrl/Cmd+C copies the active selection
         }
 
         private VisualElement CreateMessageBubbleRow(bool isUser)
@@ -2526,6 +2540,7 @@ namespace CoreAI.Chat
             _streamingLabel.AddToClassList("coreai-chat-message");
             _streamingLabel.AddToClassList("coreai-ai-message");
             _streamingLabel.AddToClassList("coreai-streaming-active");
+            MakeTextSelectable(_streamingLabel);
 
             AddBubbleContent(templateRow, contentSlot, _streamingLabel);
             MessageScroll.Add(templateRow);
