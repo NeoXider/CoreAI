@@ -1,0 +1,16 @@
+{
+    "name": "LuaVmComparison",
+    "rootNamespace": "LuaVmComparison",
+    "references": [
+        "MoonSharp.Interpreter"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
