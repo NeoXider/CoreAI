@@ -221,9 +221,49 @@ namespace CoreAI.Chat
         private static void ConfigureWebGlKeyboardInput()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            WebGLInput.captureAllKeyboardInput = false;
+            TrySetWebGlCaptureAllKeyboardInput(false);
 #endif
         }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // UnityEngine.WebGLInput is a type forwarded to the UnityEngine.WebGLModule assembly. When a WebGL
+        // player is compiled from a command-line build whose Editor active target is not WebGL, that module
+        // is not in the reference set and a direct reference fails to compile (CS0103). Reflection resolves
+        // the type at runtime inside the actual WebGL player, where the module is always present, so the
+        // build compiles regardless of the Editor's active target while behaving identically at runtime.
+        private static System.Reflection.PropertyInfo _webGlCaptureAllKeyboardInputProperty;
+        private static bool _webGlCaptureAllKeyboardInputResolved;
+
+        private static System.Reflection.PropertyInfo ResolveWebGlCaptureAllKeyboardInputProperty()
+        {
+            if (_webGlCaptureAllKeyboardInputResolved)
+            {
+                return _webGlCaptureAllKeyboardInputProperty;
+            }
+
+            _webGlCaptureAllKeyboardInputResolved = true;
+            System.Type webGlInputType = System.Type.GetType("UnityEngine.WebGLInput, UnityEngine.WebGLModule");
+            _webGlCaptureAllKeyboardInputProperty = webGlInputType?.GetProperty(
+                "captureAllKeyboardInput",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            return _webGlCaptureAllKeyboardInputProperty;
+        }
+
+        private static void TrySetWebGlCaptureAllKeyboardInput(bool value)
+        {
+            System.Reflection.PropertyInfo property = ResolveWebGlCaptureAllKeyboardInputProperty();
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(null, value);
+            }
+        }
+
+        private static bool GetWebGlCaptureAllKeyboardInput()
+        {
+            System.Reflection.PropertyInfo property = ResolveWebGlCaptureAllKeyboardInputProperty();
+            return property != null && property.CanRead && (bool)property.GetValue(null);
+        }
+#endif
 
         /// <summary>
         /// Polls keyboard shortcuts, updates long-request feedback, and reapplies responsive layout.
@@ -231,9 +271,9 @@ namespace CoreAI.Chat
         protected virtual void Update()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            if (WebGLInput.captureAllKeyboardInput)
+            if (GetWebGlCaptureAllKeyboardInput())
             {
-                WebGLInput.captureAllKeyboardInput = false;
+                TrySetWebGlCaptureAllKeyboardInput(false);
             }
 #endif
             PollChatToggleShortcuts();

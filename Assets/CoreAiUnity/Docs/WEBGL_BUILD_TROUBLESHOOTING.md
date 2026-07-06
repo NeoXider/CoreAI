@@ -30,6 +30,23 @@ Often appears alongside **FileSystemWatcher** stacks while Unity or the OS enume
 
 Comes from **`CoreAIWebGlStreamingAssetsGuard`** (Editor preprocess). It intentionally skips certain StreamingAssets folders for WebGL so the build stays valid. **Informational**, not an error.
 
+## `error CS0103: The name 'WebGLInput' does not exist in the current context`
+
+`UnityEngine.WebGLInput` is a **type forwarded** to the `UnityEngine.WebGLModule` assembly. When a
+WebGL player is compiled from a **command-line build whose Editor active target is not WebGL** (e.g.
+active target Android/Windows), that module is not in the compilation reference set, so a direct
+`WebGLInput.captureAllKeyboardInput` reference fails with **CS0103** even inside a
+`#if UNITY_WEBGL && !UNITY_EDITOR` guard. Switching the Editor to the WebGL platform first makes the
+error disappear, which is why it only reproduces on cross-target CLI builds.
+
+**Fix (in `CoreAiChatPanel`):** access `captureAllKeyboardInput` through **reflection**
+(`System.Type.GetType("UnityEngine.WebGLInput, UnityEngine.WebGLModule")`) instead of a compile-time
+reference. The type resolves at runtime inside the actual WebGL player — where the module is always
+present — so the build compiles regardless of the Editor's active target and behaves identically at
+runtime. Alternative fix if you own the build script: call
+`EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL)` before
+`BuildPipeline.BuildPlayer`.
+
 ## Invalid folder `.meta` GUID
 
 Unity requires **`guid:`** to be **exactly 32 hexadecimal characters**. A typo (33rd character) makes Unity ignore the folder asset and log **“does not have a valid GUID”**. Fix the line or delete the `.meta` and let Unity regenerate it.
