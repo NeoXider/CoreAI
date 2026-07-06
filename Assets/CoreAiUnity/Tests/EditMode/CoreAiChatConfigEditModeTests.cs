@@ -114,6 +114,7 @@ namespace CoreAI.Tests.EditMode
         private sealed class LegacyChatOptions : ICoreAiChatOptions
         {
             public string RoleId => CoreAiChatOptions.DefaultRoleId;
+            public bool AllowAgentSwitching => false;
             public string HeaderTitle => CoreAiChatOptions.DefaultHeaderTitle;
             public string WelcomeMessage => CoreAiChatOptions.DefaultWelcomeMessage;
             public bool LoadPersistedChatOnStartup => true;

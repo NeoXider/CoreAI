@@ -11,6 +11,10 @@ namespace CoreAI.Chat
         [Header("Agent")] [Tooltip("Agent role id used for prompt routing and chat history.")] [SerializeField]
         private string _roleId = Ai.BuiltInAgentRoleIds.SmartChat;
 
+        [Tooltip("Show an agent/role dropdown in the chat header so the user can switch the responding agent at runtime.")]
+        [SerializeField]
+        private bool _allowAgentSwitching;
+
         [Header("UI - Header")] [SerializeField]
         private string _headerTitle = "AI Chat";
 
@@ -126,6 +130,7 @@ namespace CoreAI.Chat
         // === Public API ===
 
         public string RoleId => _roleId;
+        public bool AllowAgentSwitching => _allowAgentSwitching;
         public string HeaderTitle => _headerTitle;
         public string WelcomeMessage => _welcomeMessage;
         public string SendButtonText => _sendButtonText;
@@ -176,6 +181,7 @@ namespace CoreAI.Chat
             }
 
             _roleId = options.RoleId;
+            _allowAgentSwitching = options.AllowAgentSwitching;
             _headerTitle = options.HeaderTitle;
             _welcomeMessage = options.WelcomeMessage;
 

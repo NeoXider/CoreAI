@@ -42,6 +42,39 @@ namespace CoreAI.Demos
             }
         }
 
+        private void Start()
+        {
+            // Turn on the chat agent/role dropdown for this demo so testers can switch the responding
+            // agent (Programmer, SmartChat, AINpc, ...) at runtime without editing the scene config.
+            StartCoroutine(EnableAgentDropdownWhenReady());
+        }
+
+        private System.Collections.IEnumerator EnableAgentDropdownWhenReady()
+        {
+            CoreAI.Chat.CoreAiChatPanel panel = null;
+            float deadline = Time.realtimeSinceStartup + 5f;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                panel = FindFirstObjectByType<CoreAI.Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
+                if (panel != null)
+                {
+                    break;
+                }
+
+                yield return null;
+            }
+
+            if (panel != null)
+            {
+                panel.EnableAgentSwitching();
+                Debug.Log("[FullAccessDemo] Agent dropdown enabled on CoreAiChatPanel.");
+            }
+            else
+            {
+                Debug.LogWarning("[FullAccessDemo] CoreAiChatPanel not found; agent dropdown not enabled.");
+            }
+        }
+
         private void Update()
         {
             if (_toggleKey != KeyCode.None && Input.GetKeyDown(_toggleKey))

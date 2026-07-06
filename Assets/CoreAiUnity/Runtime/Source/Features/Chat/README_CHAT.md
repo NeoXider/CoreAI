@@ -239,6 +239,22 @@ chatPanel.SetRuntimeOptions(new CoreAiChatOptions
 chatPanel.ClearRuntimeOptions(); // fall back to assigned CoreAiChatConfig or built-in defaults
 ```
 
+### Agent/role dropdown (switch the responding agent at runtime)
+
+Set `AllowAgentSwitching = true` (on the `CoreAiChatConfig` asset or a `CoreAiChatOptions` snapshot) to
+show a role dropdown in the chat header. The user can switch the responding agent live
+(`Programmer`, `SmartChat`, `AINpc`, `Creator`, `Analyzer`, `CoreMechanicAI`, `PlainChat`, `Merchant` —
+`BuiltInAgentRoleIds.AllBuiltInRoles`); the choice affects new messages only, and each role keeps its own
+history/memory on the service side. Prefer a light, tool-free role like `SmartChat` for plain chat (no tool
+schemas in the prompt → faster first token) and `Programmer` when the user asks for code/mechanics.
+
+It can also be turned on from code at runtime (the `FullAccess` demo does this via
+`FullAccessDemoController`):
+
+```csharp
+chatPanel.EnableAgentSwitching();
+```
+
 Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `ScriptableObject.CreateInstance<CoreAiChatConfig>()` only for asset defaults, Inspector serialization or `ToOptions()` / `ApplyOptions(...)` mapping tests. Do not write private config fields via reflection.
 ## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
 

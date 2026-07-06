@@ -7,6 +7,12 @@ namespace CoreAI.Chat
     public interface ICoreAiChatOptions
     {
         string RoleId { get; }
+
+        /// <summary>
+        /// When true, the chat panel shows an agent/role dropdown so the user can switch the responding
+        /// agent (e.g. Programmer, SmartChat, AINpc) at runtime. Default false.
+        /// </summary>
+        bool AllowAgentSwitching { get; }
         string HeaderTitle { get; }
         string WelcomeMessage { get; }
         bool LoadPersistedChatOnStartup { get; }
@@ -85,6 +91,7 @@ namespace CoreAI.Chat
         public const string DefaultNoResponseMessage = "Could not get a response. Try again.";
 
         public string RoleId { get; set; } = DefaultRoleId;
+        public bool AllowAgentSwitching { get; set; }
         public string HeaderTitle { get; set; } = DefaultHeaderTitle;
         public string WelcomeMessage { get; set; } = DefaultWelcomeMessage;
         public string SendButtonText { get; set; } = DefaultSendButtonText;
@@ -136,6 +143,7 @@ namespace CoreAI.Chat
             return new CoreAiChatOptions
             {
                 RoleId = source.RoleId,
+                AllowAgentSwitching = source.AllowAgentSwitching,
                 HeaderTitle = source.HeaderTitle,
                 WelcomeMessage = source.WelcomeMessage,
                 SendButtonText = text?.SendButtonText ?? DefaultSendButtonText,

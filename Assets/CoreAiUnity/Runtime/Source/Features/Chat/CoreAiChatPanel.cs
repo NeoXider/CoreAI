@@ -366,6 +366,56 @@ namespace CoreAI.Chat
             _activeRequestCts?.Dispose();
         }
 
+        // ===================== Agent switching =====================
+
+        private DropdownField _agentDropdown;
+        private string _activeRoleId;
+        private bool _agentSwitchingEnabled;
+
+        /// <summary>
+        /// Enables the agent/role dropdown at runtime (e.g. from a demo controller). Safe to call before or
+        /// after the UI is built; the dropdown appears once the chat header exists.
+        /// </summary>
+        public void EnableAgentSwitching()
+        {
+            _agentSwitchingEnabled = true;
+            _activeRoleId ??= Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+            TryBuildAgentDropdown();
+        }
+
+        private void TryBuildAgentDropdown()
+        {
+            if (!_agentSwitchingEnabled || _agentDropdown != null || HeaderTitle == null)
+            {
+                return;
+            }
+
+            VisualElement header = HeaderTitle.parent;
+            if (header == null)
+            {
+                return;
+            }
+
+            var roles = new System.Collections.Generic.List<string>(BuiltInAgentRoleIds.AllBuiltInRoles);
+            int index = Mathf.Max(0, roles.IndexOf(_activeRoleId ?? Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat));
+
+            _agentDropdown = new DropdownField(roles, index);
+            _agentDropdown.AddToClassList("coreai-chat-agent-dropdown");
+            _agentDropdown.RegisterValueChangedCallback(OnAgentDropdownChanged);
+            header.Insert(header.IndexOf(HeaderTitle) + 1, _agentDropdown);
+        }
+
+        private void OnAgentDropdownChanged(ChangeEvent<string> evt)
+        {
+            if (string.IsNullOrEmpty(evt.newValue))
+            {
+                return;
+            }
+
+            _activeRoleId = evt.newValue;
+            Debug.Log($"[CoreAiChatPanel] Active agent role -> {_activeRoleId}");
+        }
+
         // ===================== UI Binding =====================
 
         protected virtual void BindUI()
@@ -383,6 +433,14 @@ namespace CoreAI.Chat
             HeaderTitle = Root.Q<Label>("coreai-chat-header-title");
             HeaderIcon = Root.Q<VisualElement>("coreai-chat-header-icon");
             _longRequestHint = Root.Q<Label>("coreai-long-request-hint");
+
+            _activeRoleId ??= Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+            if (Options != null && Options.AllowAgentSwitching)
+            {
+                _agentSwitchingEnabled = true;
+            }
+
+            TryBuildAgentDropdown();
 
             if (_longRequestHint != null)
             {
@@ -1488,7 +1546,7 @@ namespace CoreAI.Chat
                 return null;
             }
 
-            string roleId = Options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+            string roleId = _activeRoleId ?? Options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
             // can compare values across awaits to detect "a newer turn is already in flight".
             Interlocked.Increment(ref _currentTurnGeneration);
             _toolRoundIterationInTurn = 1;
