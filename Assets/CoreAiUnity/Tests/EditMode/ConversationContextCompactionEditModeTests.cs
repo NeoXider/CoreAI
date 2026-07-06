@@ -418,7 +418,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LlmAssisted_CancellationToken_Rethrows()
+        public async Task LlmAssisted_CancellationToken_Rethrows()
         {
             InMemoryConversationSummaryStore store = new();
             RecordingLlmClient llm = new();
@@ -429,14 +429,18 @@ namespace CoreAI.Tests.EditMode
             // TaskCanceledException inherits from OperationCanceledException.
             // The async state machine may wrap the cancellation as either subtype,
             // so we use CatchAsync (accepts derived types) — matching production catch blocks.
-            Assert.CatchAsync<OperationCanceledException>(async () =>
+            try
             {
                 await mgr.BuildSnapshotAsync(
                     "r", MakeHistory(5),
                     new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
                     new ConversationContextBuildArgs { HistoryTokenBudget = 25, UseLlmContextCompaction = true },
                     "t", cts.Token).ConfigureAwait(false);
-            });
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         [Test]

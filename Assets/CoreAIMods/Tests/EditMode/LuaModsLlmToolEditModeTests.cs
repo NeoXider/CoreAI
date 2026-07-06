@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
@@ -43,66 +44,66 @@ namespace CoreAI.Tests.EditMode
             return new LuaModsLlmTool(runtime, _settings, NullLog.Instance, granted, allowManagement);
         }
 
-        private static JObject Execute(LuaModsLlmTool tool, string action, string modId = null, string code = null)
+        private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null, string code = null)
         {
-            string json = tool.ExecuteAsync(action, modId, code).GetAwaiter().GetResult();
+            string json = await tool.ExecuteAsync(action, modId, code);
             return JObject.Parse(json);
         }
 
         [Test]
-        public void List_WithoutMods_ReturnsEmptySuccess()
+        public async Task List_WithoutMods_ReturnsEmptySuccess()
         {
             LuaModRuntime runtime = new();
-            JObject result = Execute(CreateTool(runtime), "list");
+            JObject result = await ExecuteAsync(CreateTool(runtime), "list");
 
             Assert.IsTrue(result.Value<bool>("success"));
             Assert.AreEqual(0, ((JArray)result["data"]).Count);
         }
 
         [Test]
-        public void Load_List_GetSource_Roundtrip()
+        public async Task Load_List_GetSource_Roundtrip()
         {
             LuaModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
             const string code = "hooks_on('ping', function() end)";
 
-            JObject load = Execute(tool, "load", "demo_mod", code);
+            JObject load = await ExecuteAsync(tool, "load", "demo_mod", code);
             Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 
-            JObject list = Execute(tool, "list");
+            JObject list = await ExecuteAsync(tool, "list");
             JArray mods = (JArray)list["data"];
             Assert.AreEqual(1, mods.Count);
             Assert.AreEqual("demo_mod", mods[0].Value<string>("id"));
 
-            JObject source = Execute(tool, "get_source", "demo_mod");
+            JObject source = await ExecuteAsync(tool, "get_source", "demo_mod");
             Assert.IsTrue(source.Value<bool>("success"));
             Assert.AreEqual(code, source.Value<string>("data"));
         }
 
         [Test]
-        public void Reload_ReplacesSource_AndUnloadRemoves()
+        public async Task Reload_ReplacesSource_AndUnloadRemoves()
         {
             LuaModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
-            Execute(tool, "load", "m1", "local a = 1");
+            await ExecuteAsync(tool, "load", "m1", "local a = 1");
 
-            JObject reload = Execute(tool, "reload", "m1", "local b = 2");
+            JObject reload = await ExecuteAsync(tool, "reload", "m1", "local b = 2");
             Assert.IsTrue(reload.Value<bool>("success"), reload.ToString());
             Assert.IsTrue(runtime.TryGetModSource("m1", out string source));
             Assert.AreEqual("local b = 2", source);
 
-            JObject unload = Execute(tool, "unload", "m1");
+            JObject unload = await ExecuteAsync(tool, "unload", "m1");
             Assert.IsTrue(unload.Value<bool>("success"));
             Assert.IsFalse(runtime.IsLoaded("m1"));
         }
 
         [Test]
-        public void Load_UsesHostGrantedCapabilities_NotModelControlled()
+        public async Task Load_UsesHostGrantedCapabilities_NotModelControlled()
         {
             LuaModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime, LuaCapabilities.Read);
 
-            JObject load = Execute(tool, "load", "ro_mod", "local x = 1");
+            JObject load = await ExecuteAsync(tool, "load", "ro_mod", "local x = 1");
             Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 
             IReadOnlyList<LuaModInfo> mods = runtime.ListMods();
@@ -110,32 +111,32 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ReadOnlyTool_BlocksMutations_ButAllowsInspection()
+        public async Task ReadOnlyTool_BlocksMutations_ButAllowsInspection()
         {
             LuaModRuntime runtime = new();
             runtime.LoadMod("existing", "local x = 1");
             LuaModsLlmTool tool = CreateTool(runtime, allowManagement: false);
 
-            Assert.IsTrue(Execute(tool, "list").Value<bool>("success"));
-            Assert.IsTrue(Execute(tool, "get_source", "existing").Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "list")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "get_source", "existing")).Value<bool>("success"));
 
-            Assert.IsFalse(Execute(tool, "load", "new_mod", "local y = 2").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "reload", "existing", "local y = 2").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "unload", "existing").Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "load", "new_mod", "local y = 2")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "reload", "existing", "local y = 2")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "unload", "existing")).Value<bool>("success"));
             Assert.IsTrue(runtime.IsLoaded("existing"));
         }
 
         [Test]
-        public void InvalidInput_ReturnsFailure_NotException()
+        public async Task InvalidInput_ReturnsFailure_NotException()
         {
             LuaModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
 
-            Assert.IsFalse(Execute(tool, "explode").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "get_source").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "load", "no_code").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "get_source", "missing").Value<bool>("success"));
-            Assert.IsFalse(Execute(tool, "load", "bad", "this is not lua ((").Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "explode")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "get_source")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "load", "no_code")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "get_source", "missing")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(tool, "load", "bad", "this is not lua ((")).Value<bool>("success"));
         }
 
         [Test]
@@ -186,7 +187,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void RegisterWorldCommands_FullAccess_ManageModsGrantsFullLua()
+        public async Task RegisterWorldCommands_FullAccess_ManageModsGrantsFullLua()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject probe = new("FullManageModsProbe");
@@ -218,7 +219,7 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 Assert.IsNotNull(modsTool, "Programmer must get manage_mods as LuaModsLlmTool.");
-                JObject load = Execute(modsTool, "load", "full_probe",
+                JObject load = await ExecuteAsync(modsTool, "load", "full_probe",
                     "local id = unity_find('FullManageModsProbe')\nif id == 0 then error('Full unity_find missing') end");
                 Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 

@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode
         /// Three consecutive tool errors abort the agent when the configured limit is three.
         /// </summary>
         [Test]
-        public void ThreeConsecutiveErrors_StopsAgent()
+        public async Task ThreeConsecutiveErrors_StopsAgent()
         {
             // Модель каждый раз вызывает тулзу "my_tool", тулза всегда возвращает failure
             int callCount = 0;
@@ -40,7 +40,7 @@ namespace CoreAI.Tests.EditMode
                 true, new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 3 failed loop iterations trip the guard, then the loop makes EXACTLY ONE extra
             // tools-disabled roundtrip so the model can summarize (F6). The scripted client answers
@@ -54,7 +54,7 @@ namespace CoreAI.Tests.EditMode
         /// keeps requesting tools, independent of the global settings value.
         /// </summary>
         [Test]
-        public void RoundtripOverride_CapsLoopAtOverrideValue()
+        public async Task RoundtripOverride_CapsLoopAtOverrideValue()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -73,7 +73,7 @@ namespace CoreAI.Tests.EditMode
                 null, null, 2);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // iteration 1 (call 1) → tool; iteration 2 (call 2) → tool; iteration 3 → over cap →
             // one final tools-disabled summary roundtrip (F6, call 3), then stop.
@@ -86,7 +86,7 @@ namespace CoreAI.Tests.EditMode
         /// runs until the model itself stops requesting tools.
         /// </summary>
         [Test]
-        public void RoundtripOverrideZero_IsUnlimited()
+        public async Task RoundtripOverrideZero_IsUnlimited()
         {
             // Model requests the tool 25 times (past the default cap of 10), then returns text.
             int callCount = 0;
@@ -107,7 +107,7 @@ namespace CoreAI.Tests.EditMode
                 null, null, 0);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 25 tool roundtrips + 1 final text turn = 26 model calls; the default-10 valve never fired.
             Assert.AreEqual(26, callCount, "Override of 0 must not cap the loop (unlimited)");
@@ -208,7 +208,7 @@ namespace CoreAI.Tests.EditMode
         /// then aborts the agent after six total iterations.
         /// </summary>
         [Test]
-        public void SuccessResetsCounter_ThenThreeErrorsStop()
+        public async Task SuccessResetsCounter_ThenThreeErrorsStop()
         {
             int callCount = 0;
             // Последовательность: fail, fail, success, fail, fail, fail → stop
@@ -236,7 +236,7 @@ namespace CoreAI.Tests.EditMode
                 true, new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 2 failures (consecutiveErrors 1,2) + 1 success (reset→0) + 3 failures (1,2,3→guard)
             // + 1 final tools-disabled summary roundtrip (F6) = 7 model calls.
@@ -249,7 +249,7 @@ namespace CoreAI.Tests.EditMode
         /// followed by a text response do not abort the agent.
         /// </summary>
         [Test]
-        public void SuccessOnThirdAttempt_ResetsAndContinues()
+        public async Task SuccessOnThirdAttempt_ResetsAndContinues()
         {
             int callCount = 0;
             // fail, fail, success, fail, fail, text (модель отвечает текстом)
@@ -284,7 +284,7 @@ namespace CoreAI.Tests.EditMode
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             MEAI.ChatResponse response =
-                Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 5 тулзовых итераций + 1 текстовый ответ = 6 вызовов innerClient
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 5 tool calls + 1 text response");
@@ -297,7 +297,7 @@ namespace CoreAI.Tests.EditMode
         /// Successful tools followed by a text response complete normally.
         /// </summary>
         [Test]
-        public void AllSuccess_CompletesNormally()
+        public async Task AllSuccess_CompletesNormally()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -320,7 +320,7 @@ namespace CoreAI.Tests.EditMode
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { successTool } };
             MEAI.ChatResponse response =
-                Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount, "3 tool calls + 1 text response = 4 iterations");
             string lastText = response.Messages?.LastOrDefault()?.Text;
@@ -371,7 +371,7 @@ namespace CoreAI.Tests.EditMode
         /// the second call and return a duplicate-call explanation to the model.
         /// </summary>
         [Test]
-        public void DuplicateToolCallsRejected_WhenAllowDuplicatesFalse()
+        public async Task DuplicateToolCallsRejected_WhenAllowDuplicatesFalse()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -396,7 +396,7 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // Ожидаем 3 итерации: 1) успешный tool call, 2) дубликат (отклонён), 3) текст
             Assert.AreEqual(3, callCount,
@@ -407,7 +407,7 @@ namespace CoreAI.Tests.EditMode
         /// Different arguments are not duplicates even when global duplicate suppression is enabled.
         /// </summary>
         [Test]
-        public void DifferentArgumentsNotTreatedAsDuplicate()
+        public async Task DifferentArgumentsNotTreatedAsDuplicate()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -431,7 +431,7 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
                 "Три разных аргумента + текстовый ответ = 4 итерации, блокировки не должно быть");
@@ -441,7 +441,7 @@ namespace CoreAI.Tests.EditMode
         /// Tools with <see cref="ILlmTool.AllowDuplicates"/> are exempt from duplicate suppression.
         /// </summary>
         [Test]
-        public void PerToolAllowDuplicates_OverridesGlobal()
+        public async Task PerToolAllowDuplicates_OverridesGlobal()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -465,7 +465,7 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool> { new AllowDupTool("always_ok") }, "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(4, callCount,
                 "Инструмент с AllowDuplicates=true не триггерит rejection");
@@ -477,7 +477,7 @@ namespace CoreAI.Tests.EditMode
         /// Missing tool calls return a not-found result and increment the consecutive-error counter.
         /// </summary>
         [Test]
-        public void ToolNotFound_CountsAsError()
+        public async Task ToolNotFound_CountsAsError()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -492,7 +492,7 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 3 not-found failures trip the guard, then one final tools-disabled summary roundtrip (F6).
             Assert.AreEqual(4, callCount,
@@ -503,7 +503,7 @@ namespace CoreAI.Tests.EditMode
         /// Tool exceptions are caught, converted to function results, and counted as errors.
         /// </summary>
         [Test]
-        public void ToolThrowsException_HandledAsError()
+        public async Task ToolThrowsException_HandledAsError()
         {
             int callCount = 0;
             ScriptedChatClient fakeInner = new(iteration =>
@@ -521,8 +521,8 @@ namespace CoreAI.Tests.EditMode
                 new List<Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            MEAI.ChatResponse response = Task.Run(() =>
-                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // 3 tool-body throws trip the guard, then one final tools-disabled summary roundtrip (F6).
             Assert.AreEqual(4, callCount,

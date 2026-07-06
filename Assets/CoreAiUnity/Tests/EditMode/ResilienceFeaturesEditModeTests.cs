@@ -494,7 +494,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Fallback_Cancellation_DoesNotFallback()
+        public async Task Fallback_Cancellation_DoesNotFallback()
         {
             CancellationTokenSource cts = new();
             cts.Cancel();
@@ -504,8 +504,15 @@ namespace CoreAI.Tests.EditMode
             CountingLlmClient secondary = new("secondary");
             FallbackLlmClientDecorator fallback = new(primary, secondary);
 
-            Assert.CatchAsync<OperationCanceledException>(async () =>
-                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token));
+            try
+            {
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token);
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
             Assert.AreEqual(0, secondary.CallCount, "Secondary should not be called on cancellation");
             Assert.AreEqual(0, fallback.FallbackCount);
         }

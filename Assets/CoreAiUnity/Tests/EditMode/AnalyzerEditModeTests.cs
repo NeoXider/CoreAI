@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
@@ -128,15 +129,15 @@ namespace CoreAI.Tests.EditMode
         #region Stub LLM Tests
 
         [Test]
-        public void Analyzer_StubLlm_ReturnsJsonResponse()
+        public async Task Analyzer_StubLlm_ReturnsJsonResponse()
         {
-            LlmCompletionResult result = _stubLlm.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await _stubLlm.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Analyzer",
                 SystemPrompt = _promptComposer.GetSystemPrompt("Analyzer"),
                 UserPayload = "Analyze wave 3",
                 TraceId = "test123"
-            }).Result;
+            });
 
             Assert.IsNotNull(result);
             Assert.IsTrue(result.Ok);
@@ -148,7 +149,7 @@ namespace CoreAI.Tests.EditMode
         #region Orchestrator Integration Tests
 
         [Test]
-        public void Analyzer_Orchestrator_PublishesEnvelope()
+        public async Task Analyzer_Orchestrator_PublishesEnvelope()
         {
             // Arrange
             TestCommandSink commandSink = new();
@@ -170,12 +171,12 @@ namespace CoreAI.Tests.EditMode
                 metrics, UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
 
             // Act
-            orchestrator.RunTaskAsync(new AiTaskRequest
+            await orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = "Analyzer",
                 Hint = "Analyze current session balance",
                 TraceId = "test_analyzer"
-            }).Wait();
+            });
 
             // Assert
             Assert.IsTrue(commandSink.PublishedCommands.Count > 0, "Should publish at least one command");

@@ -72,8 +72,17 @@ namespace CoreAI.Tests.EditMode
                 .WithSystemPrompt("You are unregistered.")
                 .BuildDetached();
 
-            InvalidOperationException ex = Assert.ThrowsAsync<InvalidOperationException>(() =>
-                config.AskAsync("Hello"));
+            InvalidOperationException ex = null;
+            try
+            {
+                await config.AskAsync("Hello");
+            }
+            catch (InvalidOperationException e)
+            {
+                ex = e;
+            }
+
+            Assert.NotNull(ex, "expected InvalidOperationException");
             StringAssert.Contains("not registered", ex.Message);
         }
 

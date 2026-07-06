@@ -26,7 +26,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Non-streaming: JSON-in-text fallback ------------
 
         [Test]
-        public void NonStreaming_TextShapedToolCall_ExecutedAndStripped()
+        public async Task NonStreaming_TextShapedToolCall_ExecutedAndStripped()
         {
             int iter = 0;
             int memInvocations = 0;
@@ -55,8 +55,8 @@ namespace CoreAI.Tests.EditMode
                 "Teacher", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memTool } };
-            MEAI.ChatResponse response = Task.Run(() =>
-                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(1, memInvocations, "Tool extracted from text must execute exactly once.");
             Assert.AreEqual(2, iter, "Loop should terminate after the model returns plain text.");
@@ -69,7 +69,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void NonStreaming_NoExecutionWhenToolNotBound_ButLastTracesEmpty()
+        public async Task NonStreaming_NoExecutionWhenToolNotBound_ButLastTracesEmpty()
         {
             // Simulate a model that emits text-mode JSON but the AIFunction is missing.
             // The non-streaming loop should give up after maxConsecutiveErrors because
@@ -95,7 +95,7 @@ namespace CoreAI.Tests.EditMode
                 Tools = new List<MEAI.AITool>
                     { MakeAIFunction("other_tool", _ => Task.FromResult<object>("{\"Success\":true}")) }
             };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             // Should record at least one missing-tool trace.
             Assert.That(client.LastExecutedToolCalls.Any(t => t.Source == "missing"), Is.True,
@@ -212,7 +212,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Multi-tool chain (tool → tool → text) ------------
 
         [Test]
-        public void NonStreaming_ChainOfTwoToolsThenText_ExecutesBothAndStripsAll()
+        public async Task NonStreaming_ChainOfTwoToolsThenText_ExecutesBothAndStripsAll()
         {
             // Iter 1: tool A (text-shape) → execute → continue.
             // Iter 2: tool B (text-shape, different name + args so duplicate guard does not block) → execute → continue.
@@ -248,8 +248,8 @@ namespace CoreAI.Tests.EditMode
                 "Chain", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { toolA, toolB } };
-            MEAI.ChatResponse response = Task.Run(() =>
-                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(1, aCount, "tool_a executed once");
             Assert.AreEqual(1, bCount, "tool_b executed once");
@@ -272,7 +272,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Parallel tool calls in one iteration ------------
 
         [Test]
-        public void NonStreaming_TwoParallelToolCalls_BothExecuteInSameIteration()
+        public async Task NonStreaming_TwoParallelToolCalls_BothExecuteInSameIteration()
         {
             int iter = 0;
             int aCount = 0, bCount = 0;
@@ -311,7 +311,7 @@ namespace CoreAI.Tests.EditMode
                 "Parallel", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { toolA, toolB } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(1, aCount, "tool_a executed once");
             Assert.AreEqual(1, bCount, "tool_b executed once");
@@ -324,7 +324,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Native FunctionCallContent + text prefix in same response ------------
 
         [Test]
-        public void NonStreaming_NativeToolCallWithTextPrefix_NativeWins_TextNotLeaked()
+        public async Task NonStreaming_NativeToolCallWithTextPrefix_NativeWins_TextNotLeaked()
         {
             // Provider returned both a TextContent ("Working...") AND a native FunctionCallContent.
             // Native takes priority — text-extraction must NOT also fire and produce a phantom
@@ -361,7 +361,7 @@ namespace CoreAI.Tests.EditMode
                 "NativeWins", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { realTool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(1, execCount, "Only the native real_tool should execute (no phantom from text).");
             Assert.AreEqual(1, client.LastExecutedToolCalls.Count);
@@ -436,7 +436,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Per-call [ToolCall] log line ------------
 
         [Test]
-        public void NonStreaming_PerCallLogLine_IsEmittedWhenLogToolCallsEnabled()
+        public async Task NonStreaming_PerCallLogLine_IsEmittedWhenLogToolCallsEnabled()
         {
             // Spy logger so we can grep the log stream for [ToolCall] lines.
             // CoreAISettingsAsset defaults LogToolCalls/LogToolCallArguments to true,
@@ -462,7 +462,7 @@ namespace CoreAI.Tests.EditMode
                 "Teacher", 3, "trace-xyz");
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memTool } };
-            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             string toolCallLine = spy.AllLines.FirstOrDefault(l => l.Contains("[ToolCall]"));
             Assert.IsNotNull(toolCallLine, $"Expected a [ToolCall] log line. Got:\n{string.Join("\n", spy.AllLines)}");
@@ -697,7 +697,7 @@ namespace CoreAI.Tests.EditMode
         // ------------ Non-streaming: arguments_json key through SmartToolCallingChatClient --------
 
         [Test]
-        public void NonStreaming_ArgumentsJsonKey_ExecutedAndStripped()
+        public async Task NonStreaming_ArgumentsJsonKey_ExecutedAndStripped()
         {
             int iter = 0;
             int readSkillInvocations = 0;
@@ -724,8 +724,8 @@ namespace CoreAI.Tests.EditMode
                 "Test", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { readSkillTool } };
-            MEAI.ChatResponse response = Task.Run(() =>
-                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
             Assert.AreEqual(1, readSkillInvocations,
                 "read_skill with arguments_json key must execute exactly once.");

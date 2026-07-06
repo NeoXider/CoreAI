@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
@@ -114,20 +115,20 @@ namespace CoreAI.Tests.EditMode
             return new LuaModsLlmTool(runtime, _settings, NullLog.Instance, granted, allowManagement);
         }
 
-        private static JObject Execute(LuaModsLlmTool tool, string action, string modId = null, string code = null)
+        private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null, string code = null)
         {
-            string json = tool.ExecuteAsync(action, modId, code).GetAwaiter().GetResult();
+            string json = await tool.ExecuteAsync(action, modId, code);
             return JObject.Parse(json);
         }
 
         [Test]
-        public void Export_Import_Forget_SharesModBetweenRuntimes()
+        public async Task Export_Import_Forget_SharesModBetweenRuntimes()
         {
             FakeSourceStore sourceStore = new();
             LuaModRuntime source = new(new StubBindings(), sourceStore: sourceStore);
             LuaModsLlmTool sourceTool = CreateTool(source, LuaCapabilities.Read);
 
-            JObject load = Execute(sourceTool, "load", "shared", "hooks_on('ping', function() end)");
+            JObject load = await ExecuteAsync(sourceTool, "load", "shared", "hooks_on('ping', function() end)");
             Assert.IsTrue(load.Value<bool>("success"), load.ToString());
             Assert.IsTrue(sourceStore.Contains("shared"), "load must auto-persist the mod.");
 
@@ -150,7 +151,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ReadOnlyTool_BlocksMutations_ButAllowsInspection()
+        public async Task ReadOnlyTool_BlocksMutations_ButAllowsInspection()
         {
             FakeSourceStore store = new();
             LuaModRuntime runtime = new(new StubBindings(), sourceStore: store);
@@ -159,12 +160,12 @@ namespace CoreAI.Tests.EditMode
             LuaModsLlmTool readOnly = CreateTool(runtime, allowManagement: false);
 
             // Inspection still works.
-            Assert.IsTrue(Execute(readOnly, "list").Value<bool>("success"));
-            Assert.IsTrue(Execute(readOnly, "get_source", "existing").Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(readOnly, "list")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(readOnly, "get_source", "existing")).Value<bool>("success"));
 
             // Mutating actions are blocked, leaving the mod and its persisted package intact.
-            Assert.IsFalse(Execute(readOnly, "load", "new_mod", "local y = 2").Value<bool>("success"));
-            Assert.IsFalse(Execute(readOnly, "unload", "existing").Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(readOnly, "load", "new_mod", "local y = 2")).Value<bool>("success"));
+            Assert.IsFalse((await ExecuteAsync(readOnly, "unload", "existing")).Value<bool>("success"));
             Assert.IsTrue(runtime.IsLoaded("existing"));
             Assert.IsTrue(store.Contains("existing"));
         }

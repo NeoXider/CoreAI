@@ -186,7 +186,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void CallerCancellation_RethrowsOperationCancelled()
+        public async Task CallerCancellation_RethrowsOperationCancelled()
         {
             // v1.5.1: decorator no longer enforces its own CancelAfter timeout.
             // Instead, it re-throws OperationCanceledException when the caller's
@@ -206,7 +206,14 @@ namespace CoreAI.Tests.EditMode
                 TraceId = "t-out",
                 UserPayload = "x"
             };
-            Assert.CatchAsync<OperationCanceledException>(async () => await dec.CompleteAsync(req, cts.Token));
+            try
+            {
+                await dec.CompleteAsync(req, cts.Token);
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         /// <summary>

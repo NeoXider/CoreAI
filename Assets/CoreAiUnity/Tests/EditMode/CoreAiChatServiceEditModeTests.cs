@@ -185,14 +185,24 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void SendMessageAsync_Error_PropagatesException()
+        public async Task SendMessageAsync_Error_PropagatesException()
         {
             // v1.5.1: CoreAiChatService no longer swallows exceptions.
             // Errors propagate to the caller (CoreAiChatPanel), which displays them.
             FakeAiOrchestrator orchestrator = new(null, "connection refused");
             CoreAiChatService service = new(orchestrator);
 
-            Exception ex = Assert.ThrowsAsync<Exception>(async () => await service.SendMessageAsync("hi", "TestRole"));
+            Exception ex = null;
+            try
+            {
+                await service.SendMessageAsync("hi", "TestRole");
+            }
+            catch (Exception e)
+            {
+                ex = e;
+            }
+
+            Assert.NotNull(ex, "expected Exception");
             Assert.AreEqual("connection refused", ex.Message);
         }
 
