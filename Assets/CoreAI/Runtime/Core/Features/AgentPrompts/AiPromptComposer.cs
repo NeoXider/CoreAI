@@ -179,7 +179,7 @@ namespace CoreAI.Ai
             }
             else
             {
-                body = BuildDefaultJsonPayload(snap, task);
+                body = BuildDefaultUserBody(snap, task);
             }
 
             body = AppendMutationStateContext(body, roleId, task);
@@ -264,8 +264,26 @@ namespace CoreAI.Ai
             return sb.ToString();
         }
 
-        private static string BuildDefaultJsonPayload(GameSessionSnapshot snap, AiTaskRequest task)
+        /// <summary>
+        /// Builds the default user-message body for roles that have no custom user-template.
+        /// <para>
+        /// The JSON envelope (<c>{"telemetry":{...},"hint":"...","ai_task_source":"..."}</c>) exists solely to
+        /// deliver structured game state (telemetry) — and the task source alongside it — to autonomous
+        /// agents (e.g. the Arena's Creator/Analyzer read the <c>telemetry</c> field to plan waves). When the
+        /// game has published <b>no telemetry</b> (plain chat, or any turn without live game-state) the
+        /// envelope carries nothing the model can act on and only wraps the user's text in confusing JSON, so
+        /// the raw hint is sent instead. This keeps casual chat clean — like a normal assistant — while
+        /// preserving the state-aware payload the moment the game feeds telemetry. The task source rides along
+        /// with telemetry and is therefore delivered only when there is game-state context to carry it.
+        /// </para>
+        /// </summary>
+        private static string BuildDefaultUserBody(GameSessionSnapshot snap, AiTaskRequest task)
         {
+            if (snap?.Telemetry == null || snap.Telemetry.Count == 0)
+            {
+                return task.Hint ?? "";
+            }
+
             StringBuilder sb = new(256);
             sb.Append('{');
             sb.Append("\"telemetry\":");

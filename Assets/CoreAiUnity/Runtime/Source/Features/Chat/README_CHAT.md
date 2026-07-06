@@ -255,6 +255,16 @@ It can also be turned on from code at runtime (the `FullAccess` demo does this v
 chatPanel.EnableAgentSwitching();
 ```
 
+### What the model receives (telemetry envelope)
+
+The user message is composed by `AiPromptComposer.BuildUserPayload`. It is wrapped in a small JSON envelope
+— `{"telemetry":{...},"hint":"<your text>","ai_task_source":"..."}` — **only when the game has published
+telemetry** for that turn. Autonomous agents (e.g. the RogueliteArena `Creator`/`Analyzer`) read the
+`telemetry` field to plan from live game-state. When there is no telemetry (plain chat, or any turn without
+game-state) the composer sends the **raw hint text** instead, so a conversational model is never handed a
+confusing JSON wrapper. Feed telemetry via `ISessionTelemetryProvider.Record(key, value)` (see the Arena
+example); roles with a custom user-template are unaffected (the template controls their shape).
+
 Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `ScriptableObject.CreateInstance<CoreAiChatConfig>()` only for asset defaults, Inspector serialization or `ToOptions()` / `ApplyOptions(...)` mapping tests. Do not write private config fields via reflection.
 ## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
 
