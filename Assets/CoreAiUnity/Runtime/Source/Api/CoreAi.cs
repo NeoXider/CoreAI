@@ -203,6 +203,50 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// Registers the on-demand <c>game_state</c> tool on an agent role so the model can pull the current
+        /// host telemetry (wave, score, mode, player stats, ...) when it needs it — instead of relying on
+        /// state baked into earlier messages, which goes stale. The tool reads the live
+        /// <see cref="CoreAI.Session.ISessionTelemetryProvider"/> the game updates from gameplay. Returns
+        /// whether it was registered.
+        /// </summary>
+        public static bool RegisterGameStateTool(string roleId = BuiltInAgentRoleIds.SmartChat)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
+            lock (SyncRoot)
+            {
+                if (!TryResolve(out _, out _, out _) || _scope?.Container == null)
+                {
+                    LogFacadeWarning("[CoreAi] RegisterGameStateTool: CoreAI services not resolved.");
+                    return false;
+                }
+
+                try
+                {
+                    AgentMemoryPolicy policy = (AgentMemoryPolicy)_scope.Container.Resolve(typeof(AgentMemoryPolicy));
+                    CoreAI.Session.ISessionTelemetryProvider telemetry =
+                        (CoreAI.Session.ISessionTelemetryProvider)_scope.Container.Resolve(
+                            typeof(CoreAI.Session.ISessionTelemetryProvider));
+                    if (policy == null || telemetry == null)
+                    {
+                        return false;
+                    }
+
+                    policy.AddToolForRole(roleId.Trim(), new CoreAI.Ai.GameStateLlmTool(telemetry));
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    LogFacadeWarning($"[CoreAi] RegisterGameStateTool failed: {ex.Message}");
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Adds an on-demand skill to an agent role at runtime (the code path; the inspector path
         /// is CoreAILifetimeScope's Role Skills list). The role gets a <c>read_skill</c> catalog on
         /// first use; skills added later — even mid-session — are immediately readable. Build the

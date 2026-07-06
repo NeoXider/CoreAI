@@ -265,6 +265,14 @@ game-state) the composer sends the **raw hint text** instead, so a conversationa
 confusing JSON wrapper. Feed telemetry via `ISessionTelemetryProvider.Record(key, value)` (see the Arena
 example); roles with a custom user-template are unaffected (the template controls their shape).
 
+**History stays clean, state stays fresh.** Only the raw user intent (`AiTaskRequest.Hint`) is persisted to
+an agent's chat history — never the composed envelope — so stale telemetry snapshots don't pile up across
+turns. Live state reaches the model two fresh ways: the current turn's payload (ephemeral, not stored) and,
+preferably, an on-demand `game_state` tool the agent calls when it needs current values. Enable the tool per
+role with `CoreAi.RegisterGameStateTool(roleId)`; it reads the live `ISessionTelemetryProvider` and returns
+`{"telemetry":{...}}`. This mirrors how production agents fetch state via tools instead of baking it into
+every message.
+
 Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `ScriptableObject.CreateInstance<CoreAiChatConfig>()` only for asset defaults, Inspector serialization or `ToOptions()` / `ApplyOptions(...)` mapping tests. Do not write private config fields via reflection.
 ## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
 

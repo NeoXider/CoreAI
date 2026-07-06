@@ -1161,7 +1161,12 @@ namespace CoreAI.Ai
 
             if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
             {
-                _memoryStore.AppendChatMessage(bundle.RoleId, "user", userPayload,
+                // Persist only the raw user intent, NOT the fully-composed userPayload: the composed payload
+                // carries per-turn context (telemetry envelope, Lua-repair, mutation-state) that must not
+                // accumulate in history — a stale telemetry snapshot on every turn bloats context and confuses
+                // the model about which state is current. Live state is delivered fresh each turn (current
+                // payload) and on demand via the game_state tool, so history stays a clean conversation.
+                _memoryStore.AppendChatMessage(bundle.RoleId, "user", task.Hint ?? string.Empty,
                     bundle.RoleConfig.PersistChatHistory);
                 _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
                     bundle.RoleConfig.PersistChatHistory);
