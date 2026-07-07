@@ -80,22 +80,43 @@ namespace LuaVmComparison
         /// runaway halt), so it is safe on WebGL/WASM where threads do not exist. Its real purpose is to force
         /// Lua-CSharp's <c>Lua.dll</c> to be exercised in an IL2CPP/AOT player, proving the VM survives AOT.
         /// </summary>
-        public static string RunCorrectnessSmoke()
+        public static string RunCorrectnessSmoke() => RunCorrectnessSmoke(null);
+
+        /// <summary>
+        /// Same smoke, but emits a line to <paramref name="log"/> at every step (runner construction and each
+        /// case) BEFORE it blocks on that step. On a WebGL/WASM host this pinpoints exactly which VM/step hangs
+        /// (e.g. Lua-CSharp's async API driven synchronously) instead of leaving a silent frozen frame.
+        /// </summary>
+        public static string RunCorrectnessSmoke(Action<string> log)
         {
-            var runners = new IVmRunner[] { new MoonSharpRunner(), new LuaCSharpRunner() };
+            void Emit(string s) { log?.Invoke(s); }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Lua VM WebGL/AOT smoke — correctness only (no threads/perf/runaway)");
+            Emit("LUAVM_STEP: begin");
+
+            IVmRunner moon = null, lc = null;
             try
             {
-                var sb = new StringBuilder();
-                sb.AppendLine("Lua VM WebGL/AOT smoke — correctness only (no threads/perf/runaway)");
+                Emit("LUAVM_STEP: ctor MoonSharp");
+                moon = new MoonSharpRunner();
+                Emit("LUAVM_STEP: ctor Lua-CSharp");
+                lc = new LuaCSharpRunner();
+                Emit("LUAVM_STEP: both runners constructed");
+
+                var runners = new[] { moon, lc };
                 bool allOk = true;
                 foreach (var c in Correctness)
                 {
                     foreach (var r in runners)
                     {
+                        Emit($"LUAVM_STEP: eval {r.Name} {c.Name} ...");
                         string got = r.Eval(c.Code);
                         bool ok = got == c.Expected;
                         allOk &= ok;
-                        sb.AppendLine($"{(ok ? "OK  " : "FAIL")} {r.Name} {c.Name}: '{got}' (expected '{c.Expected}')");
+                        string line = $"{(ok ? "OK  " : "FAIL")} {r.Name} {c.Name}: '{got}' (expected '{c.Expected}')";
+                        sb.AppendLine(line);
+                        Emit("LUAVM_STEP: " + line);
                     }
                 }
 
@@ -104,7 +125,8 @@ namespace LuaVmComparison
             }
             finally
             {
-                foreach (var r in runners) r.Dispose();
+                moon?.Dispose();
+                lc?.Dispose();
             }
         }
 

@@ -59,6 +59,26 @@ namespace LuaVmComparison
             }
         }
 
+        /// <summary>
+        /// Non-blocking counterpart to <see cref="Eval"/>. Awaits <c>ExecuteAsync</c> instead of blocking on
+        /// <c>GetAwaiter().GetResult()</c>, so on single-threaded WebGL/WASM a script that calls
+        /// <c>coroutine.yield</c> can have its continuation pumped by Unity's player loop across frames rather
+        /// than deadlocking the only thread. Normalizes the first result exactly like <see cref="Eval"/>.
+        /// </summary>
+        public async System.Threading.Tasks.Task<string> EvalAsync(string code, System.Threading.CancellationToken ct = default)
+        {
+            try
+            {
+                LuaClosure closure = _state.Load(code, "eval");
+                LuaValue[] results = await _state.ExecuteAsync(closure, ct);
+                return results.Length == 0 ? "nil" : Normalize(results[0]);
+            }
+            catch (Exception e)
+            {
+                return "ERR:" + e.GetType().Name;
+            }
+        }
+
         public bool HasGlobal(string name)
         {
             LuaValue v = _state.Environment[name];
