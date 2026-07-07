@@ -221,90 +221,9 @@ namespace CoreAI.Chat
         private static void ConfigureWebGlKeyboardInput()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            TrySetWebGlCaptureAllKeyboardInput(false);
+            WebGLInput.captureAllKeyboardInput = false;
 #endif
         }
-
-#if UNITY_WEBGL && !UNITY_EDITOR
-        // UnityEngine.WebGLInput.captureAllKeyboardInput is the current (Unity 6000.x) API for releasing the
-        // WebGL canvas' global keyboard capture. The type is forwarded from UnityEngine.dll to the
-        // UnityEngine.WebGLModule assembly. When a WebGL player is compiled from a command-line build whose
-        // Editor active build target is not WebGL, that module is absent from the compilation reference set,
-        // so a direct reference fails with CS0103 even under this UNITY_WEBGL guard (the guard gates the
-        // *define*, not the *assembly reference*). The canonical build-side fix is to switch the active build
-        // target to WebGL before BuildPipeline.BuildPlayer, but a redistributable package cannot dictate how
-        // downstream CI orchestrates its builds, so we late-bind the accessor here to stay build-agnostic.
-        //
-        // Binding happens once; the getter/setter are cached as typed delegates so the per-frame Update path
-        // is a direct virtual call with no reflection overhead and no boxing allocation. If IL2CPP AOT
-        // refuses Delegate.CreateDelegate for a late-bound method, we fall back to PropertyInfo invocation so
-        // keyboard capture is still released (correctness over the micro-optimisation).
-        private static Func<bool> _webGlGetCaptureAllKeyboardInput;
-        private static Action<bool> _webGlSetCaptureAllKeyboardInput;
-        private static bool _webGlKeyboardInputResolved;
-
-        private static void EnsureWebGlKeyboardInputAccessors()
-        {
-            if (_webGlKeyboardInputResolved)
-            {
-                return;
-            }
-
-            _webGlKeyboardInputResolved = true;
-
-            Type webGlInputType = Type.GetType("UnityEngine.WebGLInput, UnityEngine.WebGLModule");
-            System.Reflection.PropertyInfo property = webGlInputType?.GetProperty(
-                "captureAllKeyboardInput",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            if (property == null)
-            {
-                return;
-            }
-
-            System.Reflection.MethodInfo getter = property.GetGetMethod(nonPublic: false);
-            System.Reflection.MethodInfo setter = property.GetSetMethod(nonPublic: false);
-
-            try
-            {
-                if (getter != null)
-                {
-                    _webGlGetCaptureAllKeyboardInput =
-                        (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), getter);
-                }
-
-                if (setter != null)
-                {
-                    _webGlSetCaptureAllKeyboardInput =
-                        (Action<bool>)Delegate.CreateDelegate(typeof(Action<bool>), setter);
-                }
-            }
-            catch (Exception)
-            {
-                // AOT rejected the fast path: keep working via reflection (boxes, but only runs on WebGL).
-                if (getter != null)
-                {
-                    _webGlGetCaptureAllKeyboardInput = () => (bool)property.GetValue(null);
-                }
-
-                if (setter != null)
-                {
-                    _webGlSetCaptureAllKeyboardInput = value => property.SetValue(null, value);
-                }
-            }
-        }
-
-        private static void TrySetWebGlCaptureAllKeyboardInput(bool value)
-        {
-            EnsureWebGlKeyboardInputAccessors();
-            _webGlSetCaptureAllKeyboardInput?.Invoke(value);
-        }
-
-        private static bool GetWebGlCaptureAllKeyboardInput()
-        {
-            EnsureWebGlKeyboardInputAccessors();
-            return _webGlGetCaptureAllKeyboardInput != null && _webGlGetCaptureAllKeyboardInput();
-        }
-#endif
 
         /// <summary>
         /// Polls keyboard shortcuts, updates long-request feedback, and reapplies responsive layout.
@@ -312,9 +231,9 @@ namespace CoreAI.Chat
         protected virtual void Update()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            if (GetWebGlCaptureAllKeyboardInput())
+            if (WebGLInput.captureAllKeyboardInput)
             {
-                TrySetWebGlCaptureAllKeyboardInput(false);
+                WebGLInput.captureAllKeyboardInput = false;
             }
 #endif
             PollChatToggleShortcuts();

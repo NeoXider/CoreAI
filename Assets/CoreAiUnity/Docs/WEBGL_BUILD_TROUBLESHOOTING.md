@@ -30,40 +30,6 @@ Often appears alongside **FileSystemWatcher** stacks while Unity or the OS enume
 
 Comes from **`CoreAIWebGlStreamingAssetsGuard`** (Editor preprocess). It intentionally skips certain StreamingAssets folders for WebGL so the build stays valid. **Informational**, not an error.
 
-## `error CS0103: The name 'WebGLInput' does not exist in the current context`
-
-`UnityEngine.WebGLInput` is a **type forwarded** from `UnityEngine.dll` to the `UnityEngine.WebGLModule`
-assembly. When a WebGL player is compiled from a **command-line build whose Editor active target is not
-WebGL** (e.g. active target Android/Windows), that module is not in the compilation reference set, so a
-direct `WebGLInput.captureAllKeyboardInput` reference fails with **CS0103**. The
-`#if UNITY_WEBGL && !UNITY_EDITOR` guard does **not** help: it gates the *define* (which is set for the
-WebGL player), not the *assembly reference set*. Switching the Editor to the WebGL platform first makes
-the error disappear, which is why it only reproduces on cross-target CLI/CI builds.
-
-**Canonical fix (if you own the build pipeline):** switch the active build target to WebGL *before*
-`BuildPipeline.BuildPlayer`, so the Editor loads the WebGL module reference set and the direct call
-compiles with zero runtime cost:
-
-```csharp
-if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.WebGL)
-{
-    EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL);
-}
-// ... then BuildPipeline.BuildPlayer(...)
-```
-
-Passing `-buildTarget WebGL` on the batchmode command line is **not** a reliable substitute — in several
-Unity versions it does not switch the active target before the first player-script compile, so the error
-still fires. Do the switch explicitly in the build method.
-
-**Package-side robustness (why CoreAI does not depend on the above):** a redistributable package cannot
-force every downstream CI to switch targets first, so `CoreAiChatPanel` late-binds
-`captureAllKeyboardInput` — it resolves `UnityEngine.WebGLInput, UnityEngine.WebGLModule` once via
-reflection and caches typed `Func<bool>`/`Action<bool>` delegates (with a `PropertyInfo` fallback if
-IL2CPP AOT refuses `Delegate.CreateDelegate`). The type is always present at runtime inside the real WebGL
-player, so the package compiles regardless of the Editor's active build target and the per-frame reset in
-`Update()` stays allocation-free.
-
 ## Invalid folder `.meta` GUID
 
 Unity requires **`guid:`** to be **exactly 32 hexadecimal characters**. A typo (33rd character) makes Unity ignore the folder asset and log **“does not have a valid GUID”**. Fix the line or delete the `.meta` and let Unity regenerate it.
