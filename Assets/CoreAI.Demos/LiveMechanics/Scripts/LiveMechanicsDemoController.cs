@@ -40,7 +40,7 @@ namespace CoreAI.Demos
         private CoreAILifetimeScope coreAiScope;
 
         private LuaLogicSlots _slots;
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
         private LuaTool.ILuaExecutor _luaExecutor;
         private readonly List<string> _battleLog = new();
@@ -66,7 +66,7 @@ namespace CoreAI.Demos
             }
 
             _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
             _luaExecutor = coreAiScope.Container.Resolve<LuaTool.ILuaExecutor>();
             _slots.DeclareSlot(DamageSlot);

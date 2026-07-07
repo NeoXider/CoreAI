@@ -43,7 +43,7 @@ namespace CoreAI.Demos
         private const int WindowId = 0x10D_0001;
         private const int EditWindowId = 0x10D_0003;
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
         private CoreAiLuaModAutoRepair _autoRepair;
         private string _status = "Waiting for CoreAI scope.";
@@ -140,7 +140,7 @@ namespace CoreAI.Demos
                 yield break;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
             _autoRepair = FindFirstObjectByType<CoreAiLuaModAutoRepair>();
             _mods.ModSourceLoaded += OnModSourceLoaded;

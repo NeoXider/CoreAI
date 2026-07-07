@@ -49,7 +49,7 @@ namespace CoreAI.Demos
             set => toggleKey = value;
         }
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private string _status = "Waiting for CoreAI scope.";
         private string _selfTestSummary = "Self-test not run yet.";
         private readonly List<string> _selfTestLines = new();
@@ -75,7 +75,7 @@ namespace CoreAI.Demos
                 yield break;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _mods.ModReportEmitted += OnModReport;
             bool tetrisAlreadyRunning = _mods.IsLoaded(TetrisId);
             if (tetrisAlreadyRunning)

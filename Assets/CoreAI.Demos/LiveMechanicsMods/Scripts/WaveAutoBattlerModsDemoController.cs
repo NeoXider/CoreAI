@@ -35,7 +35,7 @@ namespace CoreAI.Demos
 
         private readonly List<EnemyState> _enemies = new();
         private readonly List<string> _log = new();
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private LuaLogicSlots _slots;
         private GameObject _heroVisual;
         private float _heroHp;
@@ -72,7 +72,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
             DeclareSlots();
             EnsureAnchorsAndVisuals();

@@ -190,6 +190,57 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &406190034
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 406190035}
+  - component: {fileID: 406190036}
+  m_Layer: 0
+  m_Name: CoreAiMods
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &406190035
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 406190034}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2106438250}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &406190036
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 406190034}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 246dc9124f4d62b408c1b063ef72d69b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Composition.CoreAiModsLifetimeScope
+  parentReference:
+    TypeName: 
+  autoRun: 1
+  autoInjectGameObjects: []
+  enableFullLuaAccess: 1
+  enableFullLuaPrivateAccess: 0
+  allowedLuaScenes: []
 --- !u!1 &573228319
 GameObject:
   m_ObjectHideFlags: 0
@@ -441,6 +492,8 @@ MonoBehaviour:
     width: 430
     height: 460
   showPanel: 1
+  transientModIds:
+  - auto_repair_smoke
 --- !u!114 &933156843
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -737,23 +790,32 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1944e5601b054674f9aba21055a2342c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
-  title: Wave Auto-Battler mod prompts
+  title: "Lua mod tasks (easy \u2192 hard)"
   panelRect:
     serializedVersion: 2
     x: 12
     y: 412
     width: 560
     height: 180
+  chatReserveWidth: 700
   prompts:
-  - Label: Add healer aura
-    Prompt: Make the hero slowly regenerate health, and announce it whenever a wave
-      is cleared. Save this as a mod so I can turn it off later.
-  - Label: Make waves harder
-    Prompt: 
-  - Label: Make rewards generous
-    Prompt: Change the wave difficulty mod so enemies are a bit less tanky, but rewards
-      are much better. Keep it as the same mod instead of creating a duplicate.
+  - Label: 'Easy: recolor background'
+    Prompt: Create and load a persistent Lua mod named 'bg_recolor' that every 2
+      seconds sets the camera background to a new random color. Use hooks_every.
+  - Label: 'Medium: day/night cycle'
+    Prompt: Create and load a persistent Lua mod named 'day_night' that every 10
+      seconds advances a phase dawn -> day -> dusk -> night, emits a 'phase_changed'
+      event with the phase name, logs the phase via report(), and persists the phase
+      index with store_set so it survives a reload.
+  - Label: 'Hard: spawner + director (inter-mod)'
+    Prompt: 'Create two cooperating Lua mods. Mod ''spawner'': every 3 seconds spawn
+      a cube enemy at a random position and publish the current live enemy count
+      via mods_export(''count'', n). Mod ''director'': every 3 seconds read the count
+      with mods_get(''spawner'',''count'') and, when it exceeds 5, emit a ''boss_wave''
+      event and report it. Load both.'
   submitWhenInputUnavailable: 0
+  _showPanel: 1
+  _toggleKey: 289
 --- !u!4 &2100352201
 Transform:
   m_ObjectHideFlags: 0
@@ -810,6 +872,7 @@ MonoBehaviour:
   luaAllowedScenes: []
   enableFullLuaAccess: 1
   enableFullLuaPrivateAccess: 0
+  roleSkills: []
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
 --- !u!4 &2106438250
@@ -824,7 +887,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 406190035}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807

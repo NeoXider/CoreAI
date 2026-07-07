@@ -31,7 +31,7 @@ namespace CoreAI.Demos
         [Tooltip("Mod that overrides the damage formula (Read | LogicOverride).")] [SerializeField]
         private TextAsset damageTunerMod;
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private LuaLogicSlots _slots;
         private string _status = "";
         private string _lastModEvent = "-";
@@ -52,7 +52,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
             _slots.DeclareSlot(DamageSlot);
             _mods.ModEventEmitted += OnModEvent;

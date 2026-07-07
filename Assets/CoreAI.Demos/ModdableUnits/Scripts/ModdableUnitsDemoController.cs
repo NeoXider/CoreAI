@@ -58,7 +58,7 @@ namespace CoreAI.Demos
         private readonly List<Unit> _units = new();
         private readonly List<string> _log = new();
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private UnitForgeLuaBindings _bindings;
         private string _status = "Starting...";
         private Vector2 _scroll;
@@ -78,7 +78,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _mods.ModEventEmitted += OnModEvent;
             _mods.ModSourceLoaded += OnModLoaded;
 

@@ -51,10 +51,28 @@ namespace CoreAI.Ai
         /// <summary>Emits a named event with a payload to every loaded mod's matching hooks_on handlers.</summary>
         void EmitEvent(string name, string payload = "");
 
+        /// <summary>True when a mod with the given id is currently loaded.</summary>
+        bool IsLoaded(string id);
+
+        /// <summary>Whether a mod's <c>report()</c> calls are surfaced (muted by default to avoid log spam).</summary>
+        bool GetModReportLoggingEnabled(string id);
+
+        /// <summary>Enables/disables a mod's <c>report()</c> log output. Returns false if the mod is unknown.</summary>
+        bool SetModReportLoggingEnabled(string id, bool enabled);
+
         /// <summary>(modId, error, consecutiveErrorCount) when a loaded mod's hook/timer throws under Tick.</summary>
         event Action<string, string, int> ModHandlerErrored;
 
         /// <summary>(modId, source, caps) after a mod source is successfully loaded or reloaded.</summary>
         event Action<string, string, LuaCapabilities> ModSourceLoaded;
+
+        /// <summary>(modId, source, caps) after a mod is unloaded (including automatic error unloads).</summary>
+        event Action<string, string, LuaCapabilities> ModSourceUnloaded;
+
+        /// <summary>(modId, eventName, payload) when a mod calls <c>events_emit</c>.</summary>
+        event Action<string, string, string> ModEventEmitted;
+
+        /// <summary>(modId, message) when a mod calls <c>report</c>/<c>print</c> and its report logging is on.</summary>
+        event Action<string, string> ModReportEmitted;
     }
 }

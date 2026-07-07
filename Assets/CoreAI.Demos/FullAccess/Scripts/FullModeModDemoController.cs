@@ -69,7 +69,7 @@ namespace CoreAI.Demos
         [SerializeField]
         private TextAsset modSourceOverride;
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private string _status = "";
         private string _lastReport = "-";
 
@@ -107,7 +107,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
             _mods.ModReportEmitted += OnModReport;
             _status = LuaModRuntime.IsSupported
                 ? "Ready. Load the Full-mode mod to start."
