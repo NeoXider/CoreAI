@@ -17,6 +17,30 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class LuaCsModRuntimeEditModeTests
     {
+        private SynchronizationContext _savedContext;
+
+        /// <summary>
+        /// The Lua-CSharp runtime bridges its async VM to a synchronous call site via
+        /// <c>state.ExecuteAsync(...).GetAwaiter().GetResult()</c> inside the execution guard. On Unity's
+        /// main thread a <see cref="SynchronizationContext"/> is installed, so any continuation the VM
+        /// posts back to it would deadlock the blocked main thread (a sync-over-async hazard — this is
+        /// why the interactive Unity Test Runner freezes on these paths, and why batchmode is the
+        /// reliable way to run them). Detaching the context for the duration of each test lets those
+        /// continuations complete on the thread pool, exercising the runtime's logic deterministically.
+        /// </summary>
+        [SetUp]
+        public void DetachSynchronizationContext()
+        {
+            _savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        [TearDown]
+        public void RestoreSynchronizationContext()
+        {
+            SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
         /// <summary>In-memory <see cref="ILuaModStore"/> (same shape as the MoonSharp fixture's fake).</summary>
         private sealed class MemoryStore : ILuaModStore
         {
