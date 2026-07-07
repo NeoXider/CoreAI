@@ -155,7 +155,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void RegisterWorldCommands_AttachesLuaTools_ToProgrammerRole()
+        public void RegisterCoreAiMods_AttachesLuaTools_ToProgrammerRole()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             try
@@ -172,6 +172,7 @@ namespace CoreAI.Tests.EditMode
                 builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
 
                 builder.RegisterWorldCommands(registry);
+                builder.RegisterCoreAiMods();
 
                 using IObjectResolver container = builder.Build();
                 AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
@@ -187,7 +188,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task RegisterWorldCommands_FullAccess_ManageModsGrantsFullLua()
+        public async Task RegisterCoreAiMods_FullAccess_ManageModsGrantsFullLua()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject probe = new("FullManageModsProbe");
@@ -205,6 +206,7 @@ namespace CoreAI.Tests.EditMode
                 builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
 
                 builder.RegisterWorldCommands(registry, enableFullLuaAccess: true);
+                builder.RegisterCoreAiMods(enableFullLuaAccess: true);
 
                 using IObjectResolver container = builder.Build();
                 AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
