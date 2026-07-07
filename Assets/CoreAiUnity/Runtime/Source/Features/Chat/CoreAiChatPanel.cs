@@ -226,42 +226,83 @@ namespace CoreAI.Chat
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        // UnityEngine.WebGLInput is a type forwarded to the UnityEngine.WebGLModule assembly. When a WebGL
-        // player is compiled from a command-line build whose Editor active target is not WebGL, that module
-        // is not in the reference set and a direct reference fails to compile (CS0103). Reflection resolves
-        // the type at runtime inside the actual WebGL player, where the module is always present, so the
-        // build compiles regardless of the Editor's active target while behaving identically at runtime.
-        private static System.Reflection.PropertyInfo _webGlCaptureAllKeyboardInputProperty;
-        private static bool _webGlCaptureAllKeyboardInputResolved;
+        // UnityEngine.WebGLInput.captureAllKeyboardInput is the current (Unity 6000.x) API for releasing the
+        // WebGL canvas' global keyboard capture. The type is forwarded from UnityEngine.dll to the
+        // UnityEngine.WebGLModule assembly. When a WebGL player is compiled from a command-line build whose
+        // Editor active build target is not WebGL, that module is absent from the compilation reference set,
+        // so a direct reference fails with CS0103 even under this UNITY_WEBGL guard (the guard gates the
+        // *define*, not the *assembly reference*). The canonical build-side fix is to switch the active build
+        // target to WebGL before BuildPipeline.BuildPlayer, but a redistributable package cannot dictate how
+        // downstream CI orchestrates its builds, so we late-bind the accessor here to stay build-agnostic.
+        //
+        // Binding happens once; the getter/setter are cached as typed delegates so the per-frame Update path
+        // is a direct virtual call with no reflection overhead and no boxing allocation. If IL2CPP AOT
+        // refuses Delegate.CreateDelegate for a late-bound method, we fall back to PropertyInfo invocation so
+        // keyboard capture is still released (correctness over the micro-optimisation).
+        private static Func<bool> _webGlGetCaptureAllKeyboardInput;
+        private static Action<bool> _webGlSetCaptureAllKeyboardInput;
+        private static bool _webGlKeyboardInputResolved;
 
-        private static System.Reflection.PropertyInfo ResolveWebGlCaptureAllKeyboardInputProperty()
+        private static void EnsureWebGlKeyboardInputAccessors()
         {
-            if (_webGlCaptureAllKeyboardInputResolved)
+            if (_webGlKeyboardInputResolved)
             {
-                return _webGlCaptureAllKeyboardInputProperty;
+                return;
             }
 
-            _webGlCaptureAllKeyboardInputResolved = true;
-            System.Type webGlInputType = System.Type.GetType("UnityEngine.WebGLInput, UnityEngine.WebGLModule");
-            _webGlCaptureAllKeyboardInputProperty = webGlInputType?.GetProperty(
+            _webGlKeyboardInputResolved = true;
+
+            Type webGlInputType = Type.GetType("UnityEngine.WebGLInput, UnityEngine.WebGLModule");
+            System.Reflection.PropertyInfo property = webGlInputType?.GetProperty(
                 "captureAllKeyboardInput",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            return _webGlCaptureAllKeyboardInputProperty;
+            if (property == null)
+            {
+                return;
+            }
+
+            System.Reflection.MethodInfo getter = property.GetGetMethod(nonPublic: false);
+            System.Reflection.MethodInfo setter = property.GetSetMethod(nonPublic: false);
+
+            try
+            {
+                if (getter != null)
+                {
+                    _webGlGetCaptureAllKeyboardInput =
+                        (Func<bool>)Delegate.CreateDelegate(typeof(Func<bool>), getter);
+                }
+
+                if (setter != null)
+                {
+                    _webGlSetCaptureAllKeyboardInput =
+                        (Action<bool>)Delegate.CreateDelegate(typeof(Action<bool>), setter);
+                }
+            }
+            catch (Exception)
+            {
+                // AOT rejected the fast path: keep working via reflection (boxes, but only runs on WebGL).
+                if (getter != null)
+                {
+                    _webGlGetCaptureAllKeyboardInput = () => (bool)property.GetValue(null);
+                }
+
+                if (setter != null)
+                {
+                    _webGlSetCaptureAllKeyboardInput = value => property.SetValue(null, value);
+                }
+            }
         }
 
         private static void TrySetWebGlCaptureAllKeyboardInput(bool value)
         {
-            System.Reflection.PropertyInfo property = ResolveWebGlCaptureAllKeyboardInputProperty();
-            if (property != null && property.CanWrite)
-            {
-                property.SetValue(null, value);
-            }
+            EnsureWebGlKeyboardInputAccessors();
+            _webGlSetCaptureAllKeyboardInput?.Invoke(value);
         }
 
         private static bool GetWebGlCaptureAllKeyboardInput()
         {
-            System.Reflection.PropertyInfo property = ResolveWebGlCaptureAllKeyboardInputProperty();
-            return property != null && property.CanRead && (bool)property.GetValue(null);
+            EnsureWebGlKeyboardInputAccessors();
+            return _webGlGetCaptureAllKeyboardInput != null && _webGlGetCaptureAllKeyboardInput();
         }
 #endif
 
