@@ -1,0 +1,16 @@
+{
+  "name": "CoreAI.Hub.UI",
+  "rootNamespace": "CoreAI.Hub.UI",
+  "references": [
+    "CoreAI.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

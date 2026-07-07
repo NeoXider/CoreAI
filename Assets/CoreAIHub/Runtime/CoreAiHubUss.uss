@@ -1,0 +1,94 @@
+/* === CoreAI Hub — default dark theme (UI Toolkit) === */
+/* Optional stylesheet. CoreAiHubWindow also applies equivalent inline styles so the Hub
+   renders out of the box even when this sheet is not assigned. Assign it to layer custom
+   styling on top, or override these classes in your own project sheet. */
+
+.coreai-hub-root {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    width: 720px;
+    height: 640px;
+    background-color: rgba(6, 14, 30, 0.93);
+    border-radius: 16px;
+    border-width: 2px;
+    border-color: rgba(17, 160, 181, 0.35);
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Tab bar */
+.coreai-hub-tabbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    background-color: rgba(10, 22, 45, 0.95);
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(17, 160, 181, 0.3);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    padding: 8px 8px 8px 8px;
+}
+
+.coreai-hub-tab {
+    height: 34px;
+    margin-right: 8px;
+    margin-bottom: 4px;
+    padding-left: 16px;
+    padding-right: 16px;
+    background-color: rgba(17, 160, 181, 0.15);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+    border-radius: 17px;
+    color: rgb(197, 220, 232);
+    font-size: 15px;
+    -unity-font-style: bold;
+    transition-duration: 0.15s;
+}
+
+.coreai-hub-tab:hover {
+    background-color: rgba(77, 208, 225, 0.3);
+    border-color: rgba(77, 208, 225, 0.7);
+}
+
+.coreai-hub-tab-active {
+    background-color: rgba(77, 208, 225, 0.85);
+    border-color: rgba(200, 240, 255, 0.9);
+    color: rgb(6, 14, 30);
+}
+
+/* Content area */
+.coreai-hub-content {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-height: 0;
+    padding: 16px 16px 16px 16px;
+    overflow: hidden;
+}
+
+.coreai-hub-empty {
+    flex-grow: 1;
+    color: rgba(197, 220, 232, 0.6);
+    font-size: 16px;
+    -unity-font-style: italic;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+/* Built-in About page */
+.coreai-hub-about {
+    flex-grow: 1;
+}
+
+.coreai-hub-about-title {
+    color: rgb(77, 208, 225);
+    font-size: 22px;
+    -unity-font-style: bold;
+    margin-bottom: 12px;
+}
+
+.coreai-hub-about-body {
+    color: rgb(220, 232, 240);
+    font-size: 16px;
+    white-space: normal;
+}
