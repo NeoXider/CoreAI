@@ -41,9 +41,9 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public override string RecentErrors(string id)
         {
-            IReadOnlyList<LuaCsModHandlerError> errors = _runtime.GetRecentHandlerErrors(id);
+            IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(id);
             List<(string, int, DateTime)> mapped = new(errors.Count);
-            foreach (LuaCsModHandlerError error in errors)
+            foreach (LuaModHandlerError error in errors)
             {
                 mapped.Add((error.Error, error.ConsecutiveCount, error.AtUtc));
             }
@@ -53,9 +53,9 @@ namespace CoreAI.Ai.Hub
 
         protected override IReadOnlyList<HubLoadedInfo> GetLoaded()
         {
-            IReadOnlyList<LuaCsModInfo> mods = _runtime.ListMods();
+            IReadOnlyList<LuaModInfo> mods = _runtime.ListMods();
             List<HubLoadedInfo> result = new(mods.Count);
-            foreach (LuaCsModInfo mod in mods)
+            foreach (LuaModInfo mod in mods)
             {
                 result.Add(new HubLoadedInfo(
                     mod.Id, mod.Capabilities, mod.HandlerCount, mod.TimerCount, mod.ErrorCount));

@@ -283,7 +283,7 @@ namespace CoreAI.Tests.EditMode
             stack.Runtime.Tick(0); // must not throw out of Tick
             Assert.AreEqual("", store.Get("consumer", "leaked"),
                 "A function export must NOT be readable via mods_get.");
-            IReadOnlyList<LuaCsModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("consumer");
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("consumer");
             Assert.IsNotEmpty(errors, "mods_get on a function export must fail the handler.");
             StringAssert.Contains("function", errors[0].Error,
                 "The error should steer the author toward mods_call.");

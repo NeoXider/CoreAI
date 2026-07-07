@@ -197,3 +197,63 @@ already in the MIT VM: sandbox (`LuaPlatform` + selective libs) and instruction 
 ## Cut (over-engineered)
 Log determinism/replay/host-vs-client machinery (ship per-mod sink + seam only). No CoreAILua rename now.
 Rich live cross-mod callbacks (data-only gated event bus is enough for now).
+Factorio `on_configuration_changed` (persisted-data schema migration on version bump) and the
+`data.lua`/`control.lua` two-stage load — deferred, no current consumer. NOTE: these are NOT hot-reload
+and NOT error-repair — both of those are live (see below).
+
+---
+
+## Current state & remaining checklist (verified 2026-07-08, branch feat/coreaimods-extraction)
+
+### Done and green
+- **LuaCs stack (additive):** sandbox (`LuaCsSecureEnvironment`/`LuaCsExecutionGuard`/`LuaCsApiRegistry`),
+  runtime (`LuaCsModRuntime`), coroutines (frame-pump), all gameplay bindings (`LuaCsGameplayBindings`,
+  78 fns), one-off executor (`LuaCsGameToolExecutor : LuaTool.ILuaExecutor`), factory
+  (`LuaCsModRuntimeFactory`). Compiles clean; `LuaCsModRuntimeEditModeTests` 10/10.
+- **Step A re-wire:** `CoreAiModsInstaller.RegisterCoreAiMods` + child `CoreAiModsLifetimeScope` restore the
+  Lua DI that the extraction stripped (still MoonSharp behind the `IGameLuaRuntimeBindings`/`ILuaExecutor`
+  seam). The two DI gate tests (`RegisterCoreAiMods_AttachesLuaTools_*`) are green; EditMode 20/20.
+- **LuaCs persistence/versioning parity (2026-07-08):** `LuaCsModRuntime` gained `ExportMod`/`ImportMod`/
+  `ForgetMod`/`ListModVersions`/`TryRevertMod`/`RehydrateFromStore` + source/version-store plumbing
+  (`_sourceStore`/`_versionStore`/`_autoPersistMods`, `VersionKeyPrefix="mod:"`), factory options threaded.
+  `LuaCsModRuntimePersistenceEditModeTests` (14 parity tests). Both `dotnet build` = 0 errors.
+- **Hot-reload + error→agent auto-repair are LIVE:** `ReloadMod` + durable `store_*`; `ModHandlerErrored`
+  → `CoreAiLuaModAutoRepair` → debounced Programmer `lua_repair` task; `manage_mods diagnostics`.
+- **Research→code:** Factorio `remote` (mods_export/get/call), AceSerializer/AceComm plain-data boundary,
+  AceEvent fan-out with error isolation + round-robin, Roblox capability tiers — implemented in the runtime.
+
+### The flip — two commits, orchestrator-owned (do NOT fan out; single-file, in-place)
+
+**Commit 1 — switch runtime to LuaCs (MoonSharp stays dormant, still compiles):**
+1. Extract `ILuaModRuntime` (the 11 members `LuaModsLlmTool` uses: ListMods, TryGetModSource, LoadMod,
+   ReloadMod, UnloadMod, ExportMod, ImportMod, ForgetMod, ListModVersions, TryRevertMod,
+   GetRecentHandlerErrors + `ModHandlerErrored` event). `LuaModInfo`/`LuaCsModInfo` have IDENTICAL fields —
+   unify on the shared `LuaModInfo`/`LuaModHandlerError`, delete the LuaCs duplicates; both runtimes implement.
+2. Repoint `LuaModsLlmTool` ctor param `LuaModRuntime` → `ILuaModRuntime`.
+3. `CoreAiModsInstaller`/scope: build via `LuaCsModRuntimeFactory`; register `LuaCsGameToolExecutor` as
+   `LuaTool.ILuaExecutor`; attach `manage_mods` on the LuaCs runtime (via `ILuaModRuntime`).
+4. Switch the tick driver to `LuaCsModRuntime.Tick` (LuaCs ticker/driver already exist).
+5. Repoint `CoreAiLuaModAutoRepair` to `ILuaModRuntime.ModHandlerErrored` so auto-repair follows the LuaCs VM.
+6. Verify: targeted EditMode (LuaCs + persistence + LuaModsLlmTool) green; `dotnet build` 0 errors.
+
+**Commit 2 — purge MoonSharp:**
+7. Delete the MoonSharp runtime: `LuaModRuntime`, `SecureLuaEnvironment`, `LuaApiRegistry`, MoonSharp
+   `*LuaRuntimeBindings`, `GameLuaToolExecutor`, `LuaCoroutineRunner`, `LuaModRuntimeTicker/TickDriver`,
+   `LuaAiEnvelopeProcessor`, MoonSharp store variants replaced by LuaCs. (These have NO `#if` guards — must
+   be deleted, not disabled.)
+8. Remove `"MoonSharp.Interpreter"` + the `COREAI_HAS_MOONSHARP` versionDefine from `CoreAI.Mods.asmdef`.
+9. Remove dead `#if COREAI_HAS_MOONSHARP` blocks in CoreAI.Source (`CorePortableInstaller`,
+   `CoreServicesInstaller`, `GlobalMessagePipeMinimalBootstrap`, `AiGameCommandRouter`, `CoreAILifetimeScope`,
+   `CoreAiChatExternalDriver.RunLuaDiag`).
+10. `link.xml`: add `Lua.dll` AOT preserves, drop MoonSharp preserves; keep it with CoreAIMods for WebGL/IL2CPP.
+11. Verify: targeted EditMode green; Windows player build; WebGL smoke.
+
+### Future (post-flip, separate phases)
+- **Scene wiring:** add `CoreAiModsLifetimeScope` child to target scenes + `CoreAI → Setup → Add Mods` menu
+  helper (until then, live scenes do NOT get Lua tools even though tests are green).
+- PlayMode `FastNoLlm` run (safe, no backend); avoid full-suite via interactive runner (deadlocks).
+- Phase 3 mod store: CRUD + categories (folders) + search + persistence polish.
+- Phase 5 per-mod isolated logging (MP-ready `IModLogSink`, {modId, scope, tick, seq}).
+- Phase 6 update the Lua Modding skill for Lua-CSharp 5.4 semantics.
+- Dependencies/soft-hard + version ranges + load-order topo-sort (BepInEx patterns — researched, not built).
+- Deterministic tick seam (`IModClock` fixed-step) + store-command DTO for host-authoritative MP.

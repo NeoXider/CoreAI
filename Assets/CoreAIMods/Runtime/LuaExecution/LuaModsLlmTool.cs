@@ -31,7 +31,7 @@ namespace CoreAI.Ai
         /// <summary>Cap on the source text returned by <c>get_source</c>.</summary>
         public const int MaxSourceLengthReturned = 16_000;
 
-        private readonly LuaModRuntime _runtime;
+        private readonly ILuaModRuntime _runtime;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
         private readonly LuaCapabilities _grantedCapabilities;
@@ -47,7 +47,7 @@ namespace CoreAI.Ai
         /// When false the tool is read-only: only <c>list</c> and <c>get_source</c> are accepted.
         /// </param>
         public LuaModsLlmTool(
-            LuaModRuntime runtime,
+            ILuaModRuntime runtime,
             ICoreAISettings settings,
             ILog logger,
             LuaCapabilities grantedCapabilities = LuaCapabilities.All,

@@ -47,7 +47,7 @@ namespace CoreAI.Presentation
         [Tooltip("Source tag for logs and dashboard entries.")] [SerializeField]
         private string sourceTag = "lua_mod_auto_repair";
 
-        private LuaModRuntime _mods;
+        private ILuaModRuntime _mods;
         private IAiOrchestrationService _orchestrator;
         private LuaModAutoRepairPolicy _policy;
         private bool _ready;
@@ -93,9 +93,9 @@ namespace CoreAI.Presentation
                 _log = resolvedLog;
             }
 
-            if (!lifetimeScope.Container.TryResolve<LuaModRuntime>(out _mods) || _mods == null)
+            if (!lifetimeScope.Container.TryResolve<ILuaModRuntime>(out _mods) || _mods == null)
             {
-                SetStatus("Lua mod auto-repair disabled: LuaModRuntime not registered.");
+                SetStatus("Lua mod auto-repair disabled: ILuaModRuntime not registered.");
                 enabled = false;
                 yield break;
             }

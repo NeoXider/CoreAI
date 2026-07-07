@@ -225,7 +225,7 @@ namespace CoreAI.Tests.EditMode
                     "local id = unity_find('FullManageModsProbe')\nif id == 0 then error('Full unity_find missing') end");
                 Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 
-                IReadOnlyList<LuaModInfo> loaded = container.Resolve<LuaModRuntime>().ListMods();
+                IReadOnlyList<LuaModInfo> loaded = container.Resolve<ILuaModRuntime>().ListMods();
                 Assert.AreEqual(LuaCapabilities.All | LuaCapabilities.Full, loaded[0].Capabilities);
             }
             finally

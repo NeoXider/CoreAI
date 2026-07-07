@@ -52,6 +52,21 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Persistent per-mod k/v store backing <c>store_set</c>/<c>store_get</c>.</summary>
         public ILuaModStore ModStore;
 
+        /// <summary>
+        /// Package store persisting mod source + manifest so mods survive a restart and can be shared
+        /// (backs <c>ExportMod</c>/<c>ImportMod</c>/<c>RehydrateFromStore</c>). Distinct from
+        /// <see cref="ModStore"/> (per-mod runtime k/v). Null =&gt; <see cref="NullLuaModSourceStore.Instance"/>
+        /// (in-memory only). The mod's revision history reuses <see cref="LuaScriptVersions"/>, keyed by the
+        /// runtime's <c>mod:</c> prefix so it never collides with one-off <c>execute_lua</c> script slots.
+        /// </summary>
+        public ILuaModSourceStore ModSourceStore;
+
+        /// <summary>
+        /// When true (default), a successful load/reload persists source + manifest to
+        /// <see cref="ModSourceStore"/> and unload marks the stored package dormant.
+        /// </summary>
+        public bool AutoPersistMods = true;
+
         /// <summary>Runtime logger for load/unload/error diagnostics.</summary>
         public ILog Log;
 
@@ -142,7 +157,12 @@ namespace CoreAI.Ai.LuaCs
                 store: options.ModStore,
                 log: options.Log,
                 handlerTimeoutMs: options.HandlerTimeoutMs,
-                handlerMaxSteps: options.HandlerMaxSteps);
+                handlerMaxSteps: options.HandlerMaxSteps,
+                sourceStore: options.ModSourceStore,
+                autoPersistMods: options.AutoPersistMods,
+                // Share the version store the gameplay bindings already use: the runtime keys mod history
+                // under a "mod:" prefix, so it never collides with the coreai_lua_* script slots.
+                versionStore: options.LuaScriptVersions);
 
             LuaCsGameToolExecutor executor = new(
                 new LuaCsSecureEnvironment(),

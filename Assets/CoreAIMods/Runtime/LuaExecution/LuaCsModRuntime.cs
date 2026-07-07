@@ -4,43 +4,10 @@ using System.Threading;
 using CoreAI.Logging;
 using CoreAI.Sandbox.LuaCs;
 using Lua;
+using Newtonsoft.Json;
 
 namespace CoreAI.Ai.LuaCs
 {
-    /// <summary>
-    /// Snapshot of a loaded Lua-CSharp mod for diagnostics/UI. Mirrors
-    /// <see cref="CoreAI.Ai.LuaModInfo"/> (the MoonSharp runtime's snapshot) field-for-field so
-    /// hosts and tooling can render either VM's mods through the same shape.
-    /// </summary>
-    public sealed class LuaCsModInfo
-    {
-        public string Id = "";
-        public LuaCapabilities Capabilities;
-        public int HandlerCount;
-        public int TimerCount;
-        public int ErrorCount;
-        public bool LogReports;
-        public DateTime LoadedAtUtc;
-    }
-
-    /// <summary>
-    /// A single Tick-time mod-handler failure captured for later inspection by the agent (via
-    /// <see cref="LuaCsModRuntime.GetRecentHandlerErrors"/>). Mirrors
-    /// <see cref="CoreAI.Ai.LuaModHandlerError"/>. Unlike a load/reload error — which propagates
-    /// synchronously to whoever triggered it — these happen asynchronously on the host thread, so
-    /// they are buffered here so the agent learns of them on a later turn and can repair the mod.
-    /// </summary>
-    public sealed class LuaCsModHandlerError
-    {
-        public string ModId = "";
-        public string Error = "";
-
-        /// <summary>The mod's consecutive-failure streak when this error fired (resets after any success).</summary>
-        public int ConsecutiveCount;
-
-        public DateTime AtUtc;
-    }
-
     /// <summary>
     /// Lua-CSharp (nuskey8/Lua-CSharp) persistent runtime for long-lived mods. This is the ADDITIVE
     /// counterpart of the MoonSharp <see cref="CoreAI.Ai.LuaModRuntime"/>, built as part of the
@@ -66,11 +33,17 @@ namespace CoreAI.Ai.LuaCs
     /// SCOPE NOTE (migration pass 1): the heavy world/unity gameplay bindings that the MoonSharp
     /// runtime injects via <c>IGameLuaRuntimeBindings.RegisterGameplayApis(LuaApiRegistry)</c> are
     /// NOT ported here. This runtime accepts an injection callback so ported gameplay APIs can be
-    /// wired later; see <see cref="RegisterGameplayBindings"/> for the open seam. Source/version
-    /// stores, import/export and rehydrate (present on the MoonSharp runtime) are likewise deferred
-    /// to a later pass and intentionally omitted to keep this VM addition bounded and compiling.
+    /// wired later; see <see cref="RegisterGameplayBindings"/> for the open seam.
+    ///
+    /// PERSISTENCE PARITY (migration pass 2): source-store persistence, version history, import/export,
+    /// rehydrate and forget/revert are now ported from the MoonSharp runtime and behave identically
+    /// (a successful <see cref="LoadMod"/>/<see cref="ReloadMod"/> saves source+manifest to the
+    /// <see cref="ILuaModSourceStore"/> and records a revision in the <see cref="ILuaScriptVersionStore"/>;
+    /// <see cref="UnloadMod"/> marks the package dormant; <see cref="ForgetMod"/> deletes it), so
+    /// <c>manage_mods</c> can later run on this VM. Both stores default to no-op implementations, so a
+    /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
-    public sealed class LuaCsModRuntime
+    public sealed class LuaCsModRuntime : ILuaModRuntime
     {
         public const int DefaultHandlerTimeoutMs = 100;
         public const long DefaultHandlerMaxSteps = 100_000;
@@ -105,6 +78,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Shortest accepted <c>hooks_every</c> interval, so timers cannot degenerate into per-instruction spam.</summary>
         public const double MinTimerIntervalSeconds = 0.05;
+
+        /// <summary>
+        /// Prefix applied to a mod id when forming its <see cref="ILuaScriptVersionStore"/> key, so a mod's
+        /// revision history shares the version store with one-shot <c>execute_lua</c> scripts without ever
+        /// colliding with a game-defined script slot of the same name. Mirrors the MoonSharp runtime's key.
+        /// </summary>
+        public const string VersionKeyPrefix = "mod:";
 
         /// <summary>
         /// Upper bound on the number of recent Tick-time handler errors retained for the agent to
@@ -142,10 +122,13 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsExecutionGuard _handlerGuard;
         private readonly Action<LuaCsApiRegistry, LuaCapabilities> _gameplayBindings;
         private readonly ILuaModStore _store;
+        private readonly ILuaModSourceStore _sourceStore;
+        private readonly ILuaScriptVersionStore _versionStore;
+        private readonly bool _autoPersistMods;
         private readonly ILog _log;
         private readonly List<Mod> _tickScratch = new();
 
-        private readonly Queue<LuaCsModHandlerError> _recentHandlerErrors = new();
+        private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
 
         /// <summary>
         /// Round-robin start index for charging the global event dispatch budget so, under sustained
@@ -201,28 +184,58 @@ namespace CoreAI.Ai.LuaCs
         /// <param name="log">Optional logger.</param>
         /// <param name="handlerTimeoutMs">Wall-clock budget per handler/timer call.</param>
         /// <param name="handlerMaxSteps">Instruction budget per handler/timer call.</param>
+        /// <param name="sourceStore">
+        /// Optional package store persisting mod source + manifest so mods survive a restart and can be
+        /// shared. Distinct from <paramref name="store"/> (which is per-mod runtime k/v). Null falls back
+        /// to <see cref="NullLuaModSourceStore.Instance"/> (in-memory only — the prior behaviour).
+        /// </param>
+        /// <param name="autoPersistMods">
+        /// When true (default), a successful <see cref="LoadMod"/>/<see cref="ReloadMod"/> persists the
+        /// source + manifest to <paramref name="sourceStore"/> and <see cref="UnloadMod"/> marks the
+        /// stored package dormant. Persistence is always best-effort: a store failure is logged, never
+        /// thrown out of the load.
+        /// </param>
+        /// <param name="versionStore">
+        /// Optional revision tracker. When supplied, every successful <see cref="LoadMod"/>/<see cref="ReloadMod"/>
+        /// records the mod's source as a new revision (keyed by <see cref="VersionKeyPrefix"/> + mod id), so
+        /// the agent (or host) can list past revisions and roll back via <see cref="ListModVersions"/> /
+        /// <see cref="TryRevertMod"/>. Null falls back to <see cref="NullLuaScriptVersionStore"/> (no history —
+        /// the prior behaviour).
+        /// </param>
         public LuaCsModRuntime(
             Action<LuaCsApiRegistry, LuaCapabilities> gameplayBindings = null,
             ILuaModStore store = null,
             ILog log = null,
             int handlerTimeoutMs = DefaultHandlerTimeoutMs,
-            long handlerMaxSteps = DefaultHandlerMaxSteps)
+            long handlerMaxSteps = DefaultHandlerMaxSteps,
+            ILuaModSourceStore sourceStore = null,
+            bool autoPersistMods = true,
+            ILuaScriptVersionStore versionStore = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
             _log = log;
+            _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
+            _versionStore = versionStore ?? new NullLuaScriptVersionStore();
+            _autoPersistMods = autoPersistMods;
             _handlerGuard = new LuaCsExecutionGuard(handlerTimeoutMs, handlerMaxSteps);
         }
 
-        /// <summary>Snapshot of all loaded mods.</summary>
-        public IReadOnlyList<LuaCsModInfo> ListMods()
+        /// <summary>The <see cref="ILuaScriptVersionStore"/> key for a mod's revision history.</summary>
+        private static string VersionKey(string modId)
         {
-            List<LuaCsModInfo> result = new();
+            return VersionKeyPrefix + modId;
+        }
+
+        /// <summary>Snapshot of all loaded mods.</summary>
+        public IReadOnlyList<LuaModInfo> ListMods()
+        {
+            List<LuaModInfo> result = new();
             lock (_gate)
             {
                 foreach (Mod mod in _mods.Values)
                 {
-                    result.Add(new LuaCsModInfo
+                    result.Add(new LuaModInfo
                     {
                         Id = mod.Id,
                         Capabilities = mod.Caps,
@@ -296,10 +309,16 @@ namespace CoreAI.Ai.LuaCs
         /// duplicate id, mod-count limit, or script error — nothing is left registered when the load
         /// fails.
         /// </summary>
+        /// <param name="persistToStore">
+        /// When true (default), the mod's source and manifest are written to the source store. Rehydration
+        /// and import pass false so loading a mod with masked runtime capabilities never overwrites the
+        /// declared capabilities already recorded in the store.
+        /// </param>
         public void LoadMod(
             string id,
             string luaCode,
-            LuaCapabilities capabilities = LuaCapabilities.All)
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            bool persistToStore = true)
         {
             string modId = Normalize(id);
             if (modId.Length == 0)
@@ -338,6 +357,18 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
+
+            // Record the revision before persisting so PersistMod can stamp the manifest Version from the
+            // revision count. The version store seeds the original on the first record and dedups identical
+            // source, so a rehydrate (which replays the stored current source) does not create a spurious
+            // entry. Recording is independent of persistToStore: a masked rehydrate/import still wants its
+            // history seeded.
+            RecordRevision(modId, luaCode);
+            if (persistToStore)
+            {
+                PersistMod(modId, luaCode, capabilities);
+            }
+
             ModSourceLoaded?.Invoke(modId, luaCode, capabilities);
         }
 
@@ -414,6 +445,22 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' unloaded.");
+
+            // Keep the persisted package but mark it dormant so it does not auto-reload next start; the
+            // source is not lost (use ForgetMod to delete it). Best-effort: a store failure must not
+            // break unloading.
+            if (_autoPersistMods)
+            {
+                try
+                {
+                    _sourceStore.SetActive(modId, false);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Source store SetActive('{modId}', false) failed: {ex}");
+                }
+            }
+
             ModSourceUnloaded?.Invoke(modId, source, caps);
             return true;
         }
@@ -449,7 +496,120 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}).");
+            RecordRevision(modId, luaCode);
+            PersistMod(modId, luaCode, caps);
             ModSourceLoaded?.Invoke(modId, luaCode, caps);
+        }
+
+        /// <summary>
+        /// Records <paramref name="luaCode"/> as a new revision of the mod in the version store. Best-effort:
+        /// a store failure is logged, never thrown out of a load/reload. <c>SeedOriginal</c> establishes the
+        /// baseline (revision 0) on the first record; <c>RecordSuccessfulExecution</c> appends a new revision
+        /// only when the source actually changed, so a no-op reload does not grow the history.
+        /// </summary>
+        private void RecordRevision(string modId, string luaCode)
+        {
+            try
+            {
+                string key = VersionKey(modId);
+                _versionStore.SeedOriginal(key, luaCode);
+                _versionStore.RecordSuccessfulExecution(key, luaCode);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Version store record for '{modId}' failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Returns the recorded revision history for a mod (revision 0 = original), newest last, or an empty
+        /// list when the mod has no tracked history (no version store, or never loaded through one).
+        /// </summary>
+        public IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
+        {
+            string modId = Normalize(id);
+            try
+            {
+                if (_versionStore.TryGetSnapshot(VersionKey(modId), out LuaScriptVersionRecord snapshot) &&
+                    snapshot != null)
+                {
+                    return snapshot.History;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Version store snapshot for '{modId}' failed: {ex}");
+            }
+
+            return Array.Empty<LuaScriptRevision>();
+        }
+
+        /// <summary>
+        /// Rolls a mod back to a recorded revision. When the mod is currently loaded it is reloaded from that
+        /// revision's source; the reload appends the restored source as the new current revision (a
+        /// non-destructive revert — the history is an audit trail, not rewound) and re-persists the source
+        /// store and manifest Version. When the mod is not loaded the version store is rewound to that revision
+        /// instead (truncating later revisions), so a future load starts from the chosen point. Sets
+        /// <paramref name="restoredSource"/> and returns true on success; returns false when the mod has no such
+        /// revision. Throws if the restored source fails to reload (the live mod stays untouched, exactly like
+        /// <see cref="ReloadMod"/>).
+        /// </summary>
+        public bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
+        {
+            restoredSource = null;
+            string modId = Normalize(id);
+            if (revisionIndex < 0)
+            {
+                return false;
+            }
+
+            LuaScriptVersionRecord snapshot;
+            try
+            {
+                if (!_versionStore.TryGetSnapshot(VersionKey(modId), out snapshot) || snapshot == null)
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Version store snapshot for '{modId}' failed: {ex}");
+                return false;
+            }
+
+            if (revisionIndex >= snapshot.History.Count)
+            {
+                return false;
+            }
+
+            string source = snapshot.History[revisionIndex].Source ?? "";
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return false;
+            }
+
+            // Reload first (it can throw on a bad revision, leaving the live mod untouched), then truncate the
+            // version history to the chosen revision so a future revert references a clean lineage. Reload
+            // re-records the restored source as the new current revision and re-persists the source store.
+            if (IsLoaded(modId))
+            {
+                ReloadMod(modId, source);
+            }
+            else
+            {
+                try
+                {
+                    _versionStore.ResetToRevision(VersionKey(modId), revisionIndex);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Version store revert for '{modId}' failed: {ex}");
+                    return false;
+                }
+            }
+
+            restoredSource = source;
+            return true;
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
@@ -1031,12 +1191,318 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
+        /// Unloads the mod (if loaded) <em>and</em> deletes its persisted package, so it does not
+        /// rehydrate on a future start. Returns true when either an unload or a delete occurred.
+        /// </summary>
+        public bool ForgetMod(string id)
+        {
+            string modId = Normalize(id);
+            bool wasLoaded = UnloadMod(modId);
+
+            try
+            {
+                _sourceStore.Delete(modId);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Source store Delete('{modId}') failed: {ex}");
+                return wasLoaded;
+            }
+
+            return wasLoaded || modId.Length > 0;
+        }
+
+        /// <summary>
+        /// Loads every stored mod whose manifest is <see cref="LuaModManifest.Active"/> and not already
+        /// loaded. Each mod's persisted capability request is intersected with
+        /// <paramref name="hostGrant"/> and (unless <paramref name="allowFull"/>) stripped of
+        /// <see cref="LuaCapabilities.Full"/>, so a persisted or shared mod can never auto-acquire full
+        /// reflection. Loads run in independent try/catch blocks so one bad package does not abort the
+        /// rest. Returns the count successfully loaded.
+        /// </summary>
+        public int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            IReadOnlyList<LuaModManifest> manifests;
+            try
+            {
+                manifests = _sourceStore.List() ?? Array.Empty<LuaModManifest>();
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Source store List() failed during rehydrate: {ex}");
+                return 0;
+            }
+
+            int loaded = 0;
+            foreach (LuaModManifest manifest in manifests)
+            {
+                if (manifest == null || !manifest.Active)
+                {
+                    continue;
+                }
+
+                string modId = Normalize(manifest.Id);
+                if (modId.Length == 0 || IsLoaded(modId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!_sourceStore.TryLoad(modId, out string source, out LuaModManifest stored) ||
+                        string.IsNullOrWhiteSpace(source))
+                    {
+                        _log?.Warn($"[LuaCsModRuntime] Rehydrate skipped '{modId}': no source in store.");
+                        continue;
+                    }
+
+                    string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
+                    LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+
+                    // Load with the masked runtime tier but do NOT re-persist: the stored manifest already
+                    // holds the mod's declared capabilities. Overwriting it with the masked tier would
+                    // permanently strip Full from the store, so a later allowFull rehydrate could not
+                    // restore it.
+                    LoadMod(modId, source, effectiveCaps, false);
+                    loaded++;
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Rehydrate of mod '{modId}' failed: {ex}");
+                }
+            }
+
+            return loaded;
+        }
+
+        /// <summary>
+        /// Returns a shareable JSON bundle <c>{ "manifest": {...}, "source": "..." }</c> for a loaded or
+        /// stored mod, or null when neither holds the id.
+        /// </summary>
+        public string ExportMod(string id)
+        {
+            string modId = Normalize(id);
+            string source = null;
+            LuaModManifest manifest = null;
+
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    source = mod.Source;
+                    manifest = BuildManifest(modId, mod.Caps, true);
+                }
+            }
+
+            if (source == null)
+            {
+                try
+                {
+                    if (_sourceStore.TryLoad(modId, out string storedSource, out LuaModManifest storedManifest))
+                    {
+                        source = storedSource;
+                        manifest = storedManifest ?? BuildManifest(modId, LuaCapabilities.None, false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Source store TryLoad('{modId}') failed during export: {ex}");
+                }
+            }
+
+            if (source == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonConvert.SerializeObject(new LuaModBundle { Manifest = manifest, Source = source });
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Export of mod '{modId}' failed: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Parses an <see cref="ExportMod"/> bundle and loads (plus persists) it. The bundle's capability
+        /// request is intersected with <paramref name="hostGrant"/> and (unless
+        /// <paramref name="allowFull"/>) stripped of <see cref="LuaCapabilities.Full"/>, so an imported
+        /// mod can never auto-acquire full reflection. Returns false on malformed input, a missing/blank
+        /// id or source, or a load failure.
+        /// </summary>
+        public bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            if (string.IsNullOrWhiteSpace(bundleJson))
+            {
+                return false;
+            }
+
+            LuaModBundle bundle;
+            try
+            {
+                bundle = JsonConvert.DeserializeObject<LuaModBundle>(bundleJson);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] ImportMod failed to parse bundle: {ex}");
+                return false;
+            }
+
+            if (bundle == null || string.IsNullOrWhiteSpace(bundle.Source))
+            {
+                _log?.Warn("[LuaCsModRuntime] ImportMod rejected: missing source.");
+                return false;
+            }
+
+            string modId = Normalize(bundle.Manifest != null ? bundle.Manifest.Id : "");
+            if (modId.Length == 0)
+            {
+                _log?.Warn("[LuaCsModRuntime] ImportMod rejected: missing/blank mod id.");
+                return false;
+            }
+
+            string capsText = bundle.Manifest != null ? bundle.Manifest.Capabilities : "";
+            LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+
+            try
+            {
+                if (IsLoaded(modId))
+                {
+                    ReloadMod(modId, bundle.Source);
+                }
+                else
+                {
+                    // Run with the masked runtime tier, but persist the DECLARED capabilities from the
+                    // bundle (not the masked tier) so a later allowFull rehydrate can restore the full
+                    // request rather than the stripped-down version.
+                    LoadMod(modId, bundle.Source, effectiveCaps, false);
+                    PersistMod(modId, bundle.Source, ParseCaps(capsText));
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] ImportMod of '{modId}' failed: {ex}");
+                return false;
+            }
+        }
+
+        /// <summary>JSON shape of an export/import bundle: the manifest plus the raw Lua source.</summary>
+        private sealed class LuaModBundle
+        {
+            [JsonProperty("manifest")] public LuaModManifest Manifest;
+
+            [JsonProperty("source")] public string Source = "";
+        }
+
+        /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>
+        private void PersistMod(string modId, string source, LuaCapabilities caps)
+        {
+            if (!_autoPersistMods)
+            {
+                return;
+            }
+
+            try
+            {
+                _sourceStore.Save(modId, source, BuildManifest(modId, caps, true));
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Source store Save('{modId}') failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Builds a manifest for the given mod with its capability set rendered as a string. The
+        /// <see cref="LuaModManifest.Version"/> is auto-derived from the revision count tracked in the version
+        /// store (number of recorded revisions; "1" for a freshly seeded mod, blank when no history exists), so
+        /// each edit through load/reload advances the persisted and exported version without the caller managing it.
+        /// </summary>
+        private LuaModManifest BuildManifest(string id, LuaCapabilities caps, bool active)
+        {
+            return new LuaModManifest
+            {
+                Id = id,
+                Name = id,
+                Capabilities = caps.ToString(),
+                Active = active,
+                Version = CurrentVersionString(id)
+            };
+        }
+
+        /// <summary>
+        /// Renders the mod's current version as the count of recorded revisions (e.g. "3" after three distinct
+        /// edits). Blank when the version store holds no history for the mod. Best-effort: a store failure
+        /// yields a blank version rather than throwing.
+        /// </summary>
+        private string CurrentVersionString(string id)
+        {
+            try
+            {
+                if (_versionStore.TryGetSnapshot(VersionKey(Normalize(id)), out LuaScriptVersionRecord snapshot) &&
+                    snapshot != null && snapshot.History.Count > 0)
+                {
+                    return snapshot.History.Count.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Version store version lookup for '{id}' failed: {ex}");
+            }
+
+            return "";
+        }
+
+        /// <summary>
+        /// Intersects a mod's requested capabilities with the host grant and, unless
+        /// <paramref name="allowFull"/>, clears <see cref="LuaCapabilities.Full"/>. Persisted and shared
+        /// mods route through here so they can never escalate beyond what the host currently allows.
+        /// </summary>
+        private static LuaCapabilities ApplyHostGrant(LuaCapabilities requested, LuaCapabilities hostGrant,
+            bool allowFull)
+        {
+            LuaCapabilities effective = requested & hostGrant;
+            if (!allowFull)
+            {
+                effective &= ~LuaCapabilities.Full;
+            }
+
+            return effective;
+        }
+
+        /// <summary>
+        /// Tolerantly parses a persisted capability string into <see cref="LuaCapabilities"/>. An empty
+        /// or unparsable value yields <see cref="LuaCapabilities.None"/> (fail closed) and is logged, so
+        /// a corrupt manifest grants no capabilities rather than defaulting open.
+        /// </summary>
+        private LuaCapabilities ParseCaps(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return LuaCapabilities.None;
+            }
+
+            if (Enum.TryParse(text.Trim(), true, out LuaCapabilities parsed))
+            {
+                return parsed;
+            }
+
+            _log?.Warn($"[LuaCsModRuntime] Unrecognized capability string '{text}'; defaulting to None.");
+            return LuaCapabilities.None;
+        }
+
+        /// <summary>
         /// Appends a Tick-time handler failure to the bounded recent-errors buffer, dropping the oldest
         /// entry when full.
         /// </summary>
         private void RecordHandlerError(string modId, string message, int consecutiveCount)
         {
-            LuaCsModHandlerError entry = new()
+            LuaModHandlerError entry = new()
             {
                 ModId = modId,
                 Error = message ?? "",
@@ -1060,13 +1526,13 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="MaxRetainedHandlerErrors"/>. Pass <paramref name="modId"/> to filter to a single
         /// mod.
         /// </summary>
-        public IReadOnlyList<LuaCsModHandlerError> GetRecentHandlerErrors(string modId = null)
+        public IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(string modId = null)
         {
             string filter = modId == null ? null : Normalize(modId);
-            List<LuaCsModHandlerError> result = new();
+            List<LuaModHandlerError> result = new();
             lock (_gate)
             {
-                foreach (LuaCsModHandlerError entry in _recentHandlerErrors)
+                foreach (LuaModHandlerError entry in _recentHandlerErrors)
                 {
                     if (filter == null || filter.Length == 0 ||
                         string.Equals(entry.ModId, filter, StringComparison.Ordinal))
@@ -1096,9 +1562,9 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 int before = _recentHandlerErrors.Count;
-                LuaCsModHandlerError[] kept = new LuaCsModHandlerError[before];
+                LuaModHandlerError[] kept = new LuaModHandlerError[before];
                 int keptCount = 0;
-                foreach (LuaCsModHandlerError entry in _recentHandlerErrors)
+                foreach (LuaModHandlerError entry in _recentHandlerErrors)
                 {
                     if (!string.Equals(entry.ModId, filter, StringComparison.Ordinal))
                     {
