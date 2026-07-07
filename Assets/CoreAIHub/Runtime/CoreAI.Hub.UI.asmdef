@@ -2,7 +2,8 @@
   "name": "CoreAI.Hub.UI",
   "rootNamespace": "CoreAI.Hub.UI",
   "references": [
-    "CoreAI.Core"
+    "CoreAI.Core",
+    "CoreAI.Source"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

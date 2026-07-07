@@ -43,6 +43,16 @@ namespace CoreAI.Chat
         private PanelRenderer _panelRenderer;
 #endif
 
+        // === Embedded-host mode (e.g. a CoreAI Hub tab) ===
+        // When embedded, the panel renders into a caller-supplied VisualElement instead of its own
+        // UIDocument/PanelRenderer. The chat UXML is cloned into that host once the host's panel is
+        // ready, then the panel binds to it exactly like the UIDocument path.
+        private bool _embeddedHostMode;
+        private VisualElement _embeddedHost;
+        private VisualTreeAsset _embeddedChatTemplate;
+        private StyleSheet _embeddedStyleSheet;
+        private bool _embeddedTreeBuilt;
+
         /// <summary>Project game logger (shared fallback when no scoped logger is available).</summary>
         protected static IGameLogger Logger => GameLoggerUnscopedFallback.Instance;
 
@@ -242,6 +252,12 @@ namespace CoreAI.Chat
 
         protected virtual void OnEnable()
         {
+            if (_embeddedHostMode)
+            {
+                InitializeEmbeddedHost();
+                return;
+            }
+
 #if UNITY_6000_5_OR_NEWER
             _panelRenderer = GetComponent<PanelRenderer>();
             if (_panelRenderer != null)
@@ -301,6 +317,103 @@ namespace CoreAI.Chat
             TryRegisterToolCallChatDisplay();
         }
 
+        // ===================== Embedded-host mode =====================
+
+        /// <summary>
+        /// Creates a chat panel that renders into a caller-supplied <see cref="VisualElement"/> instead of
+        /// a <see cref="UIDocument"/>/<c>PanelRenderer</c>, so the whole chat can be embedded inside another
+        /// UI Toolkit surface (e.g. a CoreAI Hub tab). The panel lives on a dedicated hidden
+        /// <see cref="GameObject"/>; destroy it via <see cref="UnityEngine.Object.Destroy(UnityEngine.Object)"/>
+        /// on <see cref="Component.gameObject"/> when the host element goes away.
+        /// </summary>
+        /// <param name="host">Container the chat UI is instantiated into. Must be non-null.</param>
+        /// <param name="chatTemplate">
+        /// Chat UXML (e.g. <c>CoreAiChat.uxml</c>) cloned into <paramref name="host"/>. When null the panel
+        /// binds directly to <paramref name="host"/>, which only works if it already contains the chat tree.
+        /// </param>
+        /// <param name="chatStyleSheet">Optional stylesheet added to the cloned chat root.</param>
+        /// <param name="chatConfig">Optional chat configuration asset.</param>
+        /// <param name="gameObjectName">Name for the backing GameObject.</param>
+        public static CoreAiChatPanel CreateEmbedded(
+            VisualElement host,
+            VisualTreeAsset chatTemplate,
+            StyleSheet chatStyleSheet = null,
+            CoreAiChatConfig chatConfig = null,
+            string gameObjectName = "CoreAiChatPanel (Embedded)")
+        {
+            if (host == null)
+            {
+                throw new ArgumentNullException(nameof(host));
+            }
+
+            GameObject go = new(gameObjectName);
+            go.SetActive(false); // configure the panel before OnEnable runs
+            CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+            panel._embeddedHostMode = true;
+            panel._embeddedHost = host;
+            panel._embeddedChatTemplate = chatTemplate;
+            panel._embeddedStyleSheet = chatStyleSheet;
+            if (chatConfig != null)
+            {
+                panel.config = chatConfig;
+            }
+
+            go.SetActive(true); // triggers Awake + OnEnable -> InitializeEmbeddedHost
+            return panel;
+        }
+
+        private void InitializeEmbeddedHost()
+        {
+            if (_embeddedHost == null)
+            {
+                Logger.LogError(GameLogFeature.Core,
+                    "[CoreAiChatPanel] Embedded host mode requested without a host element.");
+                return;
+            }
+
+            // The chat tree must be attached to a live panel before styles/layout apply, mirroring the
+            // UIDocument path where rootVisualElement is already panel-attached in OnEnable.
+            _embeddedHost.RegisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
+            if (_embeddedHost.panel != null)
+            {
+                BuildEmbeddedChatTree();
+            }
+        }
+
+        private void OnEmbeddedHostAttached(AttachToPanelEvent evt)
+        {
+            BuildEmbeddedChatTree();
+        }
+
+        private void BuildEmbeddedChatTree()
+        {
+            if (_embeddedTreeBuilt || _embeddedHost == null || _embeddedHost.panel == null)
+            {
+                return;
+            }
+
+            _embeddedTreeBuilt = true;
+
+            VisualElement chatRoot;
+            if (_embeddedChatTemplate != null)
+            {
+                chatRoot = _embeddedChatTemplate.CloneTree();
+                chatRoot.style.flexGrow = 1f;
+                _embeddedHost.Add(chatRoot);
+            }
+            else
+            {
+                chatRoot = _embeddedHost;
+            }
+
+            if (_embeddedStyleSheet != null && !chatRoot.styleSheets.Contains(_embeddedStyleSheet))
+            {
+                chatRoot.styleSheets.Add(_embeddedStyleSheet);
+            }
+
+            InitializeUiRoot(chatRoot);
+        }
+
 #if UNITY_6000_5_OR_NEWER
         private void ApplyFixedWorldSpaceSize(VisualElement rootElement)
         {
@@ -337,6 +450,14 @@ namespace CoreAI.Chat
 
         protected virtual void Start()
         {
+            if (_embeddedHostMode)
+            {
+                // A Hub tab always shows the expanded chat; the FAB/collapse affordance and the
+                // persisted collapsed pref are meaningless inside an embedded surface.
+                SetCollapsed(false, false);
+                return;
+            }
+
             // Resolve and cache required local values.
             bool defaultCollapsed = IsMobileScreen();
             bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
@@ -345,6 +466,11 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            if (_embeddedHost != null)
+            {
+                _embeddedHost.UnregisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
+            }
+
 #if UNITY_6000_5_OR_NEWER
             if (_panelRenderer != null)
             {
