@@ -37,7 +37,7 @@ should serve live, in-session mutation, not just static mod loading.
   showstopper resolved (`SetHook`), plan red-teamed, external-reuse + inter-mod research done, upstream issue
   filed (nuskey8/Lua-CSharp#327). Plan v2 reflects real repo state (module = CoreAIMods, MoonSharp already out
   of core).
-- ✅ Done: deep "modding-logic" research → `Docs/coreai-modding-logic-research.md` (1533 lines): reimplementation-
+- ✅ Done: deep "modding-logic" research → `Docs/CoreAIMods/modding-logic-research.md` (1533 lines): reimplementation-
   ready algorithms for AceSerializer, AceComm (MP transport), CallbackHandler/AceEvent (event bus), Luanti
   server-authoritative sync, Factorio state-migration + remote, live hot-reload sequence, MP hybrid model
   (command replication + serialized data), and command-channel live mutation. Feeds Phase 3/4b/5.
