@@ -79,6 +79,23 @@ Lua-CSharp targets **Lua 5.4** semantics (MoonSharp was 5.2). Watch: integer/flo
 (`&`, `|`, `~`, `<<`, `>>` are native, not a `bit` library), and partial stdlib coverage — a missing library
 function errors, so keep to common `string`/`table`/`math` calls.
 
+## Bundled mods — ship a game with ready-made mods
+Drop `.lua` files (each with an `@coreai` header) into a **`Resources/CoreAIMods/`** folder. On the first
+run `BundledModSeeder` (wired in `CoreAiModsInstaller`, runs before rehydrate) installs them into the
+persistent store; `active: true` mods load immediately, `active: false` ones ship dormant (enable from the
+Hub Mods tab). Two samples live in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
+(`sample_welcome.lua`, `sample_camera_pulse.lua`).
+
+Updates are version-driven and player-respectful:
+- Bump the header `version:` and re-ship → the seeder **updates** an unmodified copy, keeping the player's
+  enabled/disabled choice.
+- If the player edited the mod, it is **not** overwritten — the entry is flagged `UpdateAvailable` for a
+  manual update in the UI.
+- A same-or-older version, or a mod the player authored under the same id, is left untouched.
+
+Hosts can add more `IBundledModSource`s (StreamingAssets, Addressables, remote) alongside the Resources
+one; see `Docs/CoreAIMods/mod-system.md` §3.
+
 ## Example mods (`Assets/CoreAI.Demos/Mods/`)
 - `hello_world.lua` — minimal: one event hook, one timer, a persistent counter.
 - `score_tracker.lua` — events + store persistence.

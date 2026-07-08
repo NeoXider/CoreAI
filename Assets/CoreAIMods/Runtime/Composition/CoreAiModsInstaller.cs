@@ -54,6 +54,11 @@ namespace CoreAI.Composition
             builder.Register(_ => new FileLuaModStore(), Lifetime.Singleton).As<ILuaModStore>();
             builder.Register(_ => new FileLuaModSourceStore(), Lifetime.Singleton).As<ILuaModSourceStore>();
 
+            // Mods shipped with the build: Resources/CoreAIMods/*.lua are seeded into the store on startup
+            // (before rehydrate) so a game can ship with a ready-made set of mods. Hosts register additional
+            // IBundledModSource entries (StreamingAssets, Addressables, remote) to extend the set.
+            builder.Register<IBundledModSource>(_ => new ResourcesBundledModSource(), Lifetime.Singleton);
+
             // Build the whole Lua-CSharp stack once from container services (sandbox + gameplay bindings +
             // persistent runtime + one-off executor), sharing one bindings instance across both surfaces.
             builder.Register(c => LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -100,6 +105,23 @@ namespace CoreAI.Composition
                     if (Application.isPlaying)
                     {
                         LuaCsModRuntime runtime = container.Resolve<LuaCsModStack>().Runtime;
+
+                        // Seed bundled mods into the store BEFORE rehydrate, so shipped mods load exactly
+                        // like persisted ones. Best-effort: a seeding failure never blocks rehydrate.
+                        try
+                        {
+                            System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
+                                container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
+                            new BundledModSeeder(
+                                container.Resolve<ILuaModSourceStore>(),
+                                new System.Collections.Generic.List<IBundledModSource>(bundled),
+                                container.ResolveOrDefault<Logging.ILog>()).Seed();
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Logging.Log.Instance.Warn($"[CoreAI] Bundled mod seeding failed: {ex.Message}");
+                        }
+
                         runtime.RehydrateFromStore(scriptCapabilities,
                             (scriptCapabilities & LuaCapabilities.Full) != 0);
 

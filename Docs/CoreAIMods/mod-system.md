@@ -64,13 +64,22 @@ fields. It is a plain JSON DTO; new fields are backward-compatible (missing => d
 
 ## 3. Bundled sources & the seeder
 
+> **Status: implemented (PR1).** `IBundledModSource`, `BundledMod`, `ResourcesBundledModSource`, and
+> `BundledModSeeder` live in `Assets/CoreAIMods/Runtime/Infrastructure/`. `CoreAiModsInstaller` registers
+> `ResourcesBundledModSource` and runs the seeder in the play-mode build callback **before**
+> `RehydrateFromStore`. Two sample mods ship in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
+> (`sample_welcome.lua` active, `sample_camera_pulse.lua` opt-in). Unit-tested in
+> `BundledModSeederEditModeTests`.
+
 ### 3.1 Sources (pluggable)
 
-`IBundledModSource` returns discovered bundled mods as `BundledMod { LuaModHeader Header, string Source,
-string Origin }`. Implementations:
+`IBundledModSource` returns discovered bundled mods as `BundledMod { string Id, string Source,
+string Version }` (id/version parsed from the `@coreai` header) plus an `Origin` marker on the source.
+Implementations:
 
-- **PR1:** `ResourcesBundledModSource` — `Resources.LoadAll<TextAsset>("CoreAIMods")`. Synchronous, all
-  platforms, built into the player. Base source.
+- **PR1 (done):** `ResourcesBundledModSource` — `Resources.LoadAll<TextAsset>("CoreAIMods")` (the
+  project's Lua scripted importer makes `.lua` a `TextAsset`). Synchronous, all platforms, built into the
+  player. Base source. This is how a game ships with ready-made mods.
 - **PR2:** `StreamingAssetsBundledModSource` — scan `StreamingAssets/CoreAIMods/*.lua` via
   `UnityWebRequest` (async; needed on Android/WebGL). Editable post-ship; path to Addressables.
 - **PR2:** `AddressablesBundledModSource` — load `.lua` TextAssets by label `coreai-mod`. Runtime/DLC
@@ -88,7 +97,7 @@ bundled mod, compared against the `ILuaModSourceStore` entry with the same `id`:
 | Store state | Condition | Action |
 |---|---|---|
 | absent | — | **install**: `Save` source; `Active = header.active`; `Origin`, `SeededVersion=header.version`, `SeededHash=hash(source)` |
-| present, `header.version > SeededVersion`, stored source hash == `SeededHash` (untouched) | — | **update**: `Save` new source (record a revision for rollback); **keep the user's `Active`**; bump `SeededVersion`/`SeededHash` |
+| present, `header.version > SeededVersion`, stored source hash == `SeededHash` (untouched) | — | **update**: `Save` new source (the subsequent rehydrate/`LoadMod` records a revision for rollback); **keep the user's `Active`**; bump `SeededVersion`/`SeededHash` |
 | present, newer version, stored source hash != `SeededHash` (user-edited) | — | **skip + flag**: set `UpdateAvailable=true`; leave user's copy; manual update in UI |
 | present, `header.version <= SeededVersion` | — | leave as-is |
 | present, `Origin == ""` (user mod, id clash) | — | never touch user mods |
@@ -105,16 +114,21 @@ algorithm everywhere.
 load/reload/unload/forget/export/import/versions/revert/diagnostics. Add: honor `category` (from the
 header or an explicit arg) and expose it in `list` output. No behavior change to existing actions.
 
-### 4.2 Player — CoreAI Hub (uGUI Canvas, event-driven)
+### 4.2 Player — CoreAI Hub (UI Toolkit, event-driven)
 
-A single floating, draggable window (`CoreAI Hub`) built on uGUI, replacing the F7–F10 IMGUI panels.
-Tabs:
+> **Status: implemented.** The Hub is a **UI Toolkit** window (`CoreAiHubWindow` + `CoreAiHub.uxml` /
+> `CoreAiHubUss.uss`, Unity 6.3 `UIDocument`), not uGUI/IMGUI. Pages register into `HubPageRegistry`;
+> the module's `CoreAiModsHubBinder` lights up the Mods tab and upgrades Settings/Statistics with live
+> DI sources. Menu `CoreAI → Setup → Add Hub` drops in the ready prefab. See `Docs/CoreAI/hub-pages.md`.
 
-- **Chat** — the agent chat.
-- **Mods** — tree by `Category`; per-mod row with actions; header buttons.
-- **Settings / Backend** — current "CoreAI Backend" window (endpoint/model/key/apply/test).
-- **Tokens** — current token-budget overlay.
-- Extensible (Prompts, World, ...).
+A single floating window (`CoreAI Hub`) built on UI Toolkit, replacing the old F7–F10 IMGUI panels.
+Collapses to a compact bar via the top-right toggle. Tabs:
+
+- **Chat** — the agent chat (embedded `CoreAiChatPanel`).
+- **Settings** — live backend config (context window, timeouts, streaming, pricing, logging).
+- **Statistics** — token budget + live orchestration metrics (`InMemoryAiOrchestrationMetrics`).
+- **Mods** — category tree; per-mod row with actions; header buttons.
+- **About**, and extensible (C# modules and Lua mods can add pages).
 
 Mods tab requirements:
 - Category tree (collapsible folders derived from `Category` paths).
@@ -122,8 +136,9 @@ Mods tab requirements:
   `GUIUtility.systemCopyBuffer`), and per-mod **Copy** (source to clipboard), **Edit**, **Enable/Disable**
   toggle, **Delete**, **Import**/**Export** (bundle JSON), **Update** (visible when `UpdateAvailable` or a
   newer bundled version exists; re-seeds from the bundled source).
-- Editor sub-panel: text area, **Paste**, **Copy**, Save, Close; save reloads the running mod or persists
-  the inactive source.
+- Editor sub-panel: a top **← Back** to the list plus a **Save & run** / **Copy** / **Paste** /
+  **Refresh diagnostics** action bar above the code area; Save validates by running the mod (errors shown
+  in the status line) and records a revision.
 
 Performance rule (critical): the Mods list/tree is built **once** and rebuilt only on
 `LuaModRuntime.ModSourceLoaded` / `ModSourceUnloaded` (and explicit user actions). NEVER call
