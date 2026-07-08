@@ -20,19 +20,33 @@ namespace CoreAI.Hub.UI
     ///
     /// The core assembly is UI-framework-free, so <see cref="IHubPage.CreatePageContent"/> returns
     /// an <see cref="object"/>; this window casts it to <see cref="VisualElement"/>.
+    ///
+    /// The shell (root/tab bar/content/collapse button) is declared in <see cref="shellUxml"/>, not
+    /// built as a C# VisualElement tree. UIDocument (pre-6.5, no PanelRenderer) can rebuild its
+    /// rootVisualElement out from under a MonoBehaviour, so every bind goes through the idempotent
+    /// <see cref="Rebuild"/>/<see cref="Unwire"/> pair rather than a one-shot OnEnable build.
     /// </remarks>
     [RequireComponent(typeof(UIDocument))]
     public class CoreAiHubWindow : MonoBehaviour
     {
-        private const string RootClassName = "coreai-hub-root";
-        private const string TabBarClassName = "coreai-hub-tabbar";
+        private const string RootName = "coreai-hub-root";
+        private const string TabBarName = "coreai-hub-tabbar";
+        private const string ContentName = "coreai-hub-content";
+        private const string EmptyName = "coreai-hub-empty";
+        private const string CollapseName = "coreai-hub-collapse";
+        private const string CollapsedClassName = "coreai-hub--collapsed";
         private const string TabClassName = "coreai-hub-tab";
         private const string TabActiveClassName = "coreai-hub-tab-active";
-        private const string ContentClassName = "coreai-hub-content";
-        private const string EmptyClassName = "coreai-hub-empty";
+
+        [Header("Structure")]
+        [Tooltip("UXML shell (root/tab bar/content/collapse button). The window clones this into the " +
+                 "UIDocument's rootVisualElement instead of building the tree in C#.")]
+        [SerializeField]
+        private VisualTreeAsset shellUxml;
 
         [Header("Style (optional)")]
-        [Tooltip("Optional stylesheet layered on top of the built-in inline styles. Leave empty to use the defaults.")]
+        [Tooltip("Optional stylesheet layered on top of the shell's built-in styles (via the UXML's own " +
+                 "<Style> reference). Leave empty to use the defaults.")]
         [SerializeField]
         private StyleSheet styleSheet;
 
@@ -41,16 +55,20 @@ namespace CoreAI.Hub.UI
         private string emptyStateText = "No Hub pages registered.";
 
         private UIDocument _document;
+        private VisualElement _boundUiRoot;
         private VisualElement _root;
         private VisualElement _tabBar;
         private VisualElement _content;
+        private Label _emptyLabel;
+        private Button _collapseButton;
 
         private HubPageRegistry _registry;
         private bool _uiReady;
         private bool _collapsed;
-        private Button _collapseButton;
+        private bool _missingShellWarned;
 
-        // Cached page instances and their created content, keyed by page id.
+        // Cached page instances and their created content, keyed by page id. These survive UI rebuilds —
+        // only the visual tree gets recreated, never the pages themselves.
         private readonly Dictionary<string, IHubPage> _pages = new(StringComparer.Ordinal);
         private readonly Dictionary<string, VisualElement> _pageContent = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _tabButtons = new(StringComparer.Ordinal);
@@ -91,11 +109,11 @@ namespace CoreAI.Hub.UI
             VisualElement uiRoot = _document != null ? _document.rootVisualElement : null;
             if (uiRoot == null)
             {
-                // rootVisualElement can be null until the panel is ready; retry on the next editor/player tick.
+                // rootVisualElement can be null until the panel is ready; retried from Update().
                 return;
             }
 
-            BuildUi(uiRoot);
+            EnsureUi(uiRoot);
         }
 
         protected virtual void OnDisable()
@@ -109,8 +127,8 @@ namespace CoreAI.Hub.UI
         {
             // The UIDocument's rootVisualElement can be rebuilt after our OnEnable (e.g. another UIDocument
             // sharing the PanelSettings re-inits the panel, or the panel comes up a frame late), which
-            // orphans our _root and leaves the Hub invisible. Build it if we never did, or re-attach it if
-            // it got detached — cheap parent check, keeps the window robust to panel lifecycle.
+            // orphans our cloned tree and leaves the Hub invisible. EnsureUi cheaply detects both "never
+            // built" and "tree was (re)created" and re-runs the full bind in either case.
             if (_document == null)
             {
                 _document = GetComponent<UIDocument>();
@@ -122,56 +140,66 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            if (!_uiReady)
+            EnsureUi(uiRoot);
+        }
+
+        private void EnsureUi(VisualElement uiRoot)
+        {
+            bool detached = _uiReady && (_root == null || _root.parent != uiRoot);
+            if (!_uiReady || _boundUiRoot != uiRoot || detached)
             {
-                BuildUi(uiRoot);
-            }
-            else if (_root != null && _root.parent != uiRoot)
-            {
-                uiRoot.Add(_root);
+                Rebuild(uiRoot);
             }
         }
 
-        private void BuildUi(VisualElement uiRoot)
+        /// <summary>
+        /// Idempotent (re)build: clones <see cref="shellUxml"/> into <paramref name="uiRoot"/>, re-queries
+        /// the named elements, and rewires everything. Safe to call whenever the panel's rootVisualElement
+        /// changes identity, not just once from OnEnable.
+        /// </summary>
+        private void Rebuild(VisualElement uiRoot)
         {
-            if (_uiReady)
+            Unwire();
+
+            if (shellUxml == null)
             {
+                if (!_missingShellWarned)
+                {
+                    Debug.LogWarning("[CoreAiHubWindow] shellUxml is not assigned; the Hub UI cannot be built.");
+                    _missingShellWarned = true;
+                }
+
                 return;
             }
 
-            _root = new VisualElement { name = "coreai-hub-root" };
-            _root.AddToClassList(RootClassName);
-            ApplyRootInlineStyles(_root);
+            // Guard against double-adding if a stale clone is still parented under uiRoot.
+            uiRoot.Q<VisualElement>(RootName)?.RemoveFromHierarchy();
+            shellUxml.CloneTree(uiRoot);
 
-            _tabBar = new VisualElement { name = "coreai-hub-tabbar" };
-            _tabBar.AddToClassList(TabBarClassName);
-            ApplyTabBarInlineStyles(_tabBar);
-            _root.Add(_tabBar);
+            _root = uiRoot.Q<VisualElement>(RootName);
+            if (_root == null)
+            {
+                Debug.LogError($"[CoreAiHubWindow] shellUxml is missing the '{RootName}' element.");
+                return;
+            }
 
-            _content = new VisualElement { name = "coreai-hub-content" };
-            _content.AddToClassList(ContentClassName);
-            _content.style.flexGrow = 1f;
-            _content.style.paddingTop = 16f;
-            _content.style.paddingBottom = 16f;
-            _content.style.paddingLeft = 16f;
-            _content.style.paddingRight = 16f;
-            _root.Add(_content);
+            _tabBar = _root.Q<VisualElement>(TabBarName);
+            _content = _root.Q<VisualElement>(ContentName);
+            _emptyLabel = _content?.Q<Label>(EmptyName);
+            _collapseButton = _root.Q<Button>(CollapseName);
+            if (_collapseButton != null)
+            {
+                _collapseButton.clicked += ToggleCollapsed;
+            }
 
             if (styleSheet != null)
             {
                 _root.styleSheets.Add(styleSheet);
             }
 
-            // Collapse/expand toggle (top-right), independent of the tab bar so RebuildTabs never removes it.
-            _collapseButton = new Button(ToggleCollapsed) { text = "–", name = "coreai-hub-collapse" };
-            _collapseButton.style.position = Position.Absolute;
-            _collapseButton.style.top = 6;
-            _collapseButton.style.right = 6;
-            _collapseButton.style.width = 24;
-            _collapseButton.style.height = 20;
-            _root.Add(_collapseButton);
+            ApplyCollapsedState();
 
-            uiRoot.Add(_root);
+            _boundUiRoot = uiRoot;
             _uiReady = true;
 
             RebuildTabs();
@@ -184,42 +212,48 @@ namespace CoreAI.Hub.UI
         public void SetCollapsed(bool collapsed)
         {
             _collapsed = collapsed;
+            ApplyCollapsedState();
+        }
 
-            // Collapse to a small bar holding just the toggle; restore to the full 720x640 window (the size
-            // ApplyRootInlineStyles sets) on expand. Tabs + content hide while collapsed.
-            if (_tabBar != null)
+        private void ApplyCollapsedState()
+        {
+            if (_root == null)
             {
-                _tabBar.style.display = collapsed ? DisplayStyle.None : DisplayStyle.Flex;
+                return;
             }
 
-            if (_content != null)
-            {
-                _content.style.display = collapsed ? DisplayStyle.None : DisplayStyle.Flex;
-            }
-
-            if (_root != null)
-            {
-                _root.style.width = collapsed ? new StyleLength(132f) : new StyleLength(720f);
-                _root.style.height = collapsed ? new StyleLength(34f) : new StyleLength(640f);
-            }
+            _root.EnableInClassList(CollapsedClassName, _collapsed);
 
             if (_collapseButton != null)
             {
-                _collapseButton.text = collapsed ? "+" : "–";
+                _collapseButton.text = _collapsed ? "+" : "–";
             }
+        }
+
+        private void Unwire()
+        {
+            if (_collapseButton != null)
+            {
+                _collapseButton.clicked -= ToggleCollapsed;
+            }
+
+            _tabButtons.Clear();
+            _root = null;
+            _tabBar = null;
+            _content = null;
+            _emptyLabel = null;
+            _collapseButton = null;
+            _uiReady = false;
         }
 
         private void TeardownUi()
         {
-            _tabButtons.Clear();
+            _root?.RemoveFromHierarchy();
+            Unwire();
+
             _pageContent.Clear();
             _activePageId = null;
-
-            _root?.RemoveFromHierarchy();
-            _root = null;
-            _tabBar = null;
-            _content = null;
-            _uiReady = false;
+            _boundUiRoot = null;
         }
 
         // ===================== Registry wiring =====================
@@ -285,13 +319,11 @@ namespace CoreAI.Hub.UI
                     name = "coreai-hub-tab-" + pageId
                 };
                 tab.AddToClassList(TabClassName);
-                ApplyTabInlineStyles(tab);
                 tab.focusable = false;
                 _tabBar.Add(tab);
                 _tabButtons[pageId] = tab;
             }
 
-            // Preserve the active page if it still exists; otherwise fall back to the first tab.
             if (pages.Count == 0)
             {
                 ShowEmptyState();
@@ -299,9 +331,13 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
+            // Preserve the active page if it still exists; otherwise fall back to the first tab. Either
+            // way the active content must be re-parented into _content, since a rebuild may have replaced
+            // it with a fresh (empty) container.
             bool activeStillPresent = _activePageId != null && _tabButtons.ContainsKey(_activePageId);
             if (activeStillPresent)
             {
+                RefreshActiveContent();
                 HighlightActiveTab();
             }
             else
@@ -384,6 +420,7 @@ namespace CoreAI.Hub.UI
             if (string.Equals(pageId, _activePageId, StringComparison.Ordinal) &&
                 _pageContent.ContainsKey(pageId))
             {
+                RefreshActiveContent();
                 HighlightActiveTab();
                 return;
             }
@@ -433,6 +470,26 @@ namespace CoreAI.Hub.UI
             }
 
             HighlightActiveTab();
+        }
+
+        /// <summary>Re-parents the active page's cached content into <see cref="_content"/> without
+        /// touching page lifecycle (used when the same page is already active, incl. after a UI rebuild).</summary>
+        private void RefreshActiveContent()
+        {
+            if (_content == null)
+            {
+                return;
+            }
+
+            _content.Clear();
+            if (_activePageId != null && _pageContent.TryGetValue(_activePageId, out VisualElement content) && content != null)
+            {
+                _content.Add(content);
+            }
+            else
+            {
+                ShowEmptyState();
+            }
         }
 
         private IHubPage ResolvePage(string pageId)
@@ -500,16 +557,7 @@ namespace CoreAI.Hub.UI
             foreach (KeyValuePair<string, Button> kvp in _tabButtons)
             {
                 bool isActive = string.Equals(kvp.Key, _activePageId, StringComparison.Ordinal);
-                if (isActive)
-                {
-                    kvp.Value.AddToClassList(TabActiveClassName);
-                    ApplyTabActiveInlineStyles(kvp.Value);
-                }
-                else
-                {
-                    kvp.Value.RemoveFromClassList(TabActiveClassName);
-                    ApplyTabInlineStyles(kvp.Value);
-                }
+                kvp.Value.EnableInClassList(TabActiveClassName, isActive);
             }
         }
 
@@ -521,13 +569,11 @@ namespace CoreAI.Hub.UI
             }
 
             _content.Clear();
-            Label label = new(emptyStateText) { name = "coreai-hub-empty" };
-            label.AddToClassList(EmptyClassName);
-            label.style.flexGrow = 1f;
-            label.style.color = new Color(0.77f, 0.86f, 0.91f, 0.6f);
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.whiteSpace = WhiteSpace.Normal;
-            _content.Add(label);
+            if (_emptyLabel != null)
+            {
+                _emptyLabel.text = emptyStateText;
+                _content.Add(_emptyLabel);
+            }
         }
 
         // ===================== Page lifecycle cleanup =====================
@@ -570,88 +616,6 @@ namespace CoreAI.Hub.UI
                 content?.RemoveFromHierarchy();
                 _pageContent.Remove(pageId);
             }
-        }
-
-        // ===================== Inline style fallbacks =====================
-        // Applied so the Hub renders correctly even when the optional stylesheet is not assigned.
-
-        private static void ApplyRootInlineStyles(VisualElement root)
-        {
-            root.style.position = Position.Absolute;
-            root.style.top = 24f;
-            root.style.left = 24f;
-            root.style.width = 720f;
-            root.style.height = 640f;
-            root.style.backgroundColor = new Color(0.024f, 0.055f, 0.118f, 0.93f);
-            root.style.borderTopLeftRadius = 16f;
-            root.style.borderTopRightRadius = 16f;
-            root.style.borderBottomLeftRadius = 16f;
-            root.style.borderBottomRightRadius = 16f;
-            SetBorderWidth(root, 2f);
-            SetBorderColor(root, new Color(0.067f, 0.627f, 0.71f, 0.35f));
-            root.style.flexDirection = FlexDirection.Column;
-            root.style.overflow = Overflow.Hidden;
-        }
-
-        private static void ApplyTabBarInlineStyles(VisualElement tabBar)
-        {
-            tabBar.style.flexDirection = FlexDirection.Row;
-            tabBar.style.flexWrap = Wrap.Wrap;
-            tabBar.style.flexShrink = 0f;
-            tabBar.style.backgroundColor = new Color(0.039f, 0.086f, 0.176f, 0.95f);
-            tabBar.style.borderBottomWidth = 1f;
-            tabBar.style.borderBottomColor = new Color(0.067f, 0.627f, 0.71f, 0.3f);
-            tabBar.style.paddingTop = 8f;
-            tabBar.style.paddingBottom = 8f;
-            tabBar.style.paddingLeft = 8f;
-            tabBar.style.paddingRight = 8f;
-        }
-
-        private static void ApplyTabInlineStyles(Button tab)
-        {
-            tab.style.height = 34f;
-            tab.style.marginRight = 8f;
-            tab.style.marginBottom = 4f;
-            tab.style.paddingLeft = 16f;
-            tab.style.paddingRight = 16f;
-            tab.style.backgroundColor = new Color(0.067f, 0.627f, 0.71f, 0.15f);
-            SetBorderWidth(tab, 1f);
-            SetBorderColor(tab, new Color(0.302f, 0.816f, 0.882f, 0.35f));
-            SetBorderRadius(tab, 17f);
-            tab.style.color = new Color(0.77f, 0.86f, 0.91f, 1f);
-            tab.style.fontSize = 15f;
-            tab.style.unityFontStyleAndWeight = FontStyle.Bold;
-        }
-
-        private static void ApplyTabActiveInlineStyles(Button tab)
-        {
-            tab.style.backgroundColor = new Color(0.302f, 0.816f, 0.882f, 0.85f);
-            SetBorderColor(tab, new Color(0.784f, 0.941f, 1f, 0.9f));
-            tab.style.color = new Color(0.024f, 0.055f, 0.118f, 1f);
-        }
-
-        private static void SetBorderWidth(VisualElement el, float width)
-        {
-            el.style.borderTopWidth = width;
-            el.style.borderBottomWidth = width;
-            el.style.borderLeftWidth = width;
-            el.style.borderRightWidth = width;
-        }
-
-        private static void SetBorderColor(VisualElement el, Color color)
-        {
-            el.style.borderTopColor = color;
-            el.style.borderBottomColor = color;
-            el.style.borderLeftColor = color;
-            el.style.borderRightColor = color;
-        }
-
-        private static void SetBorderRadius(VisualElement el, float radius)
-        {
-            el.style.borderTopLeftRadius = radius;
-            el.style.borderTopRightRadius = radius;
-            el.style.borderBottomLeftRadius = radius;
-            el.style.borderBottomRightRadius = radius;
         }
     }
 }

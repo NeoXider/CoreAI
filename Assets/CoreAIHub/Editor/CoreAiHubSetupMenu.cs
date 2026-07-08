@@ -17,6 +17,7 @@ namespace CoreAI.Hub.UI.Editor
     public static class CoreAiHubSetupMenu
     {
         private const string PrefabPath = "Assets/CoreAIHub/Runtime/CoreAiHub.prefab";
+        private const string PanelSettingsPath = "Assets/CoreAIHub/Runtime/CoreAiHubPanelSettings.asset";
         private const string ChatUxmlPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml";
         private const string ChatUssPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss";
         private const string ModsBinderType = "CoreAI.Ai.Hub.CoreAiModsHubBinder, CoreAI.Mods";
@@ -55,14 +56,31 @@ namespace CoreAI.Hub.UI.Editor
             GameObject go = new("CoreAiHub");
 
             UIDocument document = go.AddComponent<UIDocument>();
-            string[] panels = AssetDatabase.FindAssets("t:PanelSettings");
-            if (panels.Length > 0)
+            // Dedicated Hub PanelSettings so the Hub renders on its own panel and never contends with the
+            // embedded chat's UIDocument (sharing one PanelSettings orphaned the Hub root — the flicker bug).
+            PanelSettings panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(PanelSettingsPath);
+            if (panel == null)
             {
-                document.panelSettings =
-                    AssetDatabase.LoadAssetAtPath<PanelSettings>(AssetDatabase.GUIDToAssetPath(panels[0]));
+                string[] found = AssetDatabase.FindAssets("t:PanelSettings");
+                if (found.Length > 0)
+                {
+                    panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(AssetDatabase.GUIDToAssetPath(found[0]));
+                }
             }
 
-            go.AddComponent<CoreAiHubWindow>();
+            document.panelSettings = panel;
+
+            CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
+            // Assign the shell UXML (the window builds its structure from it, not from C#).
+            VisualTreeAsset shell =
+                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/CoreAIHub/Runtime/CoreAiHub.uxml");
+            SerializedObject wso = new(window);
+            SerializedProperty shellProp = wso.FindProperty("shellUxml");
+            if (shellProp != null && shell != null)
+            {
+                shellProp.objectReferenceValue = shell;
+                wso.ApplyModifiedPropertiesWithoutUndo();
+            }
 
             // The built-in About/Chat/Settings/Statistics tabs come from this bootstrap; wire the chat UXML so
             // the Chat tab embeds the real CoreAiChatPanel instead of showing a setup note.

@@ -17,6 +17,26 @@
     overflow: hidden;
 }
 
+/* Collapsed state: shrink to a small bar holding just the toggle button. */
+.coreai-hub-root.coreai-hub--collapsed {
+    width: 132px;
+    height: 34px;
+}
+
+.coreai-hub-root.coreai-hub--collapsed .coreai-hub-tabbar,
+.coreai-hub-root.coreai-hub--collapsed .coreai-hub-content {
+    display: none;
+}
+
+/* Collapse/expand toggle (top-right), independent of the tab bar. */
+.coreai-hub-collapse {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 20px;
+}
+
 /* Tab bar */
 .coreai-hub-tabbar {
     flex-direction: row;

@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &5850800050137176123
+--- !u!1 &4981408220228357819
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,10 +8,10 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 7894018410391431822}
-  - component: {fileID: 4722563024983367750}
-  - component: {fileID: 5292218202658516432}
-  - component: {fileID: 8468580654009281242}
+  - component: {fileID: 8189117434833797951}
+  - component: {fileID: 500352758507881373}
+  - component: {fileID: 896222506636856533}
+  - component: {fileID: 1861730944912341474}
   m_Layer: 0
   m_Name: CoreAiHub
   m_TagString: Untagged
@@ -19,13 +19,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &7894018410391431822
+--- !u!4 &8189117434833797951
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5850800050137176123}
+  m_GameObject: {fileID: 4981408220228357819}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -34,19 +34,19 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &4722563024983367750
+--- !u!114 &500352758507881373
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5850800050137176123}
+  m_GameObject: {fileID: 4981408220228357819}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
-  m_PanelSettings: {fileID: 11400000, guid: 0bc925d4640801549a6b5fe23e8b43b6, type: 2}
+  m_PanelSettings: {fileID: 11400000, guid: a69abecdf74a53b43a0d064ca091c70d, type: 2}
   m_ParentUI: {fileID: 0}
   sourceAsset: {fileID: 0}
   m_SortingOrder: 0
@@ -57,27 +57,28 @@ MonoBehaviour:
   m_PivotReferenceSize: 0
   m_Pivot: 0
   m_WorldSpaceCollider: {fileID: 0}
---- !u!114 &5292218202658516432
+--- !u!114 &896222506636856533
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5850800050137176123}
+  m_GameObject: {fileID: 4981408220228357819}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: efe650b8910615744be98808bed9afe3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Hub.UI::CoreAI.Hub.UI.CoreAiHubWindow
+  shellUxml: {fileID: 9197481963319205126, guid: 92cecbafcc9cdc14cbec690a46024236, type: 3}
   styleSheet: {fileID: 0}
   emptyStateText: No Hub pages registered.
---- !u!114 &8468580654009281242
+--- !u!114 &1861730944912341474
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5850800050137176123}
+  m_GameObject: {fileID: 4981408220228357819}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6f62b07a61a10114592464a4a3c64f2f, type: 3}
