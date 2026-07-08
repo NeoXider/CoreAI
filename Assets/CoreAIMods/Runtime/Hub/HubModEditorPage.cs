@@ -104,6 +104,7 @@ namespace CoreAI.Ai.Hub
             actions.style.marginBottom = 4f;
             actions.Add(HubModWidgets.MakeButton("Save & run", Save));
             actions.Add(HubModWidgets.MakeButton("Copy", Copy));
+            actions.Add(HubModWidgets.MakeButton("Paste", Paste));
             actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
             root.Add(actions);
 
@@ -168,6 +169,20 @@ namespace CoreAI.Ai.Hub
         {
             GUIUtility.systemCopyBuffer = _codeField.value ?? "";
             SetStatus("Copied source to clipboard.", false);
+        }
+
+        private void Paste()
+        {
+            string clip = GUIUtility.systemCopyBuffer ?? "";
+            if (string.IsNullOrWhiteSpace(clip))
+            {
+                SetStatus("Clipboard is empty — nothing to paste.", true);
+                return;
+            }
+
+            _codeField.value = clip;
+            RefreshHeaderBox(clip);
+            SetStatus("Pasted clipboard into the editor. Review, then Save & run.", false);
         }
 
         private void RefreshDiagnostics()
