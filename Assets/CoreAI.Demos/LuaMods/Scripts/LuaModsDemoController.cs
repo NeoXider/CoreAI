@@ -3,6 +3,7 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -32,7 +33,7 @@ namespace CoreAI.Demos
         private TextAsset damageTunerMod;
 
         private ILuaModRuntime _mods;
-        private LuaLogicSlots _slots;
+        private LuaCsLogicSlots _slots;
         private string _status = "";
         private string _lastModEvent = "-";
         private int _waveButtonPresses;
@@ -52,11 +53,15 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
-            _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
+            _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             _slots.DeclareSlot(DamageSlot);
             _mods.ModEventEmitted += OnModEvent;
-            _status = LuaModRuntime.IsSupported
+            _status = CoreAI.Ai.LuaCs.LuaCsModRuntime.IsSupported
                 ? "Ready. Load a mod to start."
                 : "Lua sandbox is not supported on this platform.";
         }

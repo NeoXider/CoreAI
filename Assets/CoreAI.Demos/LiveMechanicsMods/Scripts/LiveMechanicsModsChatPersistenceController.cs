@@ -140,8 +140,12 @@ namespace CoreAI.Demos
                 yield break;
             }
 
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
-            _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
+            _versions = luaContainer.Resolve<ILuaScriptVersionStore>();
             _autoRepair = FindFirstObjectByType<CoreAiLuaModAutoRepair>();
             _mods.ModSourceLoaded += OnModSourceLoaded;
             _mods.ModSourceUnloaded += OnModSourceUnloaded;

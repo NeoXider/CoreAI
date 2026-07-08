@@ -80,6 +80,10 @@ namespace CoreAI.Composition
                 .AsSelf().As<ILuaModRuntime>();
             builder.Register(c => c.Resolve<LuaCsModStack>().ToolExecutor, Lifetime.Singleton)
                 .As<LuaTool.ILuaExecutor>();
+            // The shared logic-override slots both surfaces register through, so a host (e.g. a demo that
+            // declares gameplay formula slots) resolves the same instance every mod's logic_define writes to.
+            builder.Register(c => c.Resolve<LuaCsModStack>().GameplayBindings.LogicSlots, Lifetime.Singleton)
+                .AsSelf();
 
             // Startup rehydration + frame ticker (play mode only). EditMode containers share the REAL
             // persistent store, so rehydrating there would inject earlier-run mods into every fresh

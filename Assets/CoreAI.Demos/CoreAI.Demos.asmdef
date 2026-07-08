@@ -5,6 +5,7 @@
     "CoreAI.Core",
     "CoreAI.Source",
     "CoreAI.Mods",
+    "CoreAI.Hub.UI",
     "MoonSharp.Interpreter",
     "VContainer"
   ],

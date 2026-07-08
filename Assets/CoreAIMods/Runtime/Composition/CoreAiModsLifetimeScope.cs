@@ -28,6 +28,11 @@ namespace CoreAI.Composition
         [Tooltip("Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = none.")]
         [SerializeField] private string[] allowedLuaScenes;
 
+        // Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
+        // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
+        // overriding FindParent to return the parent directly would bypass the deferral and NRE when this
+        // scope awakes before the parent.
+
         protected override void Configure(IContainerBuilder builder)
         {
             // execute_lua's rate limiter is module-owned (its CorePortableInstaller registration is

@@ -235,12 +235,96 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Composition.CoreAiModsLifetimeScope
   parentReference:
-    TypeName: 
+    TypeName: CoreAI.Composition.CoreAILifetimeScope
   autoRun: 1
   autoInjectGameObjects: []
   enableFullLuaAccess: 1
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
+--- !u!1 &532788468
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 532788472}
+  - component: {fileID: 532788471}
+  - component: {fileID: 532788470}
+  - component: {fileID: 532788469}
+  m_Layer: 0
+  m_Name: CoreAiHub
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &532788469
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 532788468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c027407fd03b8c54ba0cf2a96404fba8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.HubModsDemoBinder
+  allowFullTier: 1
+--- !u!114 &532788470
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 532788468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efe650b8910615744be98808bed9afe3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Hub.UI::CoreAI.Hub.UI.CoreAiHubWindow
+  styleSheet: {fileID: 0}
+  emptyStateText: No Hub pages registered.
+--- !u!114 &532788471
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 532788468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
+  m_PanelSettings: {fileID: 11400000, guid: 0bc925d4640801549a6b5fe23e8b43b6, type: 2}
+  m_ParentUI: {fileID: 0}
+  sourceAsset: {fileID: 0}
+  m_SortingOrder: 0
+  m_Position: 0
+  m_WorldSpaceSizeMode: 1
+  m_WorldSpaceWidth: 1920
+  m_WorldSpaceHeight: 1080
+  m_PivotReferenceSize: 0
+  m_Pivot: 0
+  m_WorldSpaceCollider: {fileID: 0}
+--- !u!4 &532788472
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 532788468}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &573228319
 GameObject:
   m_ObjectHideFlags: 0
@@ -904,3 +988,4 @@ SceneRoots:
   - {fileID: 933156841}
   - {fileID: 1828887120}
   - {fileID: 2100352201}
+  - {fileID: 532788472}

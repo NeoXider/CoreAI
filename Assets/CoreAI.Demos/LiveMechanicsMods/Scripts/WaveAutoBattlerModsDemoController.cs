@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -36,7 +37,7 @@ namespace CoreAI.Demos
         private readonly List<EnemyState> _enemies = new();
         private readonly List<string> _log = new();
         private ILuaModRuntime _mods;
-        private LuaLogicSlots _slots;
+        private LuaCsLogicSlots _slots;
         private GameObject _heroVisual;
         private float _heroHp;
         private float _heroMaxHp = 120f;
@@ -72,8 +73,12 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
-            _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
+            _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             DeclareSlots();
             EnsureAnchorsAndVisuals();
             _heroHp = _heroMaxHp;

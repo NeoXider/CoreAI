@@ -22,6 +22,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsWorldQueryBindings _worldQuery;
         private readonly LuaCsFullUnityRuntimeBindings _full;
         private readonly LuaCsInputRuntimeBindings _input;
+        private readonly LuaCsLogicSlots _logicSlots = new();
 
         public LuaCsGameplayBindings(
             IGameLogger logger,
@@ -78,6 +79,14 @@ namespace CoreAI.Ai.LuaCs
 
         public LuaCapabilities Capabilities => _capabilities;
 
+        /// <summary>
+        /// Shared logic-override slots (<c>logic_define</c>/<c>logic_reset</c>/<c>logic_list</c>). The host
+        /// declares slots and reads them via <see cref="LuaCsLogicSlots.TryInvokeNumber"/>; mods override
+        /// them. Both the persistent runtime and the one-off executor register through this one instance,
+        /// so a host resolving it sees every mod's overrides.
+        /// </summary>
+        public LuaCsLogicSlots LogicSlots => _logicSlots;
+
         public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
         {
             LuaCapabilities effective = _capabilities & capabilities;
@@ -101,6 +110,11 @@ namespace CoreAI.Ai.LuaCs
             {
                 _time.RegisterTimeApis(registry);
                 _input?.RegisterGameplayApis(registry);
+            }
+
+            if ((effective & LuaCapabilities.LogicOverride) != 0)
+            {
+                _logicSlots.RegisterApis(registry);
             }
 
             if ((effective & LuaCapabilities.Full) != 0)

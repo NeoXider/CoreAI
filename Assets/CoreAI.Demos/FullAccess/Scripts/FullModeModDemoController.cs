@@ -107,9 +107,13 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
             _mods.ModReportEmitted += OnModReport;
-            _status = LuaModRuntime.IsSupported
+            _status = CoreAI.Ai.LuaCs.LuaCsModRuntime.IsSupported
                 ? "Ready. Load the Full-mode mod to start."
                 : "Lua sandbox is not supported on this platform.";
         }

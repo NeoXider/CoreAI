@@ -78,7 +78,11 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
             _mods.ModEventEmitted += OnModEvent;
             _mods.ModSourceLoaded += OnModLoaded;
 

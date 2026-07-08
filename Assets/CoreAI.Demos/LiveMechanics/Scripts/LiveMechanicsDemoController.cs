@@ -2,6 +2,7 @@ using UnityEngine;
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Lua;
 using VContainer;
@@ -39,7 +40,7 @@ namespace CoreAI.Demos
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        private LuaLogicSlots _slots;
+        private LuaCsLogicSlots _slots;
         private ILuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
         private LuaTool.ILuaExecutor _luaExecutor;
@@ -65,10 +66,14 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
-            _mods = coreAiScope.Container.Resolve<ILuaModRuntime>();
-            _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
-            _luaExecutor = coreAiScope.Container.Resolve<LuaTool.ILuaExecutor>();
+            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
+            IObjectResolver luaContainer =
+                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+
+            _slots = luaContainer.Resolve<LuaCsLogicSlots>();
+            _mods = luaContainer.Resolve<ILuaModRuntime>();
+            _versions = luaContainer.Resolve<ILuaScriptVersionStore>();
+            _luaExecutor = luaContainer.Resolve<LuaTool.ILuaExecutor>();
             _slots.DeclareSlot(DamageSlot);
             _slots.DeclareSlot(AttackIntervalSlot);
             _slots.DeclareSlot(LootSlot);
