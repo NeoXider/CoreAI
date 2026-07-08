@@ -495,6 +495,12 @@ namespace CoreAI.Infrastructure.World
                 return fallback;
             }
 
+            if (value.Type == MoonSharp.Interpreter.DataType.Number)
+            {
+                double num = value.Number;
+                return double.IsNaN(num) ? fallback : num.ToString("G");
+            }
+
             if (value.Type != MoonSharp.Interpreter.DataType.String)
             {
                 throw new ArgumentException($"'{key}' must be a string.");

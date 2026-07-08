@@ -45,7 +45,7 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsModRuntime : ILuaModRuntime
     {
-        public const int DefaultHandlerTimeoutMs = 100;
+        public const int DefaultHandlerTimeoutMs = 500;
         public const long DefaultHandlerMaxSteps = 100_000;
         public const int DefaultMaxMods = 32;
         public const int DefaultMaxHandlersPerMod = 64;

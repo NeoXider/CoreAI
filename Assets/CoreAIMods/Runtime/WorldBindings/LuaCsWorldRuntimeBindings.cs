@@ -475,6 +475,12 @@ namespace CoreAI.Ai.LuaCs
                 return fallback;
             }
 
+            if (value.Type == LuaValueType.Number)
+            {
+                double num = value.Read<double>();
+                return double.IsNaN(num) ? fallback : num.ToString("G");
+            }
+
             if (value.Type != LuaValueType.String)
             {
                 throw new ArgumentException($"'{key}' must be a string.");
