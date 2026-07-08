@@ -519,7 +519,7 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
 }
 ```
 
-The built-in **`CoreAiChatPanel`** can append one diagnostic row per tool call when **`CoreAiChatConfig.ShowToolCallsInChat`** is enabled (default **off**). Override **`CoreAiChatPanel.FormatToolExecutedForChat`** for custom text.
+The built-in **`CoreAiChatPanel`** can append one diagnostic row per tool call when **`CoreAiChatConfig.ShowToolCallsInChat`** is enabled (default **off**). Override **`CoreAiChatPanel.FormatToolExecutedForChat`** for custom text. The tool-call display and chat history are keyed to the **active** role, so switching agents (via the runtime agent dropdown or `EnableAgentSwitching()`) re-targets tool bubbles and reloads that role's transcript. The **Hub-embedded chat** forces `ShowToolCallsInChat` on (via runtime options) so tool progress is always visible there, independent of the shared chat config.
 
 ### Clearing chat from UI (`CoreAiChatPanel`)
 

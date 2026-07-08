@@ -441,17 +441,23 @@ namespace CoreAI.Chat
             }
 
             // .coreai-chat-embedded strips the floating border/radius. The container's fixed 650×910 and
-            // absolute anchoring resist USS/inline overrides in the cascade on this Unity version, so we drive
-            // its exact pixel size from the wrapper's resolved geometry — bulletproof and resize-tracking.
+            // bottom-right anchoring resist USS/inline overrides in the cascade on this Unity version, so we
+            // pin it absolute top-left and drive its exact pixel size from the wrapper's resolved geometry.
+            // Absolute + left/top:0 guarantees alignment (no residual right-anchor shift → left-clip); the
+            // geometry sync guarantees the size (and tracks resizes).
             container.AddToClassList("coreai-chat-embedded");
-            container.style.position = Position.Relative;
-            container.style.left = StyleKeyword.Auto;
-            container.style.top = StyleKeyword.Auto;
-            container.style.right = StyleKeyword.Auto;
-            container.style.bottom = StyleKeyword.Auto;
 
+            // Re-assert position AND size on every layout pass. Doing it inside the GeometryChanged callback
+            // (post-layout) makes it stick where a one-shot pre-layout set was being clobbered back to the
+            // container's floating right/bottom:24 anchor (it resolved to a −24 offset on all sides).
             void Sync()
             {
+                container.style.position = Position.Absolute;
+                container.style.left = 0f;
+                container.style.top = 0f;
+                container.style.right = 0f;
+                container.style.bottom = 0f;
+
                 float w = chatRoot.resolvedStyle.width;
                 float h = chatRoot.resolvedStyle.height;
                 if (w > 1f)
@@ -553,6 +559,11 @@ namespace CoreAI.Chat
         private string _activeRoleId;
         private bool _agentSwitchingEnabled;
 
+        /// <summary>The role currently driving the chat — the runtime-switched role when agent switching is
+        /// active, otherwise the configured role. Used for history hydration, tool-call display, and stop/clear
+        /// so switching agents re-targets the whole panel, not just outgoing requests.</summary>
+        private string ActiveRoleId => _activeRoleId ?? (Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat);
+
         /// <summary>
         /// Enables the agent/role dropdown at runtime (e.g. from a demo controller). Safe to call before or
         /// after the UI is built; the dropdown appears once the chat header exists.
@@ -593,8 +604,37 @@ namespace CoreAI.Chat
                 return;
             }
 
+            string previousRole = _activeRoleId;
             _activeRoleId = evt.newValue;
             Debug.Log($"[CoreAiChatPanel] Active agent role -> {_activeRoleId}");
+
+            // Re-target the panel to the newly selected role. Stop any in-flight turn for the *previous*
+            // role so its late streaming output does not bleed into the newly selected role's transcript,
+            // then reload this role's chat history.
+            if (isActiveAndEnabled)
+            {
+                if (!string.IsNullOrEmpty(previousRole))
+                {
+                    try
+                    {
+                        CoreAi.StopAgent(previousRole);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            _chatService?.StopAgent(previousRole);
+                        }
+                        catch
+                        {
+                            // Ignore — best-effort stop.
+                        }
+                    }
+                }
+
+                StopActiveGeneration();
+                HydrateStartupMessagesFromStore();
+            }
         }
 
         // ===================== UI Binding =====================
@@ -1152,7 +1192,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            string roleId = options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+            string roleId = ActiveRoleId;
             int max = options.MaxPersistedMessagesForUi;
             bool ok = _chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max);
             if (!ok)
@@ -2354,7 +2394,7 @@ namespace CoreAI.Chat
             object? result)
         {
             ICoreAiChatOptions options = Options;
-            string panelRole = string.IsNullOrEmpty(options.RoleId) ? BuiltInAgentRoleIds.SmartChat : options.RoleId;
+            string panelRole = ActiveRoleId;
             // listeners want the name regardless of whether the bubble is rendered.
             if (string.Equals(roleId, panelRole, StringComparison.Ordinal))
             {
@@ -2443,7 +2483,7 @@ namespace CoreAI.Chat
             try
             {
                 _stopRequestedByUser = true;
-                string roleId = Options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+                string roleId = ActiveRoleId;
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
                 // Cancel orchestrator tasks first
@@ -2895,7 +2935,7 @@ namespace CoreAI.Chat
                     MessageScroll.Clear();
                 }
 
-                string roleId = Options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
+                string roleId = ActiveRoleId;
 
                 // Wrap the following block with exception-safe behavior.
                 try
