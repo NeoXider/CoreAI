@@ -12,12 +12,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 1
+  backendType: 2
   executionMode: 0
   autoPriority: 0
-  apiBaseUrl: 
+  apiBaseUrl: http://localhost:1234/v1
   apiKey: 
-  modelName: qwen3.5-4b-mtp
+  modelName: qwopus3.5-9b-coder-mtp
   visionSupport: 0
   enableTemperatureOverriding: 0
   temperature: 0.1
@@ -43,6 +43,7 @@ MonoBehaviour:
   extraBodyJson: 
   llmUnityMaxConcurrentChats: 1
   llmUnityNumGPULayers: 99
+  llmUnityServerPort: 13333
   universalSystemPromptPrefix: Respond concisely and to the point. Avoid unnecessary
     verbosity.
   toolContractAdditionalInstructions: 
