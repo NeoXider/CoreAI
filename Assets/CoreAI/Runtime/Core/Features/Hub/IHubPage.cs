@@ -30,4 +30,14 @@ namespace CoreAI.Hub
         /// <summary>Called when the page instance is being discarded.</summary>
         void OnDestroyed();
     }
+
+    /// <summary>
+    /// Optional marker for a <see cref="IHubPage"/> whose content should fill the Hub content area
+    /// edge-to-edge, with the host dropping its usual page padding while the page is active (e.g. the
+    /// embedded chat, which brings its own internal padding). Hosts that don't honor it just render the
+    /// page with the normal padding.
+    /// </summary>
+    public interface IHubFullBleedPage
+    {
+    }
 }

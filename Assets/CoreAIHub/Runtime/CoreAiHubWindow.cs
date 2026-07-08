@@ -467,6 +467,7 @@ namespace CoreAI.Hub.UI
             VisualElement content = ResolvePageContent(pageId, page);
 
             _content.Clear();
+            ApplyFullBleed(page is CoreAI.Hub.IHubFullBleedPage);
             if (content != null)
             {
                 _content.Add(content);
@@ -576,6 +577,31 @@ namespace CoreAI.Hub.UI
             {
                 bool isActive = string.Equals(kvp.Key, _activePageId, StringComparison.Ordinal);
                 kvp.Value.EnableInClassList(TabActiveClassName, isActive);
+            }
+        }
+
+        /// <summary>Drops the content area's padding for a full-bleed page (e.g. the embedded chat) so it
+        /// reaches all four edges; restores the stylesheet padding for normal pages.</summary>
+        private void ApplyFullBleed(bool fullBleed)
+        {
+            if (_content == null)
+            {
+                return;
+            }
+
+            if (fullBleed)
+            {
+                _content.style.paddingLeft = 0f;
+                _content.style.paddingRight = 0f;
+                _content.style.paddingTop = 0f;
+                _content.style.paddingBottom = 0f;
+            }
+            else
+            {
+                _content.style.paddingLeft = StyleKeyword.Null;
+                _content.style.paddingRight = StyleKeyword.Null;
+                _content.style.paddingTop = StyleKeyword.Null;
+                _content.style.paddingBottom = StyleKeyword.Null;
             }
         }
 
