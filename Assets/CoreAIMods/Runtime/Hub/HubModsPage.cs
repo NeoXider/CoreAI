@@ -243,9 +243,7 @@ namespace CoreAI.Ai.Hub
             top.Add(nameCol);
 
             top.Add(HubModWidgets.MakeButton("Edit", () => OpenEditEditor(mod.Id)));
-            Button delete = HubModWidgets.MakeButton("Delete", () => DeleteMod(mod.Id));
-            delete.style.color = HubModWidgets.Danger;
-            top.Add(delete);
+            top.Add(HubModWidgets.MakeDangerButton("Delete", () => DeleteMod(mod.Id)));
 
             panel.Add(top);
 

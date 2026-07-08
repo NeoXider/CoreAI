@@ -74,7 +74,11 @@ namespace CoreAI.Composition
             }
             else
             {
-                builder.Register<IAiOrchestrationMetrics, NullAiOrchestrationMetrics>(Lifetime.Singleton);
+                // Record metrics in-memory even without the logging sink, so the Hub's Statistics page can
+                // surface live completion/latency/per-role stats. Exposed AsSelf for that concrete resolve.
+                builder.Register<InMemoryAiOrchestrationMetrics>(Lifetime.Singleton)
+                    .AsImplementedInterfaces()
+                    .AsSelf();
             }
         }
 

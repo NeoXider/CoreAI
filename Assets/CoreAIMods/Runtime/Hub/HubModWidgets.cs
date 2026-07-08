@@ -54,10 +54,49 @@ namespace CoreAI.Ai.Hub
         {
             Button button = new(onClick) { text = text };
             button.style.marginLeft = 0f;
-            button.style.marginRight = 4f;
-            button.style.paddingLeft = 8f;
-            button.style.paddingRight = 8f;
+            button.style.marginRight = 6f;
+            button.style.marginTop = 2f;
+            button.style.marginBottom = 2f;
+            button.style.paddingLeft = 12f;
+            button.style.paddingRight = 12f;
+            button.style.paddingTop = 4f;
+            button.style.paddingBottom = 4f;
+            button.style.height = 26f;
+            button.style.color = Text;
+            button.style.backgroundColor = new Color(Accent.r, Accent.g, Accent.b, 0.18f);
+            button.style.unityFontStyleAndWeight = FontStyle.Bold;
+            SetBorder(button, new Color(Accent.r, Accent.g, Accent.b, 0.45f));
+            SetRadius(button, 6f);
             return button;
+        }
+
+        internal static Button MakeDangerButton(string text, System.Action onClick)
+        {
+            Button button = MakeButton(text, onClick);
+            button.style.color = Danger;
+            button.style.backgroundColor = new Color(Danger.r, Danger.g, Danger.b, 0.14f);
+            SetBorder(button, new Color(Danger.r, Danger.g, Danger.b, 0.45f));
+            return button;
+        }
+
+        private static void SetBorder(VisualElement el, Color color)
+        {
+            el.style.borderTopWidth = 1f;
+            el.style.borderBottomWidth = 1f;
+            el.style.borderLeftWidth = 1f;
+            el.style.borderRightWidth = 1f;
+            el.style.borderTopColor = color;
+            el.style.borderBottomColor = color;
+            el.style.borderLeftColor = color;
+            el.style.borderRightColor = color;
+        }
+
+        private static void SetRadius(VisualElement el, float r)
+        {
+            el.style.borderTopLeftRadius = r;
+            el.style.borderTopRightRadius = r;
+            el.style.borderBottomLeftRadius = r;
+            el.style.borderBottomRightRadius = r;
         }
 
         /// <summary>A padded, bordered container used for rows and boxes.</summary>

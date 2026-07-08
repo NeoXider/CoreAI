@@ -31,10 +31,32 @@
 /* Collapse/expand toggle (top-right), independent of the tab bar. */
 .coreai-hub-collapse {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 24px;
-    height: 20px;
+    top: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    margin: 0;
+    background-color: rgba(17, 160, 181, 0.18);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.5);
+    border-radius: 14px;
+    color: rgb(197, 220, 232);
+    font-size: 18px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    transition-duration: 0.15s;
+}
+
+.coreai-hub-collapse:hover {
+    background-color: rgba(77, 208, 225, 0.4);
+    border-color: rgba(200, 240, 255, 0.9);
+}
+
+/* When collapsed the toggle centres inside the small bar. */
+.coreai-hub-root.coreai-hub--collapsed .coreai-hub-collapse {
+    top: 3px;
+    right: 3px;
 }
 
 /* Tab bar */

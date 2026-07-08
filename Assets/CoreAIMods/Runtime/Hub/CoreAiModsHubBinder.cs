@@ -1,3 +1,4 @@
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
@@ -45,6 +46,25 @@ namespace CoreAI.Ai.Hub
             HubPageRegistry registry = window.Registry ?? new HubPageRegistry();
 
             IObjectResolver container = modsScope.Container;
+
+            // Light up the built-in Settings/Statistics tabs with live DI sources. The Hub's own DI-free
+            // bootstrap (CoreAiHubDemo) registers those pages with null sources, so they render a setup
+            // note; re-registering by the same id (last-writer-wins) upgrades them to the running config
+            // and live orchestration metrics wherever this module is present.
+            ICoreAISettings settings = container.ResolveOrDefault<ICoreAISettings>();
+            InMemoryAiOrchestrationMetrics metrics = container.ResolveOrDefault<InMemoryAiOrchestrationMetrics>();
+            if (settings != null || metrics != null)
+            {
+                registry.Register(
+                    HubSettingsPage.DefaultPageId,
+                    () => new HubSettingsPage(settings),
+                    order: 100);
+                registry.Register(
+                    HubStatisticsPage.DefaultPageId,
+                    () => new HubStatisticsPage(metrics, settings),
+                    order: 200);
+            }
+
             LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
             ILuaModSourceStore sourceStore = container.ResolveOrDefault<ILuaModSourceStore>();
             LuaCapabilities grant = allowFullTier

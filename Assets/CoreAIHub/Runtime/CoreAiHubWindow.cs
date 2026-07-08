@@ -289,7 +289,25 @@ namespace CoreAI.Hub.UI
 
             // Registry events may arrive off the UI thread; marshal the rebuild onto the panel's
             // scheduler so VisualElement mutations always run on the main thread.
-            _root.schedule.Execute(RebuildTabs);
+            _root.schedule.Execute(() =>
+            {
+                // A re-registered id may point to a NEW factory (e.g. a DI binder upgrading the
+                // built-in Settings/Statistics pages with live sources after the DI-free bootstrap
+                // registered them with null sources). We cache page instances at metadata-peek time,
+                // so drop any cached instance/content for a still-present id and let the new factory
+                // build it on next activation.
+                if (pageId != null && _registry != null && _registry.TryGet(pageId, out _))
+                {
+                    bool wasActive = string.Equals(pageId, _activePageId, StringComparison.Ordinal);
+                    DestroyPage(pageId);
+                    if (wasActive)
+                    {
+                        _activePageId = null;
+                    }
+                }
+
+                RebuildTabs();
+            });
         }
 
         // ===================== Tab bar =====================

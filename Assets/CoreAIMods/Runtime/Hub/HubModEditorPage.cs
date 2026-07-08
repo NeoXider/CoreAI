@@ -78,14 +78,34 @@ namespace CoreAI.Ai.Hub
             root.style.flexGrow = 1f;
             root.style.flexDirection = FlexDirection.Column;
 
+            // Header row: a Back button next to the title so returning to the list is always one click away
+            // and always on-screen (previously the only way back — "Close" — sat below the tall code field).
+            VisualElement headerRow = new();
+            headerRow.style.flexDirection = FlexDirection.Row;
+            headerRow.style.alignItems = Align.Center;
+            headerRow.style.marginBottom = 6f;
+            headerRow.Add(HubModWidgets.MakeButton("← Back", Close));
             _titleLabel = HubModWidgets.MakeTitle(_isNew ? "New mod" : $"Edit mod: {_modId}");
-            root.Add(_titleLabel);
+            _titleLabel.style.marginBottom = 0f;
+            _titleLabel.style.marginLeft = 4f;
+            headerRow.Add(_titleLabel);
+            root.Add(headerRow);
 
             _headerBox = HubModWidgets.MakePanel();
             root.Add(_headerBox);
 
             root.Add(HubModWidgets.MakeNote(
                 "Manifest fields below are read from the mod's @coreai header — edit them in the code."));
+
+            // Primary actions above the code field so they never scroll off-screen.
+            VisualElement actions = new();
+            actions.style.flexDirection = FlexDirection.Row;
+            actions.style.flexWrap = Wrap.Wrap;
+            actions.style.marginBottom = 4f;
+            actions.Add(HubModWidgets.MakeButton("Save & run", Save));
+            actions.Add(HubModWidgets.MakeButton("Copy", Copy));
+            actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
+            root.Add(actions);
 
             _codeField = new TextField { name = "coreai-hub-mod-code", multiline = true };
             _codeField.value = _initialSource;
@@ -102,16 +122,6 @@ namespace CoreAI.Ai.Hub
             }
 
             root.Add(_codeField);
-
-            VisualElement actions = new();
-            actions.style.flexDirection = FlexDirection.Row;
-            actions.style.flexWrap = Wrap.Wrap;
-            actions.style.marginBottom = 4f;
-            actions.Add(HubModWidgets.MakeButton("Save & run", Save));
-            actions.Add(HubModWidgets.MakeButton("Copy", Copy));
-            actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
-            actions.Add(HubModWidgets.MakeButton("Close", Close));
-            root.Add(actions);
 
             _status = HubModWidgets.MakeStatus();
             root.Add(_status);
