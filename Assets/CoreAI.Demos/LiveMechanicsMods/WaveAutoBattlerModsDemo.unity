@@ -119,77 +119,6 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &349880790
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 349880793}
-  - component: {fileID: 349880792}
-  - component: {fileID: 349880791}
-  m_Layer: 0
-  m_Name: CoreAiChatUI
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &349880791
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 349880790}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 85e25988323cae8459326e7c65644c29, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Chat.CoreAiChatPanel
-  config: {fileID: 11400000, guid: 35a273c9c56ed3d488f1445c0c8c3efb, type: 2}
-  customStyleSheet: {fileID: 7433441132597879392, guid: 54e4e52b0db8c294fb66ec9495faa77f, type: 3}
-  messageBubbleTemplate: {fileID: 0}
---- !u!114 &349880792
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 349880790}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
-  m_PanelSettings: {fileID: 11400000, guid: 0bc925d4640801549a6b5fe23e8b43b6, type: 2}
-  m_ParentUI: {fileID: 0}
-  sourceAsset: {fileID: 9197481963319205126, guid: c56ffd49a798940449e9f69ecf685e16, type: 3}
-  m_SortingOrder: 0
-  m_Position: 0
-  m_WorldSpaceSizeMode: 1
-  m_WorldSpaceWidth: 1920
-  m_WorldSpaceHeight: 1080
-  m_PivotReferenceSize: 0
-  m_Pivot: 0
-  m_WorldSpaceCollider: {fileID: 0}
---- !u!4 &349880793
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 349880790}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &406190034
 GameObject:
   m_ObjectHideFlags: 0
@@ -285,6 +214,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: efe650b8910615744be98808bed9afe3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Hub.UI::CoreAI.Hub.UI.CoreAiHubWindow
+  shellUxml: {fileID: 0}
   styleSheet: {fileID: 0}
   emptyStateText: No Hub pages registered.
 --- !u!114 &532788471
@@ -984,7 +914,6 @@ SceneRoots:
   - {fileID: 573228322}
   - {fileID: 1614572739}
   - {fileID: 2106438250}
-  - {fileID: 349880793}
   - {fileID: 933156841}
   - {fileID: 1828887120}
   - {fileID: 2100352201}

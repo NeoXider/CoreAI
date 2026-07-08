@@ -39,6 +39,8 @@ namespace CoreAI.Hub.UI
         private TextField _apiKey;
         private TextField _model;
         private TextField _ggufModelPath;
+        private DropdownField _ggufModel;
+        private const string GgufAutoLabel = "[ Auto / Fallback ]";
         private IntegerField _gpuLayers;
         private Toggle _overrideTemperature;
         private FloatField _temperature;
@@ -143,7 +145,10 @@ namespace CoreAI.Hub.UI
             body.Add(_httpGroup);
 
             _localGroup = MakeGroup("LLMUnity");
-            _ggufModelPath = new TextField("GGUF model path");
+            _ggufModel = MakeGgufModelDropdown();
+            _localGroup.Add(_ggufModel);
+
+            _ggufModelPath = new TextField("GGUF model path (manual override)");
             StyleField(_ggufModelPath);
             _localGroup.Add(_ggufModelPath);
 
@@ -312,6 +317,7 @@ namespace CoreAI.Hub.UI
             _apiKey.SetValueWithoutNotify("");
             _model.SetValueWithoutNotify(status.Model);
             _ggufModelPath.SetValueWithoutNotify(status.GgufModelPath);
+            SyncGgufModelDropdown(status.GgufModelPath);
 
             if (asset != null)
             {
@@ -446,6 +452,49 @@ namespace CoreAI.Hub.UI
             label.AddToClassList("coreai-hub-settings-group-title");
             group.Add(label);
             return group;
+        }
+
+        private DropdownField MakeGgufModelDropdown()
+        {
+            var options = new System.Collections.Generic.List<string> { GgufAutoLabel };
+            string[] models = CoreAiBackend.GetLlmUnityModelFileNames();
+            if (models != null)
+            {
+                foreach (string model in models)
+                {
+                    if (!string.IsNullOrEmpty(model))
+                    {
+                        options.Add(model);
+                    }
+                }
+            }
+
+            DropdownField dropdown = new("LLMUnity model", options, 0);
+            StyleField(dropdown);
+            dropdown.tooltip =
+                "Pick a GGUF model known to the LLMUnity Model Manager. [ Auto / Fallback ] keeps the " +
+                "configured default. Type a specific .gguf filename in the field below for a custom path.";
+            dropdown.RegisterValueChangedCallback(evt =>
+                _ggufModelPath.SetValueWithoutNotify(evt.newValue == GgufAutoLabel ? "" : evt.newValue));
+            return dropdown;
+        }
+
+        private void SyncGgufModelDropdown(string path)
+        {
+            if (_ggufModel == null)
+            {
+                return;
+            }
+
+            string trimmed = string.IsNullOrEmpty(path) ? "" : path.Trim();
+            if (!string.IsNullOrEmpty(trimmed) && _ggufModel.choices.IndexOf(trimmed) >= 0)
+            {
+                _ggufModel.SetValueWithoutNotify(trimmed);
+            }
+            else
+            {
+                _ggufModel.SetValueWithoutNotify(GgufAutoLabel);
+            }
         }
 
         private static void StyleField(BaseField<string> field)

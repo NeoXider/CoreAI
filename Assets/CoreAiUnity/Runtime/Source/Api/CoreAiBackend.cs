@@ -10,6 +10,9 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
 using UnityEngine;
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+using LLMUnity;
+#endif
 
 namespace CoreAI
 {
@@ -203,6 +206,48 @@ namespace CoreAI
                     numGpuLayers ?? settings.NumGPULayers);
                 return RebuildAndNotify(settings);
             }
+        }
+
+        /// <summary>
+        /// Returns the GGUF model filenames known to the LLMUnity Model Manager (non-LoRA), or an empty array
+        /// when LLMUnity is unavailable or the model directory has not been scanned yet. Used by UI model
+        /// pickers (e.g. the Hub Settings page) to populate a model dropdown without referencing LLMUnity
+        /// directly.
+        /// </summary>
+        public static string[] GetLlmUnityModelFileNames()
+        {
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            try
+            {
+                if (LLMManager.modelEntries == null || LLMManager.modelEntries.Count == 0)
+                {
+                    LLMManager.LoadFromDisk();
+                }
+
+                var list = new System.Collections.Generic.List<string>();
+                if (LLMManager.modelEntries != null)
+                {
+                    foreach (ModelEntry entry in LLMManager.modelEntries)
+                    {
+                        if (entry == null || entry.lora)
+                        {
+                            continue;
+                        }
+
+                        list.Add(entry.filename);
+                    }
+                }
+
+                return list.ToArray();
+            }
+            catch (Exception ex)
+            {
+                LogWarning("GetLlmUnityModelFileNames: LLMUnity model scan failed: " + ex.Message);
+                return System.Array.Empty<string>();
+            }
+#else
+            return System.Array.Empty<string>();
+#endif
         }
 
         /// <summary>Switches to the offline stub backend (optionally with a fixed custom response).</summary>
