@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
+    "CoreAI.Hub.UI",
     "MoonSharp.Interpreter",
     "MessagePipe",
     "MessagePipe.VContainer",

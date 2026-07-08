@@ -1,0 +1,20 @@
+{
+  "name": "CoreAI.Hub.UI.Editor",
+  "rootNamespace": "CoreAI.Hub.UI.Editor",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Hub.UI"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
