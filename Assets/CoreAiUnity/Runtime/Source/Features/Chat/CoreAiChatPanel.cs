@@ -400,6 +400,7 @@ namespace CoreAI.Chat
                 chatRoot = _embeddedChatTemplate.CloneTree();
                 chatRoot.style.flexGrow = 1f;
                 _embeddedHost.Add(chatRoot);
+                NeutralizeFloatingContainer(chatRoot);
             }
             else
             {
@@ -412,6 +413,60 @@ namespace CoreAI.Chat
             }
 
             InitializeUiRoot(chatRoot);
+        }
+
+        /// <summary>
+        /// The standalone chat container (<c>coreai-chat-root</c> / <c>.coreai-chat-container</c>) is a
+        /// floating panel: <c>position: absolute</c>, a fixed 650×910, anchored bottom-right. Embedded in a
+        /// host that clips overflow (e.g. a Hub tab), that fixed height overflows and the top of the panel —
+        /// the header with the clear / collapse / agent controls — is clipped away. In embedded mode we
+        /// override those styles so the container flows inside and fills the host instead of floating.
+        /// </summary>
+        private static void NeutralizeFloatingContainer(VisualElement chatRoot)
+        {
+            if (chatRoot == null)
+            {
+                return;
+            }
+
+            // Make the cloned template wrapper fill the host.
+            chatRoot.style.flexGrow = 1f;
+            chatRoot.style.width = Length.Percent(100);
+            chatRoot.style.height = Length.Percent(100);
+
+            VisualElement container = chatRoot.Q(className: "coreai-chat-container");
+            if (container == null)
+            {
+                return;
+            }
+
+            // .coreai-chat-embedded strips the floating border/radius. The container's fixed 650×910 and
+            // absolute anchoring resist USS/inline overrides in the cascade on this Unity version, so we drive
+            // its exact pixel size from the wrapper's resolved geometry — bulletproof and resize-tracking.
+            container.AddToClassList("coreai-chat-embedded");
+            container.style.position = Position.Relative;
+            container.style.left = StyleKeyword.Auto;
+            container.style.top = StyleKeyword.Auto;
+            container.style.right = StyleKeyword.Auto;
+            container.style.bottom = StyleKeyword.Auto;
+
+            void Sync()
+            {
+                float w = chatRoot.resolvedStyle.width;
+                float h = chatRoot.resolvedStyle.height;
+                if (w > 1f)
+                {
+                    container.style.width = w;
+                }
+
+                if (h > 1f)
+                {
+                    container.style.height = h;
+                }
+            }
+
+            chatRoot.RegisterCallback<GeometryChangedEvent>(_ => Sync());
+            Sync();
         }
 
 #if UNITY_6000_5_OR_NEWER

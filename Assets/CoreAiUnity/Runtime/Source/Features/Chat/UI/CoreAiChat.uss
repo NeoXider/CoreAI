@@ -20,6 +20,26 @@
     border-radius: 12px;
 }
 
+/* Embedded in a host container (e.g. a Hub tab): fill the host edge-to-edge instead of floating as a
+   fixed 650x910 panel anchored bottom-right. Higher specificity than .coreai-chat-container, so it wins. */
+.coreai-chat-container.coreai-chat-embedded {
+    position: relative;
+    left: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    /* width: auto + align-self: stretch fills the host cross-axis; an explicit width (even 100%) keeps
+       resolving against the fixed 650 rule on some Unity versions, so use stretch instead. */
+    width: auto;
+    height: auto;
+    align-self: stretch;
+    max-width: none;
+    max-height: none;
+    flex-grow: 1;
+    border-width: 0;
+    border-radius: 0;
+}
+
 /* Header */
 .coreai-chat-header {
     height: 56px;
@@ -75,6 +95,40 @@
 .coreai-chat-header-btn:hover {
     background-color: rgba(77, 208, 225, 0.35);
     border-color: rgba(77, 208, 225, 0.7);
+}
+
+/* Agent/role dropdown in the header — themed to match the accent buttons instead of the plain default. */
+.coreai-chat-agent-dropdown {
+    flex-shrink: 0;
+    margin-left: 8px;
+    margin-right: 4px;
+    min-width: 120px;
+}
+
+.coreai-chat-agent-dropdown .unity-base-popup-field__input {
+    height: 32px;
+    border-radius: 16px;
+    background-color: rgba(17, 160, 181, 0.2);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+    padding-left: 12px;
+    padding-right: 8px;
+    -unity-text-align: middle-left;
+}
+
+.coreai-chat-agent-dropdown .unity-base-popup-field__input:hover {
+    background-color: rgba(77, 208, 225, 0.35);
+    border-color: rgba(77, 208, 225, 0.7);
+}
+
+.coreai-chat-agent-dropdown .unity-base-popup-field__text {
+    color: rgb(197, 220, 232);
+    font-size: 13px;
+    -unity-font-style: bold;
+}
+
+.coreai-chat-agent-dropdown .unity-base-popup-field__arrow {
+    -unity-background-image-tint-color: rgb(77, 208, 225);
 }
 
 /* Collapsed state — container hidden, FAB shown instead */

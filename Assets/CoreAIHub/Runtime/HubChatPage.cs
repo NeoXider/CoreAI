@@ -88,6 +88,14 @@ namespace CoreAI.Hub.UI
             _host = new VisualElement { name = "coreai-hub-chat-host" };
             _host.style.flexGrow = 1f;
 
+            // Bleed the Hub content's 16px padding so the chat fills the whole tab edge-to-edge (no empty
+            // strip on the right/bottom). The chat has its own internal header/input padding, so it still
+            // reads well flush to the content edges.
+            _host.style.marginLeft = -16f;
+            _host.style.marginRight = -16f;
+            _host.style.marginTop = -16f;
+            _host.style.marginBottom = -16f;
+
             if (_chatTemplate == null)
             {
                 _host.Add(HubPageWidgets.MakeTitle(DisplayName));
@@ -98,6 +106,15 @@ namespace CoreAI.Hub.UI
             }
 
             _panel = CoreAiChatPanel.CreateEmbedded(_host, _chatTemplate, _chatStyleSheet, _chatConfig);
+
+            // The Hub chat always offers the agent/role dropdown in its header so the player can switch
+            // between the conversational role and the Programmer role that carries the mod tools — i.e.
+            // write mods straight from the Hub chat, not just the standalone chat.
+            if (_panel != null)
+            {
+                _panel.EnableAgentSwitching();
+            }
+
             return _host;
         }
     }
