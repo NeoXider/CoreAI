@@ -7,9 +7,8 @@ using UnityEngine.UIElements;
 namespace CoreAI.Hub.UI
 {
     /// <summary>
-    /// Built-in Hub page that shows live orchestration metrics (completions, latency, retries, per-role
-    /// breakdown) from <see cref="InMemoryAiOrchestrationMetrics"/> plus the token budget from
-    /// <see cref="ICoreAISettings"/>. Read-only; values refresh on a light 1 s scheduler while the tab is visible.
+    /// Built-in Hub page that shows live orchestration metrics, derived health signals, current backend,
+    /// and per-role breakdown from <see cref="InMemoryAiOrchestrationMetrics"/>.
     /// </summary>
     public sealed class HubStatisticsPage : IHubPage
     {
@@ -21,12 +20,16 @@ namespace CoreAI.Hub.UI
         private readonly InMemoryAiOrchestrationMetrics _metrics;
         private readonly ICoreAISettings _settings;
 
+        private Label _backend;
+        private Label _liveState;
         private Label _completions;
         private Label _successFail;
+        private Label _successRate;
         private Label _avgLatency;
-        private Label _retries;
-        private Label _published;
+        private Label _retryPressure;
+        private Label _commandsPerCompletion;
         private Label _lastSuccess;
+        private Label _capacity;
         private VisualElement _rolesContainer;
 
         /// <summary>Creates the Statistics page from optional live sources (null-tolerant).</summary>
@@ -59,6 +62,7 @@ namespace CoreAI.Hub.UI
         /// <inheritdoc />
         public void OnActivated()
         {
+            Refresh();
         }
 
         /// <inheritdoc />
@@ -74,65 +78,111 @@ namespace CoreAI.Hub.UI
         private object BuildContent()
         {
             ScrollView scroll = HubPageWidgets.CreatePage(DisplayName, out VisualElement body);
+            scroll.AddToClassList("coreai-hub-page");
+            body.AddToClassList("coreai-hub-page-body");
+
+            body.Add(HubPageWidgets.MakeSection("Backend snapshot"));
+            body.Add(HubPageWidgets.MakeRow("Current backend", "-", out _backend));
+            body.Add(HubPageWidgets.MakeRow("Live scope", "-", out _liveState));
+
+            body.Add(HubPageWidgets.MakeSection("Throughput and reliability"));
+            body.Add(HubPageWidgets.MakeRow("Completions", "0", out _completions));
+            body.Add(HubPageWidgets.MakeRow("Success / fail", "0 / 0", out _successFail));
+            body.Add(HubPageWidgets.MakeRow("Success rate", "-", out _successRate));
+            body.Add(HubPageWidgets.MakeRow("Avg latency", "-", out _avgLatency));
+            body.Add(HubPageWidgets.MakeRow("Structured retry pressure", "-", out _retryPressure));
+            body.Add(HubPageWidgets.MakeRow("Commands per completion", "-", out _commandsPerCompletion));
+            body.Add(HubPageWidgets.MakeRow("Last success", "-", out _lastSuccess));
 
             if (_settings != null)
             {
-                body.Add(HubPageWidgets.MakeSection("Token budget"));
-                body.Add(HubPageWidgets.MakeRow("Context window",
-                    _settings.ContextWindowTokens.ToString("N0", CultureInfo.InvariantCulture) + " tok"));
-                body.Add(HubPageWidgets.MakeRow("Max output tokens",
-                    _settings.MaxTokens > 0
-                        ? _settings.MaxTokens.ToString("N0", CultureInfo.InvariantCulture) + " tok"
-                        : "provider default"));
+                body.Add(HubPageWidgets.MakeSection("Configured capacity"));
+                body.Add(HubPageWidgets.MakeRow("Token budget", "-", out _capacity));
             }
+
+            VisualElement actions = new();
+            actions.AddToClassList("coreai-hub-actions");
+            actions.style.flexDirection = FlexDirection.Row;
+            actions.style.flexWrap = Wrap.Wrap;
+            actions.Add(MakeButton("Refresh", Refresh));
+            if (_metrics != null)
+            {
+                actions.Add(MakeButton("Reset counters", ResetMetrics));
+            }
+
+            body.Add(actions);
+
+            body.Add(HubPageWidgets.MakeSection("Per-role activity"));
+            _rolesContainer = new VisualElement { name = "coreai-hub-stats-roles" };
+            body.Add(_rolesContainer);
 
             if (_metrics == null)
             {
                 body.Add(HubPageWidgets.MakeNote(
-                    "No orchestration metrics source is wired. Pass an InMemoryAiOrchestrationMetrics to " +
-                    "HubBuiltInPages.RegisterAll to display live completion, latency, and per-role stats."));
-                return scroll;
+                    "No orchestration metrics source is wired. The backend snapshot still updates, but " +
+                    "completion, latency, retry, and role counters need InMemoryAiOrchestrationMetrics."));
             }
 
-            body.Add(HubPageWidgets.MakeSection("Orchestration"));
-            body.Add(HubPageWidgets.MakeRow("Completions", "0", out _completions));
-            body.Add(HubPageWidgets.MakeRow("Success / fail", "0 / 0", out _successFail));
-            body.Add(HubPageWidgets.MakeRow("Avg latency", "0 ms", out _avgLatency));
-            body.Add(HubPageWidgets.MakeRow("Structured retries", "0", out _retries));
-            body.Add(HubPageWidgets.MakeRow("Commands published", "0", out _published));
-            body.Add(HubPageWidgets.MakeRow("Last success", "-", out _lastSuccess));
-
-            body.Add(HubPageWidgets.MakeSection("Per-role"));
-            _rolesContainer = new VisualElement { name = "coreai-hub-stats-roles" };
-            body.Add(_rolesContainer);
-
-            body.Add(HubPageWidgets.MakeNote("Read-only. Refreshes about once a second while visible."));
-
             Refresh();
-            // schedule only ticks while the element is attached to a panel (i.e. the tab is shown).
             body.schedule.Execute(Refresh).Every(RefreshIntervalMs);
 
             return scroll;
         }
 
+        private void ResetMetrics()
+        {
+            _metrics?.Reset();
+            Refresh();
+        }
+
         private void Refresh()
         {
+            CoreAiBackendStatus status = CoreAiBackend.Status;
+            if (_backend != null)
+            {
+                _backend.text = status.ToString();
+            }
+
+            if (_liveState != null)
+            {
+                _liveState.text = status.IsLive ? "Live, hot-swappable" : "No live CoreAI scope";
+            }
+
+            if (_settings != null && _capacity != null)
+            {
+                _capacity.text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:N0} context / {1}",
+                    _settings.ContextWindowTokens,
+                    _settings.MaxTokens > 0 ? _settings.MaxTokens.ToString("N0", CultureInfo.InvariantCulture) + " max output" : "provider output default");
+            }
+
             if (_metrics == null || _completions == null)
             {
+                RefreshRoles();
                 return;
             }
 
-            _completions.text = _metrics.TotalCompletions.ToString(CultureInfo.InvariantCulture);
-            _successFail.text = string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} / {1}",
-                _metrics.SuccessfulCompletions,
-                _metrics.FailedCompletions);
-            _avgLatency.text = _metrics.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture) + " ms";
-            _retries.text = _metrics.StructuredRetries.ToString(CultureInfo.InvariantCulture);
-            _published.text = _metrics.CommandsPublished.ToString(CultureInfo.InvariantCulture);
-            _lastSuccess.text = _metrics.TotalCompletions == 0
+            int total = _metrics.TotalCompletions;
+            int ok = _metrics.SuccessfulCompletions;
+            int failed = _metrics.FailedCompletions;
+
+            _completions.text = total.ToString(CultureInfo.InvariantCulture);
+            _successFail.text = string.Format(CultureInfo.InvariantCulture, "{0} / {1}", ok, failed);
+            _successRate.text = total == 0 ? "no completions yet" : Percent(ok, total);
+            _avgLatency.text = total == 0 ? "-" : _metrics.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture) + " ms";
+            _retryPressure.text = total == 0
+                ? "no completions yet"
+                : string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} retries ({1})",
+                    _metrics.StructuredRetries,
+                    Percent(_metrics.StructuredRetries, total));
+            _commandsPerCompletion.text = total == 0
                 ? "-"
+                : ((double)_metrics.CommandsPublished / total).ToString("0.##", CultureInfo.InvariantCulture);
+            _lastSuccess.text = ok == 0
+                ? "never"
                 : _metrics.SecondsSinceLastSuccess.ToString("0", CultureInfo.InvariantCulture) + " s ago";
 
             RefreshRoles();
@@ -146,10 +196,16 @@ namespace CoreAI.Hub.UI
             }
 
             _rolesContainer.Clear();
+            if (_metrics == null)
+            {
+                _rolesContainer.Add(HubPageWidgets.MakeRow("(metrics not wired)", ""));
+                return;
+            }
+
             Dictionary<string, InMemoryAiOrchestrationMetrics.RoleMetrics> roles = _metrics.GetAllRoleMetrics();
             if (roles.Count == 0)
             {
-                _rolesContainer.Add(HubPageWidgets.MakeRow("(no roles yet)", ""));
+                _rolesContainer.Add(HubPageWidgets.MakeRow("(no role activity yet)", ""));
                 return;
             }
 
@@ -158,12 +214,33 @@ namespace CoreAI.Hub.UI
                 InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
                 string value = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}/{1} OK, {2} ms avg",
+                    "{0}/{1} OK ({2}), {3} fail, {4} ms avg, {5} retries, {6} cmds",
                     rm.Successes,
                     rm.Completions,
-                    rm.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture));
-                _rolesContainer.Add(HubPageWidgets.MakeRow(kvp.Key, value));
+                    Percent(rm.Successes, rm.Completions),
+                    rm.Failures,
+                    rm.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture),
+                    rm.StructuredRetries,
+                    rm.CommandsPublished);
+                _rolesContainer.Add(HubPageWidgets.MakeRow(string.IsNullOrEmpty(kvp.Key) ? "(default)" : kvp.Key, value));
             }
+        }
+
+        private static string Percent(int numerator, int denominator)
+        {
+            if (denominator <= 0)
+            {
+                return "-";
+            }
+
+            return ((double)numerator / denominator * 100d).ToString("0.#", CultureInfo.InvariantCulture) + "%";
+        }
+
+        private static Button MakeButton(string text, Action clicked)
+        {
+            Button button = new(clicked) { text = text };
+            button.AddToClassList("coreai-hub-action-button");
+            return button;
         }
     }
 }

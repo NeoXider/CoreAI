@@ -134,3 +134,114 @@
     font-size: 16px;
     white-space: normal;
 }
+
+/* Built-in Settings / Statistics page controls */
+.coreai-hub-page {
+    flex-grow: 1;
+    min-height: 0;
+}
+
+.coreai-hub-page-body {
+    flex-grow: 1;
+    padding-right: 8px;
+}
+
+.coreai-hub-field {
+    margin-bottom: 8px;
+    min-height: 32px;
+    color: rgb(220, 232, 240);
+}
+
+.coreai-hub-field .unity-base-field__label {
+    min-width: 132px;
+    color: rgb(220, 232, 240);
+    font-size: 13px;
+    -unity-font-style: bold;
+}
+
+.coreai-hub-field .unity-text-input,
+.coreai-hub-field .unity-text-field__input,
+.coreai-hub-field .unity-base-text-field__input,
+.coreai-hub-field .unity-base-field__input,
+.coreai-hub-field .unity-base-popup-field__input,
+.coreai-hub-field .unity-popup-field__input,
+.coreai-hub-field .unity-popup-field__text {
+    min-height: 30px;
+    background-color: rgba(8, 16, 32, 0.98);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+    border-radius: 4px;
+    color: rgb(232, 246, 250);
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.coreai-hub-field .unity-text-input:focus,
+.coreai-hub-field .unity-text-field__input:focus,
+.coreai-hub-field .unity-base-text-field__input:focus,
+.coreai-hub-field .unity-base-field__input:focus,
+.coreai-hub-field .unity-base-popup-field__input:focus,
+.coreai-hub-field .unity-popup-field__input:focus,
+.coreai-hub-field .unity-popup-field__text:focus {
+    border-color: rgba(96, 230, 245, 0.9);
+    background-color: rgba(10, 24, 45, 1);
+}
+
+.coreai-hub-field:disabled {
+    opacity: 0.72;
+}
+
+.coreai-hub-field:disabled .unity-base-field__label {
+    color: rgba(200, 220, 230, 0.82);
+}
+
+.coreai-hub-field:disabled .unity-text-input,
+.coreai-hub-field:disabled .unity-text-field__input,
+.coreai-hub-field:disabled .unity-base-text-field__input,
+.coreai-hub-field:disabled .unity-base-field__input,
+.coreai-hub-field:disabled .unity-base-popup-field__input,
+.coreai-hub-field:disabled .unity-popup-field__input,
+.coreai-hub-field:disabled .unity-popup-field__text {
+    background-color: rgba(12, 18, 30, 0.82);
+    border-color: rgba(160, 185, 195, 0.28);
+    color: rgba(215, 230, 236, 0.72);
+}
+
+.coreai-hub-settings-group {
+    margin-top: 2px;
+    margin-bottom: 6px;
+}
+
+.coreai-hub-settings-group-title {
+    margin-top: 10px;
+    margin-bottom: 8px;
+}
+
+.coreai-hub-actions {
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.coreai-hub-action-button {
+    height: 30px;
+    margin-right: 8px;
+    margin-bottom: 4px;
+    padding-left: 14px;
+    padding-right: 14px;
+    background-color: rgba(17, 160, 181, 0.18);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.45);
+    border-radius: 6px;
+    color: rgb(220, 246, 250);
+    -unity-font-style: bold;
+}
+
+.coreai-hub-action-button:hover {
+    background-color: rgba(77, 208, 225, 0.32);
+    border-color: rgba(120, 236, 250, 0.8);
+}
+
+.coreai-hub-status {
+    color: rgb(77, 208, 225);
+    -unity-font-style: bold;
+}

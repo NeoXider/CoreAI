@@ -131,7 +131,8 @@ namespace CoreAI
             string model,
             float? temperature = null,
             int? timeoutSeconds = null,
-            int? maxTokens = null)
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
         {
             lock (SyncRoot)
             {
@@ -148,7 +149,8 @@ namespace CoreAI
                     model,
                     temperature ?? settings.Temperature,
                     timeoutSeconds ?? settings.RequestTimeoutSeconds,
-                    maxTokens ?? settings.MaxTokens);
+                    maxTokens ?? settings.MaxTokens,
+                    overrideTemperature ?? settings.OverrideTemperature);
                 return RebuildAndNotify(settings);
             }
         }

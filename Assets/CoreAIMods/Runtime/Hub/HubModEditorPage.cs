@@ -74,7 +74,12 @@ namespace CoreAI.Ai.Hub
         /// <summary>Builds the editor VisualElement.</summary>
         public VisualElement Build()
         {
-            VisualElement root = new() { name = "coreai-hub-mod-editor" };
+            ScrollView scroll = new(ScrollViewMode.Vertical) { name = "coreai-hub-mod-editor-scroll" };
+            scroll.style.flexGrow = 1f;
+            scroll.style.minHeight = 0f;
+
+            VisualElement root = scroll.contentContainer;
+            root.name = "coreai-hub-mod-editor";
             root.style.flexGrow = 1f;
             root.style.flexDirection = FlexDirection.Column;
 
@@ -84,6 +89,7 @@ namespace CoreAI.Ai.Hub
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
             headerRow.style.marginBottom = 6f;
+            headerRow.style.flexShrink = 0f;
             headerRow.Add(HubModWidgets.MakeButton("← Back", Close));
             _titleLabel = HubModWidgets.MakeTitle(_isNew ? "New mod" : $"Edit mod: {_modId}");
             _titleLabel.style.marginBottom = 0f;
@@ -92,16 +98,20 @@ namespace CoreAI.Ai.Hub
             root.Add(headerRow);
 
             _headerBox = HubModWidgets.MakePanel();
+            _headerBox.style.flexShrink = 0f;
             root.Add(_headerBox);
 
-            root.Add(HubModWidgets.MakeNote(
-                "Manifest fields below are read from the mod's @coreai header — edit them in the code."));
+            Label manifestNote = HubModWidgets.MakeNote(
+                "Manifest fields below are read from the mod's @coreai header — edit them in the code.");
+            manifestNote.style.flexShrink = 0f;
+            root.Add(manifestNote);
 
             // Primary actions above the code field so they never scroll off-screen.
             VisualElement actions = new();
             actions.style.flexDirection = FlexDirection.Row;
             actions.style.flexWrap = Wrap.Wrap;
             actions.style.marginBottom = 4f;
+            actions.style.flexShrink = 0f;
             actions.Add(HubModWidgets.MakeButton("Save & run", Save));
             actions.Add(HubModWidgets.MakeButton("Copy", Copy));
             actions.Add(HubModWidgets.MakeButton("Paste", Paste));
@@ -110,8 +120,8 @@ namespace CoreAI.Ai.Hub
 
             _codeField = new TextField { name = "coreai-hub-mod-code", multiline = true };
             _codeField.value = _initialSource;
-            _codeField.style.flexGrow = 1f;
-            _codeField.style.minHeight = 220f;
+            _codeField.style.flexGrow = 0f;
+            _codeField.style.minHeight = 280f;
             _codeField.style.whiteSpace = WhiteSpace.Normal;
             _codeField.style.marginTop = 6f;
             _codeField.style.marginBottom = 6f;
@@ -129,7 +139,7 @@ namespace CoreAI.Ai.Hub
 
             RefreshHeaderBox(_initialSource);
             RefreshDiagnostics();
-            return root;
+            return scroll;
         }
 
         private void Save()

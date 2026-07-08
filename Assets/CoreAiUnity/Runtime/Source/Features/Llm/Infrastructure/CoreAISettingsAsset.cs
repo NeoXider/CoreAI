@@ -922,7 +922,8 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048)
+            int maxTokens = 2048,
+            bool overrideTemperature = true)
         {
             backendType = LlmBackendType.OpenAiHttp;
             executionMode = LlmExecutionMode.ClientOwnedApi;
@@ -930,7 +931,7 @@ namespace CoreAI.Infrastructure.Llm
             apiKey = key ?? "";
             modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
-            enableTemperatureOverriding = true;
+            enableTemperatureOverriding = overrideTemperature;
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
             this.maxTokens = maxTokens <= 0 ? 2048 : maxTokens;
         }
@@ -944,9 +945,10 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048)
+            int maxTokens = 2048,
+            bool overrideTemperature = true)
         {
-            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
+            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
             executionMode = LlmExecutionMode.ClientOwnedApi;
         }
 
@@ -961,9 +963,10 @@ namespace CoreAI.Infrastructure.Llm
             int maxPromptChars,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048)
+            int maxTokens = 2048,
+            bool overrideTemperature = true)
         {
-            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
+            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
             executionMode = LlmExecutionMode.ClientLimited;
             maxClientLimitedRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             maxClientLimitedPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
@@ -978,9 +981,10 @@ namespace CoreAI.Infrastructure.Llm
             string backendAuthToken = "",
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048)
+            int maxTokens = 2048,
+            bool overrideTemperature = true)
         {
-            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens);
+            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
             executionMode = LlmExecutionMode.ServerManagedApi;
         }
 
