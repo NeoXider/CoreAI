@@ -47,6 +47,8 @@ namespace CoreAI.Hub.UI
 
         private HubPageRegistry _registry;
         private bool _uiReady;
+        private bool _collapsed;
+        private Button _collapseButton;
 
         // Cached page instances and their created content, keyed by page id.
         private readonly Dictionary<string, IHubPage> _pages = new(StringComparer.Ordinal);
@@ -103,6 +105,33 @@ namespace CoreAI.Hub.UI
             TeardownUi();
         }
 
+        private void Update()
+        {
+            // The UIDocument's rootVisualElement can be rebuilt after our OnEnable (e.g. another UIDocument
+            // sharing the PanelSettings re-inits the panel, or the panel comes up a frame late), which
+            // orphans our _root and leaves the Hub invisible. Build it if we never did, or re-attach it if
+            // it got detached — cheap parent check, keeps the window robust to panel lifecycle.
+            if (_document == null)
+            {
+                _document = GetComponent<UIDocument>();
+            }
+
+            VisualElement uiRoot = _document != null ? _document.rootVisualElement : null;
+            if (uiRoot == null)
+            {
+                return;
+            }
+
+            if (!_uiReady)
+            {
+                BuildUi(uiRoot);
+            }
+            else if (_root != null && _root.parent != uiRoot)
+            {
+                uiRoot.Add(_root);
+            }
+        }
+
         private void BuildUi(VisualElement uiRoot)
         {
             if (_uiReady)
@@ -133,10 +162,51 @@ namespace CoreAI.Hub.UI
                 _root.styleSheets.Add(styleSheet);
             }
 
+            // Collapse/expand toggle (top-right), independent of the tab bar so RebuildTabs never removes it.
+            _collapseButton = new Button(ToggleCollapsed) { text = "–", name = "coreai-hub-collapse" };
+            _collapseButton.style.position = Position.Absolute;
+            _collapseButton.style.top = 6;
+            _collapseButton.style.right = 6;
+            _collapseButton.style.width = 24;
+            _collapseButton.style.height = 20;
+            _root.Add(_collapseButton);
+
             uiRoot.Add(_root);
             _uiReady = true;
 
             RebuildTabs();
+        }
+
+        /// <summary>Collapses the Hub to just its toggle button, or restores the full window.</summary>
+        public void ToggleCollapsed() => SetCollapsed(!_collapsed);
+
+        /// <summary>Hides the tabs + content when collapsed (leaving the toggle), restores them when expanded.</summary>
+        public void SetCollapsed(bool collapsed)
+        {
+            _collapsed = collapsed;
+
+            // Collapse to a small bar holding just the toggle; restore to the full 720x640 window (the size
+            // ApplyRootInlineStyles sets) on expand. Tabs + content hide while collapsed.
+            if (_tabBar != null)
+            {
+                _tabBar.style.display = collapsed ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+
+            if (_content != null)
+            {
+                _content.style.display = collapsed ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+
+            if (_root != null)
+            {
+                _root.style.width = collapsed ? new StyleLength(132f) : new StyleLength(720f);
+                _root.style.height = collapsed ? new StyleLength(34f) : new StyleLength(640f);
+            }
+
+            if (_collapseButton != null)
+            {
+                _collapseButton.text = collapsed ? "+" : "–";
+            }
         }
 
         private void TeardownUi()
