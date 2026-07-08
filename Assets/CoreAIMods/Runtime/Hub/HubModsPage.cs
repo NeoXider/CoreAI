@@ -203,7 +203,7 @@ namespace CoreAI.Ai.Hub
             {
                 Foldout foldout = new() { text = $"{group.Key}  ({group.Value.Count})", value = true };
                 foldout.style.marginBottom = 4f;
-                foldout.style.color = HubModWidgets.Accent;
+                HubModWidgets.StyleFoldoutTitle(foldout);
                 foreach (HubModRecord mod in group.Value)
                 {
                     foldout.Add(BuildModRow(mod));

@@ -115,12 +115,7 @@ namespace CoreAI.Ai.Hub
             _codeField.style.whiteSpace = WhiteSpace.Normal;
             _codeField.style.marginTop = 6f;
             _codeField.style.marginBottom = 6f;
-            VisualElement input = _codeField.Q("unity-text-input");
-            if (input != null)
-            {
-                input.style.unityTextAlign = TextAnchor.UpperLeft;
-                input.style.whiteSpace = WhiteSpace.Normal;
-            }
+            HubModWidgets.StyleCodeField(_codeField);
 
             root.Add(_codeField);
 

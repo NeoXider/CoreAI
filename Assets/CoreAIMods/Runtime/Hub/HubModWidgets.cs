@@ -10,12 +10,12 @@ namespace CoreAI.Ai.Hub
     /// </summary>
     internal static class HubModWidgets
     {
-        internal static readonly Color Accent = new(0.302f, 0.816f, 0.882f, 1f);
-        internal static readonly Color Text = new(0.863f, 0.91f, 0.941f, 1f);
-        internal static readonly Color Muted = new(0.77f, 0.86f, 0.91f, 0.7f);
-        internal static readonly Color Danger = new(0.92f, 0.45f, 0.42f, 1f);
-        internal static readonly Color Panel = new(1f, 1f, 1f, 0.04f);
-        internal static readonly Color Border = new(1f, 1f, 1f, 0.10f);
+        internal static readonly Color Accent = new(0.42f, 0.87f, 0.95f, 1f);
+        internal static readonly Color Text = new(0.93f, 0.96f, 0.98f, 1f);
+        internal static readonly Color Muted = new(0.80f, 0.88f, 0.93f, 0.95f);
+        internal static readonly Color Danger = new(0.98f, 0.55f, 0.52f, 1f);
+        internal static readonly Color Panel = new(1f, 1f, 1f, 0.07f);
+        internal static readonly Color Border = new(1f, 1f, 1f, 0.14f);
 
         internal static Label MakeTitle(string text)
         {
@@ -140,6 +140,51 @@ namespace CoreAI.Ai.Hub
             label.style.fontSize = 12f;
             label.style.whiteSpace = WhiteSpace.Normal;
             return label;
+        }
+
+        /// <summary>
+        /// Forces a Foldout's title text to a bright accent + bold so it stays readable over the Hub
+        /// content's light-to-dark gradient (the default foldout label colour vanishes near the bottom).
+        /// Also enlarges the toggle arrow's hit target.
+        /// </summary>
+        internal static void StyleFoldoutTitle(Foldout foldout)
+        {
+            if (foldout == null)
+            {
+                return;
+            }
+
+            Toggle toggle = foldout.Q<Toggle>();
+            Label title = toggle?.Q<Label>() ?? foldout.Q<Label>();
+            if (title != null)
+            {
+                title.style.color = Accent;
+                title.style.fontSize = 14f;
+                title.style.unityFontStyleAndWeight = FontStyle.Bold;
+            }
+        }
+
+        /// <summary>A dark, monospace-ish multiline code field that matches the dark theme (the default
+        /// TextField renders as a jarring white box in the dark Hub).</summary>
+        internal static void StyleCodeField(TextField field)
+        {
+            if (field == null)
+            {
+                return;
+            }
+
+            VisualElement input = field.Q("unity-text-input") ?? field;
+            input.style.backgroundColor = new Color(0.05f, 0.09f, 0.16f, 0.96f);
+            input.style.color = new Color(0.86f, 0.93f, 0.86f, 1f);
+            SetBorder(input, new Color(Accent.r, Accent.g, Accent.b, 0.30f));
+            SetRadius(input, 6f);
+            input.style.unityTextAlign = TextAnchor.UpperLeft;
+            input.style.whiteSpace = WhiteSpace.Normal;
+            input.style.paddingLeft = 10f;
+            input.style.paddingRight = 10f;
+            input.style.paddingTop = 8f;
+            input.style.paddingBottom = 8f;
+            field.style.fontSize = 13f;
         }
     }
 }
