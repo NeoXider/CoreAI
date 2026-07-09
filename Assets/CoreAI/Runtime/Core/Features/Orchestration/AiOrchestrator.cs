@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Audit;
 using CoreAI.Authority;
 using CoreAI.Messaging;
 using CoreAI.Session;
@@ -191,6 +192,8 @@ namespace CoreAI.Ai
 
             AppendMemoryTailMessage(ref chatHistory, memoryParts.TailBlock);
             AppendWorldStateTailMessage(ref chatHistory, worldState);
+            string promptText = (system ?? "") + "\n" + (user ?? "") + "\n" + string.Join("\n", (System.Collections.IEnumerable)chatHistory ?? System.Array.Empty<object>());
+            AuditContext.SetPromptHash(traceId, AuditHash.Compute(promptText));
             int estimatedPromptTokens =
                 _tokenEstimator.EstimateText(system ?? "") +
                 _tokenEstimator.EstimateText(user ?? "") +

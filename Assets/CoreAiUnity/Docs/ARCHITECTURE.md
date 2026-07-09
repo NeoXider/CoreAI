@@ -122,6 +122,16 @@ Tests must measure whether the system under test works. They must not rescue the
 
 **Async continuations (v1.5.10–v1.5.14 — split by layer):** In **portable** `com.neoxider.coreai`, the MEAI tool path (`SmartToolCallingChatClient`, `AiOrchestrator` completion calls — streaming by default, non-streaming fallback, `QueuedAiOrchestrator`) still uses **`ConfigureAwait(false)`** where appropriate so thread-pool continuations do not needlessly capture Unity sync context (WebGL hygiene). **`ToolExecutionPolicy`** therefore routes each **`AIFunction.InvokeAsync`** through **`ICoreAISettings.ToolInvocationMarshaler`**: default pass-through in Core; **`CoreAISettingsAsset`** supplies **`UnityMainThreadLlmAsyncMarshaler`**, which **`UniTask.SwitchToMainThread`s** inside **Play Mode / built players** only. Since **v1.5.14**, in **`UNITY_EDITOR`** with **`!Application.isPlaying`** (Edit Mode), the marshaler runs the tool body **inline** (no player-loop hop) so **`Task.Wait` / `.Result`** on the editor managed main thread cannot deadlock thread-pooled MEAI continuations. In Editor Play Mode, **`RuntimeInitializeOnLoadMethod` (BeforeSceneLoad / AfterSceneLoad)**, **`Application.onBeforeRender`**, and **`EditorApplication.update`** prime the Editor **`Application.isPlaying` mirror**, reducing stale **`0`** during Test Runner and low-render-loop situations. Off the mirrored main thread the marshaler still uses **`_editorMirrorIsPlaying != 1`** to decide **inline** (so unknown **`-1`** inlines and **Edit Mode** stacks that **`Task.Run(...).Wait()`** on the main thread do not deadlock on **`SwitchToMainThread`**). **`MeaiOpenAiChatClient`** delegates HTTP I/O to **`IOpenAiHttpTransport`**: **`HttpClientOpenAiTransport`** avoids **`ConfigureAwait(false)`** on its **`await`**s; **`UnityWebRequestOpenAiTransport`** uses **`Task.Yield`** in WebGL. **`MeaiLlmClient` / `RoutingLlmClient`** avoid **`ConfigureAwait(false)`** on the inner completion **`await`** toward Unity/UI callers. **`CoreAiChatPanel`** may **`UniTask.SwitchToMainThread`** or **`Task.Yield`** for UI repaint where documented.
 
+## Audit Log
+
+The immutable append-only audit log records every LLM request/response, tool call, and world mutation event to a single SHA-256-chained JSONL file. Entries carry `prevHash`/`hash` for tamper evidence.
+
+- **Portable core** (`CoreAI`): `IAuditLog`, `AuditEntry` (struct with `AuditEntryKind` discriminator), `AuditHash`, `AuditContext` (traceId-keyed prompt hash + model cache).
+- **Unity layer** (`CoreAiUnity`): `AuditLogWriter` (background flush loop, rotation at 50 MB), three interceptors that subscribe existing event buses (`LlmAuditInterceptor`, `ToolCallAuditInterceptor`) and the `AuditedWorldCommandExecutor` decorator over `CoreAiWorldCommandExecutor`.
+- **Activation:** `CoreServicesInstaller.RegisterCore` → `AuditLogInstaller.RegisterAuditLog()` — no setup needed after install.
+- **Zero main-thread blocking:** `IAuditLog.Record()` enqueues; the writer flushes every ~500 ms on a background loop.
+- **Design:** [AUDIT_LOG.md](AUDIT_LOG.md).
+
 ## Source code documentation and comments
 
 Applies to **`Assets/CoreAI`** (portable) and **`Assets/CoreAiUnity/Runtime`** unless noted.

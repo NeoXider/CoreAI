@@ -1,4 +1,6 @@
-﻿using CoreAI.Infrastructure.Logging;
+﻿using CoreAI.Audit;
+using CoreAI.Features.Audit;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Logging;
 using CoreAI.Messaging;
@@ -45,6 +47,8 @@ namespace CoreAI.Composition
             builder.Register<IAiGameCommandSink>(c =>
                     new MessagePipeAiCommandSink(c.Resolve<IPublisher<ApplyAiGameCommand>>()),
                 Lifetime.Singleton);
+
+            builder.RegisterAuditLog();
 
             builder.RegisterBuildCallback(static resolver =>
             {

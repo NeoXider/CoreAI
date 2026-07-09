@@ -89,6 +89,7 @@ Package manifests:
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for both packages. |
+| [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
 | [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 

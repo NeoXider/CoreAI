@@ -1,10 +1,12 @@
 ﻿using CoreAI;
 using CoreAI.Ai;
+using CoreAI.Audit;
 using CoreAI.Config;
+using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
-using CoreAI.Messaging;
 using CoreAI.Infrastructure.World;
+using CoreAI.Messaging;
 using MessagePipe;
 using UnityEngine;
 using VContainer;
@@ -67,11 +69,18 @@ namespace CoreAI.Composition
             // Factory registration so the load_scene whitelist (allowedLuaScenes) reaches the executor.
             // Enforcing it here makes the native world_command tool honour the same restriction as the
             // Lua coreai_world_load_scene binding, instead of the native path bypassing it.
-            builder.Register(c => new CoreAiWorldCommandExecutor(
-                        c.Resolve<IGameLogger>(),
-                        c.Resolve<ICoreAiPrefabRegistry>(),
-                        allowedLuaScenes,
-                        c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
+            builder.Register(c =>
+                    {
+                        var inner = new CoreAiWorldCommandExecutor(
+                            c.Resolve<IGameLogger>(),
+                            c.Resolve<ICoreAiPrefabRegistry>(),
+                            allowedLuaScenes,
+                            c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true);
+                        var audit = c.ResolveOrDefault<IAuditLog>();
+                        return audit != null
+                            ? (ICoreAiWorldCommandExecutor)new AuditedWorldCommandExecutor(inner, audit)
+                            : inner;
+                    },
                     Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
 

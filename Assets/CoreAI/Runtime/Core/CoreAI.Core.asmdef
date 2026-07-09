@@ -11,6 +11,7 @@
     "Microsoft.Extensions.AI.Abstractions.dll",
     "Microsoft.Bcl.AsyncInterfaces.dll",
     "Newtonsoft.Json.dll",
+    "System.Security.Cryptography.Algorithms.dll",
     "System.Text.Json.dll"
   ],
   "autoReferenced": true,

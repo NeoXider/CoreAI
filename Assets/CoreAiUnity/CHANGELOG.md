@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.12 - Immutable audit log (2026-07-09)
+
+- **New audit log system: immutable, append-only, tamper-evident.** All LLM requests/responses, tool calls, and world mutations are recorded to a single SHA-256-chained JSONL file at `persistentDataPath/CoreAI/Audit/audit.jsonl`. Background writer, rotation at 50 MB, zero main-thread blocking.
+- **New portable core types:** `IAuditLog`, `AuditEntry` (struct with `AuditEntryKind` discriminator), `AuditHash` (SHA-256 + chain helper), `AuditContext` (traceId-keyed prompt hash + model cache), `NullAuditLog`.
+- **New Unity types:** `AuditLogWriter` (background batch flush loop), `LlmAuditInterceptor` (subscribes `LlmRequestStarted/Completed` + `LlmBackendSelected`), `ToolCallAuditInterceptor` (subscribes `CoreAi.OnToolCallCompleted/Failed`), `AuditedWorldCommandExecutor` (decorates `CoreAiWorldCommandExecutor`), `AuditLogInstaller`.
+- **Integration:** `AuditLogInstaller.RegisterAuditLog()` called from `CoreServicesInstaller.RegisterCore` — zero setup. `AiOrchestrator.BuildRequestAsync` computes prompt hash and stores via `AuditContext`.
+- **Tests:** `AuditHashEditModeTests`, `AuditEntryEditModeTests`, `AuditLogWriterEditModeTests` cover hash chain, entry serialization, context caching, null log.
+- **Docs:** New `AUDIT_LOG.md` with architecture, field reference, tamper-evidence verification, performance characteristics. Updated `ARCHITECTURE.md` and `DOCS_INDEX.md`.
+
 ### 5.0.11 - World state save/load with colour persistence (2026-07-09)
 
 - **New world state save/load system (`WorldStateManager`).** All AI-spawned objects (`WorldObjectComponent`) are auto-saved to `persistentDataPath/CoreAI/WorldState/world_state.json` on Play Mode exit and auto-loaded on next entry. Includes:

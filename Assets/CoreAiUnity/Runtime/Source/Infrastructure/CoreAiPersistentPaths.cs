@@ -18,5 +18,8 @@ namespace CoreAI.Infrastructure
 
         /// <summary>Folder for world-object snapshots persisted by <c>WorldStateManager</c>.</summary>
         public const string WorldState = "WorldState";
+
+        /// <summary>Folder for the immutable append-only audit log.</summary>
+        public const string Audit = "Audit";
     }
 }
