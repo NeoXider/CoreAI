@@ -91,16 +91,11 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 
 ## Platform Support
 
-Runtime Lua execution is currently supported in the Editor and non-WebGL player
-builds. WebGL player builds temporarily disable the MoonSharp-based sandbox:
-`SecureLuaEnvironment.IsSupported` returns `false`, and callers should treat Lua
-execution as unavailable on that platform.
-
-The WebGL guard exists because the current MoonSharp integration can initialize
-reflection-based loaders that abort WebGL/IL2CPP before a managed exception is
-raised. WebGL support can be added later by replacing this path with an AOT-safe
-Lua runtime, executing Lua on a trusted server, or mapping AI output to a
-restricted command interpreter with dedicated WebGL Player tests.
+Runtime Lua execution is supported on all platforms, including WebGL player
+builds. On WebGL, Lua is **on by default** — toggle with
+`CoreAISettingsAsset.EnableLuaOnWebGl`. The Full `unity_*` reflection tier
+stays disabled on WebGL; IL2CPP stripping protection (`link.xml` preserving
+`MoonSharp.Interpreter`) ships in the package.
 
 ## Recommended Flow
 
