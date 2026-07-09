@@ -71,22 +71,24 @@ namespace CoreAI.Tests.EditMode
 
             List<VisualElement> rows = scroll.contentContainer.Children().ToList();
 
+            // AI-message labels live inside CoreAiChatMessageBubbleElement's content slot
+            // (a grandchild of the row, not a direct child), so they must be found via a
+            // recursive descendant query rather than r.Children() — matches the convention
+            // in CoreAiChatMessageBubbleElementEditModeTests (bubble.Q<Label>(...)).
             List<Label> aiLabels = rows
-                .SelectMany(r => r.Children().OfType<Label>()
-                    .Where(l => l.ClassListContains("coreai-ai-message")))
+                .SelectMany(r => r.Query<Label>().Class("coreai-ai-message").ToList())
                 .ToList();
             List<Label> toolLabels = rows
-                .SelectMany(r => r.Children().OfType<Label>()
-                    .Where(l => l.ClassListContains("coreai-tool-call-message")))
+                .SelectMany(r => r.Query<Label>().Class("coreai-tool-call-message").ToList())
                 .ToList();
 
             Assert.AreEqual(2, aiLabels.Count,
                 "A tool round must split the assistant prose into two bubbles.");
             Assert.AreEqual(1, toolLabels.Count, "One tool-call bubble expected.");
 
-            int beforeIdx = rows.IndexOf(aiLabels[0].parent);
-            int toolIdx = rows.IndexOf(toolLabels[0].parent);
-            int afterIdx = rows.IndexOf(aiLabels[1].parent);
+            int beforeIdx = rows.IndexOf(RowOf(rows, aiLabels[0]));
+            int toolIdx = rows.IndexOf(RowOf(rows, toolLabels[0]));
+            int afterIdx = rows.IndexOf(RowOf(rows, aiLabels[1]));
 
             Assert.Less(beforeIdx, toolIdx, "Pre-tool prose bubble must precede the tool bubble.");
             Assert.Less(toolIdx, afterIdx, "Tool bubble must precede the post-tool prose bubble.");
@@ -124,16 +126,31 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("hello world", response);
 
             int aiBubbles = scroll.contentContainer
-                .Children()
-                .SelectMany(r => r.Children().OfType<Label>()
-                    .Where(l => l.ClassListContains("coreai-ai-message")))
-                .Count();
+                .Query<Label>().Class("coreai-ai-message").ToList()
+                .Count;
 
             Assert.AreEqual(1, aiBubbles,
                 "Plain streaming with no tool round must stay in a single bubble.");
         }
 
         // ---------- helpers ----------
+
+        /// <summary>
+        /// AI-message labels are nested inside CoreAiChatMessageBubbleElement's content slot,
+        /// so a label's direct .parent is not its row; walk up until we hit a known row.
+        /// </summary>
+        private static VisualElement RowOf(List<VisualElement> rows, VisualElement element)
+        {
+            for (VisualElement current = element; current != null; current = current.parent)
+            {
+                if (rows.Contains(current))
+                {
+                    return current;
+                }
+            }
+
+            return null;
+        }
 
         private readonly struct PanelCtx : System.IDisposable
         {
