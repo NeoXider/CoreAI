@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.13 - Tool round splits streaming assistant bubble (2026-07-09)
+
+- **Fix: assistant prose streamed before and after a tool round now lands in two separate bubbles (claude/cursor-style) instead of one.** Previously the streaming bubble opened at the start of the turn was reused for all prose, so tool-call bubbles were appended *below* it — leaving the final answer at the top and the tool calls at the bottom, forcing the user to scroll up. At a tool-round boundary the in-flight prose bubble is now sealed and any post-tool prose opens a fresh bubble beneath the tool-call bubbles.
+- The full assistant transcript (both prose parts concatenated exactly once) is unchanged, so history/hydration behaviour is unaffected.
+- **Tests:** `CoreAiChatPanelToolRoundBubbleEditModeTests` pins the split (`Streaming_WithToolRound_SplitsProseIntoSeparateBubbles`) and the no-tool single-bubble case (`Streaming_WithoutToolRound_KeepsSingleProseBubble`).
+
 ### 5.0.12 - Immutable audit log (2026-07-09)
 
 - **New audit log system: immutable, append-only, tamper-evident.** All LLM requests/responses, tool calls, and world mutations are recorded to a single SHA-256-chained JSONL file at `persistentDataPath/CoreAI/Audit/audit.jsonl`. Background writer, rotation at 50 MB, zero main-thread blocking.
