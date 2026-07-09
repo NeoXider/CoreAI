@@ -27,11 +27,13 @@ namespace CoreAI.Features.Audit
         private const int MaxBatchSize = 10;
 
         public AuditLogWriter()
+            : this(Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, "Audit"))
         {
-            _folder = Path.Combine(
-                Application.persistentDataPath,
-                CoreAiPersistentPaths.RootFolderName,
-                "Audit");
+        }
+
+        internal AuditLogWriter(string folder)
+        {
+            _folder = folder;
             Directory.CreateDirectory(_folder);
             _filePath = Path.Combine(_folder, "audit.jsonl");
 
@@ -46,6 +48,8 @@ namespace CoreAI.Features.Audit
             FlushLoop(_cts.Token).Forget();
         }
 
+        internal string FilePath => _filePath;
+
         public void Record(AuditEntry entry)
         {
             _queue.Enqueue(entry);
@@ -56,6 +60,12 @@ namespace CoreAI.Features.Audit
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
+            FlushBatch();
+        }
+
+        /// <summary>Synchronously flushes the queue. Used by tests that need deterministic writes.</summary>
+        internal void FlushForTesting()
+        {
             FlushBatch();
         }
 
@@ -79,14 +89,16 @@ namespace CoreAI.Features.Audit
                     return;
                 }
 
-                using StreamReader reader = new(_filePath);
                 string lastLine = null;
-                string line;
                 long count = 0;
-                while ((line = reader.ReadLine()) != null)
+                using (StreamReader reader = new(_filePath))
                 {
-                    lastLine = line;
-                    count++;
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        lastLine = line;
+                        count++;
+                    }
                 }
 
                 _seq = count;
@@ -95,19 +107,34 @@ namespace CoreAI.Features.Audit
                     try
                     {
                         var last = JsonConvert.DeserializeAnonymousType(lastLine, new { hash = "" });
-                        _prevHash = last?.hash ?? "";
+                        if (last == null)
+                        {
+                            throw new InvalidOperationException("tail line deserialized to null");
+                        }
+
+                        _prevHash = last.hash ?? "";
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        Debug.LogError($"[AuditLogWriter] Audit log tail line is corrupt, chain cannot be resumed: {ex.Message}");
                         _prevHash = "";
+                        AppendChainResetMarker($"corrupt tail line: {ex.Message}");
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.LogError($"[AuditLogWriter] Failed to resume audit chain, starting fresh: {ex.Message}");
                 _seq = 0;
                 _prevHash = "";
+                AppendChainResetMarker($"resume failed: {ex.Message}");
             }
+        }
+
+        private void AppendChainResetMarker(string reason)
+        {
+            _queue.Enqueue(AuditEntry.ForChainReset(seq: 0, actor: "system", reason: reason));
+            FlushBatch();
         }
 
         private void Rotate()
@@ -155,49 +182,34 @@ namespace CoreAI.Features.Audit
                 if (_queue.TryDequeue(out AuditEntry entry))
                 {
                     long seq = Interlocked.Increment(ref _seq);
-                    string json = JsonConvert.SerializeObject(
-                        new AuditEntry(
-                            seq: seq,
-                            kind: entry.Kind,
-                            traceId: entry.TraceId,
-                            actor: entry.Actor,
-                            model: entry.Model,
-                            promptHash: entry.PromptHash,
-                            toolName: entry.ToolName,
-                            args: entry.Args,
-                            policyDecision: entry.PolicyDecision,
-                            result: entry.Result,
-                            resultDetail: entry.ResultDetail,
-                            durationMs: entry.DurationMs,
-                            worldDiff: entry.WorldDiff,
-                            rollbackHandle: entry.RollbackHandle,
-                            prevHash: _prevHash,
-                            hash: ""),
-                        _jsonSettings);
 
-                    string hash = AuditHash.Chain(_prevHash, json);
+                    // Built ONCE — a single Ts, the real chain-head prevHash, hash left blank.
+                    // This is the canonical preimage: the stored line is this same entry with
+                    // only the hash field filled in, so a verifier can reconstruct it exactly.
+                    AuditEntry finalEntry = new(
+                        seq: seq,
+                        kind: entry.Kind,
+                        traceId: entry.TraceId,
+                        actor: entry.Actor,
+                        model: entry.Model,
+                        promptHash: entry.PromptHash,
+                        toolName: entry.ToolName,
+                        args: entry.Args,
+                        policyDecision: entry.PolicyDecision,
+                        result: entry.Result,
+                        resultDetail: entry.ResultDetail,
+                        durationMs: entry.DurationMs,
+                        worldDiff: entry.WorldDiff,
+                        rollbackHandle: entry.RollbackHandle,
+                        sourceTag: entry.SourceTag,
+                        prevHash: _prevHash,
+                        hash: "");
+
+                    string preimage = JsonConvert.SerializeObject(finalEntry, _jsonSettings);
+                    string hash = AuditHash.Chain(_prevHash, preimage);
                     _prevHash = hash;
 
-                    string line = JsonConvert.SerializeObject(
-                        new AuditEntry(
-                            seq: seq,
-                            kind: entry.Kind,
-                            traceId: entry.TraceId,
-                            actor: entry.Actor,
-                            model: entry.Model,
-                            promptHash: entry.PromptHash,
-                            toolName: entry.ToolName,
-                            args: entry.Args,
-                            policyDecision: entry.PolicyDecision,
-                            result: entry.Result,
-                            resultDetail: entry.ResultDetail,
-                            durationMs: entry.DurationMs,
-                            worldDiff: entry.WorldDiff,
-                            rollbackHandle: entry.RollbackHandle,
-                            prevHash: entry.PrevHash,
-                            hash: hash),
-                        _jsonSettings);
-
+                    string line = JsonConvert.SerializeObject(finalEntry.WithHash(hash), _jsonSettings);
                     lines.Add(line);
                 }
             }
@@ -209,10 +221,22 @@ namespace CoreAI.Features.Audit
 
             try
             {
-                long currentSize = File.Exists(_filePath) ? new FileInfo(_filePath).Length : 0;
+                bool exists = File.Exists(_filePath);
+                long currentSize = exists ? new FileInfo(_filePath).Length : 0;
                 if (currentSize > MaxFileSize)
                 {
                     Rotate();
+                    exists = File.Exists(_filePath);
+                    currentSize = exists ? new FileInfo(_filePath).Length : 0;
+                }
+
+                // A crash or a corrupt-tail resume can leave the file's last line without a trailing
+                // newline. Appending straight onto that (StreamWriter's append mode does not insert one)
+                // would concatenate the new entry into the corrupt line, making it unparseable — exactly
+                // when a ChainReset marker needs to be readable. Repair the missing newline first.
+                if (exists && currentSize > 0 && !EndsWithNewline(_filePath))
+                {
+                    File.AppendAllText(_filePath, Environment.NewLine);
                 }
 
                 using StreamWriter writer = new(_filePath, append: true);
@@ -225,6 +249,20 @@ namespace CoreAI.Features.Audit
             {
                 Debug.LogWarning($"[AuditLogWriter] Write failed: {ex.Message}");
             }
+        }
+
+        /// <summary>Reads just the last byte to check whether the file ends with a line terminator.</summary>
+        private static bool EndsWithNewline(string path)
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length == 0)
+            {
+                return true;
+            }
+
+            stream.Seek(-1, SeekOrigin.End);
+            int last = stream.ReadByte();
+            return last == '\n';
         }
     }
 }

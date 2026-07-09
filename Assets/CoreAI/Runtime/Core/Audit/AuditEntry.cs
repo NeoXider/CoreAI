@@ -9,7 +9,8 @@ namespace CoreAI.Audit
         LlmResponse,
         ToolCall,
         WorldMutation,
-        PolicyDecision
+        PolicyDecision,
+        ChainReset
     }
 
     public readonly struct AuditEntry
@@ -30,10 +31,12 @@ namespace CoreAI.Audit
             string worldDiff = "",
             string rollbackHandle = "",
             string prevHash = "",
-            string hash = "")
+            string hash = "",
+            string sourceTag = "",
+            DateTime ts = default)
         {
             Seq = seq;
-            Ts = DateTime.UtcNow;
+            Ts = ts == default ? DateTime.UtcNow : ts;
             Kind = kind;
             TraceId = traceId ?? "";
             Actor = actor ?? "";
@@ -47,6 +50,7 @@ namespace CoreAI.Audit
             DurationMs = durationMs;
             WorldDiff = worldDiff ?? "";
             RollbackHandle = rollbackHandle ?? "";
+            SourceTag = sourceTag ?? "";
             PrevHash = prevHash ?? "";
             Hash = hash ?? "";
         }
@@ -70,6 +74,7 @@ namespace CoreAI.Audit
 
         public string WorldDiff { get; }
         public string RollbackHandle { get; }
+        public string SourceTag { get; }
 
         [JsonIgnore]
         public string PrevHash { get; }
@@ -80,6 +85,34 @@ namespace CoreAI.Audit
         private string PrevHashForSerialization => PrevHash;
         [JsonProperty("hash")]
         private string HashForSerialization => Hash;
+
+        /// <summary>
+        /// Returns a copy of this entry with only the <see cref="Hash"/> field changed — used to
+        /// go from the canonical preimage (hash="") to the final stored line without disturbing
+        /// Seq/Ts/PrevHash/etc, which are exactly what got hashed.
+        /// </summary>
+        public AuditEntry WithHash(string hash)
+        {
+            return new AuditEntry(
+                seq: Seq,
+                kind: Kind,
+                traceId: TraceId,
+                actor: Actor,
+                model: Model,
+                promptHash: PromptHash,
+                toolName: ToolName,
+                args: Args,
+                policyDecision: PolicyDecision,
+                result: Result,
+                resultDetail: ResultDetail,
+                durationMs: DurationMs,
+                worldDiff: WorldDiff,
+                rollbackHandle: RollbackHandle,
+                prevHash: PrevHash,
+                hash: hash,
+                sourceTag: SourceTag,
+                ts: Ts);
+        }
 
         public static AuditEntry ForToolCall(
             long seq,
@@ -130,7 +163,8 @@ namespace CoreAI.Audit
                 policyDecision: success ? "allowed" : "failed",
                 result: success ? "ok" : "error",
                 worldDiff: worldDiff,
-                rollbackHandle: rollbackHandle);
+                rollbackHandle: rollbackHandle,
+                sourceTag: sourceTag);
         }
 
         public static AuditEntry ForLlmRequest(
@@ -148,6 +182,7 @@ namespace CoreAI.Audit
                 traceId: traceId,
                 actor: actor,
                 model: model,
+                promptHash: promptHash,
                 args: $"{{\"routingProfile\":\"{routingProfileId}\",\"streaming\":{streaming}}}",
                 policyDecision: "started",
                 result: "pending");
@@ -172,6 +207,23 @@ namespace CoreAI.Audit
                 policyDecision: success ? "completed" : "failed",
                 result: success ? "ok" : "error",
                 resultDetail: error);
+        }
+
+        /// <summary>
+        /// Marks that the writer could not resume the previous hash chain (corrupt tail line or
+        /// I/O failure) and restarted it from genesis. This entry is itself part of the chain
+        /// that follows it, so the reset is audited rather than silently hidden.
+        /// </summary>
+        public static AuditEntry ForChainReset(long seq, string actor, string reason)
+        {
+            return new AuditEntry(
+                seq: seq,
+                kind: AuditEntryKind.ChainReset,
+                traceId: "",
+                actor: actor,
+                policyDecision: "reset",
+                result: "error",
+                resultDetail: reason ?? "");
         }
     }
 }

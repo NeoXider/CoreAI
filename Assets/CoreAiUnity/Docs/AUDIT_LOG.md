@@ -19,6 +19,7 @@ Portable       │ IAuditLog           │ ← NullAuditLog (no-op)
                │ AuditEntry          │ ← struct with Kind discriminator
                │ AuditHash           │ ← SHA-256 (+ chain helper)
                │ AuditContext        │ ← traceId-keyed promptHash/model cache
+               │ AuditLogVerifier    │ ← ReadAll() / Verify() — re-chains from genesis
                └─────────────────────┘
 
 CoreAiUnity    ┌──────────────────────┐
@@ -37,8 +38,9 @@ CoreAiUnity    ┌────────────────────�
 | `LlmRequest` | `LlmAuditInterceptor` | traceId, actor, model, promptHash, routing profile |
 | `LlmResponse` | `LlmAuditInterceptor` | traceId, actor, success/error |
 | `ToolCall` | `ToolCallAuditInterceptor` | toolName, args, policyDecision, result, durationMs |
-| `WorldMutation` | `AuditedWorldCommandExecutor` | commandTypeId, payload, actor, success |
+| `WorldMutation` | `AuditedWorldCommandExecutor` | commandTypeId, payload, actor, success, sourceTag |
 | `PolicyDecision` | _future_ | authority host decision, guard results |
+| `ChainReset` | `AuditLogWriter.ResumeChain` | audits that the hash chain was restarted from genesis (corrupt tail line or I/O failure on resume) |
 
 ## File Format
 
@@ -61,19 +63,44 @@ JSONL (one JSON object per line). Each entry includes:
 | `durationMs` | Execution duration |
 | `worldDiff` | JSON: command-scoped diff (future) |
 | `rollbackHandle` | JSON: reverse action descriptor (future) |
+| `sourceTag` | Origin tag for world mutations (e.g. `lua:world_command`, `demo:...`) |
 | `prevHash` | SHA-256 of the previous line — chain root is `""` |
 | `hash` | `SHA-256(prevHash + jsonLine)` |
 
 ## Tamper Evidence
 
-Every line includes `prevHash` and `hash`:
+Every line includes `prevHash` and `hash`. **Canonical preimage:** the preimage of a line's hash is
+that exact same line with the `hash` field set to `""` (every other field — including `ts` and
+`prevHash` — stays exactly as stored):
+
 ```
-hash_1 = SHA256("" + json_1)
-hash_2 = SHA256(hash_1 + json_2)
-hash_3 = SHA256(hash_2 + json_3)
+preimage_N = jsonLine_N with "hash" set to ""
+hash_1 = SHA256("" + preimage_1)
+hash_2 = SHA256(hash_1 + preimage_2)
+hash_3 = SHA256(hash_2 + preimage_3)
 ```
 
-To verify: recompute the chain from line 1 and confirm `hash_N` matches. Any modification in any entry breaks the chain for all subsequent entries.
+`AuditLogWriter.FlushBatch` builds each entry exactly once (one `seq`, one `ts`, `prevHash` = the
+current chain head) before ever serializing it, so the bytes that get hashed are the same bytes
+that (modulo the `hash` field) end up on disk — there is nothing hidden from the hash.
+
+To verify: use `AuditLogVerifier.Verify(filePath)`. It re-chains from genesis (`prevHash = ""`) by,
+for each line: parsing it, checking the stored `prevHash` equals the running chain head, blanking
+the `hash` field, recomputing `SHA256(runningPrevHash + preimage)`, and comparing against the
+stored `hash`. It returns `{ Ok, FirstBrokenSeq, LineCount, Error }` — `Ok` is false at the first
+line whose `prevHash` or `hash` doesn't match, or that fails to parse at all (e.g. a truncated
+tail line), and `FirstBrokenSeq` identifies it. `AuditLogVerifier.ReadAll(filePath)` returns the
+parsed `AuditEntry` list for inspection without verifying the chain.
+
+Any modification to any entry (including its `ts`) breaks the chain for that entry and all
+subsequent ones.
+
+### Resuming after corruption
+
+If `AuditLogWriter` cannot resume the chain on startup — the tail line fails to parse, or the file
+can't be read — it does **not** silently reset the chain. It logs an error and appends a
+`ChainReset` entry (`AuditEntry.ForChainReset`) as the first entry of the new chain segment, so the
+reset itself is an audited, tamper-evident event rather than a hole that looks like a fresh log.
 
 ## Performance
 

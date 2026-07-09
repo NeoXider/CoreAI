@@ -53,6 +53,7 @@ namespace CoreAI.Tests.EditMode.Audit
             Assert.AreEqual("{\"prefab\":\"cube\"}", entry.Args);
             Assert.AreEqual("allowed", entry.PolicyDecision);
             Assert.AreEqual("ok", entry.Result);
+            Assert.AreEqual("lua:world_command", entry.SourceTag);
         }
 
         [Test]
@@ -74,6 +75,14 @@ namespace CoreAI.Tests.EditMode.Audit
             Assert.AreEqual(AuditEntryKind.LlmRequest, entry.Kind);
             Assert.AreEqual("creator", entry.Actor);
             Assert.AreEqual("pending", entry.Result);
+        }
+
+        [Test]
+        public void ForLlmRequest_PreservesPromptHash()
+        {
+            AuditEntry entry = AuditEntry.ForLlmRequest(1, "t", "creator", "gpt-4", "prompt-hash-abc", "default", true);
+
+            Assert.AreEqual("prompt-hash-abc", entry.PromptHash);
         }
 
         [Test]
