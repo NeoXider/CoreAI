@@ -2,14 +2,62 @@
 
 Full audit of the recently landed systems against the project goal — **dynamically created
 worlds** (LLM + Lua mods spawn/modify/persist a running world). Covers: world-state save/load,
-the SHA-256 audit log, the mod system + Hub pages, and test quality of the newest commits.
-Each finding was verified against current source (file:line cited). Companion doc:
-[optimization-review.md](optimization-review.md) — re-checked here, **all 14 findings still open**.
+the SHA-256 audit log, the mod system + Hub pages, tool-call duplicate/concurrency policy,
+a live E2E pass of the world/Lua APIs, and test quality of the newest commits.
+Each finding was verified against current source (file:line cited). Companion docs:
+[optimization-review.md](optimization-review.md) — re-checked here, **all 14 findings still open** —
+and [audit-tool-policy-codex.md](audit-tool-policy-codex.md) — independent verification of the
+tool-policy findings (§0b).
 
 Verdict in one line: the architecture is right (command-sink mutations, VM-agnostic mod runtime,
 registry-driven Hub), but the two newest subsystems each ship one broken core promise —
 **world-state cannot persist deletions or hierarchies**, and **the audit chain can never be
 verified** — and both were missed because tests assert plumbing, not the promise.
+
+> **Remediation status:** the W1/W2/W3/W5, A1–A4, and M4 (mod-logs) findings below were fixed the
+> same day by delegated agents (see git history); the Lua VM bug in §0a was patched upstream-style
+> (rebuilt `Lua.dll`). The tool-policy findings in §0b are NOT yet fixed — P0 hotfixes pending.
+
+---
+
+## 0a. Live E2E of the world/Lua surface (found a VM-level bug)
+
+A full in-play pass over the Lua world APIs: `coreai_world_spawn` (incl. string parent + scale),
+`coreai_world_change` (move/rotate/scale/reparent/`parent='none'`), `coreai_world_set_color` (MPB),
+Full-tier `unity_find/describe/get_transform/unity_parent` with negative instance ids,
+`unity_add_component`/`unity_set_member` (Rigidbody, mass), `coreai_world_destroy`/`unity_destroy`,
+and `coreai_world_load_scene` — all verified working.
+
+| # | Sev | Finding |
+|---|-----|---------|
+| E1 | CRITICAL (FIXED) | **`#table` returned nil under the sandbox instruction hook.** Lua-CSharp 0.5.5 VM bug: `OpCode.Len`'s table path writes the result register without `stack.NotifyTop`, so the every-instruction count hook (our runaway budget, `LuaCsExecutionGuard`) pushes its frame over the un-notified slot and clears it. Symptoms: `local n = #t` → nil, `#(expr)` → correct, strings fine, `for i=1,#t` fine. Every C#-built list (`unity_find_all`, `unity_get_children`, …) and every mod using `#` was affected. Fixed by a one-line VM patch (`stack.NotifyTop(RA + 1)` in the table-length path) + 5 regression tests; rebuilt `Lua.dll` deployed (backup `Lua.dll.bak-0.5.5`). Upstream PR-worthy. |
+| E2 | MAJOR | **`coreai_world_load_scene` reports success to Lua when the load fails.** A scene missing from Build Settings logs a Unity error but the Lua call (and the LLM) sees ok — the agent cannot self-correct. Needs a result/error surfaced through the command sink. |
+
+## 0b. Tool-call duplicate & concurrency policy (external audit, independently verified)
+
+An external audit of `ToolExecutionPolicy` was verified claim-by-claim by a second independent
+agent (full evidence: [audit-tool-policy-codex.md](audit-tool-policy-codex.md)):
+
+| Claim | Verdict |
+|---|---|
+| `AllowDuplicates=true` on `world_command`/`component_command`/`execute_lua`/`manage_mods` disables duplicate-signature tracking entirely → cross-turn mutation echo is never suppressed | **CONFIRMED** |
+| `SerializedMutatingToolNames` hardcodes only `memory`/`manage_mods`/`manage_skills` → world mutations can be scheduled in parallel under `MaxParallelToolCalls>1` | **CONFIRMED** |
+| Streaming multi-call echo is detected only after the calls already re-executed | **PARTLY** (true for signature-eligible tools; the four above are not detected at all) |
+
+Additional gaps found in verification: **partial-success batches register the whole-batch
+signature (`ToolExecutionPolicy.cs:960-971`) so a legitimate retry of the failed slot would be
+suppressed** (this is why a blanket `AllowDuplicates=false` is NOT safe as-is); **no idempotency
+key in `ApplyAiGameCommand`** (executor level has zero replay protection); and **`call_skill_tool`
+bypasses the whole policy** (dynamic dispatch, `AllowDuplicates=true`, not serialized).
+
+Agreed fix order (differs from the external audit's): **(P0)** extend the serialized mutation
+chain with `world_command`/`component_command`/`execute_lua`/`call_skill_tool`; **(P0)** defer
+streamed mutating calls until turn finalization (check combined signature BEFORE executing);
+**(P1)** executor-level idempotency keys in `ApplyAiGameCommand` (also the multiplayer
+host-authoritative seam); **(P1)** `ToolBehaviorDescriptor` metadata replacing both the boolean and
+the name list; **(P2 only, after fixing partial-success registration)** flip `AllowDuplicates`.
+Note: `spawn_batch` already exists in the Lua layer (`coreai_world_spawn_batch`) — the tool layer
+should reuse it rather than invent a new one.
 
 ---
 
