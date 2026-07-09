@@ -102,6 +102,12 @@ namespace CoreAI.Chat
         // Monotonic counter incremented at the start of each agent turn.
         private int _currentTurnGeneration;
 
+        // When an assistant turn streams prose, then a tool round runs, then more prose arrives,
+        // the post-tool prose must land in a NEW bubble (claude/cursor behaviour). This flag marks
+        // that the in-flight streaming bubble was sealed at a tool-round boundary; the next visible
+        // prose chunk opens a fresh bubble instead of appending to the old (now-resolved) one.
+        private bool _streamingBubbleSealed;
+
         // Tracks the in-flight tool round so we can emit ToolRoundStarted with the last tool name.
         private string _lastToolNameInTurn;
         private int _toolRoundIterationInTurn; // 1-based iteration index inside current turn
@@ -1918,6 +1924,7 @@ namespace CoreAI.Chat
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
+            _streamingBubbleSealed = false;
 
             // Yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish the enumerator.
             await Task.Yield();
@@ -1967,6 +1974,12 @@ namespace CoreAI.Chat
                         {
                             _toolRoundIterationInTurn++;
                             RaiseToolRoundStarted(_toolRoundIterationInTurn, _lastToolNameInTurn);
+
+                            // Close the in-flight prose bubble at the tool-round boundary so the assistant
+                            // answer after the tools lands in its own bubble below the tool-call bubbles
+                            // (matches claude/cursor behaviour) instead of being appended to the bubble that
+                            // was opened before the tools (which would leave tools below the answer).
+                            SealStreamingBubbleIfAny();
                         }
 
                         if (chunk.BufferedStreamingUseToolProgressHint)
@@ -1999,7 +2012,7 @@ namespace CoreAI.Chat
 
                         if (!string.IsNullOrEmpty(visible))
                         {
-                            if (!_streamingStartedVisible)
+                            if (!_streamingStartedVisible || _streamingBubbleSealed)
                             {
                                 _streamingStartedVisible = true;
                                 StartStreaming();
@@ -2803,6 +2816,7 @@ namespace CoreAI.Chat
             _isStreaming = true;
             RaiseBusyStateChangedIfChanged();
             _streamingLabel = null;
+            _streamingBubbleSealed = false;
 
             if (MessageScroll == null)
             {
@@ -2835,6 +2849,23 @@ namespace CoreAI.Chat
 
             _streamingLabel.text = (_streamingLabel.text ?? "") + chunk;
             ScheduleStreamingScrollToBottom();
+        }
+
+        /// <summary>
+        /// Closes the in-flight streaming bubble at a tool-round boundary so subsequent prose opens a
+        /// fresh bubble below the tool-call bubbles (claude/cursor behaviour), instead of being appended
+        /// to the bubble that was opened before the tools ran.
+        /// </summary>
+        private void SealStreamingBubbleIfAny()
+        {
+            if (_streamingLabel == null || !_isStreaming)
+            {
+                return;
+            }
+
+            _streamingLabel.RemoveFromClassList("coreai-streaming-active");
+            _streamingLabel = null;
+            _streamingBubbleSealed = true;
         }
 
         private void FinishStreaming()
