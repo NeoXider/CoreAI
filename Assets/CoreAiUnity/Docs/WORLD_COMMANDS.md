@@ -172,7 +172,9 @@ All AI-spawned objects (primitives and prefabs) are automatically tracked for sa
 
 ### How it works
 
-Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created.
+Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created. Load always starts from a clean slate — any pre-existing `WorldObjectComponent` objects in the scene are destroyed first, so duplicate `persistentId`s can never accumulate across sessions.
+
+A **periodic auto-save** (every 60s, configured on `WorldStateAutoSaveHook` on the Hub prefab) also runs, as crash protection between an edit and the next quit.
 
 ### What is saved per object
 

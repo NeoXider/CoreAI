@@ -12,6 +12,8 @@ GameObject:
   - component: {fileID: 500352758507881373}
   - component: {fileID: 896222506636856533}
   - component: {fileID: 1861730944912341474}
+  - component: {fileID: 6123456789012345671}
+  - component: {fileID: 6123456789012345672}
   m_Layer: 0
   m_Name: CoreAiHub
   m_TagString: Untagged
@@ -89,3 +91,28 @@ MonoBehaviour:
   chatTemplate: {fileID: 9197481963319205126, guid: c56ffd49a798940449e9f69ecf685e16, type: 3}
   chatStyleSheet: {fileID: 7433441132597879392, guid: 54e4e52b0db8c294fb66ec9495faa77f, type: 3}
   chatConfig: {fileID: 0}
+--- !u!114 &6123456789012345671
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4981408220228357819}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9879ea32cf82ce14c923837b61d03817, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.WorldStateHubBinder
+--- !u!114 &6123456789012345672
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4981408220228357819}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61920cd1cd4bd5446af07a678e3955f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.WorldStateAutoSaveHook
+  saveIntervalSeconds: 60

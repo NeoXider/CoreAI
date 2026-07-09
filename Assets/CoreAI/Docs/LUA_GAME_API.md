@@ -360,6 +360,12 @@ Full through `WorldEdit`: use `coreai_world_spawn`, `coreai_world_change`,
 `coreai_world_set_color`, and `coreai_world_destroy` when object names and prefab keys are known.
 Full remains for diagnostics and reflection-only cases.
 
+> **Persistence:** every object spawned via `WorldEdit` (or `world_command`) is auto-saved to disk and
+> re-created on the next session entry — including transform, parent, active state, and any colour set via
+> `coreai_world_set_color`. Prefabs keep their original material when no explicit colour was set. The Hub
+> **World** tab exposes reset / save-now controls. Full format and behaviour: see
+> `CoreAiUnity/Docs/WORLD_COMMANDS.md` §7 (World State Persistence).
+
 Demo: `Assets/CoreAI.Demos/FullAccess/`. For production, targeted bindings are preferable, or the
 future migration to MoonSharp `UserData.RegisterType` (see MOONSHARP_NATIVE_APIS.md).
 

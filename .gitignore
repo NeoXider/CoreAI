@@ -103,6 +103,13 @@ FirebaseCppApp-*.so
 # Scene Backups
 /SceneBackups/
 
+# AutoSave scenes created by the Hub auto-save feature (world-state persistence crash protection)
+/[Aa]ssets/[Ss]cenes/[Aa]uto[Ss]aves/
+
+# Runtime screenshots (generated via manage_camera screenshot, not curated gallery assets)
+/[Aa]ssets/[Ss]creenshots/
+/[Aa]ssets/[Ss]creenshots.meta
+
 # Local-only business / monetization plans (not tracked; create `Docs/LocalBusinessPlans/` yourself)
 /Docs/LocalBusinessPlans/
 # LLMUnity — нативные бинарники LlamaLib в StreamingAssets (часто >100 MB, без Git LFS не пушится на GitHub)

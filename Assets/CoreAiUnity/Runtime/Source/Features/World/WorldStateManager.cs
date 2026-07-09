@@ -207,6 +207,10 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
+            // Clean slate: destroy any existing world objects (e.g. from a previous load or
+            // editor-placed objects) so we never accumulate duplicate persistentIds.
+            DestroyAllWorldObjects();
+
             int spawned = 0;
             int failed = 0;
             bool hasColor = string.Compare(data.version, "1.1", StringComparison.Ordinal) >= 0;
@@ -277,15 +281,7 @@ namespace CoreAI.Infrastructure.World
                 return;
             }
 
-            WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
-                FindObjectsSortMode.None);
-            for (int i = 0; i < allTags.Length; i++)
-            {
-                if (allTags[i] != null && allTags[i].gameObject != null)
-                {
-                    UnityEngine.Object.Destroy(allTags[i].gameObject);
-                }
-            }
+            DestroyAllWorldObjects();
 
             try
             {
@@ -309,6 +305,19 @@ namespace CoreAI.Infrastructure.World
             StateReset?.Invoke();
             _logger.LogInfo(GameLogFeature.Core,
                 "[WorldState] Reset: all world objects destroyed, save file deleted.");
+        }
+
+        private static void DestroyAllWorldObjects()
+        {
+            WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+                FindObjectsSortMode.None);
+            for (int i = 0; i < allTags.Length; i++)
+            {
+                if (allTags[i] != null && allTags[i].gameObject != null)
+                {
+                    UnityEngine.Object.Destroy(allTags[i].gameObject);
+                }
+            }
         }
 
         public void Dispose()

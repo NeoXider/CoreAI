@@ -12,12 +12,17 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   - Scene mismatch guard (skips load if scene name differs)
   - Atomic file write (`.tmp` + rename)
 - **Colour capture is optional.** Only objects where `set_color` was called (detected via `MaterialPropertyBlock`) persist `cr/cg/cb/ca`. Prefabs without explicit colour keep their original material on reload. Old `1.0`-format saves load without colour changes.
+- **Load starts from a clean slate.** `TryLoad` now destroys any pre-existing `WorldObjectComponent` objects before re-creating from the snapshot, so duplicate `persistentId`s can never accumulate across sessions.
+- **Periodic auto-save.** `WorldStateAutoSaveHook` (on the Hub prefab) saves every 60s in addition to on-quit, protecting against crashes between an edit and the next exit.
+- **`WorldStateHubBinder` + `WorldStateAutoSaveHook` are now part of the `CoreAiHub` prefab**, so the World tab and auto-save work in any scene that instantiates the Hub (no manual component wiring needed).
 - **New files:**
   - `WorldObjectComponent` — tag MonoBehaviour on each spawned object
   - `WorldStateManager` / `IWorldStateManager` — core save/load logic
   - `WorldStateEntryPoint` — VContainer `IStartable` for auto-init
   - `WorldStateHubPage` / `WorldStateHubBinder` — Hub UI tab
-  - `WorldStateAutoSaveHook` — catches Play Mode exit in Editor
+  - `WorldStateAutoSaveHook` — catches Play Mode exit + periodic save
+- **Tests:** `WorldStateManagerPlayModeTests` covers save/load/reset, explicit-colour persistence, and prefab material preservation.
+- **Demo registry:** `DemoPrefabRegistry` now also exposes `test.marker` (a sphere prefab) alongside `enemy.basic`.
 
 ### 5.0.10 - Self-spawning model-download indicator for mobile builds (2026-07-06)
 

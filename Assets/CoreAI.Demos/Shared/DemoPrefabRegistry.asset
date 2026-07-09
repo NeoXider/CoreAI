@@ -16,3 +16,6 @@ MonoBehaviour:
   - Key: enemy.basic
     Name: enemy.basic
     Prefab: {fileID: 661325305789694810, guid: de87e15a17f314a46bbcaa2c912f0a06, type: 3}
+  - Key: test.marker
+    Name: test.marker
+    Prefab: {fileID: 100100000, guid: a204fd4fd8de48243b6d34a324281a22, type: 3}
