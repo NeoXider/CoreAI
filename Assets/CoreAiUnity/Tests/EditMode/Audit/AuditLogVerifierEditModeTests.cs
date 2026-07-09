@@ -114,6 +114,12 @@ namespace CoreAI.Tests.EditMode.Audit
             string truncatedTail = tail.Substring(0, tail.Length / 2);
             File.WriteAllText(filePath, head + truncatedTail);
 
+            // The resume path INTENTIONALLY logs an error when the tail is corrupt (that is the
+            // audited chain-reset behavior under test) — declare it so LogAssert doesn't fail the test.
+            UnityEngine.TestTools.LogAssert.Expect(
+                LogType.Error,
+                new System.Text.RegularExpressions.Regex(@"\[AuditLogWriter\] Audit log tail line is corrupt"));
+
             using (AuditLogWriter resumed = new(_testFolder))
             {
                 // ResumeChain() already flushed the marker synchronously; nothing else to do.
