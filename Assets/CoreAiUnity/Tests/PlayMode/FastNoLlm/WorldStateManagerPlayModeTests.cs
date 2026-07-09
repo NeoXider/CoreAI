@@ -193,6 +193,117 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Save_ThenLoad_RestoresParentByIdWhenNamesAreAmbiguous()
+        {
+            // Untracked decoy sharing the real parent's name — GameObject.Find() could resolve to
+            // either of the two, so parenting must never rely on name when the parent is tracked.
+            GameObject decoy = new("SharedParentName");
+
+            try
+            {
+                GameObject parentGo = CoreAiPrimitiveFactory.Create("cube");
+                parentGo.name = "SharedParentName";
+                Tag(parentGo, "cube");
+
+                GameObject childGo = CoreAiPrimitiveFactory.Create("sphere");
+                childGo.name = "ChildSphere";
+                Tag(childGo, "sphere");
+                childGo.transform.SetParent(parentGo.transform, true);
+
+                WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+                manager.Save();
+
+                UnityEngine.Object.DestroyImmediate(childGo);
+                UnityEngine.Object.DestroyImmediate(parentGo);
+                yield return null;
+
+                Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
+                yield return null;
+
+                GameObject loadedChild = GameObject.Find("ChildSphere");
+                Assert.IsNotNull(loadedChild, "Child should be re-created.");
+                Assert.IsNotNull(loadedChild.transform.parent, "Child should have a parent after load.");
+                Assert.IsNotNull(loadedChild.transform.parent.GetComponent<WorldObjectComponent>(),
+                    "Child must be re-parented to the tracked world object resolved by persistentId, " +
+                    "not the untracked decoy sharing its name.");
+                Assert.AreNotEqual(decoy.transform, loadedChild.transform.parent,
+                    "Parent resolution must not fall back to the untracked decoy with the same name.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(decoy);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Save_EmptyWorld_RoundTrip_LoadsZeroObjects()
+        {
+            GameObject cube = CoreAiPrimitiveFactory.Create("cube");
+            cube.name = "TempCube";
+            Tag(cube, "cube");
+
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            manager.Save();
+            Assert.IsTrue(File.Exists(_saveFilePath));
+
+            UnityEngine.Object.DestroyImmediate(cube);
+            yield return null;
+
+            // Save again with zero tracked objects — the stale snapshot (still listing "TempCube")
+            // must be overwritten with a valid empty snapshot, not left untouched.
+            manager.Save();
+            yield return null;
+
+            Assert.IsTrue(manager.TryLoad(), "TryLoad of an empty snapshot should still succeed (clean slate).");
+            yield return null;
+
+            Assert.IsNull(GameObject.Find("TempCube"), "Deleted object must not reappear after loading the empty snapshot.");
+            int count = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(FindObjectsSortMode.None).Length;
+            Assert.AreEqual(0, count, "World should contain zero tracked objects after loading an empty snapshot.");
+        }
+
+        [UnityTest]
+        public IEnumerator Save_MissingPrefab_RetainsObjectUntilPrefabReturns()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
+
+            GameObject enemy = UnityEngine.Object.Instantiate(prefab, new Vector3(2, 0, 0), Quaternion.identity);
+            enemy.name = "RetainedEnemy";
+            Tag(enemy, "enemy.basic");
+
+            StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            manager.Save();
+            UnityEngine.Object.DestroyImmediate(enemy);
+            yield return null;
+
+            // Simulate the prefab becoming unavailable (registry never resolves it) — load must
+            // fail to spawn it but retain it in memory instead of dropping it.
+            WorldStateManager managerNoPrefab = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should still succeed even if a prefab is unresolved.");
+            yield return null;
+
+            Assert.IsNull(GameObject.Find("RetainedEnemy"), "Object should not spawn while its prefab is unresolved.");
+
+            // Save while the prefab is still missing — the retained entry must survive in the file.
+            managerNoPrefab.Save();
+            yield return null;
+
+            // Prefab becomes available again; loading should now restore the retained object.
+            WorldStateManager managerPrefabRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            Assert.IsTrue(managerPrefabRestored.TryLoad(), "TryLoad should succeed once the prefab is available again.");
+            yield return null;
+
+            GameObject restored = GameObject.Find("RetainedEnemy");
+            Assert.IsNotNull(restored,
+                "Object retained through the missing-prefab window must be restored once the prefab returns.");
+        }
+
+        [UnityTest]
         public IEnumerator Reset_DeletesSaveFileAndDestroysObjects()
         {
             GameObject cube = CoreAiPrimitiveFactory.Create("cube");

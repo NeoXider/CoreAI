@@ -44,6 +44,11 @@ namespace CoreAI.Infrastructure.World
         private string _saveFilePath;
         private bool _disposed;
 
+        // Objects whose prefabKey could not be resolved on the last load (e.g. a prefab not yet
+        // registered). Retained in memory and re-written on every Save() so a temporarily missing
+        // prefab never permanently deletes the object from the snapshot.
+        private List<ObjectData> _unresolvedObjects = new();
+
         public bool HasSavedState => File.Exists(_saveFilePath);
 
         public event Action StateReset;
@@ -86,13 +91,6 @@ namespace CoreAI.Infrastructure.World
             WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
                 FindObjectsSortMode.None);
 
-            if (allTags.Length == 0)
-            {
-                _logger.LogInfo(GameLogFeature.Core,
-                    "[WorldState] No world objects to save.");
-                return;
-            }
-
             List<ObjectData> objects = new(allTags.Length);
             for (int i = 0; i < allTags.Length; i++)
             {
@@ -105,6 +103,17 @@ namespace CoreAI.Infrastructure.World
                 Transform t = tag.transform;
                 Color color = ReadColor(tag.gameObject);
                 bool hasColor = color.r >= 0f;
+
+                // Prefer the parent's persistentId (stable across renames and duplicate names);
+                // fall back to the parent's name only when the parent isn't itself a tracked
+                // world object (e.g. a static scene root).
+                string parentValue = "";
+                if (t.parent != null)
+                {
+                    WorldObjectComponent parentTag = t.parent.GetComponent<WorldObjectComponent>();
+                    parentValue = parentTag != null ? parentTag.persistentId : t.parent.gameObject.name;
+                }
+
                 objects.Add(new ObjectData
                 {
                     id = tag.persistentId,
@@ -119,13 +128,32 @@ namespace CoreAI.Infrastructure.World
                     sx = t.localScale.x,
                     sy = t.localScale.y,
                     sz = t.localScale.z,
-                    parent = t.parent != null ? t.parent.gameObject.name : "",
+                    parent = parentValue,
                     active = tag.gameObject.activeSelf,
                     cr = hasColor ? color.r : -1f,
                     cg = hasColor ? color.g : -1f,
                     cb = hasColor ? color.b : -1f,
                     ca = hasColor ? color.a : -1f
                 });
+            }
+
+            // Re-append objects whose prefab could not be resolved on the last load, so the
+            // pending fix doesn't disappear from the snapshot just because it isn't in the scene.
+            if (_unresolvedObjects.Count > 0)
+            {
+                HashSet<string> savedIds = new();
+                foreach (ObjectData saved in objects)
+                {
+                    savedIds.Add(saved.id);
+                }
+
+                foreach (ObjectData retained in _unresolvedObjects)
+                {
+                    if (!savedIds.Contains(retained.id))
+                    {
+                        objects.Add(retained);
+                    }
+                }
             }
 
             SaveData data = new()
@@ -191,10 +219,14 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            if (data?.objects == null || data.objects.Length == 0)
+            if (data == null)
             {
                 return false;
             }
+
+            // A snapshot with an empty objects array is a valid state (the world was emptied and
+            // saved as such) — it must still clean-slate the scene, not be treated as "no data".
+            ObjectData[] snapshotObjects = data.objects ?? Array.Empty<ObjectData>();
 
             string currentScene = SceneManager.GetActiveScene().name;
             string targetScene = sceneName ?? data.scene;
@@ -214,14 +246,16 @@ namespace CoreAI.Infrastructure.World
             int spawned = 0;
             int failed = 0;
             bool hasColor = string.Compare(data.version, "1.1", StringComparison.Ordinal) >= 0;
-            Dictionary<string, GameObject> idToGo = new(data.objects.Length);
+            Dictionary<string, GameObject> idToGo = new(snapshotObjects.Length);
+            List<ObjectData> unresolved = new();
 
-            for (int i = 0; i < data.objects.Length; i++)
+            for (int i = 0; i < snapshotObjects.Length; i++)
             {
-                ObjectData obj = data.objects[i];
+                ObjectData obj = snapshotObjects[i];
                 if (string.IsNullOrEmpty(obj.prefabKey))
                 {
                     failed++;
+                    unresolved.Add(obj);
                     continue;
                 }
 
@@ -236,6 +270,7 @@ namespace CoreAI.Infrastructure.World
                     else
                     {
                         failed++;
+                        unresolved.Add(obj);
                     }
                 }
                 catch (Exception ex)
@@ -243,12 +278,21 @@ namespace CoreAI.Infrastructure.World
                     _logger.LogWarning(GameLogFeature.Core,
                         $"[WorldState] Failed to spawn '{obj.name}' ({obj.prefabKey}): {ex.Message}");
                     failed++;
+                    unresolved.Add(obj);
                 }
             }
 
-            for (int i = 0; i < data.objects.Length; i++)
+            _unresolvedObjects = unresolved;
+            if (unresolved.Count > 0)
             {
-                ObjectData obj = data.objects[i];
+                _logger.LogWarning(GameLogFeature.Core,
+                    "[WorldState] Retained unresolved object(s), will retry on next load: " +
+                    string.Join(", ", unresolved.ConvertAll(o => o.id)));
+            }
+
+            for (int i = 0; i < snapshotObjects.Length; i++)
+            {
+                ObjectData obj = snapshotObjects[i];
                 if (string.IsNullOrEmpty(obj.parent))
                 {
                     continue;
@@ -271,7 +315,7 @@ namespace CoreAI.Infrastructure.World
 
             _logger.LogInfo(GameLogFeature.Core,
                 $"[WorldState] Loaded {spawned} objects ({failed} failed).");
-            return spawned > 0;
+            return true;
         }
 
         public void Reset()
@@ -315,7 +359,19 @@ namespace CoreAI.Infrastructure.World
             {
                 if (allTags[i] != null && allTags[i].gameObject != null)
                 {
-                    UnityEngine.Object.Destroy(allTags[i].gameObject);
+                    GameObject go = allTags[i].gameObject;
+
+                    // Object.Destroy() only takes effect at the end of the frame, but the load path
+                    // spawns replacement instances (same names, possibly same parents) within the
+                    // same frame. Detach, deactivate, and rename immediately so GameObject.Find()
+                    // and name-based parent resolution can never bind to an instance that is merely
+                    // pending destruction. DestroyImmediate() is avoided here since this method also
+                    // runs from Reset(), which may be called mid-callback where immediate destruction
+                    // of components could be unsafe.
+                    go.transform.SetParent(null, true);
+                    go.SetActive(false);
+                    go.name += "__pending_destroy";
+                    UnityEngine.Object.Destroy(go);
                 }
             }
         }
