@@ -86,7 +86,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6f62b07a61a10114592464a4a3c64f2f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Hub.UI::CoreAI.Hub.UI.CoreAiHubDemo
-  registerAboutPage: 1
+  registerAboutPage: 0
   registerBuiltInPages: 1
   chatTemplate: {fileID: 9197481963319205126, guid: c56ffd49a798940449e9f69ecf685e16, type: 3}
   chatStyleSheet: {fileID: 7433441132597879392, guid: 54e4e52b0db8c294fb66ec9495faa77f, type: 3}

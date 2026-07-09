@@ -142,6 +142,17 @@ namespace CoreAI.Ai.Hub
             return label;
         }
 
+        /// <summary>Forces a Toggle's label to <see cref="Text"/> so it stays readable over the Hub's
+        /// dark gradient (the default toggle label colour is close to invisible there).</summary>
+        internal static void StyleToggleLabel(Toggle toggle)
+        {
+            Label label = toggle?.Q<Label>();
+            if (label != null)
+            {
+                label.style.color = Text;
+            }
+        }
+
         /// <summary>
         /// Forces a Foldout's title text to a bright accent + bold so it stays readable over the Hub
         /// content's light-to-dark gradient (the default foldout label colour vanishes near the bottom).

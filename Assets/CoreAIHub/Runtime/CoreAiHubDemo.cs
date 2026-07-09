@@ -20,9 +20,10 @@ namespace CoreAI.Hub.UI
     [RequireComponent(typeof(CoreAiHubWindow))]
     public sealed class CoreAiHubDemo : MonoBehaviour
     {
-        [Tooltip("Register the built-in About page so the Hub always has one tab.")]
+        [Tooltip("Register the built-in About page. Off by default to keep the tab bar focused on " +
+                 "functional pages; flip on if you want a dedicated About tab.")]
         [SerializeField]
-        private bool registerAboutPage = true;
+        private bool registerAboutPage = false;
 
         [Tooltip("Register the built-in Chat, Settings, and Statistics pages.")]
         [SerializeField]

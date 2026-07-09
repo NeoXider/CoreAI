@@ -59,17 +59,27 @@
     right: 3px;
 }
 
-/* Tab bar */
+/* Tab bar: a vertical ScrollView so a tab row taller than max-height (more tabs than fit) scrolls
+   instead of overlapping the content area. The row layout (direction/wrap) is applied to the
+   ScrollView's content container, since that — not the ScrollView root — is what actually parents
+   the tab buttons added in CoreAiHubWindow.RebuildTabs. */
 .coreai-hub-tabbar {
-    flex-direction: row;
-    flex-wrap: wrap;
     flex-shrink: 0;
+    max-height: 76px;
     background-color: rgba(10, 22, 45, 0.95);
     border-bottom-width: 1px;
     border-bottom-color: rgba(17, 160, 181, 0.3);
     border-top-left-radius: 14px;
     border-top-right-radius: 14px;
-    padding: 8px 8px 8px 8px;
+}
+
+.coreai-hub-tabbar .unity-scroll-view__content-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    /* Right padding reserves space so wrapped tabs never sit under the absolute-positioned
+       collapse button (28px wide, 10px from the right edge). */
+    padding: 8px 44px 8px 8px;
 }
 
 .coreai-hub-tab {
