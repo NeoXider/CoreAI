@@ -119,7 +119,36 @@ namespace CoreAI.Ai.Hub
         /// <summary>Human-readable recent runtime handler/timer errors for a mod (empty when none).</summary>
         string RecentErrors(string id);
 
+        /// <summary>
+        /// Structured recent Tick-time handler/timer errors (all mods when <paramref name="modId"/> is
+        /// null), oldest first. Same underlying data as <see cref="RecentErrors"/>, kept as objects so a
+        /// UI can merge/sort them against <see cref="RecentReports"/> by timestamp.
+        /// </summary>
+        IReadOnlyList<LuaModHandlerError> RecentErrorEntries(string modId = null);
+
+        /// <summary>
+        /// Recent <c>report()</c>/<c>print()</c> emissions (all mods when <paramref name="modId"/> is
+        /// null), oldest first, independent of each mod's report-logging mute flag. Empty when the
+        /// underlying runtime keeps no report history.
+        /// </summary>
+        IReadOnlyList<LuaModReport> RecentReports(string modId = null);
+
+        /// <summary>Clears the recent reports buffer (all mods). No-op where the runtime keeps no report history.</summary>
+        void ClearReports();
+
+        /// <summary>Clears the recent handler-errors buffer (all mods).</summary>
+        void ClearErrors();
+
+        /// <summary>Whether a mod's <c>report()</c>/<c>print()</c> output is surfaced live (muted by default).</summary>
+        bool GetReportLoggingEnabled(string modId);
+
+        /// <summary>Enables/disables a mod's live report output. Returns false if the mod is unknown.</summary>
+        bool SetReportLoggingEnabled(string modId, bool enabled);
+
         /// <summary>Raised after any mod is loaded, reloaded, unloaded, or deleted (including by the AI tool).</summary>
         event Action ModsChanged;
+
+        /// <summary>Raised after a handler error or report is recorded, for live-refreshing log views.</summary>
+        event Action LogsChanged;
     }
 }

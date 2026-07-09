@@ -93,6 +93,14 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public const int MaxRetainedHandlerErrors = 32;
 
+        /// <summary>
+        /// Upper bound on the number of recent <c>report()</c>/<c>print()</c> emissions retained for
+        /// inspection via <see cref="GetRecentReports"/>, independent of each mod's <c>LogReports</c>
+        /// mute flag. Oldest entries are dropped once the buffer is full so a chatty mod cannot grow it
+        /// without bound.
+        /// </summary>
+        public const int MaxRetainedReports = 64;
+
         private sealed class TimerEntry
         {
             public double IntervalSeconds;
@@ -129,6 +137,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly List<Mod> _tickScratch = new();
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
+        private readonly Queue<LuaModReport> _recentReports = new();
 
         /// <summary>
         /// Round-robin start index for charging the global event dispatch budget so, under sustained
@@ -1016,27 +1025,36 @@ namespace CoreAI.Ai.LuaCs
 
             registry.Register("report", new Action<string>(message =>
             {
+                string text = message ?? "";
+
+                // Buffered regardless of LogReports: the flag only gates the live event/log spam, not
+                // this bounded history, so a Hub logs view can still show a muted mod's history.
+                RecordReport(mod.Id, text);
+
                 if (!mod.LogReports)
                 {
                     return;
                 }
 
-                ModReportEmitted?.Invoke(mod.Id, message ?? "");
+                ModReportEmitted?.Invoke(mod.Id, text);
             }));
 
-            // print() inside a mod behaves like report(): same event pipeline, same LogReports mute.
-            // Overrides the basic library's print on this mod's environment.
+            // print() inside a mod behaves like report(): same event pipeline, same LogReports mute,
+            // same report buffer. Overrides the basic library's print on this mod's environment.
             registry.RegisterCallback("print", (ctx, ct) =>
             {
+                string[] parts = new string[ctx.ArgumentCount];
+                for (int i = 0; i < ctx.ArgumentCount; i++)
+                {
+                    parts[i] = ctx.GetArgument(i).ToString();
+                }
+
+                string text = string.Join("\t", parts);
+                RecordReport(mod.Id, text);
+
                 if (mod.LogReports)
                 {
-                    string[] parts = new string[ctx.ArgumentCount];
-                    for (int i = 0; i < ctx.ArgumentCount; i++)
-                    {
-                        parts[i] = ctx.GetArgument(i).ToString();
-                    }
-
-                    ModReportEmitted?.Invoke(mod.Id, string.Join("\t", parts));
+                    ModReportEmitted?.Invoke(mod.Id, text);
                 }
 
                 return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
@@ -1576,6 +1594,91 @@ namespace CoreAI.Ai.LuaCs
                 for (int i = 0; i < keptCount; i++)
                 {
                     _recentHandlerErrors.Enqueue(kept[i]);
+                }
+
+                return before - keptCount;
+            }
+        }
+
+        /// <summary>
+        /// Appends a <c>report()</c>/<c>print()</c> emission to the bounded recent-reports buffer,
+        /// dropping the oldest entry when full. Called regardless of the mod's <c>LogReports</c> flag.
+        /// </summary>
+        private void RecordReport(string modId, string message)
+        {
+            LuaModReport entry = new()
+            {
+                ModId = modId,
+                Message = message ?? "",
+                AtUtc = DateTime.UtcNow
+            };
+
+            lock (_gate)
+            {
+                if (_recentReports.Count >= MaxRetainedReports)
+                {
+                    _recentReports.Dequeue();
+                }
+
+                _recentReports.Enqueue(entry);
+            }
+        }
+
+        /// <summary>
+        /// Returns a snapshot of recent <c>report()</c>/<c>print()</c> emissions (oldest first), capped
+        /// at <see cref="MaxRetainedReports"/>, independent of each mod's <c>LogReports</c> flag. Pass
+        /// <paramref name="modId"/> to filter to a single mod.
+        /// </summary>
+        public IReadOnlyList<LuaModReport> GetRecentReports(string modId = null)
+        {
+            string filter = modId == null ? null : Normalize(modId);
+            List<LuaModReport> result = new();
+            lock (_gate)
+            {
+                foreach (LuaModReport entry in _recentReports)
+                {
+                    if (filter == null || filter.Length == 0 ||
+                        string.Equals(entry.ModId, filter, StringComparison.Ordinal))
+                    {
+                        result.Add(entry);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Clears the recent reports buffer (optionally only entries for one mod). Returns the number of
+        /// entries removed.
+        /// </summary>
+        public int ClearRecentReports(string modId = null)
+        {
+            string filter = modId == null ? null : Normalize(modId);
+            lock (_gate)
+            {
+                if (filter == null || filter.Length == 0)
+                {
+                    int cleared = _recentReports.Count;
+                    _recentReports.Clear();
+                    return cleared;
+                }
+
+                int before = _recentReports.Count;
+                LuaModReport[] kept = new LuaModReport[before];
+                int keptCount = 0;
+                foreach (LuaModReport entry in _recentReports)
+                {
+                    if (!string.Equals(entry.ModId, filter, StringComparison.Ordinal))
+                    {
+                        kept[keptCount++] = entry;
+                    }
+                }
+
+                _recentReports.Clear();
+                for (int i = 0; i < keptCount; i++)
+                {
+                    _recentReports.Enqueue(kept[i]);
                 }
 
                 return before - keptCount;

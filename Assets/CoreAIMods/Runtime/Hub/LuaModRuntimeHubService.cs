@@ -26,6 +26,7 @@ namespace CoreAI.Ai.Hub
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _runtime.ModSourceLoaded += OnModsChanged;
             _runtime.ModSourceUnloaded += OnModsChanged;
+            _runtime.ModHandlerErrored += OnHandlerErrored;
         }
 
         /// <inheritdoc />
@@ -83,9 +84,53 @@ namespace CoreAI.Ai.Hub
             return _runtime.UnloadMod(id);
         }
 
+        /// <inheritdoc />
+        public override IReadOnlyList<LuaModHandlerError> RecentErrorEntries(string modId = null)
+        {
+            return _runtime.GetRecentHandlerErrors(modId);
+        }
+
+        /// <inheritdoc />
+        public override IReadOnlyList<LuaModReport> RecentReports(string modId = null)
+        {
+            // The MoonSharp runtime keeps no report history buffer (reports are event-only there,
+            // muted by default) — return empty so the Hub Logs page still compiles/renders against
+            // this adapter instead of a full report history.
+            return Array.Empty<LuaModReport>();
+        }
+
+        /// <inheritdoc />
+        public override void ClearReports()
+        {
+            // No-op: nothing is buffered to clear.
+        }
+
+        /// <inheritdoc />
+        public override void ClearErrors()
+        {
+            _runtime.ClearRecentHandlerErrors();
+        }
+
+        /// <inheritdoc />
+        public override bool GetReportLoggingEnabled(string modId)
+        {
+            return _runtime.GetModReportLoggingEnabled(modId);
+        }
+
+        /// <inheritdoc />
+        public override bool SetReportLoggingEnabled(string modId, bool enabled)
+        {
+            return _runtime.SetModReportLoggingEnabled(modId, enabled);
+        }
+
         private void OnModsChanged(string modId, string source, LuaCapabilities caps)
         {
             RaiseChanged();
+        }
+
+        private void OnHandlerErrored(string modId, string error, int consecutiveCount)
+        {
+            RaiseLogsChanged();
         }
     }
 }

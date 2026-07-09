@@ -32,6 +32,9 @@ namespace CoreAI.Ai.Hub
         public event Action ModsChanged;
 
         /// <inheritdoc />
+        public event Action LogsChanged;
+
+        /// <inheritdoc />
         public abstract bool IsSupported { get; }
 
         /// <inheritdoc />
@@ -39,6 +42,24 @@ namespace CoreAI.Ai.Hub
 
         /// <inheritdoc />
         public abstract string RecentErrors(string id);
+
+        /// <inheritdoc />
+        public abstract IReadOnlyList<LuaModHandlerError> RecentErrorEntries(string modId = null);
+
+        /// <inheritdoc />
+        public abstract IReadOnlyList<LuaModReport> RecentReports(string modId = null);
+
+        /// <inheritdoc />
+        public abstract void ClearReports();
+
+        /// <inheritdoc />
+        public abstract void ClearErrors();
+
+        /// <inheritdoc />
+        public abstract bool GetReportLoggingEnabled(string modId);
+
+        /// <inheritdoc />
+        public abstract bool SetReportLoggingEnabled(string modId, bool enabled);
 
         /// <summary>Live status of every currently loaded mod, mapped onto the shared projection.</summary>
         protected abstract IReadOnlyList<HubLoadedInfo> GetLoaded();
@@ -59,6 +80,12 @@ namespace CoreAI.Ai.Hub
         protected void RaiseChanged()
         {
             ModsChanged?.Invoke();
+        }
+
+        /// <summary>Adapters call this from their runtime error/report events so log views live-refresh.</summary>
+        protected void RaiseLogsChanged()
+        {
+            LogsChanged?.Invoke();
         }
 
         /// <inheritdoc />

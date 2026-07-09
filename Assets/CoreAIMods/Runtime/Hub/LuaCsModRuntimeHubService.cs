@@ -27,6 +27,8 @@ namespace CoreAI.Ai.Hub
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _runtime.ModSourceLoaded += OnModsChanged;
             _runtime.ModSourceUnloaded += OnModsChanged;
+            _runtime.ModHandlerErrored += OnHandlerErrored;
+            _runtime.ModReportEmitted += OnReportEmitted;
         }
 
         /// <inheritdoc />
@@ -84,9 +86,55 @@ namespace CoreAI.Ai.Hub
             return _runtime.UnloadMod(id);
         }
 
+        /// <inheritdoc />
+        public override IReadOnlyList<LuaModHandlerError> RecentErrorEntries(string modId = null)
+        {
+            return _runtime.GetRecentHandlerErrors(modId);
+        }
+
+        /// <inheritdoc />
+        public override IReadOnlyList<LuaModReport> RecentReports(string modId = null)
+        {
+            return _runtime.GetRecentReports(modId);
+        }
+
+        /// <inheritdoc />
+        public override void ClearReports()
+        {
+            _runtime.ClearRecentReports();
+        }
+
+        /// <inheritdoc />
+        public override void ClearErrors()
+        {
+            _runtime.ClearRecentHandlerErrors();
+        }
+
+        /// <inheritdoc />
+        public override bool GetReportLoggingEnabled(string modId)
+        {
+            return _runtime.GetModReportLoggingEnabled(modId);
+        }
+
+        /// <inheritdoc />
+        public override bool SetReportLoggingEnabled(string modId, bool enabled)
+        {
+            return _runtime.SetModReportLoggingEnabled(modId, enabled);
+        }
+
         private void OnModsChanged(string modId, string source, LuaCapabilities caps)
         {
             RaiseChanged();
+        }
+
+        private void OnHandlerErrored(string modId, string error, int consecutiveCount)
+        {
+            RaiseLogsChanged();
+        }
+
+        private void OnReportEmitted(string modId, string message)
+        {
+            RaiseLogsChanged();
         }
     }
 }

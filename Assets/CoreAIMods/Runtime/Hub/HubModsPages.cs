@@ -17,8 +17,14 @@ namespace CoreAI.Ai.Hub
         /// <summary>Registry id of the Mods page.</summary>
         public const string ModsPageId = HubModsPage.DefaultPageId;
 
+        /// <summary>Registry id of the Mod Logs page.</summary>
+        public const string LogsPageId = HubModLogsPage.DefaultPageId;
+
         /// <summary>Default Hub tab order for the Mods page (after Chat/Settings/Statistics).</summary>
         public const int DefaultOrder = 300;
+
+        /// <summary>Default Hub tab order for the Mod Logs page (after Mods).</summary>
+        public const int DefaultLogsOrder = 350;
 
         /// <summary>Registers the Mods page backed by the MoonSharp <see cref="LuaModRuntime"/>.</summary>
         /// <param name="registry">Target registry. Required.</param>
@@ -74,6 +80,7 @@ namespace CoreAI.Ai.Hub
             }
 
             registry.Register(ModsPageId, () => new HubModsPage(service, order), order);
+            registry.Register(LogsPageId, () => new HubModLogsPage(service, DefaultLogsOrder), DefaultLogsOrder);
         }
     }
 }
