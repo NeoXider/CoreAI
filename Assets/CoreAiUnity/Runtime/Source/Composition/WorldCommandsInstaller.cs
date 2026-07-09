@@ -80,6 +80,14 @@ namespace CoreAI.Composition
 
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IGameConfigStore>();
+
+            builder.Register(c => new WorldStateManager(
+                        c.Resolve<IGameLogger>(),
+                        c.Resolve<ICoreAiPrefabRegistry>(),
+                        c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
+                    Lifetime.Singleton)
+                .As<IWorldStateManager>()
+                .AsSelf();
         }
 
         /// <summary>

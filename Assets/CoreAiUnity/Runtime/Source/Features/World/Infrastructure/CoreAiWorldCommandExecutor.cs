@@ -197,31 +197,40 @@ namespace CoreAI.Infrastructure.World
 
             // Registered prefab takes precedence; otherwise fall back to a built-in primitive so the world
             // tool is usable without any prefab registry assigned.
+            GameObject spawned = null;
+
             if (_prefabRegistry != null && _prefabRegistry.TryResolve(key, out GameObject prefab) && prefab != null)
             {
-                GameObject prefabGo = UnityEngine.Object.Instantiate(prefab, pos, rotation);
-                prefabGo.name = targetName;
+                spawned = UnityEngine.Object.Instantiate(prefab, pos, rotation);
+                spawned.name = targetName;
                 if (scale != Vector3.one)
                 {
-                    prefabGo.transform.localScale = scale;
+                    spawned.transform.localScale = scale;
                 }
-
-                TryParentSpawned(prefabGo, env.stringValue);
-                return true;
+            }
+            else if (_allowPrimitives && CoreAiPrimitiveFactory.IsPrimitiveKey(key))
+            {
+                spawned = CoreAiPrimitiveFactory.Create(key);
+                spawned.name = targetName;
+                spawned.transform.position = pos;
+                spawned.transform.rotation = rotation;
+                if (scale != Vector3.one)
+                {
+                    spawned.transform.localScale = scale;
+                }
             }
 
-            if (_allowPrimitives && CoreAiPrimitiveFactory.IsPrimitiveKey(key))
+            if (spawned != null)
             {
-                GameObject primitive = CoreAiPrimitiveFactory.Create(key);
-                primitive.name = targetName;
-                primitive.transform.position = pos;
-                primitive.transform.rotation = rotation;
-                if (scale != Vector3.one)
+                TryParentSpawned(spawned, env.stringValue);
+
+                if (spawned.GetComponent<WorldObjectComponent>() == null)
                 {
-                    primitive.transform.localScale = scale;
+                    WorldObjectComponent tag = spawned.AddComponent<WorldObjectComponent>();
+                    tag.persistentId = Guid.NewGuid().ToString("N");
+                    tag.prefabKey = key;
                 }
 
-                TryParentSpawned(primitive, env.stringValue);
                 return true;
             }
 

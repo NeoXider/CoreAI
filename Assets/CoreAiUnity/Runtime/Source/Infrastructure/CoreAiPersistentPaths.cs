@@ -15,5 +15,8 @@ namespace CoreAI.Infrastructure
 
         /// <summary>Folder for agent-authored skills persisted by <c>FileSkillStore</c>.</summary>
         public const string Skills = "Skills";
+
+        /// <summary>Folder for world-object snapshots persisted by <c>WorldStateManager</c>.</summary>
+        public const string WorldState = "WorldState";
     }
 }

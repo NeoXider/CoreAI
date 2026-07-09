@@ -190,6 +190,7 @@ namespace CoreAI.Composition
 
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
+            builder.RegisterEntryPoint<WorldStateEntryPoint>();
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             if (settings != null)
             {
