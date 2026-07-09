@@ -10,7 +10,9 @@ namespace CoreAI.Infrastructure.World
     public sealed class WorldStateManager : IWorldStateManager, IDisposable
     {
         private const string SaveFileName = "world_state.json";
-        private const string FormatVersion = "1.0";
+        private const string FormatVersion = "1.1";
+
+        private static readonly Color NoColor = new(-1f, -1f, -1f, -1f);
 
         [Serializable]
         private sealed class ObjectData
@@ -23,6 +25,7 @@ namespace CoreAI.Infrastructure.World
             public float sx, sy, sz;
             public string parent;
             public bool active;
+            public float cr, cg, cb, ca;
         }
 
         [Serializable]
@@ -100,6 +103,8 @@ namespace CoreAI.Infrastructure.World
                 }
 
                 Transform t = tag.transform;
+                Color color = ReadColor(tag.gameObject);
+                bool hasColor = color.r >= 0f;
                 objects.Add(new ObjectData
                 {
                     id = tag.persistentId,
@@ -115,7 +120,11 @@ namespace CoreAI.Infrastructure.World
                     sy = t.localScale.y,
                     sz = t.localScale.z,
                     parent = t.parent != null ? t.parent.gameObject.name : "",
-                    active = tag.gameObject.activeSelf
+                    active = tag.gameObject.activeSelf,
+                    cr = hasColor ? color.r : -1f,
+                    cg = hasColor ? color.g : -1f,
+                    cb = hasColor ? color.b : -1f,
+                    ca = hasColor ? color.a : -1f
                 });
             }
 
@@ -200,6 +209,7 @@ namespace CoreAI.Infrastructure.World
 
             int spawned = 0;
             int failed = 0;
+            bool hasColor = string.Compare(data.version, "1.1", StringComparison.Ordinal) >= 0;
             Dictionary<string, GameObject> idToGo = new(data.objects.Length);
 
             for (int i = 0; i < data.objects.Length; i++)
@@ -213,7 +223,7 @@ namespace CoreAI.Infrastructure.World
 
                 try
                 {
-                    GameObject go = SpawnFromSnapshot(obj);
+                    GameObject go = SpawnFromSnapshot(obj, hasColor);
                     if (go != null)
                     {
                         idToGo[obj.id] = go;
@@ -312,12 +322,58 @@ namespace CoreAI.Infrastructure.World
             Application.quitting -= OnApplicationQuitting;
         }
 
+        private static Color ReadColor(GameObject go)
+        {
+            Renderer renderer = go.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return NoColor;
+            }
+
+            MaterialPropertyBlock mpb = new();
+            renderer.GetPropertyBlock(mpb);
+            if (mpb.HasColor("_Color"))
+            {
+                return mpb.GetColor("_Color");
+            }
+
+            if (mpb.HasColor("_BaseColor"))
+            {
+                return mpb.GetColor("_BaseColor");
+            }
+
+            return NoColor;
+        }
+
+        private static void ApplyColor(GameObject go, Color color)
+        {
+            if (go == null || color.r < 0f)
+            {
+                return;
+            }
+
+            Renderer[] renderers = go.GetComponents<Renderer>();
+            if (renderers.Length == 0)
+            {
+                return;
+            }
+
+            MaterialPropertyBlock mpb = new();
+            foreach (Renderer renderer in renderers)
+            {
+                renderer.GetPropertyBlock(mpb);
+                mpb.SetColor("_Color", color);
+                mpb.SetColor("_BaseColor", color);
+                renderer.SetPropertyBlock(mpb);
+            }
+        }
+
         private void OnApplicationQuitting()
         {
             Save();
         }
 
-        private GameObject SpawnFromSnapshot(ObjectData obj)
+        private GameObject SpawnFromSnapshot(ObjectData obj, bool hasColor = false)
         {
             Vector3 pos = new(obj.px, obj.py, obj.pz);
             Quaternion rot = Quaternion.Euler(obj.rx, obj.ry, obj.rz);
@@ -352,6 +408,11 @@ namespace CoreAI.Infrastructure.World
             WorldObjectComponent tag = go.AddComponent<WorldObjectComponent>();
             tag.persistentId = obj.id;
             tag.prefabKey = obj.prefabKey;
+
+            if (hasColor && obj.cr >= 0f)
+            {
+                ApplyColor(go, new Color(obj.cr, obj.cg, obj.cb, obj.ca));
+            }
 
             return go;
         }

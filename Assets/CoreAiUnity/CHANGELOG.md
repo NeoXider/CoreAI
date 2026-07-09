@@ -4,6 +4,21 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.0.11 - World state save/load with colour persistence (2026-07-09)
+
+- **New world state save/load system (`WorldStateManager`).** All AI-spawned objects (`WorldObjectComponent`) are auto-saved to `persistentDataPath/CoreAI/WorldState/world_state.json` on Play Mode exit and auto-loaded on next entry. Includes:
+  - `IWorldStateManager.Save()` / `TryLoad()` / `Reset()` API
+  - Hub **World** tab with status, Reset World, and Save Now controls
+  - Scene mismatch guard (skips load if scene name differs)
+  - Atomic file write (`.tmp` + rename)
+- **Colour capture is optional.** Only objects where `set_color` was called (detected via `MaterialPropertyBlock`) persist `cr/cg/cb/ca`. Prefabs without explicit colour keep their original material on reload. Old `1.0`-format saves load without colour changes.
+- **New files:**
+  - `WorldObjectComponent` — tag MonoBehaviour on each spawned object
+  - `WorldStateManager` / `IWorldStateManager` — core save/load logic
+  - `WorldStateEntryPoint` — VContainer `IStartable` for auto-init
+  - `WorldStateHubPage` / `WorldStateHubBinder` — Hub UI tab
+  - `WorldStateAutoSaveHook` — catches Play Mode exit in Editor
+
 ### 5.0.10 - Self-spawning model-download indicator for mobile builds (2026-07-06)
 
 - **New `CoreAiModelDownloadOverlay`: a drop-in, self-spawning on-screen indicator for LLMUnity's

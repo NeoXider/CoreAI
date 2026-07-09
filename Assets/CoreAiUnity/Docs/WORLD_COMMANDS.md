@@ -166,7 +166,69 @@ coreai_component_set_text("Lamp", "light", "color", "#88aa33")
 coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 ```
 
-## 7. Tests
+## 7. World State Persistence (auto-save/load)
+
+All AI-spawned objects (primitives and prefabs) are automatically tracked for save/load.
+
+### How it works
+
+Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created.
+
+### What is saved per object
+
+| Field | Description |
+|---|---|
+| `id` | Stable `persistentId` (GUID) |
+| `prefabKey` | Primitive key (`cube`, `sphere`, etc.) or prefab registry key |
+| `name` | Current `GameObject.name` |
+| `px, py, pz` | World position |
+| `rx, ry, rz` | Euler rotation |
+| `sx, sy, sz` | Local scale |
+| `parent` | Parent object name (empty if root) |
+| `active` | Whether the object is enabled |
+| `cr, cg, cb, ca` | **Optional** — only present if `set_color` was called on the object; otherwise `-1` (sentinel). Prefabs without explicit `set_color` keep their original material. |
+
+### Color behaviour
+
+- **Only colours set via `set_color` are persisted** — objects with no explicit colour save `cr/cg/cb/ca = -1` and are loaded with their original material.
+- On restore, colour is applied via `MaterialPropertyBlock` (same path as `set_color`), so the prefab's base material is not modified.
+- Old save files (format version `1.0`, no colour fields) are loaded without colour changes.
+
+### Hub controls
+
+The **World** tab in the CoreAI Hub shows:
+- Current saved-state status ("Has saved state: Yes / No")
+- **Reset World** — destroys all tracked objects and deletes the save file
+- **Save Now** — trigger a manual save at any time
+
+### Save format
+
+```json
+{
+  "version": "1.1",
+  "timestamp": "2026-07-09T08:01:23Z",
+  "scene": "CoreAiHubDemo",
+  "objects": [
+    {
+      "id": "a7d957c5-3e15-4599-9c1d-d396e9b7913a",
+      "prefabKey": "cube",
+      "name": "RedCube",
+      "px": 0.0, "py": 1.0, "pz": 0.0,
+      "rx": 0.0, "ry": 0.0, "rz": 0.0,
+      "sx": 1.0, "sy": 1.0, "sz": 1.0,
+      "parent": "",
+      "active": true,
+      "cr": 1.0, "cg": 0.0, "cb": 0.0, "ca": 1.0
+    }
+  ]
+}
+```
+
+### Scene mismatch guard
+
+If the saved scene name differs from the current scene, load is skipped. This prevents accidentally spawning world objects in the wrong scene.
+
+## 8. Tests
 
 - EditMode: `WorldCommandLuaBindingsEditModeTests` verifies Lua publishes valid `WorldCommand` JSON.
 - PlayMode: world-command executor and public world-tool tests should cover spawn/change/colour/destroy/listing plus runtime actions such as animation, audio, physics, and UI.
