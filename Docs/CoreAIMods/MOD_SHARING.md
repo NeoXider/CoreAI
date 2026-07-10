@@ -3,9 +3,9 @@
 Status: format sections (1–3, 5) describe the **shipped implementation** as of 2026-07-10.
 Section 4 (community gallery) is a **process proposal** — nothing in it exists yet.
 
-Related idea-audit item: the UGC loop ("shareable mod format + gallery + one-click import
-from the Hub") from [IDEA_IMPROVEMENT_AUDIT_2026-07-10.md](../IDEA_IMPROVEMENT_AUDIT_2026-07-10.md)
-§2.2 (modding-loop moat, top-10 item #9).
+Related product bet: the UGC loop ("shareable mod format + gallery + one-click import from the Hub")
+is the modding-loop moat — tracked in [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md)
+("Idea / positioning bets").
 
 ## 1. Why share mods
 
@@ -305,4 +305,4 @@ package entirely. A failed revert/reload leaves the running mod untouched.
 - [LUA_GAME_API.md § Persistence & Sharing](../../Assets/CoreAI/Docs/LUA_GAME_API.md) — source store, export/import API contract, revision history and rollback.
 - [FIRST_MOD.md](../../Assets/CoreAI/Docs/FIRST_MOD.md) — writing your first mod.
 - [mod-system.md](mod-system.md) / [mod-authoring.md](mod-authoring.md) — mod runtime internals and authoring notes.
-- [IDEA_IMPROVEMENT_AUDIT_2026-07-10.md](../IDEA_IMPROVEMENT_AUDIT_2026-07-10.md) — where the UGC-loop bet comes from.
+- [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md) — "Idea / positioning bets", where the UGC-loop bet lives.

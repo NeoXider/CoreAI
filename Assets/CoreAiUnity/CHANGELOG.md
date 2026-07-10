@@ -25,8 +25,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## 5.1.0 - audit remediation: durability, fallback correctness, sandbox hardening (2026-07-10)
 
-Release of the 2026-07-10 audit remediation wave (findings F-01…F-16 of
-`Docs/REPOSITORY_AUDIT_2026-07-10.md`; verification in `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`).
+Release of the 2026-07-10 audit remediation wave (findings F-01…F-16 of the 2026-07-10 repository
+audits, since removed; any remaining open findings are tracked in `TODO.md`).
 Version lockstep with `com.neoxider.coreai` 5.1.0; `coreaimods` / `coreaihub` / `coreaibenchmark`
 ship the same version.
 

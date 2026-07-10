@@ -12,12 +12,11 @@
 - [x] Compile clean (0 `error CS`); Hub integration compiled in the monorepo via `COREAI_HAS_HUB`.
 - [x] Full EditMode suite green: 1,598 total / 1,594 passed / 4 third-party ignored / 0 failed.
 - [x] PlayMode `FastNoLlm` suite green: 67/67.
-- [ ] Delete the audit docs only after their remaining findings are closed or transferred. Do not
-      delete them yet: durability, package-isolation, full-tier query, and CI findings remain open.
-      Candidate files: `Docs/REPOSITORY_AUDIT_2026-07-10.md`,
-      `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`, `Docs/CoreAIMods/audit-*.md`,
-      `Docs/CoreAIMods/optimization-review.md`) — owner's rule: closed audits get deleted, and every
-      code finding in them is either fixed or tracked here.
+- [x] Audit docs removed (2026-07-10). Per the owner's rule ("no audits should live in the project"),
+      all 2026-07-10 audit reports were deleted after their still-open code findings were transferred to
+      live TODO items: **CI** (F-12, below), **package isolation** (F-22, below), **durability** and
+      **full-tier Lua query** (in the R0.6 residual list below). Product/idea bets from the idea audit
+      moved to `Assets/CoreAiUnity/Docs/BACKLOG.md` ("Idea / positioning bets").
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 

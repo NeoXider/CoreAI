@@ -48,3 +48,24 @@ Items here are intentionally not active TODO checkboxes.
 - STT -> Agent -> TTS for NPCs.
 - Visual AgentBuilder editor workflow.
 - Streaming emotions / function-driven animations.
+
+## Idea / positioning bets (from the 2026-07-10 idea-improvement audit, since deleted)
+
+> The idea audit concluded the moat is pillars 1+3: "local-first agentic runtime for Unity games, proven
+> by the only LLM game-creation benchmark." These are the open, non-code bets it recommended pursuing.
+> Most concrete artifacts it asked for already shipped (SHIPPING_PLAYER_MACHINES, DETERMINISM_AND_REPLAY,
+> CONTENT_SAFETY, CLOUD_COST_BUDGETING, BENCHMARK_LEADERBOARD, MOD_SHARING); these are what remained open.
+
+- **Director-AI demo scene** (beyond the chat box): a standalone `.unity` scene for the ambient/scheduled
+  agent that observes game state and acts through the same tools with no chat UI. The controller recipe
+  exists (`Assets/CoreAI.Demos/DirectorAi/`); a featured scene + PlayMode acceptance is the remaining step.
+- **Audit-log replay** → determinism / anti-cheat / debugging. The tamper-evident audit log + the
+  `DETERMINISM_AND_REPLAY.md` contract exist; the replayer itself is the next build.
+- **Public mod gallery** on top of the shared mod format (`MOD_SHARING.md`): a curated `.lua` repo with
+  one-click import from the Hub — the one moat that grows through other people's hands (UGC loop).
+- **Self-serve indie commercial tier with a public price** (owner decision): removes the "email me for a
+  license" friction that filters out exactly the solo devs who would evangelize the project.
+- **Ship one real jam-scale game** on CoreAI local-first and write the postmortem — the single highest
+  trust-per-effort artifact (one shipped case study beats any feature list). Needs an owner.
+- **Content-safety auto-wiring**: the `IContentFilter` module + wordlist filter ship and are tested; wiring
+  it into the pipeline by default (not just available) is the follow-up that unblocks education/console.

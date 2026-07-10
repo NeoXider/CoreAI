@@ -36,8 +36,8 @@
   stable across eviction and revert is index-based in both mod runtimes.
 - **Audit chain (F-07):** `AuditEntry`/`AuditLogVerifier` support rotation markers and anchored
   genesis (`VerifyChainedSet`) so rotated files verify standalone while staying chained.
-- Audits: `Docs/REPOSITORY_AUDIT_2026-07-10.md` and `Docs/REPOSITORY_AUDIT_2_2026-07-10.md` in the
-  repository root document the findings and the verification of this wave.
+- This wave was driven by the 2026-07-10 repository audits (findings F-01…F-25 / A-01…A-06); those audit
+  reports have since been removed and any remaining open findings are tracked in `TODO.md`.
 
 ## 5.0.10 - version lockstep with coreaiunity 5.0.10 (2026-07-06)
 
