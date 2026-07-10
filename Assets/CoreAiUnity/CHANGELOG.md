@@ -4,6 +4,25 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.4.0 - MoonSharp removed; Lua-CSharp is the only VM (2026-07-10)
+
+- **MoonSharp purged from the whole project.** The MoonSharp Lua VM, its ~22-file runtime/binding/sandbox
+  layer, the `org.moonsharp.moonsharp` UPM dependency, and the `COREAI_HAS_MOONSHARP` scripting define are
+  all removed. Lua now runs exclusively on the managed, AOT-safe Lua-CSharp runtime, which ships bundled as
+  `Lua.dll` + `Lua.Annotations.dll` inside the CoreAI Mods package (`Assets/CoreAIMods/Plugins/`) — there is
+  no external Lua package to install.
+- **Setup surface updated.** `CoreAI → Setup → Modules → MoonSharp (Lua)` is replaced by
+  `Lua (Lua-CSharp) → Enable Lua / Disable Lua` (toggles `COREAI_NO_LUA`; the VM is bundled, nothing to
+  install). `CoreAI → Setup → Install Git Dependencies` no longer adds the MoonSharp package. Module status
+  reports the bundled Lua-CSharp runtime.
+- **Benchmark migrated to Lua-CSharp.** The game-creation benchmark harness (`BenchmarkLuaExecutor`) now runs
+  on `LuaCsSecureEnvironment` / `LuaCsApiRegistry` / `LuaCsLogicSlots`; all G1–G8 scenarios compile without
+  MoonSharp. The 10 bundled demos and the RogueliteArena example were ported to the Lua-CSharp binding API.
+- **link.xml** preserves the Lua-CSharp assemblies (plus the Resources/TextAsset members CoreAI loads
+  prompts/skills/bundled mods through) instead of MoonSharp.
+- Removed the obsolete `Assets/dev/LuaVmComparison` VM-comparison harness (it only existed to benchmark
+  MoonSharp against Lua-CSharp).
+
 ## 5.3.0 - camera stability and benchmark v2 host (2026-07-10)
 
 - **`CoreAI → Getting Started` welcome window.** A single onboarding entry point that opens automatically

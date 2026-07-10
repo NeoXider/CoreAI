@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## 5.4.0 - MoonSharp removed; Lua-CSharp is the only VM (2026-07-10)
+
+- **MoonSharp fully removed — Lua-CSharp is now the single Lua runtime.** The legacy MoonSharp VM and its
+  entire binding/sandbox/runtime layer are deleted; the managed, AOT-safe Lua-CSharp stack (already the
+  DI-registered runtime for mods, world, hierarchy/components, input, time, logic slots, coroutines) is the
+  only VM. The `org.moonsharp.moonsharp` package dependency is gone and the Lua VM (`Lua.dll` +
+  `Lua.Annotations.dll`) now ships bundled inside the CoreAI Mods package — no external Lua package to
+  install. The `COREAI_HAS_MOONSHARP` scripting define no longer exists; Lua is compiled in by default and
+  `COREAI_NO_LUA` still compiles it out.
+- Dead `#if COREAI_HAS_MOONSHARP` blocks removed from CoreAI.Source (`CorePortableInstaller`,
+  `AiGameCommandRouter`, `CoreAILifetimeScope`, `CoreAiChatExternalDriver.RunLuaDiag`). The Programmer agent
+  system prompt now names the Lua-CSharp sandbox instead of MoonSharp.
 - **Benchmark G6 image-feedback mode.** The free-build visual can now run with a `off` / `image` / `both`
   vision mode (benchmark-window "Vision feedback" dropdown or `COREAI_BENCHMARK_VISION_MODE`). In `image`,
   the model additionally gets the `camera` tool so it can `camera_capture` a screenshot of its own
