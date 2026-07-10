@@ -5,7 +5,7 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// VM-agnostic surface of a persistent Lua mod runtime, so the <c>manage_mods</c> tool and the
-    /// auto-repair bridge work against either the MoonSharp <see cref="LuaModRuntime"/> or the Lua-CSharp
+    /// auto-repair bridge work against either the MoonSharp <c>LuaModRuntime</c> or the Lua-CSharp
     /// <see cref="LuaCsModRuntime"/>. Only the members those consumers need are exposed; VM-specific
     /// construction, ticking, and rehydration stay on the concrete runtime types.
     /// </summary>

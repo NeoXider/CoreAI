@@ -9,13 +9,13 @@ namespace CoreAI.Presentation
 {
     /// <summary>
     /// Host bridge that lets the model fix failing Lua mods on its own. It subscribes to
-    /// <see cref="LuaModRuntime.ModHandlerErrored"/> (raised when a loaded mod's hook/timer throws at
+    /// <c>LuaModRuntime.ModHandlerErrored</c> (raised when a loaded mod's hook/timer throws at
     /// runtime) and, through a debouncing <see cref="LuaModAutoRepairPolicy"/>, schedules a Programmer
     /// task that carries the failing source and error as <c>lua_repair</c> context. The Programmer then
     /// rewrites the mod and re-applies it via <c>manage_mods reload</c>, reusing the same self-repair
     /// pipeline that one-shot <c>execute_lua</c> envelopes already use.
     /// Drop this component into any scene that has a <see cref="CoreAILifetimeScope"/> and a
-    /// <see cref="LuaModRuntime"/>; it is inert when MoonSharp is unavailable.
+    /// <c>LuaModRuntime</c>; it is inert when MoonSharp is unavailable.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class CoreAiLuaModAutoRepair : MonoBehaviour

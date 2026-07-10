@@ -8,7 +8,7 @@ namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
     /// Lua-CSharp (nuskey8/Lua-CSharp) counterpart of
-    /// <see cref="CoreAI.Ai.LuaAiEnvelopeProcessor"/>: thin glue that runs an AI command's embedded Lua
+    /// <c>CoreAI.Ai.LuaAiEnvelopeProcessor</c>: thin glue that runs an AI command's embedded Lua
     /// envelope on a <see cref="LuaCsSecureEnvironment"/> state under the
     /// <see cref="LuaCsExecutionGuard"/> and publishes the same success/failure game commands. Built as
     /// part of the MoonSharp -> Lua-CSharp migration so the envelope path can later be type-swapped away

@@ -10,7 +10,7 @@ namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
     /// Lua-CSharp (nuskey8/Lua-CSharp) persistent runtime for long-lived mods. This is the ADDITIVE
-    /// counterpart of the MoonSharp <see cref="CoreAI.Ai.LuaModRuntime"/>, built as part of the
+    /// counterpart of the MoonSharp <c>CoreAI.Ai.LuaModRuntime</c>, built as part of the
     /// MoonSharp -> Lua-CSharp migration: both VMs coexist and the tick driver can later swap
     /// <c>LuaModRuntime</c> -> <c>LuaCsModRuntime</c> by type because the public lifecycle/tick/
     /// diagnostics surface below mirrors the MoonSharp runtime.

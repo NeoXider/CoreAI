@@ -8,7 +8,7 @@ namespace CoreAI.Ai.Hub
     /// metadata (from <see cref="ILuaModSourceStore"/> and the mod's <c>@coreai</c> header) plus its
     /// live runtime status (loaded? how many handlers/timers/errors) from the active mod runtime.
     /// The page never touches a VM type directly — it renders these records, so it works the same
-    /// whether the host wired the MoonSharp <see cref="LuaModRuntime"/> or the Lua-CSharp runtime.
+    /// whether the host wired the MoonSharp <c>LuaModRuntime</c> or the Lua-CSharp runtime.
     /// </summary>
     public sealed class HubModRecord
     {
@@ -88,7 +88,7 @@ namespace CoreAI.Ai.Hub
 
     /// <summary>
     /// VM-agnostic CRUD/query surface the Hub Mods page and editor drive. Implemented by a thin
-    /// adapter over a concrete mod runtime (<see cref="LuaModRuntime"/> or the Lua-CSharp runtime)
+    /// adapter over a concrete mod runtime (<c>LuaModRuntime</c> or the Lua-CSharp runtime)
     /// plus the shared <see cref="ILuaModSourceStore"/>. Every mutating call routes through the real
     /// runtime + store (load/reload/unload/delete/persist) — nothing is stubbed.
     /// </summary>

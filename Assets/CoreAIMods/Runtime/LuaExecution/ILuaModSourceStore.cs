@@ -8,7 +8,7 @@ namespace CoreAI.Ai
     /// <see cref="ILuaModStore"/>: that interface is the per-mod runtime key/value scratch space
     /// backing <c>store_set</c>/<c>store_get</c>, whereas this one is the package store (the code and
     /// metadata that define the mod itself). A host wires an implementation (file system, player
-    /// prefs, cloud, etc.); <see cref="LuaModRuntime"/> calls it best-effort and never lets a store
+    /// prefs, cloud, etc.); <c>LuaModRuntime</c> calls it best-effort and never lets a store
     /// failure abort a load.
     /// </summary>
     public interface ILuaModSourceStore

@@ -5,7 +5,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// No-op <see cref="ILuaModSourceStore"/> used when a host wires no persistence: mods stay
     /// in-memory only (the pre-persistence behaviour). Save/SetActive/Delete do nothing, TryLoad
-    /// reports absence, and List is empty. <see cref="LuaModRuntime"/> defaults to
+    /// reports absence, and List is empty. <c>LuaModRuntime</c> defaults to
     /// <see cref="Instance"/> so persistence calls are always safe to make unconditionally.
     /// </summary>
     public sealed class NullLuaModSourceStore : ILuaModSourceStore

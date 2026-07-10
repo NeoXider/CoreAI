@@ -15,7 +15,7 @@ using UnityEngine.SceneManagement;
 namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
-    /// Lua-CSharp counterpart of <see cref="CoreAiFullUnityLuaRuntimeBindings"/>.
+    /// Lua-CSharp counterpart of <c>CoreAiFullUnityLuaRuntimeBindings</c>.
     /// </summary>
     public sealed class LuaCsFullUnityRuntimeBindings
     {

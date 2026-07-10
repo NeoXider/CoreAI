@@ -6,7 +6,7 @@ namespace CoreAI.Ai.Hub
 {
     /// <summary>
     /// <see cref="IHubModService"/> adapter over the Lua-CSharp <see cref="LuaCsModRuntime"/> — the
-    /// additive migration counterpart of <see cref="LuaModRuntime"/>. Its lifecycle surface mirrors the
+    /// additive migration counterpart of <c>LuaModRuntime</c>. Its lifecycle surface mirrors the
     /// MoonSharp runtime field-for-field (<see cref="LuaCsModRuntime.ListMods"/>,
     /// <see cref="LuaCsModRuntime.TryGetModSource"/>, <see cref="LuaCsModRuntime.LoadMod"/>,
     /// <see cref="LuaCsModRuntime.ReloadMod"/>, <see cref="LuaCsModRuntime.UnloadMod"/>,

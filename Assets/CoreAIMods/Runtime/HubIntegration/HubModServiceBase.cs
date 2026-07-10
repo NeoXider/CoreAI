@@ -9,9 +9,8 @@ namespace CoreAI.Ai.Hub
     /// Runtime-agnostic implementation of <see cref="IHubModService"/>. It owns the store-driven
     /// logic (merged listing, enable/disable/delete, persist-on-save, capability masking, header
     /// parsing) and delegates only the handful of VM-specific primitives (list loaded, get live
-    /// source, load/reload/unload, recent errors) to a concrete runtime adapter. This keeps the two
-    /// adapters (<see cref="LuaModRuntimeHubService"/> and <see cref="LuaCsModRuntimeHubService"/>)
-    /// tiny and guarantees identical behaviour across VMs.
+    /// source, load/reload/unload, recent errors) to a concrete runtime adapter. This keeps the
+    /// concrete adapter (<see cref="LuaCsModRuntimeHubService"/>) tiny.
     /// </summary>
     public abstract class HubModServiceBase : IHubModService
     {

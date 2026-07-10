@@ -11,7 +11,7 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// LLM tool (<c>manage_mods</c>) that lets an agent inspect and rewrite its own persistent
-    /// Lua mods in <see cref="LuaModRuntime"/>: list mods, read their source, load, reload, unload,
+    /// Lua mods in <c>LuaModRuntime</c>: list mods, read their source, load, reload, unload,
     /// export, import, and forget them; list a mod's revision history and roll back to an earlier
     /// revision (<c>versions</c>/<c>revert</c>); and read recent runtime hook/timer failures
     /// (<c>diagnostics</c>) so a mod that throws long after it loaded can be repaired. Loaded/reloaded
