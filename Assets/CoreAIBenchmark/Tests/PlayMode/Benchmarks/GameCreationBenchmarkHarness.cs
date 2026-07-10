@@ -1028,6 +1028,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 return new WorldLlmTool(World, Settings, new NullGameLogger(), TimeRemainingNote);
             }
+
+            /// <summary>
+            /// The agent-vision tool (<c>camera_capture</c> etc.) so a scenario can let the model SEE its own
+            /// build and refine it. Only meaningful in the visual world executor (which renders real
+            /// GameObjects and a preview camera the service can resolve). Returns null otherwise, so a
+            /// scenario can gate the tool on <c>CameraTool() != null</c>.
+            /// </summary>
+            public CoreAI.Vision.CameraLlmTool CameraTool(string agentRoleId)
+            {
+                if (World is not VisualBenchmarkWorldExecutor)
+                {
+                    return null;
+                }
+
+                return new CoreAI.Vision.CameraLlmTool(
+                    new CoreAI.Vision.AgentCameraService(), agentRoleId);
+            }
         }
 
         public sealed class RunObservation

@@ -51,6 +51,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public const string EnvRoundtrips = "COREAI_BENCHMARK_ROUNDTRIPS";
 
         /// <summary>
+        /// Env var for the G6 free-build vision mode: "off" (default, text-only build), "image" (the model
+        /// gets a camera tool to SEE and refine its build — vision-capable models only), or "both" (run the
+        /// text-only build AND an image-feedback build so their scores can be compared). Also settable from
+        /// the benchmark window dropdown.
+        /// </summary>
+        public const string EnvVisionMode = "COREAI_BENCHMARK_VISION_MODE";
+
+        /// <summary>
         /// Env var (seconds) for the SOFT whole-suite time budget. A scenario rep only STARTS when its
         /// WORST case — every retry attempt running the full per-scenario timeout — still fits inside this
         /// budget; once nothing more fits, the suite stops and writes the report/screenshots for everything

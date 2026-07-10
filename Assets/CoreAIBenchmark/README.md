@@ -118,6 +118,7 @@ Environment shaping is also supported:
 | `COREAI_TEST_MODEL` | Model id to request. |
 | `COREAI_BENCHMARK_GROUPS` | CSV group filter, such as `G1,G2,G6`; empty means all groups. |
 | `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. |
+| `COREAI_BENCHMARK_VISION_MODE` | G6 free-build vision mode: `off` (default, text-only build), `image` (the model gets a camera tool to SEE and refine its own scene — vision-capable models only), or `both` (run the text-only build AND an image-feedback build to compare). Also a **Vision feedback** dropdown in the benchmark window. |
 
 For an LM Studio multi-model sweep, load one model at a time, run the benchmark, unload it, and move to the next model. Example structure:
 

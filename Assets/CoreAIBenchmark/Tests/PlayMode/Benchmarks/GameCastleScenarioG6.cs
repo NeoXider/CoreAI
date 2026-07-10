@@ -13,12 +13,39 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameFreeBuildScenariosG6
     {
+        /// <summary>
+        /// G6 vision mode from COREAI_BENCHMARK_VISION_MODE: "off" (default), "image", or "both".
+        /// </summary>
+        private static string VisionMode()
+        {
+            string raw = System.Environment.GetEnvironmentVariable("COREAI_BENCHMARK_VISION_MODE");
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "off";
+            }
+
+            raw = raw.Trim().ToLowerInvariant();
+            return raw is "image" or "both" ? raw : "off";
+        }
+
         public static GameBenchmarkScenario[] All()
         {
-            return new GameBenchmarkScenario[]
+            string mode = VisionMode();
+            List<GameBenchmarkScenario> scenarios = new();
+
+            // Text-only build runs unless the mode is exclusively "image".
+            if (mode != "image")
             {
-                new FreeBuildScene()
-            };
+                scenarios.Add(new FreeBuildScene());
+            }
+
+            // Image-feedback build runs for "image" and "both".
+            if (mode is "image" or "both")
+            {
+                scenarios.Add(new FreeBuildSceneWithVision());
+            }
+
+            return scenarios.ToArray();
         }
 
         private abstract class G6Scenario : GameBenchmarkScenario
@@ -101,7 +128,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private sealed class FreeBuildScene : G6Scenario
+        private class FreeBuildScene : G6Scenario
         {
             public override string Id => "g6_free_build";
 
@@ -680,6 +707,53 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 return !string.IsNullOrEmpty(value) &&
                        value.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+
+        /// <summary>
+        /// Image-feedback variant of the free-build: the model additionally gets the <c>camera</c> tool so it
+        /// can SEE its own work-in-progress (camera_capture returns a rendered screenshot) and refine it —
+        /// the "look at what you made and fix it" loop. Only meaningful for vision-capable models; a text-only
+        /// model simply never calls the camera and scores like the plain build. Grading is inherited unchanged
+        /// so the image and text runs are directly comparable. Enabled via COREAI_BENCHMARK_VISION_MODE
+        /// = image | both.
+        /// </summary>
+        private sealed class FreeBuildSceneWithVision : FreeBuildScene
+        {
+            public override string Id => "g6_free_build_vision";
+
+            public override string Name => "Free build (visual, image feedback)";
+
+            public override string WhatItChecks =>
+                "Same free-form build, but the model can capture and look at its own scene and refine it — " +
+                "measures whether vision feedback improves the result.";
+
+            public override string SystemPrompt =>
+                base.SystemPrompt +
+                " You also have a camera tool: call camera_capture to SEE a screenshot of your scene so far, " +
+                "judge what looks wrong or empty, and keep improving it — fill gaps, fix proportions, add " +
+                "missing detail — then capture again to check. Use vision to make the final result look good, " +
+                "not just to place objects blindly.";
+
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                AgentBuilder b = new AgentBuilder(RoleId)
+                    .WithSystemPrompt(SystemPrompt)
+                    .WithTool(env.WorldTool());
+
+                // Add the vision tool only when the world executor can actually render (visual mode). A null
+                // camera tool means this run degrades to a text-only build rather than erroring.
+                CoreAI.Vision.CameraLlmTool cam = env.CameraTool(RoleId);
+                if (cam != null)
+                {
+                    b.WithTool(cam);
+                }
+
+                return b
+                    .WithMaxOutputTokens(MaxOutputTokens)
+                    .WithMaxToolCallRoundtrips(FreeBuildRoundtrips())
+                    .WithMode(AgentMode.ToolsOnly)
+                    .BuildDetached();
             }
         }
     }

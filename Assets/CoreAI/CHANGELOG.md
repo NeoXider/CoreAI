@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Benchmark G6 image-feedback mode.** The free-build visual can now run with a `off` / `image` / `both`
+  vision mode (benchmark-window "Vision feedback" dropdown or `COREAI_BENCHMARK_VISION_MODE`). In `image`,
+  the model additionally gets the `camera` tool so it can `camera_capture` a screenshot of its own
+  work-in-progress, judge it, and refine — the "look at what you made and fix it" loop; `both` runs the
+  text-only and image-feedback builds side by side. Grading is inherited unchanged so the two are directly
+  comparable; the camera tool is null-safe and degrades to a text-only build for non-vision models.
+- **Speed probe fixed for a fair comparison.** `DirectVsAgent_Speed` now warms each configuration
+  immediately before measuring it, so the reported TTFT reflects pipeline prefill cost rather than call
+  order (previously the last-run, biggest-prompt role looked fastest because the server kept warming).
+
 ## 5.3.0 - benchmark v2 and resilience primitives (2026-07-10)
 
 - **Benchmark suite v2 — new G8 described-state selection group.** `BenchmarkInfo.Version` bumped `v1 → v2`.

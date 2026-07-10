@@ -307,16 +307,38 @@ namespace CoreAI.Tests.EditMode
         {
             const string subjectKey = "CoreAI.Benchmark.FreeBuildSubject";
             const string overrideKey = "CoreAI.Benchmark.FreeBuildOverride";
+            const string visionKey = "CoreAI.Benchmark.VisionMode";
             bool overrideOn = EditorPrefs.GetBool(overrideKey, false);
             string subject = EditorPrefs.GetString(subjectKey, "");
+            string visionMode = EditorPrefs.GetString(visionKey, "off");
 
-            // Keep the env var the harness reads in sync with the persisted state on window open.
+            // Keep the env vars the harness reads in sync with the persisted state on window open.
             Environment.SetEnvironmentVariable(
                 "COREAI_BENCHMARK_FREEBUILD_SUBJECT", overrideOn ? subject : "");
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_VISION_MODE", visionMode);
 
             _freeBuildBox = new VisualElement();
             _freeBuildBox.style.marginLeft = 16;
             _freeBuildBox.style.marginBottom = 4;
+
+            // Vision mode: off (text-only build) / image (model sees & refines its build) / both (run both,
+            // so the image-feedback result can be compared with the text-only one). Image needs a
+            // vision-capable model.
+            DropdownField visionField = new(
+                "Vision feedback",
+                new List<string> { "off", "image", "both" },
+                Mathf.Max(0, new List<string> { "off", "image", "both" }.IndexOf(visionMode)))
+            {
+                tooltip = "off = text-only build. image = the model gets a camera tool to see and refine its " +
+                          "own scene (vision-capable models only). both = run text-only AND image-feedback for " +
+                          "a side-by-side comparison."
+            };
+            visionField.RegisterValueChangedCallback(evt =>
+            {
+                string v = evt.newValue ?? "off";
+                EditorPrefs.SetString(visionKey, v);
+                Environment.SetEnvironmentVariable("COREAI_BENCHMARK_VISION_MODE", v);
+            });
 
             TextField subjectField = new("Build subject")
             {
@@ -362,6 +384,7 @@ namespace CoreAI.Tests.EditMode
 
             _freeBuildBox.Add(overrideToggle);
             _freeBuildBox.Add(subjectField);
+            _freeBuildBox.Add(visionField);
             _freeBuildBox.style.display = _runG6 ? DisplayStyle.Flex : DisplayStyle.None;
             return _freeBuildBox;
         }
