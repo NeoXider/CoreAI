@@ -50,29 +50,30 @@ namespace CoreAI.Tests.PlayMode
             const string userText = "Привет! Как дела? Ответь одним коротким предложением.";
             const float timeout = 120f;
 
-            // Warm the model/KV so the first measured call is not skewed by cold start.
-            var warm = new ThroughputProbe();
-            yield return _setup.RunAndWait(
-                MeasureAsync(_setup.Client.CompleteStreamingAsync(Direct(userText), CancellationToken.None), warm),
-                timeout, "warmup");
+            // CRITICAL for a fair TTFT comparison: warm EACH configuration immediately before measuring it,
+            // not once globally. A single global warmup skews the result because the server keeps warming
+            // its KV cache / model load between calls, so whichever path runs LAST looks fastest regardless
+            // of its prompt size — earlier this made the big-prompt Creator role read as the FASTEST, which
+            // is backwards. A per-config warm-up run (result discarded) puts every path on an equally warm
+            // server, so the measured TTFT delta reflects the CoreAI pipeline prefill, not call order.
 
             // A) DIRECT — raw provider client, minimal system prompt, no tools (like native LLMUnity chat).
-            var direct = new ThroughputProbe();
-            yield return _setup.RunAndWait(
-                MeasureAsync(_setup.Client.CompleteStreamingAsync(Direct(userText), CancellationToken.None), direct),
-                timeout, "direct");
+            ThroughputProbe direct = new();
+            yield return WarmThenMeasure(
+                () => _setup.Client.CompleteStreamingAsync(Direct(userText), CancellationToken.None),
+                timeout, "direct", direct);
 
             // B) AGENT (PlainChat) — full orchestrator pipeline with a light, tool-free role.
-            var agentLight = new ThroughputProbe();
-            yield return _setup.RunAndWait(
-                MeasureAsync(_setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText), CancellationToken.None), agentLight),
-                timeout, "agent-plainchat");
+            ThroughputProbe agentLight = new();
+            yield return WarmThenMeasure(
+                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText), CancellationToken.None),
+                timeout, "agent-plainchat", agentLight);
 
             // C) AGENT (Creator) — full orchestrator pipeline with the tool-configured game-master role.
-            var agentHeavy = new ThroughputProbe();
-            yield return _setup.RunAndWait(
-                MeasureAsync(_setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText), CancellationToken.None), agentHeavy),
-                timeout, "agent-creator");
+            ThroughputProbe agentHeavy = new();
+            yield return WarmThenMeasure(
+                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText), CancellationToken.None),
+                timeout, "agent-creator", agentHeavy);
 
             Debug.Log($"[ChatSpeed] ===== Direct vs Agent (same model/server: {_setup.BackendName}, {direct.Model}) =====");
             Debug.Log(Line("A) DIRECT (raw client, minimal prompt, no tools)", direct));
@@ -100,6 +101,20 @@ namespace CoreAI.Tests.PlayMode
                 "one late chunk, so the decode window is too small to measure throughput).");
 
             Assert.IsTrue(direct.SawDone, "Direct path must complete to compare.");
+        }
+
+        /// <summary>
+        /// Warms THIS specific configuration once (result discarded), then measures it. Per-config warming is
+        /// what makes the TTFT comparison fair: without it, the server keeps warming between calls and
+        /// whichever path runs last looks fastest regardless of prompt size.
+        /// </summary>
+        private IEnumerator WarmThenMeasure(
+            System.Func<IAsyncEnumerable<LlmStreamChunk>> streamFactory,
+            float timeout, string label, ThroughputProbe probe)
+        {
+            var warm = new ThroughputProbe();
+            yield return _setup.RunAndWait(MeasureAsync(streamFactory(), warm), timeout, label + "-warm");
+            yield return _setup.RunAndWait(MeasureAsync(streamFactory(), probe), timeout, label);
         }
 
         private static LlmCompletionRequest Direct(string userText)
