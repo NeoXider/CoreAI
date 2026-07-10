@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **R6 resilience wiring.** `LlmPipelineInstaller` now composes `Timeout( Logging( RetryingStreaming( routed )))`,
+  so the portable-core request timeout and the pre-commit streaming retry are on by default for every backend.
+- **F-12 CI gate.** Added a `merge_group` trigger with a `merge-queue-gate` job that FAILS (not skips) when
+  `UNITY_LICENSE` is absent on the merge queue, plus a fork-safe `package-graph` job that checks all five
+  packages are version-locked and every internal `com.neoxider.*` dependency pin resolves.
+- **F-22 package isolation.** Added `CoreAI.Core.Tests`, a package-local EditMode assembly referencing only
+  `CoreAI.Core`, proving the core package compiles and tests in a standalone UPM graph.
+
 ## 5.4.0 - MoonSharp removed; Lua-CSharp is the only VM (2026-07-10)
 
 - **MoonSharp purged from the whole project.** The MoonSharp Lua VM, its ~22-file runtime/binding/sandbox

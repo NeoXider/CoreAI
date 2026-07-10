@@ -36,15 +36,18 @@
 
 ## [R0.6] Release-engineering residuals (from the two 2026-07-10 repository audits)
 
-- [ ] **F-12 CI gates**: trusted merge-queue Unity job (fails, not skips, without license), minimal
-      Standalone/WebGL IL2CPP player builds, package-isolation consumer matrix, real package removal
-      for no-lua/no-hub configs. This is the fix for the A-01/A-02 class of failure (uncompiled wave).
+- [~] **F-12 CI gates**: trusted merge-queue gate added (`merge_group` trigger + `merge-queue-gate` job
+      that FAILS, not skips, when UNITY_LICENSE is absent) plus a fork-safe `package-graph` job
+      (lockstep + internal-dep check). REMAINING: minimal Standalone/WebGL IL2CPP player builds and a
+      package-isolation consumer matrix (need the licensed runner to add).
 - [ ] **F-18**: pin floating Git dependencies (tags/commits) + explicit upgrade command.
 - [ ] **F-19**: slim the dev project (Epic Toon FX ~522 MiB, unused multiplayer packages) or a minimal
       verification project; demo assets to `Samples~`.
 - [ ] **F-20**: performance regression suite (orchestrator enqueue, streaming buffers, 10k-object world
       queries, revision stores, audit burst, WebGL persistence cadence).
-- [ ] **F-22**: package-local test assemblies so standalone UPM graphs are proven, not just monorepo.
+- [~] **F-22**: package-local test assemblies so standalone UPM graphs are proven, not just monorepo.
+      Added `CoreAI.Core.Tests` (references only `CoreAI.Core`) as the pattern + isolation smoke suite;
+      `CoreAI.Mods.Tests` is already package-local. REMAINING: same for coreaiunity/hub/benchmark.
 - [ ] **F-21**: replace remaining fixed `Task.Delay` waits in async tests with signal-based waits.
 - [x] Streaming mutating-call deferral: mutating calls wait for turn completion, whole-turn echoes
       are rejected before side effects, and partial retries execute only failed slots.
@@ -82,9 +85,12 @@
 - [ ] **Multi-provider fallback chain** (ordered list, not just 1 secondary) + secondary wrapped in the same
       retry/logging decorators (today the secondary gets no HTTP-retry wrapper).
 - [ ] **Per-provider rate limiting** (token/request bucket) distinct from the Lua-generation limiter.
-- [ ] Streaming-path retry (today only `CompleteAsync` retries; `CompleteStreamingAsync` is single-shot).
-- [ ] Enforce request timeout in the portable core, not only in the Unity `CoreAiChatService` (default 300s).
-- [ ] Tests for each (circuit open/half-open, chain exhaustion, streaming retry, core-side timeout).
+- [x] Streaming-path retry: `RetryingStreamingLlmClientDecorator` (CoreAI.Core) retries the stream only
+      before it commits content (7 EditMode tests); wired into `LlmPipelineInstaller`.
+- [x] Enforce request timeout in the portable core: `TimeoutLlmClientDecorator` (CoreAI.Core) bounds both
+      paths off `LlmRequestTimeoutSeconds` (5 EditMode tests); additive with the Unity WebGL PlayerLoop timer.
+- [x] Tests for streaming retry + core-side timeout (12 EditMode tests). Circuit open/half-open already
+      covered; multi-provider chain exhaustion remains with the fallback-chain item above.
 
 ### [R7] Structured output (schema-constrained generation) — optional, pending decision
 

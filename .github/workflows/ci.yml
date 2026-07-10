@@ -4,9 +4,60 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 jobs:
+  # F-22 package isolation (fork-safe, no Unity license): prove every shipped package.json is a
+  # self-consistent UPM graph - all five packages versioned in lockstep and every internal
+  # com.neoxider.* dependency pin matches the pinned package's actual version. Catches a half-done
+  # version bump (one of A-01/A-02's failure classes) before it reaches a consumer.
+  package-graph:
+    name: Package graph (lockstep + deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify package versions are in lockstep and internal deps resolve
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, glob, sys
+          pkgs = {}
+          for path in glob.glob('Assets/*/package.json'):
+              with open(path, encoding='utf-8') as f:
+                  data = json.load(f)
+              pkgs[data['name']] = (data.get('version', ''), data.get('dependencies', {}))
+          versions = {v[0] for v in pkgs.values()}
+          ok = True
+          if len(versions) != 1:
+              print(f"::error::package versions are not in lockstep: {versions}")
+              ok = False
+          for name, (ver, deps) in pkgs.items():
+              for dep, dver in deps.items():
+                  if dep.startswith('com.neoxider.') and dep in pkgs and dver != pkgs[dep][0]:
+                      print(f"::error::{name} pins {dep}@{dver} but that package is {pkgs[dep][0]}")
+                      ok = False
+          print("packages:", {n: v[0] for n, v in pkgs.items()})
+          sys.exit(0 if ok else 1)
+          PY
+
+  # F-12 trusted merge-queue gate: on the merge queue the repository secrets ARE available, so a
+  # missing UNITY_LICENSE is a misconfiguration, not a forked PR - FAIL loudly instead of skipping,
+  # so an unlicensed runner can never merge an uncompiled/untested wave (the A-01/A-02 class).
+  merge-queue-gate:
+    name: Merge-queue license gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'merge_group'
+    steps:
+      - name: Require UNITY_LICENSE on the merge queue
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
+            echo "::error::UNITY_LICENSE is unavailable on the merge queue; the EditMode/PlayMode Unity"
+            echo "::error::jobs would skip and let an uncompiled change merge. Configure the secret."
+            exit 1
+          fi
+          echo "UNITY_LICENSE present - Unity jobs will run and gate this merge."
   # Secret-free analyzer guard. Uses plain dotnet (no Unity license), so it also runs
   # on forked PRs where the Unity jobs are skipped. Building + testing the Roslyn
   # analyzer project guards the committed CoreAI.UnityAsyncAnalyzers.dll against drift
