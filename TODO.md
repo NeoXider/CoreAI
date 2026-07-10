@@ -1,9 +1,52 @@
 # TODO
 
-> Updated 2026-07-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
-> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`. Priorities below reflect the
-> 2026-06-28 competitive audit (vs Cursor / Claude Code / Kilo / Cline) and the maintainer's ordering.
-> Test baseline: EditMode 1361, PlayMode `FastNoLlm` 48 (deterministic).
+> Updated 2026-07-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
+> Test baseline: EditMode 1,583 (verified green 2026-07-10), PlayMode `FastNoLlm` (deterministic).
+
+## [R0] IMMEDIATE — verification gate on next editor start (blocks release)
+
+> Three commits landed while the editor was unavailable (`4c6ed232` audit worker thread,
+> `1ded0a65` entry-point handoff, `ad7c3764` query walker) — code-reviewed but NOT compiled.
+> On the next Unity start, in order; fix any red before anything else:
+- [ ] Compile clean (0 `error CS`), let Unity generate `.meta` for `Assets/Resources/CoreAIPresets/`.
+- [ ] Full EditMode suite green (was 1,583/1,583 before these three commits).
+- [ ] PlayMode `FastNoLlm` suite green (never completed on 2026-07-10 — editor was busy; includes the
+      new world-state, camera-capture, and entry-point-handoff tests).
+- [ ] Then: delete the closed audit docs (`Docs/REPOSITORY_AUDIT_2026-07-10.md`,
+      `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`, `Docs/CoreAIMods/audit-*.md`,
+      `Docs/CoreAIMods/optimization-review.md`) — owner's rule: closed audits get deleted, and every
+      code finding in them is either fixed or tracked here.
+
+## [R0.5] Demo pass (owner request: "показательны и корректны")
+
+- [ ] Run every demo scene end-to-end (Hub, MiniRpg, WaveAutoBattler, FullAccess, LuaMods,
+      LiveMechanics, ModdableUnits, WorldCommands): delete demos that don't showcase anything,
+      finish the ones that almost do. Known cosmetic debt: pink URP materials + missing hit
+      animations in WaveAutoBattler.
+- [ ] Verify the AI writes mods through the Hub chat in each kept demo with local 4B/9B/27B
+      (LM Studio) and Opus 4.8 via the bundled preset (`Assets/Resources/CoreAIPresets/`,
+      bridge: `agent.sh openai-server -e claude -m opus`).
+- [ ] Benchmark package (`com.neoxider.coreaibenchmark`): run the suite through the bridge with
+      `-m spark` (unlimited) as the API model; fix scenario breakage from the 5.1.0 wave if any.
+
+## [R0.6] Release-engineering residuals (from the two 2026-07-10 repository audits)
+
+- [ ] **F-12 CI gates**: trusted merge-queue Unity job (fails, not skips, without license), minimal
+      Standalone/WebGL IL2CPP player builds, package-isolation consumer matrix, real package removal
+      for no-lua/no-hub configs. This is the fix for the A-01/A-02 class of failure (uncompiled wave).
+- [ ] **F-18**: pin floating Git dependencies (tags/commits) + explicit upgrade command.
+- [ ] **F-19**: slim the dev project (Epic Toon FX ~522 MiB, unused multiplayer packages) or a minimal
+      verification project; demo assets to `Samples~`.
+- [ ] **F-20**: performance regression suite (orchestrator enqueue, streaming buffers, 10k-object world
+      queries, revision stores, audit burst, WebGL persistence cadence).
+- [ ] **F-22**: package-local test assemblies so standalone UPM graphs are proven, not just monorepo.
+- [ ] **F-21**: replace remaining fixed `Task.Delay` waits in async tests with signal-based waits.
+- [ ] Streaming mutating-call deferral: HEAD policy serializes mutations and suppresses cross-turn
+      echoes per-call, but mid-stream mutating calls still execute on arrival; defer them to turn
+      finalization (the original F-01 recommendation #2, lost in the 2026-07-10 rollback incident).
+- [ ] Hub "Audit Log" page: viewer + chain-integrity badge over `AuditLogVerifier` (natural home for
+      the new read/verify API).
 
 ## Roadmap (prioritized)
 
