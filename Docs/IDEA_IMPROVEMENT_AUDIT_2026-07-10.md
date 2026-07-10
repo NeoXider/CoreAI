@@ -1,148 +1,150 @@
-# CoreAI Idea Improvement Audit
+# CoreAI — аудит улучшения идеи
 
-**Date:** 2026-07-10
-**Companion to:** [REPOSITORY_AUDIT_2_2026-07-10.md](REPOSITORY_AUDIT_2_2026-07-10.md) (technical)
-**Subject:** the idea itself — positioning, differentiation, audience, and where the concept
-(not the code) should move next.
-**Grounding:** root `README.md`, `INSTALL.md`, `Docs/LocalBusinessPlans/` (monetization + CoreAiPro
-plans), the five demo experiences (`Assets/CoreAI.Demos/`), the benchmark package
-(`Assets/CoreAIBenchmark/`), and the current license model (PolyForm Noncommercial + paid
-commercial). Where a claim is market judgment rather than repo fact, it is phrased as such.
+**Дата:** 2026-07-10
+**Парный документ:** [REPOSITORY_AUDIT_2_2026-07-10.md](REPOSITORY_AUDIT_2_2026-07-10.md) (технический)
+**Предмет:** сама идея — позиционирование, дифференциация, аудитория и куда концепция
+(а не код) должна двигаться дальше.
+**Основание:** корневой `README.md`, `INSTALL.md`, `Docs/LocalBusinessPlans/` (планы монетизации и
+CoreAiPro), пять демо-сцен (`Assets/CoreAI.Demos/`), пакет бенчмарка (`Assets/CoreAIBenchmark/`)
+и текущая модель лицензирования (PolyForm Noncommercial + платная коммерческая).
+Там, где утверждение является рыночным суждением, а не фактом из репозитория, оно так и
+сформулировано.
 
 ---
 
-## 1. What the idea actually is — and how strong each pillar is
+## 1. Что представляет собой идея — и насколько силён каждый столп
 
-The README sells one sentence: *"LLM agents that play your game."* Underneath it there are five
-distinguishable pillars. They are not equally valuable.
+README продаёт одну фразу: *«LLM-агенты, которые играют в вашу игру»*. Под ней — пять различимых
+столпов. Они не равноценны.
 
-| # | Pillar | Assessment |
-|---|--------|-----------|
-| 1 | **Small-local-model resilience layer** — tool-name repair, retry-with-feedback, split `<think>` handling, runaway caps, dual-backend fallback; the whole suite passes on a 4 GB GGUF | **The crown jewel.** Nobody else makes "a 4B model reliably drives gameplay" a tested, first-class contract. Every competitor demos GPT-4-class cloud models; CoreAI's moat is the messy reality below 8B. This is also the hardest pillar to copy, because it is accumulated scar tissue (test suites, repair heuristics), not a feature. |
-| 2 | **AI-authored runtime content (Lua mods)** — the model writes Lua that defines units, waves, hooks; capability tiers (WorldEdit vs Full); version history/revert; Unit Forge ships an *empty arena* | **Genuinely novel as a product story** ("build a whole game from mods alone"), and the demos prove it. Risk: it is also the pillar with the largest safety/platform surface (see §6). |
-| 3 | **Game-Creation Benchmark** — G1–G7 scored suite, cloud + local model rankings, castle gallery | **Undervalued asset.** Currently framed as internal QA + README tables. As a *community artifact* ("the leaderboard for 'can this model build a game'") it is the cheapest marketing engine the project could have — nothing comparable exists. |
-| 4 | **Production plumbing** — orchestrator queue, memory, context compaction, audit log, token budget overlay, skills (~91% token savings) | Solid and increasingly true (see technical audit), but **undifferentiated in story**: every agent framework claims plumbing. It justifies the price; it does not win the click. |
-| 5 | **Drop-in chat UI + Hub** | Table stakes. Necessary for the 5-minute demo, not a reason to choose CoreAI. |
+| # | Столп | Оценка |
+|---|-------|--------|
+| 1 | **Слой устойчивости для маленьких локальных моделей** — починка имён тулов, retry с обратной связью, обработка разорванных `<think>`, ограничители runaway-генерации, dual-backend fallback; весь тестовый набор проходит на 4 ГБ GGUF | **Главная ценность.** Никто другой не делает «4B-модель надёжно управляет геймплеем» проверенным, первоклассным контрактом. Все конкуренты демонстрируют облачные модели уровня GPT-4; ров CoreAI — грязная реальность ниже 8B. Этот столп и труднее всего скопировать: это накопленная «рубцовая ткань» (тест-сьюты, эвристики починки), а не фича. |
+| 2 | **AI-авторский контент в рантайме (Lua-моды)** — модель пишет Lua, определяющий юнитов, волны, хуки; уровни доступа (WorldEdit vs Full); история версий/откат; Unit Forge поставляется как *пустая арена* | **По-настоящему нова как продуктовая история** («собери целую игру из одних модов»), и демо это доказывают. Риск: у этого столпа самая большая поверхность безопасности/платформенных ограничений (см. §6). |
+| 3 | **Game-Creation Benchmark** — G1–G7 с оценками, рейтинги облачных и локальных моделей, галерея замков | **Недооценённый актив.** Сейчас подан как внутренний QA + таблицы в README. Как *артефакт сообщества* («лидерборд „может ли эта модель построить игру“») — это самый дешёвый маркетинговый двигатель проекта: ничего сопоставимого не существует. |
+| 4 | **Production-обвязка** — очередь оркестратора, память, компакция контекста, audit log, оверлей токен-бюджета, skills (~91% экономии токенов) | Прочно и всё более правдиво (см. технический аудит), но **не дифференцирует в истории**: обвязку обещает каждый агентский фреймворк. Она оправдывает цену, но не выигрывает клик. |
+| 5 | **Drop-in чат-UI + Hub** | Гигиенический минимум. Нужен для 5-минутного демо, но не причина выбрать CoreAI. |
 
-**Sharpest wedge:** pillars 1 + 3 together — *"the framework and the benchmark for LLMs that run
-games on the player's machine."* Local-first is not a feature here; it is the identity. Cloud
-compatibility is the escape hatch, not the pitch.
+**Самый острый клин:** столпы 1 + 3 вместе — *«фреймворк и бенчмарк для LLM, которые запускают
+игры на машине игрока»*. Local-first здесь не фича, а идентичность. Совместимость с облаком —
+запасной выход, а не питч.
 
-## 2. Competitive position (market judgment)
+## 2. Конкурентная позиция (рыночное суждение)
 
-- **Inworld / Convai** — character-AI platforms: hosted, voice-first, per-usage pricing, strong
-  authoring UX. They win on polish and voice; they lose on: local/offline, owning your own code
-  path, modding, cost at scale, and "the model calls *your* C#". CoreAI should never fight them
-  on "lifelike NPC dialogue"; it fights on *agency inside your systems*.
-- **LLMUnity / NobodyWho** — local inference plumbing. They are CoreAI's *substrate*, not
-  competitors (CoreAI already treats LLMUnity as an optional backend). The gap CoreAI fills above
-  them — tools, memory, guardrails, mods — is exactly right. Keep the relationship symbiotic;
-  contributing fixes upstream buys goodwill and stability.
-- **Unity Sentis / Behavior** — official, but aimed at tensors and behavior graphs, not
-  LLM-tool-calling agents. Risk is long-term platform absorption (Unity ships a first-party
-  "AI NPC" package), which argues for moving fast on the community/benchmark front where a
-  platform vendor is slow.
-- **Generic agent SDKs (OpenAI/Anthropic/MS)** — strong loops, zero Unity empathy (main thread,
-  IL2CPP, WebGL, domain reload, .meta files). CoreAI's Unity-native pain absorption is a real
-  barrier to entry; the MEAI-based core keeps it compatible with that ecosystem rather than at
-  war with it.
+- **Inworld / Convai** — character-AI-платформы: хостинг, voice-first, оплата за использование,
+  сильный авторский UX. Они выигрывают в полировке и голосе; проигрывают в: локальность/оффлайн,
+  владение собственным код-путём, моддинг, стоимость на масштабе и «модель вызывает *ваш* C#».
+  CoreAI не должен воевать с ними за «живой диалог NPC»; его поле — *агентность внутри ваших
+  систем*.
+- **LLMUnity / NobodyWho** — обвязка локального инференса. Это *субстрат* CoreAI, а не конкуренты
+  (CoreAI уже использует LLMUnity как опциональный бэкенд). Зазор, который CoreAI закрывает над
+  ними — тулы, память, ограничители, моды — ровно тот, что нужен. Отношения стоит держать
+  симбиотическими; фиксы в апстрим покупают доброжелательность и стабильность.
+- **Unity Sentis / Behavior** — официально, но про тензоры и графы поведения, а не про
+  LLM-tool-calling-агентов. Долгосрочный риск — поглощение платформой (Unity выпустит
+  первопартийный пакет «AI NPC»), что аргументирует быстрое движение на фронте
+  сообщества/бенчмарка, где вендор платформы медлителен.
+- **Универсальные агентские SDK (OpenAI/Anthropic/MS)** — сильные циклы, ноль эмпатии к Unity
+  (main thread, IL2CPP, WebGL, domain reload, .meta-файлы). Поглощение Unity-специфичной боли в
+  CoreAI — реальный барьер входа; ядро на MEAI держит его совместимым с этой экосистемой, а не в
+  войне с ней.
 
-**Positioning that follows:** "The local-first agent runtime for Unity games — proven by the only
-game-creation benchmark for LLMs." One sentence, both moats.
+**Следующее из этого позиционирование:** «Local-first агентский рантайм для Unity-игр —
+доказанный единственным game-creation-бенчмарком для LLM». Одно предложение — оба рва.
 
-## 3. Audience and the license problem
+## 3. Аудитория и проблема лицензии
 
-The business plans (`Docs/LocalBusinessPlans/`) correctly identify indies, small studios,
-education/simulation, and WebGL/multiplayer teams. Two frictions stand between the funnel and
-those users:
+Бизнес-планы (`Docs/LocalBusinessPlans/`) верно называют инди, небольшие студии,
+образование/симуляции и WebGL/multiplayer-команды. Между воронкой и этими пользователями стоят
+два трения:
 
-1. **PolyForm Noncommercial is a silent filter on the best adopters.** The indie who would
-   evangelize CoreAI *is* commercial the moment they put a game on itch.io for $3. Today the path
-   is "email the author for a commercial license" — high friction, opaque price, no self-serve.
-   The plans already lean the right way (free runtime strong, Pro sells time). Concretely: keep
-   noncommercial for the core if revenue protection matters, but publish a **self-serve, priced
-   indie tier** (e.g., flat per-title under a revenue threshold). An unpriced "write to me"
-   license reads as "no" to a solo dev at 2 a.m.
-2. **The 5-minute promise carries a NuGet + git-deps toll.** INSTALL.md is honest about it, but
-   the first-session reality (NuGetForUnity → MEAI package → git URLs → optional MoonSharp/
-   LLMUnity → scene wizard) is the single biggest drop-off risk. An installer/bootstrapper that
-   performs the whole chain (the `CoreAI → Setup` menu already merges git deps — extend it to
-   drive the NuGet step too) is worth more adoption than any new runtime feature.
+1. **PolyForm Noncommercial — тихий фильтр на лучших адоптеров.** Инди, который стал бы
+   евангелистом CoreAI, *становится коммерческим* в момент, когда выкладывает игру на itch.io за
+   $3. Сегодня путь — «напишите автору за коммерческой лицензией»: высокое трение, непрозрачная
+   цена, нет self-serve. Планы уже склоняются в правильную сторону (сильный бесплатный runtime,
+   Pro продаёт время). Конкретно: если защита дохода важна, оставить noncommercial для ядра, но
+   опубликовать **self-serve инди-тариф с ценой** (например, фикс за тайтл до порога выручки).
+   Лицензия «напишите мне» читается как «нет» для соло-разработчика в 2 часа ночи.
+2. **Обещание «5 минут» несёт пошлину NuGet + git-зависимостей.** INSTALL.md честен, но реальность
+   первой сессии (NuGetForUnity → пакет MEAI → git-URL → опциональные MoonSharp/LLMUnity → мастер
+   сцены) — самый большой риск отвала. Установщик/бутстраппер, который проводит всю цепочку
+   (меню `CoreAI → Setup` уже умеет мержить git-зависимости — расширить его и на NuGet-шаг),
+   стоит больше адопции, чем любая новая рантайм-фича.
 
-Underserved persona in the current docs: **the modding-community organizer** — the person who
-wants players writing/sharing AI-authored mods. Pillar 2 serves them; no doc or demo speaks to
-them directly.
+Недообслуженная персона в текущих доках: **организатор моддинг-сообщества** — человек, который
+хочет, чтобы игроки писали и шарили AI-авторские моды. Столп 2 ему служит; ни один док и ни одно
+демо не обращаются к нему напрямую.
 
-## 4. Idea-level gaps (things the concept, not the code, is missing)
+## 4. Пробелы уровня идеи (чего не хватает концепции, а не коду)
 
-1. **The shipping story.** Nothing in the README answers: what does the *player's* machine need?
-   GGUF download UX (who hosts, resume, disk budget), min spec, fallback when the model can't
-   run, expected latency (~2 s TTFT is already measured internally — publish it). "Runs on a
-   local 4B" is proven in tests; "ships in a Steam game" is the claim buyers need, and one
-   shipped case study (even a jam game) would be worth more than the whole feature list.
-2. **Determinism and multiplayer honesty.** The README's host-authoritative section is two
-   sentences. The idea needs a stated contract: seeds, audit-log replay (the tamper-evident log
-   already exists — replay is the natural next step), and what happens on desync. Replay also
-   unlocks debugging and anti-cheat narratives for free.
-3. **Content safety as a first-class module.** Player-facing generated text with zero moderation
-   story blocks education (a declared target segment) and consoles. Even a pluggable
-   `IContentFilter` + a shipped profanity/threat baseline changes the answer from "no" to "yes,
-   with knobs."
-4. **Cloud cost story.** Token budgets and usage sinks exist; what's missing is the designer-
-   facing frame: "an NPC conversation costs ~$0.00X on provider Y; here is the per-agent cap."
-   One doc page + one Hub panel = the difference between "scary" and "budgeted."
-5. **Beyond the chat box.** Every demo is chat-initiated. The director-AI / ambient-simulation
-   pattern (agent observes game state on a cadence, acts through the same tools, no chat UI) is
-   already possible with the orchestrator — one demo scene would open the "AI game director"
-   audience, which is larger than the "NPC chat" audience.
-6. **Mod sharing loop.** Export/import via clipboard just landed in the Hub. The idea-level next
-   step is a shareable format + a curated gallery (even a GitHub repo of `.lua` mod files with a
-   one-click import). UGC loops are how frameworks escape their author's marketing budget.
-7. **The benchmark as a standalone community asset.** Publish the leaderboard as a page, accept
-   PR'd model results, version the suite. Every new local model release becomes free CoreAI
-   publicity ("how does it score on the game-creation benchmark?").
+1. **История шипинга.** Ничто в README не отвечает: что нужно машине *игрока*? UX скачивания GGUF
+   (кто хостит, докачка, бюджет диска), мин. спека, fallback, когда модель не тянет, ожидаемая
+   задержка (~2 с TTFT уже измерено внутренне — опубликовать). «Работает на локальной 4B» доказано
+   тестами; «шипится в Steam-игре» — то утверждение, которое нужно покупателям, и один
+   отгруженный кейс (хоть джем-игра) стоит больше всего списка фич.
+2. **Детерминизм и честность про мультиплеер.** Раздел README про host-authoritative — два
+   предложения. Идее нужен заявленный контракт: сиды, реплей по audit-логу (защищённый от
+   подделки лог уже есть — реплей является естественным следующим шагом) и что происходит при
+   десинке. Реплей заодно бесплатно открывает истории отладки и анти-чита.
+3. **Content safety как первоклассный модуль.** Генерируемый текст, обращённый к игроку, без
+   истории модерации блокирует образование (заявленный сегмент) и консоли. Даже подключаемый
+   `IContentFilter` + базовый фильтр в комплекте меняют ответ с «нет» на «да, с настройками».
+4. **История стоимости облака.** Токен-бюджеты и usage-синки есть; не хватает рамки для
+   дизайнера: «разговор NPC стоит ~$0.00X у провайдера Y; вот кап на агента». Одна страница дока +
+   одна панель Hub = разница между «страшно» и «под контролем бюджета».
+5. **За пределами чат-бокса.** Каждое демо начинается с чата. Паттерн director-AI / ambient-симуляции
+   (агент наблюдает состояние игры по расписанию, действует через те же тулы, без UI чата) уже
+   возможен на оркестраторе — одна демо-сцена откроет аудиторию «AI-режиссёра игры», которая
+   больше аудитории «чата с NPC».
+6. **Петля обмена модами.** Export/import через буфер обмена только что появился в Hub. Следующий
+   шаг уровня идеи — шарящийся формат + курируемая галерея (хотя бы GitHub-репозиторий `.lua`-модов
+   с импортом в один клик). UGC-петли — то, как фреймворки выходят за пределы маркетингового
+   бюджета своего автора.
+7. **Бенчмарк как самостоятельный актив сообщества.** Опубликовать лидерборд страницей, принимать
+   результаты моделей через PR, версионировать сьют. Каждый релиз новой локальной модели
+   становится бесплатной рекламой CoreAI («а сколько она наберёт на game-creation-бенчмарке?»).
 
-## 5. Top recommendations, ranked (impact on adoption × feasibility)
+## 5. Топ рекомендаций по рангу (влияние на адопцию × реализуемость)
 
-| # | Recommendation | Type |
-|---|---------------|------|
-| 1 | Ship the compile/CI gate and land the remediation wave (technical audit A-02/F-12) — every product claim rests on the "tested" story being true | Prerequisite |
-| 2 | Publish the benchmark leaderboard as a living public artifact (page + PR process + suite versioning) | Quick win, big lever |
-| 3 | Self-serve indie commercial tier with a public price | Quick win, unblocks the funnel |
-| 4 | One-click bootstrapper: single menu action drives NuGet + git deps + scene | Quick win (menu already half-exists) |
-| 5 | "Shipping on a player's machine" doc: model download UX, disk/min-spec, TTFT numbers, WebGL/IL2CPP matrix (much of this exists as internal memory notes — promote it) | Quick win |
-| 6 | Director-AI demo (no chat box): ambient agent using existing tools on a timer | Medium |
-| 7 | Audit-log replay → determinism/anti-cheat story for the multiplayer claim | Strategic bet |
-| 8 | Pluggable content-safety filter + baseline, unblocks education/console segments | Medium |
-| 9 | Mod gallery + shareable mod format (UGC loop for pillar 2) | Strategic bet |
-| 10 | Case study: ship one tiny real game (jam scale) on CoreAI local-first, write the postmortem | Strategic bet, highest credibility yield |
+| # | Рекомендация | Тип |
+|---|--------------|-----|
+| 1 | Довести compile/CI-гейт и приземлить волну исправлений (технический аудит A-02/F-12) — каждое продуктовое утверждение опирается на правдивость истории «протестировано» | Предпосылка |
+| 2 | Опубликовать лидерборд бенчмарка как живой публичный артефакт (страница + PR-процесс + версии сьюта) | Быстрая победа, большой рычаг |
+| 3 | Self-serve коммерческий инди-тариф с публичной ценой | Быстрая победа, разблокирует воронку |
+| 4 | Бутстраппер в один клик: одно действие меню проводит NuGet + git-зависимости + сцену | Быстрая победа (меню уже наполовину есть) |
+| 5 | Док «шипинг на машине игрока»: UX скачивания модели, диск/мин. спека, цифры TTFT, матрица WebGL/IL2CPP (многое уже существует как внутренние заметки — повысить в статусе) | Быстрая победа |
+| 6 | Демо director-AI (без чат-бокса): ambient-агент на таймере через существующие тулы | Средняя |
+| 7 | Реплей audit-лога → история детерминизма/анти-чита для мультиплеерного утверждения | Стратегическая ставка |
+| 8 | Подключаемый content-safety-фильтр + базовая поставка; разблокирует образование/консоли | Средняя |
+| 9 | Галерея модов + шарящийся формат мода (UGC-петля для столпа 2) | Стратегическая ставка |
+| 10 | Кейс-стади: отгрузить одну маленькую настоящую игру (джем-масштаб) на CoreAI local-first и написать постмортем | Стратегическая ставка, максимальный выход доверия |
 
-## 6. Risks to the idea itself
+## 6. Риски для самой идеи
 
-- **Platform/UGC risk (pillar 2).** Runtime-downloaded executable content (Lua mods) is
-  restricted or review-sensitive on consoles and mobile stores; even on PC, AI-authored code
-  that reaches a reflection tier is a security story that must stay watertight (the sandbox
-  hardening in the technical audits is exactly this). Mitigation: keep the capability-tier
-  narrative loud, and treat "Full tier" as a dev-tool, not a shipping mode.
-- **Model licensing drift.** The recommended models (Qwen et al.) carry their own licenses;
-  a shipped game embeds them. The shipping-story doc (rec #5) must include a license matrix, or
-  studios' lawyers will do it for them, slowly.
-- **Solo-maintainer scope.** Five packages + Hub + benchmark + five demos + an example game +
-  business plans is a studio's surface area maintained by one person. The repository's own
-  history (this week's unverified 118-file wave) is the warning. Protect the core: pillars 1–3
-  get investment; pillars 4–5 get maintenance; anything new (voice, avatars, hosted services)
-  should be an integration point, not a subsystem. Freezing the example game and consolidating
-  demos into the Hub would cut real maintenance load today.
-- **Platform absorption.** If Unity ships first-party LLM-NPC tooling, plumbing (pillar 4)
-  evaporates as a differentiator overnight; the benchmark, the local-model scar tissue, and the
-  modding loop do not. That is the strongest argument for rebalancing effort toward
-  pillars 1–3 now.
+- **Платформенный/UGC-риск (столп 2).** Исполняемый контент, скачиваемый в рантайме (Lua-моды),
+  ограничен или чувствителен к ревью на консолях и в мобильных сторах; даже на ПК AI-авторский
+  код, дотягивающийся до reflection-уровня, — история безопасности, которая обязана оставаться
+  герметичной (укрепление песочницы в технических аудитах — ровно об этом). Митигция: держать
+  нарратив уровней доступа громким и позиционировать «Full tier» как инструмент разработчика, а
+  не режим шипинга.
+- **Дрейф лицензий моделей.** У рекомендованных моделей (Qwen и др.) свои лицензии; отгруженная
+  игра их встраивает. Док про шипинг (рек. #5) должен включать матрицу лицензий — иначе её
+  медленно составят юристы студий.
+- **Масштаб соло-мейнтейнера.** Пять пакетов + Hub + бенчмарк + пять демо + пример игры +
+  бизнес-планы — поверхность студии, поддерживаемая одним человеком. Собственная история
+  репозитория (непроверенная волна из 118 файлов на этой неделе) — предупреждение. Защищать ядро:
+  столпы 1–3 получают инвестиции; столпы 4–5 — поддержку; всё новое (голос, аватары, хостинговые
+  сервисы) должно быть точкой интеграции, а не подсистемой. Заморозка примера игры и консолидация
+  демо в Hub снизили бы реальную нагрузку уже сегодня.
+- **Поглощение платформой.** Если Unity выпустит первопартийный LLM-NPC-инструментарий, обвязка
+  (столп 4) как дифференциатор испарится за ночь; бенчмарк, «рубцовая ткань» локальных моделей и
+  моддинг-петля — нет. Это сильнейший аргумент перенести усилия на столпы 1–3 уже сейчас.
 
-## 7. Bottom line
+## 7. Итог
 
-The idea is right and the hard part — small local models reliably driving real game code — is
-already the project's demonstrated strength. The concept-level work now is not adding another
-subsystem; it is (a) converting the benchmark into the public proof, (b) removing the license and
-install friction that filters out the exact users who would spread it, and (c) telling the
-shipping story end-to-end. The framework already plays the game; the idea now has to play the
-market.
+Идея верна, и самая трудная её часть — маленькие локальные модели, надёжно управляющие настоящим
+игровым кодом, — уже является доказанной силой проекта. Работа уровня концепции теперь не в том,
+чтобы добавить ещё одну подсистему, а в том, чтобы (а) превратить бенчмарк в публичное
+доказательство, (б) убрать лицензионное и установочное трение, отфильтровывающее именно тех
+пользователей, которые понесут проект дальше, и (в) рассказать историю шипинга от начала до конца.
+Фреймворк уже играет в игру; теперь идея должна сыграть на рынке.
