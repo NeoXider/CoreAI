@@ -514,9 +514,15 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher with a memory tool. Save requested trace data when asked. " +
-                    "Keep the final response brief.",
-                UserPayload = "Save trace test data to memory now.",
+                    "You are a teacher with a memory tool. When asked to save something, call the memory " +
+                    "tool immediately with the given content — never ask for clarification. Keep the final " +
+                    "response brief.",
+                // Give the model concrete content and an explicit key so a compliant model has no reason to
+                // ask for details (which is what makes this test model-dependent). It still Inconclusive-skips
+                // if a weak model answers in prose instead of calling the tool.
+                UserPayload =
+                    "Use the memory tool now to save this fact under the key 'trace_test': " +
+                    "\"trace diagnostics sample value 42\". Then reply 'saved'.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
