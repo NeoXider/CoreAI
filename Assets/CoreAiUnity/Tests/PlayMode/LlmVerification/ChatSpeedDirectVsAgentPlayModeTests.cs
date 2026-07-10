@@ -78,15 +78,26 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log(Line("A) DIRECT (raw client, minimal prompt, no tools)", direct));
             Debug.Log(Line("B) AGENT  (orchestrator, PlainChat, no tools)   ", agentLight));
             Debug.Log(Line("C) AGENT  (orchestrator, Creator + tools)       ", agentHeavy));
+            // TTFT is the ONLY fair overhead metric here: total wall-clock is dominated by decode, which is
+            // proportional to how many tokens each path happened to emit (a shorter reply finishes sooner even
+            // with more pipeline work), so a raw total delta is misleading. Report TTFT delta as the pipeline
+            // overhead and print total deltas only as context, each with an explicit sign.
             Debug.Log(
-                $"[ChatSpeed] overhead vs direct:  " +
-                $"PlainChat +{agentLight.TotalMs - direct.TotalMs:0}ms total / +{agentLight.FirstTokenMs - direct.FirstTokenMs:0}ms TTFT   |   " +
-                $"Creator +{agentHeavy.TotalMs - direct.TotalMs:0}ms total / +{agentHeavy.FirstTokenMs - direct.FirstTokenMs:0}ms TTFT");
+                $"[ChatSpeed] pipeline overhead vs direct (TTFT = prefill cost, the fair metric):  " +
+                $"PlainChat {Signed(agentLight.FirstTokenMs - direct.FirstTokenMs)}ms TTFT   |   " +
+                $"Creator {Signed(agentHeavy.FirstTokenMs - direct.FirstTokenMs)}ms TTFT");
             Debug.Log(
-                "[ChatSpeed] Interpretation: all three hit the same local model, so most of each total is decode " +
-                "time. A small A->B delta = the CoreAI chat pipeline is cheap; a large A->C delta = the heavy " +
-                "role's prompt+tools prefill (and any tool round-trips), which is why a light role like PlainChat " +
-                "is the fast chat path.");
+                $"[ChatSpeed] total wall-clock delta (NOT overhead — scales with output length; " +
+                $"direct={direct.CompletionTokens?.ToString() ?? "?"}tok, " +
+                $"plainchat={agentLight.CompletionTokens?.ToString() ?? "?"}tok, " +
+                $"creator={agentHeavy.CompletionTokens?.ToString() ?? "?"}tok):  " +
+                $"PlainChat {Signed(agentLight.TotalMs - direct.TotalMs)}ms   |   " +
+                $"Creator {Signed(agentHeavy.TotalMs - direct.TotalMs)}ms");
+            Debug.Log(
+                "[ChatSpeed] Interpretation: all three hit the same local model. The TTFT delta is the real " +
+                "CoreAI pipeline cost (role prompt + tools prefill); a small delta means CoreAI is cheap and the " +
+                "model dominates. Ignore total deltas and decode tok/s when TTFT ≈ total (the stream arrived in " +
+                "one late chunk, so the decode window is too small to measure throughput).");
 
             Assert.IsTrue(direct.SawDone, "Direct path must complete to compare.");
         }
@@ -106,14 +117,30 @@ namespace CoreAI.Tests.PlayMode
             return new AiTaskRequest { RoleId = roleId, Hint = userText };
         }
 
+        /// <summary>Formats a signed millisecond delta with an explicit +/- and no double sign (e.g. "-2418").</summary>
+        private static string Signed(double ms) => (ms >= 0 ? "+" : "") + ms.ToString("0");
+
         private static string Line(string label, ThroughputProbe p)
         {
             double decodeSec = (p.TotalMs - p.FirstTokenMs) / 1000.0;
-            double decode = p.CompletionTokens.HasValue && decodeSec > 0 ? p.CompletionTokens.Value / decodeSec : double.NaN;
+            double decodeRaw = p.CompletionTokens.HasValue && decodeSec > 0
+                ? p.CompletionTokens.Value / decodeSec
+                : double.NaN;
+            // Decode throughput is only meaningful when the stream was actually incremental. If it arrived as
+            // one late chunk, TTFT ≈ total, the decode window is tiny, and out/window explodes to an impossible
+            // rate. Gate on a plausible local-model ceiling (~500 tok/s) rather than a fixed window: above that
+            // the number is a streaming artefact, not throughput, so report it as unmeasurable.
+            const double PlausibleMaxLocalTokPerSec = 500.0;
+            bool decodeMeasurable = !double.IsNaN(decodeRaw)
+                                    && p.CompletionTokens.Value > 2
+                                    && decodeRaw <= PlausibleMaxLocalTokPerSec;
+            string decodeStr = decodeMeasurable
+                ? decodeRaw.ToString("0.0") + "tok/s"
+                : "n/a (stream not incremental — one late chunk)";
             string err = string.IsNullOrEmpty(p.Error) ? "" : $"  ERROR={p.Error}";
             return $"[ChatSpeed] {label}: TTFT={p.FirstTokenMs:0}ms total={p.TotalMs:0}ms " +
                    $"outTok={p.CompletionTokens?.ToString() ?? "?"} promptTok={p.PromptTokens?.ToString() ?? "?"} " +
-                   $"decode~{(double.IsNaN(decode) ? "?" : decode.ToString("0.0"))}tok/s{err}";
+                   $"decode~{decodeStr}{err}";
         }
 
         private static async Task MeasureAsync(IAsyncEnumerable<LlmStreamChunk> stream, ThroughputProbe probe)
