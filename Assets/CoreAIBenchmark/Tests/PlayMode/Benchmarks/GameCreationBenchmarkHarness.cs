@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 #if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
@@ -16,9 +16,10 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
-using CoreAI.Sandbox;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Sandbox.LuaCs;
 using CoreAI.Session;
-using MoonSharp.Interpreter;
+using Lua;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -311,13 +312,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         public sealed class BenchmarkLuaExecutor : LuaTool.ILuaExecutor
         {
-            public readonly SecureLuaEnvironment Sandbox = new();
-            public readonly LuaApiRegistry Registry = new();
-            public readonly LuaLogicSlots LogicSlots = new();
+            public readonly LuaCsSecureEnvironment Sandbox = new();
+            public readonly LuaCsApiRegistry Registry = new();
+            public readonly LuaCsLogicSlots LogicSlots = new();
             public int ExecutionCount;
             public int FailedExecutions;
             public string LastError = "";
-            private Script _script;
+            // Lua-CSharp state persists across chunks so a seeded formula (logic_define) stays installed
+            // for later invocations, mirroring the reused MoonSharp Script this replaced.
+            private LuaState _state;
 
             public BenchmarkLuaExecutor()
             {
@@ -338,13 +341,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 try
                 {
-                    _script ??= Sandbox.CreateScript(Registry);
+                    _state ??= Sandbox.Create(Registry);
                     ExecutionCount++;
-                    DynValue result = Sandbox.RunChunk(_script, code);
+                    LuaValue[] results = Sandbox.RunChunk(_state, code, cancellationToken: ct);
                     return Task.FromResult(new LuaTool.LuaResult
                     {
                         Success = true,
-                        Output = result?.ToString() ?? "ok"
+                        Output = Summarize(results)
                     });
                 }
                 catch (Exception ex)
@@ -353,6 +356,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     LastError = ex.Message;
                     return Task.FromResult(new LuaTool.LuaResult { Success = false, Error = ex.Message });
                 }
+            }
+
+            private static string Summarize(LuaValue[] results)
+            {
+                if (results == null || results.Length == 0)
+                {
+                    return "ok";
+                }
+
+                LuaValue first = results[0];
+                return first.Type == LuaValueType.Nil ? "ok" : first.ToString();
             }
 
             public bool TryNumber(string slot, out double value, params object[] args)

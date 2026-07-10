@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 #if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using CoreAI.Ai;
