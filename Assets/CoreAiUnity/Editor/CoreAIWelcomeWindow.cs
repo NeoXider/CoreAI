@@ -23,16 +23,18 @@ namespace CoreAI.Editor
 
         private readonly struct Demo
         {
+            /// <summary>Scene asset name WITHOUT extension — resolved by AssetDatabase so it works whether the
+            /// demos live under Assets/ (dev monorepo) or Packages/ (UPM install) or an imported Sample.</summary>
+            public readonly string SceneName;
             public readonly string Title;
-            public readonly string ScenePath;
             public readonly string Blurb;
             public readonly bool NeedsLlm;
             public readonly bool Featured;
 
-            public Demo(string title, string scenePath, string blurb, bool needsLlm, bool featured)
+            public Demo(string title, string sceneName, string blurb, bool needsLlm, bool featured)
             {
                 Title = title;
-                ScenePath = scenePath;
+                SceneName = sceneName;
                 Blurb = blurb;
                 NeedsLlm = needsLlm;
                 Featured = featured;
@@ -40,49 +42,66 @@ namespace CoreAI.Editor
         }
 
         // Descriptions mirror Assets/CoreAI.Demos/README.md. Featured = the strongest WOW demos, shown first.
+        // Scenes are referenced by NAME (no path) so the launcher is package-path-safe.
         private static readonly Demo[] Demos =
         {
             new("🔥 Live Mechanics — AI changes the game from chat",
-                DemosRoot + "LiveMechanics/LiveMechanicsDemo.unity",
+                "LiveMechanicsDemo",
                 "A real LLM rewrites gameplay live: the Programmer role writes Lua through execute_lua → logic slots / mods / world commands.",
                 needsLlm: true, featured: true),
             new("🔥 Moddable Units — a whole game built from mods",
-                DemosRoot + "ModdableUnits/ModdableUnitsDemo.unity",
+                "ModdableUnitsDemo",
                 "Mods define new unit types and armies (forge_define / forge_spawn) and drive the fight via hooks; the host just runs the auto-battle.",
                 needsLlm: true, featured: true),
             new("🔥 Hub — drop-in AI control panel",
-                DemosRoot + "Hub/CoreAiHubDemo.unity",
+                "CoreAiHubDemo",
                 "A ready UI Toolkit Hub with Chat, Settings, Statistics, Mods, and World State pages — the fastest way to feel the whole stack.",
                 needsLlm: true, featured: true),
             new("Skills — agents load tools on demand",
-                DemosRoot + "Skills/SkillsDemo.unity",
+                "SkillsDemo",
                 "SkillSet + AgentBuilder: a game-master agent with crafting/combat skills via read_skill / call_skill_tool.",
                 needsLlm: true, featured: false),
             new("Full Access — Programmer inspects & moves the scene",
-                DemosRoot + "FullAccess/FullAccessDemo.unity",
+                "FullAccessDemo",
                 "Opt-in full-tier unity_* access: inspect objects/components/transforms, then move/rotate/parent from Lua.",
                 needsLlm: true, featured: false),
             new("Mini RPG — first-person world + Hub chat",
-                DemosRoot + "MiniRpg/MiniRpgModsDemo.unity",
+                "MiniRpgModsDemo",
                 "A small first-person environment wired to the Hub chat with mod-ready prompts.",
                 needsLlm: true, featured: false),
             new("Wave Auto-Battler — rules changed by mods",
-                DemosRoot + "LiveMechanicsMods/WaveAutoBattlerModsDemo.unity",
+                "WaveAutoBattlerModsDemo",
                 "A playable wave loop whose rules and rewards are edited by persistent Lua mods (F9 mods panel, F10 usage overlay).",
                 needsLlm: true, featured: false),
             new("Live Mechanics Mods Chat — persistent manage_mods",
-                DemosRoot + "LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",
+                "LiveMechanicsModsChatDemo",
                 "Chat-driven load/reload/unload of Lua mods that persist and autoload on the next scene start.",
                 needsLlm: true, featured: false),
             new("Lua Mods — hooks, timers, events (offline)",
-                DemosRoot + "LuaMods/LuaModsDemo.unity",
+                "LuaModsDemo",
                 "LuaModRuntime hooks/timers/events/store + capability tiers; override the damage formula from Lua. Runs with no model.",
                 needsLlm: false, featured: false),
             new("World Commands — the AI command pipeline (offline)",
-                DemosRoot + "WorldCommands/WorldCommandsDemo.unity",
+                "WorldCommandsDemo",
                 "IAiGameCommandSink → AiGameCommandRouter → world executor: the same path LLM agents and Lua use. Runs with no model.",
                 needsLlm: false, featured: false),
         };
+
+        /// <summary>Resolves a scene asset path by name across Assets/ and Packages/, or null if not found.</summary>
+        private static string ResolveScenePath(string sceneName)
+        {
+            string[] guids = AssetDatabase.FindAssets($"{sceneName} t:Scene");
+            for (int i = 0; i < guids.Length; i++)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                if (Path.GetFileNameWithoutExtension(path) == sceneName)
+                {
+                    return path;
+                }
+            }
+
+            return null;
+        }
 
         [MenuItem("CoreAI/Getting Started", priority = 0)]
         public static void Open()
@@ -167,7 +186,7 @@ namespace CoreAI.Editor
 
                     if (GUILayout.Button("Recommended models (docs)"))
                     {
-                        OpenDoc("LLMUNITY_SETUP_AND_MODELS.md");
+                        OpenDoc("LLMUNITY_SETUP_AND_MODELS", DocsRoot + "LLMUNITY_SETUP_AND_MODELS.md");
                     }
                 }
             }
@@ -217,7 +236,8 @@ namespace CoreAI.Editor
 
         private void DrawDemoRow(Demo demo)
         {
-            bool exists = File.Exists(demo.ScenePath);
+            string scenePath = ResolveScenePath(demo.SceneName);
+            bool exists = !string.IsNullOrEmpty(scenePath);
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 using (new EditorGUILayout.HorizontalScope())
@@ -238,12 +258,14 @@ namespace CoreAI.Editor
                     {
                         if (GUILayout.Button(exists ? "Open scene" : "Scene not found", GUILayout.Width(140)))
                         {
-                            OpenScene(demo.ScenePath);
+                            OpenScene(scenePath);
                         }
                     }
 
-                    string readme = Path.GetDirectoryName(demo.ScenePath) + "/README.md";
-                    using (new EditorGUI.DisabledScope(!File.Exists(readme)))
+                    // Sibling README, resolved relative to wherever the scene actually resolved.
+                    string readme = exists ? Path.GetDirectoryName(scenePath) + "/README.md" : null;
+                    bool hasReadme = readme != null && AssetDatabase.LoadAssetAtPath<TextAsset>(readme) != null;
+                    using (new EditorGUI.DisabledScope(!hasReadme))
                     {
                         if (GUILayout.Button("README", GUILayout.Width(90)))
                         {
@@ -264,21 +286,17 @@ namespace CoreAI.Editor
                 {
                     if (GUILayout.Button("Quick Start"))
                     {
-                        OpenDoc("QUICK_START.md");
+                        OpenDoc("QUICK_START", DocsRoot + "QUICK_START.md");
                     }
 
                     if (GUILayout.Button("Full Walkthrough"))
                     {
-                        OpenDoc("QUICK_START_FULL.md");
+                        OpenDoc("QUICK_START_FULL", DocsRoot + "QUICK_START_FULL.md");
                     }
 
                     if (GUILayout.Button("All demos (README)"))
                     {
-                        TextAsset readme = AssetDatabase.LoadAssetAtPath<TextAsset>(DemosRoot + "README.md");
-                        if (readme != null)
-                        {
-                            AssetDatabase.OpenAsset(readme);
-                        }
+                        OpenDoc("README", DemosRoot + "README.md");
                     }
                 }
             }
@@ -286,7 +304,7 @@ namespace CoreAI.Editor
 
         private static void OpenScene(string scenePath)
         {
-            if (!File.Exists(scenePath))
+            if (string.IsNullOrEmpty(scenePath) || AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
             {
                 CoreAIEditorLog.LogError($"Demo scene not found: {scenePath}");
                 return;
@@ -298,17 +316,38 @@ namespace CoreAI.Editor
             }
         }
 
-        private static void OpenDoc(string fileName)
+        /// <summary>
+        /// Opens a Markdown doc, resolving it by asset NAME across Assets/ and Packages/ so it works in a UPM
+        /// install. <paramref name="preferredPath"/> is tried first (fast path in the dev monorepo).
+        /// </summary>
+        private static void OpenDoc(string docName, string preferredPath = null)
         {
-            string path = DocsRoot + fileName;
-            TextAsset doc = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+            string path = preferredPath;
+            if (string.IsNullOrEmpty(path) || AssetDatabase.LoadAssetAtPath<TextAsset>(path) == null)
+            {
+                path = null;
+                string bare = Path.GetFileNameWithoutExtension(docName);
+                string[] guids = AssetDatabase.FindAssets($"{bare} t:TextAsset");
+                for (int i = 0; i < guids.Length; i++)
+                {
+                    string candidate = AssetDatabase.GUIDToAssetPath(guids[i]);
+                    if (Path.GetFileName(candidate).Equals(docName + ".md", System.StringComparison.OrdinalIgnoreCase)
+                        || Path.GetFileNameWithoutExtension(candidate).Equals(bare, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        path = candidate;
+                        break;
+                    }
+                }
+            }
+
+            TextAsset doc = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<TextAsset>(path);
             if (doc != null)
             {
                 AssetDatabase.OpenAsset(doc);
             }
             else
             {
-                CoreAIEditorLog.LogError($"Doc not found: {path}");
+                CoreAIEditorLog.LogError($"Doc not found: {docName}");
             }
         }
     }
