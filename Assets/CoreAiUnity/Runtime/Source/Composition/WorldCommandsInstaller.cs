@@ -25,8 +25,11 @@ namespace CoreAI.Composition
         /// <param name="builder">Container builder.</param>
         /// <param name="worldPrefabRegistry">Prefab whitelist for Lua spawn commands.</param>
         /// <param name="allowedLuaScenes">
-        /// Optional whitelist for <c>coreai_world_load_scene</c>. When null or empty any scene from
-        /// Build Settings stays loadable (legacy behavior); otherwise only listed names pass.
+        /// Optional scene whitelist for <c>load_scene</c> (native tool AND <c>coreai_world_load_scene</c>).
+        /// <b>Security note:</b> null or empty is DELIBERATELY permissive — it does NOT block scene loads;
+        /// any scene present/enabled in Build Settings stays loadable (legacy default). To actually
+        /// restrict which scenes the model may load, pass a NON-EMPTY list; then only listed names pass and
+        /// everything else is rejected. Pinned by CoreAiWorldCommandExecutorLoadSceneEditModeTests.
         /// </param>
         /// <param name="enableFullLuaAccess">
         /// When true, scripts with the Full capability tier receive reflection bindings to arbitrary
