@@ -112,9 +112,6 @@ namespace CoreAI.Composition
                 builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
 
                 CoreAISettings.Instance = settings;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-                Sandbox.SecureLuaEnvironment.WebGlLuaOptIn = settings.EnableLuaOnWebGl;
-#endif
             }
 
             if (gameLogSettings != null)
@@ -129,10 +126,9 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // Full tier works on WebGL/IL2CPP too: the former "null function" wasm trap was stripped
-            // UnityEngine.Resources/TextAsset members reflected by MoonSharp's script loader, fixed by
-            // preserving them in Assets/link.xml. Actual Lua availability on the WebGL player is still
-            // gated by SecureLuaEnvironment.WebGlLuaOptIn (ICoreAISettings.EnableLuaOnWebGl).
+            // Full tier works on WebGL/IL2CPP too: the Lua-CSharp runtime is a managed, AOT-safe VM, so
+            // there is no wasm "null function" trap to gate around. link.xml preserves the Lua assemblies
+            // plus the Resources/TextAsset members CoreAI loads prompts/skills/bundled mods through.
             builder.RegisterWorldCommands(
                 worldPrefabRegistry,
                 luaAllowedScenes,

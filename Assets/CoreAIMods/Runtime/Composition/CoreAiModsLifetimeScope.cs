@@ -40,9 +40,9 @@ namespace CoreAI.Composition
 
         protected override void Configure(IContainerBuilder builder)
         {
-            // execute_lua's rate limiter is module-owned (its CorePortableInstaller registration is
-            // #if COREAI_HAS_MOONSHARP, inactive in the MoonSharp-free core). The Lua-CSharp sandbox is
-            // created inside the factory, so no SecureLuaEnvironment registration is needed here.
+            // execute_lua's rate limiter is module-owned: the Lua-free core no longer registers it, so the
+            // mods module supplies it here. The Lua-CSharp sandbox is created inside the factory, so no
+            // sandbox registration is needed at this scope.
             builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
 
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;

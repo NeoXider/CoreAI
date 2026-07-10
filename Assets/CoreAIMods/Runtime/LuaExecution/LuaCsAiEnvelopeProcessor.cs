@@ -13,11 +13,17 @@ namespace CoreAI.Ai.LuaCs
     /// <see cref="LuaCsExecutionGuard"/> and publishes the same success/failure game commands. Built as
     /// part of the MoonSharp -> Lua-CSharp migration so the envelope path can later be type-swapped away
     /// from MoonSharp. Behavior mirrors the MoonSharp processor: rate limiting, transaction-scope reset
-    /// around each chunk, result/error caps (reusing <see cref="LuaAiEnvelopeProcessor"/>'s constants),
+    /// around each chunk, result/error caps,
     /// version recording, and Programmer repair scheduling.
     /// </summary>
     public sealed class LuaCsAiEnvelopeProcessor
     {
+        /// <summary>Max characters of a chunk's printable result kept in the success summary.</summary>
+        public const int MaxResultSummaryLength = 4_000;
+
+        /// <summary>Max characters of a flattened error message kept in a failure report.</summary>
+        public const int MaxErrorMessageLength = 500;
+
         private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
 
         private readonly LuaCsSecureEnvironment _sandbox;
@@ -90,7 +96,7 @@ namespace CoreAI.Ai.LuaCs
                 LuaState state = _sandbox.Create(registry);
                 LuaValue[] results = _sandbox.RunChunk(state, lua);
                 string summary = Truncate(LuaCsGameToolExecutor.Summarize(results),
-                    LuaAiEnvelopeProcessor.MaxResultSummaryLength);
+                    LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))
                 {
                     _luaScriptVersions.RecordSuccessfulExecution(cmd.LuaScriptVersionKey.Trim(), lua);
@@ -145,7 +151,7 @@ namespace CoreAI.Ai.LuaCs
         private static string NormalizeError(string message)
         {
             string flat = (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
-            return Truncate(flat, LuaAiEnvelopeProcessor.MaxErrorMessageLength);
+            return Truncate(flat, LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
         }
 
         private void PublishLuaFailure(ApplyAiGameCommand cmd, string message)

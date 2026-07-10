@@ -8,9 +8,8 @@ namespace CoreAI.Ai.Hub
     /// One-call registration of the CoreAI Mods page into a <see cref="HubPageRegistry"/>. The page is
     /// registered as a lazy factory (its content is built only when the tab is first activated) at
     /// order 300 by default, so it slots after the built-in Chat (0) / Settings (100) / Statistics
-    /// (200) tabs. Overloads accept either mod runtime (MoonSharp <see cref="LuaModRuntime"/> or
-    /// Lua-CSharp <see cref="LuaCsModRuntime"/>) plus the shared <see cref="ILuaModSourceStore"/>, or a
-    /// pre-built <see cref="IHubModService"/> for full control.
+    /// (200) tabs. Overloads accept the Lua-CSharp <see cref="LuaCsModRuntime"/> plus the shared
+    /// <see cref="ILuaModSourceStore"/>, or a pre-built <see cref="IHubModService"/> for full control.
     /// </summary>
     public static class HubModsPages
     {
@@ -26,30 +25,13 @@ namespace CoreAI.Ai.Hub
         /// <summary>Default Hub tab order for the Mod Logs page (after Mods).</summary>
         public const int DefaultLogsOrder = 350;
 
-        /// <summary>Registers the Mods page backed by the MoonSharp <see cref="LuaModRuntime"/>.</summary>
+        /// <summary>Registers the Mods page backed by the Lua-CSharp <see cref="LuaCsModRuntime"/>.</summary>
         /// <param name="registry">Target registry. Required.</param>
         /// <param name="runtime">Live mod runtime (also driven by the manage_mods LLM tool). Required.</param>
         /// <param name="sourceStore">Package store persisting mod source + manifest (may be null).</param>
         /// <param name="grant">Capability ceiling applied to every mod loaded from the UI.</param>
         /// <param name="allowFull">When true, <see cref="LuaCapabilities.Full"/> may be granted from the header.</param>
         /// <param name="order">Hub tab order (default 300).</param>
-        public static void Register(
-            HubPageRegistry registry,
-            LuaModRuntime runtime,
-            ILuaModSourceStore sourceStore = null,
-            LuaCapabilities grant = LuaCapabilities.All,
-            bool allowFull = false,
-            int order = DefaultOrder)
-        {
-            if (runtime == null)
-            {
-                throw new ArgumentNullException(nameof(runtime));
-            }
-
-            Register(registry, new LuaModRuntimeHubService(runtime, sourceStore, grant, allowFull), order);
-        }
-
-        /// <summary>Registers the Mods page backed by the Lua-CSharp <see cref="LuaCsModRuntime"/>.</summary>
         public static void Register(
             HubPageRegistry registry,
             LuaCsModRuntime runtime,

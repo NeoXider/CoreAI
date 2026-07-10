@@ -4,7 +4,6 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
-    "MoonSharp.Interpreter",
     "MessagePipe",
     "MessagePipe.VContainer",
     "Unity.TextMeshPro",
@@ -39,11 +38,6 @@
       "name": "com.unity.inputsystem",
       "expression": "1.0.0",
       "define": "COREAI_HAS_INPUT_SYSTEM"
-    },
-    {
-      "name": "org.moonsharp.moonsharp",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_MOONSHARP"
     }
   ],
   "noEngineReferences": false

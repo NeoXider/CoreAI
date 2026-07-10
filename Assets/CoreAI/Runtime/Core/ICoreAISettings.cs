@@ -121,7 +121,7 @@ namespace CoreAI
         bool EnableStreaming { get; }
 
         /// <summary>
-        /// Run the MoonSharp Lua sandbox on the WebGL player. Default <c>true</c>.
+        /// Run the Lua sandbox on the WebGL player. Default <c>true</c>.
         /// Lua works on all other players regardless of this flag; it gates only the WebGL/IL2CPP path,
         /// which additionally requires link.xml stripping protection (shipped). The Full reflection tier
         /// (<c>unity_*</c>) is always force-disabled on WebGL even when this is <c>true</c>.

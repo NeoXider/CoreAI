@@ -100,91 +100,15 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Staged Lua diagnostic for the WebGL "RuntimeError: null function" trap (no LLM involved).
-        /// Runs six escalating stages (bare Script → sandbox → host callback → Full unity_* bindings),
-        /// logging before/after each; the last "stage-N: begin" without a matching "ok" pinpoints the
-        /// faulting layer even though a wasm trap halts the player. SendMessage-compatible (arg unused).
+        /// Retired MoonSharp WebGL "null function" diagnostic. The MoonSharp VM has been removed in favor
+        /// of the managed, AOT-safe Lua-CSharp runtime (which does not exhibit the wasm-trap failure this
+        /// probe was built to isolate), so this SendMessage hook is now a logged no-op. Lua execution is
+        /// driven through the CoreAIMods (Lua-CSharp) stack.
         /// </summary>
         public void RunLuaDiag(string _ = null)
         {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-            void Stage(string name, Action body)
-            {
-                Logging.Log.Instance.Info($"{LogPrefix} [diag] {name}: begin");
-                try
-                {
-                    body();
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] {name}: ok");
-                }
-                catch (Exception ex)
-                {
-                    Logging.Log.Instance.Warn(
-                        $"{LogPrefix} [diag] {name}: MANAGED-FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-                }
-            }
-
-            GameObject probe = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            probe.name = "LuaDiagCube";
-            try
-            {
-                MoonSharp.Interpreter.Script bare = null;
-                Stage("s1-new-Script", () =>
-                {
-                    bare = new MoonSharp.Interpreter.Script(
-                        MoonSharp.Interpreter.CoreModules.Preset_HardSandbox |
-                        MoonSharp.Interpreter.CoreModules.Coroutine);
-                });
-
-                Stage("s2-bare-DoString", () =>
-                {
-                    MoonSharp.Interpreter.DynValue r = bare.DoString("return 1+1");
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s2 result={r.Number}");
-                });
-
-                Sandbox.SecureLuaEnvironment env = new();
-                Stage("s3-sandbox-RunChunk", () =>
-                {
-                    MoonSharp.Interpreter.Script s = env.CreateScript(null);
-                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return 2+2");
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s3 result={r.Number}");
-                });
-
-                Stage("s4-host-callback", () =>
-                {
-                    Sandbox.LuaApiRegistry reg = new();
-                    reg.Register("host_add", (Func<double, double, double>)((a, b) => a + b));
-                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
-                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return host_add(2,3)");
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s4 result={r.Number}");
-                });
-
-                Stage("s5-unity_find", () =>
-                {
-                    Sandbox.LuaApiRegistry reg = new();
-                    new Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
-                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
-                    MoonSharp.Interpreter.DynValue r = env.RunChunk(s, "return unity_find('LuaDiagCube')");
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s5 id={r.Number}");
-                });
-
-                Stage("s6-unity_set_scale", () =>
-                {
-                    Sandbox.LuaApiRegistry reg = new();
-                    new Infrastructure.Lua.CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(reg);
-                    MoonSharp.Interpreter.Script s = env.CreateScript(reg);
-                    env.RunChunk(s, "local id = unity_find('LuaDiagCube'); unity_set_scale(id, 2, 2, 2)");
-                    Logging.Log.Instance.Info($"{LogPrefix} [diag] s6 scale={probe.transform.localScale}");
-                });
-
-                Logging.Log.Instance.Info($"{LogPrefix} [diag] ALL STAGES PASSED");
-            }
-            finally
-            {
-                Destroy(probe);
-            }
-#else
-            Logging.Log.Instance.Warn($"{LogPrefix} RunLuaDiag ignored: Lua module not compiled in.");
-#endif
+            Logging.Log.Instance.Info(
+                $"{LogPrefix} RunLuaDiag retired: MoonSharp removed; Lua now runs on the Lua-CSharp runtime.");
         }
 
         /// <summary>

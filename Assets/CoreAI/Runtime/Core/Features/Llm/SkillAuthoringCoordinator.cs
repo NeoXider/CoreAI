@@ -20,7 +20,7 @@ namespace CoreAI.Ai
     /// <c>read_skill</c> reads from, so the model can reuse what it just authored within the same session.
     /// <para>
     /// Tool resolution is strict by default: a skill referencing a tool the role does not have is rejected
-    /// (the model cannot invent C# tools). The coordinator is portable (no Unity / MoonSharp dependency);
+    /// (the model cannot invent C# tools). The coordinator is portable (no Unity / Lua dependency);
     /// the host supplies the persistence and version stores.
     /// </para>
     /// </summary>

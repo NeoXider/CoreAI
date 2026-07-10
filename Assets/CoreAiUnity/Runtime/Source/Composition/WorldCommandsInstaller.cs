@@ -33,7 +33,7 @@ namespace CoreAI.Composition
         /// </param>
         /// <param name="enableFullLuaAccess">
         /// When true, scripts with the Full capability tier receive reflection bindings to arbitrary
-        /// GameObjects/components (<see cref="CoreAiFullUnityLuaRuntimeBindings"/>). Off by default.
+        /// GameObjects/components (the Lua-CSharp <c>LuaCsFullUnityRuntimeBindings</c>). Off by default.
         /// </param>
         /// <param name="enableFullLuaPrivateAccess">
         /// When true, Full-tier Lua reflection may access non-public members. Off by default.

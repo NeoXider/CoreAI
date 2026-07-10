@@ -6,9 +6,6 @@ using CoreAI.Config;
 using CoreAI.Diagnostics;
 using CoreAI.Messaging;
 using CoreAI.Session;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-using CoreAI.Sandbox;
-#endif
 using VContainer;
 
 namespace CoreAI.Composition
@@ -37,20 +34,11 @@ namespace CoreAI.Composition
                 builder.Register<InMemoryConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
             }
 
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-            builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
-#endif
             builder.Register<Func<IAiOrchestrationService>>(c =>
             {
                 IObjectResolver r = c;
                 return () => r.Resolve<IAiOrchestrationService>();
             }, Lifetime.Singleton);
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-            builder.Register<LuaAiEnvelopeProcessor>(Lifetime.Singleton);
-            // Factory lambda: VContainer cannot resolve the optional int/double constructor
-            // parameters, so construct with the limiter's own defaults.
-            builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
-#endif
 
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();
             builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();

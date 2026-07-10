@@ -342,7 +342,7 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool webGlNativeStreaming = true;
 
-        [Tooltip("WebGL-only: run the MoonSharp Lua sandbox on the WebGL player. On by default; " +
+        [Tooltip("WebGL-only: run the Lua sandbox on the WebGL player. On by default; " +
                  "requires link.xml stripping protection in the build (shipped). Full unity_* tier stays disabled on WebGL regardless.")]
         [SerializeField]
         private bool enableLuaOnWebGl = true;

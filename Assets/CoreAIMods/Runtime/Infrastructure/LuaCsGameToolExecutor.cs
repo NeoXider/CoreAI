@@ -100,7 +100,7 @@ namespace CoreAI.Ai.LuaCs
                 _bindings.RegisterGameplayApis(registry);
                 LuaState state = _sandbox.Create(registry);
                 LuaValue[] results = _sandbox.RunChunk(state, code, cancellationToken: cancellationToken);
-                string summary = Truncate(Summarize(results), LuaAiEnvelopeProcessor.MaxResultSummaryLength);
+                string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
                 _observer.OnLuaSuccess(summary);
                 LuaExecutedSuccessfully?.Invoke(code ?? "");
                 return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = summary });
@@ -109,7 +109,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 string flat = Truncate(
                     (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim(),
-                    LuaAiEnvelopeProcessor.MaxErrorMessageLength);
+                    LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
                 _observer.OnLuaFailure(flat);
                 return Task.FromResult(new LuaTool.LuaResult { Success = false, Error = flat });
             }

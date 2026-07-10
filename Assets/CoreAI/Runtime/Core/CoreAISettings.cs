@@ -299,7 +299,7 @@
         }
 
         /// <summary>
-        /// Whether the MoonSharp Lua sandbox may run on the WebGL player (opt-in). ///.</summary>
+        /// Whether the Lua sandbox may run on the WebGL player (opt-in). ///.</summary>
         public static bool EnableLuaOnWebGl
         {
             get => _enableLuaOnWebGl ?? Instance?.EnableLuaOnWebGl ?? DefaultEnableLuaOnWebGl;
