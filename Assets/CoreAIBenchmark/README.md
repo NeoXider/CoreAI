@@ -19,7 +19,7 @@ The benchmark answers the practical production question: is this model usable fo
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
 | G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle scene from the model's own positions; graded leniently on scale (12+ objects) and variety (20+), kept as the report hero image. |
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
-| G8 - Observe-then-act | 4/5 | Reasoning over GIVEN world state, not building from blank — the "director-AI / beyond the chat box" axis | The scene is described (already-populated); the model acts on the named existing objects: clear only the junk, raise only the undersized towers (conditional selection), and encode an observed wave-scaling rule as Lua. Prompts state the goal, **not** the tool syntax, so weaker models visibly fail the conditional-selection step. |
+| G8 - Described-state selection | 4/5 | Reasoning over a GIVEN textual world state, not live scene sensing | The prompt describes an already-populated scene; the model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. It is a single-turn conditional-selection test, not sustained multi-turn recovery. |
 
 Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. G6 (hero image) and G7 capture scene screenshots because the built scene is part of the result; the other groups are primarily graded through logic execution and traces.
 
@@ -199,9 +199,10 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
-The current cloud-model and local-model ranking tables (suite v1.7, G1-G8, no token caps) live in the
-[README's benchmark section](../../README.md#game-creation-benchmark), rebuilt from hand-picked report
-JSONs as described above. Example ranking (local models, 2026-07-02 sweep):
+The repository's published cloud-model and local-model tables are historical suite v1.6 / G1-G7
+baselines in the [README benchmark section](../../README.md#game-creation-benchmark). Current v1.7 / G1-G8
+runs start a separate leaderboard and must not be mixed with those scores. Historical example (local models,
+2026-07-02 sweep):
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
@@ -246,13 +247,14 @@ The G6 scenario is a free-form visual build (default: castle). Each model author
 > **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [How To Run](#how-to-run) above for details.
 
 ¹ Sonnet's hero image is from its G6-only verification rerun (94.2 on that scenario) after a
-chat-only bridge fix; its suite score in the table is from the full G1-G8 run.
+chat-only bridge fix; its suite score in the table is from the historical full G1-G7 run.
 See [the full example report](../../Docs/Images/example_report/example_report.md) for a complete
 per-scenario breakdown and transcript example.
 
 ## Community Leaderboard
 
-Ranked results (cloud and local, suite v1.6) with a public submission workflow live on the
+Ranked results with version-separated sections (current suite v1.7/G1-G8; historical v1.6/G1-G7)
+and a public submission workflow live on the
 [community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,
 model file/quantization, and hardware — the leaderboard page lists the exact requirements and

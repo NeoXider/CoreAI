@@ -1,6 +1,7 @@
 # CoreAIMods VM migration (MoonSharp → Lua-CSharp) + mod-feature polish — working plan
 
-> Status: DRAFT v2 (rewritten after plan-review red-team, 2026-07-07). Reflects the REAL repo state.
+> Status: DRAFT v2 (repo-state snapshot refreshed 2026-07-10). This is a migration plan, not a claim
+> that Lua-CSharp is already the production VM.
 > All code, docs, commit messages in English. MoonSharp stays live until Phase 2 is green.
 > Module name decision: **keep `com.neoxider.coreaimods` / `CoreAI.Mods`** (no rename). A rename to
 > CoreAILua, if ever wanted, is a separate GUID-preserving PR — never bundled with the VM swap.
@@ -43,19 +44,22 @@ should serve live, in-session mutation, not just static mod loading.
   (command replication + serialized data), and command-channel live mutation. Feeds Phase 3/4b/5.
 - 🔄 In flight: Codex `lua-foundation` — additive Lua-CSharp foundation for Phase 2 (SetHook budget guard,
   LuaCsApiRegistry marshalling, LuaCsSecureEnvironment) as NEW files; package keeps compiling.
-- ⏭ Next to BUILD: Phase 1 (finish install) → **Phase 2 (serial VM swap, 11-step map)** + Phase 2b (DI scope) →
+- ⏭ Next to BUILD: Phase 1 (finish install) → **Phase 2 (serial VM swap, 11-step map)** + Phase 2b (verify the existing DI scope after the swap) →
   fan out Phase 3/4/4b/5 → Phase 6 (skill) → Phase 7 (tests + Windows build + docs). Prod stays on MoonSharp
   until Phase 2 is green.
 
-## Reality on disk (verified 2026-07-07, branch feat/coreaimods-extraction)
-- Lua module already extracted: `Assets/CoreAIMods/` = `com.neoxider.coreaimods` v5.2.0, asmdef `CoreAI.Mods`.
+## Reality on disk (verified 2026-07-10)
+- Lua module is extracted: `Assets/CoreAIMods/` = `com.neoxider.coreaimods` v5.3.0, asmdef `CoreAI.Mods`.
 - MoonSharp already removed from `CoreAI.Core` + `CoreAI.Source` (core is Lua-free). `ILuaExecutor` seam exists
   (`Assets/CoreAIMods/Runtime/LuaExecution/LuaTool.cs`). All five packages are versioned in lockstep.
-- MoonSharp still used in **~17 files** under `Assets/CoreAIMods/Runtime` — this is the migration surface.
-- **No `CoreAiModsLifetimeScope`/`CoreAiModsInstaller` exists** → the Lua runtime/tools are NOT wired by the
-  running composition root today (only by test fakes). Building this scope is in-scope.
-- `link.xml` lives at `Assets/CoreAiUnity/link.xml` (Source pkg), MoonSharp-only. `Lua.dll` currently only in
-  the dev harness `Assets/dev/LuaVmComparison/Plugins/`.
+- `Assets/CoreAIMods/Runtime` contains 82 C# files; 13 still reference MoonSharp APIs directly and are the
+  concrete VM-migration surface.
+- `CoreAiModsLifetimeScope` and `CoreAiModsInstaller` exist. The Mods scope is wired in eight demo scenes;
+  package consumers still opt in by adding/parenting the scope.
+- `link.xml` remains at `Assets/CoreAiUnity/link.xml` and is MoonSharp-oriented. `Lua.dll` and
+  `Lua.Annotations.dll` remain dev-harness-only under `Assets/dev/LuaVmComparison/Plugins/`.
+- `Microsoft.Bcl.TimeProvider` has one owner: NuGet (`Packages/nuget-packages/...` 10.0.9). The stale
+  developer-harness DLL copy was removed to prevent duplicate-assembly imports.
 
 ## Proven facts (de-risk done)
 - Lua-CSharp on WebGL: sync `.GetResult()` deadlocks on `coroutine.yield`; **frame-pumped async drive fixes it**
@@ -92,8 +96,8 @@ tick runtime / formulas / bindings / coroutine / auto-repair) with the MoonSharp
 equivalent. Gate Phase 2 on a viable budget story.
 
 ### Phase 1 — finish install (small; most already done)
-Move `Lua.dll` + `Lua.Annotations.dll` (source generator) + `Microsoft.Bcl.TimeProvider.dll` into
-`CoreAI.Mods` (single copy — avoid duplicate-assembly load with the harness). `link.xml`: add AOT preserves
+Move `Lua.dll` + `Lua.Annotations.dll` (source generator) into `CoreAI.Mods`. Reuse the single NuGet-owned
+`Microsoft.Bcl.TimeProvider` dependency; do not vendor another DLL copy. `link.xml`: add AOT preserves
 for the Lua assemblies; plan removal of MoonSharp/Resources/TextAsset preserves once MoonSharp is dropped;
 decide package ownership (Mods).
 
@@ -113,8 +117,8 @@ Swap MoonSharp → Lua-CSharp across **all execution entry points**, behind `ILu
 - Audit every `ILuaExecutor` caller for hidden `.GetAwaiter().GetResult()`; make the tool-result pipeline
   non-blocking (UniTask/`Awaitable`). Drop MoonSharp from `CoreAI.Mods.asmdef` when done.
 
-### Phase 2b — build the missing DI scope (GATE test)
-`CoreAiModsLifetimeScope` (child of CoreAI scope) + installer: resolve parent services, register the Lua
+### Phase 2b — verify the existing DI scope after the VM swap (GATE test)
+`CoreAiModsLifetimeScope` (child of CoreAI scope) + installer already resolve parent services and register the Lua
 runtime/tools, in build-callback `AddToolForRole(Programmer, execute_lua/manage_mods)` + `AddSkillForRole
 (Lua Modding)` + spawn tick driver. Gate: EditMode test that after both scopes build, Programmer actually has
 `execute_lua`/`manage_mods`/`Lua Modding`. Delete dead `CoreAiChatExternalDriver.RunLuaDiag()` (`#if

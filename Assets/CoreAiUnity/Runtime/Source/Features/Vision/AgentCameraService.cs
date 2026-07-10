@@ -271,6 +271,7 @@ namespace CoreAI.Vision
             }
 
             Transform t = camera.transform;
+            Vector3 originalPosition = t.position;
             Vector3 pos = t.position;
             Vector3 euler = t.eulerAngles;
             bool hasLookAt = !string.IsNullOrWhiteSpace(lookAtTarget);
@@ -303,16 +304,16 @@ namespace CoreAI.Vision
 
             if (hasLookAt)
             {
-                GameObject target = GameObject.Find(lookAtTarget.Trim());
+                Transform target = FindActiveTransformByName(lookAtTarget.Trim());
                 if (target == null)
                 {
                     // Restore position: nothing meaningful was applied.
-                    t.position = camera.transform.position;
+                    t.position = originalPosition;
                     errorCode = "target_not_found";
                     return false;
                 }
 
-                t.LookAt(target.transform);
+                t.LookAt(target);
                 return true;
             }
 
@@ -467,8 +468,7 @@ namespace CoreAI.Vision
 
             if (!string.IsNullOrEmpty(trimmed) && !explicitMain)
             {
-                GameObject go = GameObject.Find(trimmed);
-                Camera named = go != null ? go.GetComponent<Camera>() : null;
+                Camera named = FindActiveCameraByName(trimmed);
                 if (named != null)
                 {
                     return named;
@@ -502,8 +502,7 @@ namespace CoreAI.Vision
 
             if (!string.IsNullOrEmpty(trimmed) && !explicitMain)
             {
-                GameObject go = GameObject.Find(trimmed);
-                return go != null ? go.GetComponent<Camera>() : null;
+                return FindActiveCameraByName(trimmed);
             }
 
             if (!explicitMain)
@@ -516,6 +515,42 @@ namespace CoreAI.Vision
             }
 
             return Camera.main;
+        }
+
+        private static Camera FindActiveCameraByName(string cameraName)
+        {
+            Camera[] cameras = UnityEngine.Object.FindObjectsByType<Camera>(
+                FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (Camera camera in cameras)
+            {
+                if (camera != null && string.Equals(camera.name, cameraName, StringComparison.Ordinal))
+                {
+                    return camera;
+                }
+            }
+
+            return null;
+        }
+
+        private static Transform FindActiveTransformByName(string objectName)
+        {
+            Transform[] transforms = UnityEngine.Object.FindObjectsByType<Transform>(
+                FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (Transform transform in transforms)
+            {
+                if (transform == null || !string.Equals(transform.name, objectName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Scene scene = transform.gameObject.scene;
+                if (scene.IsValid() && scene.isLoaded)
+                {
+                    return transform;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>The first active marked camera that applies to <paramref name="agentRoleId"/>.</summary>

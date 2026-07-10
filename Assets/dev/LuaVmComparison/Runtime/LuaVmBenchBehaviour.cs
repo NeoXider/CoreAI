@@ -39,8 +39,9 @@ namespace LuaVmComparison
         {
             try
             {
-                // Correctness-only smoke: safe on single-threaded WebGL/WASM (no threads/timers), and forces
-                // Lua-CSharp's Lua.dll to run under IL2CPP/AOT — the point of the WebGL viability check.
+                // Synchronous correctness smoke: safe on single-threaded WebGL/WASM and forces Lua-CSharp's
+                // Lua.dll to run under IL2CPP/AOT. The yielding coroutine case lives in LuaCSharpPumpSmoke;
+                // synchronously waiting for that case would deadlock the single player-loop thread.
                 // Pass Debug.Log as a per-step sink so each step is flushed to the browser console BEFORE it runs;
                 // if a step blocks the WASM main thread, the last "LUAVM_STEP:" line names the culprit.
                 string report = LuaVmBench.RunCorrectnessSmoke(s => Debug.Log("[LuaVmComparison] " + s));

@@ -12,14 +12,36 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void WaveAutoBattlerModsDemo_HasFullLuaEnabled()
         {
-            EditorSceneManager.OpenScene(WaveScenePath, OpenSceneMode.Single);
+            SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
+            try
+            {
+                EditorSceneManager.OpenScene(WaveScenePath, OpenSceneMode.Single);
 
-            MonoBehaviour scope = FindBehaviour("CoreAI.Composition.CoreAILifetimeScope");
-            Assert.IsNotNull(scope, "Scene must include CoreAILifetimeScope.");
+                MonoBehaviour scope = FindBehaviour("CoreAI.Composition.CoreAILifetimeScope");
+                Assert.IsNotNull(scope, "Scene must include CoreAILifetimeScope.");
 
-            SerializedObject scopeSo = new(scope);
-            Assert.IsTrue(scopeSo.FindProperty("enableFullLuaAccess").boolValue,
-                "Wave auto-battler demo must grant Full Lua for scene-object mod tasks.");
+                SerializedObject scopeSo = new(scope);
+                Assert.IsTrue(scopeSo.FindProperty("enableFullLuaAccess").boolValue,
+                    "Wave auto-battler demo must grant Full Lua for scene-object mod tasks.");
+            }
+            finally
+            {
+                RestoreSceneSetupOrCreateEmptyScene(originalSetup);
+            }
+        }
+
+        private static void RestoreSceneSetupOrCreateEmptyScene(SceneSetup[] originalSetup)
+        {
+            foreach (SceneSetup scene in originalSetup)
+            {
+                if (scene.isLoaded)
+                {
+                    EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
+                    return;
+                }
+            }
+
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         }
 
         private static MonoBehaviour FindBehaviour(string fullName)

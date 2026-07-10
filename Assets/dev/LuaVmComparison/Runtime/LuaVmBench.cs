@@ -76,9 +76,11 @@ namespace LuaVmComparison
         }
 
         /// <summary>
-        /// Single-threaded-safe smoke: runs ONLY the correctness corpus (no perf loops, no thread/timer-based
-        /// runaway halt), so it is safe on WebGL/WASM where threads do not exist. Its real purpose is to force
-        /// Lua-CSharp's <c>Lua.dll</c> to be exercised in an IL2CPP/AOT player, proving the VM survives AOT.
+        /// Single-threaded-safe smoke: runs the synchronous correctness corpus (no perf loops, no
+        /// thread/timer-based runaway halt). Lua-CSharp's yielding coroutine case is intentionally delegated
+        /// to <see cref="LuaCSharpPumpSmoke"/>, which pumps its async continuation across player-loop frames.
+        /// Its purpose is to exercise Lua-CSharp's <c>Lua.dll</c> in an IL2CPP/AOT player without blocking the
+        /// single WebGL/WASM thread.
         /// </summary>
         public static string RunCorrectnessSmoke() => RunCorrectnessSmoke(null);
 
@@ -106,10 +108,21 @@ namespace LuaVmComparison
 
                 var runners = new[] { moon, lc };
                 bool allOk = true;
+                bool skippedYieldingLuaCSharp = false;
                 foreach (var c in Correctness)
                 {
                     foreach (var r in runners)
                     {
+                        if (c.Name == "coroutines" && r is LuaCSharpRunner)
+                        {
+                            skippedYieldingLuaCSharp = true;
+                            const string skipped =
+                                "SKIP Lua-CSharp coroutines: run LuaCSharpPumpSmoke to verify the yielding async path";
+                            sb.AppendLine(skipped);
+                            Emit("LUAVM_STEP: " + skipped);
+                            continue;
+                        }
+
                         Emit($"LUAVM_STEP: eval {r.Name} {c.Name} ...");
                         string got = r.Eval(c.Code);
                         bool ok = got == c.Expected;
@@ -120,7 +133,20 @@ namespace LuaVmComparison
                     }
                 }
 
-                sb.AppendLine(allOk ? "RESULT: all correctness cases pass on both VMs under AOT." : "RESULT: a case FAILED — see above.");
+                if (!allOk)
+                {
+                    sb.AppendLine("RESULT: a case FAILED — see above.");
+                }
+                else if (skippedYieldingLuaCSharp)
+                {
+                    sb.AppendLine(
+                        "RESULT: synchronous AOT cases pass; run LuaCSharpPumpSmoke for the yielding coroutine path.");
+                }
+                else
+                {
+                    sb.AppendLine("RESULT: all correctness cases pass on both VMs under AOT.");
+                }
+
                 return sb.ToString();
             }
             finally

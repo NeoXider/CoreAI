@@ -2,16 +2,17 @@
 
 > Updated 2026-07-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Release candidate: 5.2.0. Verified 2026-07-10: EditMode 1,598 total / 1,594 passed /
-> 0 failed / 4 third-party ignored; PlayMode `FastNoLlm` 67/67 (includes ten-scene demo smoke);
-> live local `qwen3.5-4b-mtp` memory and `world_command` checks 2/2.
+> Release candidate: 5.3.0. Verified 2026-07-10: EditMode 1,613 total / 1,609 passed /
+> 0 failed / 4 optional third-party ignored; deterministic G8 PlayMode 3/3; full local
+> `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
 ## [R0] IMMEDIATE — verification gate on next editor start (blocks release)
 
 > The previously uncompiled audit wave is now compiled and verified in Unity 6000.3.14f1.
 - [x] Compile clean (0 `error CS`); Hub integration compiled in the monorepo via `COREAI_HAS_HUB`.
-- [x] Full EditMode suite green: 1,598 total / 1,594 passed / 4 third-party ignored / 0 failed.
-- [x] PlayMode `FastNoLlm` suite green: 67/67.
+- [x] Full EditMode suite green: 1,613 total / 1,609 passed / 4 optional third-party ignored / 0 failed.
+- [x] Final post-5.3.0 PlayMode `FastNoLlm`: 67/67 passed.
+- [x] Local 4B benchmark gate: suite v1.7 / benchmark v2, 88.1/100; G8 3/3.
 - [x] Audit docs removed (2026-07-10). Per the owner's rule ("no audits should live in the project"),
       all 2026-07-10 audit reports were deleted after their still-open code findings were transferred to
       live TODO items: **CI** (F-12, below), **package isolation** (F-22, below), **durability** and
@@ -53,8 +54,8 @@
       `unity_find_by_tag` / `unity_find_by_component` implementations onto the shared budgeted walker.
 - [ ] Durability: WebGL sync after `WorldStateManager.Reset`; recoverable two-phase audit rotation;
       surface audit worker failures during runtime rather than only at Dispose/testing flush.
-- [ ] Resolve `allowedLuaScenes` contract mismatch (tooltip says empty=none; runtime treats empty as
-      any Build Settings scene) and add an explicit security-policy test.
+- [x] `allowedLuaScenes` contract pinned as deliberately permissive when empty (any Build Settings scene),
+      with an explicit security-policy test; Inspector tooltip now matches the runtime contract.
 - [ ] Hub "Audit Log" page: viewer + chain-integrity badge over `AuditLogVerifier` (natural home for
       the new read/verify API).
 
@@ -72,9 +73,12 @@
 
 ### [R6] Advanced resilience (basic fallback already shipped & tested)
 
-> `FallbackLlmClientDecorator` (primary→1 secondary) is shipped and covered by 10 EditMode tests. Missing:
-- [ ] **Circuit breaker** — trip a backend "open" after N consecutive failures so a dead primary doesn't cost
-      `timeout × (retries+1)` every turn; half-open probe to recover.
+> `FallbackLlmClientDecorator` (primary→1 secondary) is shipped and covered by 10 EditMode tests.
+> `CircuitBreakerLlmClientDecorator` is also shipped and covered, but remains an opt-in public decorator.
+- [x] **Circuit breaker primitive** — transient-failure threshold, open short-circuit, half-open recovery,
+      streaming coverage, deterministic clock, and six EditMode tests.
+- [ ] Wire circuit-breaker settings into the production composition root (threshold/cooldown/provider scope)
+      before claiming that every default backend uses it automatically.
 - [ ] **Multi-provider fallback chain** (ordered list, not just 1 secondary) + secondary wrapped in the same
       retry/logging decorators (today the secondary gets no HTTP-retry wrapper).
 - [ ] **Per-provider rate limiting** (token/request bucket) distinct from the Lua-generation limiter.
@@ -109,10 +113,11 @@
 - [ ] Separate inter-token idle timeout (distinct from total request timeout) in SSE streaming.
 - [ ] Surface provider-native `reasoning_content` SSE deltas as a collapsible "thinking" channel. *(Now handled consistently as internal — not surfaced as visible text in either path — 2026-07-01.)*
 - [x] ~~Pin "raw tool-call JSON never leaks into visible Text"~~ — streaming now fails closed on incomplete/unparseable text-shaped tool JSON (2026-07-01); a dedicated hard leak test would still be nice.
-- [ ] Harden `ConversationHistoryPruner.ExtractToolNames` against `Full`-policy tool blocks (name-only markdown parse is brittle).
+- [x] Harden `ConversationHistoryPruner.ExtractToolNames` against nested `Full`-policy detail blocks.
 - [x] ~~Fix `ToolExecutionPolicy.IsToolResultSuccess` lossy "contains 'success'" heuristic~~ — done 2026-07-01 (JSON `error`/`ok:false`/`succeeded:false` + failure prefixes, classified before truncation).
 - [x] ~~`world_command` `apply_force`/`set_velocity` accept an all-zero vector~~ — fixed 2026-07-01 (require at least one vector component; explicit per-axis `0` still honored).
-- [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI. *(`SseToolCallAccumulator` many-small-deltas coverage added 2026-07-01.)*
+- [ ] Tests: per-tool timeout firing; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI.
+      *Max-roundtrips cap termination is covered; `SseToolCallAccumulator` many-small-deltas coverage was added 2026-07-01.*
 - [ ] Chat: queue outgoing user messages while a turn is in progress (buffer sends, flush in order when the
       active turn completes) instead of only disabling the send button / dropping input.
 - [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite.
@@ -151,7 +156,7 @@
       still runs/screenshots but is excluded from `SuiteBaseScore`/pass-rate/dimension breakdown (a
       subject-only override still uses the known `GenericGoal` scaffold and stays gradeable). Verified live
       against qwen3.5-4b-mtp: a 3-cube custom prompt now shows "No graded groups" instead of a punishing FAIL.
-- [ ] `RoleFitness` "Orchestrator / Director" can rate a small model 9+/10 off G1-G7 alone, since almost
+- [ ] `RoleFitness` "Orchestrator / Director" can rate a small model 9+/10 off G1-G8 alone, since almost
       every scenario resolves in a single LLM turn (`RunObservation.Turns` = 1 nearly everywhere) — high
       Reasoning/Intent scores reflect "parsed the instruction correctly in one shot", not sustained
       multi-turn orchestration with error recovery, which is what the role's own description asks for. G4's
@@ -161,6 +166,7 @@
       would affect every historical comparison and needs a user decision, not a quiet fix. A real fix likely
       needs a genuinely multi-turn scenario (adversarial tool failures forcing retries, or a task that can't
       complete in one turn by construction) feeding into the Director gate/weights specifically.
+      G8 adds described-state conditional selection, but it is still single-turn and does not close this gap.
 
 ## Shipped (recent)
 

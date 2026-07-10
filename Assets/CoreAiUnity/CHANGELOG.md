@@ -4,11 +4,26 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.3.0 - camera stability and benchmark v2 host (2026-07-10)
+
 - **`CoreAI → Getting Started` welcome window.** A single onboarding entry point that opens automatically
   on first import: a one-click launcher for every bundled demo (each with a one-line description and an
   offline/needs-model tag, strongest demos featured first), the current backend status with quick links to
   Settings and recommended models, a "30-second start" Create-Chat-Demo button, and links to Quick Start /
   full walkthrough / demo READMEs. Makes the 10 demo scenes discoverable instead of buried under menus.
+- Replaced `GameObject.Find` camera/target lookup with active-scene-safe typed enumeration, eliminating
+  native `go.IsActive()` assertions when EditMode tests leave inactive objects behind. Missing look targets
+  now restore the moved object position before returning an error.
+- Isolated `LiveMechanicsModsChat` scene tests from the caller's scene setup and added camera regressions
+  for inactive objects, successful look-at, and missing-target rollback.
+- Removed the stale developer-harness copy of `Microsoft.Bcl.TimeProvider.dll`; the harness now reuses the
+  single NuGet-owned 10.0.9 assembly. Its synchronous correctness smoke no longer blocks on Lua-CSharp
+  yielding coroutines and directs those cases to the frame-pumped smoke.
+- Benchmark comparison titles now come from `BenchmarkInfo.TitleWithVersion`, so v2 reports cannot be
+  mislabeled as v1.
+- Verification snapshot: EditMode 1,613 total (1,609 passed, 4 optional third-party ignored, 0 failed);
+  PlayMode `FastNoLlm` 67/67; deterministic G8 PlayMode 3/3; full local 4B G1-G8 benchmark
+  88.1/100 with G8 3/3.
 
 ## 5.2.0 - verified demos and release stabilization (2026-07-10)
 

@@ -71,7 +71,9 @@ NOT a git UPM package. A `?path=...git` manifest entry for the core is invalid (
 package resolution). Supported Unity install = **NuGetForUnity** (core) + git UPM
 `?path=src/Lua.Unity/Assets/Lua.Unity` (Unity layer). Transitive runtime deps: `LuaCSharp.Annotations`,
 `Microsoft.Bcl.TimeProvider` 8.0.0, `System.Runtime.CompilerServices.Unsafe` 6.0.0
-(`LuaCSharp.SourceGenerator` is analyzer-only, not a runtime dep).
+(`LuaCSharp.SourceGenerator` is analyzer-only, not a runtime dep). This repository resolves the compatible
+NuGet-owned `Microsoft.Bcl.TimeProvider` 10.0.9 copy from `Assets/Packages`; do not vendor a second copy
+into this harness.
 
 - **Sandbox (STRONG).** Libraries are per-library opt-in: `OpenBasicLibrary`, `OpenStringLibrary`,
   `OpenTableLibrary`, `OpenMathLibrary`, `OpenCoroutineLibrary`, `OpenBitwiseLibrary`, plus the dangerous
@@ -160,10 +162,10 @@ a large Lua-CSharp win on everything except string-building. The remaining decid
 The core is NuGet, so there's no zero-touch git-URL install. Three ways to get `Lua.dll` into the project,
 cheapest-first:
 
-1. **Vendored DLLs (self-contained, throwaway):** drop `Lua.dll` + `Lua.Annotations.dll` +
-   `Microsoft.Bcl.TimeProvider.dll` into `Assets/dev/LuaVmComparison/Plugins/` (skip `Unsafe` unless Unity
-   errors on a missing type). No manifest changes, delete-the-folder rollback. Risk: `TimeProvider`/`Unsafe`
-   duplicate-assembly conflicts with Unity's runtime — resolve per compile error.
+1. **Vendored Lua DLLs (current throwaway setup):** keep only `Lua.dll` + `Lua.Annotations.dll` in
+   `Assets/dev/LuaVmComparison/Plugins/`. Reuse the NuGet-owned `Microsoft.Bcl.TimeProvider` 10.0.9 from
+   `Assets/Packages`; adding another TimeProvider DLL creates a duplicate-assembly warning. Skip `Unsafe`
+   unless Unity reports a missing type. No manifest changes, delete-the-folder rollback.
 2. **NuGetForUnity (supported):** add NuGetForUnity (git UPM) + a `packages.config` pinning `LuaCSharp 0.5.5`;
    it restores all transitive deps automatically. Cleanest for correctness, heaviest project footprint.
 3. **Vendored source:** copy `src/Lua/**` into an asmdef — rejected: depends on the source generator for

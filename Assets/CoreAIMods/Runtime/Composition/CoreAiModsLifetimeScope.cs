@@ -26,7 +26,7 @@ namespace CoreAI.Composition
         [Tooltip("When on, Full-tier Lua reflection may touch non-public members. Requires Full access.")]
         [SerializeField] private bool enableFullLuaPrivateAccess;
 
-        [Tooltip("Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = none.")]
+        [Tooltip("Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = any scene in Build Settings.")]
         [SerializeField] private string[] allowedLuaScenes;
 
         [Tooltip("Optional ScriptableObject implementing IFullLuaAccessBlacklistPolicy to deny Full-tier " +

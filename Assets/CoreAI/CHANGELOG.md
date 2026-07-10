@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-- **Benchmark suite v2 — new G8 "observe-then-act" group.** `BenchmarkInfo.Version` bumped `v1 → v2`.
+## 5.3.0 - benchmark v2 and resilience primitives (2026-07-10)
+
+- **Benchmark suite v2 — new G8 described-state selection group.** `BenchmarkInfo.Version` bumped `v1 → v2`.
   Adds a group that gives the model a DESCRIBED, already-populated scene and grades acting on the named
   existing objects (clear only junk, raise only undersized towers via conditional selection, encode an
   observed rule as Lua) — the "director-AI / beyond the chat box" axis. Prompts state the goal, not the
@@ -23,7 +25,11 @@
   dead primary no longer costs `timeout × (retries+1)` every turn. After a cooldown it half-opens and
   admits one probe: success closes it, failure re-opens it. Caller-caused failures (auth, invalid
   request, context-length, cancellation) never trip it. Covers both `CompleteAsync` and the streaming
-  path. Deterministic (injected monotonic clock); 6 EditMode tests.
+  path. Deterministic (injected monotonic clock); 6 EditMode tests. This is an opt-in public decorator;
+  production composition/settings wiring remains tracked in `TODO.md`.
+- Final release verification: 1,613 EditMode tests discovered (1,609 passed, 4 optional third-party
+  ignored, 0 failed); PlayMode `FastNoLlm` 67/67; the local `qwen3.5-4b-mtp` full G1-G8 run scored
+  88.1/100 and passed G8 3/3.
 
 ## 5.2.0 - stability gate and extension APIs (2026-07-10)
 

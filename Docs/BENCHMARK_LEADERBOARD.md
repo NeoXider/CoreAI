@@ -2,22 +2,31 @@
 
 This is the living public leaderboard for the [CoreAI Game-Creation Benchmark](../Assets/CoreAIBenchmark/README.md) (`com.neoxider.coreaibenchmark`). The benchmark measures how well an LLM can *build a game* inside CoreAI — not how well it can describe one. Each scenario drives the real `execute_lua` and `world_command` tools through eight scenario groups (G1 world building, G2 mechanic Lua, G3 reasoning/design, G4 playthroughs, G5 strict instruction-following, G6 free-build castle hero, G7 comprehensive integration, G8 observe-then-act), then grades the resulting world state, Lua logic slots, simulated playthroughs, screenshots, and tool-call trace into a 0-100 suite score. It is **not** a text-quality benchmark: a model can be a great conversationalist and still fail here if it cannot call tools correctly, obey constraints, or reason through game rules. The leaderboard exists to answer one practical question — "can this model build a game, and for which role?" — and anyone can submit results (see [Submit your model's score](#submit-your-models-score)).
 
+G8's current "observe" input is a textual description of existing objects. It measures single-turn
+conditional selection and mutation; it does not claim live scene sensing or sustained multi-turn recovery.
+
 Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [benchmark design](../Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/BENCHMARK_DESIGN.md) · [example full report](Images/example_report/example_report.md).
 
 ## Suite Versioning Policy
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v1.6** (G1-G7, no token caps).
+**Current suite version: v1.7** (G1-G8, no token caps).
 
 ### Suite version history
 
 | Suite | Status | Notes |
 |---|---|---|
-| v1.6 | **Current** | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. Baseline for this leaderboard. |
+| v1.7 | **Current** | G1-G8; adds described-state conditional selection and benchmark v2 prompts. |
+| v1.6 | Historical | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. |
 | < v1.6 | Retired | Pre-leaderboard development iterations; results were not published and are not comparable. |
 
-## Leaderboard — Suite v1.6
+## Leaderboard — Suite v1.7
+
+No public rankable v1.7 submissions yet. A local release-gate run may verify the suite without becoming a
+published leaderboard row; submissions require the artifacts and hardware disclosure below.
+
+## Historical Leaderboard — Suite v1.6
 
 Column legend: **Suite** = 0-100 suite base score (ranking key) · **Pass-rate** = share of scenario runs that PASS · **P/PA/F** = PASS / PARTIAL / FAIL counts · **Tools** = tool correctness · **Intent** = intent and sequence · **Task** = task completion · **Determ** = determinism · **Reason** = reasoning · **Instr** = instruction adherence · **Eff** = effective tok/s (end-to-end) · **Tool-err** = failed tool-call rate · **Tokens** = completion tokens for the run · **Run** = run id (report timestamp).
 
@@ -61,14 +70,14 @@ Community submissions are welcome. The workflow:
 
 Follow the [How To Run](../Assets/CoreAIBenchmark/README.md#how-to-run) section of the benchmark guide. In short:
 
-- **Editor UI:** open `CoreAI/Benchmarks/Benchmark Window (UITK)...`, choose model / base URL, select all groups **G1-G7**, and start a run. For a repeat with the last saved settings use `CoreAI/Benchmarks/Run Game-Creation Benchmark`.
+- **Editor UI:** open `CoreAI/Benchmarks/Benchmark Window (UITK)...`, choose model / base URL, select all groups **G1-G8**, and start a run. For a repeat with the last saved settings use `CoreAI/Benchmarks/Run Game-Creation Benchmark`.
 - **Batchmode / automation:**
 
   ```powershell
   Unity.exe -batchmode -projectPath C:\Git\CoreAI `
     -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
     -coreAiBenchmarkModel <your-model-id> `
-    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7 `
+    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
     -coreAiBenchmarkReps 3
   ```
 
@@ -86,13 +95,13 @@ Add one row to the appropriate table (cloud or local) with your name/handle in *
 | Run id | The `yyyyMMdd_HHmmss` timestamp from the report filename — goes into the **Run** column. |
 | Model identity | Exact model id / file name and, for local models, the quantization (e.g. `Q4_K_M`, `imatrix`) and context length used. |
 | Hardware | For local runs: GPU/CPU, VRAM/RAM, and the runtime (LM Studio / llama.cpp / other) with version. Cloud runs: provider + endpoint type. |
-| Suite version | Must match the leaderboard section you are adding to (currently **v1.6**; check `suiteVersion` in your report JSON). |
-| Settings | Groups run (full submissions must be G1-G7), repetitions, any timeout overrides, and any non-default endpoint settings. |
+| Suite version | Must match the leaderboard section you are adding to (currently **v1.7**; check `suiteVersion` in your report JSON). |
+| Settings | Groups run (full current submissions must be G1-G8), repetitions, any timeout overrides, and any non-default endpoint settings. |
 
 ### 3. What reviewers check
 
 - The report JSON parses, its `suiteVersion` matches the section, and the table row matches the JSON's suite score, pass-rate, P/PA/F, dimension scores, tool-error rate, tokens, and run id.
-- All seven groups G1-G7 were run (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
+- All eight groups G1-G8 were run for a current v1.7 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
 - The model id, quantization, and hardware declaration are plausible and complete.
 - No signs of harness modification (scenario prompts, weights, penalties, or caps changed locally).
 

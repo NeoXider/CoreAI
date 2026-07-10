@@ -76,7 +76,7 @@ drives a real Unity scene (primitive GameObjects with name labels, tinted green/
 and a **screenshot is captured and embedded** in the report (and shown inline in the History window).
 Other groups skip the screenshot (their scene is incidental); skipped headlessly when no GPU is present.
 
-## Implemented: G1 – G6
+## Implemented: G1 – G8
 
 ### G2 — Runtime mechanic authoring (deterministic core)
 Pure-Lua tasks. The game declares named **logic slots** (`LuaLogicSlots`: `calculate_damage`,
@@ -124,6 +124,18 @@ screenshot preserves the model's layout (no grid normalisation, no ghosts) and i
 image at the top of the report**. Purpose is a vivid, comparable visual of what each model builds — not a
 precise score.
 
+### G7 — Comprehensive integration
+A key-and-gate puzzle combines exact world construction with Lua logic in one model session. The harness
+checks Player/Gate/Key placement, a proximity-based `key_found` slot, and consistency between the spawned
+world and the logic that refers to it. This is the end-to-end integration group and captures a scene image.
+
+### G8 — Described-state conditional selection
+The prompt provides a textual snapshot of named existing objects and asks the model to mutate only the
+matching subset: remove two junk objects, scale only undersized towers, or encode a described wave rule.
+Grading validates exact targets and rejects position/rotation/parent pollution or extra mutations. This is
+a single-turn described-state reasoning test; it does not inspect a live scene or measure sustained
+multi-turn recovery.
+
 ## Recorded ideas (not yet implemented)
 
 ### Incremental build (multi-turn, regression-aware)
@@ -136,7 +148,7 @@ A golden reference (hand-authored world commands + logic slots) passes a behavio
 sees only the brief and is graded by how many of the golden behavior tests it also passes. Cost:
 maintaining golden references.
 
-### G8 — Game jam (open-ended, judge + deterministic floor)
+### Future game jam (open-ended, judge + deterministic floor)
 "Make a fun one-screen mini-game." Deterministic floor first (runs without Lua errors? ≥3 interactive
 objects? ≥1 callable win/lose slot?), then an LLM-judge scores creativity/coherence with a capped
 contribution (deterministic stays ≥ 50% per the scoring model's judge-blend clamp). Flakiest, needs a
@@ -157,7 +169,7 @@ date and model in the filename, so runs are self-identifying and never overwrite
 `GameCreationBenchmarkLauncher` (editor-only test assembly) drives the suite via `TestRunnerApi`:
 - Menu **CoreAI ▸ Benchmarks ▸ Run Game-Creation Benchmark** (one click; opens the report when done).
 - Menu **CoreAI ▸ Benchmarks ▸ Benchmark Window (UITK)…** — Run/History/Models/Compare tabs: pick
-  model/connection, G1–G6 groups and repetitions, browse past runs, a sortable model leaderboard, and
+  model/connection, G1–G8 groups and repetitions, browse past runs, a sortable model leaderboard, and
   build the cross-model comparison report.
 - Batchmode: `-executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli`
   with `-coreAiBenchmarkModel` / `-coreAiBenchmarkGroups` / `-coreAiBenchmarkReps`.

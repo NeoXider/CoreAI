@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaimods",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "displayName": "CoreAI Mods (Lua)",
   "unity": "6000.0",
   "description": "Lua modding layer for CoreAI: the MoonSharp sandbox, execute_lua and manage_mods tools, the Lua Modding skill, the mod runtime, persistent mod stores, gameplay bindings, and mod UI. Depends on com.neoxider.coreai / com.neoxider.coreaiunity. Install this package only when you want AI/player-authored Lua mods; without it CoreAI compiles Lua-free. Requires the MoonSharp package (org.moonsharp.moonsharp).",
@@ -11,7 +11,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreai": "5.2.0",
-    "com.neoxider.coreaiunity": "5.2.0"
+    "com.neoxider.coreai": "5.3.0",
+    "com.neoxider.coreaiunity": "5.3.0"
   }
 }

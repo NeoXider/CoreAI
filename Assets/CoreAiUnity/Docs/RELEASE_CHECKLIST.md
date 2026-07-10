@@ -7,7 +7,7 @@ Use this checklist before every commit or release that changes any of the five U
 
 - Update the affected package manifests and keep all five package versions in lockstep.
 - Keep every internal `com.neoxider.coreai*` dependency aligned with that version.
-- `CoreAIBenchmark` depends on Core, Unity, and Mods because G1-G7 execute real Lua tools.
+- `CoreAIBenchmark` depends on Core, Unity, and Mods because G1-G8 execute real Lua tools.
 - Keep changelog headings consistent with package.json versions.
 
 ## Changelog

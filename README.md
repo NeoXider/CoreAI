@@ -85,9 +85,9 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 
 ## Game-Creation Benchmark
 
-CoreAI includes a local game-creation benchmark that measures how well an LLM builds a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across seven scenario groups (world-building, Lua logic, math reasoning, playthroughs, instruction adherence, a free-build castle showcase and a comprehensive integration puzzle), adds 0-10 game-fitness ratings per role, and can run against any OpenAI-compatible endpoint — cloud APIs or a local LMStudio multi-model sweep.
+CoreAI includes a local game-creation benchmark that measures how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across eight scenario groups (world-building, Lua logic, math reasoning, playthroughs, instruction adherence, a free-build castle showcase, comprehensive integration, and described-state conditional selection), adds 0-10 game-fitness ratings per role, and can run against any OpenAI-compatible endpoint — cloud APIs or a local LMStudio multi-model sweep.
 
-**Cloud / frontier models** — one full G1-G7 run each (suite v1.6, no token caps):
+**Historical cloud / frontier baseline** — one full G1-G7 run each (suite v1.6, no token caps; do not compare directly with current v1.7/G1-G8 results):
 
 <img src="Docs/Images/benchmark_comparison_cloud.svg" alt="Model comparison — Game-Creation Benchmark, cloud models ranked by suite score" width="900">
 

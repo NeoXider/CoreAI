@@ -37,6 +37,13 @@ namespace CoreAI.Tests.EditMode
             return go.AddComponent<Camera>();
         }
 
+        private GameObject NewGameObject(string name)
+        {
+            GameObject go = new(name);
+            _created.Add(go);
+            return go;
+        }
+
         private static CoreAiAgentCamera Mark(Camera cam, string role, bool allowMove)
         {
             CoreAiAgentCamera marker = cam.gameObject.AddComponent<CoreAiAgentCamera>();
@@ -172,6 +179,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ResolveCaptureCamera_ExplicitInactiveName_DoesNotResolveInactiveCamera()
+        {
+            Camera inactive = NewCamera("InactiveCaptureCam");
+            inactive.gameObject.SetActive(false);
+            var service = new AgentCameraService();
+
+            Camera resolved = service.ResolveCaptureCamera("InactiveCaptureCam", Role, out _);
+
+            Assert.AreNotSame(inactive, resolved);
+        }
+
+        [Test]
+        public void TryResolveMovableCamera_ExplicitInactiveName_DeniedAsNoCamera()
+        {
+            Camera inactive = NewCamera("InactiveMovableCam");
+            Mark(inactive, role: "", allowMove: true);
+            inactive.gameObject.SetActive(false);
+            var service = new AgentCameraService();
+
+            bool ok = service.TryResolveMovableCamera(
+                "InactiveMovableCam", Role, out Camera resolved, out CameraMoveDenial denial);
+
+            Assert.IsFalse(ok);
+            Assert.IsNull(resolved);
+            Assert.AreEqual(CameraMoveDenialReason.NoCamera, denial.Reason);
+        }
+
+        [Test]
         public void TryApplyLook_SetsPosition_AndRejectsNoChange()
         {
             Camera cam = NewCamera("MoveCam");
@@ -185,6 +220,40 @@ namespace CoreAI.Tests.EditMode
             bool noChange = service.TryApplyLook(cam, null, null, null, null, null, null, null, out string err2);
             Assert.IsFalse(noChange);
             Assert.AreEqual("no_change", err2);
+        }
+
+        [Test]
+        public void TryApplyLook_ActiveTarget_RotatesFromFinalPosition()
+        {
+            Camera cam = NewCamera("LookCamera");
+            GameObject target = NewGameObject("LookTarget");
+            target.transform.position = new Vector3(4f, 2f, 8f);
+            var service = new AgentCameraService();
+
+            bool applied = service.TryApplyLook(
+                cam, 1f, 2f, 3f, null, null, null, target.name, out string error);
+
+            Assert.IsTrue(applied);
+            Assert.IsNull(error);
+            Assert.AreEqual(new Vector3(1f, 2f, 3f), cam.transform.position);
+            Vector3 direction = (target.transform.position - cam.transform.position).normalized;
+            Assert.Greater(Vector3.Dot(cam.transform.forward, direction), 0.999f);
+        }
+
+        [Test]
+        public void TryApplyLook_MissingTarget_RestoresOriginalPosition()
+        {
+            Camera cam = NewCamera("RestoreCamera");
+            Vector3 originalPosition = new(9f, 8f, 7f);
+            cam.transform.position = originalPosition;
+            var service = new AgentCameraService();
+
+            bool applied = service.TryApplyLook(
+                cam, 1f, 2f, 3f, null, null, null, "MissingLookTarget", out string error);
+
+            Assert.IsFalse(applied);
+            Assert.AreEqual("target_not_found", error);
+            Assert.AreEqual(originalPosition, cam.transform.position);
         }
 
         private static AgentCameraInfo Find(IReadOnlyList<AgentCameraInfo> cameras, string name)

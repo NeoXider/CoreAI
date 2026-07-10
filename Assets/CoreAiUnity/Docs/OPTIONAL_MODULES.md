@@ -13,7 +13,7 @@ packages so a consumer installs only the surfaces it uses.
 
 `CoreAI.Core.asmdef` has no MoonSharp reference. Lua VM/sandbox implementations and their
 MoonSharp/Lua-CSharp dependencies live in `CoreAI.Mods`. `CoreAI.Source` owns the guarded LLMUnity
-adapter. The benchmark depends on Core, Unity, and Mods because G1-G7 execute real Lua tools.
+adapter. The benchmark depends on Core, Unity, and Mods because G1-G8 execute real Lua tools.
 
 ## Editor module tool
 
