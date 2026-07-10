@@ -4,6 +4,37 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### 5.1.0 - audit remediation: durability, fallback correctness, sandbox hardening (2026-07-10)
+
+Release of the 2026-07-10 audit remediation wave (findings F-01…F-16 of
+`Docs/REPOSITORY_AUDIT_2026-07-10.md`; verification in `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`).
+Version lockstep with `com.neoxider.coreai` 5.1.0; `coreaimods` / `coreaihub` / `coreaibenchmark`
+ship the same version.
+
+- **World state (F-04, F-06):** `Save()`/`DestroyAllWorldObjects()` include inactive objects;
+  `Reset()` clears unresolved objects; WebGL IDBFS flush after save; always-on auto-save loop with
+  a single quit-save; mod rehydrate now waits for `WorldRestoreCompleted` (restore-before-mods
+  ordering guarantee).
+- **`load_scene` (F-05):** validates the scene against Build Settings (plus an optional per-scope
+  whitelist for Lua) and fails with a clear error instead of reporting success.
+- **Audit log writer (F-07):** bounded queue (drop-oldest + dropped-count marker), drain-on-Dispose
+  with deadline, seq/hash committed only after a successful write, rotation marker + anchor entries,
+  serialized flushes, shared `CoreAiWebGlPersistence` IDBFS helper.
+- **Fallback (F-09):** real streaming/internal timeouts now fall back to the secondary backend;
+  caller cancellation still rethrows; streaming "commitment" requires visible text, a tool call, or
+  an error (control chunks no longer commit the primary).
+- **Lua sandbox (F-08, in `coreaimods`):** per-instruction GC allocation budget (default 64 MB) on
+  both MoonSharp and Lua-CSharp VMs; `table.concat` output capped like `string.rep`.
+- **Mod events (F-13):** per-subscriber isolation — a throwing subscriber no longer breaks
+  `LoadMod` or starves other subscribers.
+- **Diagnostics (F-16, F-23):** turn-trace sink capped (32 roles) with `Clear()`; IMGUI dashboards
+  rebuild text at most 4×/sec.
+- **Hub mods UX:** version history + revert, bundled-update badge + apply, export/import via
+  clipboard, cached mod list with debounced search.
+- **Packaging (F-02):** Hub-facing mods code extracted into optional `CoreAI.Mods.Hub` assembly
+  (self-disables without the Hub package); benchmark suite extracted into
+  `com.neoxider.coreaibenchmark`; package dependency graphs now match real asmdef references.
+
 ### 5.0.13 - Tool round splits streaming assistant bubble (2026-07-09)
 
 - **Fix: assistant prose streamed before and after a tool round now lands in two separate bubbles (claude/cursor-style) instead of one.** Previously the streaming bubble opened at the start of the turn was reused for all prose, so tool-call bubbles were appended *below* it — leaving the final answer at the top and the tool calls at the bottom, forcing the user to scroll up. At a tool-round boundary the in-flight prose bubble is now sealed and any post-tool prose opens a fresh bubble beneath the tool-call bubbles.

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### 5.1.0 - audit remediation: safe mutation pipeline, bounded queues/stores (2026-07-10)
+
+- **Tool execution policy (F-01):** per-call duplicate signatures registered only on success (failed
+  calls stay retryable), a single serialized mutation chain covering `world_command`,
+  `component_command`, `execute_lua`, `call_skill_tool`, and streamed mutating calls deferred to
+  turn completion so mutations never overlap and cross-turn echoes become structured
+  `{ok, duplicate}` no-ops before side effects.
+- **Orchestrator backpressure (F-10):** `AiOrchestrationQueueOptions.MaxPending` admission cap
+  (default 64) with `AiOrchestrationQueueFullException`, binary-search insertion instead of
+  per-enqueue re-sort, and a Dispose contract that cancels in-flight work and completes all
+  pending tasks/streams.
+- **Version retention (F-11):** new `VersionRetentionPolicy` bounds Lua-script and data-overlay
+  version stores (original + current + last N intermediates, byte budget); revision `Index` is now
+  stable across eviction and revert is index-based in both mod runtimes.
+- **Audit chain (F-07):** `AuditEntry`/`AuditLogVerifier` support rotation markers and anchored
+  genesis (`VerifyChainedSet`) so rotated files verify standalone while staying chained.
+- Audits: `Docs/REPOSITORY_AUDIT_2026-07-10.md` and `Docs/REPOSITORY_AUDIT_2_2026-07-10.md` in the
+  repository root document the findings and the verification of this wave.
+
 ### 5.0.10 - version lockstep with coreaiunity 5.0.10 (2026-07-06)
 
 - No changes; released to keep both packages on identical versions. (The self-spawning model-download
