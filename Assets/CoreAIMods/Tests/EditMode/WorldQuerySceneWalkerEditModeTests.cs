@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.World;
 using NUnit.Framework;
 using UnityEngine;
@@ -48,7 +49,7 @@ namespace CoreAI.Tests.EditMode
             bool truncated = WorldQuerySceneWalker.CollectByName(
                 new[] { root },
                 "NoSuchObjectNameAnywhere",
-                CoreAiWorldQueryLuaBindings.MaxFindResults,
+                LuaCsWorldQueryBindings.MaxFindResults,
                 (name, pattern) => name.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase) >= 0,
                 results);
 
@@ -79,11 +80,11 @@ namespace CoreAI.Tests.EditMode
             Assert.DoesNotThrow(() => WorldQuerySceneWalker.CollectByName(
                 new[] { root },
                 "DeepChild",
-                CoreAiWorldQueryLuaBindings.MaxFindResults,
+                LuaCsWorldQueryBindings.MaxFindResults,
                 (name, pattern) => name.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase) >= 0,
                 results));
 
-            Assert.AreEqual(CoreAiWorldQueryLuaBindings.MaxFindResults, results.Count);
+            Assert.AreEqual(LuaCsWorldQueryBindings.MaxFindResults, results.Count);
         }
 
         private GameObject CreateObject(string name)

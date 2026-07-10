@@ -5,7 +5,7 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// EditMode coverage for <see cref="LuaGenerationRateLimiter"/> — the sliding-window guard
-    /// against runaway LLM Lua generation loops. Pure C#, injected clock (no MoonSharp needed).
+    /// against runaway LLM Lua generation loops. Pure C#, injected clock (no Lua VM needed).
     /// </summary>
     public sealed class LuaGenerationRateLimiterEditModeTests
     {

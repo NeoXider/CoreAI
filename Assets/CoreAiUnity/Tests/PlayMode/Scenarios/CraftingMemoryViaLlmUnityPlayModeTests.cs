@@ -1,4 +1,3 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -11,10 +10,7 @@ using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Messaging;
-using CoreAI.Sandbox;
 using CoreAI.Session;
-using LLMUnity;
-using MoonSharp.Interpreter;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -112,18 +108,13 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
 
-                // Register Lua execution as the crafting tool.
-                RealLuaExecutor luaExecutor = new();
-                LuaLlmTool luaTool = new(luaExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    Logging.NullLog.Instance);
-
                 AgentMemoryPolicy policy = new();
                 TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
                 // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
                 // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                // Restrict CoreMechanicAI to the execute_lua crafting tool.
-                policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
+                // The crafting tool (execute_lua) is registered per turn inside CreateOrchestrator so it
+                // publishes the raw Lua code to the per-turn sink, exactly like CraftingMemoryViaOpenAi.
 
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
@@ -283,6 +274,19 @@ namespace CoreAI.Tests.PlayMode
             AiPromptComposer composer,
             IAiGameCommandSink sink)
         {
+            // The legacy real-Lua executor was removed with the old Lua runtime. Mirroring
+            // CraftingMemoryViaOpenAi, the crafting tool is a delegate execute_lua that publishes the raw
+            // Lua code to the sink; the test extracts the crafted item name from the tool-call arguments.
+            policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[]
+            {
+                new DelegateLlmTool("execute_lua", "Execute lua code to create item",
+                    new Action<string>(code =>
+                    {
+                        sink.Publish(new ApplyAiGameCommand
+                            { CommandTypeId = AiGameCommandTypeIds.Envelope, JsonPayload = code });
+                    }))
+            });
+
             return new AiOrchestrator(
                 new SoloAuthorityHost(),
                 client,
@@ -293,126 +297,6 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
-        }
-
-        /// <summary>
-        /// Executes Lua in a secure sandbox for the crafting memory scenario.
-        /// </summary>
-        private sealed class RealLuaExecutor : LuaTool.ILuaExecutor
-        {
-            private readonly SecureLuaEnvironment _sandbox;
-            private readonly LuaApiRegistry _registry;
-            private readonly Dictionary<string, Closure> _logicSlots = new(StringComparer.Ordinal);
-
-            public RealLuaExecutor()
-            {
-                _sandbox = new SecureLuaEnvironment();
-                _registry = new LuaApiRegistry();
-
-                // Register Lua APIs used by generated scripts.
-                _registry.Register("report", new Action<string>(msg =>
-                    Debug.Log($"[Lua.report] {msg}")));
-                _registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
-                    Debug.Log($"[Lua.create_item] name={name}, type={type}, quality={quality}")));
-                _registry.Register("logic_define", new Func<string, Closure, bool>(DefineLogicSlot));
-                _registry.Register("logic_reset", new Action<string>(ResetLogicSlot));
-                _registry.Register("logic_list", new Func<List<object>>(ListLogicSlots));
-                _registry.Register("add", new Func<double, double, double>((a, b) => a + b));
-                _registry.RegisterCallback("memory", HandleMemoryShim);
-            }
-
-            private bool DefineLogicSlot(string name, Closure fn)
-            {
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    throw new ArgumentException("logic_define: slot name is required.");
-                }
-
-                if (fn == null)
-                {
-                    throw new ArgumentException("logic_define: second argument must be a function.");
-                }
-
-                _logicSlots[name] = fn;
-                Debug.Log($"[Lua.logic_define] {name}");
-                return true;
-            }
-
-            private void ResetLogicSlot(string name)
-            {
-                _logicSlots.Remove(name ?? string.Empty);
-                Debug.Log($"[Lua.logic_reset] {name}");
-            }
-
-            private List<object> ListLogicSlots()
-            {
-                List<object> slots = new();
-                foreach (string name in _logicSlots.Keys)
-                {
-                    slots.Add(new Dictionary<string, object>
-                    {
-                        { "name", name },
-                        { "overridden", true }
-                    });
-                }
-
-                return slots;
-            }
-
-            private DynValue HandleMemoryShim(ScriptExecutionContext ctx, CallbackArguments args)
-            {
-                string action = ReadMemoryArg(args, "action", 0) ?? "append";
-                string content = ReadMemoryArg(args, "content", 1) ?? "";
-                Debug.Log($"[Lua.memory.shim] action={action}, content={content}");
-                return DynValue.NewBoolean(true);
-            }
-
-            private static string ReadMemoryArg(CallbackArguments args, string tableKey, int positionalIndex)
-            {
-                if (args == null || args.Count == 0)
-                {
-                    return null;
-                }
-
-                DynValue first = args[0];
-                if (first.Type == DataType.Table)
-                {
-                    DynValue value = first.Table.Get(tableKey);
-                    return value.IsNil() ? null : value.CastToString();
-                }
-
-                if (args.Count > positionalIndex && !args[positionalIndex].IsNil())
-                {
-                    return args[positionalIndex].CastToString();
-                }
-
-                return null;
-            }
-
-            public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
-            {
-                try
-                {
-                    Script script = _sandbox.CreateScript(_registry);
-                    DynValue result = _sandbox.RunChunk(script, code);
-                    string output = result?.ToString() ?? "nil";
-                    Debug.Log($"[RealLuaExecutor] SUCCESS: {output}");
-                    return Task.FromResult(new LuaTool.LuaResult
-                    {
-                        Success = true,
-                        Output = output
-                    });
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[RealLuaExecutor] FAILED: {ex.Message}");
-                    return Task.FromResult(new LuaTool.LuaResult
-                    {
-                        Success = false,
-                        Error = ex.Message
-                    });
-                }
-            }
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
@@ -735,4 +619,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-#endif

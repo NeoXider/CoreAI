@@ -7,7 +7,6 @@
     "CoreAI.Mods",
     "CoreAI.Source",
     "MessagePipe",
-    "MoonSharp.Interpreter",
     "VContainer",
     "UniTask",
     "UnityEngine.TestRunner",
@@ -29,12 +28,6 @@
   "defineConstraints": [
     "UNITY_INCLUDE_TESTS"
   ],
-  "versionDefines": [
-    {
-      "name": "org.moonsharp.moonsharp",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_MOONSHARP"
-    }
-  ],
+  "versionDefines": [],
   "noEngineReferences": false
 }

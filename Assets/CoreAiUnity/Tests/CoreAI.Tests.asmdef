@@ -9,7 +9,6 @@
     "CoreAI.ExampleGame",
     "CoreAI.Hub.UI",
     "CoreAI.Source",
-    "MoonSharp.Interpreter",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
     "VContainer",
@@ -43,11 +42,6 @@
       "name": "ai.undream.llm",
       "expression": "1.0.0",
       "define": "COREAI_HAS_LLMUNITY"
-    },
-    {
-      "name": "org.moonsharp.moonsharp",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_MOONSHARP"
     }
   ],
   "noEngineReferences": false

@@ -8,14 +8,13 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Persistence and versioning parity tests for the Lua-CSharp <see cref="LuaCsModRuntime"/>, mirroring
-    /// the MoonSharp <c>LuaModPersistenceEditModeTests</c> and the versioning cases in
-    /// <c>LuaModRuntimeEditModeTests</c>: auto-persist on load, rehydrate of active (and skip of dormant)
+    /// Persistence and versioning tests for the Lua-CSharp <see cref="LuaCsModRuntime"/>:
+    /// auto-persist on load, rehydrate of active (and skip of dormant)
     /// mods, dormant-marking on unload, deletion on forget, an export/import round-trip between two
     /// runtimes, capability masking that strips <see cref="LuaCapabilities.Full"/> from persisted/shared
     /// mods unless explicitly allowed, and the version history growing per edit / restoring on revert.
-    /// The runtime is constructed directly (no gameplay bindings needed) exactly as the MoonSharp fixture
-    /// builds a bare <c>LuaModRuntime</c>; the fakes mirror that fixture's in-memory stores.
+    /// The runtime is constructed directly (no gameplay bindings needed) as a bare
+    /// <see cref="LuaCsModRuntime"/>; the fakes are simple in-memory stores.
     /// </summary>
     public sealed class LuaCsModRuntimePersistenceEditModeTests
     {
@@ -45,8 +44,7 @@ namespace CoreAI.Tests.EditMode
 
         /// <summary>
         /// In-memory <see cref="ILuaModSourceStore"/> capturing source + manifest per id so the test can
-        /// assert exactly what the runtime persisted without touching the file system. Same shape as the
-        /// MoonSharp fixture's fake.
+        /// assert exactly what the runtime persisted without touching the file system.
         /// </summary>
         private sealed class FakeSourceStore : ILuaModSourceStore
         {

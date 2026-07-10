@@ -1,11 +1,7 @@
 using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
-using CoreAI.Sandbox;
 using CoreAI.Session;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-using MoonSharp.Interpreter;
-#endif
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -72,43 +68,5 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("\"wave\":\"2\"", u);
             StringAssert.Contains("\"hint\":\"h\"", u);
         }
-
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-        [Test]
-        public void SecureLuaEnvironment_AllowsWhitelistedApi()
-        {
-            SecureLuaEnvironment env = new();
-            LuaApiRegistry reg = new();
-            reg.Register("add", new System.Func<double, double, double>((a, b) => a + b));
-            Script script = env.CreateScript(reg);
-            DynValue r = script.DoString("return add(2,3)");
-            Assert.AreEqual(5, (int)r.Number);
-        }
-
-        [Test]
-        public void SecureLuaEnvironment_StripGlobals_RemovesRequire()
-        {
-            SecureLuaEnvironment env = new();
-            Script script = env.CreateScript(new LuaApiRegistry());
-            Assert.Throws<ScriptRuntimeException>(() => script.DoString("return require('x')"));
-        }
-
-        [Test]
-        public void SecureLuaEnvironment_InfiniteLoop_IsInterrupted()
-        {
-            SecureLuaEnvironment env = new();
-            Script script = env.CreateScript(new LuaApiRegistry());
-
-            ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
-                env.RunChunk(script, "while true do local x = 1 end")
-            );
-
-            // Может прерваться по лимиту шагов ИЛИ по wall-clock timeout — оба валидны
-            bool isStepLimit = ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS");
-            bool isTimeout = ex.Message.Contains("Lua exceeded");
-            Assert.IsTrue(isStepLimit || isTimeout,
-                $"Expected step limit or timeout, but got: {ex.Message}");
-        }
-#endif
     }
 }

@@ -6,7 +6,6 @@
     "CoreAI.Mods",
     "CoreAI.Source",
     "MessagePipe",
-    "MoonSharp.Interpreter",
     "VContainer",
     "UniTask",
     "UnityEngine.TestRunner",

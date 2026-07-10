@@ -10,7 +10,6 @@ namespace CoreAI.Tests.EditMode
     /// concatenation and <c>table.concat</c> have no single library call site to cap the way
     /// <c>string.rep</c>/<c>string.format</c> are capped, so <see cref="LuaCsSecureEnvironment"/> and
     /// <see cref="LuaCsExecutionGuard"/> enforce a total per-execution GC allocation budget instead.
-    /// Mirrors the MoonSharp <c>SecureLuaSandboxEditModeTests</c> allocation-bomb fixtures.
     /// </summary>
     [TestFixture]
     public sealed class LuaCsSecureSandboxEditModeTests

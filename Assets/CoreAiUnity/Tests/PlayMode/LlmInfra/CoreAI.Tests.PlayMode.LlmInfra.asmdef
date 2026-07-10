@@ -8,7 +8,6 @@
     "CoreAI.Source",
     "MessagePipe",
     "undream.llmunity.Runtime",
-    "MoonSharp.Interpreter",
     "VContainer",
     "UniTask",
     "UnityEngine.TestRunner",

@@ -10,8 +10,8 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// End-to-end EditMode proof of the additive Lua-CSharp mod stack, wired exactly as a future DI scope
-    /// would wire it — through <see cref="LuaCsModRuntimeFactory"/>. Mirrors the MoonSharp
-    /// <c>LuaModRuntimeEditModeTests</c> fixtures/fakes on the managed (Lua-CSharp) runtime instead.
+    /// would wire it — through <see cref="LuaCsModRuntimeFactory"/>, exercising the managed
+    /// (Lua-CSharp) runtime end to end.
     /// The test assembly does not reference the Lua-CSharp package (Lua.dll), so Lua-side failures are
     /// caught via the non-generic <see cref="Assert.Catch(TestDelegate)"/> rather than by exception type.
     /// </summary>
@@ -41,7 +41,7 @@ namespace CoreAI.Tests.EditMode
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 
-        /// <summary>In-memory <see cref="ILuaModStore"/> (same shape as the MoonSharp fixture's fake).</summary>
+        /// <summary>In-memory <see cref="ILuaModStore"/> used by the runtime fixtures.</summary>
         private sealed class MemoryStore : ILuaModStore
         {
             private readonly Dictionary<(string ModId, string Key), string> _values = new();
@@ -206,7 +206,7 @@ namespace CoreAI.Tests.EditMode
                 gotPayload = payload;
             };
 
-            // events_emit runs at load and raises ModEventEmitted synchronously (matches MoonSharp).
+            // events_emit runs at load and raises ModEventEmitted synchronously.
             stack.Runtime.LoadMod("a", "events_emit('quest_event', 'payload')");
 
             Assert.AreEqual("a", gotMod);

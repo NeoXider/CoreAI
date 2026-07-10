@@ -9,7 +9,6 @@
     "CoreAI.Source",
     "MessagePipe",
     "undream.llmunity.Runtime",
-    "MoonSharp.Interpreter",
     "VContainer",
     "UniTask",
     "UnityEngine.TestRunner",
@@ -36,11 +35,6 @@
       "name": "ai.undream.llm",
       "expression": "1.0.0",
       "define": "COREAI_HAS_LLMUNITY"
-    },
-    {
-      "name": "org.moonsharp.moonsharp",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_MOONSHARP"
     }
   ],
   "noEngineReferences": false

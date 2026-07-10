@@ -1,4 +1,3 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections;
 using System.Threading;
@@ -9,7 +8,6 @@ using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Messaging;
-using CoreAI.Sandbox;
 using CoreAI.Session;
 using MessagePipe;
 using NUnit.Framework;
@@ -41,20 +39,6 @@ namespace CoreAI.Tests.PlayMode
             }
 
             public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
-            {
-            }
-        }
-
-        private sealed class EmptyLuaBindings : IGameLuaRuntimeBindings
-        {
-            public void RegisterGameplayApis(LuaApiRegistry registry)
-            {
-            }
-        }
-
-        private sealed class ListCommandSink : IAiGameCommandSink
-        {
-            public void Publish(ApplyAiGameCommand command)
             {
             }
         }
@@ -164,13 +148,6 @@ namespace CoreAI.Tests.PlayMode
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
 
             ThreadPoolDeliverySubscriber subscriber = new();
-            LuaAiEnvelopeProcessor lua = new(
-                new SecureLuaEnvironment(),
-                new EmptyLuaBindings(),
-                new ListCommandSink(),
-                () => null,
-                new NullLuaExecutionObserver(),
-                new NullLuaScriptVersionStore());
             AiGameCommandRouter router = new(subscriber, new NoOpGameLogger(), new NullWorldExecutor());
 
             bool received = false;
@@ -242,13 +219,6 @@ namespace CoreAI.Tests.PlayMode
                 ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
-            LuaAiEnvelopeProcessor lua = new(
-                new SecureLuaEnvironment(),
-                new EmptyLuaBindings(),
-                new ListCommandSink(),
-                () => queued,
-                new NullLuaExecutionObserver(),
-                new NullLuaScriptVersionStore());
             AiGameCommandRouter router = new(bus, new NoOpGameLogger(), new NullWorldExecutor());
 
             bool received = false;
@@ -300,4 +270,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-#endif

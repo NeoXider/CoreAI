@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using AOT;
-using CoreAI.Sandbox;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -88,39 +87,6 @@ namespace CoreAI.Tests.PlayMode
             // bubble into the Unity event that requested cancellation.
             yield return null;
             yield return null;
-        }
-
-        [Test]
-        public void LuaSandbox_DisabledOnWebGl_WhenOptInIsOff()
-        {
-            bool previous = SecureLuaEnvironment.WebGlLuaOptIn;
-            try
-            {
-                SecureLuaEnvironment.WebGlLuaOptIn = false;
-                SecureLuaEnvironment env = new();
-
-                Assert.IsFalse(SecureLuaEnvironment.IsSupported);
-                Assert.Throws<PlatformNotSupportedException>(() => env.CreateScript(null));
-            }
-            finally
-            {
-                SecureLuaEnvironment.WebGlLuaOptIn = previous;
-            }
-        }
-
-        [Test]
-        public void LuaSandbox_EnabledOnWebGl_WhenOptInIsOn()
-        {
-            bool previous = SecureLuaEnvironment.WebGlLuaOptIn;
-            try
-            {
-                SecureLuaEnvironment.WebGlLuaOptIn = true;
-                Assert.IsTrue(SecureLuaEnvironment.IsSupported);
-            }
-            finally
-            {
-                SecureLuaEnvironment.WebGlLuaOptIn = previous;
-            }
         }
 
         private static CallbackState Register(int id)

@@ -1,12 +1,12 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
-using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
-using CoreAI.Sandbox;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using Newtonsoft.Json.Linq;
@@ -23,21 +23,29 @@ namespace CoreAI.Tests.EditMode
     public sealed class LuaModsLlmToolEditModeTests
     {
         private CoreAISettingsAsset _settings;
+        private SynchronizationContext _savedContext;
 
         [SetUp]
         public void SetUp()
         {
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+
+            // The Lua-CSharp runtime bridges its async VM to a synchronous call site; detaching the Unity
+            // SynchronizationContext for the duration of each test lets those continuations complete on the
+            // thread pool instead of deadlocking the blocked main thread (see LuaCsModRuntimeEditModeTests).
+            _savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
         }
 
         [TearDown]
         public void TearDown()
         {
+            SynchronizationContext.SetSynchronizationContext(_savedContext);
             Object.DestroyImmediate(_settings);
         }
 
         private LuaModsLlmTool CreateTool(
-            LuaModRuntime runtime,
+            LuaCsModRuntime runtime,
             LuaCapabilities granted = LuaCapabilities.All,
             bool allowManagement = true)
         {
@@ -53,7 +61,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task List_WithoutMods_ReturnsEmptySuccess()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             JObject result = await ExecuteAsync(CreateTool(runtime), "list");
 
             Assert.IsTrue(result.Value<bool>("success"));
@@ -63,7 +71,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Load_List_GetSource_Roundtrip()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
             const string code = "hooks_on('ping', function() end)";
 
@@ -83,7 +91,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Reload_ReplacesSource_AndUnloadRemoves()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
             await ExecuteAsync(tool, "load", "m1", "local a = 1");
 
@@ -100,7 +108,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Load_UsesHostGrantedCapabilities_NotModelControlled()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime, LuaCapabilities.Read);
 
             JObject load = await ExecuteAsync(tool, "load", "ro_mod", "local x = 1");
@@ -113,7 +121,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ReadOnlyTool_BlocksMutations_ButAllowsInspection()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             runtime.LoadMod("existing", "local x = 1");
             LuaModsLlmTool tool = CreateTool(runtime, allowManagement: false);
 
@@ -129,7 +137,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task InvalidInput_ReturnsFailure_NotException()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             LuaModsLlmTool tool = CreateTool(runtime);
 
             Assert.IsFalse((await ExecuteAsync(tool, "explode")).Value<bool>("success"));
@@ -142,7 +150,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryGetModSource_MissingMod_ReturnsFalse()
         {
-            LuaModRuntime runtime = new();
+            LuaCsModRuntime runtime = new();
             Assert.IsFalse(runtime.TryGetModSource("nope", out string source));
             Assert.AreEqual("", source);
         }
@@ -169,7 +177,6 @@ namespace CoreAI.Tests.EditMode
                 builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
                 builder.RegisterInstance<ICoreAISettings>(_settings);
                 builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
-                builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
 
                 builder.RegisterWorldCommands(registry);
                 builder.RegisterCoreAiMods();
@@ -203,7 +210,6 @@ namespace CoreAI.Tests.EditMode
                 builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
                 builder.RegisterInstance<ICoreAISettings>(_settings);
                 builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
-                builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
 
                 builder.RegisterWorldCommands(registry, enableFullLuaAccess: true);
                 builder.RegisterCoreAiMods(enableFullLuaAccess: true);
