@@ -15,6 +15,7 @@ namespace CoreAI.Features.Audit
     public sealed class AuditLogWriter : IAuditLog, IDisposable
     {
         private readonly ConcurrentQueue<AuditEntry> _queue = new();
+        private readonly ConcurrentQueue<(LogType Level, string Message)> _pendingLogs = new();
         private readonly string _folder;
         private readonly string _filePath;
         private readonly JsonSerializerSettings _jsonSettings;
@@ -26,11 +27,15 @@ namespace CoreAI.Features.Audit
         private long _droppedCount;
         private long _lastReportedDroppedCount;
         private CancellationTokenSource _cts;
+#if !UNITY_WEBGL
+        private Thread _worker;
+#endif
 
         private const long MaxFileSize = 50 * 1024 * 1024;
         private const int FlushIntervalMs = 500;
         private const int MaxQueueSize = 10_000;
         private static readonly TimeSpan DisposeDrainDeadline = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan WorkerJoinTimeout = DisposeDrainDeadline + TimeSpan.FromMilliseconds(500);
 
         /// <summary>
         /// Test-only hook: when set and returns true, the next file append throws instead of touching
@@ -57,7 +62,16 @@ namespace CoreAI.Features.Audit
 
             ResumeChain();
             _cts = new CancellationTokenSource();
+
+            // Serialization + SHA-256 + file I/O run off the main thread wherever real threads
+            // exist. WebGL has no threads, so it keeps the original main-thread, frame-budgeted
+            // UniTask.Delay loop instead.
+#if UNITY_WEBGL
             FlushLoop(_cts.Token).Forget();
+#else
+            _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "CoreAI-AuditLogWriter" };
+            _worker.Start();
+#endif
         }
 
         internal string FilePath => _filePath;
@@ -93,16 +107,32 @@ namespace CoreAI.Features.Audit
 
         public void Dispose()
         {
+            // Cancelling wakes the worker's WaitHandle immediately (no need to wait for the next
+            // 500ms tick); the worker then drains the queue itself, bounded by DisposeDrainDeadline.
             _cts?.Cancel();
+
+#if !UNITY_WEBGL
+            bool joined = _worker == null || _worker.Join(WorkerJoinTimeout);
+            if (!joined || !_queue.IsEmpty)
+            {
+                // Worker didn't finish in time (or never started) — fall back to draining on the
+                // calling thread so entries are not silently lost.
+                DrainOnDispose();
+            }
+#else
+            DrainOnDispose();
+#endif
+
+            DrainPendingLogs();
             _cts?.Dispose();
             _cts = null;
-            DrainOnDispose();
         }
 
         /// <summary>Synchronously flushes the queue. Used by tests that need deterministic writes.</summary>
         internal void FlushForTesting()
         {
             FlushBatch();
+            DrainPendingLogs();
         }
 
         /// <summary>
@@ -308,6 +338,8 @@ namespace CoreAI.Features.Audit
             return Path.GetFileName(rotated);
         }
 
+#if UNITY_WEBGL
+        /// <summary>WebGL has no threads, so the flush tick stays on the main thread (player loop).</summary>
         private async UniTaskVoid FlushLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
@@ -316,10 +348,70 @@ namespace CoreAI.Features.Audit
                 {
                     await UniTask.Delay(FlushIntervalMs, cancellationToken: ct);
                     FlushBatch();
+                    DrainPendingLogs();
                 }
                 catch (OperationCanceledException)
                 {
                     break;
+                }
+            }
+        }
+#else
+        /// <summary>
+        /// Background flush loop: wakes every <see cref="FlushIntervalMs"/> or immediately when
+        /// <see cref="_cts"/> is cancelled (Dispose). Owns <see cref="_seq"/>/<see cref="_prevHash"/>
+        /// exclusively via <see cref="_flushGate"/> — Record() only ever enqueues.
+        /// Must not call any UnityEngine API directly; log messages are deferred via
+        /// <see cref="EnqueueLog"/> and emitted on the main thread instead.
+        /// </summary>
+        private void WorkerLoop()
+        {
+            CancellationToken ct = _cts.Token;
+            while (!ct.WaitHandle.WaitOne(FlushIntervalMs))
+            {
+                FlushBatch();
+            }
+
+            // Stop requested: drain whatever remains, bounded by DisposeDrainDeadline so a stuck
+            // disk (or a producer that never stops enqueuing) cannot hang application exit forever.
+            DateTime start = DateTime.UtcNow;
+            while (!_queue.IsEmpty)
+            {
+                FlushBatch();
+                if (DateTime.UtcNow - start >= DisposeDrainDeadline)
+                {
+                    EnqueueLog(LogType.Warning, "[AuditLogWriter] Dispose drain deadline (2s) reached with entries still queued.");
+                    break;
+                }
+            }
+        }
+#endif
+
+        /// <summary>Queues a log message for emission on the main thread (see <see cref="DrainPendingLogs"/>).</summary>
+        private void EnqueueLog(LogType level, string message)
+        {
+            _pendingLogs.Enqueue((level, message));
+        }
+
+        /// <summary>
+        /// Emits log messages queued by the background worker. Unity's Debug.Log family must run on
+        /// the main thread, so callers (log pump, FlushForTesting, Dispose) must all be main-thread.
+        /// </summary>
+        private void DrainPendingLogs()
+        {
+            while (_pendingLogs.TryDequeue(out (LogType Level, string Message) log))
+            {
+                switch (log.Level)
+                {
+                    case LogType.Warning:
+                        Debug.LogWarning(log.Message);
+                        break;
+                    case LogType.Error:
+                        Debug.LogError(log.Message);
+                        break;
+                    default:
+                        Debug.Log(log.Message);
+                        break;
                 }
             }
         }
@@ -357,7 +449,7 @@ namespace CoreAI.Features.Audit
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AuditLogWriter] Rotation failed, re-queuing {batch.Count} pending entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
+                    EnqueueLog(LogType.Warning, $"[AuditLogWriter] Rotation failed, re-queuing {batch.Count} pending entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
                     RequeueFront(batch);
                     return;
                 }
@@ -411,7 +503,7 @@ namespace CoreAI.Features.Audit
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AuditLogWriter] Write failed, re-queuing {batch.Count} entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
+                EnqueueLog(LogType.Warning, $"[AuditLogWriter] Write failed, re-queuing {batch.Count} entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
                 RequeueFront(batch);
             }
         }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CoreAI.Audit;
 using CoreAI.Features.Audit;
 using NUnit.Framework;
@@ -106,7 +107,8 @@ namespace CoreAI.Tests.EditMode.Audit
             RecordN(_writer, 500);
             string path = _writer.FilePath;
 
-            // No FlushForTesting() — Dispose alone must drain the whole backlog, not one batch.
+            // No FlushForTesting() — Dispose alone must join the background worker and have it
+            // drain the whole backlog, not one batch (see AuditLogWriter.WorkerLoop).
             _writer.Dispose();
             _writer = null;
 
@@ -114,6 +116,40 @@ namespace CoreAI.Tests.EditMode.Audit
             Assert.AreEqual(500, entries.Count);
 
             AuditVerifyResult result = AuditLogVerifier.Verify(path);
+            Assert.IsTrue(result.Ok, result.Error);
+        }
+
+        [Test]
+        public void ConcurrentRecord_FromFourThreads_AllEntriesPresentAndChainVerifies()
+        {
+            _writer = new AuditLogWriter(_testFolder);
+            const int perThread = 250;
+            const int threadCount = 4;
+
+            Task[] tasks = new Task[threadCount];
+            for (int t = 0; t < threadCount; t++)
+            {
+                int threadIndex = t;
+                tasks[t] = Task.Run(() =>
+                {
+                    for (int i = 0; i < perThread; i++)
+                    {
+                        _writer.Record(AuditEntry.ForToolCall(
+                            seq: 0, traceId: $"trace-{threadIndex}-{i}", actor: "creator", model: "gpt-4",
+                            promptHash: "ph", toolName: "test_tool", args: $"{{\"i\":{i}}}",
+                            policyDecision: "allowed", result: "ok", resultDetail: "", durationMs: i));
+                    }
+                });
+            }
+
+            Task.WaitAll(tasks);
+
+            _writer.FlushForTesting();
+
+            List<AuditEntry> entries = AuditLogVerifier.ReadAll(_writer.FilePath);
+            Assert.AreEqual(perThread * threadCount, entries.Count);
+
+            AuditVerifyResult result = AuditLogVerifier.Verify(_writer.FilePath);
             Assert.IsTrue(result.Ok, result.Error);
         }
 
