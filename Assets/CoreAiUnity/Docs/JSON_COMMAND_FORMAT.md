@@ -78,12 +78,11 @@ When the model decides to invoke a tool, a structure equivalent to the following
 **Roles:** Programmer (primary), Creator (when needed)
 
 > [!NOTE]
-> Runtime Lua execution is temporarily unavailable in WebGL player builds. In WebGL,
-> `SecureLuaEnvironment.IsSupported` is `false`, and Lua envelopes return
-> `LuaExecutionFailed` instead of creating a MoonSharp runtime. Editor and
-> non-WebGL players keep the existing Lua path. WebGL support can be added later
-> through an AOT-safe Lua runtime, server-side execution, or a restricted command
-> interpreter with WebGL Player coverage.
+> Runtime Lua execution runs on **Lua-CSharp**, a managed, AOT-safe VM that works
+> on IL2CPP and WebGL. WebGL player Lua execution is supported and **on by default**
+> (`CoreAISettingsAsset.EnableLuaOnWebGl`); if disabled or unsupported,
+> `SecureLuaEnvironment.IsSupported` is `false` and Lua envelopes return
+> `LuaExecutionFailed` instead of executing.
 
 ### Execute Lua code
 ```json
@@ -126,9 +125,8 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | `coreai_component_set_text(name, type, property, value)` | Set text, colour, or enum component property |
 | `coreai_component_set_vector(name, type, property, x, y, z)` | Set vector component property |
 **On success:** Output of `report(...)` or `"Lua executed successfully"`  
-**On error:** `"[Error] MoonSharp runtime: <error description>"` or a platform
-unsupported failure when `SecureLuaEnvironment.IsSupported` is `false` (currently
-WebGL player builds).
+**On error:** `"[Error] Lua execution failed: <error description>"` or a platform
+unsupported failure when `SecureLuaEnvironment.IsSupported` is `false`.
 
 ### Multi-line Lua example
 

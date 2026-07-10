@@ -575,7 +575,7 @@ CoreAI supports a **universal prefix** — text prepended to the **start** of ev
 "You are an AI agent in a game. Always stay in character."
 
 # Agent-specific (Programmer):
-"You are the Programmer agent for CoreAI MoonSharp sandbox..."
+"You are the Programmer agent for CoreAI Lua sandbox..."
 
 # Resulting prompt (automatic):
 "You are an AI agent in a game. Always stay in character. You are the Programmer agent..."

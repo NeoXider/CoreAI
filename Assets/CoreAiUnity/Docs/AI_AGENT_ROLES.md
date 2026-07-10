@@ -123,7 +123,7 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **ID** | `Programmer` |
 | **Goal** | From **Creator** spec (rarely others) **write, fix, and narrow** **Lua** snippets for the sandbox. |
 | **Behavior** | Loop: prompt with whitelist API → generation → static check → dry-run → host execution → on error self-heal (limited). |
-| **Inputs** | Spec from Creator, MoonSharp error context, current APIRegistry version. |
+| **Inputs** | Spec from Creator, Lua error context, current APIRegistry version. |
 | **Outputs** | Signed **UseCaseScript** (string/hash) + “attach/replace” command via bus. Or JSON: `{"tool": "memory", "action": "write", "content": "..."}`. |
 | **Placement** | Almost always **HostAuthoritative** (code affects simulation). |
 | **Examples** | “Ambush spawn script for forest”; “reward logic patch on boss death”. |
@@ -254,7 +254,7 @@ Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for 
 | **AINpc (crowd / minor)** | One short line or `{mood, barkId}` | **Tiny** or **no LLM**: table + random; LLM optional for “color” | — | Do **not** call the model per crowd frame: one call per **group** (“crowd mood”) or zero. |
 | **AINpc (merchant / named)** | Dialogue 1–3 lines, menu action pick | **Small** | Nuanced lore, long branch → **Medium** / API | Co-op: prefer **host** or shared seed so quest facts do not diverge. |
 | **AINpc (boss / key)** | Tactical line + combat phase hooks | **Small–Medium** | Cinematic + complex logic → **Large** / API | Low call frequency — can afford a heavier model. |
-| **Programmer** | Lua in sandbox, fixes on error | **Small** (strict whitelist API + examples) | Reliable codegen, fewer self-heal iterations → **Medium–Large** / API | **MoonSharp error context** and short allowed-API list matter. |
+| **Programmer** | Lua in sandbox, fixes on error | **Small** (strict whitelist API + examples) | Reliable codegen, fewer self-heal iterations → **Medium–Large** / API | **Lua error context** and short allowed-API list matter. |
 | **Creator** | Rule packs, affixes, tasking | **Medium** as compromise | “Smart” session mode shifts, fine balance → **Large** / API | High **orchestrator priority**, not high frequency. |
 | **Director / LoreWeaver** | Text, rare events | **Small–Medium** | — | Often one **Medium** model with different prompts per role. |
 | **Moderator** | Classification / filter | **Tiny** | Fine legal/safety context → specialized APIs | Prefer a separate fast pass before showing text to the player. |

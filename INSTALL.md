@@ -7,7 +7,7 @@ CoreAI ships as **five UPM packages**. `coreai` + `coreaiunity` are the required
 |---|---|---|
 | `com.neoxider.coreai` | Portable C# core (orchestration, tools, memory, routing). No `UnityEngine`. | — |
 | `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). | `coreai` |
-| `com.neoxider.coreaimods` | Optional Lua modding layer (MoonSharp sandbox, `execute_lua`/`manage_mods` tools, mod runtime). | `coreai` + `coreaiunity` (+ MoonSharp) |
+| `com.neoxider.coreaimods` | Optional Lua modding layer (Lua-CSharp sandbox, `execute_lua`/`manage_mods` tools, mod runtime). | `coreai` + `coreaiunity` |
 | `com.neoxider.coreaihub` | Optional UI Toolkit Hub window (tabbed Chat/Settings/Statistics/Mods pages). | `coreai` + `coreaiunity` |
 | `com.neoxider.coreaibenchmark` | Dev/test-only LLM game-creation benchmark harness. | `coreai` + `coreaiunity` |
 
@@ -21,7 +21,7 @@ standalone through its tools.
 | Profile | Packages | Section |
 |---|---|---|
 | **Base** | `coreai` + `coreaiunity` | [§1](#1-install-coreai-base) + [§2](#2-llm-module-microsoftextensionsai-via-nuget) |
-| **+Mods** | Base + `coreaimods` (+ MoonSharp) | [§3](#3-mods-module-lua) |
+| **+Mods** | Base + `coreaimods` | [§3](#3-mods-module-lua) |
 | **+Hub** | Base + `coreaihub` | [§4](#4-hub-module-ui-toolkit) |
 | **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation) | [§3](#3-mods-module-lua) + [§4](#4-hub-module-ui-toolkit) + [§5](#5-benchmark-module-dev-only) |
 
@@ -122,17 +122,12 @@ CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest
 ## 3. Mods module (Lua)
 
 Lua modding (sandbox, `execute_lua`/`manage_mods` tools, AI-written gameplay scripts, mod runtime) is
-a separate package, `com.neoxider.coreaimods`, on top of the base. It requires the MoonSharp package.
+a separate package, `com.neoxider.coreaimods`, on top of the base. The Lua runtime is
+[Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) — a managed, AOT-safe VM (works on IL2CPP and
+WebGL). It ships **bundled** as `Lua.dll` + `Lua.Annotations.dll` inside the package at
+`Assets/CoreAIMods/Plugins/`, so there is **no external Lua package to install**.
 
-### 3.1 Install MoonSharp
-
-```
-CoreAI → Setup → Modules → MoonSharp (Lua) → Enable + Update to latest
-```
-
-(or manifest: `"org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"`).
-
-### 3.2 Install the Mods package
+### 3.1 Install the Mods package
 
 **Window → Package Manager → `+` → Add package from git URL…**
 
@@ -140,18 +135,19 @@ CoreAI → Setup → Modules → MoonSharp (Lua) → Enable + Update to latest
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMods
 ```
 
-With MoonSharp present, the package's `COREAI_HAS_MOONSHARP` version-define lights up the Lua
-sandbox, `execute_lua`/`manage_mods` tools, and the mod runtime automatically. Remove either the
-`coreaimods` package or MoonSharp and the Lua code compiles out with no errors elsewhere in the project.
+Lua is compiled in by default: with the `coreaimods` package present, the Lua sandbox,
+`execute_lua`/`manage_mods` tools, and the mod runtime are available automatically. Remove the
+`coreaimods` package (or set `COREAI_NO_LUA`) and the Lua code compiles out with no errors elsewhere
+in the project.
 
-### 3.3 Switches
+### 3.2 Switches
 
-- **Soft-disable** (keep the packages, compile Lua out): scripting define `COREAI_NO_LUA`, or
-  `CoreAI → Setup → Modules → MoonSharp (Lua) → Disable Lua (keep package)`.
-  Runtime code is guarded by `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA`.
+- **Soft-disable** (keep the package, compile Lua out): scripting define `COREAI_NO_LUA`, or
+  `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Disable Lua`.
+  Runtime code is guarded by `#if !COREAI_NO_LUA`.
 - **WebGL:** Lua on the WebGL player is **on by default** (new settings assets); toggle with
-  `CoreAISettingsAsset.EnableLuaOnWebGl`. IL2CPP stripping protection (`link.xml` preserving
-  `MoonSharp.Interpreter`) ships in the package; the Full `unity_*` reflection tier stays disabled on WebGL.
+  `CoreAISettingsAsset.EnableLuaOnWebGl`. Lua-CSharp is AOT-safe, so it runs under IL2CPP/WebGL
+  without extra stripping protection; the Full `unity_*` reflection tier stays disabled on WebGL.
 - **Hub integration:** if `com.neoxider.coreaihub` (§4) is also installed, Mods' `CoreAI.Mods.Hub`
   assembly auto-enables via the `COREAI_HAS_HUB` version define and adds a Mods page to the Hub
   window — no extra configuration needed either way.
@@ -195,7 +191,7 @@ local multi-model sweep.
 
 | Module | Package | Auto-define when installed | Manual switch |
 |---|---|---|---|
-| Mods (Lua) | `com.neoxider.coreaimods` + `org.moonsharp.moonsharp` | `COREAI_HAS_MOONSHARP` | `COREAI_NO_LUA` (soft-disable) |
+| Mods (Lua) | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — (compiled in by default) | `COREAI_NO_LUA` (soft-disable) |
 | Hub (UI Toolkit) | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` (consumed by Mods' Hub integration) | — |
 | Benchmark | `com.neoxider.coreaibenchmark` | — | dev/test-only, not referenced by runtime code |
 | Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | — |

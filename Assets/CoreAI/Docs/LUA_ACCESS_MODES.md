@@ -78,7 +78,7 @@ file APIs that a host game exposes through components.
 ## Runtime Guardrails
 
 - Full mode is opt-in.
-- Lua chunks and mod handlers still run with MoonSharp sandbox and instruction/time limits.
+- Lua chunks and mod handlers still run with the Lua-CSharp sandbox and instruction/time limits.
 - `CoreAiFullUnityLuaRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
   sandbox limits.
 - Mod error budget and auto-unload still apply to persistent mods.
@@ -109,7 +109,7 @@ add its own actions without modifying the package.
 
 Verified on Unity 6000.3 WebGL with **Managed Stripping Level = Medium** and
 **IL2CPP Code Generation = Faster (smaller) builds** (`OptimizeSize`). Both are recommended:
-`OptimizeSize` shrinks MoonSharp's generic-method tables enough that the Emscripten linker does
+`OptimizeSize` shrinks Lua-CSharp's generic-method tables enough that the Emscripten linker does
 not run out of memory, and Medium stripping keeps the wasm small.
 
 **Consumer projects need no link.xml of their own**: the `com.neoxider.coreaiunity` package ships
@@ -129,15 +129,16 @@ DI-registered assemblies (template — replace the assembly name):
 Reflection-based Lua features keep working **only** with the preserve rules below (already present
 in the package `link.xml`):
 
-- `MoonSharp.Interpreter` — `preserve="all"`. MoonSharp invokes host delegates and its own
-  loaders via reflection on AOT.
+- `Lua.dll` / `Lua.Annotations.dll` (bundled under `Assets/CoreAIMods/Plugins/`) —
+  `preserve="all"`. The Lua-CSharp runtime invokes host delegates and its own loaders via
+  reflection on AOT.
 - `UnityEngine.CoreModule`: `UnityEngine.Resources` and `UnityEngine.TextAsset` —
-  MoonSharp's `UnityAssetsScriptLoader` reaches them purely via reflection; stripping them
+  the Lua script loader reaches them purely via reflection; stripping them
   crashes the player with `RuntimeError: null function`.
 - Every `IGameLuaRuntimeBindings` implementation the player uses
   (`CoreAiWorldLuaRuntimeBindings`, `CoreAiWorldQueryLuaBindings`, `LuaTimeBindings`,
   `CoreAiInputLuaRuntimeBindings`, `CoreAiFullUnityLuaRuntimeBindings`, ...) — their callback
-  bodies are reflection-invoked by MoonSharp.
+  bodies are reflection-invoked by the Lua-CSharp runtime.
 
 DI note: VContainer's `Register<T>()` finds constructors via reflection; under Medium stripping
 an unused parameterless ctor can be stripped and container build fails with

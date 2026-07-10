@@ -155,7 +155,7 @@ For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
 ### Symptoms
 - `LuaExecutionFailed` in logs
-- `[Error] MoonSharp runtime: ...` in the model output
+- `[Error] Lua execution failed: ...` in the model output
 - Endless self-heal loops (up to 3 attempts)
 - `LuaExecutionGuard: step limit exceeded`
 
@@ -163,7 +163,7 @@ For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
 **Type 1: Lua syntax error**
 ```
-[Error] MoonSharp: chunk_1:(3,0-4): unexpected symbol near 'end'
+[Error] Lua execution failed: chunk_1:(3,0-4): unexpected symbol near 'end'
 ```
 
 **Cause:** The model generated invalid Lua.
@@ -177,7 +177,7 @@ For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
 **Type 2: Calling a non-existent function**
 ```
-[Error] MoonSharp runtime: attempt to call 'custom_function' (a nil value)
+[Error] Lua execution failed: attempt to call 'custom_function' (a nil value)
 ```
 
 **Cause:** Lua tries to call a function that is not in the whitelist API.

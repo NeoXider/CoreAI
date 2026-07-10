@@ -4,7 +4,7 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 
 ## What Is Inside
 
-- **`LuaModsDemoController`** resolves `LuaModRuntime` and `LuaLogicSlots` from DI and draws an OnGUI panel.
+- **`LuaModsDemoController`** resolves `ILuaModRuntime` and `LuaCsLogicSlots` from DI and draws an OnGUI panel.
 - **`WaveDirectorMod.lua.txt`** is a mod with the `Read | WorldEdit` level:
   - `hooks_on("wave_started", ...)` spawns a wave of enemies in one transaction
     (`coreai_world_begin/commit`), and stores the wave counter in persistent store (`store_set/get`);

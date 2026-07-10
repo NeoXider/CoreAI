@@ -5,8 +5,8 @@ For the full surface (every binding, the capability tiers, transactions, Full mo
 [LUA_GAME_API.md](LUA_GAME_API.md). For the security model read
 [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md).
 
-> Lua is an optional module. If your project defines `COREAI_NO_LUA` (or has no MoonSharp package),
-> none of this applies — the runtime ships stub bindings instead. See
+> Lua is an optional module. If your project defines `COREAI_NO_LUA`, none of
+> this applies — the runtime ships stub bindings instead. See
 > [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 ## What a mod is

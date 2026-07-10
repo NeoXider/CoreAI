@@ -15,7 +15,7 @@ CoreAI uses a **two-level architecture** for tools:
 
 **Engine-agnostic tools** do not depend on the engine; implementation stays in CoreAI:
 - ✅ `MemoryTool` — stores a string; works on any engine
-- ✅ `LuaTool` — MoonSharp interpreter; engine-independent
+- ✅ `LuaTool` — Lua-CSharp interpreter; engine-independent
 
 **Engine-specific tools** depend on the engine; implementation lives in CoreAiUnity:
 - ✅ `WorldTool` — uses `GameObject`, `SceneManager` (Unity)
@@ -317,15 +317,15 @@ public:
 - ✅ Works on any engine (simple key-value store)
 - ✅ Same logic on all platforms
 
-**LuaTool** uses the MoonSharp interpreter. That means:
+**LuaTool** uses the Lua-CSharp interpreter. That means:
 - ✅ Pure .NET, no `UnityEngine`
-- ✅ Same engine-agnostic binding model where MoonSharp is supported
+- ✅ Same engine-agnostic binding model where Lua-CSharp is supported
 - ✅ Engine-specific bindings can be added later
 
-WebGL player builds currently disable the MoonSharp path explicitly through
-`SecureLuaEnvironment.IsSupported == false`. See
-[`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support and
-future WebGL restoration options.
+Lua-CSharp is a managed, AOT-safe VM and works on WebGL player builds by
+default (toggle with `CoreAISettingsAsset.EnableLuaOnWebGl`). See
+[`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support
+details and IL2CPP/WebGL stripping requirements.
 
 ### Why is WorldCommand’s abstraction in CoreAI?
 

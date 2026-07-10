@@ -8,7 +8,7 @@ minimal scripts, and a README.
 |---|---|---|---|
 | [Hub](Hub/README.md) | `Hub/CoreAiHubDemo.unity` | Drop-in UI Toolkit Hub with Chat, Settings, Statistics, Mods, and World State pages | Yes |
 | [MiniRpg](MiniRpg/README.md) | `MiniRpg/MiniRpgModsDemo.unity` | Small first-person environment with Hub chat and mod-ready prompts | Yes |
-| [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua mods (`LuaModRuntime`): hooks, timers, events, store, capability tiers; `LuaLogicSlots` — overriding the damage formula from Lua | No |
+| [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua mods (`ILuaModRuntime`): hooks, timers, events, store, capability tiers; `LuaCsLogicSlots` — overriding the damage formula from Lua | No |
 | [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | AI command pipeline: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (the same path used by LLM agents and Lua bindings) | No |
 | [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: skill catalog, `read_skill` / `call_skill_tool`, a "game master" agent with crafting and combat | Yes |
 | [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **A real LLM changes mechanics live through chat**: the Programmer role writes Lua → `execute_lua` pipeline → logic slots / `LuaModRuntime` / world commands | Yes |
@@ -16,13 +16,13 @@ minimal scripts, and a README.
 | [ModdableUnits](ModdableUnits/README.md) | `ModdableUnits/ModdableUnitsDemo.unity` | **A whole game built from mods**: `forge_define`/`forge_spawn` let mods create new unit types and armies, `hooks_every`/`hooks_on` drive the fight; the host only runs the auto-battle | Yes |
 | [LiveMechanics Mods Chat](LiveMechanicsMods/README.md) | `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity` | Chat-driven persistent `manage_mods` workflow | Yes |
 | [WaveAutoBattler](LiveMechanicsMods/README.md) | `LiveMechanicsMods/WaveAutoBattlerModsDemo.unity` | Playable wave loop whose rules and rewards are changed by persistent Lua mods | Yes |
-| [WebGlLuaSelfTest](WebGlLuaSelfTest/README.md) | script only (attach to any scene) | Runtime PASS/FAIL check that the Lua sandbox survives IL2CPP stripping in a WebGL player build (`SecureLuaEnvironment.TryRunSelfTest`) | No |
+| [WebGlLuaSelfTest](WebGlLuaSelfTest/README.md) | script only (attach to any scene) | Runtime PASS/FAIL check that the Lua sandbox survives IL2CPP stripping in a WebGL player build (Lua-CSharp `LuaCsSecureEnvironment` invariants) | No |
 
 ## Common requirements
 
 - Every scene has a `CoreAILifetimeScope` (CoreAI's DI composition). Settings come from
   `Resources/CoreAISettings` unless a dedicated asset is assigned in the Inspector.
-- Lua demos require MoonSharp in the project (define `COREAI_HAS_MOONSHARP`) and the absence of `COREAI_NO_LUA`.
+- Lua demos require the Lua-CSharp runtime (shipped via the CoreAI.Mods package) and the absence of `COREAI_NO_LUA`.
 - Lua demos also require a `CoreAiModsLifetimeScope` child under `CoreAILifetimeScope`; the mod
   runtime is package-owned and is not registered in the core container.
 - Every scene **opens** without an LLM. The "Needs LLM" column above marks demos whose

@@ -26,8 +26,8 @@ That is section 4.
 
 ### 2.1 Bundle shape
 
-`ExportMod(id)` (both VMs: `LuaCsModRuntime` — the primary Lua-CSharp VM — and the legacy,
-optional MoonSharp `LuaModRuntime`) produces one JSON object with exactly two keys:
+`ExportMod(id)` (on `LuaCsModRuntime`, the Lua-CSharp VM) produces one JSON object with
+exactly two keys:
 
 ```json
 { "manifest": { ... }, "source": "..." }
@@ -40,8 +40,7 @@ optional MoonSharp `LuaModRuntime`) produces one JSON object with exactly two ke
   a bundle carries exactly one file, there is no multi-file or asset payload).
 
 Implementation: `Assets/CoreAIMods/Runtime/LuaExecution/LuaCsModRuntime.cs`
-(`ExportMod` / `ImportMod` / private `LuaModBundle`) and the identical pair in
-`Assets/CoreAIMods/Runtime/LuaExecution/LuaModRuntime.cs`. The manifest contract lives in
+(`ExportMod` / `ImportMod` / private `LuaModBundle`). The manifest contract lives in
 `Assets/CoreAIMods/Runtime/LuaExecution/LuaModManifest.cs`.
 
 ### 2.2 Manifest fields

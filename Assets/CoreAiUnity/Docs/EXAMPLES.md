@@ -217,7 +217,7 @@ LLM → execute_lua:
   local reward = calculate_reward(player_level)  -- ❌ nil function!
   report("Reward: " .. reward)
 
-MoonSharp Error:
+Lua Error:
   "attempt to call 'calculate_reward' (a nil value)"
 
 ═══════════ ATTEMPT 2 (auto-repair) ═══════════
@@ -231,7 +231,7 @@ LLM → execute_lua:
   local reward = 50 * 3  -- use only allowed math
   report("Reward: " .. reward
 
-MoonSharp Error:
+Lua Error:
   "')' expected near '<eof>'"  -- missing closing paren
 
 ═══════════ ATTEMPT 3 (auto-repair) ═══════════

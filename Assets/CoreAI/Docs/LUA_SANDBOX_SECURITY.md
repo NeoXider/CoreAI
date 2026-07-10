@@ -29,16 +29,18 @@ operations.
 
 Lua is an **optional module**. Defining the scripting symbol `COREAI_NO_LUA`
 (Project Settings → Player → Scripting Define Symbols) compiles the entire
-MoonSharp-based sandbox out of `CoreAI.Core` and `CoreAI.Source`, mirroring the
+Lua-CSharp-based sandbox out of `CoreAI.Core` and `CoreAI.Source`, mirroring the
 existing `COREAI_NO_LLM` opt-out. The core (orchestration, LLM, chat, agent
-memory) builds and runs with no MoonSharp usage, and with the define set you may
-also remove the `org.moonsharp.moonsharp` package from `Packages/manifest.json`.
+memory) builds and runs with no Lua-CSharp usage. Lua ships bundled as
+`Lua.dll` / `Lua.Annotations.dll` inside the CoreAI Mods package
+(`Assets/CoreAIMods/Plugins/`) — there is no external package dependency to
+remove.
 
 When `COREAI_NO_LUA` is set:
 
-- `SecureLuaEnvironment`, `LuaCoroutineHandle`, `LuaApiRegistry`,
-  `LuaExecutionGuard`, `InstructionLimitDebugger`, `LuaAiEnvelopeProcessor` (Core)
-  and `LuaCoroutineRunner` (Source) are removed from the build.
+- `LuaCsSecureEnvironment`, `LuaCsCoroutineHandle`, `LuaCsApiRegistry`,
+  `LuaCsExecutionGuard`, `LuaCsAiEnvelopeProcessor`, and `LuaCsCoroutineRunner`
+  (all part of the CoreAI Mods package) are removed from the build.
 - `CorePortableInstaller` / `WorldCommandsInstaller` skip Lua registrations and
   fall back to the Core no-ops `CoreDefaultLuaRuntimeBindings` /
   `NullLuaExecutionObserver`, so the DI graph still resolves.
@@ -50,10 +52,9 @@ Default builds (symbol unset) keep Lua enabled and behave exactly as before.
 ### CI matrix
 
 `.github/workflows/ci.yml` runs EditMode tests in both configurations on every
-push/PR: the default project with MoonSharp, and a `no-lua` job that deletes
-`org.moonsharp.moonsharp` from `Packages/manifest.json`/`packages-lock.json` and
-appends `COREAI_NO_LUA` to every platform's Scripting Define Symbols before
-compiling — exactly the opt-out procedure described above. The MoonSharp job
+push/PR: the default project with Lua enabled, and a `no-lua` job that appends
+`COREAI_NO_LUA` to every platform's Scripting Define Symbols before
+compiling — exactly the opt-out procedure described above. The default job
 additionally asserts that the `SecureLuaSandboxEditModeTests` escape-test
 fixture actually executed, so isolation coverage cannot silently drop out of
 the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
@@ -80,34 +81,33 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 - `table.concat` is capped the same way (`MaxTableConcatLength`, same `1_000_000` value): the
   replacement mirrors the real `table.concat` algorithm for both VMs but aborts as soon as the
   in-progress result exceeds the cap, instead of finishing a potentially huge build first.
-- **Total per-execution allocation budget (both VMs, default 64MB, F-08).** `string.rep`,
+- **Total per-execution allocation budget (default 64MB, F-08).** `string.rep`,
   `string.format`, and `table.concat` are capped at their library call site, but plain string
   concatenation (`s = s .. s`) is ordinary VM opcodes with no call site to intercept — a ~1MB allowed
-  string can be doubled repeatedly into hundreds of MB well within the instruction budget. Both VMs'
-  per-instruction hooks (`InstructionLimitDebugger` for MoonSharp, `LuaCsExecutionGuard` for
-  Lua-CSharp) now also sample `GC.GetAllocatedBytesForCurrentThread()` against a baseline captured at
-  the start of the guarded call and abort with `EXCEEDED_MEMORY_BUDGET` once the delta exceeds the
-  budget. This check runs on **every** instruction, not on a coarse sample interval: concatenation
-  doubling grows exponentially, so a handful of loop iterations can jump from megabytes to gigabytes,
-  and any sampling interval wide enough to matter for performance is also wide enough to either miss
-  the attack or let the runtime approach a real out-of-memory condition before the next sample point.
-  `GC.GetAllocatedBytesForCurrentThread()` is a thread-local counter read (not a GC pass), the same
-  cost class as the wall-clock check already performed unconditionally on the same hot path, so this
-  adds no new performance risk. Configure the budget via the `maxAllocatedBytes` constructor parameter
-  on `LuaExecutionGuard`/`LuaCsExecutionGuard`, or `SecureLuaEnvironment.MaxAllocatedBytesBudget` /
+  string can be doubled repeatedly into hundreds of MB well within the instruction budget. The
+  per-instruction hook (`LuaCsExecutionGuard`) now also samples `GC.GetAllocatedBytesForCurrentThread()`
+  against a baseline captured at the start of the guarded call and aborts with
+  `EXCEEDED_MEMORY_BUDGET` once the delta exceeds the budget. This check runs on **every** instruction,
+  not on a coarse sample interval: concatenation doubling grows exponentially, so a handful of loop
+  iterations can jump from megabytes to gigabytes, and any sampling interval wide enough to matter for
+  performance is also wide enough to either miss the attack or let the runtime approach a real
+  out-of-memory condition before the next sample point. `GC.GetAllocatedBytesForCurrentThread()` is a
+  thread-local counter read (not a GC pass), the same cost class as the wall-clock check already
+  performed unconditionally on the same hot path, so this adds no new performance risk. Configure the
+  budget via the `maxAllocatedBytes` constructor parameter on `LuaCsExecutionGuard`, or
   `LuaCsSecureEnvironment.MaxAllocatedBytesBudget` for the default.
   - **What this does not cover:** the budget is a total-allocation backstop, not a live heap-size cap —
     a script that allocates and discards memory in a tight loop can still cause GC churn without
     tripping it (GC pauses are bounded by the existing timeout instead). A single host callback that
     allocates a large amount of memory in one call (not driven by VM instructions) is not observed by
     this hook either; host bindings must still bound their own worst-case allocations, the same caveat
-    that already applies to the wall-clock guarantee documented on `LuaExecutionGuard`.
+    that already applies to the wall-clock guarantee documented on `LuaCsExecutionGuard`.
 - Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
   `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
   for one handle, and the handle is forcibly killed when exceeded.
 - `LuaAiEnvelopeProcessor` normalizes and truncates results:
   result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
-- `LuaApiRegistry` wraps host callbacks through MoonSharp `CallbackFunction` and converts non-MoonSharp host validation exceptions into `ScriptRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
+- `LuaCsApiRegistry` wraps host callbacks and converts host validation exceptions into `LuaRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
 - `coreai_world_load_scene` supports an optional scene whitelist check.
 - World bindings validate coordinate inputs before touching state:
   coordinates must be finite and `abs(value) <= 100000`.
@@ -120,7 +120,7 @@ Runtime Lua execution is supported on all platforms, including WebGL player
 builds. On WebGL, Lua is **on by default** — toggle with
 `CoreAISettingsAsset.EnableLuaOnWebGl`. The Full `unity_*` reflection tier
 stays disabled on WebGL; IL2CPP stripping protection (`link.xml` preserving
-`MoonSharp.Interpreter`) ships in the package.
+`Lua.dll` / `Lua.Annotations.dll`) ships in the package.
 
 ## Recommended Flow
 
@@ -255,6 +255,6 @@ Lua binding:
 
 ## Related docs
 
-- [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md) — which MoonSharp/Lua features CoreAI uses natively vs custom wrappers.
+- [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md) — which Lua-CSharp features CoreAI uses natively vs custom wrappers.
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) — integration do's and don'ts.
 - [LUA_GAME_API.md](LUA_GAME_API.md) — game API reference.

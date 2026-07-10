@@ -52,7 +52,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 - 🗜️ **Long chats that don't explode** — token budget, rolling summaries, optional smart compaction
 - 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, Lua generation rate limit, rate-limit metrics + F10 token-budget overlay
 - 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
-- 🧩 **Optional modules** — no MoonSharp? No LLMUnity? Still compiles; features light up when packages appear
+- 🧩 **Optional modules** — no Mods package? No LLMUnity? Still compiles; features light up when packages appear
 - 🌍 **Unity world control** — spawn primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`), move/rotate/scale objects, and add configured components through the reflection-free `component_command` tool
 
 ⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
@@ -445,7 +445,7 @@ The repository ships as **five UPM packages**. Only the first two are required; 
 |---------|--------------|--------------|
 | **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity: orchestration, tools, memory, routing | — |
 | **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), LLM clients (MEAI), MessagePipe, chat UI, tests | `coreai` |
-| **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — MoonSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` (+ MoonSharp) |
+| **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — Lua-CSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
 
@@ -456,7 +456,7 @@ Mods and Hub are independent optional installs — neither requires the other. W
 | Profile | Packages |
 |---|---|
 | **Base** | `coreai` + `coreaiunity` |
-| **+Mods** | Base + `coreaimods` (+ MoonSharp) |
+| **+Mods** | Base + `coreaimods` |
 | **+Hub** | Base + `coreaihub` |
 | **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation) |
 
@@ -505,7 +505,7 @@ See [INSTALL.md](INSTALL.md) for step-by-step instructions per profile.
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   Game World                                 │
-│  • Lua Sandbox (MoonSharp)  • MessagePipe  • DI (VContainer)│
+│  • Lua Sandbox (Lua-CSharp)  • MessagePipe  • DI (VContainer)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -575,13 +575,12 @@ Unity Package Manager does not transitively pull every Git dependency for you.
 
 ```json
     "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
-    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
 ```
 
 | Optional package | Unlocks | Skip it if |
 |------------------|---------|------------|
 | **LLMUnity** (`ai.undream.llm`) | Local GGUF models on-device | You only use an OpenAI-compatible HTTP API |
-| **MoonSharp** (`org.moonsharp.moonsharp`) | Lua sandbox & AI-written gameplay scripts | You don't need Lua scripting |
+| **Mods** (`com.neoxider.coreaimods`) | Lua sandbox & AI-written gameplay scripts (Lua-CSharp bundled) | You don't need Lua scripting |
 
 ### 3. Install CoreAI packages (Git URL)
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**

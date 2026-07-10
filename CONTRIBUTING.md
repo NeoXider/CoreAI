@@ -20,14 +20,14 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
 
 `.github/workflows/ci.yml` runs on every push/PR to `main`:
 
-- **EditMode tests, two Lua configurations** — `moonsharp` (the default project) and `no-lua`
-  (`org.moonsharp.moonsharp` removed from `Packages/manifest.json`/`packages-lock.json`,
-  `COREAI_NO_LUA` appended to all platform Scripting Define Symbols). Both must stay green.
-- **Sandbox coverage gate** — the `moonsharp` job fails if the `SecureLuaSandboxEditModeTests`
+- **EditMode tests, two Lua configurations** — `lua` (the default project, with the bundled
+  Lua-CSharp runtime) and `no-lua` (`COREAI_NO_LUA` appended to all platform Scripting Define
+  Symbols, compiling all Lua features out). Both must stay green.
+- **Sandbox coverage gate** — the `lua` job fails if the `SecureLuaSandboxEditModeTests`
   escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
 
 The workflow requires the standard [GameCI](https://game.ci/docs/github/getting-started) repository
 secrets: `UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
 
-New Lua-dependent test files must be wrapped in `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` so the
+New Lua-dependent test files must be wrapped in `#if !COREAI_NO_LUA` so the
 `no-lua` job compiles.

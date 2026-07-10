@@ -1,85 +1,89 @@
-﻿# MoonSharp / Lua: Native Capabilities vs Our Implementation
+# Lua-CSharp: Native Capabilities vs Our Implementation
 
-> Audit 2026-06-12. Sources: [moonsharp.org/sandbox](https://www.moonsharp.org/sandbox.html), [coroutines](https://www.moonsharp.org/coroutines.html), [objects/UserData](https://www.moonsharp.org/objects.html), [hardwire](https://www.moonsharp.org/hardwire.html).
+> Runtime: [Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) — a managed, AOT-safe Lua 5.4 VM that
+> runs under IL2CPP and WebGL. It ships **bundled** as `Lua.dll` + `Lua.Annotations.dll` inside the
+> CoreAI Mods package at `Assets/CoreAIMods/Plugins/`. There is no external Lua package to install.
 
-Goal: avoid duplicating what MoonSharp and Lua already provide out of the box, and use recommended APIs where they are safe.
+Goal: expose host functionality to secured Lua scripts through the registry rather than opening the
+whole CLR, and reuse what the VM already provides where it is safe.
 
 ## What Is Already Done Correctly
 
 | Area | CoreAI solution | Why it is native / justified |
 |---|---|---|
-| **Sandbox modules** | `CoreModules.Preset_HardSandbox \| Coroutine` | Official MoonSharp preset: string/math/table/bit32 without io/os/load/debug |
-| **StripRiskyGlobals** | Manual `Nil` for load/require/package/collectgarbage, `string.rep` cap | The preset does not fully remove package and collectgarbage; `string.rep` is one VM instruction, so the step limiter cannot react in time: **a custom cap is required** |
-| **One-shot limits** | `InstructionLimitDebugger` + `IDebugger.GetAction` | MoonSharp has no built-in hard step limit; the debugger API is the documented approach |
-| **Frame coroutines** | `Script.CreateCoroutine` + `coroutine.yield()` in Lua | Standard Lua/MoonSharp pattern; `LuaCoroutineRunner` only ticks Resume |
-| **Kill coroutine** | `Coroutine.AutoYieldCounter = 1` + `_disposed` | MoonSharp has no ForceKill; AutoYieldCounter is the recommended mechanism (see docs) |
-| **YieldRequest** | Drain loop in `LuaCoroutineHandle.Resume` | Required for preemptive yield (AutoYieldCounter) |
-| **API registration** | `globals[name] = clrDelegate` in `LuaApiRegistry` | MoonSharp marshals typed `Func`/`Action` without DynamicInvoke |
-| **Logic slots / mod hooks** | C# `InvokeGuarded` + `LuaExecutionGuard` | Errors are host-side; `pcall` in Lua is intentionally not enabled (see below) |
-| **Optional module** | `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` | Build without MoonSharp: stub/null in DI |
+| **Secured environment** | `LuaCsSecureEnvironment` builds a curated global table (string/math/table subset, no io/os/load/debug) | Lua-CSharp lets the host own `LuaState.Environment`; we only add what is safe |
+| **One-shot limits** | `LuaCsExecutionGuard` (instruction / time budget) | Hard step/time cap for untrusted AI scripts; yields back to Unity |
+| **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua 5.4 coroutine pattern; the handle only drives Resume per frame |
+| **API registration** | `LuaCsApiRegistry.Register(name, delegate)` / `RegisterCallback` | Typed host delegates marshalled to `LuaFunction`; no CLR surface leaks |
+| **Logic slots / mod hooks** | C# guarded invoke + `LuaCsExecutionGuard` | Errors surface host-side; scripts cannot silently swallow failures |
+| **Optional module** | `#if !COREAI_NO_LUA` | Build without Lua: stub/null in DI, no compile errors elsewhere |
 
-## What Is Intentionally Not Enabled from MoonSharp
+## What Is Intentionally Not Exposed
 
-| Module / API | Reason |
+| Capability | Reason |
 |---|---|
-| `ErrorHandling` (pcall/xpcall) | SoftSandbox; scripts can swallow errors and bypass C# fail-open; the host catches errors |
-| `Metatables` | Complicates escapes through `__index`/`__newindex`; world APIs are explicit functions |
-| `LoadMethods`, `IO`, `OS_System`, `Debug` | Files, processes, eval, introspection |
-| `Dynamic`, `Json` (MoonSharp) | Extra surface; JSON goes through the C# envelope |
-| `Preset_SoftSandbox` / `Preset_Default` | Too broad for untrusted AI scripts |
+| `io`, `os`, `debug`, `package`, `require`, `load`/`loadstring` | Files, processes, eval, introspection, module loading — all removed from the secured environment |
+| Arbitrary metatables on host tables | Complicates escapes through `__index`/`__newindex`; world APIs are explicit functions |
+| Raw CLR object access | Only registered host callbacks are visible; the Full tier (opt-in) is the sole reflection path |
 
-## Where Custom Implementation Is Justified
+## Registering a Native API
 
-| Custom code | MoonSharp alternative | Verdict |
-|---|---|---|
-| `LuaModRuntime` hooks_on / hooks_every / store | None in MoonSharp | **Keep**: game mod runtime |
-| `LuaLogicSlots` | None | **Keep**: "slot + C# default" contract |
-| World command envelopes | None | **Keep**: main-thread execution + validation |
-| `InstructionLimitDebugger` on every Resume | `AutoYieldCounter` | **Keep debugger** for hard failure after N steps without yield; AutoYieldCounter gives a cooperative slice, not a throw |
-| `CoreAiFullUnityLuaRuntimeBindings` (reflection) | `UserData.RegisterType<T>()` | **Planned migration**: see below |
-
-## Full Mode: UserData Instead of Reflection (Planned)
-
-Current Full tier (`unity_find`, `unity_get_member`, ...) is a custom reflection wrapper.
-
-**MoonSharp recommendation** for CLR interop:
+The native binding concept is `LuaCsApiRegistry`:
 
 ```csharp
-UserData.RegistrationPolicy = InteropRegistrationPolicy.Manual; // never Automatic
-UserData.RegisterType<Transform>(InteropAccessMode.LazyOptimized);
-UserData.RegisterType<Rigidbody>(...);
+var registry = new LuaCsApiRegistry();
 
-// In Lua:
-local go = unity_find("Player")  -- UserData.Create(go)
-go.transform.position = Vector3(1, 2, 3)  -- if Transform is registered
+// 1. Typed delegate — arguments are coerced to the delegate's parameter types,
+//    the return value is marshalled back to a Lua value automatically.
+registry.Register("forge_spawn",
+    (string kind, double x, double y) => forge.Spawn(kind, (float)x, (float)y));
+
+// 2. Custom callback — when you need full control over Lua arguments/returns.
+registry.RegisterCallback("forge_count", (ctx, ct) =>
+{
+    string team = ctx.GetArgument<string>(0);
+    return new ValueTask<int>(ctx.Return(forge.Count(team)));
+});
+
+// Applied to the secured LuaState when a script runs:
+registry.ApplyToEnvironment(state); // writes each name into state.Environment
 ```
 
-Pros: typed marshalling, `[MoonSharpUserData]`, `[MoonSharpHide]`, hardwire for IL2CPP, no `MethodInfo.Invoke` on the hot path.
+```lua
+-- In Lua (5.4):
+forge_spawn("knight", -5, 0)
+local n = forge_count("enemy")
+```
 
-Cons: every type must be registered explicitly (or generated); type/member denial stays a separate host policy
-(see `IFullLuaAccessBlacklistPolicy` in `LUA_ACCESS_MODES.md`).
+Argument coercion (`LuaCsApiRegistry.CoerceArgument`) handles `string`, `bool`, `double`/`float`,
+`int`/`long`, enums, `LuaTable`, and `LuaValue`; return values (numbers, strings, bools, dictionaries,
+`IEnumerable`) are converted back to Lua values. Host exceptions become `LuaRuntimeException` prefixed
+with the API name.
 
-**Intermediate step (current):** reflection API with Type/Member caching. It works for opt-in Full, but it is not idiomatic MoonSharp.
+## Full Mode: Opt-in Reflection Tier
 
-## Performance (Brief)
+The Full tier (`unity_find`, `unity_get_member`, …) in `LuaCsFullUnityRuntimeBindings` is a curated
+reflection wrapper (public members by default) gated behind explicit access modes and a
+type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see `LUA_ACCESS_MODES.md`). It stays
+disabled on WebGL. Prefer registering explicit typed APIs over the Full tier for anything shipped.
 
-1. **IDebugger on every instruction** (`IsPauseRequested` + `StepIn`) is expensive for hot coroutines. Alternative for time-slicing: only `AutoYieldCounter` without debugger (not a hard limit). Current choice: exact hard limit is more important than FPS for AI scripts.
-2. **`LuaApiRegistry`** after the audit: direct delegate assignment to globals (without a DynamicInvoke wrapper).
-3. **`set_color` through `renderer.material`** is a Unity API issue, not MoonSharp; for frequent calls, use `MaterialPropertyBlock` (see PERF review).
+## Lua 5.4 Semantics (Lua-CSharp)
 
-## Lua 5.x vs MoonSharp
-
-- MoonSharp is a Lua 5.2-like dialect, not 100% LuaJIT/Lua 5.4.
-- `bit32` is available (`Preset_HardSandbox`); verify the `#` operator / `goto` against the package version in the project.
-- Standard `coroutine.*` is available when `CoreModules.Coroutine` is enabled.
+- Lua-CSharp implements **Lua 5.4**: distinct integer/float number subtypes, integer division `//`,
+  and native bitwise operators (`&`, `|`, `~`, `<<`, `>>`) — no `bit32` shim needed.
+- A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, …);
+  `io`/`os`/`debug`/`package` are withheld from the secured environment.
+- Standard `coroutine.*` is available; long-lived scripts should `coroutine.yield()` across frames
+  rather than busy-loop inside a one-shot chunk.
 
 ## Checklist for New Bindings
 
-1. Prefer a **typed delegate** (`Func<...>`, `Action<...>`) in `LuaApiRegistry.Register`.
-2. For CLR objects, use **`UserData.RegisterType`** + `[MoonSharpHide]` on dangerous members, not reflection (Full tier is a temporary exception).
-3. Do not add CoreModules without review, especially Metatables, ErrorHandling, or LoadMethods.
-4. Long-lived scripts should use **`Script.CreateCoroutine` + yield**, not a busy-loop in a one-shot chunk.
-5. Tail-call from a C# callback into Lua only through `DynValue.NewTailCallReq` (rare; see MoonSharp coroutine caveats).
+1. Prefer a **typed delegate** in `LuaCsApiRegistry.Register`; use `RegisterCallback` only when you
+   need custom argument/return handling.
+2. Keep host callbacks small and validating — treat every Lua argument as untrusted.
+3. Do not widen the secured environment (no `io`/`os`/`debug`/`load`/`require`) without review.
+4. Long-lived scripts should use `coroutine.yield()`, not a busy-loop in a one-shot chunk.
+5. Reach for the Full reflection tier only behind an explicit opt-in access mode.
 
 Detailed **✅/❌** guidance: [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 
@@ -89,4 +93,3 @@ Detailed **✅/❌** guidance: [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 - [LUA_GAME_API.md](LUA_GAME_API.md) - game API for scripts
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) - best practices and anti-patterns
 - `LUA_ACCESS_MODES.md` - access modes (Read -> Full), blacklist policy
-

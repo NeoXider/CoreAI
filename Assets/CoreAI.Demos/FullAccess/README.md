@@ -25,7 +25,7 @@ Full access is split by member visibility:
 
 ## Requirements
 
-- MoonSharp present, `COREAI_NO_LUA` not defined.
+- `COREAI_NO_LUA` not defined.
 - LM Studio / OpenAI-compatible endpoint in `Resources/CoreAISettings`.
 - On the `CoreAI` scope: **Enable Full Lua Access = true** (already set in the demo scene).
 
@@ -83,7 +83,7 @@ WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample"
 ## Safety
 
 Full access is **opt-in** and gated behind the Full capability tier. Public-only is the
-default member surface (see above). The MoonSharp sandbox (no `io`/`os`/`load`),
+default member surface (see above). The Lua-CSharp sandbox (no `io`/`os`/`load`),
 instruction and time limits, and the auto-unload-on-repeated-errors policy still apply.
 A type/member blacklist is available through `IFullLuaAccessBlacklistPolicy`; see
 `Assets/CoreAI/Docs/LUA_ACCESS_MODES.md`.

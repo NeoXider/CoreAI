@@ -30,20 +30,18 @@ Recommended follow-up:
 - Check project render pipeline global settings.
 - Remove or reassign obsolete render pipeline resource references if Unity created stale settings.
 
-## WebGL Lua execution
+## WebGL Lua execution (resolved)
 
-Symptom: Lua tools or Lua envelope processing report that Lua execution is unavailable in a WebGL player.
+Symptom (historical): Lua tools or Lua envelope processing reported that Lua execution was unavailable in a WebGL player.
 
-Cause: v2.6.0 explicitly disables the current MoonSharp-based sandbox in WebGL player builds. The old path could initialize reflection-based loader code that aborts WebGL/IL2CPP before managed exception handling.
+Cause (historical): v2.6.0 explicitly disabled the then-current Lua sandbox (a different third-party interpreter, since replaced) in WebGL player builds. That path could initialize reflection-based loader code that aborts WebGL/IL2CPP before managed exception handling.
 
-Impact: expected platform limitation. Editor and non-WebGL player Lua execution remain supported.
+Resolution: the Lua VM was replaced end-to-end by **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading. WebGL Lua execution through `SecureLuaEnvironment` is supported on WebGL player builds and **on by default**; toggle with `CoreAISettingsAsset.EnableLuaOnWebGl`. See ARCHITECTURE.md.
 
 Recommended follow-up:
 
-- Keep WebGL gameplay on non-Lua tools or server-managed actions for now.
-- Restore WebGL Lua only through an AOT-safe Lua runtime, trusted server-side execution, or a restricted command interpreter.
-- Add or extend WebGL Player tests before enabling any replacement Lua path.
-- Since v3.0.0 you can also compile Lua out entirely with the `COREAI_NO_LUA` scripting define (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md) — useful for WebGL or any build that does not need scripting.
+- Add or extend WebGL Player tests to keep covering the Lua-CSharp path on IL2CPP.
+- You can still compile Lua out entirely with the `COREAI_NO_LUA` scripting define (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md) — useful for WebGL or any build that does not need scripting.
 
 ## Warning handling policy
 

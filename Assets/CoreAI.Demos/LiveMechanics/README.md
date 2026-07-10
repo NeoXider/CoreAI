@@ -12,8 +12,8 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
   Until a slot is overridden, the C# default is used (`atk - def`, 2 sec, 10 gold).
 - `CoreAiChatPanel` with the **Programmer** role: the model replies with Lua code (a fenced block or
   tool-call `execute_lua`), which goes through the normal pipeline
-  `LuaAiEnvelopeProcessor -> SecureLuaEnvironment` with the full game binding set
-  (`LuaCapabilities.All`): logic slots, `LuaModRuntime`, world commands
+  `LuaCsAiEnvelopeProcessor -> LuaCsSecureEnvironment` with the full game binding set
+  (`LuaCapabilities.All`): logic slots, `ILuaModRuntime`, world commands
   (`coreai_world_spawn`, etc.; prefabs from `Shared/DemoPrefabRegistry`).
 - Left panel (OnGUI): boss HP, gold, slot states (C# default / Lua override), loaded mods, combat log.
   Open chat with **C**.
@@ -22,7 +22,7 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
 
 - LM Studio (or any OpenAI-compatible server) at `http://127.0.0.1:1234/v1` with a loaded model;
   the endpoint is configured in `Assets/Resources/CoreAISettings.asset`.
-- MoonSharp in the project (define `COREAI_HAS_MOONSHARP`, without `COREAI_NO_LUA`).
+- The Lua-CSharp runtime (shipped via the CoreAI.Mods package), without `COREAI_NO_LUA`.
 
 ## How to Use It
 
@@ -61,7 +61,7 @@ Hosts that want mods to autoload should load/reload their selected mod sources o
 
 ## Security
 
-Model code runs only in `SecureLuaEnvironment` (MoonSharp sandbox: no io/os/files, instruction and
+Model code runs only in `LuaCsSecureEnvironment` (Lua-CSharp sandbox: no io/os/files, instruction and
 memory limits). Capabilities are restricted by `LuaCapabilities`; the demo intentionally gives the
 Programmer role the full standard set (`All`) because it demonstrates an "AI game designer".
 

@@ -1,7 +1,7 @@
 # CoreAI Lua mod authoring guide
 
-> How to write a CoreAI Lua mod. Audience: the AI agent and human authors. Runtime VM: Lua-CSharp
-> (migrating from MoonSharp). Examples: `Assets/CoreAI.Demos/Mods/*.lua`.
+> How to write a CoreAI Lua mod. Audience: the AI agent and human authors. Runtime VM: Lua-CSharp.
+> Examples: `Assets/CoreAI.Demos/Mods/*.lua`.
 
 ## What a mod is
 A mod is Lua source that the runtime runs ONCE through `LoadMod`. During that run it **registers hooks**;
@@ -75,7 +75,7 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   serviced on later ticks), auto-unload after consecutive failures.
 
 ## Lua version note
-Lua-CSharp targets **Lua 5.4** semantics (MoonSharp was 5.2). Watch: integer/float subtype, bitwise operators
+Lua-CSharp targets **Lua 5.4** semantics. Watch: integer/float subtype, bitwise operators
 (`&`, `|`, `~`, `<<`, `>>` are native, not a `bit` library), and partial stdlib coverage — a missing library
 function errors, so keep to common `string`/`table`/`math` calls.
 

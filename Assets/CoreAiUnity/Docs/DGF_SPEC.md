@@ -1,6 +1,6 @@
 # CoreAI — Core SPEC (Dynamic Game Framework)
 
-**Document version:** 0.23
+**Document version:** 0.24
 **Repository:** CoreAI · **Author:** Neoxider (handle neoxider) — [github.com/NeoXider](https://github.com/NeoXider)
 **UPM:** **`com.neoxider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** only: pure **C# without an engine** (`noEngineReferences`). **`com.neoxider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
 **Sample game:** `Assets/_exampleGame` (see also `Docs/ROGUELITE_PLAYBOOK.md` in the sample)
@@ -18,7 +18,7 @@
 - A single **core** for games with **procedural and AI-driven** logic: rule changes, waves, modifiers, character effects.
 - **One code path** for single-player and multiplayer: offline, the player is the local **authority** (host analogue).
 - **Orchestration** of multiple model requests and scenarios: queue, priorities, timeouts, budget.
-- **Safe execution** of optional code (Lua / MoonSharp) in a **sandbox** with whitelist and limits.
+- **Safe execution** of optional code (Lua / Lua-CSharp) in a **sandbox** with whitelist and limits.
 - **Application of AI decisions** only via explicit **commands and typed events** (primarily **MessagePipe**), without direct “text parsing” in gameplay systems.
 - **Default “out of the box” pipeline:** a minimal scene and `CoreAILifetimeScope` shall bring up a working path (LLM/stub → orchestrator → MessagePipe → Lua sandbox → commands); the game may override specific points as needed (prompts, LLM routing, whitelist API, policies).
 
@@ -38,7 +38,7 @@
 | **Session snapshot** | Minimal telemetry DTO for prompt/logic (wave, core HP, party composition, mode flags, etc.). |
 | **Command / game event** | Typed message on the bus (MessagePipe) that game code handles deterministically. |
 | **Use case (dynamic)** | Unit of behavior, possibly AI-generated: data (JSON) and/or a Lua fragment under whitelist. |
-| **Sandbox** | Isolated MoonSharp `Script` + globals policy + limits + registered C# delegates. |
+| **Sandbox** | Isolated Lua-CSharp `LuaState` + globals policy + limits + registered C# delegates. |
 | **AI orchestrator** | Service that accepts **tasks** from the game, assigns priorities, and prevents parallel calls from blocking the main thread without policy. |
 | **Agent role** | Logical request type: **Creator**, **Analyzer**, **Programmer** (Lua), **AINpc**, **CoreMechanicAI**, etc. — see [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). |
 | **Placement** | Where the role runs: **HostAuthoritative**, **LocalPerClient**, **Hybrid** — set by game configuration, not hard-coded in the core. |
@@ -52,7 +52,7 @@
 > `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
 > `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
 > `com.neoxider.coreaihub` (optional UI Toolkit Hub window), and `com.neoxider.coreaibenchmark`
-> (dev/test-only benchmark harness). `CoreAI.Core` no longer references MoonSharp — the Lua sandbox
+> (dev/test-only benchmark harness). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
 > and `execute_lua`/`manage_mods` tools live entirely in `CoreAI.Mods`. See [INSTALL.md](../../../INSTALL.md)
 > and the root [README.md §Architecture](../../../README.md#%EF%B8%8F-architecture) for the current
 > package/dependency graph; treat the rest of this section as historical unless it is updated.
@@ -70,13 +70,13 @@
 
 - **VContainer**, **MessagePipe** + **MessagePipe.VContainer**
 - **R3**, **UniTask**
-- **MoonSharp / Lua-CSharp** are implementation dependencies of `com.neoxider.coreaimods`, not Core.
+- **Lua-CSharp** (bundled `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/`) is an implementation dependency of `com.neoxider.coreaimods`, not Core.
 - **MCPForUnity** (`com.coplaydev.unity-mcp`) — editor automation; **mandatory** test execution path for agent/CI with Cursor — see **§11–12**.
 - **LLM for Unity** ([LLMUnity](https://github.com/undreamai/LLMUnity), package `ai.undream.llm` in manifest) — local/remote inference (llama.cpp), `LLM` / `LLMAgent`, grammar/RAG per package documentation. The core still introduces **`ILlmClient`**; the **reference** implementation is a thin adapter over LLMUnity + **stub** mode (§5.2).
 
 ### 3.2 Assembly `CoreAI.Core` (`Assets/CoreAI/Runtime/Core/CoreAI.Core.asmdef`)
 
-- `noEngineReferences: true`; no MoonSharp, Unity, MessagePipe, or VContainer reference. Composition stays in host/module assemblies.
+- `noEngineReferences: true`; no Lua, Unity, MessagePipe, or VContainer reference. Composition stays in host/module assemblies.
 - Portable logic: AI contracts, MVP orchestrator, Lua sandbox, session snapshot DTO.
 
 ### 3.3 Assembly `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)
@@ -185,7 +185,7 @@ flowchart LR
 | **MessagePipe** (+ VContainer) | Default **no** | UPM layer pulls Unity; in Core — own **`ICommandBus`** / delegates / internal subscriber list; in Source — wrapper publishing to MessagePipe. |
 | **R3** | Default **no** | UI/client reactivity closer to Unity; in Core — `event`, `IObservable` from Rx (if truly needed) or simple callbacks. Exception: if you choose **one** netstandard-compatible package for all hosts — record in an ADR. |
 | **UniTask** | Default **no** | In Core — `Task` / `ValueTask`; in Unity layer — UniTask for PlayerLoop integration. |
-| **MoonSharp** | **Yes** | Runs **without Unity** on .NET; sandbox and globals/whitelist policy in **`CoreAI.Core`**. In `CoreAI.Source` — calls from game loop/host only if needed. Assembly name in UPM: usually under `org.moonsharp.moonsharp` (verify in PackageCache on first asmdef reference). |
+| **Lua-CSharp** | **No (moved to `CoreAI.Mods`)** | Runs **without Unity** on .NET; sandbox and globals/whitelist policy now live in **`CoreAI.Mods`** (`com.neoxider.coreaimods`), not `CoreAI.Core`. Ships bundled as `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/` — no separate UPM package to install. |
 | **System.Text.Json** / **HttpClient** | Permitted | For `ILlmClient` HTTP and JSON parsing on BCL. |
 
 **Why not pull everything into the portable assembly immediately:** each dependency implies versions, compatibility with **Godot / console / Linux server**, licenses, and size. A thinner Core simplifies **DLL extraction** and testing without the editor.
@@ -253,16 +253,16 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
 
 ---
 
-## 8. Lua sandbox (MoonSharp)
+## 8. Lua sandbox (Lua-CSharp)
 
 ### 8.1 Security
 
-- Remove or override dangerous **globals** (`os`, `io`, `require`, dynamic code loading — per MoonSharp version checklist).
+- Remove or override dangerous **globals** (`os`, `io`, `require`, dynamic code loading — per Lua-CSharp version checklist).
 - **Whitelist** of registered functions only; no arbitrary Unity API access from Lua for LLM-generated code.
 
 ### 8.2 Limits
 
-- **MaxInstructions** (or equivalent in the MoonSharp version used). In the template this is implemented via a pluggable debugger hook (`InstructionLimitDebugger`) in `LuaExecutionGuard` (best-effort step limit + wall clock).
+- **MaxInstructions** (or equivalent in the Lua-CSharp version used). In the template this is implemented via a pluggable debugger hook (`InstructionLimitDebugger`) in `LuaExecutionGuard` (best-effort step limit + wall clock).
 - **Timeout** policy for Lua chunk execution aligned with §10 (main thread).
 
 ### 8.3 Bridge to MessagePipe (Last-War motivation)
@@ -286,7 +286,7 @@ In Last-War (`Assets/Scripts/LuaBehaviour/`, including the **`LuaMessagePipeAdap
 
 ### ADR-9.1 — Recommended default model
 
-- **Lua and command application to Unity** — on the **main thread** (MoonSharp `Script` in the same thread as MessagePipe `Publish` / game state changes).
+- **Lua and command application to Unity** — on the **main thread** (Lua-CSharp `LuaState` in the same thread as MessagePipe `Publish` / game state changes).
 - **LLM calls** — **async** (`Task` / UniTask in Unity layer); result is validated and **marshaled to the main thread** before publishing commands and touching `UnityEngine` API.
 - The **orchestrator** shall not block the network tick beyond policy: move heavy steps to async and split work across frames if needed.
 
@@ -415,7 +415,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 | Id | Criterion |
 |----|-----------|
-| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, dependencies: **VContainer**, **MoonSharp**; **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`**, MessagePipe, UniTask, LLMUnity, etc. |
+| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, no required package dependencies (Lua moved to `com.neoxider.coreaimods`, bundled as `Lua.dll`); **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`**, MessagePipe, UniTask, LLMUnity, etc. |
 | **F1** | **Done:** monorepo — sources in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; **do not** register them in **`manifest.json`** via **`file:`** to a path inside **`Assets/`** (Unity UPM rejects). External project: Git UPM **`?path=Assets/CoreAI`** / **`?path=Assets/CoreAiUnity`**. |
 | **F2** | **Done:** **`CoreAI.Core`** in **`Assets/CoreAI/Runtime/Core/`**; **`CoreAI.Source`** in **`Assets/CoreAiUnity/Runtime/Source/`**; tests, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — in package **`CoreAiUnity`**. |
 | F3 | Publish: git URL with **`?path=Assets/CoreAI`**, tags per `version`, optional OpenUPM; sync `package.json` version with releases. |
@@ -424,7 +424,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 ## 14. Summary for context (copy-paste)
 
-**CoreAI:** Unity core template for procedural logic and AI. **Done:** **`CoreAI.Core`** in **`Assets/CoreAI`**, **`CoreAI.Source`** in **`Assets/CoreAiUnity`** (LLM routing **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, metrics **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity in project manifest; host **`Assets/CoreAiUnity`** (scene **`Scenes/_mainCoreAI`**, prompts in **`Resources`**); sample **`RogueliteArena`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** `CoreAI.Tests`; Play Mode: `CoreAI.Tests.PlayMode.FastNoLlm`, `CoreAI.Tests.PlayMode.LlmVerification`, `CoreAI.Tests.PlayMode.Scenarios` (+ `Shared`, `LlmInfra`). **Defines:** `COREAI_NO_LLM` (manual opt-out, §5.2), `COREAI_HAS_LLMUNITY` (auto, versionDefines).
+**CoreAI:** Unity core template for procedural logic and AI. **Done:** **`CoreAI.Core`** in **`Assets/CoreAI`**, **`CoreAI.Source`** in **`Assets/CoreAiUnity`** (LLM routing **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, metrics **`GameLogFeature.Metrics`**); VContainer + MessagePipe + LLMUnity + MCPForUnity in project manifest (Lua-CSharp ships bundled inside `com.neoxider.coreaimods`, no manifest entry needed); host **`Assets/CoreAiUnity`** (scene **`Scenes/_mainCoreAI`**, prompts in **`Resources`**); sample **`RogueliteArena`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** `CoreAI.Tests`; Play Mode: `CoreAI.Tests.PlayMode.FastNoLlm`, `CoreAI.Tests.PlayMode.LlmVerification`, `CoreAI.Tests.PlayMode.Scenarios` (+ `Shared`, `LlmInfra`). **Defines:** `COREAI_NO_LLM` (manual opt-out, §5.2), `COREAI_HAS_LLMUNITY` (auto, versionDefines).
 
 ---
 
@@ -442,8 +442,8 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 | 0.8 | §4.1 portable C# core / DLL without Unity, adapter layer |
 | 0.9 | §4.2 Core vs Source dependency policy (MessagePipe/R3/UniTask/VContainer) |
 | 0.10 | §4.2: VContainer allowed in CoreAI.Core when compatible with noEngineReferences |
-| 0.11 | §4.1–4.2: MoonSharp explicitly as Core dependency (no Unity) |
-| 0.12 | §9 ADR-9.1–9.3; in code: `CoreAI.Core` assembly, `ILlmClient` + stub + LLMUnity in Source, MVP orchestrator, `ApplyAiGameCommand` + MessagePipe, MoonSharp sandbox, `CoreAI.Tests`, `COREAI_NO_LLM` |
+| 0.11 | §4.1–4.2: Lua VM explicitly as Core dependency (no Unity) — historical; the Lua sandbox later moved to `CoreAI.Mods` (see 0.24) |
+| 0.12 | §9 ADR-9.1–9.3; in code: `CoreAI.Core` assembly, `ILlmClient` + stub + LLMUnity in Source, MVP orchestrator, `ApplyAiGameCommand` + MessagePipe, Lua sandbox, `CoreAI.Tests`, `COREAI_NO_LLM` |
 | 0.13 | Link to [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md); §3.4: OpenAI HTTP, `LuaAiEnvelopeProcessor`, entry point order, Lua bindings |
 | 0.14 | §3.4: `LoggingLlmClientDecorator`, LLM timeout, `TraceId` on request/command, `GameLogFeature.Llm`, §14 summary |
 | 0.15 | §Phase F: core UPM (`package.json`, dependencies including AI Navigation); plan F1–F3 |
@@ -455,3 +455,4 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 | 0.21 | Sources only in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; duplicates removed from **`Packages/`**; **`manifest`**: no **`file:`** to `Assets/` |
 | 0.22 | §3.4: v1.5.x composition additions — context budget policy, `EnableLlmContextCompaction`, `SelectingConversationContextManager`, WebGL `CancelAfterSlim` timeout, single-layer retry |
 | 0.23 | §3.0 invariant: **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore`** on WebGL player (**v1.6.19+**) with IDBFS flush; portable **`NullAgentMemoryStore`** only when host does not suppress default |
+| 0.24 | Lua VM implementation switched to **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading; it ships bundled as `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/`; the previous third-party Lua interpreter dependency and its UPM package entry were removed from the manifest and from `CoreAI ▸ Setup ▸ Modules`; the old Lua auto-define no longer exists — Lua is compiled in by default (`COREAI_NO_LUA` still compiles it out) |

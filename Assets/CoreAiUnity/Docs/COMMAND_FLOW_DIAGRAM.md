@@ -62,7 +62,7 @@ flowchart TB
         Router["AiGameCommandRouter<br/>⚠️ Marshal to<br/>Unity MAIN THREAD"]
     end
 
-    subgraph LUA ["🔧 Lua layer (MoonSharp)"]
+    subgraph LUA ["🔧 Lua layer (Lua-CSharp)"]
         LuaProcessor["LuaAiEnvelopeProcessor<br/>Extracts Lua from response"]
         SecureLua["SecureLuaEnvironment<br/>+ LuaExecutionGuard<br/>+ LuaApiRegistry"]
         
@@ -283,7 +283,7 @@ Background Thread ──→ UniTask.SwitchToMainThread() ──→ Main Thread
 ### Step 8: Lua execution → `SecureLuaEnvironment`
 
 ```lua
--- Lua runs in MoonSharp sandbox:
+-- Lua runs in Lua-CSharp sandbox:
 create_item("Flame Sword", 75)        -- → Whitelist API
 add_effect("fire_damage", 15)         -- → Whitelist API
 report("crafted Flame Sword")         -- → IGameLuaRuntimeBindings

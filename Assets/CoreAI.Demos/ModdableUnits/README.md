@@ -12,9 +12,15 @@ extend the game at runtime through a host-defined Lua API.
 ## How it works
 
 The scene controller [`ModdableUnitsDemoController`](Scripts/ModdableUnitsDemoController.cs)
-implements `IUnitForge` and registers [`UnitForgeLuaBindings`](Scripts/UnitForgeLuaBindings.cs)
-through `GameLuaBindingsExtensibility` under the **WorldEdit** capability tier. Any mod
-granted WorldEdit (the default tier) therefore gets these extra Lua functions:
+implements `IUnitForge` and authors [`UnitForgeLuaBindings`](Scripts/UnitForgeLuaBindings.cs)
+as a Lua-CSharp `ILuaCsGameRuntimeBindings` set intended for the **WorldEdit** capability tier.
+When wired into the mod runtime, a mod granted WorldEdit (the default tier) gets these extra
+Lua functions:
+
+> NOTE: the active Lua-CSharp mod runtime does not yet expose a host seam for injecting per-scene
+> extension bindings, so the forge functions below are authored and ready but are not currently
+> surfaced to running mods from the demo layer alone. They become live once CoreAI.Mods adds such
+> an extension point.
 
 | Function | Effect |
 |---|---|
@@ -38,7 +44,7 @@ So a mod can react to its own world with `hooks_on(...)` and drive it over time 
 
 ## Requirements
 
-- MoonSharp present and `COREAI_NO_LUA` **not** defined.
+- `COREAI_NO_LUA` **not** defined.
 - An LLM endpoint configured in `Resources/CoreAISettings` (LM Studio / OpenAI-compatible).
 - The scene's `CoreAI` scope uses the built-in **Programmer** role (already wired in the
   scene) so `manage_mods` is available in chat.
@@ -84,10 +90,10 @@ report("Endless waves armed.")
 ## Safety
 
 `forge_*` lives behind the **WorldEdit** tier — read-only mods cannot spawn anything.
-The MoonSharp sandbox (no `io`/`os`/`load`), per-call instruction/time limits and the
+The Lua-CSharp sandbox (no `io`/`os`/`load`), per-call instruction/time limits and the
 automatic unload-after-repeated-errors policy all still apply. Spawns are capped (`MaxUnits`)
 and positions are clamped to the arena. Unit visuals are created on Unity's main thread
-during mod ticks, which the `LuaModRuntime` ticker guarantees.
+during mod ticks, which the mod-runtime ticker guarantees.
 
 ## Related
 

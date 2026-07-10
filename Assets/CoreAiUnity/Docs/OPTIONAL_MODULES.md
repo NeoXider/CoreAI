@@ -6,13 +6,13 @@ packages so a consumer installs only the surfaces it uses.
 
 | Module | Package/dependency | Auto-define | Manual opt-out |
 |---|---|---|---|
-| Lua mods | `com.neoxider.coreaimods` + `org.moonsharp.moonsharp` | `COREAI_HAS_MOONSHARP` | `COREAI_NO_LUA` |
+| Lua mods | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — (compiled in by default) | `COREAI_NO_LUA` |
 | Hub UI | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` in Mods/Hub integration | remove Hub package |
 | Local inference | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | `COREAI_NO_LLM` |
 | Benchmark | `com.neoxider.coreaibenchmark` | none | do not install in players |
 
-`CoreAI.Core.asmdef` has no MoonSharp reference. Lua VM/sandbox implementations and their
-MoonSharp/Lua-CSharp dependencies live in `CoreAI.Mods`. `CoreAI.Source` owns the guarded LLMUnity
+`CoreAI.Core.asmdef` has no Lua reference. Lua VM/sandbox implementations and their
+Lua-CSharp dependencies live in `CoreAI.Mods`. `CoreAI.Source` owns the guarded LLMUnity
 adapter. The benchmark depends on Core, Unity, and Mods because G1-G8 execute real Lua tools.
 
 ## Editor module tool

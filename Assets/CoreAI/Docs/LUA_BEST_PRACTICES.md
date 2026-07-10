@@ -1,10 +1,10 @@
 ﻿# CoreAI Lua: Best Practices and Anti-Patterns
 
-> Current for v4.x. See also [LUA_GAME_API.md](LUA_GAME_API.md), [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md), [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md).
+> Current for v4.x. See also [LUA_GAME_API.md](LUA_GAME_API.md), [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md), [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md).
 
 ## Principle
 
-**Lua proposes changes; C# decides whether they are legal.** The MoonSharp sandbox cuts system APIs;
+**Lua proposes changes; C# decides whether they are legal.** The Lua-CSharp sandbox cuts system APIs;
 capability levels cut game APIs; validators in bindings cut specific values.
 
 ---
@@ -81,7 +81,7 @@ GameLuaBindingsExtensibility.Register(
     LuaCapabilities.Gameplay);  // only scripts with Gameplay+
 ```
 
-MoonSharp marshals delegates directly; do not wrap them in `DynamicInvoke` yourself.
+Lua-CSharp marshals delegates directly; do not wrap them in `DynamicInvoke` yourself.
 
 ### 4. Custom World Commands Through `ICoreAiCustomWorldCommandHandler`
 
@@ -142,16 +142,16 @@ return '{"found":true,"id":' .. sun.id .. ',"path":"' .. sun.path .. '"}'
 For persistent mods, rediscover objects by name/tag/component inside the hook instead of storing
 old instance ids forever; scene reloads invalidate object identity.
 
-### 8. MoonSharp: Use Native Facilities
+### 8. Lua-CSharp: Use Native Facilities
 
 | Task | Native | Do not reinvent |
 |---|---|---|
-| Sandbox modules | `CoreModules.Preset_HardSandbox` | A custom Lua parser |
-| Frame coroutines | `CreateCoroutine` + `coroutine.yield()` | Busy-loop in a one-shot chunk |
-| CLR callbacks | `registry.Register(name, typedDelegate)` | `GetComponent` from Lua through reflection without Full tier |
-| One-shot CPU limit | `IDebugger` / `LuaExecutionGuard` | Infinite `while true` with no limit |
-| Preemptive yield | `AutoYieldCounter` + drain `YieldRequest` | - |
-| CLR objects in Lua (Full+) | `UserData.RegisterType<T>()` (roadmap) | Raw reflection on every call |
+| Sandbox modules | secured `LuaState.Environment` (curated stdlib subset) | A custom Lua parser |
+| Frame coroutines | `LuaCsCoroutineHandle` + `coroutine.yield()` | Busy-loop in a one-shot chunk |
+| CLR callbacks | `LuaCsApiRegistry.Register(name, typedDelegate)` | `GetComponent` from Lua through reflection without Full tier |
+| One-shot CPU limit | `LuaCsExecutionGuard` | Infinite `while true` with no limit |
+| Memory budget | `LuaCsSecureEnvironment.MaxAllocatedBytesBudget` | Unbounded string/table growth |
+| CLR objects in Lua (Full+) | targeted reflection bindings guarded by `IFullLuaAccessBlacklistPolicy` | Raw reflection on every call |
 
 ### 9. Logging
 
@@ -162,7 +162,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 
 - EditMode: `SecureLuaSandboxEditModeTests`, `LuaModRuntimeEditModeTests`, binding tests
 - PlayMode: `LuaCoroutineRunnerPlayModeTests`, FastNoLlm integrations
-- CI: `moonsharp` / `COREAI_NO_LUA` matrix
+- CI: default (Lua enabled) / `COREAI_NO_LUA` matrix
 
 ---
 
@@ -173,7 +173,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 | Anti-pattern | Why it is bad |
 |---|---|
 | Enable `Preset_Default` / `LoadMethods` / `IO` / `Debug` | Files, eval, introspection |
-| `UserData.RegistrationPolicy.Automatic` | Any CLR type in Lua (MoonSharp docs: **never**) |
+| Full mode without `IFullLuaAccessBlacklistPolicy` | Any CLR type/member reachable from Lua |
 | Full mode in production multiplayer without review | Any script can touch any component |
 | Trust `pcall` in Lua instead of a C# guard | `ErrorHandling` is intentionally disabled; the host must catch errors |
 | Skip `luaAllowedScenes` in public chat mode | The LLM can request any scene from Build Settings |
@@ -189,14 +189,14 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 | Store game state only in `store_set` | Strings, 64 KB cap; critical state belongs in C# |
 | `GetComponent` / reflection every frame through the Full API | GC and perf; cache ids, use slots |
 
-### MoonSharp / Perf
+### Lua-CSharp / Perf
 
 | Anti-pattern | Why it is bad |
 |---|---|
-| `DynamicInvoke` + `ToObject` on every binding call | Loses typed marshalling (old `LuaApiRegistry` anti-pattern) |
-| Mix `AutoYieldCounter` and debugger step limits without understanding them | Different semantics; see MOONSHARP_NATIVE_APIS.md |
+| `DynamicInvoke` + `ToObject` on every binding call | Loses typed marshalling; use `LuaCsApiRegistry.Register` with a typed delegate instead |
+| Mix instruction-count limits and time-based timeouts without understanding their semantics | Different failure modes; see LUA_NATIVE_APIS.md |
 | `renderer.material.color = ...` in a tight loop | Material instances; use `MaterialPropertyBlock` |
-| `string.rep(1, 1e9)` without a cap | Allocation bomb; capped in `SecureLuaEnvironment` |
+| `string.rep(1, 1e9)` without a cap | Allocation bomb; capped in `LuaCsSecureEnvironment` |
 
 ### LLM / Context
 

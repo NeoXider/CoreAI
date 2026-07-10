@@ -198,7 +198,7 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI          # core first
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity     # then Unity layer
 ```
 
-NuGet DLLs and Git dependencies for VContainer/MoonSharp/UniTask/MessagePipe/LLMUnity — see the root [README](../../README.md) §Quick Start.
+NuGet DLLs and Git dependencies for VContainer/UniTask/MessagePipe/LLMUnity — see the root [README](../../README.md) §Quick Start. Lua (Lua-CSharp) ships bundled inside the CoreAI Mods package; no separate Lua package to install.
 
 ---
 

@@ -34,7 +34,7 @@ Package manifests:
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
-| [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable MoonSharp (Lua) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
+| [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable Lua (Lua-CSharp) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
 
 ## Chat And Streaming
@@ -74,8 +74,8 @@ Package manifests:
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
 | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md) | Your first Lua mod in 5 minutes: load via agent/C#/TextAsset, persistence, sharing. |
 | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`, persistence & sharing. |
-| [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, MoonSharp, LLM context. |
-| [MOONSHARP_NATIVE_APIS](../../CoreAI/Docs/MOONSHARP_NATIVE_APIS.md) | Native MoonSharp vs custom CoreAI code. |
+| [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, Lua-CSharp, LLM context. |
+| [LUA_NATIVE_APIS](../../CoreAI/Docs/LUA_NATIVE_APIS.md) | Native Lua-CSharp vs custom CoreAI code. |
 
 ## Architecture
 

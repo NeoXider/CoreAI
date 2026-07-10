@@ -5,12 +5,12 @@ logic, and communicate with the game through events. The sandbox (`SecureLuaEnvi
 [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) is not weakened by this: only the binding surface
 grows, and every group is gated by a capability level.
 
-**Lua is an optional module:** define `COREAI_NO_LUA` or remove the MoonSharp package, and CoreAI
+**Lua is an optional module:** define `COREAI_NO_LUA`, and CoreAI
 builds without Lua (stub bindings in DI). See [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md).
 
 **New to mods?** Start with [FIRST_MOD.md](FIRST_MOD.md) — "Your first Lua mod in 5 minutes".
 **Best practices and anti-patterns:** [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
-**MoonSharp: native vs custom:** [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md).
+**Lua-CSharp: native vs custom:** [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md).
 **Access modes (Read -> Full):** [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 All bindings run on the Unity main thread.
@@ -367,7 +367,7 @@ Full remains for diagnostics and reflection-only cases.
 > `CoreAiUnity/Docs/WORLD_COMMANDS.md` §7 (World State Persistence).
 
 Demo: `Assets/CoreAI.Demos/FullAccess/`. For production, targeted bindings are preferable, or the
-future migration to MoonSharp `UserData.RegisterType` (see MOONSHARP_NATIVE_APIS.md).
+future migration to native Lua-CSharp object bindings (see LUA_NATIVE_APIS.md).
 
 ## Host Configuration (Unity)
 
@@ -395,6 +395,6 @@ into the same pipeline as LLM/Lua world commands. Example in LUA_BEST_PRACTICES.
 
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) - how to do it / how **not** to do it
 - [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) - security and checklists
-- [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md) - native MoonSharp APIs
+- [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md) - native Lua-CSharp APIs
 - [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md) - access modes
 - Demo: `Assets/CoreAI.Demos/README.md`
