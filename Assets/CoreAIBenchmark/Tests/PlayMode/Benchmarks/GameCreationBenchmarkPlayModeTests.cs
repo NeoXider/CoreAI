@@ -27,7 +27,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed class GameCreationBenchmarkPlayModeTests
     {
-        private const string SuiteVersion = "1.6";
+        private const string SuiteVersion = "1.7";
 
         /// <summary>
         /// NUnit hard-abort backstop (110 min). Attribute arguments must be compile-time constants, so the

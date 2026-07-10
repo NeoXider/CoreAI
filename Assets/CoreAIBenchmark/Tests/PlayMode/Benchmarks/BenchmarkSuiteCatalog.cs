@@ -22,6 +22,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             all.AddRange(GameInstructionScenariosG5.All()); // G5 — strict instruction-following (subtractive)
             all.AddRange(GameFreeBuildScenariosG6.All()); // G6 — free-form visual build (default: castle)
             all.AddRange(GameIntegrationScenariosG7.All()); // G7 — comprehensive: world + Lua consistency
+            all.AddRange(GameObserveActScenariosG8.All()); // G8 — observe described state, then act (director-AI)
             return all;
         }
     }

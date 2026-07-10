@@ -385,6 +385,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public float FloatValue;
             public float Fx, Fy, Fz;
             public float ScaleX, ScaleY, ScaleZ;
+            public bool HasPosition, HasRotation, HasScale;
+            public bool HasX, HasY, HasZ;
+            public bool HasFx, HasFy, HasFz;
         }
 
         public class RecordingWorldExecutor : ICoreAiWorldCommandExecutor
@@ -428,7 +431,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         Fz = env.fz,
                         ScaleX = env.scaleX,
                         ScaleY = env.scaleY,
-                        ScaleZ = env.scaleZ
+                        ScaleZ = env.scaleZ,
+                        HasPosition = env.hasPosition,
+                        HasRotation = env.hasRotation,
+                        HasScale = env.hasScale,
+                        HasX = env.hasX,
+                        HasY = env.hasY,
+                        HasZ = env.hasZ,
+                        HasFx = env.hasFx,
+                        HasFy = env.hasFy,
+                        HasFz = env.hasFz
                     };
                     Commands.Add(recorded);
                     OnCommand(recorded);

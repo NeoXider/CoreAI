@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Benchmark suite v2 — new G8 "observe-then-act" group.** `BenchmarkInfo.Version` bumped `v1 → v2`.
+  Adds a group that gives the model a DESCRIBED, already-populated scene and grades acting on the named
+  existing objects (clear only junk, raise only undersized towers via conditional selection, encode an
+  observed rule as Lua) — the "director-AI / beyond the chat box" axis. Prompts state the goal, not the
+  tool syntax, so weaker local models visibly fail the conditional-selection step. Scores are only
+  comparable within a suite version; v2 starts a new leaderboard section.
 - **Circuit breaker for LLM backends** (`CircuitBreakerLlmClientDecorator`). After N consecutive
   TRANSIENT failures (timeout, rate-limit, backend-unavailable, provider/routing error) the breaker
   trips **open** and short-circuits calls with `BackendUnavailable` *without invoking the backend* — so a

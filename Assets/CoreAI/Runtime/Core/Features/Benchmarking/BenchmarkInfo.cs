@@ -13,9 +13,9 @@ namespace CoreAI.Benchmarking
         public const string SuiteName = "CoreAI Game-Creation Benchmark";
 
         /// <summary>Current benchmark version tag (scenarios + prompts + grading).</summary>
-        public const string Version = "v1";
+        public const string Version = "v2";
 
-        /// <summary>"CoreAI Game-Creation Benchmark v1" — name and version combined.</summary>
+        /// <summary>"CoreAI Game-Creation Benchmark v2" — name and version combined.</summary>
         public const string TitleWithVersion = SuiteName + " " + Version;
 
         /// <summary>
@@ -31,6 +31,7 @@ namespace CoreAI.Benchmarking
             { "G5", 5 }, // strict instruction-following (subtractive)
             { "G6", 6 }, // free-build visual (bonus; default castle)
             { "G3", 7 }, // reasoning & design
+            { "G8", 7 }, // observe described state, then act (director-AI; conditional selection + rule encoding)
             { "G4", 8 }, // playable game (simulated playthrough)
             { "G7", 9 } // comprehensive integration (world + Lua cross-consistency; one-off, like G6)
         };

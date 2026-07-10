@@ -1,6 +1,6 @@
 # CoreAI Game-Creation Benchmark
 
-Package graph: `com.neoxider.coreaibenchmark` 5.2.0 depends on `com.neoxider.coreai`,
+Package graph: `com.neoxider.coreaibenchmark` 5.3.0 depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
@@ -19,6 +19,7 @@ The benchmark answers the practical production question: is this model usable fo
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
 | G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle scene from the model's own positions; graded leniently on scale (12+ objects) and variety (20+), kept as the report hero image. |
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
+| G8 - Observe-then-act | 4/5 | Reasoning over GIVEN world state, not building from blank — the "director-AI / beyond the chat box" axis | The scene is described (already-populated); the model acts on the named existing objects: clear only the junk, raise only the undersized towers (conditional selection), and encode an observed wave-scaling rule as Lua. Prompts state the goal, **not** the tool syntax, so weaker models visibly fail the conditional-selection step. |
 
 Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. G6 (hero image) and G7 capture scene screenshots because the built scene is part of the result; the other groups are primarily graded through logic execution and traces.
 
@@ -87,7 +88,7 @@ The window has four tabs, plus toolbar **Open folder** / **Open report** shortcu
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups (G1-G7), repetitions, retries, timeout override, and start a run. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
 | Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
 | Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md` plus `COMPARISON.svg`. |
@@ -104,7 +105,7 @@ For batchmode or automation, launch the explicit PlayMode suite through:
 Unity.exe -batchmode -projectPath C:\Git\CoreAI `
   -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
   -coreAiBenchmarkModel qwen3.5-4b-mtp `
-  -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7 `
+  -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
   -coreAiBenchmarkReps 3
 ```
 
@@ -132,7 +133,7 @@ foreach ($model in $models) {
   Unity.exe -batchmode -projectPath C:\Git\CoreAI `
     -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
     -coreAiBenchmarkModel $model `
-    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7 `
+    -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
     -coreAiBenchmarkReps 3
   lms unload $model
 }
@@ -198,7 +199,7 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 
 _Comparison chart: suite base scores across the newest JSON report for each selected model._
 
-The current cloud-model and local-model ranking tables (suite v1.6, G1-G7, no token caps) live in the
+The current cloud-model and local-model ranking tables (suite v1.7, G1-G8, no token caps) live in the
 [README's benchmark section](../../README.md#game-creation-benchmark), rebuilt from hand-picked report
 JSONs as described above. Example ranking (local models, 2026-07-02 sweep):
 
@@ -245,7 +246,7 @@ The G6 scenario is a free-form visual build (default: castle). Each model author
 > **Override G6 subject:** the free-build visual is overridable from the benchmark window UI field, so the report hero can use a different subject without code changes. See [How To Run](#how-to-run) above for details.
 
 ¹ Sonnet's hero image is from its G6-only verification rerun (94.2 on that scenario) after a
-chat-only bridge fix; its suite score in the table is from the full G1-G7 run.
+chat-only bridge fix; its suite score in the table is from the full G1-G8 run.
 See [the full example report](../../Docs/Images/example_report/example_report.md) for a complete
 per-scenario breakdown and transcript example.
 
