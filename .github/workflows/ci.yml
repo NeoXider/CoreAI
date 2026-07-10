@@ -34,18 +34,18 @@ jobs:
       fail-fast: false
       matrix:
         # Explicit include list (no cross-product). Three configurations must stay green:
-        #   moonsharp  - default project with MoonSharp.
-        #   no-lua     - COREAI_NO_LUA build with the MoonSharp package removed entirely.
+        #   lua        - default project with the bundled Lua-CSharp runtime.
+        #   no-lua     - COREAI_NO_LUA build so every Lua feature compiles out.
         #   no-llm     - COREAI_NO_LLM build so the layer under #if !COREAI_NO_LLM compiles out.
         include:
-          - name: moonsharp
-            lua: moonsharp
+          - name: lua
+            lua: lua
             no_llm: false
           - name: no-lua
             lua: no-lua
             no_llm: false
           - name: no-llm
-            lua: moonsharp
+            lua: lua
             no_llm: true
     steps:
       - uses: actions/checkout@v4
@@ -61,21 +61,13 @@ jobs:
             echo "run_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Strip MoonSharp + define COREAI_NO_LUA
+      - name: Define COREAI_NO_LUA
         if: matrix.lua == 'no-lua'
         run: |
-          # Remove the optional MoonSharp package (documented opt-out in
-          # Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) so this job proves the
-          # project compiles without it.
-          sed -i '/org\.moonsharp\.moonsharp/d' Packages/manifest.json
-          python3 - <<'EOF'
-          import json
-          with open('Packages/packages-lock.json', encoding='utf-8') as f:
-              lock = json.load(f)
-          lock['dependencies'].pop('org.moonsharp.moonsharp', None)
-          with open('Packages/packages-lock.json', 'w', encoding='utf-8') as f:
-              json.dump(lock, f, indent=2)
-          EOF
+          # The Lua-CSharp runtime ships bundled inside the CoreAI Mods package (Lua.dll), so there
+          # is no package to remove — this job proves the project compiles with every Lua feature
+          # compiled out via the COREAI_NO_LUA define (documented opt-out in
+          # Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md).
           # Append the define to every per-platform scriptingDefineSymbols entry.
           sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LUA/' ProjectSettings/ProjectSettings.asset
           grep -q 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LUA injection failed'; exit 1; }
@@ -109,15 +101,15 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce Lua sandbox escape-test coverage
-        if: matrix.lua == 'moonsharp' && matrix.no_llm == false && steps.unity-license-check.outputs.run_tests == 'true'
+        if: matrix.lua == 'lua' && matrix.no_llm == false && steps.unity-license-check.outputs.run_tests == 'true'
         run: |
           # The sandbox isolation suite must actually have run — a green build with
           # 0 executed escape tests (filter typo, asmdef regression, define drift)
           # must fail, not pass silently.
-          count=$(grep -o 'SecureLuaSandboxEditModeTests' artifacts-${{ matrix.name }}/editmode-results.xml | wc -l)
-          echo "SecureLuaSandboxEditModeTests occurrences in results: $count"
-          if [ "$count" -lt 10 ]; then
-            echo "::error::Lua sandbox escape tests did not run (expected the SecureLuaSandboxEditModeTests fixture in EditMode results)."
+          count=$(grep -o 'LuaCsSecureSandboxEditModeTests' artifacts-${{ matrix.name }}/editmode-results.xml | wc -l)
+          echo "LuaCsSecureSandboxEditModeTests occurrences in results: $count"
+          if [ "$count" -lt 3 ]; then
+            echo "::error::Lua sandbox escape tests did not run (expected the LuaCsSecureSandboxEditModeTests fixture in EditMode results)."
             exit 1
           fi
 

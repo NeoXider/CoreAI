@@ -12,10 +12,10 @@ namespace CoreAI.Editor
     /// <summary>
     /// Enable / disable the optional CoreAI modules from the editor:
     /// <list type="bullet">
-    /// <item><b>MoonSharp (Lua)</b> — package <c>org.moonsharp.moonsharp</c>; its presence sets the
-    /// <c>COREAI_HAS_MOONSHARP</c> version-define. A separate <c>COREAI_NO_LUA</c> scripting define
-    /// soft-disables Lua while keeping the package installed (the runtime guards on
-    /// <c>COREAI_HAS_MOONSHARP &amp;&amp; !COREAI_NO_LUA</c>).</item>
+    /// <item><b>Lua (Lua-CSharp)</b> — the managed, AOT-safe Lua runtime ships bundled inside the
+    /// <c>com.neoxider.coreaimods</c> package (no external package to install). It is compiled in by
+    /// default; the <c>COREAI_NO_LUA</c> scripting define compiles every Lua feature out for builds that
+    /// do not want scripting (the runtime guards on <c>!COREAI_NO_LUA</c>).</item>
     /// <item><b>LLMUnity</b> — package <c>ai.undream.llm</c>; its presence sets <c>COREAI_HAS_LLMUNITY</c>.</item>
     /// </list>
     /// "Enable + Update" runs <see cref="Client.Add(string)"/> with the canonical git URL, which both
@@ -23,11 +23,6 @@ namespace CoreAI.Editor
     /// </summary>
     public static class CoreAIModuleManager
     {
-        private const string MoonSharpId = "org.moonsharp.moonsharp";
-
-        private const string MoonSharpUrl =
-            "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0";
-
         private const string LlmUnityId = "ai.undream.llm";
         private const string LlmUnityUrl = "https://github.com/undreamai/LLMUnity.git";
 
@@ -35,38 +30,32 @@ namespace CoreAI.Editor
 
         private static bool _busy;
 
-        // ----------------------------------------------------------------- MoonSharp (Lua)
+        // ----------------------------------------------------------------- Lua (Lua-CSharp)
 
-        [MenuItem("CoreAI/Setup/Modules/MoonSharp (Lua)/Enable + Update to latest", priority = 0)]
-        public static void EnableMoonSharp()
+        [MenuItem("CoreAI/Setup/Modules/Lua (Lua-CSharp)/Enable Lua", priority = 0)]
+        public static void EnableLua()
         {
-            // Clear the manual opt-out first so Lua is live the moment the package resolves.
             SetDefine(NoLuaDefine, false);
-            AddOrUpdatePackage("MoonSharp (Lua)", MoonSharpUrl);
-        }
-
-        [MenuItem("CoreAI/Setup/Modules/MoonSharp (Lua)/Disable Lua (keep package)", priority = 1)]
-        public static void DisableMoonSharpSoft()
-        {
-            SetDefine(NoLuaDefine, true);
             EditorUtility.DisplayDialog("CoreAI Modules",
-                "Lua disabled via COREAI_NO_LUA. The MoonSharp package stays installed; scripts recompile " +
-                "with all Lua features compiled out. Re-enable from the same menu.",
+                "Lua enabled. The Lua-CSharp runtime is bundled with the CoreAI Mods package — there is " +
+                "no external package to install. Scripts recompile with all Lua features (sandbox, mods, " +
+                "logic slots, Full reflection) available.",
                 "OK");
         }
 
-        [MenuItem("CoreAI/Setup/Modules/MoonSharp (Lua)/Remove package", priority = 2)]
-        public static void RemoveMoonSharp()
+        [MenuItem("CoreAI/Setup/Modules/Lua (Lua-CSharp)/Disable Lua", priority = 1)]
+        public static void DisableLua()
         {
             if (!EditorUtility.DisplayDialog("CoreAI Modules",
-                    "Remove the MoonSharp package entirely?\n\nCOREAI_HAS_MOONSHARP will unset and every Lua " +
-                    "feature (sandbox, mods, logic slots, Full reflection) compiles out.",
-                    "Remove", "Cancel"))
+                    "Disable Lua via COREAI_NO_LUA?\n\nEvery Lua feature (sandbox, mods, logic slots, Full " +
+                    "reflection) compiles out. The bundled Lua-CSharp assembly stays in the project; only " +
+                    "the CoreAI Lua surface is removed. Re-enable from the same menu.",
+                    "Disable", "Cancel"))
             {
                 return;
             }
 
-            RemovePackage("MoonSharp (Lua)", MoonSharpId);
+            SetDefine(NoLuaDefine, true);
         }
 
         // ----------------------------------------------------------------- LLMUnity
@@ -104,14 +93,13 @@ namespace CoreAI.Editor
             ListRequest list = Client.List(false, false);
             Pump(list, () =>
             {
-                string moonsharp = DescribePackage(list, MoonSharpId);
                 string llmunity = DescribePackage(list, LlmUnityId);
                 bool noLua = HasDefine(NoLuaDefine);
 
                 string message =
-                    $"MoonSharp package: {moonsharp}\n" +
+                    $"Lua runtime: Lua-CSharp (bundled with CoreAI Mods)\n" +
                     $"COREAI_NO_LUA define: {(noLua ? "SET (Lua disabled)" : "not set")}\n" +
-                    $"-> Lua effective: {(moonsharp != "not installed" && !noLua ? "ENABLED" : "disabled")}\n\n" +
+                    $"-> Lua effective: {(noLua ? "disabled" : "ENABLED")}\n\n" +
                     $"LLMUnity package: {llmunity}\n" +
                     $"-> Local LLM effective: {(llmunity != "not installed" ? "ENABLED" : "disabled")}";
 

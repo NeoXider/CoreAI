@@ -25,8 +25,6 @@ namespace CoreAI.Editor
         {
             ("jp.hadashikick.vcontainer",
                 "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0"),
-            ("org.moonsharp.moonsharp",
-                "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"),
             ("com.cysharp.messagepipe",
                 "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe"),
             ("com.cysharp.messagepipe.vcontainer",

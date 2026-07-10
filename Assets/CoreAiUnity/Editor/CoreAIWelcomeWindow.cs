@@ -79,7 +79,7 @@ namespace CoreAI.Editor
                 needsLlm: true, featured: false),
             new("Lua Mods — hooks, timers, events (offline)",
                 "LuaModsDemo",
-                "LuaModRuntime hooks/timers/events/store + capability tiers; override the damage formula from Lua. Runs with no model.",
+                "Lua mod hooks/timers/events/store + capability tiers; override the damage formula from Lua. Runs with no model.",
                 needsLlm: false, featured: false),
             new("World Commands — the AI command pipeline (offline)",
                 "WorldCommandsDemo",

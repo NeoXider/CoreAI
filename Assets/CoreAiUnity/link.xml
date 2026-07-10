@@ -5,16 +5,16 @@
      Generation = OptimizeSize for WebGL - player settings cannot ship in a package. See
      CoreAI Docs/LUA_ACCESS_MODES.md, "WebGL / IL2CPP Stripping Requirements". -->
 <linker>
-    <!-- WebGL/IL2CPP: keep MoonSharp Lua marshalling/reflection metadata when Lua-on-WebGL is enabled -->
-    <assembly fullname="MoonSharp.Interpreter" preserve="all"/>
+    <!-- WebGL/IL2CPP: keep the Lua-CSharp VM + its source-generated marshalling metadata. The managed
+         VM is AOT-safe, but its binding trampolines and LuaValue marshalling are reached generically,
+         so preserve both the runtime and the annotations assembly to keep them off the stripper. -->
+    <assembly fullname="Lua" preserve="all"/>
+    <assembly fullname="Lua.Annotations" preserve="all"/>
 
-    <!-- WebGL/IL2CPP: MoonSharp's Script static ctor builds a UnityAssetsScriptLoader, which calls
-         UnityEngine.Resources.LoadAll(string, Type) and TextAsset.name/.text PURELY via reflection
-         (UnityAssetsScriptLoader.LoadResourcesWithReflection). Nothing references those members
-         directly, so the stripper drops their bodies; the reflection invoke then jumps to a null
-         method pointer and the whole wasm player traps ("RuntimeError: null function" in release,
-         "memory access out of bounds" in development). Preserving them makes the invoke real again.
-         Root cause pinpointed via a development build stack trace on 2026-07-04. -->
+    <!-- WebGL/IL2CPP: CoreAI loads its built-in agent prompts, skills, and bundled Lua mods through
+         UnityEngine.Resources.Load<TextAsset>(...) (AgentPrompts/System, AgentSkills/LuaModding,
+         CoreAIMods/*.lua). Preserve these two engine types so Medium+ managed stripping cannot drop
+         the members those loads reach and leave a WebGL player with missing content. -->
     <assembly fullname="UnityEngine.CoreModule">
         <type fullname="UnityEngine.Resources" preserve="all"/>
         <type fullname="UnityEngine.TextAsset" preserve="all"/>
@@ -34,11 +34,13 @@
     <assembly fullname="CoreAI.Core" preserve="all"/>
 
     <!-- WebGL/IL2CPP with Managed Stripping >= Medium: VContainer creates every DI type via
-         reflection (TypeAnalyzer), MoonSharp reflection-invokes Lua binding callbacks on AOT
-         (InteropAccessMode.Reflection), and nothing references those constructors/lambdas directly,
-         so the stripper removes them one by one ("Type does not found injectable constructor" at
-         container build, "null function" wasm traps from bindings). Preserving the whole Unity
-         integration assembly closes the entire class of failures; it is a thin layer, the size cost
-         is small next to the engine modules. -->
+         reflection (TypeAnalyzer) and nothing references those constructors/lambdas directly, so the
+         stripper removes them one by one ("Type does not found injectable constructor" at container
+         build). Preserving the whole Unity integration assembly closes the entire class of failures;
+         it is a thin layer, the size cost is small next to the engine modules. -->
     <assembly fullname="CoreAI.Source" preserve="all"/>
+
+    <!-- Lua-CSharp reflection-invokes the game binding callbacks registered on LuaCsApiRegistry; keep
+         the mod assembly so those delegates/closures survive Medium+ stripping on AOT players. -->
+    <assembly fullname="CoreAI.Mods" preserve="all"/>
 </linker>

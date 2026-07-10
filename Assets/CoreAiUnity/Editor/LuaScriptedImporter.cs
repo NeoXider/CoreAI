@@ -14,7 +14,7 @@ namespace CoreAI.Editor
     /// Unity does not import <c>.lua</c> as a <see cref="TextAsset"/> by default; this importer adds that.
     /// If another package in the project already registers an importer for the <c>lua</c> extension, Unity
     /// reports a duplicate-importer error — delete one of them. The importer is text-only and has no
-    /// dependency on MoonSharp, so it works in no-Lua builds too.
+    /// dependency on the Lua runtime, so it works in no-Lua builds too.
     /// </remarks>
     [ScriptedImporter(1, "lua")]
     public sealed class LuaScriptedImporter : ScriptedImporter
