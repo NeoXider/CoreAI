@@ -11,7 +11,7 @@ namespace CoreAI.Hub.UI
     /// standard chat UXML into this page's content element and drives it with a real chat panel, so
     /// streaming, tools, history, and hotkeys behave exactly as the standalone chat.
     /// </summary>
-    public sealed class HubChatPage : IHubPage, IHubFullBleedPage
+    public sealed class HubChatPage : HubPageBase, IHubFullBleedPage
     {
         /// <summary>Default registry id for the built-in Chat page.</summary>
         public const string DefaultPageId = "coreai.hub.chat";
@@ -40,39 +40,21 @@ namespace CoreAI.Hub.UI
             string pageId = DefaultPageId,
             string displayName = "Chat",
             int order = 0)
+            : base(
+                string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
+                string.IsNullOrWhiteSpace(displayName) ? "Chat" : displayName,
+                order)
         {
             _chatTemplate = chatTemplate;
             _chatStyleSheet = chatStyleSheet;
             _chatConfig = chatConfig;
-            PageId = string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "Chat" : displayName;
-            Order = order;
         }
 
         /// <inheritdoc />
-        public string PageId { get; }
+        public override Func<object> CreatePageContent => BuildContent;
 
         /// <inheritdoc />
-        public string DisplayName { get; }
-
-        /// <inheritdoc />
-        public int Order { get; }
-
-        /// <inheritdoc />
-        public Func<object> CreatePageContent => BuildContent;
-
-        /// <inheritdoc />
-        public void OnActivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDeactivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDestroyed()
+        public override void OnDestroyed()
         {
             if (_panel != null)
             {

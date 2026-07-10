@@ -66,9 +66,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
-            IObjectResolver luaContainer =
-                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+            IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             _mods = luaContainer.Resolve<ILuaModRuntime>();

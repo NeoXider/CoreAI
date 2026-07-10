@@ -131,5 +131,54 @@ namespace CoreAI.Tests.EditMode.Audit
             AuditVerifyResult result = AuditLogVerifier.Verify(filePath);
             Assert.IsFalse(result.Ok, "Truncated tail line should break verification.");
         }
+
+        [Test]
+        public void Rotation_BothFiles_VerifyStandaloneAndAnchorLinked()
+        {
+            using AuditLogWriter writer = new(_testFolder);
+
+            // Pad past MaxFileSize (50 MB) with a large Args payload per entry so rotation triggers
+            // through the normal flush path rather than by tampering with the file on disk.
+            string padding = new string('x', 11_000);
+            for (int i = 0; i < 5000; i++)
+            {
+                writer.Record(AuditEntry.ForToolCall(
+                    seq: 0, traceId: $"trace-{i}", actor: "creator", model: "gpt-4", promptHash: "ph",
+                    toolName: "test_tool", args: padding, policyDecision: "allowed",
+                    result: "ok", resultDetail: "", durationMs: i));
+            }
+
+            writer.FlushForTesting(); // file now exceeds MaxFileSize, but rotation is checked at the START of a flush
+
+            writer.Record(AuditEntry.ForToolCall(
+                seq: 0, traceId: "after-rotation", actor: "creator", model: "gpt-4", promptHash: "ph",
+                toolName: "test_tool", args: "{}", policyDecision: "allowed", result: "ok", resultDetail: "", durationMs: 1));
+            writer.FlushForTesting(); // this flush should detect the oversized file and rotate
+
+            string rotatedPath = Path.Combine(_testFolder, "audit_0001.jsonl");
+            string activePath = writer.FilePath;
+
+            Assert.IsTrue(File.Exists(rotatedPath), "Expected the oversized file to be rotated aside.");
+            Assert.IsTrue(File.Exists(activePath), "Expected a fresh active file after rotation.");
+
+            AuditVerifyResult rotatedResult = AuditLogVerifier.Verify(rotatedPath);
+            Assert.IsTrue(rotatedResult.Ok, $"Rotated file should verify standalone: {rotatedResult.Error}");
+
+            AuditVerifyResult activeResult = AuditLogVerifier.Verify(activePath);
+            Assert.IsTrue(activeResult.Ok, $"New active file should verify standalone via anchored genesis: {activeResult.Error}");
+
+            List<AuditEntry> rotatedEntries = AuditLogVerifier.ReadAll(rotatedPath);
+            Assert.AreEqual(AuditEntryKind.RotationMarker, rotatedEntries[^1].Kind,
+                "Rotated file's last entry should be the RotationMarker.");
+
+            List<AuditEntry> activeEntries = AuditLogVerifier.ReadAll(activePath);
+            Assert.AreEqual(AuditEntryKind.RotationAnchor, activeEntries[0].Kind,
+                "New active file should open with a RotationAnchor.");
+            Assert.AreEqual(rotatedEntries[^1].Hash, activeEntries[0].PrevHash,
+                "Anchor's prevHash should equal the rotated file's final hash.");
+
+            AuditVerifyResult setResult = AuditLogVerifier.VerifyChainedSet(new[] { rotatedPath, activePath });
+            Assert.IsTrue(setResult.Ok, $"Rotated set should verify as linked: {setResult.Error}");
+        }
     }
 }

@@ -41,6 +41,30 @@ namespace CoreAI.Ai.Hub
         }
 
         /// <inheritdoc />
+        public override IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
+        {
+            return _runtime.ListModVersions(id);
+        }
+
+        /// <inheritdoc />
+        public override bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
+        {
+            return _runtime.TryRevertMod(id, revisionIndex, out restoredSource);
+        }
+
+        /// <inheritdoc />
+        public override string ExportMod(string id)
+        {
+            return _runtime.ExportMod(id);
+        }
+
+        /// <inheritdoc />
+        protected override bool RuntimeImport(string bundleJson, LuaCapabilities hostGrant, bool allowFull)
+        {
+            return _runtime.ImportMod(bundleJson, hostGrant, allowFull);
+        }
+
+        /// <inheritdoc />
         public override string RecentErrors(string id)
         {
             IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(id);

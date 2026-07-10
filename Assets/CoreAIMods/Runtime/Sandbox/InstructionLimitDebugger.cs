@@ -8,17 +8,30 @@ using MoonSharp.Interpreter.Tree.Expressions;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// MoonSharp debugger used to stop scripts that exceed instruction limits.
+    /// MoonSharp debugger used to stop scripts that exceed instruction limits, wall-clock time, or a
+    /// total GC allocation budget. The allocation check runs on every VM instruction, same as the
+    /// wall-clock check above it: <see cref="GC.GetTotalMemory(bool)"/> is a cheap heap-size
+    /// counter read, not a GC pass, so it is cheap enough to check unconditionally. A coarser sampling
+    /// interval was considered, but concatenation-doubling (<c>s = s .. s</c>) grows exponentially — a
+    /// handful of loop iterations can jump from megabytes to gigabytes, so any interval wide enough to
+    /// matter for performance is also wide enough to miss the attack (or let the runtime hit a real
+    /// out-of-memory condition) before the next sample point.
     /// </summary>
     internal sealed class InstructionLimitDebugger : IDebugger
     {
+        /// <summary>Default per-execution GC allocation budget enforced between VM instructions.</summary>
+        public const long DefaultMaxAllocatedBytesBudget = 64 * 1024 * 1024;
+
         private long _maxSteps;
         private int _timeoutMs;
+        private long _maxAllocatedBytes;
         private readonly Stopwatch _sw = new();
         private long _steps;
+        private long _allocBaseline;
 
-        public InstructionLimitDebugger(long maxSteps, int timeoutMs)
+        public InstructionLimitDebugger(long maxSteps, int timeoutMs, long maxAllocatedBytes = DefaultMaxAllocatedBytesBudget)
         {
+            _maxAllocatedBytes = maxAllocatedBytes;
             Reset(maxSteps, timeoutMs);
         }
 
@@ -31,6 +44,11 @@ namespace CoreAI.Sandbox
             _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
             _steps = 0;
             _sw.Restart();
+            // GC.GetTotalMemory(false), NOT GC.GetAllocatedBytesForCurrentThread: Unity's Mono does not
+            // implement the thread-local counter (it returns 0 unconditionally — verified empirically),
+            // so a budget based on it can never fire. Heap total is process-wide and noisy, but an
+            // allocation bomb overwhelms that noise within a few doublings.
+            _allocBaseline = GC.GetTotalMemory(false);
         }
 
         public DebuggerCaps GetDebuggerCaps()
@@ -70,6 +88,20 @@ namespace CoreAI.Sandbox
             if (_sw.ElapsedMilliseconds > _timeoutMs)
             {
                 throw new ScriptRuntimeException($"Lua exceeded {_timeoutMs} ms.");
+            }
+
+            // Allocation-bomb backstop: string.rep/string.format are capped at the library-function
+            // level, but plain concatenation (s = s .. s) or a loop of table.insert calls has no single
+            // interceptable call site — it is ordinary VM opcodes. Checking total thread allocations
+            // between instructions is the only place this VM exposes to catch that pattern.
+            if (_maxAllocatedBytes > 0)
+            {
+                long allocated = GC.GetTotalMemory(false) - _allocBaseline;
+                if (allocated > _maxAllocatedBytes)
+                {
+                    throw new ScriptRuntimeException(
+                        $"SecureLuaEnvironment: EXCEEDED_MEMORY_BUDGET ({_maxAllocatedBytes} bytes)");
+                }
             }
 
             return new DebuggerAction { Action = DebuggerAction.ActionType.StepIn };

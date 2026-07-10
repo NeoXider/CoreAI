@@ -77,6 +77,31 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 - `string.rep` is now capped via a replaced implementation in `SecureLuaEnvironment`.
   `SecureLuaEnvironment.MaxStringRepLength` is `1_000_000`; attempts that exceed this
   limit fail fast with an explicit error.
+- `table.concat` is capped the same way (`MaxTableConcatLength`, same `1_000_000` value): the
+  replacement mirrors the real `table.concat` algorithm for both VMs but aborts as soon as the
+  in-progress result exceeds the cap, instead of finishing a potentially huge build first.
+- **Total per-execution allocation budget (both VMs, default 64MB, F-08).** `string.rep`,
+  `string.format`, and `table.concat` are capped at their library call site, but plain string
+  concatenation (`s = s .. s`) is ordinary VM opcodes with no call site to intercept — a ~1MB allowed
+  string can be doubled repeatedly into hundreds of MB well within the instruction budget. Both VMs'
+  per-instruction hooks (`InstructionLimitDebugger` for MoonSharp, `LuaCsExecutionGuard` for
+  Lua-CSharp) now also sample `GC.GetAllocatedBytesForCurrentThread()` against a baseline captured at
+  the start of the guarded call and abort with `EXCEEDED_MEMORY_BUDGET` once the delta exceeds the
+  budget. This check runs on **every** instruction, not on a coarse sample interval: concatenation
+  doubling grows exponentially, so a handful of loop iterations can jump from megabytes to gigabytes,
+  and any sampling interval wide enough to matter for performance is also wide enough to either miss
+  the attack or let the runtime approach a real out-of-memory condition before the next sample point.
+  `GC.GetAllocatedBytesForCurrentThread()` is a thread-local counter read (not a GC pass), the same
+  cost class as the wall-clock check already performed unconditionally on the same hot path, so this
+  adds no new performance risk. Configure the budget via the `maxAllocatedBytes` constructor parameter
+  on `LuaExecutionGuard`/`LuaCsExecutionGuard`, or `SecureLuaEnvironment.MaxAllocatedBytesBudget` /
+  `LuaCsSecureEnvironment.MaxAllocatedBytesBudget` for the default.
+  - **What this does not cover:** the budget is a total-allocation backstop, not a live heap-size cap —
+    a script that allocates and discards memory in a tight loop can still cause GC churn without
+    tripping it (GC pauses are bounded by the existing timeout instead). A single host callback that
+    allocates a large amount of memory in one call (not driven by VM instructions) is not observed by
+    this hook either; host bindings must still bound their own worst-case allocations, the same caveat
+    that already applies to the wall-clock guarantee documented on `LuaExecutionGuard`.
 - Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
   `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
   for one handle, and the handle is forcibly killed when exceeded.
@@ -184,6 +209,8 @@ Maintain EditMode tests for attempts to:
   strings.
 - Reuse stale object handles after scene reload or despawn.
 - `string.rep` repeat-capping behavior (`MaxStringRepLength`) and malformed `package` access checks.
+- `table.concat` output capping (`MaxTableConcatLength`) and plain-concatenation allocation bombs
+  (`s = s .. s` doubling) hitting the total per-execution allocation budget (`EXCEEDED_MEMORY_BUDGET`).
 - `pcall` loop recursion and unbounded call-stack behavior.
 - Coroutines that exceed total lifetime budgets.
 - World binding validations for NaN/Infinity and coordinate bounds (`|value| <= 100000`).

@@ -9,6 +9,9 @@ namespace CoreAI.Hub.UI
     /// </summary>
     internal static class HubPageWidgets
     {
+        // Accent/Text/Muted are duplicated (kept byte-identical) in CoreAI.Ai.Hub.HubModWidgets
+        // (CoreAIMods/Runtime/Hub/HubModWidgets.cs) so the Mods tab matches these built-in pages; that
+        // module can't reference this internal type across the asmdef boundary. Keep both in sync by hand.
         internal static readonly Color Accent = new(0.302f, 0.816f, 0.882f, 1f);
         internal static readonly Color Text = new(0.863f, 0.91f, 0.941f, 1f);
         internal static readonly Color Muted = new(0.77f, 0.86f, 0.91f, 0.7f);

@@ -297,12 +297,6 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 4981408220228357819, guid: 32aa855d8ee3f8c43a5f6817d7056a99, type: 3}
       insertIndex: -1
       addedObject: {fileID: 687696252}
-    - targetCorrespondingSourceObject: {fileID: 4981408220228357819, guid: 32aa855d8ee3f8c43a5f6817d7056a99, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 687696257}
-    - targetCorrespondingSourceObject: {fileID: 4981408220228357819, guid: 32aa855d8ee3f8c43a5f6817d7056a99, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 687696258}
   m_SourcePrefab: {fileID: 100100000, guid: 32aa855d8ee3f8c43a5f6817d7056a99, type: 3}
 --- !u!1 &687696251 stripped
 GameObject:
@@ -323,31 +317,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.CoreAiModsHubBinder
   hubWindow: {fileID: 0}
   allowFullTier: 1
---- !u!114 &687696257
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 687696251}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9879ea32cf82ce14c923837b61d03817, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.WorldStateHubBinder
---- !u!114 &687696258
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 687696251}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 61920cd1cd4bd5446af07a678e3955f2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.WorldStateAutoSaveHook
-  saveIntervalSeconds: 60
 --- !u!1 &826394818
 GameObject:
   m_ObjectHideFlags: 0

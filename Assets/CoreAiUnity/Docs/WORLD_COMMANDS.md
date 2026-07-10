@@ -174,7 +174,16 @@ All AI-spawned objects (primitives and prefabs) are automatically tracked for sa
 
 Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created. Load always starts from a clean slate — any pre-existing `WorldObjectComponent` objects in the scene are destroyed first, so duplicate `persistentId`s can never accumulate across sessions.
 
-A **periodic auto-save** (every 60s, configured on `WorldStateAutoSaveHook` on the Hub prefab) also runs, as crash protection between an edit and the next quit.
+A **periodic auto-save** (default every `WorldStateManager.DefaultAutoSaveIntervalSeconds` = 60s) runs always-on in every scene that wires `WorldStateManager` — started by `WorldStateManager.Initialize()` itself, not by a scene-specific component — as crash protection between an edit and the next quit. On WebGL it also calls `CoreAi_PersistFsSync` after each save so the write reaches IndexedDB even without `Application.Quit`. The optional `WorldStateAutoSaveHook` MonoBehaviour (e.g. on the Hub prefab) only overrides the interval for its scene via `WorldStateManager.StartAutoSave(...)`; it does not perform its own quit-save, since `WorldStateManager` already saves exactly once on `Application.quitting`.
+
+### Mod rehydrate ordering guarantee
+
+Startup order between the world-state restore and Lua mod rehydrate is explicit, not incidental:
+
+1. **World restore runs first.** `WorldStateEntryPoint.Start()` (a VContainer `IStartable` on the core scope) calls `WorldStateManager.Initialize()`, which synchronously loads any saved snapshot before returning. When it finishes (loaded or not), `WorldStateManager.WorldRestoreCompleted` becomes `true` and `RestoreCompleted` fires once.
+2. **Mod rehydrate waits for it.** `CoreAiModsInstaller`'s startup callback (`CoreAiModsLifetimeScope`, a child scope parented to the core scope) runs at container-build time, which happens *before* the core scope's `Start()` phase — so it cannot assume the restore already ran. It defers bundled-mod seeding + `LuaCsModRuntime.RehydrateFromStore` behind `WorldRestoreGate`, which polls `WorldRestoreCompleted` every frame (5s timeout fallback, so a broken/absent world-state wiring never blocks mods forever) before rehydrating.
+
+Net effect: a mod that re-spawns "its" objects on load never races the snapshot restore — it always rehydrates against the already-restored world, so it can neither double-spawn against the snapshot nor have its spawns wiped by the snapshot's clean-slate destroy.
 
 ### What is saved per object
 

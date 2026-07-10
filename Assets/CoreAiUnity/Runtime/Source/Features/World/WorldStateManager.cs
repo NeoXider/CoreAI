@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
 using CoreAI.Infrastructure.Logging;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -11,6 +14,25 @@ namespace CoreAI.Infrastructure.World
     {
         private const string SaveFileName = "world_state.json";
         private const string FormatVersion = "1.1";
+
+        /// <summary>
+        /// Default periodic auto-save interval, shared by the manager's always-on loop and by
+        /// <c>WorldStateAutoSaveHook</c>'s optional override.
+        /// </summary>
+        public const float DefaultAutoSaveIntervalSeconds = 60f;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void CoreAi_PersistFsSync();
+#endif
+
+        /// <summary>On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a reload/tab close.</summary>
+        private static void PersistFsForWebGl()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+#endif
+        }
 
         private static readonly Color NoColor = new(-1f, -1f, -1f, -1f);
 
@@ -43,6 +65,7 @@ namespace CoreAI.Infrastructure.World
 
         private string _saveFilePath;
         private bool _disposed;
+        private CancellationTokenSource _autoSaveCts;
 
         // Objects whose prefabKey could not be resolved on the last load (e.g. a prefab not yet
         // registered). Retained in memory and re-written on every Save() so a temporarily missing
@@ -52,6 +75,10 @@ namespace CoreAI.Infrastructure.World
         public bool HasSavedState => File.Exists(_saveFilePath);
 
         public event Action StateReset;
+
+        public bool WorldRestoreCompleted { get; private set; }
+
+        public event Action RestoreCompleted;
 
         public WorldStateManager(
             IGameLogger logger,
@@ -78,6 +105,57 @@ namespace CoreAI.Infrastructure.World
                     $"[WorldState] Save file found, auto-loading...");
                 TryLoad();
             }
+
+            // The restore attempt above is fully synchronous (TryLoad spawns everything before
+            // returning), so by this point startup restore is done either way. Anything that spawns
+            // its own objects on startup (e.g. Lua mod rehydrate, see CoreAiModsInstaller) must wait
+            // for this before running — see WORLD_COMMANDS.md §7.
+            WorldRestoreCompleted = true;
+            RestoreCompleted?.Invoke();
+
+            // Always-on crash protection: previously this only ran in the Hub demo scene via the
+            // optional WorldStateAutoSaveHook MonoBehaviour, so every other scene only persisted on a
+            // clean Application.quitting. Starting it here covers every scene that wires WorldStateManager.
+            if (Application.isPlaying)
+            {
+                StartAutoSave(DefaultAutoSaveIntervalSeconds);
+            }
+        }
+
+        /// <summary>
+        /// (Re)starts the periodic auto-save loop at the given interval. Safe to call again to change
+        /// the interval (e.g. from <c>WorldStateAutoSaveHook</c>'s optional override) — the previous
+        /// loop is cancelled first. Passing an interval &lt;= 0 stops periodic saving.
+        /// </summary>
+        public void StartAutoSave(float intervalSeconds)
+        {
+            _autoSaveCts?.Cancel();
+            _autoSaveCts = null;
+
+            if (intervalSeconds <= 0f || _disposed)
+            {
+                return;
+            }
+
+            _autoSaveCts = new CancellationTokenSource();
+            AutoSaveLoop(intervalSeconds, _autoSaveCts.Token).Forget();
+        }
+
+        private async UniTaskVoid AutoSaveLoop(float intervalSeconds, CancellationToken ct)
+        {
+            int delayMs = Mathf.Max(1, Mathf.RoundToInt(intervalSeconds * 1000f));
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await UniTask.Delay(delayMs, cancellationToken: ct);
+                    Save();
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
         }
 
         public void Save()
@@ -89,7 +167,7 @@ namespace CoreAI.Infrastructure.World
 
             string sceneName = SceneManager.GetActiveScene().name;
             WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
-                FindObjectsSortMode.None);
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
 
             List<ObjectData> objects = new(allTags.Length);
             for (int i = 0; i < allTags.Length; i++)
@@ -183,6 +261,8 @@ namespace CoreAI.Infrastructure.World
                 {
                     File.Move(tmpPath, _saveFilePath);
                 }
+
+                PersistFsForWebGl();
 
                 _logger.LogInfo(GameLogFeature.Core,
                     $"[WorldState] Saved {objects.Count} objects.");
@@ -327,6 +407,10 @@ namespace CoreAI.Infrastructure.World
 
             DestroyAllWorldObjects();
 
+            // Otherwise a later Save() would re-append entries from a prefab that went missing
+            // before this Reset, resurrecting them into the fresh snapshot.
+            _unresolvedObjects.Clear();
+
             try
             {
                 if (File.Exists(_saveFilePath))
@@ -354,7 +438,7 @@ namespace CoreAI.Infrastructure.World
         private static void DestroyAllWorldObjects()
         {
             WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
-                FindObjectsSortMode.None);
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
             for (int i = 0; i < allTags.Length; i++)
             {
                 if (allTags[i] != null && allTags[i].gameObject != null)
@@ -385,6 +469,8 @@ namespace CoreAI.Infrastructure.World
 
             _disposed = true;
             Application.quitting -= OnApplicationQuitting;
+            _autoSaveCts?.Cancel();
+            _autoSaveCts = null;
         }
 
         private static Color ReadColor(GameObject go)

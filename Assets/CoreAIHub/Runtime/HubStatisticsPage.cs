@@ -10,7 +10,7 @@ namespace CoreAI.Hub.UI
     /// Built-in Hub page that shows live orchestration metrics, derived health signals, current backend,
     /// and per-role breakdown from <see cref="InMemoryAiOrchestrationMetrics"/>.
     /// </summary>
-    public sealed class HubStatisticsPage : IHubPage
+    public sealed class HubStatisticsPage : HubPageBase
     {
         /// <summary>Default registry id for the built-in Statistics page.</summary>
         public const string DefaultPageId = "coreai.hub.statistics";
@@ -39,40 +39,22 @@ namespace CoreAI.Hub.UI
             string pageId = DefaultPageId,
             string displayName = "Statistics",
             int order = 200)
+            : base(
+                string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
+                string.IsNullOrWhiteSpace(displayName) ? "Statistics" : displayName,
+                order)
         {
             _metrics = metrics;
             _settings = settings;
-            PageId = string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "Statistics" : displayName;
-            Order = order;
         }
 
         /// <inheritdoc />
-        public string PageId { get; }
+        public override Func<object> CreatePageContent => BuildContent;
 
         /// <inheritdoc />
-        public string DisplayName { get; }
-
-        /// <inheritdoc />
-        public int Order { get; }
-
-        /// <inheritdoc />
-        public Func<object> CreatePageContent => BuildContent;
-
-        /// <inheritdoc />
-        public void OnActivated()
+        public override void OnActivated()
         {
             Refresh();
-        }
-
-        /// <inheritdoc />
-        public void OnDeactivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDestroyed()
-        {
         }
 
         private object BuildContent()

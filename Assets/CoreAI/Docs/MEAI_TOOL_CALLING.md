@@ -1,6 +1,6 @@
 # 🛠️ MEAI Tool Calling — Architecture
 
-**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.neoxider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.neoxider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
+**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.nexoider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.nexoider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
 
 > 💡 **v2.0+:** Tools can be organized into **SkillSets** — named groups with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills-v20). The MEAI pipeline handles skill tools identically — `DelegateLlmTool` and `AIFunctionFactory` work the same way regardless of whether the tool was registered directly or through a `SkillSet`.
 
@@ -115,55 +115,6 @@ This prompt contract does not replace provider-native tool choice. It gives smal
 models the same explicit behavioral guidance that production integrations expect, while
 `ForcedToolMode` / `RequiredToolName` still control provider-level tool selection when needed.
 
-### 6. Parallel tool execution (R1, 4.13.0)
-
-`ToolExecutionPolicy.ExecuteBatchAsync` runs the tool calls of one assistant turn **concurrently**,
-bounded by the `MaxParallelToolCalls` setting (default `4`; `1` = sequential, byte-identical to the
-legacy path). Guarantees preserved regardless of completion order:
-
-- **Result order** matches the original call order (results collated by index, not by completion).
-- **State-mutating built-ins are serialized**: `memory`, `manage_mods`, and `manage_skills` run on one
-  ordered chain so two writes never race; independent/read tools run fully in parallel.
-- Per-call timeout, whole-batch duplicate rejection, forced-tool reset, and the consecutive-error
-  counter are unchanged; outer cancellation cancels all in-flight calls and propagates (never a fallback).
-
-#### Streamed path
-
-The execute-as-you-stream path (calls run the moment their streamed argument JSON closes) uses the
-**same bounded parallelism**: as each native call drains mid-stream, `ExecuteStreamedAsync` schedules it
-concurrently on a `SemaphoreSlim` bounded by `MaxParallelToolCalls`, and the turn closes through
-`CompleteStreamedTurnAsync`. Guarantees regardless of completion order:
-
-- **Result order matches arrival order** — `CompleteStreamedTurnAsync` awaits all in-flight calls and
-  collates results strictly in the order the calls arrived on the wire.
-- **State-mutating built-ins stay serialized** (`IsSerializedTool`: `memory`, `manage_mods`,
-  `manage_skills`) on one ordered serial chain — two writes never overlap.
-- **Per-call duplicate suppression and the cross-turn echo guard are decided synchronously at arrival**
-  (arrival order is what defines the turn signature); the **per-call timeout** is still enforced inside
-  `ExecuteSingleAsync` in each worker, exactly as on the batch path.
-- **Finalization is bounded**: `CompleteStreamedTurnAsync` waits for in-flight calls only up to the
-  per-call tool timeout plus a small margin, so a tool that ignores its cancellation token cannot hang
-  the turn (its slot collates as a failure). Only when tool timeouts are explicitly disabled does it
-  wait for natural completion.
-- **Finalization never throws** and also runs on mid-stream abort: a cancelled/unfinished call becomes
-  a failed slot, then the existing turn-level semantics apply unchanged (whole-turn echo → one
-  `RecordFailure`; otherwise one success/failure record; combined-signature registration).
-  `MeaiLlmClient` awaits `CompleteStreamedTurnAsync` on both the happy path and the abort path.
-- **`MaxParallelToolCalls <= 1` keeps the old strictly-sequential inline behavior byte-identical.**
-
-### 7. Text-shaped tool calls (local GGUF models)
-
-When a backend returns tool intent as assistant *text* instead of native `tool_calls`,
-`LlmToolCallTextExtractor` recovers it. Supported formats:
-
-- JSON object: `{"name":"tool","arguments":{…}}` (and `"arguments_json":"{…}"`, Qwen via LLMUnity).
-- Function-call syntax: `read_skill("Crafting")`.
-- Memory pseudo-syntax: `Action=write content="…"` → mapped to the `memory` tool.
-- **Hermes / Qwen-Agent XML** (4.13.0): `<tool_call><function=NAME><parameter=KEY>VALUE</parameter>…</function></tool_call>`
-  — parameter values are kept as strings (so an inner `arguments_json` stays a JSON string), and the
-  `<tool_call>` wrapper is stripped from the visible reply. Many local GGUF models fall back to this
-  template when their native `tool_calls` array is empty.
-
 ---
 
 ## 📦 Files
@@ -231,11 +182,6 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 // 5. Result → model → final answer
 ```
 
-> ℹ️ **Streaming is the default execution path — not chat/UI-only.** `AiOrchestrator.RunTaskAsync`
-> (non-interactive agent tasks) runs through `CompleteStreamingAsync` whenever `ICoreAISettings.EnableStreaming`
-> is on, so tasks use the **same execute-as-you-stream tool path** (including bounded-parallel tool execution)
-> as chat. The non-streaming `CompleteAsync` shown above is the fallback used only when streaming is disabled.
-
 ---
 
 ## 🎯 Benefits of MEAI
@@ -299,12 +245,6 @@ await orch.RunTaskAsync(new AiTaskRequest
 
 For `RequireSpecific`, the name is checked against registered `AIFunction[]` for the role — if the tool is missing, a warning is logged and forced mode is downgraded to `RequireAny` (the model must still call something — better to fail loudly than silently get a non-tool answer).
 
-> ⚠️ **Local-server limitation (llama.cpp / LM Studio).** Many local OpenAI-compatible servers reject a
-> forced-**specific** `tool_choice` — i.e. `RequireSpecific` + `RequiredToolName`, which serializes to
-> `{"type":"function","function":{"name":X}}` — with **HTTP 400**. `tool_choice` `"auto"` / `"required"`
-> (absent) are accepted. Against such servers prefer `RequireAny` (`"required"`) or `Auto` rather than
-> `RequireSpecific`. This is a current, documented limitation and is not yet worked around in code.
-
 ### Streaming + ForcedToolMode (v0.25.0)
 
 In `MeaiLlmClient.CompleteStreamingAsync`, forced mode applies **only on the first iteration** of the tool loop. After we feed the model the tool result, options are cloned with `ChatToolMode.Auto` via `CloneOptionsWithAutoToolMode` — otherwise the model would stay locked in an infinite tool-call loop (each round would be forced again).
@@ -315,7 +255,7 @@ This matches how multi-step tool chains work in Claude Code / Cursor: the first 
 
 - **`Auto` (default).** 95% of cases. In `ToolsAndChat`, the model usually picks tools well on its own.
 - **`RequireAny`.** When you know deterministically that a tool is needed but not which one. E.g. an intent classifier detected “wants to test knowledge” — some interactive evaluation tool must run, not plain text.
-- **`RequireSpecific`.** Narrow integrations: rerun fixes, Lua repair, forcing a specific workflow. Use sparingly — forcing tool choice too often hurts dialogue naturalness. **Not supported by most local llama.cpp / LM Studio servers (HTTP 400 on a specific `tool_choice`); use `RequireAny` there** (see the note above).
+- **`RequireSpecific`.** Narrow integrations: rerun fixes, Lua repair, forcing a specific workflow. Use sparingly — forcing tool choice too often hurts dialogue naturalness.
 - **`None`.** Tools are registered for the role, but for this turn they must not run (e.g. post-tool reflection / summarization).
 
 ### Tests

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Lua;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -28,6 +29,10 @@ namespace CoreAI.Composition
         [Tooltip("Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = none.")]
         [SerializeField] private string[] allowedLuaScenes;
 
+        [Tooltip("Optional ScriptableObject implementing IFullLuaAccessBlacklistPolicy to deny Full-tier " +
+                 "reflection access to specific component types/members. Leave empty to allow all (default).")]
+        [SerializeField] private ScriptableObject blacklistPolicy;
+
         // Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
         // overriding FindParent to return the parent directly would bypass the deferral and NRE when this
@@ -44,7 +49,8 @@ namespace CoreAI.Composition
             builder.RegisterCoreAiMods(
                 scenes,
                 enableFullLuaAccess,
-                enableFullLuaPrivateAccess);
+                enableFullLuaPrivateAccess,
+                blacklistPolicy as IFullLuaAccessBlacklistPolicy);
         }
     }
 }

@@ -31,6 +31,23 @@ namespace CoreAI.Sandbox
         public const int MaxStringFormatLength = MaxStringRepLength;
 
         /// <summary>
+        /// Maximum length of the string that <c>table.concat</c> may build, for the same reason and
+        /// with the same value as <see cref="MaxStringRepLength"/>: a single VM instruction can join an
+        /// entire table's elements into one huge string, and the instruction-limit debugger cannot
+        /// interrupt a single instruction.
+        /// </summary>
+        public const int MaxTableConcatLength = MaxStringRepLength;
+
+        /// <summary>
+        /// Default per-execution GC allocation budget (bytes). Unlike the caps above, this is enforced
+        /// by sampling <see cref="System.GC.GetTotalMemory(bool)"/> between VM instructions (Mono does not implement the thread-local allocation counter)
+        /// (see <see cref="InstructionLimitDebugger"/>) rather than at a specific library call, because
+        /// plain string concatenation (<c>s = s .. s</c>) has no library call site to intercept. It is
+        /// the last line of defense against allocation bombs built purely from concatenation opcodes.
+        /// </summary>
+        public const long MaxAllocatedBytesBudget = InstructionLimitDebugger.DefaultMaxAllocatedBytesBudget;
+
+        /// <summary>
         /// Host opt-in to run the MoonSharp Lua sandbox on the WebGL player. Default <c>false</c>:
         /// WebGL stays disabled unless the host explicitly enables it after verifying an IL2CPP build
         /// keeps the required marshalling metadata. Set once at bootstrap from
@@ -273,6 +290,72 @@ namespace CoreAI.Sandbox
                 {
                 }
             }
+
+            // table.concat(list [, sep [, i [, j]]]) allocates its whole result in one VM instruction,
+            // the same allocation-bomb class as string.rep/string.format above. Replace it with a
+            // version that aborts once the running result would exceed MaxTableConcatLength, instead of
+            // reimplementing table.concat's error/edge-case behavior separately.
+            DynValue tableLib = g.Get("table");
+            if (tableLib.Type == DataType.Table)
+            {
+                try
+                {
+                    tableLib.Table["concat"] = DynValue.NewCallback(CappedTableConcat, "concat");
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        // table.concat replacement: mirrors MoonSharp's own TableModule.concat algorithm (same
+        // start/end/sep defaults and the same "invalid value" error), but aborts as soon as the
+        // in-progress result exceeds MaxTableConcatLength instead of finishing the (potentially huge)
+        // build first. Unlike the original, the default end index always uses Table.Length directly and
+        // does not consult a __len metamethod; sandboxed scripts have no legitimate need for a custom
+        // length on a concat target, and skipping it keeps this cap check simple and auditable.
+        private static DynValue CappedTableConcat(ScriptExecutionContext ctx, CallbackArguments args)
+        {
+            DynValue vlist = args.AsType(0, "concat", DataType.Table, false);
+            DynValue vsep = args.AsType(1, "concat", DataType.String, true);
+            DynValue vstart = args.AsType(2, "concat", DataType.Number, true);
+            DynValue vend = args.AsType(3, "concat", DataType.Number, true);
+
+            Table list = vlist.Table;
+            string sep = vsep.IsNil() ? "" : vsep.String;
+            int start = vstart.IsNilOrNan() ? 1 : (int)vstart.Number;
+            int end = vend.IsNilOrNan() ? (int)list.Length : (int)vend.Number;
+
+            if (end < start)
+            {
+                return DynValue.NewString(string.Empty);
+            }
+
+            System.Text.StringBuilder sb = new();
+            for (int i = start; i <= end; i++)
+            {
+                DynValue v = list.Get(i);
+                if (v.Type != DataType.Number && v.Type != DataType.String)
+                {
+                    throw new ScriptRuntimeException(
+                        "invalid value ({1}) at index {0} in table for 'concat'", i, v.Type.ToLuaTypeString());
+                }
+
+                if (i != start)
+                {
+                    sb.Append(sep);
+                }
+
+                sb.Append(v.ToPrintString());
+
+                if (sb.Length > MaxTableConcatLength)
+                {
+                    throw new ScriptRuntimeException(
+                        $"SecureLuaEnvironment: table.concat result would exceed {MaxTableConcatLength} chars.");
+                }
+            }
+
+            return DynValue.NewString(sb.ToString());
         }
 
         // string.rep replacement: identical semantics (s, n[, sep]) but refuses to build strings

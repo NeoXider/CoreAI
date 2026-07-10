@@ -60,9 +60,20 @@ namespace CoreAI.Infrastructure.Llm
 
                 return result;
             }
-            catch (OperationCanceledException)
+            // The caller's own token was cancelled: this is a genuine user-initiated stop, never fall back.
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                throw; // Never fallback on user cancellation
+                throw;
+            }
+            // OperationCanceledException with an un-cancelled caller token is an internal provider/transport
+            // timeout (e.g. MeaiOpenAiChatClient's transport-level timeout), not a user cancellation.
+            catch (OperationCanceledException ex)
+            {
+                _logger.Warn(
+                    $"[Fallback] Primary timed out internally ({ex.GetType().Name}), falling back to secondary.",
+                    LogTag.Llm);
+                FallbackCount++;
+                return await _secondary.CompleteAsync(request, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -75,11 +86,20 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// The primary stream is "committed" once it produces a chunk with visible text, a tool call,
+        /// or a forwarded (non-retryable) error - at that point falling back would duplicate output or
+        /// re-run tool side effects, so failures after commitment simply propagate. Before commitment
+        /// (e.g. a tool-buffering control chunk with no text/tool content), a timeout or failure on any
+        /// subsequent <c>MoveNextAsync</c> is still safe to fall back from and restarts the stream
+        /// cleanly on the secondary backend.
+        /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             bool primaryFailed = false;
+            bool committed = false;
 
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
             try
@@ -87,54 +107,88 @@ namespace CoreAI.Infrastructure.Llm
                 enumerator = _primary.CompleteStreamingAsync(request, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
 
-                // Resolve and cache required local values.
-                bool hasFirst;
-                try
+                while (!committed)
                 {
-                    hasFirst = await enumerator.MoveNextAsync();
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn(
-                        $"[Fallback] Primary streaming threw {ex.GetType().Name}: {ex.Message}, falling back to secondary.",
-                        LogTag.Llm);
-                    primaryFailed = true;
-                    hasFirst = false;
-                }
-
-                if (!primaryFailed && hasFirst)
-                {
-                    LlmStreamChunk first = enumerator.Current;
-                    if (!string.IsNullOrEmpty(first.Error) && IsRetryableError(first.ErrorCode))
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync();
+                    }
+                    // The caller's own token was cancelled: never fall back.
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (OperationCanceledException ex)
                     {
                         _logger.Warn(
-                            $"[Fallback] Primary streaming error chunk ({first.ErrorCode}), falling back to secondary.",
+                            $"[Fallback] Primary streaming timed out internally before committing any content " +
+                            $"({ex.GetType().Name}), falling back to secondary.",
                             LogTag.Llm);
                         primaryFailed = true;
+                        break;
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        yield return first;
-
-                        // Continue streaming from primary
-                        while (await enumerator.MoveNextAsync())
-                        {
-                            yield return enumerator.Current;
-                        }
-
-                        yield break;
+                        _logger.Warn(
+                            $"[Fallback] Primary streaming threw {ex.GetType().Name}: {ex.Message}, falling back to secondary.",
+                            LogTag.Llm);
+                        primaryFailed = true;
+                        break;
                     }
+
+                    if (!hasNext)
+                    {
+                        _logger.Warn(
+                            "[Fallback] Primary streaming completed without committing any content, falling back to secondary.",
+                            LogTag.Llm);
+                        primaryFailed = true;
+                        break;
+                    }
+
+                    LlmStreamChunk chunk = enumerator.Current;
+                    if (!string.IsNullOrEmpty(chunk.Error) && IsRetryableError(chunk.ErrorCode))
+                    {
+                        _logger.Warn(
+                            $"[Fallback] Primary streaming error chunk ({chunk.ErrorCode}), falling back to secondary.",
+                            LogTag.Llm);
+                        primaryFailed = true;
+                        break;
+                    }
+
+                    if (IsCommittingChunk(chunk))
+                    {
+                        yield return chunk;
+                        committed = true;
+                        break;
+                    }
+
+                    if (chunk.IsDone)
+                    {
+                        // Terminal chunk with no visible text/tool call/error: nothing was ever committed,
+                        // so discard it and restart cleanly on the secondary instead of forwarding an empty end.
+                        _logger.Warn(
+                            "[Fallback] Primary streaming ended without committing any content, falling back to secondary.",
+                            LogTag.Llm);
+                        primaryFailed = true;
+                        break;
+                    }
+
+                    // Benign pre-commitment control/hint chunk (no text, no tool call, not done): forward it
+                    // and keep watching subsequent MoveNextAsync calls under the same fallback protection.
+                    yield return chunk;
                 }
-                else if (!primaryFailed)
+
+                if (committed)
                 {
-                    _logger.Warn(
-                        "[Fallback] Primary streaming completed without any chunks, falling back to secondary.",
-                        LogTag.Llm);
-                    primaryFailed = true;
+                    // Already streamed real content: continuing failures are no longer safe to fall back
+                    // from (would duplicate output or re-run tool side effects), so let them propagate.
+                    while (await enumerator.MoveNextAsync())
+                    {
+                        yield return enumerator.Current;
+                    }
+
+                    yield break;
                 }
             }
             finally
@@ -154,6 +208,13 @@ namespace CoreAI.Infrastructure.Llm
                     yield return chunk;
                 }
             }
+        }
+
+        private static bool IsCommittingChunk(LlmStreamChunk chunk)
+        {
+            return !string.IsNullOrEmpty(chunk.Text) ||
+                   !string.IsNullOrEmpty(chunk.Error) ||
+                   (chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0);
         }
 
         private static bool IsRetryableError(LlmErrorCode code)

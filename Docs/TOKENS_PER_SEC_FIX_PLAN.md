@@ -18,12 +18,12 @@ This is a read-only analysis of the current benchmark token/throughput reporting
 
 Files inspected:
 
-- `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/GameCreationBenchmarkHarness.cs`
+- `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkHarness.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkReport.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkReportFormatter.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/ScenarioResult.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Orchestration/ILlmClient.cs`
-- `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/GameCreationBenchmarkPlayModeTests.cs`
+- `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkPlayModeTests.cs`
 - `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/RoutingLlmClient.cs`
 
 ## Current Findings
@@ -168,7 +168,7 @@ Do not do all of this as a rewrite. Apply in small steps.
 
 Files:
 
-- `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/GameCreationBenchmarkHarness.cs`
+- `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkHarness.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/ScenarioResult.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkReport.cs`
 - `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkReportFormatter.cs`

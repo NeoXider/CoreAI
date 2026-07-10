@@ -33,6 +33,12 @@ namespace CoreAI.Ai.Hub
         private bool _subscribed;
         private bool _editorOpen;
 
+        // OPT#7: ListMods() re-parses every mod's @coreai header, so it is cached and only reloaded on
+        // Refresh / ModsChanged / a mutating action — typing in the search box just re-filters the cache.
+        private IReadOnlyList<HubModRecord> _modsCache;
+        private string _modsLoadError;
+        private IVisualElementScheduledItem _searchDebounce;
+
         /// <param name="service">VM-agnostic mod CRUD/query surface (built by <see cref="HubModsPages"/>).</param>
         /// <param name="order">Sort priority for the Hub tab (defaults to 300).</param>
         public HubModsPage(IHubModService service, int order = 300)
@@ -119,13 +125,14 @@ namespace CoreAI.Ai.Hub
             _searchField.RegisterValueChangedCallback(evt =>
             {
                 _search = evt.newValue ?? "";
-                RefreshTree();
+                ScheduleSearchRender();
             });
             toolbar.Add(_searchField);
 
             toolbar.Add(HubModWidgets.MakeButton("Refresh", RefreshList));
             toolbar.Add(HubModWidgets.MakeButton("Add", OpenNewEditor));
             toolbar.Add(HubModWidgets.MakeButton("Paste", PasteFromClipboard));
+            toolbar.Add(HubModWidgets.MakeButton("Import", ImportFromClipboard));
             listRoot.Add(toolbar);
 
             _status = HubModWidgets.MakeStatus();
@@ -138,6 +145,8 @@ namespace CoreAI.Ai.Hub
             return listRoot;
         }
 
+        /// <summary>Reloads the mods cache from the service, then re-renders. Use after any mutation or
+        /// external change (ModsChanged); the search box itself only calls <see cref="RenderTree"/>.</summary>
         private void RefreshList()
         {
             if (_root == null)
@@ -145,10 +154,35 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            RefreshTree();
+            ReloadModsCache();
+            RenderTree();
         }
 
-        private void RefreshTree()
+        private void ReloadModsCache()
+        {
+            try
+            {
+                _modsCache = _service.ListMods();
+                _modsLoadError = null;
+            }
+            catch (Exception ex)
+            {
+                _modsCache = Array.Empty<HubModRecord>();
+                _modsLoadError = ex.Message;
+            }
+        }
+
+        /// <summary>Debounces search-box re-renders (~250ms) so fast typing does not rebuild the tree
+        /// on every keystroke; cancels any pending render before scheduling a new one.</summary>
+        private void ScheduleSearchRender()
+        {
+            _searchDebounce?.Pause();
+            _searchDebounce = _searchField.schedule.Execute(RenderTree).StartingIn(250);
+        }
+
+        /// <summary>Filters the cached mod list and rebuilds the tree. Never calls the service — callers
+        /// that need fresh data should call <see cref="RefreshList"/> instead.</summary>
+        private void RenderTree()
         {
             if (_treeScroll == null)
             {
@@ -157,17 +191,13 @@ namespace CoreAI.Ai.Hub
 
             _treeScroll.Clear();
 
-            IReadOnlyList<HubModRecord> mods;
-            try
+            if (_modsLoadError != null)
             {
-                mods = _service.ListMods();
-            }
-            catch (Exception ex)
-            {
-                _treeScroll.Add(HubModWidgets.MakeNote($"Failed to list mods: {ex.Message}"));
+                _treeScroll.Add(HubModWidgets.MakeNote($"Failed to list mods: {_modsLoadError}"));
                 return;
             }
 
+            IReadOnlyList<HubModRecord> mods = _modsCache ?? Array.Empty<HubModRecord>();
             List<HubModRecord> filtered = new();
             foreach (HubModRecord mod in mods)
             {
@@ -243,6 +273,7 @@ namespace CoreAI.Ai.Hub
             top.Add(nameCol);
 
             top.Add(HubModWidgets.MakeButton("Edit", () => OpenEditEditor(mod.Id)));
+            top.Add(HubModWidgets.MakeButton("Export", () => ExportMod(mod.Id)));
             top.Add(HubModWidgets.MakeDangerButton("Delete", () => DeleteMod(mod.Id)));
 
             panel.Add(top);
@@ -253,6 +284,24 @@ namespace CoreAI.Ai.Hub
                 desc.style.fontSize = 11f;
                 desc.style.marginTop = 2f;
                 panel.Add(desc);
+            }
+
+            if (mod.UpdateAvailable)
+            {
+                VisualElement updateRow = new();
+                updateRow.style.flexDirection = FlexDirection.Row;
+                updateRow.style.alignItems = Align.Center;
+                updateRow.style.marginTop = 2f;
+
+                string versionSuffix = string.IsNullOrWhiteSpace(mod.SeededVersion) ? "" : $" (v{mod.SeededVersion})";
+                Label badge = HubModWidgets.MakeMutedLabel($"Update available{versionSuffix}");
+                badge.style.color = HubModWidgets.Accent;
+                badge.style.unityFontStyleAndWeight = FontStyle.Bold;
+                badge.style.marginRight = 6f;
+                updateRow.Add(badge);
+
+                updateRow.Add(HubModWidgets.MakeButton("Apply update", () => ApplyUpdate(mod.Id)));
+                panel.Add(updateRow);
             }
 
             return panel;
@@ -266,7 +315,8 @@ namespace CoreAI.Ai.Hub
                 ? $"  loaded  handlers: {mod.Handlers}  timers: {mod.Timers}  errors: {mod.Errors}"
                 : (mod.IsStored ? "  stored (disabled)" : "");
             string version = string.IsNullOrWhiteSpace(mod.Version) ? "" : $"  v{mod.Version}";
-            return id + version + caps + status;
+            string bundled = string.IsNullOrWhiteSpace(mod.Origin) ? "" : "  [bundled]";
+            return id + version + caps + status + bundled;
         }
 
         private static bool Matches(HubModRecord mod, string search)
@@ -309,7 +359,7 @@ namespace CoreAI.Ai.Hub
                 SetStatus($"Failed to toggle '{id}': {ex.Message}", true);
             }
 
-            RefreshTree();
+            RefreshList();
         }
 
         private void DeleteMod(string id)
@@ -324,7 +374,76 @@ namespace CoreAI.Ai.Hub
                 SetStatus($"Failed to delete '{id}': {ex.Message}", true);
             }
 
-            RefreshTree();
+            RefreshList();
+        }
+
+        private void ApplyUpdate(string id)
+        {
+            try
+            {
+                if (_service.ApplyBundledUpdate(id))
+                {
+                    SetStatus($"Updated '{id}' from the bundled version.", false);
+                }
+                else
+                {
+                    SetStatus($"No bundled update available for '{id}'.", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Failed to update '{id}': {ex.Message}", true);
+            }
+
+            RefreshList();
+        }
+
+        private void ExportMod(string id)
+        {
+            try
+            {
+                string bundle = _service.ExportMod(id);
+                if (string.IsNullOrEmpty(bundle))
+                {
+                    SetStatus($"Nothing to export for '{id}'.", true);
+                    return;
+                }
+
+                GUIUtility.systemCopyBuffer = bundle;
+                SetStatus($"Copied '{id}' export bundle to clipboard.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Failed to export '{id}': {ex.Message}", true);
+            }
+        }
+
+        private void ImportFromClipboard()
+        {
+            string clip = GUIUtility.systemCopyBuffer ?? "";
+            if (string.IsNullOrWhiteSpace(clip))
+            {
+                SetStatus("Clipboard is empty — copy an exported mod bundle first.", true);
+                return;
+            }
+
+            try
+            {
+                if (_service.ImportMod(clip))
+                {
+                    SetStatus("Imported mod bundle from clipboard.", false);
+                }
+                else
+                {
+                    SetStatus("Import failed: the clipboard does not contain a valid mod bundle.", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Import failed: {ex.Message}", true);
+            }
+
+            RefreshList();
         }
 
         private void OpenNewEditor()
@@ -374,7 +493,7 @@ namespace CoreAI.Ai.Hub
             _editorRoot.style.display = DisplayStyle.None;
             _listRoot.style.display = DisplayStyle.Flex;
             _editorOpen = false;
-            RefreshTree();
+            RefreshList();
         }
 
         private void OnModsChanged()
@@ -385,7 +504,7 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            RefreshTree();
+            RefreshList();
         }
 
         private void Subscribe()
@@ -423,8 +542,45 @@ namespace CoreAI.Ai.Hub
 
         private static void SetPlaceholder(TextField field, string placeholder)
         {
-            // Lightweight placeholder: shows greyed hint text until the user types.
-            field.tooltip = placeholder;
+            // UI Toolkit's TextField has no native placeholder, so fake one: show greyed hint text
+            // whenever the field is empty and unfocused, swap to the real (initially empty) value and
+            // normal color on focus, and restore the hint if the field is left empty again.
+            bool showingPlaceholder = string.IsNullOrEmpty(field.value);
+
+            void ShowPlaceholder()
+            {
+                showingPlaceholder = true;
+                field.SetValueWithoutNotify(placeholder);
+                field.style.color = HubModWidgets.Muted;
+            }
+
+            void ShowRealValue()
+            {
+                showingPlaceholder = false;
+                field.SetValueWithoutNotify("");
+                field.style.color = HubModWidgets.Text;
+            }
+
+            if (showingPlaceholder)
+            {
+                ShowPlaceholder();
+            }
+
+            field.RegisterCallback<FocusInEvent>(_ =>
+            {
+                if (showingPlaceholder)
+                {
+                    ShowRealValue();
+                }
+            });
+
+            field.RegisterCallback<FocusOutEvent>(_ =>
+            {
+                if (string.IsNullOrEmpty(field.value))
+                {
+                    ShowPlaceholder();
+                }
+            });
         }
     }
 }

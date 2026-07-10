@@ -27,6 +27,18 @@ namespace CoreAI.Ai.LuaCs
         private static readonly ConcurrentDictionary<(Type type, bool nonPublic), List<MemberInfo>>
             SettableMemberCache = new();
 
+        // instanceId -> GameObject, memoized across unity_* calls; a full Resources.FindObjectsOfTypeAll scan
+        // is only re-run when a lookup misses (and even then, at most once per MissedIdRescanIntervalSeconds
+        // for a given id) so an N-object-per-tick mod costs ~1 scan instead of N.
+        private static readonly ConcurrentDictionary<int, GameObject> GameObjectResolveCache = new();
+        private static readonly ConcurrentDictionary<int, float> GameObjectMissedScanTime = new();
+
+        private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<int, UnityEngine.Object>>
+            UnityObjectResolveCacheByType = new();
+        private static readonly ConcurrentDictionary<(Type Type, int ObjectId), float> UnityObjectMissedScanTime = new();
+
+        private const float MissedIdRescanIntervalSeconds = 1f;
+
         private readonly IGameLogger _logger;
         private readonly bool _allowNonPublic;
         private readonly IFullLuaAccessBlacklistPolicy _blacklistPolicy;
@@ -566,15 +578,31 @@ namespace CoreAI.Ai.LuaCs
                 return null;
             }
 
+            if (GameObjectResolveCache.TryGetValue(instanceId, out GameObject cached) && cached != null)
+            {
+                return cached;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (GameObjectMissedScanTime.TryGetValue(instanceId, out float lastMiss)
+                && now - lastMiss < MissedIdRescanIntervalSeconds)
+            {
+                return null;
+            }
+
+            GameObjectResolveCache.Clear();
             GameObject[] loaded = Resources.FindObjectsOfTypeAll<GameObject>();
             for (int i = 0; i < loaded.Length; i++)
             {
-                if (GetObjectId(loaded[i]) == instanceId)
-                {
-                    return loaded[i];
-                }
+                GameObjectResolveCache[GetObjectId(loaded[i])] = loaded[i];
             }
 
+            if (GameObjectResolveCache.TryGetValue(instanceId, out cached))
+            {
+                return cached;
+            }
+
+            GameObjectMissedScanTime[instanceId] = now;
             return null;
         }
 
@@ -585,15 +613,34 @@ namespace CoreAI.Ai.LuaCs
                 return null;
             }
 
+            ConcurrentDictionary<int, UnityEngine.Object> cache =
+                UnityObjectResolveCacheByType.GetOrAdd(wanted, static _ => new ConcurrentDictionary<int, UnityEngine.Object>());
+            if (cache.TryGetValue(objectId, out UnityEngine.Object cached) && cached != null)
+            {
+                return cached;
+            }
+
+            (Type Type, int ObjectId) missKey = (wanted, objectId);
+            float now = Time.realtimeSinceStartup;
+            if (UnityObjectMissedScanTime.TryGetValue(missKey, out float lastMiss)
+                && now - lastMiss < MissedIdRescanIntervalSeconds)
+            {
+                return null;
+            }
+
+            cache.Clear();
             UnityEngine.Object[] loaded = Resources.FindObjectsOfTypeAll(wanted);
             for (int i = 0; i < loaded.Length; i++)
             {
-                if (GetObjectId(loaded[i]) == objectId)
-                {
-                    return loaded[i];
-                }
+                cache[GetObjectId(loaded[i])] = loaded[i];
             }
 
+            if (cache.TryGetValue(objectId, out cached))
+            {
+                return cached;
+            }
+
+            UnityObjectMissedScanTime[missKey] = now;
             return null;
         }
 

@@ -3,17 +3,37 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>In-memory Lua script version store with original/current revision tracking.</summary>
+    /// <summary>
+    /// In-memory Lua script version store with original/current revision tracking. History is bounded by
+    /// <see cref="VersionRetentionPolicy"/>: only the original, the current, and the last N intermediate
+    /// revisions (plus a total byte budget) are kept per key, so a long-running session cannot grow a
+    /// key's history without limit. Evicted revisions keep their original <see cref="LuaScriptRevision.Index"/>
+    /// numbering (indices are never reassigned), so callers that reference a revision by index must not
+    /// assume the index equals its position in <see cref="LuaScriptVersionRecord.History"/>.
+    /// </summary>
     public sealed class MemoryLuaScriptVersionStore : ILuaScriptVersionStore
     {
         private readonly object _lock = new();
         private readonly Dictionary<string, Slot> _slots = new(StringComparer.Ordinal);
+        private readonly int _maxIntermediateRevisions;
+        private readonly long _maxTotalBytes;
+
+        public MemoryLuaScriptVersionStore(
+            int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
+            long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
+        {
+            _maxIntermediateRevisions = maxIntermediateRevisions;
+            _maxTotalBytes = maxTotalBytes;
+        }
 
         private sealed class Slot
         {
             public string OriginalLua = "";
             public string CurrentLua = "";
             public readonly List<LuaScriptRevision> History = new();
+
+            /// <summary>Next stable sequence number to assign; independent of History.Count so numbering stays stable across evictions.</summary>
+            public int NextIndex;
         }
 
         public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)
@@ -45,9 +65,18 @@ namespace CoreAI.Ai
 
         public void RecordSuccessfulExecution(string scriptKey, string executedLuaSource)
         {
+            RecordSuccessfulExecutionChanged(scriptKey, executedLuaSource);
+        }
+
+        /// <summary>
+        /// Same as <see cref="RecordSuccessfulExecution"/> but reports whether a new revision was actually
+        /// appended, so file-backed stores can skip a redundant disk write for a no-op reload.
+        /// </summary>
+        public bool RecordSuccessfulExecutionChanged(string scriptKey, string executedLuaSource)
+        {
             if (string.IsNullOrWhiteSpace(scriptKey))
             {
-                return;
+                return false;
             }
 
             string key = scriptKey.Trim();
@@ -62,25 +91,34 @@ namespace CoreAI.Ai
                     slot.OriginalLua = lua;
                     slot.CurrentLua = lua;
                     slot.History.Add(new LuaScriptRevision(0, lua, now));
-                    return;
+                    slot.NextIndex = 1;
+                    return true;
                 }
 
                 if (string.Equals(slot.CurrentLua, lua, StringComparison.Ordinal))
                 {
-                    return;
+                    return false;
                 }
 
-                int next = slot.History.Count;
+                int next = slot.NextIndex++;
                 slot.History.Add(new LuaScriptRevision(next, lua, now));
                 slot.CurrentLua = lua;
+                VersionRetentionPolicy.Enforce(slot.History, _maxIntermediateRevisions, _maxTotalBytes);
+                return true;
             }
         }
 
         public void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false)
         {
+            SeedOriginalChanged(scriptKey, originalLuaSource, overwriteExistingOriginal);
+        }
+
+        /// <summary>Same as <see cref="SeedOriginal"/> but reports whether the store was actually mutated.</summary>
+        public bool SeedOriginalChanged(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false)
+        {
             if (string.IsNullOrWhiteSpace(scriptKey))
             {
-                return;
+                return false;
             }
 
             string key = scriptKey.Trim();
@@ -95,7 +133,8 @@ namespace CoreAI.Ai
                     slot.OriginalLua = seed;
                     slot.CurrentLua = seed;
                     slot.History.Add(new LuaScriptRevision(0, seed, now));
-                    return;
+                    slot.NextIndex = 1;
+                    return true;
                 }
 
                 if (overwriteExistingOriginal || string.IsNullOrEmpty(slot.OriginalLua))
@@ -104,15 +143,25 @@ namespace CoreAI.Ai
                     slot.CurrentLua = seed;
                     slot.History.Clear();
                     slot.History.Add(new LuaScriptRevision(0, seed, now));
+                    slot.NextIndex = 1;
+                    return true;
                 }
+
+                return false;
             }
         }
 
         public void ResetToOriginal(string scriptKey)
         {
+            ResetToOriginalChanged(scriptKey);
+        }
+
+        /// <summary>Same as <see cref="ResetToOriginal"/> but reports whether the store was actually mutated.</summary>
+        public bool ResetToOriginalChanged(string scriptKey)
+        {
             if (string.IsNullOrWhiteSpace(scriptKey))
             {
-                return;
+                return false;
             }
 
             string key = scriptKey.Trim();
@@ -121,26 +170,34 @@ namespace CoreAI.Ai
             {
                 if (!_slots.TryGetValue(key, out Slot slot) || string.IsNullOrEmpty(slot.OriginalLua))
                 {
-                    return;
+                    return false;
                 }
 
                 string o = slot.OriginalLua;
                 slot.CurrentLua = o;
                 slot.History.Clear();
                 slot.History.Add(new LuaScriptRevision(0, o, now));
+                slot.NextIndex = 1;
+                return true;
             }
         }
 
         public void ResetToRevision(string scriptKey, int revisionIndex)
         {
+            ResetToRevisionChanged(scriptKey, revisionIndex);
+        }
+
+        /// <summary>Same as <see cref="ResetToRevision"/> but reports whether the store was actually mutated.</summary>
+        public bool ResetToRevisionChanged(string scriptKey, int revisionIndex)
+        {
             if (string.IsNullOrWhiteSpace(scriptKey))
             {
-                return;
+                return false;
             }
 
             if (revisionIndex < 0)
             {
-                return;
+                return false;
             }
 
             string key = scriptKey.Trim();
@@ -148,20 +205,35 @@ namespace CoreAI.Ai
             {
                 if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
                 {
-                    return;
+                    return false;
                 }
 
-                if (revisionIndex >= slot.History.Count)
+                // Revision indices are stable sequence numbers, not positions: after retention eviction the
+                // requested index may no longer sit at slot.History[revisionIndex], so it must be searched.
+                int pos = -1;
+                for (int i = 0; i < slot.History.Count; i++)
                 {
-                    return;
+                    if (slot.History[i].Index == revisionIndex)
+                    {
+                        pos = i;
+                        break;
+                    }
                 }
 
-                LuaScriptRevision rev = slot.History[revisionIndex];
+                if (pos < 0)
+                {
+                    return false;
+                }
+
+                LuaScriptRevision rev = slot.History[pos];
                 slot.CurrentLua = rev.Source ?? "";
-                if (slot.History.Count > revisionIndex + 1)
+                if (slot.History.Count > pos + 1)
                 {
-                    slot.History.RemoveRange(revisionIndex + 1, slot.History.Count - revisionIndex - 1);
+                    slot.History.RemoveRange(pos + 1, slot.History.Count - pos - 1);
                 }
+
+                slot.NextIndex = revisionIndex + 1;
+                return true;
             }
         }
 
@@ -264,6 +336,17 @@ namespace CoreAI.Ai
 
                     if (slot.History.Count > 0)
                     {
+                        int maxIndex = 0;
+                        for (int i = 0; i < slot.History.Count; i++)
+                        {
+                            if (slot.History[i].Index > maxIndex)
+                            {
+                                maxIndex = slot.History[i].Index;
+                            }
+                        }
+
+                        slot.NextIndex = maxIndex + 1;
+                        VersionRetentionPolicy.Enforce(slot.History, _maxIntermediateRevisions, _maxTotalBytes);
                         _slots[key] = slot;
                     }
                 }

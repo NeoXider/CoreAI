@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -42,6 +43,8 @@ namespace CoreAI.Ai.Hub
         private Label _diagnostics;
         private VisualElement _headerBox;
         private Label _titleLabel;
+        private VisualElement _historyBox;
+        private bool _historyOpen;
 
         /// <param name="service">CRUD surface used to load/save/validate the mod.</param>
         /// <param name="modId">Existing mod id to edit; null/empty for a new or pasted mod.</param>
@@ -116,7 +119,13 @@ namespace CoreAI.Ai.Hub
             actions.Add(HubModWidgets.MakeButton("Copy", Copy));
             actions.Add(HubModWidgets.MakeButton("Paste", Paste));
             actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
+            actions.Add(HubModWidgets.MakeButton("History", ToggleHistory));
             root.Add(actions);
+
+            _historyBox = HubModWidgets.MakePanel();
+            _historyBox.style.flexShrink = 0f;
+            _historyBox.style.display = DisplayStyle.None;
+            root.Add(_historyBox);
 
             _codeField = new TextField { name = "coreai-hub-mod-code", multiline = true };
             _codeField.value = _initialSource;
@@ -204,6 +213,101 @@ namespace CoreAI.Ai.Hub
                 ? "No recent runtime errors."
                 : "Recent runtime errors:\n" + errors;
             _diagnostics.style.color = string.IsNullOrEmpty(errors) ? HubModWidgets.Muted : HubModWidgets.Danger;
+        }
+
+        private void ToggleHistory()
+        {
+            _historyOpen = !_historyOpen;
+            if (_historyOpen)
+            {
+                RefreshHistory();
+            }
+
+            _historyBox.style.display = _historyOpen ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        private void RefreshHistory()
+        {
+            _historyBox.Clear();
+            string id = _isNew ? ParseId(_codeField?.value ?? "") : _modId;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                _historyBox.Add(HubModWidgets.MakeNote("Save the mod first to track revision history."));
+                return;
+            }
+
+            IReadOnlyList<LuaScriptRevision> revisions;
+            try
+            {
+                revisions = _service.ListModVersions(id);
+            }
+            catch (Exception ex)
+            {
+                _historyBox.Add(HubModWidgets.MakeNote($"Failed to load history: {ex.Message}"));
+                return;
+            }
+
+            if (revisions == null || revisions.Count == 0)
+            {
+                _historyBox.Add(HubModWidgets.MakeNote("No revision history recorded for this mod."));
+                return;
+            }
+
+            // Newest first for readability; ListModVersions itself is oldest-first (revision 0 = original).
+            for (int i = revisions.Count - 1; i >= 0; i--)
+            {
+                _historyBox.Add(BuildRevisionRow(id, revisions[i]));
+            }
+        }
+
+        private VisualElement BuildRevisionRow(string id, LuaScriptRevision revision)
+        {
+            VisualElement row = new();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 2f;
+
+            string when = new DateTime(revision.UtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            string preview = FirstLinePreview(revision.Source);
+            Label label = HubModWidgets.MakeMutedLabel(
+                $"#{revision.Index}  {when}  ({revision.Source.Length} chars)  {preview}");
+            label.style.flexGrow = 1f;
+            label.style.flexShrink = 1f;
+            row.Add(label);
+
+            row.Add(HubModWidgets.MakeButton("Revert", () => Revert(id, revision.Index)));
+            return row;
+        }
+
+        private static string FirstLinePreview(string source)
+        {
+            string trimmed = (source ?? "").TrimStart();
+            int newline = trimmed.IndexOfAny(new[] { '\r', '\n' });
+            string firstLine = (newline >= 0 ? trimmed.Substring(0, newline) : trimmed).Trim();
+            const int maxLength = 60;
+            return firstLine.Length > maxLength ? firstLine.Substring(0, maxLength) + "…" : firstLine;
+        }
+
+        private void Revert(string id, int revisionIndex)
+        {
+            try
+            {
+                if (!_service.TryRevertMod(id, revisionIndex, out string restored))
+                {
+                    SetStatus($"Revision #{revisionIndex} not found for '{id}'.", true);
+                    return;
+                }
+
+                _codeField.value = restored;
+                RefreshHeaderBox(restored);
+                RefreshDiagnostics();
+                RefreshHistory();
+                SetStatus($"Reverted '{id}' to revision #{revisionIndex}.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Revert failed: {ex.Message}", true);
+            }
         }
 
         private void Close()

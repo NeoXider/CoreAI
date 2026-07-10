@@ -1,0 +1,28 @@
+{
+  "name": "CoreAI.Mods.Hub",
+  "rootNamespace": "CoreAI.Ai.Hub",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Mods",
+    "CoreAI.Hub.UI",
+    "VContainer"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "COREAI_HAS_HUB"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.coreaihub",
+      "expression": "",
+      "define": "COREAI_HAS_HUB"
+    }
+  ],
+  "noEngineReferences": false
+}

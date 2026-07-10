@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using CoreAI.Infrastructure.Logging;
@@ -12,6 +13,12 @@ namespace CoreAI.Infrastructure.World
     /// <summary>Applies validated CoreAI world commands to Unity scene objects.</summary>
     public sealed class CoreAiWorldCommandExecutor : ICoreAiWorldCommandExecutor
     {
+        /// <summary>Maximum entries accepted by a single <c>spawn_batch</c> command.</summary>
+        public const int MaxSpawnBatchSize = 100;
+
+        /// <summary>Maximum prefab/primitive keys listed in an unknown-prefabKey error message.</summary>
+        private const int MaxKeysInErrorMessage = 20;
+
         private readonly IGameLogger _logger;
         private readonly ICoreAiPrefabRegistry _prefabRegistry;
         private readonly HashSet<string> _allowedScenes;
@@ -102,10 +109,19 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
+            // Clear per-call diagnostics up front so a stale value from a previous command never leaks
+            // into this command's result (LastErrorMessage/LastSpawnBatchResult are consumed immediately
+            // by the caller after a failed/batch call, mirroring LastListedObjects/LastListedAnimations).
+            LastErrorMessage = "";
+
             switch (env.action.Trim())
             {
                 case "spawn":
                     return TrySpawn(env);
+                case "spawn_batch":
+                    return TrySpawnBatch(env);
+                case "list_prefabs":
+                    return TryListPrefabs();
                 case "move":
                     return TryMove(env);
                 case "rotate":
@@ -164,13 +180,35 @@ namespace CoreAI.Infrastructure.World
 
         private bool TrySpawn(CoreAiWorldCommandEnvelope env)
         {
+            GameObject spawned = TrySpawnCore(env, out string error);
+            if (spawned != null)
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                LastErrorMessage = error;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Shared spawn implementation used by both <c>spawn</c> and each entry of <c>spawn_batch</c>.
+        /// Returns the spawned instance, or null with <paramref name="error"/> describing why (e.g. an
+        /// unknown prefabKey lists the available keys so the model can self-correct in one round).
+        /// </summary>
+        private GameObject TrySpawnCore(CoreAiWorldCommandEnvelope env, out string error)
+        {
+            error = "";
             string key = (env.prefabKeyOrName ?? "").Trim();
 
             string targetName = (env.targetName ?? "").Trim();
             if (string.IsNullOrEmpty(targetName))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe, "[World] spawn missing targetName");
-                return false;
+                return null;
             }
 
             Vector3 pos = new(env.x, env.y, env.z);
@@ -183,7 +221,8 @@ namespace CoreAI.Infrastructure.World
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[World] spawn blocked: position ({pos.x},{pos.y},{pos.z}) overlaps existing colliders");
-                return false;
+                error = $"spawn blocked: position ({pos.x},{pos.y},{pos.z}) overlaps existing colliders.";
+                return null;
             }
 
             // Rotation (fx/fy/fz) and scale can be set during spawn for convenience.
@@ -231,20 +270,127 @@ namespace CoreAI.Infrastructure.World
                     tag.prefabKey = key;
                 }
 
-                return true;
+                return spawned;
             }
 
             if (_prefabRegistry == null && !_allowPrimitives)
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe, "[World] prefab registry not assigned");
-                return false;
+                error = "spawn failed: no prefab registry is assigned and primitives are disabled.";
+                return null;
             }
 
-            _logger.LogWarning(GameLogFeature.MessagePipe,
-                _allowPrimitives
-                    ? $"[World] spawn failed: '{key}' is neither a registered prefab nor a primitive ({CoreAiPrimitiveFactory.SupportedKeys})"
-                    : $"[World] prefab not found: '{key}'");
-            return false;
+            error = BuildUnknownPrefabKeyMessage(key);
+            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] {error}");
+            return null;
+        }
+
+        /// <summary>
+        /// Builds a self-correcting error listing available primitive and registered-prefab keys
+        /// (truncated to <see cref="MaxKeysInErrorMessage"/>) for an unresolvable spawn prefabKey.
+        /// </summary>
+        private string BuildUnknownPrefabKeyMessage(string key)
+        {
+            if (!_allowPrimitives)
+            {
+                return $"prefab not found: '{key}'.";
+            }
+
+            string message = $"Unknown prefabKey '{key}'. Available primitives: {CoreAiPrimitiveFactory.SupportedKeys}.";
+
+            if (_prefabRegistry is ICoreAiPrefabCatalog catalog)
+            {
+                IReadOnlyList<string> keys = catalog.ListPrefabKeys();
+                if (keys.Count > 0)
+                {
+                    int shown = Math.Min(keys.Count, MaxKeysInErrorMessage);
+                    string keyList = string.Join(", ", keys.Take(shown));
+                    string more = keys.Count > shown ? $" (+{keys.Count - shown} more)" : "";
+                    message += $" Registered prefabs: {keyList}{more}.";
+                }
+            }
+
+            return message;
+        }
+
+        /// <summary>
+        /// Spawns every entry in <c>env.items</c> (up to <see cref="MaxSpawnBatchSize"/>), reusing
+        /// <see cref="TrySpawnCore"/> per item. Atomicity is intentionally simple: a per-item failure
+        /// (unknown prefabKey, missing name) is counted and skipped, not rolled back, so one bad entry
+        /// never discards the objects already spawned earlier in the same batch.
+        /// </summary>
+        private bool TrySpawnBatch(CoreAiWorldCommandEnvelope env)
+        {
+            CoreAiSpawnBatchItem[] items = env.items ?? System.Array.Empty<CoreAiSpawnBatchItem>();
+            int count = Math.Min(items.Length, MaxSpawnBatchSize);
+            string namePrefix = (env.targetName ?? "").Trim();
+            string defaultPrefab = (env.prefabKeyOrName ?? "").Trim();
+            Vector3 defaultEuler = new(env.fx, env.fy, env.fz);
+            Vector3 defaultNonUniformScale = new(env.scaleX, env.scaleY, env.scaleZ);
+
+            CoreAiSpawnBatchResult result = new();
+
+            for (int i = 0; i < count; i++)
+            {
+                CoreAiSpawnBatchItem item = items[i] ?? new CoreAiSpawnBatchItem();
+
+                string prefab = !string.IsNullOrWhiteSpace(item.prefabKey) ? item.prefabKey.Trim() : defaultPrefab;
+                string name = !string.IsNullOrWhiteSpace(item.name)
+                    ? item.name.Trim()
+                    : !string.IsNullOrEmpty(namePrefix)
+                        ? $"{namePrefix}_{i + 1}"
+                        : $"{prefab}_{i + 1}";
+                string parent = !string.IsNullOrWhiteSpace(item.parent) ? item.parent : env.stringValue;
+
+                bool itemHasRotation = item.rx != 0f || item.ry != 0f || item.rz != 0f;
+                Vector3 euler = itemHasRotation ? new Vector3(item.rx, item.ry, item.rz) : defaultEuler;
+
+                bool itemHasNonUniformScale = item.scaleX > 0f || item.scaleY > 0f || item.scaleZ > 0f;
+                Vector3 nonUniformScale = itemHasNonUniformScale
+                    ? new Vector3(item.scaleX, item.scaleY, item.scaleZ)
+                    : defaultNonUniformScale;
+                float uniformScale = item.scale > 0f ? item.scale : env.floatValue;
+
+                CoreAiWorldCommandEnvelope itemEnv = CoreAiWorldCommandEnvelope.Spawn(
+                    prefab, name, new Vector3(item.x, item.y, item.z), euler, uniformScale, nonUniformScale);
+                itemEnv.stringValue = parent ?? "";
+
+                GameObject spawned = TrySpawnCore(itemEnv, out _);
+                if (spawned == null)
+                {
+                    result.Failed++;
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(item.color))
+                {
+                    TrySetColorOnGameObject(spawned, item.color);
+                }
+
+                result.Spawned++;
+                if (result.Names.Count < 10)
+                {
+                    result.Names.Add(spawned.name);
+                }
+            }
+
+            LastSpawnBatchResult = result;
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] spawn_batch: {result.Spawned} spawned, {result.Failed} failed (of {count} requested)");
+            return true;
+        }
+
+        private bool TryListPrefabs()
+        {
+            List<string> keys = new();
+            if (_prefabRegistry is ICoreAiPrefabCatalog catalog)
+            {
+                keys.AddRange(catalog.ListPrefabKeys());
+            }
+
+            LastListedPrefabKeys = keys;
+            _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] list_prefabs: {keys.Count} registered prefab keys");
+            return true;
         }
 
         /// <summary>
@@ -583,8 +729,36 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
+            // Validate the scene is actually loadable BEFORE calling SceneManager.LoadScene: a scene
+            // missing from (or disabled in) Build Settings logs a Unity error and leaves the current
+            // scene running, but SceneManager.LoadScene itself has no return value — so without this
+            // check the command sink would still report success and the caller could never self-correct.
+            if (!IsSceneInBuildSettings(name))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] load_scene '{name}' rejected: scene is not present/enabled in Build Settings.");
+                return false;
+            }
+
             SceneManager.LoadScene(name);
             return true;
+        }
+
+        /// <summary>Checks whether a scene name is present and enabled in Build Settings.</summary>
+        private static bool IsSceneInBuildSettings(string sceneName)
+        {
+            int count = SceneManager.sceneCountInBuildSettings;
+            for (int i = 0; i < count; i++)
+            {
+                string path = SceneUtility.GetScenePathByBuildIndex(i);
+                string fileName = Path.GetFileNameWithoutExtension(path);
+                if (string.Equals(fileName, sceneName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryReloadScene()
@@ -729,11 +903,17 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            string colorText = NormalizeHtmlColor(env.stringValue);
+            return TrySetColorOnGameObject(go, env.stringValue);
+        }
+
+        /// <summary>Shared coloring logic used by <c>set_color</c> and per-item colors in <c>spawn_batch</c>.</summary>
+        private bool TrySetColorOnGameObject(GameObject go, string htmlColor)
+        {
+            string colorText = NormalizeHtmlColor(htmlColor);
             if (!ColorUtility.TryParseHtmlString(colorText, out Color color))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
-                    $"[World] set_color: invalid html color '{env.stringValue}'");
+                    $"[World] set_color: invalid html color '{htmlColor}'");
                 return false;
             }
 
@@ -1103,5 +1283,14 @@ namespace CoreAI.Infrastructure.World
 
         /// <summary>Most recent animation names returned by a list command.</summary>
         public string[] LastListedAnimations { get; private set; } = Array.Empty<string>();
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> LastListedPrefabKeys { get; private set; } = Array.Empty<string>();
+
+        /// <inheritdoc />
+        public string LastErrorMessage { get; private set; } = "";
+
+        /// <inheritdoc />
+        public CoreAiSpawnBatchResult LastSpawnBatchResult { get; private set; }
     }
 }

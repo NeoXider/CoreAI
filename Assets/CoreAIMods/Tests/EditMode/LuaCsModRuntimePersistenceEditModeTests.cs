@@ -388,5 +388,30 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(runtime.IsLoaded("m"));
             Assert.IsEmpty(runtime.ListModVersions("m"));
         }
+
+        [Test]
+        public void LuaCs_Revert_AfterRetentionEviction_OriginalWorks_EvictedMiddleFails()
+        {
+            // F-11: history is bounded (original + last N intermediate + current); a revert must resolve
+            // revisions by their stable index, not by array position, once eviction has removed entries.
+            MemoryLuaScriptVersionStore versions = new(maxIntermediateRevisions: 2);
+            LuaCsModRuntime runtime = new(versionStore: versions);
+
+            runtime.LoadMod("m", "local x = 0");
+            for (int i = 1; i <= 10; i++)
+            {
+                runtime.ReloadMod("m", $"local x = {i}");
+            }
+
+            IReadOnlyList<LuaScriptRevision> history = runtime.ListModVersions("m");
+            Assert.LessOrEqual(history.Count, 4, "original + 2 intermediate + current at most.");
+
+            Assert.IsTrue(runtime.TryRevertMod("m", 0, out string restored),
+                "Revision 0 (original) must remain revertible after eviction.");
+            Assert.AreEqual("local x = 0", restored);
+
+            Assert.IsFalse(runtime.TryRevertMod("m", 1, out _),
+                "Revision 1 was evicted by retention; revert must fail cleanly, not resolve the wrong revision.");
+        }
     }
 }

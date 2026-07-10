@@ -8,17 +8,28 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
 {
-    /// <summary>Persists data overlay version records to the local file system.</summary>
+    /// <summary>
+    /// Persists data overlay version records to the local file system. History is bounded per key by
+    /// <see cref="VersionRetentionPolicy"/> (original + current + last N intermediate revisions + a byte
+    /// budget), so the serialized JSON size stays bounded over a session instead of growing without limit.
+    /// A mutating call only rewrites the file when the in-memory store actually changed (a no-op apply is
+    /// skipped); every real mutation still serializes the full per-store JSON file, which is acceptable
+    /// because retention keeps that payload small.
+    /// </summary>
     public sealed class FileDataOverlayVersionStore : IDataOverlayVersionStore
     {
         private readonly IGameLogger _logger;
-        private readonly MemoryDataOverlayVersionStore _memory = new();
+        private readonly MemoryDataOverlayVersionStore _memory;
         private readonly string _filePath;
         private readonly object _ioLock = new();
 
-        public FileDataOverlayVersionStore(IGameLogger logger)
+        public FileDataOverlayVersionStore(
+            IGameLogger logger,
+            int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
+            long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memory = new MemoryDataOverlayVersionStore(maxIntermediateRevisions, maxTotalBytes);
             string dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                 CoreAiPersistentPaths.DataOverlayVersions);
             Directory.CreateDirectory(dir);
@@ -26,9 +37,14 @@ namespace CoreAI.Infrastructure.Lua
             LoadFromDisk();
         }
 
-        public FileDataOverlayVersionStore(IGameLogger logger, string jsonFilePath)
+        public FileDataOverlayVersionStore(
+            IGameLogger logger,
+            string jsonFilePath,
+            int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
+            long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memory = new MemoryDataOverlayVersionStore(maxIntermediateRevisions, maxTotalBytes);
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
             string dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
@@ -46,26 +62,34 @@ namespace CoreAI.Infrastructure.Lua
 
         public void RecordSuccessfulApply(string overlayKey, string jsonOrTextPayload)
         {
-            _memory.RecordSuccessfulApply(overlayKey, jsonOrTextPayload);
-            SaveToDisk();
+            if (_memory.RecordSuccessfulApplyChanged(overlayKey, jsonOrTextPayload))
+            {
+                SaveToDisk();
+            }
         }
 
         public void SeedOriginal(string overlayKey, string originalPayload, bool overwriteExistingOriginal = false)
         {
-            _memory.SeedOriginal(overlayKey, originalPayload, overwriteExistingOriginal);
-            SaveToDisk();
+            if (_memory.SeedOriginalChanged(overlayKey, originalPayload, overwriteExistingOriginal))
+            {
+                SaveToDisk();
+            }
         }
 
         public void ResetToOriginal(string overlayKey)
         {
-            _memory.ResetToOriginal(overlayKey);
-            SaveToDisk();
+            if (_memory.ResetToOriginalChanged(overlayKey))
+            {
+                SaveToDisk();
+            }
         }
 
         public void ResetToRevision(string overlayKey, int revisionIndex)
         {
-            _memory.ResetToRevision(overlayKey, revisionIndex);
-            SaveToDisk();
+            if (_memory.ResetToRevisionChanged(overlayKey, revisionIndex))
+            {
+                SaveToDisk();
+            }
         }
 
         public void ResetAllToOriginal()

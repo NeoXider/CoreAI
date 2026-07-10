@@ -438,5 +438,215 @@ namespace CoreAI.Tests.EditMode
                 /* expected cancellation */
             }
         }
+
+        // ──────────────────────────────────────────────────────────
+        // F-10: bounded pending queue (MaxPending) and full Dispose contract
+        // ──────────────────────────────────────────────────────────
+
+        private static async Task WaitUntilAsync(
+            Func<bool> condition,
+            string message,
+            int timeoutMs = 5000,
+            int pollMs = 10)
+        {
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return;
+                }
+
+                await Task.Delay(pollMs);
+            }
+
+            Assert.Fail(message);
+        }
+
+        [Test]
+        public async Task MaxPending_Exceeded_TaskEnqueue_FailsFastWithStructuredError()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 1, MaxPending = 2 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "Blocker should occupy the only concurrent slot.");
+
+            // Fill the 2-item pending cap.
+            Task p1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "p1" });
+            Task p2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "p2" });
+
+            // A third pending request must be rejected immediately instead of growing the queue further.
+            Task overflow = queue.RunTaskAsync(new AiTaskRequest { Hint = "overflow" });
+
+            AiOrchestrationQueueFullException caught = null;
+            try
+            {
+                await overflow;
+            }
+            catch (AiOrchestrationQueueFullException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught,
+                "Enqueuing beyond MaxPending must fail fast with AiOrchestrationQueueFullException.");
+            Assert.AreEqual(2, caught.MaxPending);
+
+            // Cleanup: release blocker and both accepted pending tasks so nothing is left running.
+            inner.Gates[0].TrySetResult(null);
+            await WaitUntilAsync(() => inner.Gates.Count == 2, "p1 or p2 should start after blocker.");
+            inner.Gates[1].TrySetResult(null);
+            await WaitUntilAsync(() => inner.Gates.Count == 3, "The other of p1/p2 should start.");
+            inner.Gates[2].TrySetResult(null);
+
+            await Task.WhenAll(blocker, p1, p2);
+        }
+
+        [Test]
+        public async Task MaxPending_Exceeded_StreamingEnqueue_EmitsTerminalErrorChunk()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 1, MaxPending = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "Blocker should occupy the only concurrent slot.");
+
+            // Fills the single pending slot.
+            Task p1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "p1" });
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in queue.RunStreamingAsync(
+                               new AiTaskRequest { Hint = "overflow-stream" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, chunks.Count,
+                "A streaming request rejected by admission control gets exactly one terminal chunk.");
+            Assert.IsTrue(chunks[0].IsDone);
+            Assert.That(chunks[0].Error, Does.Contain("MaxPending"));
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
+
+            inner.Gates[0].TrySetResult(null);
+            await WaitUntilAsync(() => inner.Gates.Count == 2, "p1 should start once blocker finishes.");
+            inner.Gates[1].TrySetResult(null);
+
+            await Task.WhenAll(blocker, p1);
+        }
+
+        [Test]
+        public async Task Dispose_CompletesPendingTask_InsteadOfHangingForever()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "Blocker should occupy the only concurrent slot.");
+
+            Task pending = queue.RunTaskAsync(new AiTaskRequest { Hint = "pending" });
+
+            queue.Dispose();
+
+            ObjectDisposedException caught = null;
+            try
+            {
+                await pending;
+            }
+            catch (ObjectDisposedException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught,
+                "A still-pending (never started) task must resolve instead of awaiting forever once disposed.");
+
+            // Cleanup: the in-flight blocker is cancelled via Dispose()'s lifetime CTS.
+            inner.Gates[0].TrySetResult(null);
+            try
+            {
+                await blocker;
+            }
+            catch (OperationCanceledException)
+            {
+                /* expected: Dispose() cancels in-flight work via the lifetime CTS */
+            }
+        }
+
+        [Test]
+        public async Task Dispose_CompletesPendingStream_WithTerminalChunk_InsteadOfHangingForever()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "Blocker should occupy the only concurrent slot.");
+
+            IAsyncEnumerator<LlmStreamChunk> enumerator = queue.RunStreamingAsync(
+                new AiTaskRequest { Hint = "pending-stream" }).GetAsyncEnumerator();
+
+            // An async-iterator's MoveNextAsync runs synchronously up to its first real suspension point.
+            // Enqueue(work) is plain synchronous code, so by the time this call returns an incomplete
+            // ValueTask (suspended inside the empty/not-yet-completed AsyncChunkQueue read), the streaming
+            // request is deterministically already sitting in the pending list - no arbitrary delay needed.
+            ValueTask<bool> moveNextTask = enumerator.MoveNextAsync();
+
+            queue.Dispose();
+
+            bool hasNext = await moveNextTask;
+            Assert.IsTrue(hasNext, "Dispose() must deliver a terminal chunk instead of completing the stream empty.");
+            LlmStreamChunk chunk = enumerator.Current;
+            Assert.IsTrue(chunk.IsDone);
+            Assert.IsNotEmpty(chunk.Error);
+
+            Assert.IsFalse(await enumerator.MoveNextAsync(), "No further chunks after the terminal one.");
+            await enumerator.DisposeAsync();
+
+            inner.Gates[0].TrySetResult(null);
+            try
+            {
+                await blocker;
+            }
+            catch (OperationCanceledException)
+            {
+                /* expected: Dispose() cancels in-flight work via the lifetime CTS */
+            }
+        }
+
+        [Test]
+        public void RunTaskAsync_AfterDispose_ThrowsObjectDisposedException()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            queue.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() =>
+                queue.RunTaskAsync(new AiTaskRequest { Hint = "after-dispose" }));
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_AfterDispose_ThrowsObjectDisposedException()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            queue.Dispose();
+
+            ObjectDisposedException caught = null;
+            try
+            {
+                await foreach (LlmStreamChunk _ in queue.RunStreamingAsync(
+                                   new AiTaskRequest { Hint = "after-dispose" }))
+                {
+                }
+            }
+            catch (ObjectDisposedException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "RunStreamingAsync must throw ObjectDisposedException after Dispose().");
+        }
     }
 }

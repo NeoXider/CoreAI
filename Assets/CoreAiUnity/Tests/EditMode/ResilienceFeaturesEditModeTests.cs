@@ -531,6 +531,90 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, fallback.FallbackCount);
         }
 
+        // ==================== FallbackLlmClientDecorator: commit-aware streaming fallback (F-09) ====================
+
+        [Test]
+        public async Task Fallback_ControlChunkThenInternalTimeout_FallsBackToSecondary()
+        {
+            ControlThenTimeoutStreamingLlmClient primary = new();
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "test" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, primary.StreamingCallCount);
+            Assert.AreEqual(1, fallback.FallbackCount,
+                "An internal timeout before any visible content must still fall back");
+            Assert.AreEqual(1, secondary.StreamingCallCount);
+
+            // First chunk is primary's benign control chunk (no visible text), then the full secondary stream.
+            Assert.AreEqual(3, chunks.Count);
+            Assert.IsTrue(string.IsNullOrEmpty(chunks[0].Text), "Control chunk carries no visible text");
+            Assert.AreEqual("secondary-stream", chunks[1].Text);
+            Assert.IsTrue(chunks[2].IsDone);
+        }
+
+        [Test]
+        public async Task Fallback_FirstTextChunkThenTimeout_DoesNotFallback_NoDoubleExecution()
+        {
+            TextThenTimeoutStreamingLlmClient primary = new();
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            List<LlmStreamChunk> chunks = new();
+            try
+            {
+                await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                                   new LlmCompletionRequest { AgentRoleId = "test" }))
+                {
+                    chunks.Add(chunk);
+                }
+
+                Assert.Fail("Expected the internal timeout to propagate once content was already committed");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(1, chunks.Count, "Only the already-committed text chunk should have been yielded");
+            Assert.AreEqual("primary-text", chunks[0].Text);
+            Assert.AreEqual(0, fallback.FallbackCount, "Must not fall back once content was already committed");
+            Assert.AreEqual(0, secondary.StreamingCallCount,
+                "Secondary must not run - it would duplicate already-streamed content");
+        }
+
+        [Test]
+        public async Task Fallback_StreamingCallerCancelled_DoesNotFallback()
+        {
+            CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            StreamingCountingLlmClient primary = new("primary-text");
+            StreamingCountingLlmClient secondary = new("secondary-text");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            try
+            {
+                await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                                   new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token))
+                {
+                }
+
+                Assert.Fail("expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(0, secondary.StreamingCallCount, "Secondary must not run on caller cancellation");
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
         // Helpers for fallback tests
 
         private sealed class CountingLlmClient : ILlmClient
@@ -657,6 +741,58 @@ namespace CoreAI.Tests.EditMode
                 StreamingCallCount++;
                 await Task.Yield();
                 throw new LlmClientException("primary stream fault", LlmErrorCode.ProviderError);
+#pragma warning disable CS0162
+                yield return default;
+#pragma warning restore CS0162
+            }
+        }
+
+        /// <summary>Yields one benign control chunk (no visible text) then simulates an internal
+        /// provider/transport timeout, mirroring MeaiLlmClient's tool-buffering hint chunk followed by a
+        /// transport-level timeout with the caller's token uncancelled.</summary>
+        private sealed class ControlThenTimeoutStreamingLlmClient : ILlmClient
+        {
+            public int StreamingCallCount { get; private set; }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "n/a" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                StreamingCallCount++;
+                yield return new LlmStreamChunk(); // control/hint chunk: no text, no tool call, not done
+                await Task.Yield();
+                throw new LlmOperationTimeoutException(); // internal timeout; caller ct is NOT cancelled
+#pragma warning disable CS0162
+                yield return default;
+#pragma warning restore CS0162
+            }
+        }
+
+        /// <summary>Yields a real visible text chunk (committing the stream) then simulates an internal
+        /// timeout. The decorator must not fall back after this point.</summary>
+        private sealed class TextThenTimeoutStreamingLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "primary-text" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                yield return new LlmStreamChunk { Text = "primary-text" };
+                await Task.Yield();
+                throw new LlmOperationTimeoutException(); // internal timeout after commitment; must propagate
 #pragma warning disable CS0162
                 yield return default;
 #pragma warning restore CS0162

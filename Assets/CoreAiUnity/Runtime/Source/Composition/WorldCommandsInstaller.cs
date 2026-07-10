@@ -97,6 +97,41 @@ namespace CoreAI.Composition
                     Lifetime.Singleton)
                 .As<IWorldStateManager>()
                 .AsSelf();
+
+            RegisterAgentVision(builder);
+        }
+
+        /// <summary>
+        /// Registers the agent-vision service and attaches the <c>camera</c> tool
+        /// (<c>camera_capture</c>/<c>camera_look</c>/<c>camera_list</c>) to the built-in Programmer role.
+        /// Capture is always read-only-safe on any camera; movement is gated by the opt-in
+        /// <see cref="CoreAI.Vision.CoreAiAgentCamera"/> marker so the player's camera is never hijacked.
+        /// See <c>Docs/CoreAI/agent-vision.md</c>. SmartChat is intentionally not registered by default
+        /// (hosts can add it via <see cref="AgentMemoryPolicy.AddToolForRole"/>).
+        /// </summary>
+        private static void RegisterAgentVision(IContainerBuilder builder)
+        {
+            // Factory lambda: the service's clock/rate-limit ctor args are not container-resolvable, so
+            // construct with its production defaults (Stopwatch clock, 1s capture rate limit).
+            builder.Register(_ => new CoreAI.Vision.AgentCameraService(), Lifetime.Singleton)
+                .As<CoreAI.Vision.IAgentCameraService>();
+
+            builder.RegisterBuildCallback(container =>
+            {
+                try
+                {
+                    AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+                    CoreAI.Vision.IAgentCameraService cameraService =
+                        container.Resolve<CoreAI.Vision.IAgentCameraService>();
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new CoreAI.Vision.CameraLlmTool(cameraService, BuiltInAgentRoleIds.Programmer));
+                }
+                catch (VContainerException)
+                {
+                    // Minimal containers (tests, headless tools) may omit the orchestration services; the
+                    // camera tool is an additive convenience, not a requirement.
+                }
+            });
         }
 
         /// <summary>

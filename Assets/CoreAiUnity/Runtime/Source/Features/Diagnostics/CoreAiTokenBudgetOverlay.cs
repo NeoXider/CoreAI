@@ -34,6 +34,15 @@ namespace CoreAI.Diagnostics
         private GUIStyle _alertStyle;
         private bool _stylesInitialized;
 
+        /// <summary>Refresh cadence for the cached diagnostics view model (4x/second).</summary>
+        private const float ViewModelRefreshIntervalSeconds = 0.25f;
+
+        private float _lastViewModelRefreshTime = float.NegativeInfinity;
+        private string _tokensText = "";
+        private string _costText = "";
+        private string _loadText = "";
+        private bool _nearLimitCached;
+
         /// <summary>Aggregator behind the overlay; exposed for host code and tests.</summary>
         public TokenBudgetCalculator Calculator => GetOrCreateSource().Calculator;
 
@@ -199,24 +208,50 @@ namespace CoreAI.Diagnostics
                 return;
             }
 
-            TokenBudgetCalculator calc = source.Calculator;
-            double now = source.NowSeconds;
+            RefreshViewModelIfDue(source);
 
             GUILayout.Label("Tokens", _headerStyle);
-            GUILayout.Label(Indent(TokenBudgetTextFormatter.FormatTokens(calc)), _valueStyle);
+            GUILayout.Label(_tokensText, _valueStyle);
 
             GUILayout.Label("Cost", _headerStyle);
-            double inPrice = source.Settings?.InputTokenPricePer1KUsd ?? 0f;
-            double outPrice = source.Settings?.OutputTokenPricePer1KUsd ?? 0f;
-            GUILayout.Label(Indent(TokenBudgetTextFormatter.FormatCost(calc, inPrice, outPrice)), _valueStyle);
+            GUILayout.Label(_costText, _valueStyle);
 
             GUILayout.Label("Request Load", _headerStyle);
-            RateLimiterMetrics rate = source.ChatService?.GetRateLimiterMetrics() ?? default;
-            string loadText = TokenBudgetTextFormatter.FormatLoad(calc, rate, now, out bool nearLimit);
-            GUILayout.Label(Indent(loadText), nearLimit ? _alertStyle : _valueStyle);
+            GUILayout.Label(_loadText, _nearLimitCached ? _alertStyle : _valueStyle);
 
             GUILayout.Label($"\n[{_toggleKey}] toggle  |  drag to move", _valueStyle);
             GUI.DragWindow(new Rect(0, 0, _windowRect.width, 22f));
+        }
+
+        /// <summary>
+        /// Rebuilds the cached text fields from <paramref name="source"/> at most every
+        /// <see cref="ViewModelRefreshIntervalSeconds"/>, so <see cref="DrawWindow"/> can reuse the same
+        /// formatted strings across the several OnGUI repaints Unity issues per frame instead of
+        /// re-formatting and re-allocating on each one.
+        /// </summary>
+        private void RefreshViewModelIfDue(TokenBudgetRuntimeSource source)
+        {
+            float now = Time.unscaledTime;
+            if (now - _lastViewModelRefreshTime < ViewModelRefreshIntervalSeconds)
+            {
+                return;
+            }
+
+            _lastViewModelRefreshTime = now;
+
+            TokenBudgetCalculator calc = source.Calculator;
+            double nowSeconds = source.NowSeconds;
+
+            _tokensText = Indent(TokenBudgetTextFormatter.FormatTokens(calc));
+
+            double inPrice = source.Settings?.InputTokenPricePer1KUsd ?? 0f;
+            double outPrice = source.Settings?.OutputTokenPricePer1KUsd ?? 0f;
+            _costText = Indent(TokenBudgetTextFormatter.FormatCost(calc, inPrice, outPrice));
+
+            RateLimiterMetrics rate = source.ChatService?.GetRateLimiterMetrics() ?? default;
+            string loadText = TokenBudgetTextFormatter.FormatLoad(calc, rate, nowSeconds, out bool nearLimit);
+            _loadText = Indent(loadText);
+            _nearLimitCached = nearLimit;
         }
 
         /// <summary>Prefixes every line with two spaces to match the section headers.</summary>

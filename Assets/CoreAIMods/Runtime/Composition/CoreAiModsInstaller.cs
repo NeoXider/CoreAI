@@ -49,6 +49,14 @@ namespace CoreAI.Composition
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
 
+            // One-off execute_lua calls run untrusted, ad-hoc snippets rather than an installed mod, so
+            // Full-tier reflection is stripped from them by default even when persistent mods are granted
+            // it; a host must opt in explicitly since a single malformed prompt-authored snippet has no
+            // review step the way loading a named mod does.
+            LuaCapabilities oneOffCapabilities = enableFullLuaAccess
+                ? scriptCapabilities
+                : scriptCapabilities & ~LuaCapabilities.Full;
+
             // Persistent stores so mods survive a restart and export/import works. ResolveOrDefault in the
             // factory means a host that wires its own store wins; otherwise these file-backed defaults apply.
             builder.Register(_ => new FileLuaModStore(), Lifetime.Singleton).As<ILuaModStore>();
@@ -76,7 +84,7 @@ namespace CoreAI.Composition
                 Log = c.ResolveOrDefault<Logging.ILog>(),
                 ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                 Capabilities = scriptCapabilities,
-                OneOffCapabilities = scriptCapabilities
+                OneOffCapabilities = oneOffCapabilities
             }), Lifetime.Singleton);
 
             // Facades over the stack: the persistent runtime as the VM-agnostic ILuaModRuntime (manage_mods +
@@ -106,28 +114,51 @@ namespace CoreAI.Composition
                     {
                         LuaCsModRuntime runtime = container.Resolve<LuaCsModStack>().Runtime;
 
-                        // Seed bundled mods into the store BEFORE rehydrate, so shipped mods load exactly
-                        // like persisted ones. Best-effort: a seeding failure never blocks rehydrate.
-                        try
-                        {
-                            System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
-                                container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
-                            new BundledModSeeder(
-                                container.Resolve<ILuaModSourceStore>(),
-                                new System.Collections.Generic.List<IBundledModSource>(bundled),
-                                container.ResolveOrDefault<Logging.ILog>()).Seed();
-                        }
-                        catch (System.Exception ex)
-                        {
-                            Logging.Log.Instance.Warn($"[CoreAI] Bundled mod seeding failed: {ex.Message}");
-                        }
-
-                        runtime.RehydrateFromStore(scriptCapabilities,
-                            (scriptCapabilities & LuaCapabilities.Full) != 0);
-
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
                         Object.DontDestroyOnLoad(tickerGo);
-                        tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(runtime);
+
+                        void RehydrateAndStartTicking()
+                        {
+                            // Seed bundled mods into the store BEFORE rehydrate, so shipped mods load
+                            // exactly like persisted ones. Best-effort: a seeding failure never blocks
+                            // rehydrate.
+                            try
+                            {
+                                System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
+                                    container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
+                                new BundledModSeeder(
+                                    container.Resolve<ILuaModSourceStore>(),
+                                    new System.Collections.Generic.List<IBundledModSource>(bundled),
+                                    container.ResolveOrDefault<Logging.ILog>()).Seed();
+                            }
+                            catch (System.Exception ex)
+                            {
+                                Logging.Log.Instance.Warn($"[CoreAI] Bundled mod seeding failed: {ex.Message}");
+                            }
+
+                            runtime.RehydrateFromStore(scriptCapabilities,
+                                (scriptCapabilities & LuaCapabilities.Full) != 0);
+
+                            tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(runtime);
+                        }
+
+                        // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate
+                        // must run AFTER WorldStateEntryPoint's startup world restore completes, or a mod
+                        // that re-spawns its own objects can double-spawn against the restored snapshot,
+                        // or the snapshot's clean-slate destroy can remove what the mod just made. This
+                        // callback runs at child-scope Awake time, before the parent scope's Start() phase
+                        // (where the restore happens), so it cannot simply check the flag synchronously —
+                        // it defers via WorldRestoreGate, which polls WorldRestoreCompleted with a 5s
+                        // timeout fallback so a broken/absent world-state wiring never blocks mods forever.
+                        IWorldStateManager worldState = container.ResolveOrDefault<IWorldStateManager>();
+                        if (worldState != null)
+                        {
+                            tickerGo.AddComponent<WorldRestoreGate>().Begin(worldState, RehydrateAndStartTicking);
+                        }
+                        else
+                        {
+                            RehydrateAndStartTicking();
+                        }
                     }
                 }
                 catch (VContainerException)

@@ -296,7 +296,9 @@ namespace CoreAI.Tests.EditMode
             ILlmTool tool = CallSkillToolLlmTool.Create(skills);
 
             Assert.AreEqual("call_skill_tool", tool.Name);
-            Assert.IsTrue(tool.AllowDuplicates);
+            // call_skill_tool dispatches to arbitrary skill tools whose effects the policy cannot
+            // classify, so it participates in duplicate tracking (cross-turn echo suppression).
+            Assert.IsFalse(tool.AllowDuplicates);
             Assert.IsInstanceOf<IAIFunctionLlmTool>(tool);
         }
 

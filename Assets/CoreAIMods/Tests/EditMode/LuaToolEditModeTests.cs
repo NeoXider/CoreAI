@@ -186,8 +186,11 @@ namespace CoreAI.Tests.EditMode
             LuaLlmTool wrapper = new(executor, new FakeSettings(), new NullLog());
 
             Assert.AreEqual("execute_lua", wrapper.Name);
-            Assert.IsTrue(wrapper.AllowDuplicates,
-                "execute_lua должен разрешать дубликаты (несколько последовательных Lua блоков — нормальный use case)");
+            Assert.IsFalse(wrapper.AllowDuplicates,
+                "execute_lua must NOT allow duplicates: arbitrary Lua mutates host/world state " +
+                "non-idempotently, so a byte-identical CROSS-TURN echo is suppressed as a no-op. " +
+                "Several DIFFERENT Lua blocks in one turn, intra-turn repeats, and the retry of a " +
+                "FAILED block all still execute — only the exact cross-turn echo is skipped.");
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.Description));
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.ParametersSchema));
             StringAssert.Contains("logic_define", wrapper.Description,

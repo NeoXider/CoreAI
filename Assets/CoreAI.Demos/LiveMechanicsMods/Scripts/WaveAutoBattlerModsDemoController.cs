@@ -26,6 +26,7 @@ namespace CoreAI.Demos
 
         private const int MaxLogLines = 14;
         private const float EnemySpacing = 1.35f;
+        private static readonly int BaseColorProperty = Shader.PropertyToID("_Color");
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
@@ -39,6 +40,9 @@ namespace CoreAI.Demos
         private ILuaModRuntime _mods;
         private LuaCsLogicSlots _slots;
         private GameObject _heroVisual;
+        private GUIStyle _richLabelStyle;
+        private IReadOnlyList<LuaModInfo> _cachedMods = System.Array.Empty<LuaModInfo>();
+        private Material _entityMaterial;
         private float _heroHp;
         private float _heroMaxHp = 120f;
         private float _heroAttack = 16f;
@@ -73,9 +77,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            var modsScope = FindFirstObjectByType<CoreAI.Composition.CoreAiModsLifetimeScope>();
-            IObjectResolver luaContainer =
-                (modsScope != null && modsScope.Container != null) ? modsScope.Container : coreAiScope.Container;
+            IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
@@ -83,6 +85,9 @@ namespace CoreAI.Demos
             EnsureAnchorsAndVisuals();
             _heroHp = _heroMaxHp;
             _mods.ModEventEmitted += OnModEvent;
+            _mods.ModSourceLoaded += OnModsChanged;
+            _mods.ModSourceUnloaded += OnModsChanged;
+            RefreshCachedMods();
             _status = "Ask chat to create or edit mods. Prompt buttons insert ready requests.";
             Log("Battle started. Lua mods can alter wave scaling, damage, regen and rewards.");
             StartNextWave();
@@ -93,7 +98,24 @@ namespace CoreAI.Demos
             if (_mods != null)
             {
                 _mods.ModEventEmitted -= OnModEvent;
+                _mods.ModSourceLoaded -= OnModsChanged;
+                _mods.ModSourceUnloaded -= OnModsChanged;
             }
+
+            if (_entityMaterial != null)
+            {
+                Destroy(_entityMaterial);
+            }
+        }
+
+        private void OnModsChanged(string modId, string source, LuaCapabilities capabilities)
+        {
+            RefreshCachedMods();
+        }
+
+        private void RefreshCachedMods()
+        {
+            _cachedMods = _mods.ListMods();
         }
 
         private void DeclareSlots()
@@ -398,14 +420,13 @@ namespace CoreAI.Demos
 
             GUILayout.Space(4);
             GUILayout.Label("<b>Loaded mods</b>", RichLabel());
-            IReadOnlyList<LuaModInfo> mods = _mods.ListMods();
-            if (mods.Count == 0)
+            if (_cachedMods.Count == 0)
             {
                 GUILayout.Label("No mods loaded.");
             }
             else
             {
-                foreach (LuaModInfo mod in mods)
+                foreach (LuaModInfo mod in _cachedMods)
                 {
                     GUILayout.Label(
                         $"* {mod.Id} caps={mod.Capabilities} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
@@ -427,17 +448,23 @@ namespace CoreAI.Demos
             GUILayout.Label($"* {slot}{args} - {(_slots.IsOverridden(slot) ? "Lua override" : "C# default")}");
         }
 
-        private static void SetRendererColor(GameObject go, Color color)
+        private void SetRendererColor(GameObject go, Color color)
         {
-            if (go != null && go.TryGetComponent(out Renderer renderer))
+            if (go == null || !go.TryGetComponent(out Renderer renderer))
             {
-                renderer.sharedMaterial = new Material(Shader.Find("Standard")) { color = color };
+                return;
             }
+
+            _entityMaterial ??= new Material(Shader.Find("Standard"));
+            renderer.sharedMaterial = _entityMaterial;
+            var block = new MaterialPropertyBlock();
+            block.SetColor(BaseColorProperty, color);
+            renderer.SetPropertyBlock(block);
         }
 
-        private static GUIStyle RichLabel()
+        private GUIStyle RichLabel()
         {
-            return new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
+            return _richLabelStyle ??= new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
         }
 #else
         private void Start()

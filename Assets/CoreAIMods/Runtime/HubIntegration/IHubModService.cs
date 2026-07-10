@@ -36,6 +36,15 @@ namespace CoreAI.Ai.Hub
         /// <summary>Origin marker for bundled mods (resources/streamingassets/... or empty for user mods).</summary>
         public string Origin = "";
 
+        /// <summary>
+        /// Set when a newer bundled version exists but the local copy was user-edited, so it was not
+        /// auto-updated on seed. Drives the "Update available" badge in the Mods page.
+        /// </summary>
+        public bool UpdateAvailable;
+
+        /// <summary>Last bundled version seeded into this entry (empty for user-authored mods).</summary>
+        public string SeededVersion = "";
+
         /// <summary>Granted capability tier rendered as a string.</summary>
         public string Capabilities = "";
 
@@ -115,6 +124,36 @@ namespace CoreAI.Ai.Hub
 
         /// <summary>Unloads (if loaded) and permanently deletes the stored package. Returns true.</summary>
         bool Delete(string id);
+
+        /// <summary>
+        /// Revision history recorded for a mod (empty when the runtime tracks no history for it, e.g. it
+        /// was never loaded through a version-tracked runtime).
+        /// </summary>
+        IReadOnlyList<LuaScriptRevision> ListModVersions(string id);
+
+        /// <summary>
+        /// Reverts a mod to a recorded revision, returning its source. False when the mod has no such
+        /// revision. Throws if the restored source fails to reload (mirrors <see cref="SaveOrReload"/>).
+        /// </summary>
+        bool TryRevertMod(string id, int revisionIndex, out string restoredSource);
+
+        /// <summary>Serializes a mod (loaded or stored) to a shareable JSON bundle. Null when the id is unknown.</summary>
+        string ExportMod(string id);
+
+        /// <summary>
+        /// Installs a mod from an <see cref="ExportMod"/> bundle, capped by this service's host
+        /// capability grant (and, unless the service was built with <c>allowFull</c>, stripped of
+        /// <see cref="LuaCapabilities.Full"/>). Returns false on malformed JSON or a missing id/source.
+        /// </summary>
+        bool ImportMod(string bundleJson);
+
+        /// <summary>
+        /// Re-seeds a mod from its bundled source (matched by id via the registered bundled-mod source),
+        /// clearing <see cref="HubModRecord.UpdateAvailable"/>. Returns false when the mod has no bundled
+        /// counterpart, or the stored entry is user-authored (no bundled origin) rather than a
+        /// previously-seeded package.
+        /// </summary>
+        bool ApplyBundledUpdate(string id);
 
         /// <summary>Human-readable recent runtime handler/timer errors for a mod (empty when none).</summary>
         string RecentErrors(string id);

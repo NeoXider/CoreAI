@@ -64,7 +64,11 @@ namespace CoreAI.Ai
         public override string Name => "manage_mods";
 
         /// <inheritdoc />
-        public override bool AllowDuplicates => true;
+        // Mutating mod actions (load/reload/unload/import/forget/revert) are non-idempotent, so an
+        // identical cross-turn echo must not re-run. AllowDuplicates=false lets ToolExecutionPolicy
+        // suppress only a CROSS-TURN byte-identical echo (structured no-op) while still allowing
+        // intra-turn repeats and never suppressing the retry of a FAILED call.
+        public override bool AllowDuplicates => false;
 
         /// <inheritdoc />
         public override string Description =>

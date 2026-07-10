@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
-using CoreAI.Messaging;
-using MessagePipe;
 using MoonSharp.Interpreter;
 using NUnit.Framework;
 
@@ -190,21 +188,6 @@ namespace CoreAI.Tests.EditMode
 
             runtime.Tick(0);
             Assert.AreEqual("hello", store.Get("b", "received"));
-        }
-
-        [Test]
-        public void LuaModRuntimeTicker_ModEventEmitted_PublishesMessagePipeEvent()
-        {
-            LuaModRuntime runtime = new();
-            CapturingPublisher publisher = new();
-            _ = new LuaModRuntimeTicker(runtime, null, publisher);
-
-            runtime.LoadMod("a", "events_emit('quest_event', 'payload')");
-
-            Assert.AreEqual(1, publisher.Events.Count);
-            Assert.AreEqual("a", publisher.Events[0].ModId);
-            Assert.AreEqual("quest_event", publisher.Events[0].EventName);
-            Assert.AreEqual("payload", publisher.Events[0].Payload);
         }
 
         [Test]
@@ -439,6 +422,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_ModSourceLoaded_ThrowingSubscriber_DoesNotFailLoadOrOtherSubscribers()
+        {
+            LuaModRuntime runtime = new();
+            bool healthySubscriberRan = false;
+            runtime.ModSourceLoaded += (_, _, _) => throw new InvalidOperationException("boom");
+            runtime.ModSourceLoaded += (_, _, _) => healthySubscriberRan = true;
+
+            Assert.DoesNotThrow(() => runtime.LoadMod("m", "local a = 1"),
+                "A throwing ModSourceLoaded subscriber must not make a healthy load fail.");
+
+            Assert.IsTrue(runtime.IsLoaded("m"), "The mod must be loaded despite the throwing subscriber.");
+            Assert.IsTrue(healthySubscriberRan, "Other subscribers must still run after one throws.");
+        }
+
+        [Test]
         public void LuaModRuntime_ReloadMod_BadNewCode_KeepsOldModWorking()
         {
             MemoryStore store = new();
@@ -635,16 +633,6 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private sealed class CapturingPublisher : IPublisher<LuaModEventEmitted>
-        {
-            public readonly List<LuaModEventEmitted> Events = new();
-
-            public void Publish(LuaModEventEmitted message)
-            {
-                Events.Add(message);
-            }
-        }
-
         [Test]
         public void LuaModRuntime_LoadMod_ReadCapability_DoesNotExposeWorldEditApi()
         {
@@ -740,6 +728,31 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(runtime.IsLoaded("m"));
             Assert.IsEmpty(runtime.ListModVersions("m"));
+        }
+
+        [Test]
+        public void LuaModRuntime_Revert_AfterRetentionEviction_OriginalWorks_EvictedMiddleFails()
+        {
+            // F-11: history is bounded (original + last N intermediate + current); a revert must resolve
+            // revisions by their stable index, not by array position, once eviction has removed entries.
+            MemoryLuaScriptVersionStore versions = new(maxIntermediateRevisions: 2);
+            LuaModRuntime runtime = new(versionStore: versions);
+
+            runtime.LoadMod("m", "local x = 0");
+            for (int i = 1; i <= 10; i++)
+            {
+                runtime.ReloadMod("m", $"local x = {i}");
+            }
+
+            IReadOnlyList<LuaScriptRevision> history = runtime.ListModVersions("m");
+            Assert.LessOrEqual(history.Count, 4, "original + 2 intermediate + current at most.");
+
+            Assert.IsTrue(runtime.TryRevertMod("m", 0, out string restored),
+                "Revision 0 (original) must remain revertible after eviction.");
+            Assert.AreEqual("local x = 0", restored);
+
+            Assert.IsFalse(runtime.TryRevertMod("m", 1, out _),
+                "Revision 1 was evicted by retention; revert must fail cleanly, not resolve the wrong revision.");
         }
 
         // ============== Runtime handler-error feedback (manage_mods diagnostics) ==============

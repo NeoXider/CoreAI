@@ -38,9 +38,6 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Optional scene allow-list enforced by <c>coreai_world_load_scene</c>.</summary>
         public IEnumerable<string> AllowedScenes;
 
-        /// <summary>Optional data-overlay payload validator (null =&gt; DefaultDataOverlayPayloadValidator).</summary>
-        public IDataOverlayPayloadValidator DataOverlayValidator;
-
         /// <summary>Optional Full-tier reflection allow/deny policy (null =&gt; allow-all).</summary>
         public IFullLuaAccessBlacklistPolicy FullBlacklistPolicy;
 
@@ -147,10 +144,9 @@ namespace CoreAI.Ai.LuaCs
                 options.CommandSink,
                 options.PrefabRegistry,
                 options.AllowedScenes,
-                options.DataOverlayValidator,
-                options.FullBlacklistPolicy,
-                options.AllowNonPublicFullMembers,
-                options.Capabilities);
+                fullBlacklistPolicy: options.FullBlacklistPolicy,
+                allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
+                capabilities: options.Capabilities);
 
             LuaCsModRuntime runtime = new(
                 gameplayBindings: bindings.Register,

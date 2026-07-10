@@ -33,11 +33,12 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Name => "component_command";
 
-        // Multi-action tool: identical repeats are legitimate (e.g. repeated 'set' on different frames). The
-        // original duplicate-SPAWN spam is now prevented at the root by reasoning being enabled and the
-        // self-describing [Description] schema (models emit distinct args), so blanket tool-level dedup is the
-        // wrong layer — it would wrongly skip valid repeated component calls.
-        public override bool AllowDuplicates => true;
+        // Component mutations must be idempotent across turns: AllowDuplicates=false lets
+        // ToolExecutionPolicy suppress only a CROSS-TURN identical echo (structured no-op) while still
+        // allowing intra-turn repeats and never suppressing the retry of a FAILED call. A legitimate
+        // repeated 'set' varies its arguments between real requests; a byte-identical repeat next turn
+        // is an echo, so suppressing it avoids re-applying the same component write.
+        public override bool AllowDuplicates => false;
 
         public override string Description =>
             "Execute component commands to add, remove, configure, or list Unity components on existing GameObjects. " +

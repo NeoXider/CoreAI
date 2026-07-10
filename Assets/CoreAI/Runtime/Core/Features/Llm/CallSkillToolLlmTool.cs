@@ -60,7 +60,11 @@ namespace CoreAI.Ai
             public override string ParametersSchema =>
                 "{\"type\":\"object\",\"properties\":{\"tool_name\":{\"type\":\"string\",\"description\":\"Skill tool name returned by read_skill.\"},\"arguments_json\":{\"type\":\"string\",\"description\":\"JSON object string with the skill tool parameters.\"}},\"required\":[\"tool_name\",\"arguments_json\"]}";
 
-            public override bool AllowDuplicates => true;
+            // call_skill_tool dispatches to an arbitrary resolved skill tool whose effect the outer
+            // policy cannot see, so it is treated conservatively as mutating: AllowDuplicates=false so
+            // ToolExecutionPolicy suppresses only a CROSS-TURN byte-identical echo (structured no-op)
+            // while still allowing intra-turn repeats and never suppressing the retry of a FAILED call.
+            public override bool AllowDuplicates => false;
 
             public bool ContainsSkillTool(string toolName)
             {

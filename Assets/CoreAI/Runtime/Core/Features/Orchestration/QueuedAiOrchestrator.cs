@@ -15,6 +15,7 @@ namespace CoreAI.Ai
     {
         private readonly IAiOrchestrationService _inner;
         private readonly int _maxConcurrent;
+        private readonly int _maxPending;
 
         // BUG-1 fix: single lock for both queue and scope operations to eliminate deadlock risk.
         // Previously _scopeLock was nested inside _queueLock in some paths but taken independently
@@ -23,6 +24,18 @@ namespace CoreAI.Ai
         private readonly List<WorkItem> _pending = new();
         private readonly List<StreamWorkItem> _streamPending = new();
         private readonly Dictionary<string, CancellationTokenSource> _scopeTokens = new(StringComparer.Ordinal);
+
+        // F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
+        // caller/scope token was never cancelled. Never disposed (only Cancel()'d): work already
+        // reading its .Token racing with a Dispose()-time Dispose() call would risk ObjectDisposedException;
+        // an unreferenced, timer-less CTS is reclaimed by GC once this orchestrator is collected.
+        private readonly CancellationTokenSource _lifetimeCts = new();
+
+        private static readonly IComparer<WorkItem> WorkItemComparer = Comparer<WorkItem>.Create(CompareWorkItems);
+
+        private static readonly IComparer<StreamWorkItem> StreamWorkItemComparer =
+            Comparer<StreamWorkItem>.Create(CompareStreamWorkItems);
+
         private int _inFlight;
         private long _nextSequence;
         private bool _disposed;
@@ -34,11 +47,18 @@ namespace CoreAI.Ai
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             int max = options?.MaxConcurrent ?? 2;
             _maxConcurrent = max < 1 ? 1 : max;
+            int maxPending = options?.MaxPending ?? 64;
+            _maxPending = maxPending < 1 ? 1 : maxPending;
         }
 
         /// <inheritdoc />
         public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(QueuedAiOrchestrator));
+            }
+
             TaskCompletionSource<string> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
             WorkItem work = new()
             {
@@ -70,6 +90,11 @@ namespace CoreAI.Ai
             AiTaskRequest task,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(QueuedAiOrchestrator));
+            }
+
             AsyncChunkQueue queue = new();
             CancellationTokenSource consumerCancellation = new();
 
@@ -160,9 +185,14 @@ namespace CoreAI.Ai
         private async Task RunOneAsync(WorkItem w)
         {
             w.PendingCancellation.Dispose();
+            CancellationTokenSource linkedCts = null;
             try
             {
-                CancellationToken token = w.ScopeCancellation?.Token ?? w.OuterCt;
+                CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
+                // Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
+                // when neither the caller nor the cancellation scope token was ever cancelled.
+                linkedCts = CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
+                CancellationToken token = linkedCts.Token;
                 token.ThrowIfCancellationRequested();
                 // WebGL player: keep continuation on Unity SynchronizationContext.
                 // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
@@ -183,6 +213,7 @@ namespace CoreAI.Ai
             }
             finally
             {
+                linkedCts?.Dispose();
                 ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
 
                 lock (_lock)
@@ -200,15 +231,14 @@ namespace CoreAI.Ai
             try
             {
                 CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
-                CancellationToken token = baseToken;
-                if (w.ConsumerCancellation != null)
-                {
-                    // Link in the consumer-abandonment signal so breaking the public enumeration without
-                    // cancelling the caller token still stops the inner stream.
-                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                        baseToken, w.ConsumerCancellation.Token);
-                    token = linkedCts.Token;
-                }
+                // Always link the lifetime signal (Dispose() teardown) and, when present, the
+                // consumer-abandonment signal so breaking enumeration without cancelling the caller
+                // token still stops the inner stream.
+                linkedCts = w.ConsumerCancellation != null
+                    ? CancellationTokenSource.CreateLinkedTokenSource(
+                        baseToken, w.ConsumerCancellation.Token, _lifetimeCts.Token)
+                    : CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
+                CancellationToken token = linkedCts.Token;
 
                 token.ThrowIfCancellationRequested();
                 await foreach (LlmStreamChunk chunk in _inner.RunStreamingAsync(w.Task, token))
@@ -339,6 +369,19 @@ namespace CoreAI.Ai
             return task.Sequence < stream.Sequence;
         }
 
+        /// <summary>Inserts into a list kept sorted by <paramref name="comparer"/> via binary search
+        /// instead of re-sorting the whole list on every enqueue.</summary>
+        private static void InsertSorted<T>(List<T> list, T item, IComparer<T> comparer)
+        {
+            int index = list.BinarySearch(item, comparer);
+            if (index < 0)
+            {
+                index = ~index;
+            }
+
+            list.Insert(index, item);
+        }
+
         private void Enqueue(WorkItem work)
         {
             if (work.OuterCt.IsCancellationRequested)
@@ -352,36 +395,51 @@ namespace CoreAI.Ai
             CancellationTokenSource activeToCancel = null;
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
+            bool rejected = false;
 
             lock (_lock)
             {
-                _pending.Add(work);
-                if (!string.IsNullOrEmpty(scopeKey))
+                // F-10: bounded admission instead of an unbounded queue - reject fast rather than
+                // growing _pending/_streamPending without limit under sustained offline/slow-LLM load.
+                if (_pending.Count + _streamPending.Count >= _maxPending)
                 {
-                    work.ScopeKey = scopeKey;
-                    work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
-
-                    if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
-                    {
-                        activeToCancel = prev;
-                    }
-
-                    _scopeTokens[scopeKey] = work.ScopeCancellation;
-
-                    removedPending = _pending.FindAll(w =>
-                        !ReferenceEquals(w, work) &&
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                    removedStreamPending = _streamPending.FindAll(w =>
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-
-                    _pending.RemoveAll(w =>
-                        !ReferenceEquals(w, work) &&
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                    _streamPending.RemoveAll(w =>
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                    rejected = true;
                 }
+                else
+                {
+                    InsertSorted(_pending, work, WorkItemComparer);
+                    if (!string.IsNullOrEmpty(scopeKey))
+                    {
+                        work.ScopeKey = scopeKey;
+                        work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
 
-                _pending.Sort(CompareWorkItems);
+                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
+                        {
+                            activeToCancel = prev;
+                        }
+
+                        _scopeTokens[scopeKey] = work.ScopeCancellation;
+
+                        removedPending = _pending.FindAll(w =>
+                            !ReferenceEquals(w, work) &&
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                        removedStreamPending = _streamPending.FindAll(w =>
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+
+                        _pending.RemoveAll(w =>
+                            !ReferenceEquals(w, work) &&
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                        _streamPending.RemoveAll(w =>
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                    }
+                }
+            }
+
+            if (rejected)
+            {
+                work.PendingCancellation.Dispose();
+                work.Tcs.TrySetException(new AiOrchestrationQueueFullException(_maxPending));
+                return;
             }
 
             // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
@@ -408,36 +466,56 @@ namespace CoreAI.Ai
             CancellationTokenSource activeToCancel = null;
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
+            bool rejected = false;
 
             lock (_lock)
             {
-                _streamPending.Add(work);
-                if (!string.IsNullOrEmpty(scopeKey))
+                // F-10: same bounded admission policy as the task path.
+                if (_pending.Count + _streamPending.Count >= _maxPending)
                 {
-                    work.ScopeKey = scopeKey;
-                    work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
-
-                    if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
-                    {
-                        activeToCancel = prev;
-                    }
-
-                    _scopeTokens[scopeKey] = work.ScopeCancellation;
-
-                    removedPending = _pending.FindAll(w =>
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                    removedStreamPending = _streamPending.FindAll(w =>
-                        !ReferenceEquals(w, work) &&
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-
-                    _pending.RemoveAll(w =>
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                    _streamPending.RemoveAll(w =>
-                        !ReferenceEquals(w, work) &&
-                        string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                    rejected = true;
                 }
+                else
+                {
+                    InsertSorted(_streamPending, work, StreamWorkItemComparer);
+                    if (!string.IsNullOrEmpty(scopeKey))
+                    {
+                        work.ScopeKey = scopeKey;
+                        work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
 
-                _streamPending.Sort(CompareStreamWorkItems);
+                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
+                        {
+                            activeToCancel = prev;
+                        }
+
+                        _scopeTokens[scopeKey] = work.ScopeCancellation;
+
+                        removedPending = _pending.FindAll(w =>
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                        removedStreamPending = _streamPending.FindAll(w =>
+                            !ReferenceEquals(w, work) &&
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+
+                        _pending.RemoveAll(w =>
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                        _streamPending.RemoveAll(w =>
+                            !ReferenceEquals(w, work) &&
+                            string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                    }
+                }
+            }
+
+            if (rejected)
+            {
+                work.PendingCancellation.Dispose();
+                work.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = $"AI orchestration queue is full (MaxPending={_maxPending}).",
+                    ErrorCode = LlmErrorCode.BackendUnavailable
+                });
+                work.Queue.Complete();
+                return;
             }
 
             // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
@@ -621,8 +699,10 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// ARCH-5: Disposes all outstanding scope CancellationTokenSources.
-        /// Safe to call multiple times.
+        /// ARCH-5 / F-10: cancels in-flight work via the lifetime token, completes every still-pending
+        /// task/stream (so callers never await forever past scene teardown), and disposes outstanding
+        /// scope CancellationTokenSources. Safe to call multiple times. After this call, <see cref="RunTaskAsync"/>
+        /// and <see cref="RunStreamingAsync"/> throw <see cref="ObjectDisposedException"/>.
         /// </summary>
         public void Dispose()
         {
@@ -633,14 +713,48 @@ namespace CoreAI.Ai
 
             _disposed = true;
 
-            List<CancellationTokenSource> toDispose;
+            // Unblocks any in-flight RunOneAsync/RunOneStreamingAsync await - both link their token to
+            // this, so an inner provider call that ignores its own caller/scope token still observes
+            // teardown. Their existing IsCancellationLike catch blocks then complete the work item / write
+            // a terminal "cancelled" chunk exactly as they do for a normal cancellation.
+            _lifetimeCts.Cancel();
+
+            List<CancellationTokenSource> scopeTokens;
+            List<WorkItem> drainedPending;
+            List<StreamWorkItem> drainedStreamPending;
             lock (_lock)
             {
-                toDispose = new List<CancellationTokenSource>(_scopeTokens.Values);
+                scopeTokens = new List<CancellationTokenSource>(_scopeTokens.Values);
                 _scopeTokens.Clear();
+
+                drainedPending = new List<WorkItem>(_pending);
+                _pending.Clear();
+
+                drainedStreamPending = new List<StreamWorkItem>(_streamPending);
+                _streamPending.Clear();
             }
 
-            foreach (CancellationTokenSource cts in toDispose)
+            // Pending work never got a chance to run: resolve it now instead of leaving it forever
+            // un-awaited. Scope CTS ownership already moved into `scopeTokens` above.
+            foreach (WorkItem w in drainedPending)
+            {
+                w.PendingCancellation.Dispose();
+                w.Tcs.TrySetException(new ObjectDisposedException(nameof(QueuedAiOrchestrator)));
+            }
+
+            foreach (StreamWorkItem w in drainedStreamPending)
+            {
+                w.PendingCancellation.Dispose();
+                w.Queue.Write(new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "AI orchestration queue disposed.",
+                    ErrorCode = LlmErrorCode.BackendUnavailable
+                });
+                w.Queue.Complete();
+            }
+
+            foreach (CancellationTokenSource cts in scopeTokens)
             {
                 SafeDispose(cts);
             }

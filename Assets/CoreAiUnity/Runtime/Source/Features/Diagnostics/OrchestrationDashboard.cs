@@ -28,6 +28,16 @@ namespace CoreAI.Diagnostics
         private GUIStyle _alertStyle;
         private bool _stylesInitialized;
 
+        /// <summary>Refresh cadence for the cached metrics view model (4x/second).</summary>
+        private const float ViewModelRefreshIntervalSeconds = 0.25f;
+
+        private readonly StringBuilder _scratch = new();
+        private readonly List<string> _roleLines = new();
+        private float _lastViewModelRefreshTime = float.NegativeInfinity;
+        private string _globalMetricsText = "";
+        private string _healthLastOkText = "";
+        private bool _unresponsiveCached;
+
         /// <summary>Assigns the orchestration metrics source displayed by the dashboard.</summary>
         public void SetMetrics(InMemoryAiOrchestrationMetrics metrics)
         {
@@ -137,42 +147,65 @@ namespace CoreAI.Diagnostics
             _windowRect = GUI.Window(98765, _windowRect, DrawWindow, "CoreAI - Orchestration Dashboard");
         }
 
+        /// <summary>
+        /// Rebuilds the cached view model from <see cref="_metrics"/> at most every
+        /// <see cref="ViewModelRefreshIntervalSeconds"/>, so <see cref="DrawWindow"/> can reuse the same
+        /// formatted strings across the several OnGUI repaints Unity issues per frame instead of
+        /// re-formatting and re-allocating on each one.
+        /// </summary>
+        private void RefreshViewModelIfDue()
+        {
+            float now = Time.unscaledTime;
+            if (now - _lastViewModelRefreshTime < ViewModelRefreshIntervalSeconds)
+            {
+                return;
+            }
+
+            _lastViewModelRefreshTime = now;
+
+            _scratch.Clear();
+            _scratch.AppendLine(
+                $"  Completions: {_metrics.TotalCompletions} (OK: {_metrics.SuccessfulCompletions}, Fail: {_metrics.FailedCompletions})");
+            _scratch.AppendLine($"  Avg Latency: {_metrics.AverageLatencyMs:F0} ms");
+            _scratch.AppendLine($"  Retries:     {_metrics.StructuredRetries}");
+            _scratch.AppendLine($"  Published:   {_metrics.CommandsPublished}");
+            _globalMetricsText = _scratch.ToString();
+
+            double secsSinceLast = _metrics.SecondsSinceLastSuccess;
+            _unresponsiveCached = _metrics.IsLlmUnresponsive(_unresponsiveThresholdSeconds);
+            _healthLastOkText = $"  Last OK: {secsSinceLast:F0}s ago";
+
+            _roleLines.Clear();
+            Dictionary<string, InMemoryAiOrchestrationMetrics.RoleMetrics> roles = _metrics.GetAllRoleMetrics();
+            foreach (KeyValuePair<string, InMemoryAiOrchestrationMetrics.RoleMetrics> kvp in roles)
+            {
+                InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
+                _roleLines.Add(
+                    $"  {kvp.Key}: {rm.Successes}/{rm.Completions} OK, {rm.AverageLatencyMs:F0}ms avg");
+            }
+        }
+
         private void DrawWindow(int id)
         {
-            StringBuilder sb = new();
+            RefreshViewModelIfDue();
 
             GUILayout.Label("Global Metrics", _headerStyle);
-
-            sb.Clear();
-            sb.AppendLine(
-                $"  Completions: {_metrics.TotalCompletions} (OK: {_metrics.SuccessfulCompletions}, Fail: {_metrics.FailedCompletions})");
-            sb.AppendLine($"  Avg Latency: {_metrics.AverageLatencyMs:F0} ms");
-            sb.AppendLine($"  Retries:     {_metrics.StructuredRetries}");
-            sb.AppendLine($"  Published:   {_metrics.CommandsPublished}");
-            GUILayout.Label(sb.ToString(), _valueStyle);
-
-            // Resolve and cache required local values.
-            double secsSinceLast = _metrics.SecondsSinceLastSuccess;
-            bool unresponsive = _metrics.IsLlmUnresponsive(_unresponsiveThresholdSeconds);
+            GUILayout.Label(_globalMetricsText, _valueStyle);
 
             GUILayout.Label("Health", _headerStyle);
-            GUILayout.Label($"  Last OK: {secsSinceLast:F0}s ago", unresponsive ? _alertStyle : _valueStyle);
+            GUILayout.Label(_healthLastOkText, _unresponsiveCached ? _alertStyle : _valueStyle);
 
-            if (unresponsive)
+            if (_unresponsiveCached)
             {
                 GUILayout.Label("  ! LLM UNRESPONSIVE", _alertStyle);
             }
 
-            Dictionary<string, InMemoryAiOrchestrationMetrics.RoleMetrics> roles = _metrics.GetAllRoleMetrics();
-            if (roles.Count > 0)
+            if (_roleLines.Count > 0)
             {
                 GUILayout.Label("Per-Role", _headerStyle);
-                foreach (KeyValuePair<string, InMemoryAiOrchestrationMetrics.RoleMetrics> kvp in roles)
+                for (int i = 0; i < _roleLines.Count; i++)
                 {
-                    InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
-                    GUILayout.Label(
-                        $"  {kvp.Key}: {rm.Successes}/{rm.Completions} OK, {rm.AverageLatencyMs:F0}ms avg",
-                        _valueStyle);
+                    GUILayout.Label(_roleLines[i], _valueStyle);
                 }
             }
 

@@ -45,6 +45,16 @@ namespace CoreAI.Infrastructure.Llm
 
         private static readonly IReadOnlyList<SkillRecord> Empty = new SkillRecord[0];
 
+        /// <summary>
+        /// Process-wide mutation locks keyed by each skill's file path, one entry per distinct skill id
+        /// ever mutated (not per active/loaded skill), so cardinality tracks the lifetime skill count
+        /// rather than the current catalog size. Entries are intentionally never evicted: a caller could
+        /// already hold the <see cref="SemaphoreSlim"/> instance fetched from this dictionary while a
+        /// concurrent eviction-then-<c>GetOrAdd</c> for the same key hands a second caller a fresh
+        /// instance, which would silently break the mutual exclusion this lock exists for. In practice the
+        /// key set is bounded by the number of distinct skills an agent has authored on this install, which
+        /// is small relative to process lifetime.
+        /// </summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
             new(StringComparer.Ordinal);
 

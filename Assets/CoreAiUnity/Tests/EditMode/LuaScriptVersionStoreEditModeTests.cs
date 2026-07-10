@@ -196,5 +196,106 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(b.TryGetSnapshot("y", out LuaScriptVersionRecord sy));
             Assert.AreEqual("y0", sy.CurrentLua);
         }
+
+        // ==================== F-11: retention policy (bounded history) ====================
+
+        [Test]
+        public void Memory_RetentionPolicy_100Revisions_BoundedHistory_OriginalAndCurrentIntact()
+        {
+            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 20);
+            for (int i = 0; i < 100; i++)
+            {
+                s.RecordSuccessfulExecution("k", "v" + i);
+            }
+
+            Assert.IsTrue(s.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
+            Assert.LessOrEqual(snap.History.Count, 22, "original + 20 intermediate + current at most.");
+            Assert.AreEqual("v0", snap.OriginalLua);
+            Assert.AreEqual("v99", snap.CurrentLua);
+            Assert.AreEqual(0, snap.History[0].Index, "Original keeps its original stable index.");
+            Assert.AreEqual(99, snap.History[snap.History.Count - 1].Index, "Current keeps its original stable index.");
+
+            s.ResetToOriginal("k");
+            Assert.IsTrue(s.TryGetSnapshot("k", out LuaScriptVersionRecord afterReset));
+            Assert.AreEqual("v0", afterReset.CurrentLua, "Revert-to-original still works after eviction.");
+        }
+
+        [Test]
+        public void Memory_RetentionPolicy_ByteBudget_EvictsMiddleButKeepsOriginalAndCurrent()
+        {
+            // maxIntermediateRevisions is large so only the byte budget drives eviction; each 11-char
+            // revision is 11 UTF-8 bytes, and a 15-byte budget cannot hold any intermediate revision
+            // alongside original+current, so eviction converges to exactly those two entries.
+            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 1000, maxTotalBytes: 15);
+            for (int i = 0; i < 5; i++)
+            {
+                s.RecordSuccessfulExecution("k", "0123456789" + i);
+            }
+
+            Assert.IsTrue(s.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
+            Assert.AreEqual(2, snap.History.Count, "Byte budget evicts every middle revision, never original/current.");
+            Assert.AreEqual(0, snap.History[0].Index);
+            Assert.AreEqual(4, snap.History[1].Index);
+        }
+
+        [Test]
+        public void Memory_RetentionPolicy_RevertToEvictedRevision_ReturnsNoChange()
+        {
+            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 2);
+            for (int i = 0; i < 10; i++)
+            {
+                s.RecordSuccessfulExecution("k", "v" + i);
+            }
+
+            // Revision index 1 was evicted (only original(0) + last 2 intermediate + current(9) remain).
+            Assert.IsFalse(s.ResetToRevisionChanged("k", 1), "Reverting to an evicted revision is a no-op.");
+            Assert.IsTrue(s.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
+            Assert.AreEqual("v9", snap.CurrentLua, "State is unchanged after a no-op revert.");
+        }
+
+        [Test]
+        public void Memory_RetentionPolicy_RevertToStillKeptRevision_UsesStableIndexNotPosition()
+        {
+            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 2);
+            for (int i = 0; i < 10; i++)
+            {
+                s.RecordSuccessfulExecution("k", "v" + i);
+            }
+
+            // Original (index 0) is always kept regardless of position shifts caused by eviction.
+            Assert.IsTrue(s.ResetToRevisionChanged("k", 0));
+            Assert.IsTrue(s.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
+            Assert.AreEqual("v0", snap.CurrentLua);
+        }
+
+        [Test]
+        public void FileStore_RetentionPolicy_BoundedAcrossManyRevisions_RoundTrips()
+        {
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "retention.json");
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+
+            {
+                FileLuaScriptVersionStore a = new(new NullGameLogger(), path, maxIntermediateRevisions: 5);
+                for (int i = 0; i < 50; i++)
+                {
+                    a.RecordSuccessfulExecution("k", "v" + i);
+                }
+            }
+
+            FileLuaScriptVersionStore b = new(new NullGameLogger(), path);
+            Assert.IsTrue(b.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
+            Assert.LessOrEqual(snap.History.Count, 7, "original + 5 intermediate + current at most.");
+            Assert.AreEqual("v0", snap.OriginalLua);
+            Assert.AreEqual("v49", snap.CurrentLua);
+        }
     }
 }

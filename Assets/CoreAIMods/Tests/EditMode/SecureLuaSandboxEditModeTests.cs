@@ -448,6 +448,59 @@ namespace CoreAI.Tests.EditMode
             Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "time_set_scale(0/0)"));
         }
 
+        // ===================== Allocation-bomb regression (F-08) =====================
+
+        [Test]
+        public void AllocationBomb_ConcatDoubling_ThrowsMemoryBudgetError()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            // string.rep is capped at MaxStringRepLength (1MB), so the seed string itself is allowed.
+            // Doubling it via plain concatenation (no library call site to intercept) must still be
+            // caught by the per-instruction GC allocation budget before it reaches hundreds of MB.
+            ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
+                script.DoString(
+                    "local s = string.rep('x', 1000000)\n" +
+                    "for i = 1, 30 do s = s .. s end\n" +
+                    "return s"));
+
+            Assert.IsTrue(ex.Message.Contains("EXCEEDED_MEMORY_BUDGET"),
+                $"Expected the allocation-bomb backstop to fire, got: {ex.Message}");
+        }
+
+        [Test]
+        public void AllocationBomb_TableConcat_CapEnforced()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
+                script.DoString(
+                    "local t = {}\n" +
+                    "local chunk = string.rep('x', 1000000)\n" +
+                    "for i = 1, 5 do t[i] = chunk end\n" +
+                    "return table.concat(t)"));
+
+            Assert.IsTrue(ex.Message.Contains("table.concat"),
+                $"Expected the table.concat cap to fire, got: {ex.Message}");
+        }
+
+        [Test]
+        public void AllocationBomb_NormalHundredKbString_StillPasses()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            DynValue result = script.DoString(
+                "local s = string.rep('x', 100000)\n" +
+                "s = s .. s\n" +
+                "return #s");
+
+            Assert.AreEqual(200000, (int)result.Number,
+                "A normal, non-adversarial 100KB-class string script must not be blocked by the budget.");
+        }
+
         [Test]
         public void LuaTimeBindings_TimeSetScale_ClampsToMax()
         {

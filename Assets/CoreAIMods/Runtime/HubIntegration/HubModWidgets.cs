@@ -10,9 +10,13 @@ namespace CoreAI.Ai.Hub
     /// </summary>
     internal static class HubModWidgets
     {
-        internal static readonly Color Accent = new(0.42f, 0.87f, 0.95f, 1f);
-        internal static readonly Color Text = new(0.93f, 0.96f, 0.98f, 1f);
-        internal static readonly Color Muted = new(0.80f, 0.88f, 0.93f, 0.95f);
+        // Accent/Text/Muted are kept byte-identical to CoreAI.Hub.UI.HubPageWidgets (CoreAIHub/Runtime/
+        // HubPageWidgets.cs) so the Mods tab matches the built-in Hub pages; CoreAI.Mods cannot reference
+        // that internal type across the asmdef boundary (see the type doc above), so the values are
+        // duplicated here rather than fully deduped. Keep the two in sync by hand if either changes.
+        internal static readonly Color Accent = new(0.302f, 0.816f, 0.882f, 1f);
+        internal static readonly Color Text = new(0.863f, 0.91f, 0.941f, 1f);
+        internal static readonly Color Muted = new(0.77f, 0.86f, 0.91f, 0.7f);
         internal static readonly Color Danger = new(0.98f, 0.55f, 0.52f, 1f);
         internal static readonly Color Panel = new(1f, 1f, 1f, 0.07f);
         internal static readonly Color Border = new(1f, 1f, 1f, 0.14f);

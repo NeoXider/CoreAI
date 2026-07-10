@@ -20,7 +20,7 @@ namespace CoreAI.Hub.UI.Editor
         private const string PanelSettingsPath = "Assets/CoreAIHub/Runtime/CoreAiHubPanelSettings.asset";
         private const string ChatUxmlPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml";
         private const string ChatUssPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss";
-        private const string ModsBinderType = "CoreAI.Ai.Hub.CoreAiModsHubBinder, CoreAI.Mods";
+        private const string ModsBinderType = "CoreAI.Ai.Hub.CoreAiModsHubBinder, CoreAI.Mods.Hub";
 
         [MenuItem("CoreAI/Setup/Add Hub", priority = 12)]
         public static void AddHub()
@@ -36,8 +36,8 @@ namespace CoreAI.Hub.UI.Editor
 
             GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
 
-            // Light up the Mods tab when the Lua mods module is present (its component lives in CoreAI.Mods,
-            // which the Hub package does not reference, so resolve it by name).
+            // Light up the Mods tab when the Lua mods module is present (its component lives in the optional
+            // CoreAI.Mods.Hub assembly, which the Hub package does not reference, so resolve it by name).
             Type modsBinder = Type.GetType(ModsBinderType);
             if (modsBinder != null && instance.GetComponent(modsBinder) == null)
             {

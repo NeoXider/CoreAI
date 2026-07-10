@@ -360,7 +360,7 @@ namespace CoreAI.Ai
                 PersistMod(modId, luaCode, capabilities);
             }
 
-            ModSourceLoaded?.Invoke(modId, luaCode, capabilities);
+            RaiseModSourceLoaded(modId, luaCode, capabilities);
         }
 
         /// <summary>
@@ -388,7 +388,7 @@ namespace CoreAI.Ai
             {
                 if (mod.LogReports)
                 {
-                    ModReportEmitted?.Invoke(mod.Id, message ?? "");
+                    RaiseModReportEmitted(mod.Id, message ?? "");
                 }
             };
             mod.Script = script;
@@ -472,7 +472,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            ModSourceUnloaded?.Invoke(modId, source, caps);
+            RaiseModSourceUnloaded(modId, source, caps);
             return true;
         }
 
@@ -509,7 +509,7 @@ namespace CoreAI.Ai
             _log?.Info($"[LuaModRuntime] Mod '{modId}' reloaded (caps={caps}).");
             RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps);
-            ModSourceLoaded?.Invoke(modId, luaCode, caps);
+            RaiseModSourceLoaded(modId, luaCode, caps);
         }
 
         /// <summary>
@@ -588,12 +588,16 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            if (revisionIndex >= snapshot.History.Count)
+            // Revision indices are stable sequence numbers assigned by the version store, not positions in
+            // History: the store's retention policy can evict middle revisions, leaving gaps, so the
+            // requested index must be searched rather than used to index the list directly.
+            LuaScriptRevision revision = FindRevisionByIndex(snapshot.History, revisionIndex);
+            if (revision == null)
             {
                 return false;
             }
 
-            string source = snapshot.History[revisionIndex].Source ?? "";
+            string source = revision.Source ?? "";
             if (string.IsNullOrWhiteSpace(source))
             {
                 return false;
@@ -621,6 +625,20 @@ namespace CoreAI.Ai
 
             restoredSource = source;
             return true;
+        }
+
+        /// <summary>Finds the revision with the given stable <see cref="LuaScriptRevision.Index"/>, or null if it was evicted or never recorded.</summary>
+        private static LuaScriptRevision FindRevisionByIndex(IReadOnlyList<LuaScriptRevision> history, int revisionIndex)
+        {
+            for (int i = 0; i < history.Count; i++)
+            {
+                if (history[i].Index == revisionIndex)
+                {
+                    return history[i];
+                }
+            }
+
+            return null;
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
@@ -825,17 +843,7 @@ namespace CoreAI.Ai
 
                 // Surface the runtime failure so hosts can drive auto-repair. Fired outside the gate
                 // (InvokeGuarded never holds it); a throwing subscriber must not derail the tick.
-                if (ModHandlerErrored != null)
-                {
-                    try
-                    {
-                        ModHandlerErrored.Invoke(mod.Id, message, mod.ErrorCount);
-                    }
-                    catch (Exception subscriberEx)
-                    {
-                        _log?.Error($"[LuaModRuntime] ModHandlerErrored subscriber threw: {subscriberEx}");
-                    }
-                }
+                RaiseModHandlerErrored(mod.Id, message, mod.ErrorCount);
             }
             finally
             {
@@ -847,6 +855,116 @@ namespace CoreAI.Ai
                 // Resetting per guarded call guarantees no transaction opened inside one
                 // invocation can leak into the next handler, the next timer, or a later tick.
                 (_gameBindings as ILuaTransactionScope)?.ResetTransactions();
+            }
+        }
+
+        // Per-subscriber isolated event raises. A host UI/telemetry listener throwing must never make a
+        // healthy mod load/reload/unload/report/error notification appear failed to the caller: every
+        // subscriber on the invocation list is called independently, and a subscriber's exception is
+        // logged and swallowed rather than propagated or allowed to skip the remaining subscribers.
+
+        private void RaiseModSourceLoaded(string modId, string source, LuaCapabilities caps)
+        {
+            Action<string, string, LuaCapabilities> handler = ModSourceLoaded;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string, LuaCapabilities> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, source, caps);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] [subscriber] ModSourceLoaded handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
+        private void RaiseModSourceUnloaded(string modId, string source, LuaCapabilities caps)
+        {
+            Action<string, string, LuaCapabilities> handler = ModSourceUnloaded;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string, LuaCapabilities> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, source, caps);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] [subscriber] ModSourceUnloaded handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
+        private void RaiseModHandlerErrored(string modId, string message, int consecutiveErrorCount)
+        {
+            Action<string, string, int> handler = ModHandlerErrored;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string, int> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, message, consecutiveErrorCount);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] [subscriber] ModHandlerErrored handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
+        private void RaiseModReportEmitted(string modId, string message)
+        {
+            Action<string, string> handler = ModReportEmitted;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, message);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] [subscriber] ModReportEmitted handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
+        private void RaiseModEventEmitted(string modId, string evt, string payload)
+        {
+            Action<string, string, string> handler = ModEventEmitted;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string, string> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, evt, payload);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] [subscriber] ModEventEmitted handler for '{modId}' threw: {ex}");
+                }
             }
         }
 
@@ -1040,7 +1158,7 @@ namespace CoreAI.Ai
                     return;
                 }
 
-                ModReportEmitted?.Invoke(mod.Id, message ?? "");
+                RaiseModReportEmitted(mod.Id, message ?? "");
             }));
         }
 
@@ -1154,7 +1272,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            ModEventEmitted?.Invoke(sender.Id, evt, payload);
+            RaiseModEventEmitted(sender.Id, evt, payload);
         }
 
         private void EnqueueLocked(Mod mod, string evt, string payload)

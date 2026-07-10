@@ -113,6 +113,88 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, snap.History.Count);
         }
 
+        // ==================== F-11: retention policy (bounded history) ====================
+
+        [Test]
+        public void Memory_RetentionPolicy_100Revisions_BoundedHistory_OriginalAndCurrentIntact()
+        {
+            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 20);
+            for (int i = 0; i < 100; i++)
+            {
+                s.RecordSuccessfulApply("k", "p" + i);
+            }
+
+            Assert.IsTrue(s.TryGetSnapshot("k", out DataOverlayVersionRecord snap));
+            Assert.LessOrEqual(snap.History.Count, 22, "original + 20 intermediate + current at most.");
+            Assert.AreEqual("p0", snap.OriginalPayload);
+            Assert.AreEqual("p99", snap.CurrentPayload);
+            Assert.AreEqual(0, snap.History[0].Index);
+            Assert.AreEqual(99, snap.History[snap.History.Count - 1].Index);
+
+            s.ResetToOriginal("k");
+            Assert.IsTrue(s.TryGetCurrentPayload("k", out string afterReset));
+            Assert.AreEqual("p0", afterReset, "Revert-to-original still works after eviction.");
+        }
+
+        [Test]
+        public void Memory_RetentionPolicy_ByteBudget_EvictsMiddleButKeepsOriginalAndCurrent()
+        {
+            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 1000, maxTotalBytes: 15);
+            for (int i = 0; i < 5; i++)
+            {
+                s.RecordSuccessfulApply("k", "0123456789" + i);
+            }
+
+            Assert.IsTrue(s.TryGetSnapshot("k", out DataOverlayVersionRecord snap));
+            Assert.AreEqual(2, snap.History.Count, "Byte budget evicts every middle revision, never original/current.");
+            Assert.AreEqual(0, snap.History[0].Index);
+            Assert.AreEqual(4, snap.History[1].Index);
+        }
+
+        [Test]
+        public void Memory_RetentionPolicy_RevertToEvictedRevision_ReturnsNoChange()
+        {
+            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 2);
+            for (int i = 0; i < 10; i++)
+            {
+                s.RecordSuccessfulApply("k", "p" + i);
+            }
+
+            Assert.IsFalse(s.ResetToRevisionChanged("k", 1), "Reverting to an evicted revision is a no-op.");
+            Assert.IsTrue(s.TryGetCurrentPayload("k", out string cur));
+            Assert.AreEqual("p9", cur, "State is unchanged after a no-op revert.");
+        }
+
+        [Test]
+        public void FileStore_RetentionPolicy_BoundedAcrossManyRevisions_RoundTrips()
+        {
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestDataOverlays", "retention.json");
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+
+            {
+                FileDataOverlayVersionStore a = new(new NullGameLogger(), path, maxIntermediateRevisions: 5);
+                for (int i = 0; i < 50; i++)
+                {
+                    a.RecordSuccessfulApply("k", "p" + i);
+                }
+            }
+
+            FileDataOverlayVersionStore b = new(new NullGameLogger(), path);
+            Assert.IsTrue(b.TryGetSnapshot("k", out DataOverlayVersionRecord snap));
+            Assert.LessOrEqual(snap.History.Count, 7, "original + 5 intermediate + current at most.");
+            Assert.AreEqual("p0", snap.OriginalPayload);
+            Assert.AreEqual("p49", snap.CurrentPayload);
+        }
+
         [Test]
         public void VersioningLuaBindings_DataAndLuaReset_FromSandbox()
         {

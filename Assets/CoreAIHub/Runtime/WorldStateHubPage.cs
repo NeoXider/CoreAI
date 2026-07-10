@@ -6,7 +6,7 @@ using UnityEngine.UIElements;
 
 namespace CoreAI.Hub.UI
 {
-    public sealed class WorldStateHubPage : IHubPage
+    public sealed class WorldStateHubPage : HubPageBase
     {
         public const string DefaultPageId = "coreai.hub.worldstate";
 
@@ -20,21 +20,15 @@ namespace CoreAI.Hub.UI
             string pageId = DefaultPageId,
             string displayName = "World",
             int order = 300)
+            : base(
+                string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
+                string.IsNullOrWhiteSpace(displayName) ? "World" : displayName,
+                order)
         {
             _manager = manager;
-            PageId = string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "World" : displayName;
-            Order = order;
         }
 
-        public string PageId { get; }
-        public string DisplayName { get; }
-        public int Order { get; }
-        public Func<object> CreatePageContent => BuildContent;
-
-        public void OnActivated() { }
-        public void OnDeactivated() { }
-        public void OnDestroyed() { }
+        public override Func<object> CreatePageContent => BuildContent;
 
         private object BuildContent()
         {

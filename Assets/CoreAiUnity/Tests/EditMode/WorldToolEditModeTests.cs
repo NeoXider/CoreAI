@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using CoreAI.Messaging;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -398,6 +400,197 @@ namespace CoreAI.Tests.EditMode
 
         #endregion
 
+        #region SpawnBatch And ListPrefabs Tests
+
+        [Test]
+        public async Task WorldLlmTool_SpawnBatch_SpawnsAllItemsWithParentAndColor_ReturnsCompactResult()
+        {
+            CoreAiWorldCommandExecutor executor = new(Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            string id = Guid.NewGuid().ToString("N");
+            GameObject parent = new($"BatchParent_{id}");
+
+            try
+            {
+                string itemsJson = JsonConvert.SerializeObject(new object[]
+                {
+                    new { name = $"Coin_{id}_1", x = 1f, y = 0f, z = 0f, color = "#ff0000" },
+                    new { name = $"Coin_{id}_2", x = 2f, y = 0f, z = 0f, color = "#00ff00" },
+                    new { name = $"Coin_{id}_3", x = 3f, y = 0f, z = 0f }
+                });
+
+                string resultJson = await tool.ExecuteAsync("spawn_batch", prefabKey: "cube",
+                    stringValue: parent.name, itemsJson: itemsJson);
+                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+                Assert.IsTrue(result.Success, result.Message);
+                Assert.AreEqual("spawn_batch", result.Action);
+
+                SpawnBatchResultDto batch = JsonConvert.DeserializeObject<SpawnBatchResultDto>(result.Message);
+                Assert.IsTrue(batch.Ok);
+                Assert.AreEqual(3, batch.Spawned);
+                Assert.AreEqual(0, batch.Failed);
+                Assert.AreEqual(3, batch.Names.Count);
+                StringAssert.DoesNotContain("\"x\":", result.Message,
+                    "spawn_batch result must be a compact summary, not an echo of every item.");
+
+                GameObject first = GameObject.Find($"Coin_{id}_1");
+                Assert.IsNotNull(first);
+                Assert.AreEqual(parent.transform, first.transform.parent);
+                Assert.IsTrue(first.GetComponent<Renderer>().HasPropertyBlock(),
+                    "Per-item color should apply a MaterialPropertyBlock.");
+
+                GameObject third = GameObject.Find($"Coin_{id}_3");
+                Assert.IsNotNull(third);
+                Assert.AreEqual(parent.transform, third.transform.parent);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(parent);
+            }
+        }
+
+        [Test]
+        public async Task WorldLlmTool_SpawnBatch_PartialUnknownPrefabKey_CountsFailuresWithoutAborting()
+        {
+            CoreAiWorldCommandExecutor executor = new(Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            string id = Guid.NewGuid().ToString("N");
+
+            try
+            {
+                string itemsJson = JsonConvert.SerializeObject(new object[]
+                {
+                    new { name = $"Good_{id}_1", x = 0f, y = 0f, z = 0f, prefabKey = "cube" },
+                    new { name = $"Bad_{id}", x = 1f, y = 0f, z = 0f, prefabKey = "no_such_prefab_key" },
+                    new { name = $"Good_{id}_2", x = 2f, y = 0f, z = 0f, prefabKey = "sphere" }
+                });
+
+                string resultJson = await tool.ExecuteAsync("spawn_batch", itemsJson: itemsJson);
+                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+                SpawnBatchResultDto batch = JsonConvert.DeserializeObject<SpawnBatchResultDto>(result.Message);
+
+                Assert.IsTrue(result.Success);
+                Assert.AreEqual(2, batch.Spawned);
+                Assert.AreEqual(1, batch.Failed);
+                Assert.IsNotNull(GameObject.Find($"Good_{id}_1"));
+                Assert.IsNotNull(GameObject.Find($"Good_{id}_2"));
+                Assert.IsNull(GameObject.Find($"Bad_{id}"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(GameObject.Find($"Good_{id}_1"));
+                UnityEngine.Object.DestroyImmediate(GameObject.Find($"Good_{id}_2"));
+            }
+        }
+
+        [Test]
+        public async Task WorldLlmTool_Spawn_UnknownPrefabKey_ListsAvailableKeysForSelfCorrection()
+        {
+            StubPrefabRegistry registry = new();
+            GameObject heroSource = new("HeroSource");
+            GameObject treeSource = new("TreeSource");
+
+            try
+            {
+                registry.Add("Hero", heroSource);
+                registry.Add("Tree", treeSource);
+
+                CoreAiWorldCommandExecutor executor =
+                    new(Infrastructure.Logging.GameLoggerUnscopedFallback.Instance, registry);
+                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+                string resultJson = await tool.ExecuteAsync("spawn", prefabKey: "totally_unknown_key",
+                    targetName: "X", x: 0f, y: 0f, z: 0f);
+                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+                Assert.IsFalse(result.Success);
+                StringAssert.Contains("Unknown prefabKey", result.Message);
+                StringAssert.Contains("totally_unknown_key", result.Message);
+                StringAssert.Contains("Hero", result.Message);
+                StringAssert.Contains("Tree", result.Message);
+                StringAssert.Contains("cube", result.Message);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(heroSource);
+                UnityEngine.Object.DestroyImmediate(treeSource);
+            }
+        }
+
+        [Test]
+        public async Task WorldLlmTool_Spawn_UnknownPrefabKey_TruncatesLongRegistryList()
+        {
+            StubPrefabRegistry registry = new();
+            List<GameObject> sources = new();
+
+            try
+            {
+                for (int i = 0; i < 25; i++)
+                {
+                    GameObject source = new($"Prefab_{i}");
+                    sources.Add(source);
+                    registry.Add($"Prefab_{i}", source);
+                }
+
+                CoreAiWorldCommandExecutor executor =
+                    new(Infrastructure.Logging.GameLoggerUnscopedFallback.Instance, registry);
+                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+                string resultJson = await tool.ExecuteAsync("spawn", prefabKey: "nope", targetName: "X",
+                    x: 0f, y: 0f, z: 0f);
+                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+                Assert.IsFalse(result.Success);
+                StringAssert.Contains("+5 more", result.Message);
+            }
+            finally
+            {
+                foreach (GameObject source in sources)
+                {
+                    UnityEngine.Object.DestroyImmediate(source);
+                }
+            }
+        }
+
+        [Test]
+        public async Task WorldLlmTool_ListPrefabs_ReturnsRegistryKeysAndPrimitives()
+        {
+            StubPrefabRegistry registry = new();
+            GameObject heroSource = new("HeroSource2");
+
+            try
+            {
+                registry.Add("Hero", heroSource);
+
+                CoreAiWorldCommandExecutor executor =
+                    new(Infrastructure.Logging.GameLoggerUnscopedFallback.Instance, registry);
+                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+                string resultJson = await tool.ExecuteAsync("list_prefabs");
+                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+                Assert.IsTrue(result.Success);
+                Assert.AreEqual("list_prefabs", result.Action);
+
+                ListPrefabsResultDto listed = JsonConvert.DeserializeObject<ListPrefabsResultDto>(result.Message);
+                CollectionAssert.Contains(listed.Prefabs, "Hero");
+                CollectionAssert.Contains(listed.Primitives, "cube");
+                CollectionAssert.Contains(listed.Primitives, "sphere");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(heroSource);
+            }
+        }
+
+        #endregion
+
         #region Test Helpers
 
         private sealed class TestWorldExecutor : ICoreAiWorldCommandExecutor
@@ -414,6 +607,41 @@ namespace CoreAI.Tests.EditMode
                 LastCommandJson = cmd.JsonPayload;
                 return true; // Keep execution synchronous for deterministic editor-only tests.
             }
+        }
+
+        /// <summary>Minimal in-memory prefab registry/catalog stand-in for spawn_batch/list_prefabs tests.</summary>
+        private sealed class StubPrefabRegistry : ICoreAiPrefabRegistry, ICoreAiPrefabCatalog
+        {
+            private readonly Dictionary<string, GameObject> _prefabs = new();
+
+            public void Add(string key, GameObject prefab)
+            {
+                _prefabs[key] = prefab;
+            }
+
+            public bool TryResolve(string keyOrName, out GameObject prefab)
+            {
+                return _prefabs.TryGetValue(keyOrName, out prefab);
+            }
+
+            public IReadOnlyList<string> ListPrefabKeys()
+            {
+                return new List<string>(_prefabs.Keys);
+            }
+        }
+
+        private sealed class SpawnBatchResultDto
+        {
+            public bool Ok { get; set; }
+            public int Spawned { get; set; }
+            public int Failed { get; set; }
+            public List<string> Names { get; set; } = new();
+        }
+
+        private sealed class ListPrefabsResultDto
+        {
+            public List<string> Prefabs { get; set; } = new();
+            public List<string> Primitives { get; set; } = new();
         }
 
         #endregion

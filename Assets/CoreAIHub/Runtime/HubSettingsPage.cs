@@ -15,7 +15,7 @@ namespace CoreAI.Hub.UI
     /// surface as <see cref="CoreAiBackend"/>: Auto, LLMUnity, HTTP API, and Offline, plus an inline
     /// health probe. API keys are write-only in the UI.
     /// </summary>
-    public sealed class HubSettingsPage : IHubPage
+    public sealed class HubSettingsPage : HubPageBase
     {
         /// <summary>Default registry id for the built-in Settings page.</summary>
         public const string DefaultPageId = "coreai.hub.settings";
@@ -60,39 +60,26 @@ namespace CoreAI.Hub.UI
             string pageId = DefaultPageId,
             string displayName = "AI Settings",
             int order = 100)
+            : base(
+                string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
+                string.IsNullOrWhiteSpace(displayName) ? "AI Settings" : displayName,
+                order)
         {
             _settings = settings;
             _chatConfig = chatConfig;
-            PageId = string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "AI Settings" : displayName;
-            Order = order;
         }
 
         /// <inheritdoc />
-        public string PageId { get; }
+        public override Func<object> CreatePageContent => BuildContent;
 
         /// <inheritdoc />
-        public string DisplayName { get; }
-
-        /// <inheritdoc />
-        public int Order { get; }
-
-        /// <inheritdoc />
-        public Func<object> CreatePageContent => BuildContent;
-
-        /// <inheritdoc />
-        public void OnActivated()
+        public override void OnActivated()
         {
             RefreshFromStatus();
         }
 
         /// <inheritdoc />
-        public void OnDeactivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDestroyed()
+        public override void OnDestroyed()
         {
             if (_subscribed)
             {

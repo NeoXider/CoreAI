@@ -101,21 +101,56 @@ parsing prose.
 
 ## Duplicate Calls
 
-Keep duplicate suppression on unless the tool is intentionally repeatable.
+Keep duplicate suppression on (`AllowDuplicates = false`, the default) for any tool
+that mutates state. Set `AllowDuplicates = true` ONLY when repeated identical calls
+are meaningful and safe — querying different pages, re-reading live state, rolling
+independent samples, or streaming progress through a host-controlled protocol.
 
-Set `AllowDuplicates = true` only when repeated calls are meaningful and safe, such
-as querying different pages, rolling multiple independent samples, or streaming
-progress through a host-controlled protocol.
+`ToolExecutionPolicy` enforces the following for `AllowDuplicates = false` tools,
+matching how Claude/Cursor stay reliable — no duplicate world mutations from an
+echoed or retried turn, while a legitimate retry is never blocked:
 
-For mutating tools, duplicates should usually return a structured no-op result:
+- **Cross-turn echo → structured no-op.** A call whose exact canonical
+  `name(sorted-args)` signature already **succeeded** earlier in the same request is
+  suppressed and answered with a no-op the model can understand:
 
-```json
-{
-  "ok": true,
-  "duplicate": true,
-  "message": "Action already applied."
-}
-```
+  ```json
+  {
+    "ok": true,
+    "duplicate": true,
+    "message": "Duplicate tool call 'world_command' with identical arguments: this exact call already succeeded ... the world was NOT changed again."
+  }
+  ```
+
+- **Intra-turn repeats always execute.** Three identical `spawn tree` calls in ONE
+  turn are a legitimate request and all run — signatures are compared only against
+  earlier turns, never against sibling slots in the same turn.
+- **Failed calls stay retryable.** A call's signature is registered **only after it
+  succeeds**. A transient failure — including the failed slot of a partially
+  successful batch — is never registered, so retrying exactly that call with
+  identical arguments is always allowed.
+
+You do NOT need a tool-side idempotency key just to get echo suppression; the policy
+provides it by signature. Keep an explicit request/action id (below) for
+billing-sensitive or currency-spending work, where you want idempotency to survive
+even across independent requests.
+
+## Policy-Enforced Mutation Ordering
+
+Mutating built-ins (`world_command`, `component_command`, `execute_lua`,
+`manage_mods`, `manage_skills`, `memory`, and — conservatively — `call_skill_tool`)
+share ONE ordered serialization chain, so no two mutations ever overlap and they
+apply in original call order even when `MaxParallelToolCalls > 1`. Read-only tools
+still run fully in parallel.
+
+In the **streaming** path these mutating calls are DEFERRED: they are buffered as
+they arrive and executed serially at turn finalization, after the cross-turn echo
+check. This means an echoed streamed mutation is suppressed with the no-op above
+**before** any side effect — it does not re-apply and then get noticed. Read-only
+streamed calls keep executing the moment they arrive.
+
+If you add a new state-mutating built-in, add its name to
+`ToolExecutionPolicy.SerializedMutatingToolNames` and leave `AllowDuplicates = false`.
 
 ## Error Rules
 
@@ -177,6 +212,35 @@ Revisit a tool design when you see any of these:
 - The tool can spend currency, grant items, or call a paid backend without an
   idempotency key.
 - The only failure mode is `"error": "failed"`.
+
+## Result Contracts Per Action (world_command example)
+
+A tool with many actions should tell the model what each action returns *in the
+Description*, so it never has to spend a round-trip discovering the shape by
+trial and error. `world_command` documents its own contract this way — one
+line per action, `params -> result` — instead of prose, since the Description
+is resent on every request:
+
+```
+spawn(prefabKey,targetName,x/y/z?,...) -> ok, echoes applied transform
+spawn_batch(...,itemsJson) -> {ok,spawned,failed,names:[first few]}
+list_prefabs() -> {prefabs:[...],primitives:[...]}
+```
+
+Guidelines that follow from this:
+
+- **Batch actions return a summary, never an echo.** `spawn_batch` spawns up to
+  100 objects from one call but reports only `{ok, spawned, failed, names}` —
+  the first few names, not every item's transform back. If the caller needs to
+  know exactly what was placed, follow up with `list_objects`.
+- **An unknown-key error lists the valid keys.** When `prefabKey` does not
+  resolve, the error names the available primitives and (truncated to ~20) the
+  registered prefab keys, so the model can retry correctly in the same
+  round instead of guessing or calling a separate discovery tool first.
+- **Discoverability actions exist for expensive-to-guess inputs.**
+  `list_prefabs` lets the model learn valid `prefabKey` values before spawning,
+  the same way `list_animations` and `list_objects` let it learn valid
+  `animationName`/`targetName` values.
 
 ## Verification Checklist
 

@@ -21,6 +21,12 @@ namespace CoreAI.Features.Audit
 
         public List<Dictionary<string, object>> LastListedObjects => _inner.LastListedObjects;
 
+        public IReadOnlyList<string> LastListedPrefabKeys => _inner.LastListedPrefabKeys;
+
+        public string LastErrorMessage => _inner.LastErrorMessage;
+
+        public CoreAiSpawnBatchResult LastSpawnBatchResult => _inner.LastSpawnBatchResult;
+
         public bool TryExecute(ApplyAiGameCommand cmd)
         {
             bool success = _inner.TryExecute(cmd);

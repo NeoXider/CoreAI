@@ -10,7 +10,7 @@ namespace CoreAI.Hub.UI
     /// UI Toolkit panel with a title and body label so a freshly wired
     /// <see cref="CoreAiHubWindow"/> always shows at least one page.
     /// </summary>
-    public sealed class HubAboutPage : IHubPage
+    public sealed class HubAboutPage : HubPageBase
     {
         /// <summary>Default registry id for the built-in About page.</summary>
         public const string DefaultPageId = "coreai.hub.about";
@@ -20,10 +20,11 @@ namespace CoreAI.Hub.UI
         /// <summary>Creates the About page with an optional custom body message.</summary>
         public HubAboutPage(string pageId = DefaultPageId, string displayName = "About", int order = 1000,
             string body = null)
+            : base(
+                string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
+                string.IsNullOrWhiteSpace(displayName) ? "About" : displayName,
+                order)
         {
-            PageId = string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "About" : displayName;
-            Order = order;
             _body = string.IsNullOrEmpty(body)
                 ? "This is the CoreAI Hub — an optional UI Toolkit window that renders pages " +
                   "registered into the HubPageRegistry. C# modules and (later) Lua mods can add their own tabs."
@@ -31,31 +32,7 @@ namespace CoreAI.Hub.UI
         }
 
         /// <inheritdoc />
-        public string PageId { get; }
-
-        /// <inheritdoc />
-        public string DisplayName { get; }
-
-        /// <inheritdoc />
-        public int Order { get; }
-
-        /// <inheritdoc />
-        public Func<object> CreatePageContent => BuildContent;
-
-        /// <inheritdoc />
-        public void OnActivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDeactivated()
-        {
-        }
-
-        /// <inheritdoc />
-        public void OnDestroyed()
-        {
-        }
+        public override Func<object> CreatePageContent => BuildContent;
 
         private object BuildContent()
         {

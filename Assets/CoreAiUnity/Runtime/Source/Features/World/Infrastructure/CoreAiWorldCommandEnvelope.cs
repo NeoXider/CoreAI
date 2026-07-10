@@ -46,6 +46,11 @@ namespace CoreAI.Infrastructure.World
         // Scene
         public string sceneName = "";
 
+        // spawn_batch: per-item overrides. Any item field left at its default falls back to the
+        // envelope-level default carried in the fields above (prefabKeyOrName, x/y/z, fx/fy/fz,
+        // floatValue/scaleX/Y/Z, stringValue as parent).
+        public CoreAiSpawnBatchItem[] items = System.Array.Empty<CoreAiSpawnBatchItem>();
+
         public static CoreAiWorldCommandEnvelope Spawn(string prefabKeyOrName, string targetName, Vector3 pos)
         {
             return new CoreAiWorldCommandEnvelope
@@ -352,6 +357,46 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
+        public static CoreAiWorldCommandEnvelope ListPrefabs()
+        {
+            return new CoreAiWorldCommandEnvelope { action = "list_prefabs" };
+        }
+
+        /// <summary>
+        /// Batch spawn: one command instantiates every entry in <paramref name="items"/> (up to
+        /// <see cref="CoreAiWorldCommandExecutor.MaxSpawnBatchSize"/>). Defaults carried on the envelope
+        /// (prefabKeyOrName, position, rotation, scale, parent) apply to any item that omits that field.
+        /// </summary>
+        public static CoreAiWorldCommandEnvelope SpawnBatch(
+            string defaultPrefabKeyOrName,
+            string namePrefix,
+            Vector3 defaultPos,
+            Vector3 defaultEulerAngles,
+            float defaultUniformScale,
+            Vector3 defaultNonUniformScale,
+            string defaultParent,
+            CoreAiSpawnBatchItem[] items)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "spawn_batch",
+                prefabKeyOrName = defaultPrefabKeyOrName ?? "",
+                targetName = namePrefix ?? "",
+                x = defaultPos.x,
+                y = defaultPos.y,
+                z = defaultPos.z,
+                fx = defaultEulerAngles.x,
+                fy = defaultEulerAngles.y,
+                fz = defaultEulerAngles.z,
+                floatValue = defaultUniformScale,
+                scaleX = defaultNonUniformScale.x,
+                scaleY = defaultNonUniformScale.y,
+                scaleZ = defaultNonUniformScale.z,
+                stringValue = defaultParent ?? "",
+                items = items ?? System.Array.Empty<CoreAiSpawnBatchItem>()
+            };
+        }
+
         public static CoreAiWorldCommandEnvelope ListAnimations(string targetName = "")
         {
             return new CoreAiWorldCommandEnvelope
@@ -400,5 +445,28 @@ namespace CoreAI.Infrastructure.World
                 fz = velocity.z
             };
         }
+    }
+
+    /// <summary>
+    /// One entry of a <c>spawn_batch</c> command. Fields left at their default (0 / "") fall back to the
+    /// batch-level default carried on the owning <see cref="CoreAiWorldCommandEnvelope"/>.
+    /// </summary>
+    [Serializable]
+    public sealed class CoreAiSpawnBatchItem
+    {
+        public string prefabKey = "";
+        public string name = "";
+        public float x;
+        public float y;
+        public float z;
+        public float rx;
+        public float ry;
+        public float rz;
+        public float scale;
+        public float scaleX;
+        public float scaleY;
+        public float scaleZ;
+        public string parent = "";
+        public string color = "";
     }
 }

@@ -86,7 +86,8 @@ namespace CoreAI.Tests.PlayMode
         private static void DestroyAllWorldObjects()
         {
             WorldObjectComponent[] tags =
-                UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(FindObjectsSortMode.None);
+                UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+                    FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (WorldObjectComponent t in tags)
             {
                 if (t != null && t.gameObject != null)
@@ -111,6 +112,23 @@ namespace CoreAI.Tests.PlayMode
             r.GetPropertyBlock(mpb);
             mpb.SetColor("_Color", color);
             r.SetPropertyBlock(mpb);
+        }
+
+        // GameObject.Find() skips inactive objects, so tests covering F-04A need to search
+        // via the tracked component instead.
+        private static GameObject FindInactiveByName(string name)
+        {
+            WorldObjectComponent[] tags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (WorldObjectComponent t in tags)
+            {
+                if (t != null && t.gameObject != null && t.gameObject.name == name)
+                {
+                    return t.gameObject;
+                }
+            }
+
+            return null;
         }
 
         [UnityTest]
@@ -321,6 +339,124 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsFalse(manager.HasSavedState);
 
             yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Save_ThenLoad_PreservesInactiveObjectAcrossMultipleRoundTrips()
+        {
+            GameObject cube = CoreAiPrimitiveFactory.Create("cube");
+            cube.name = "InactiveCube";
+            Tag(cube, "cube");
+            cube.SetActive(false);
+
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            manager.Save();
+            UnityEngine.Object.DestroyImmediate(cube);
+            yield return null;
+
+            Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
+            yield return null;
+
+            GameObject loaded = FindInactiveByName("InactiveCube");
+            Assert.IsNotNull(loaded, "Inactive object must be restored by load.");
+            Assert.IsFalse(loaded.activeSelf, "Restored object must keep its saved inactive state.");
+
+            // F-04A: an inactive object must not be dropped by a subsequent Save().
+            manager.Save();
+            yield return null;
+
+            Assert.IsTrue(manager.TryLoad(), "Second TryLoad should succeed.");
+            yield return null;
+
+            GameObject loadedAgain = FindInactiveByName("InactiveCube");
+            Assert.IsNotNull(loadedAgain, "Inactive object must still be present after a second save/load round-trip.");
+            Assert.IsFalse(loadedAgain.activeSelf, "Object must remain inactive after the second round-trip.");
+        }
+
+        [UnityTest]
+        public IEnumerator Load_CleanSlate_DestroysPreExistingInactiveTrackedObject()
+        {
+            GameObject cube = CoreAiPrimitiveFactory.Create("cube");
+            cube.name = "SnapshotCube";
+            WorldObjectComponent cubeTag = Tag(cube, "cube");
+            string sharedId = cubeTag.persistentId;
+
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            manager.Save();
+            UnityEngine.Object.DestroyImmediate(cube);
+            yield return null;
+
+            // Simulate a stale INACTIVE tracked object left behind in the scene, sharing the
+            // snapshot's persistentId (e.g. a survivor of a previously buggy load). Clean-slate
+            // must destroy it too, not just active objects, or the reloaded scene ends up with a
+            // duplicate persistentId.
+            GameObject stale = CoreAiPrimitiveFactory.Create("cube");
+            stale.name = "StaleLeftover";
+            WorldObjectComponent staleTag = stale.AddComponent<WorldObjectComponent>();
+            staleTag.persistentId = sharedId;
+            staleTag.prefabKey = "cube";
+            stale.SetActive(false);
+            yield return null;
+
+            Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
+            yield return null;
+
+            WorldObjectComponent[] afterLoad = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            int matching = 0;
+            foreach (WorldObjectComponent t in afterLoad)
+            {
+                if (t != null && t.persistentId == sharedId)
+                {
+                    matching++;
+                }
+            }
+
+            Assert.AreEqual(1, matching,
+                "Clean-slate load must destroy the stale inactive object, leaving exactly one " +
+                "object with the shared persistentId.");
+        }
+
+        [UnityTest]
+        public IEnumerator Reset_ClearsUnresolvedObjects_SoTheyDoNotReturnAfterReSave()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
+
+            GameObject enemy = UnityEngine.Object.Instantiate(prefab, new Vector3(3, 0, 0), Quaternion.identity);
+            enemy.name = "UnresolvedThenReset";
+            Tag(enemy, "enemy.basic");
+
+            StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            manager.Save();
+            UnityEngine.Object.DestroyImmediate(enemy);
+            yield return null;
+
+            // Load while the prefab is unavailable — the object is retained in memory as unresolved.
+            WorldStateManager managerNoPrefab = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should succeed even with an unresolved prefab.");
+            yield return null;
+            Assert.IsNull(GameObject.Find("UnresolvedThenReset"), "Object should not spawn while its prefab is unresolved.");
+
+            // F-04B: Reset must be truly final — it must discard the retained-unresolved list, not
+            // just delete the save file.
+            managerNoPrefab.Reset();
+            yield return null;
+
+            managerNoPrefab.Save();
+            yield return null;
+
+            // Prefab becomes available again — the object must NOT resurrect since Reset discarded it.
+            WorldStateManager managerPrefabRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            Assert.IsTrue(managerPrefabRestored.TryLoad(), "TryLoad should succeed after reset+re-save.");
+            yield return null;
+
+            Assert.IsNull(GameObject.Find("UnresolvedThenReset"),
+                "Object discarded by Reset must not come back after the prefab becomes available again.");
         }
     }
 }

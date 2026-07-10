@@ -11,12 +11,17 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// File Lua Script Version Store component used by CoreAI.
+    /// File Lua Script Version Store component used by CoreAI. History is bounded per key by
+    /// <see cref="VersionRetentionPolicy"/> (original + current + last N intermediate revisions + a byte
+    /// budget), so the serialized JSON size stays bounded over a session instead of growing without limit.
+    /// A mutating call only rewrites the file when the in-memory store actually changed (a no-op
+    /// reload/apply is skipped); every real mutation still serializes the full per-store JSON file, which
+    /// is acceptable because retention keeps that payload small.
     /// </summary>
     public sealed class FileLuaScriptVersionStore : ILuaScriptVersionStore
     {
         private readonly IGameLogger _logger;
-        private readonly MemoryLuaScriptVersionStore _memory = new();
+        private readonly MemoryLuaScriptVersionStore _memory;
         private readonly string _filePath;
         private readonly object _ioLock = new();
 
@@ -24,12 +29,25 @@ namespace CoreAI.Infrastructure.Lua
         private bool _lastFileExists;
         private DateTime _lastWriteTimeUtc;
 
+        /// <summary>
+        /// Process-wide mutation locks keyed by the resolved absolute path of each version store file, one
+        /// entry per distinct file ever mutated. Entries are intentionally never evicted: a caller could
+        /// already hold the <see cref="SemaphoreSlim"/> instance fetched from this dictionary while a
+        /// concurrent eviction-then-<c>GetOrAdd</c> for the same key hands a second caller a fresh
+        /// instance, which would silently break the mutual exclusion this lock exists for. In practice the
+        /// key set is bounded by the number of distinct version-store files a host ever creates (typically
+        /// one per Lua script/mod), which is small relative to process lifetime.
+        /// </summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
             new(StringComparer.Ordinal);
 
-        public FileLuaScriptVersionStore(IGameLogger logger)
+        public FileLuaScriptVersionStore(
+            IGameLogger logger,
+            int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
+            long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memory = new MemoryLuaScriptVersionStore(maxIntermediateRevisions, maxTotalBytes);
             string dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                 CoreAiPersistentPaths.LuaScriptVersions);
             Directory.CreateDirectory(dir);
@@ -38,9 +56,14 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>Initializes a new instance of FileLuaScriptVersionStore.</summary>
-        public FileLuaScriptVersionStore(IGameLogger logger, string jsonFilePath)
+        public FileLuaScriptVersionStore(
+            IGameLogger logger,
+            string jsonFilePath,
+            int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
+            long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memory = new MemoryLuaScriptVersionStore(maxIntermediateRevisions, maxTotalBytes);
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
             string dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
@@ -61,27 +84,31 @@ namespace CoreAI.Infrastructure.Lua
 
         public void RecordSuccessfulExecution(string scriptKey, string executedLuaSource)
         {
-            MutateOnDisk(() => _memory.RecordSuccessfulExecution(scriptKey, executedLuaSource));
+            MutateOnDisk(() => _memory.RecordSuccessfulExecutionChanged(scriptKey, executedLuaSource));
         }
 
         public void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false)
         {
-            MutateOnDisk(() => _memory.SeedOriginal(scriptKey, originalLuaSource, overwriteExistingOriginal));
+            MutateOnDisk(() => _memory.SeedOriginalChanged(scriptKey, originalLuaSource, overwriteExistingOriginal));
         }
 
         public void ResetToOriginal(string scriptKey)
         {
-            MutateOnDisk(() => _memory.ResetToOriginal(scriptKey));
+            MutateOnDisk(() => _memory.ResetToOriginalChanged(scriptKey));
         }
 
         public void ResetToRevision(string scriptKey, int revisionIndex)
         {
-            MutateOnDisk(() => _memory.ResetToRevision(scriptKey, revisionIndex));
+            MutateOnDisk(() => _memory.ResetToRevisionChanged(scriptKey, revisionIndex));
         }
 
         public void ResetAllToOriginal()
         {
-            MutateOnDisk(() => _memory.ResetAllToOriginal());
+            MutateOnDisk(() =>
+            {
+                _memory.ResetAllToOriginal();
+                return true;
+            });
         }
 
         public IReadOnlyList<string> GetKnownKeys()
@@ -94,15 +121,21 @@ namespace CoreAI.Infrastructure.Lua
             return ReadFromDisk(() => _memory.BuildProgrammerPromptSection(scriptKey));
         }
 
-        private void MutateOnDisk(Action mutation)
+        /// <summary>
+        /// Applies <paramref name="mutation"/> and writes the file only when it reports an actual change,
+        /// so a no-op call (e.g. a reload with identical source) skips a redundant full-JSON rewrite.
+        /// </summary>
+        private void MutateOnDisk(Func<bool> mutation)
         {
             SemaphoreSlim gate = FileLocks.GetOrAdd(Path.GetFullPath(_filePath), _ => new SemaphoreSlim(1, 1));
             gate.Wait();
             try
             {
                 LoadFromDisk();
-                mutation();
-                SaveToDisk();
+                if (mutation())
+                {
+                    SaveToDisk();
+                }
             }
             finally
             {

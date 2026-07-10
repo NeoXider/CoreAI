@@ -40,37 +40,41 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Name => "world_command";
 
-        // Multi-action tool: identical repeats are legitimate (apply_force/set_velocity/show_text etc.).
-        // The original duplicate-SPAWN spam is now prevented at the root by reasoning being enabled and the
-        // self-describing [Description] schema (models emit distinct args), so blanket tool-level dedup is the
-        // wrong layer — it would wrongly skip valid repeated physics/score calls.
-        public override bool AllowDuplicates => true;
+        // World mutations must be idempotent across turns: an echoed or blind-retried identical spawn
+        // would create a second object. AllowDuplicates=false lets ToolExecutionPolicy suppress only a
+        // CROSS-TURN identical echo (structured no-op) while still allowing intra-turn repeats
+        // ("spawn tree x3" in one turn) and never suppressing the retry of a FAILED call. A genuinely
+        // repeated physics/score action stays legitimate because the model varies its arguments
+        // (position, force) between real requests; a byte-identical repeat next turn is an echo.
+        public override bool AllowDuplicates => false;
 
         public override string Description =>
-            "Execute world commands to manipulate the game world. " +
-            "Actions: spawn, change, set_color, destroy, load_scene, reload_scene, " +
-            "set_active, play_animation, stop_animation, list_animations, show_text, " +
-            "play_sound, set_volume, hide_panel, apply_force, set_velocity, list_objects. " +
-            "Use 'spawn' to create objects (prefabKey can be a built-in primitive — " +
-            "cube, sphere, cylinder, capsule, empty — or a registered prefab key). " +
-            "For spawn, targetName and prefabKey are required; x/y/z, fx/fy/fz, scale/scaleX/scaleY/scaleZ, " +
-            "and stringValue parent name are optional. One Unity unit is one meter. " +
-            "Unscaled primitive sizes differ by shape: cube/sphere are 1m; cylinder and capsule are " +
-            "2m TALL (not 1m) at 1m diameter — a plain cylinder is already twice as tall as a cube of the " +
-            "same scaleY, so account for that when sizing towers, pillars, or trunks. " +
-            "Use 'change' to update any subset of position, rotation, scale, and parent on an existing object. " +
-            "Use 'set_color' to tint an object with an HTML color in stringValue. " +
-            "'destroy' to remove, " +
-            "'play_animation'/'stop_animation' to control animations, 'list_animations' to get available animations, " +
-            "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel' for UI, " +
-            "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
-            "'apply_force'/'set_velocity' for physics. " +
-            "Objects are targeted by 'targetName'. For play_animation, stop_animation, and list_animations " +
-            "always pass targetName (for example targetName='Enemy'); do not put the target object name only in prose.";
+            "Manipulate game world objects/scenes. 1 unit = 1 meter; cube/sphere unscaled=1m; " +
+            "cylinder/capsule unscaled=2m TALL at 1m diameter (already twice a cube's height at the same scaleY). " +
+            "Actions, params -> result (all results are compact JSON {success,message,action}; " +
+            "message never echoes full inputs back):\n" +
+            "spawn(prefabKey,targetName,x/y/z?,fx/fy/fz?,scale|scaleX/Y/Z?,stringValue=parent?) -> ok, echoes applied transform. " +
+            "prefabKey is a registered prefab key or a primitive (cube, sphere, cylinder, capsule, empty); " +
+            "an unknown key's error lists available keys — call list_prefabs first if unsure.\n" +
+            "spawn_batch(prefabKey?,targetName=namePrefix?,x/y/z/fx/fy/fz/scale*/stringValue=parent as per-item " +
+            "defaults,itemsJson=JSON array of up to 100 {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?," +
+            "parent?,color?}) -> ONE call spawns every item -> {ok,spawned,failed,names:[first few]}.\n" +
+            "list_prefabs() -> {prefabs:[registered keys],primitives:[built-in shapes]}.\n" +
+            "change(targetName,x?/y?/z?,fx?/fy?/fz?,scale?|scaleX/Y/Z?,stringValue=parent?) -> ok; only given fields change.\n" +
+            "set_color(targetName,stringValue=htmlColor) -> ok. destroy(targetName) -> ok, removes the object.\n" +
+            "load_scene(stringValue=sceneName) / reload_scene() -> ok. set_active(targetName) -> ok.\n" +
+            "play_animation(targetName,animationName|stringValue) / stop_animation(targetName) -> ok; " +
+            "list_animations(targetName) -> {animations:[...]}.\n" +
+            "play_sound(targetName,stringValue=clipName,volume?) / set_volume(targetName,volume) -> ok.\n" +
+            "show_text(targetName,textToDisplay|stringValue) / hide_panel(targetName) -> ok.\n" +
+            "apply_force(targetName,fx,fy,fz) / set_velocity(targetName,fx,fy,fz) -> ok.\n" +
+            "list_objects(stringValue=searchPattern?) -> {count,objects:[...]} (search by name).\n" +
+            "Always pass targetName for play_animation/stop_animation/list_animations (e.g. targetName='Enemy'); " +
+            "do not put the target object name only in prose.";
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true,
-                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects"),
+                "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects"),
             ("targetName", "string", false,
                 "Object name to target. Required for spawn and most object actions."),
             ("x", "number", false, "World X coordinate in meters for spawn/change; omit to leave unchanged on change."),
@@ -97,7 +101,11 @@ namespace CoreAI.Infrastructure.Llm
             ("textToDisplay", "string", false, "Text for show_text"),
             ("stringValue", "string", false,
                 "Generic string value (search pattern for list_objects, clip name for play_sound, parent object name for change/spawn, HTML color for set_color)"),
-            ("volume", "number", false, "Volume level 0.0-1.0 for set_volume")
+            ("volume", "number", false, "Volume level 0.0-1.0 for set_volume"),
+            ("itemsJson", "string", false,
+                "spawn_batch only: JSON array of up to 100 items, each " +
+                "{prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}. " +
+                "Fields an item omits fall back to this call's prefabKey/x/y/z/fx/fy/fz/scale*/stringValue as defaults.")
         );
 
         public AIFunction CreateAIFunction()
@@ -113,7 +121,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private delegate Task<string> ExecuteWorldCommandDelegate(
             [Description(
-                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
+                "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
             [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
             float? x = null,
@@ -154,11 +162,14 @@ namespace CoreAI.Infrastructure.Llm
             [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
+            [Description(
+                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}.")]
+            string? itemsJson = null,
             CancellationToken cancellationToken = default);
 
         public async Task<string> ExecuteAsync(
             [Description(
-                "Command: spawn, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
+                "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
             [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
             float? x = null,
@@ -203,6 +214,9 @@ namespace CoreAI.Infrastructure.Llm
             [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
+            [Description(
+                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}.")]
+            string? itemsJson = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(action))
@@ -259,6 +273,11 @@ namespace CoreAI.Infrastructure.Llm
                     args.Append($" textToDisplay={textToDisplay}");
                 }
 
+                if (!string.IsNullOrEmpty(itemsJson))
+                {
+                    args.Append($" itemsJson.len={itemsJson.Length}");
+                }
+
                 if (args.Length > 0)
                 {
                     _logger.LogInfo(GameLogFeature.MessagePipe, $"  args:{args}");
@@ -269,6 +288,17 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
+                if (action == "spawn_batch")
+                {
+                    return await ExecuteSpawnBatchAsync(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX,
+                        scaleY, scaleZ, stringValue, itemsJson, cancellationToken);
+                }
+
+                if (action == "list_prefabs")
+                {
+                    return await ExecuteListPrefabsAsync(cancellationToken);
+                }
+
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
                     "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY,
@@ -361,6 +391,14 @@ namespace CoreAI.Infrastructure.Llm
                         $"World command 'spawn' executed successfully{extra}{LiveNote()}", action);
                 }
 
+                // A failed spawn (most commonly an unknown prefabKey) carries a self-correcting detail —
+                // e.g. the available registered/primitive keys — on the executor; surface it instead of the
+                // generic message so the model can fix the call in one round without a blind retry.
+                if (!success && action == "spawn" && !string.IsNullOrEmpty(_executor.LastErrorMessage))
+                {
+                    return SerializeResult(false, _executor.LastErrorMessage, action);
+                }
+
                 return SerializeResult(success,
                     success
                         ? $"World command '{action}' executed successfully"
@@ -376,6 +414,122 @@ namespace CoreAI.Infrastructure.Llm
 
                 return SerializeResult(false, $"World command failed: {ex.Message}", action);
             }
+        }
+
+        /// <summary>
+        /// Spawns every entry of <paramref name="itemsJson"/> in one dispatch. Missing per-item fields fall
+        /// back to this call's top-level prefabKey/x/y/z/fx/fy/fz/scale*/stringValue defaults. Result is a
+        /// compact summary, never a full echo of every spawned item — see TOOL_CALLING_BEST_PRACTICES.md.
+        /// </summary>
+        private async Task<string> ExecuteSpawnBatchAsync(
+            string? prefabKey, string? namePrefix, float? x, float? y, float? z, float? fx, float? fy, float? fz,
+            float? scale, float? scaleX, float? scaleY, float? scaleZ, string? parent, string? itemsJson,
+            CancellationToken cancellationToken)
+        {
+            const string action = "spawn_batch";
+
+            if (string.IsNullOrWhiteSpace(itemsJson))
+            {
+                return SerializeResult(false,
+                    "Missing required parameters for action 'spawn_batch': itemsJson must be a JSON array with at least one item.",
+                    action);
+            }
+
+            List<CoreAiSpawnBatchItem> items;
+            try
+            {
+                items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<CoreAiSpawnBatchItem>>(itemsJson) ??
+                        new List<CoreAiSpawnBatchItem>();
+            }
+            catch (Exception ex)
+            {
+                return SerializeResult(false, $"spawn_batch: itemsJson is not a valid JSON array: {ex.Message}",
+                    action);
+            }
+
+            if (items.Count == 0)
+            {
+                return SerializeResult(false,
+                    "Missing required parameters for action 'spawn_batch': itemsJson must contain at least one item.",
+                    action);
+            }
+
+            if (items.Count > CoreAiWorldCommandExecutor.MaxSpawnBatchSize)
+            {
+                return SerializeResult(false,
+                    $"spawn_batch exceeds maximum of {CoreAiWorldCommandExecutor.MaxSpawnBatchSize} items ({items.Count} given).",
+                    action);
+            }
+
+            CoreAiWorldCommandEnvelope envelope = CoreAiWorldCommandEnvelope.SpawnBatch(
+                prefabKey ?? "",
+                namePrefix ?? "",
+                new Vector3(x ?? 0f, y ?? 0f, z ?? 0f),
+                new Vector3(fx ?? 0f, fy ?? 0f, fz ?? 0f),
+                Positive(scale) ? scale.Value : 0f,
+                new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
+                    Positive(scaleZ) ? scaleZ.Value : 0f),
+                parent ?? "",
+                items.ToArray());
+
+            string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
+            cancellationToken.ThrowIfCancellationRequested();
+            await UniTask.SwitchToMainThread(cancellationToken);
+            bool dispatched = _executor.TryExecute(new CoreAI.Messaging.ApplyAiGameCommand
+            {
+                CommandTypeId = CoreAI.Messaging.AiGameCommandTypeIds.WorldCommand,
+                JsonPayload = json
+            });
+
+            if (_settings.LogToolCallResults)
+            {
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[Tool Call] world_command: {(dispatched ? "SUCCESS" : "FAILED")} - {action}");
+            }
+
+            if (!dispatched)
+            {
+                return SerializeResult(false, "Failed to execute world command 'spawn_batch'", action);
+            }
+
+            CoreAiSpawnBatchResult result = _executor.LastSpawnBatchResult;
+            int spawned = result?.Spawned ?? 0;
+            int failed = result?.Failed ?? 0;
+            List<string> names = result?.Names ?? new List<string>();
+            bool ok = spawned > 0;
+            string resultJson = Newtonsoft.Json.JsonConvert.SerializeObject(new { ok, spawned, failed, names });
+            return SerializeResult(ok, resultJson, action);
+        }
+
+        /// <summary>Lists registered prefab keys plus built-in primitive names, so a model can self-correct
+        /// an unknown prefabKey without a trial-and-error spawn call.</summary>
+        private async Task<string> ExecuteListPrefabsAsync(CancellationToken cancellationToken)
+        {
+            const string action = "list_prefabs";
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await UniTask.SwitchToMainThread(cancellationToken);
+            bool success = _executor.TryExecute(new CoreAI.Messaging.ApplyAiGameCommand
+            {
+                CommandTypeId = CoreAI.Messaging.AiGameCommandTypeIds.WorldCommand,
+                JsonPayload = Newtonsoft.Json.JsonConvert.SerializeObject(CoreAiWorldCommandEnvelope.ListPrefabs())
+            });
+
+            if (_settings.LogToolCallResults)
+            {
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
+            }
+
+            if (!success)
+            {
+                return SerializeResult(false, "Failed to execute world command 'list_prefabs'", action);
+            }
+
+            IReadOnlyList<string> prefabs = _executor.LastListedPrefabKeys ?? Array.Empty<string>();
+            string[] primitives = CoreAiPrimitiveFactory.SupportedKeys.Split(", ");
+            string resultJson = Newtonsoft.Json.JsonConvert.SerializeObject(new { prefabs, primitives });
+            return SerializeResult(true, resultJson, action);
         }
 
         private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float? x,
@@ -620,7 +774,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private const string ValidActionsText =
-            "spawn, change, set_color, destroy, load_scene, reload_scene, set_active, " +
+            "spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, " +
             "play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, " +
             "apply_force, set_velocity, list_objects";
 
@@ -628,7 +782,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             return action switch
             {
-                "spawn" or "change" or "set_color" or "destroy" or "load_scene" or
+                "spawn" or "spawn_batch" or "list_prefabs" or "change" or "set_color" or "destroy" or "load_scene" or
                     "reload_scene" or "set_active" or "play_animation" or "stop_animation" or "list_animations" or
                     "play_sound" or "set_volume" or "show_text" or "hide_panel" or "apply_force" or
                     "set_velocity" or "list_objects" => true,

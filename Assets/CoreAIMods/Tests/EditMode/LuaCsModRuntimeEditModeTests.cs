@@ -215,6 +215,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaCs_ModSourceLoaded_ThrowingSubscriber_DoesNotFailLoadOrOtherSubscribers()
+        {
+            LuaCsModStack stack = BuildStack();
+            bool healthySubscriberRan = false;
+            stack.Runtime.ModSourceLoaded += (_, _, _) => throw new System.InvalidOperationException("boom");
+            stack.Runtime.ModSourceLoaded += (_, _, _) => healthySubscriberRan = true;
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod("a", "hooks_on('noop', function() end)"),
+                "A throwing ModSourceLoaded subscriber must not make a healthy load fail.");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("a"), "The mod must be loaded despite the throwing subscriber.");
+            Assert.IsTrue(healthySubscriberRan, "Other subscribers must still run after one throws.");
+        }
+
+        [Test]
         [Timeout(15000)]
         public void LuaCs_Coroutine_AdvancesOneStepPerResume_CompletesWithoutHanging()
         {

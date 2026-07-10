@@ -16,10 +16,16 @@ namespace CoreAI.Ai
 
         private readonly int _capacity;
 
+        /// <summary>Default cap on distinct role IDs retained in <see cref="_latestByRole"/>.</summary>
+        public const int DefaultMaxRoles = 32;
+
+        private readonly int _maxRoles;
+
         /// <summary>Creates a bounded trace sink.</summary>
-        public InMemoryAgentTurnTraceSink(int capacity = 128)
+        public InMemoryAgentTurnTraceSink(int capacity = 128, int maxRoles = DefaultMaxRoles)
         {
             _capacity = capacity < 1 ? 128 : capacity;
+            _maxRoles = maxRoles < 1 ? DefaultMaxRoles : maxRoles;
         }
 
         /// <inheritdoc />
@@ -40,7 +46,30 @@ namespace CoreAI.Ai
                 _traces.Enqueue(trace);
 
                 string roleId = trace.RoleId ?? "";
+                if (!_latestByRole.ContainsKey(roleId) && _latestByRole.Count >= _maxRoles)
+                {
+                    // Dynamic role IDs (e.g. per-session or per-mod agents) are otherwise unbounded, so
+                    // this dictionary would grow for the lifetime of the process. Which specific role is
+                    // dropped does not matter - only that cardinality stays capped - so evict any single
+                    // entry rather than tracking access order for a true LRU.
+                    Dictionary<string, AgentTurnTrace>.Enumerator enumerator = _latestByRole.GetEnumerator();
+                    if (enumerator.MoveNext())
+                    {
+                        _latestByRole.Remove(enumerator.Current.Key);
+                    }
+                }
+
                 _latestByRole[roleId] = trace;
+            }
+        }
+
+        /// <summary>Clears all recorded traces and the latest-by-role snapshot.</summary>
+        public void Clear()
+        {
+            lock (_gate)
+            {
+                _traces.Clear();
+                _latestByRole.Clear();
             }
         }
 

@@ -41,6 +41,9 @@ CoreAiUnity    ┌────────────────────�
 | `WorldMutation` | `AuditedWorldCommandExecutor` | commandTypeId, payload, actor, success, sourceTag |
 | `PolicyDecision` | _future_ | authority host decision, guard results |
 | `ChainReset` | `AuditLogWriter.ResumeChain` | audits that the hash chain was restarted from genesis (corrupt tail line or I/O failure on resume) |
+| `RotationMarker` | `AuditLogWriter.RotateNow` | last entry of a file about to be rotated away; its hash is what the next file's anchor embeds |
+| `RotationAnchor` | `AuditLogWriter.RotateNow` | first entry of a file created by rotation; its own `prevHash` is the previous file's final hash, not `""` |
+| `QueueDropped` | `AuditLogWriter.FlushBatch` | audits that the bounded in-memory queue dropped older entries under sustained backpressure |
 
 ## File Format
 
@@ -102,14 +105,49 @@ can't be read — it does **not** silently reset the chain. It logs an error and
 `ChainReset` entry (`AuditEntry.ForChainReset`) as the first entry of the new chain segment, so the
 reset itself is an audited, tamper-evident event rather than a hole that looks like a fresh log.
 
+### Rotation: linked, independently-verifiable files
+
+At 50 MB, `AuditLogWriter` rotates the active file instead of growing it forever. Rotation writes
+two administrative entries so each file verifies **standalone** while the pair still proves the
+**set** is linked:
+
+1. A `RotationMarker` entry is appended as the **last** line of the file being rotated away,
+   chained normally from the current head. Its resulting hash is the cross-file link.
+2. The old file is renamed aside (`audit_0001.jsonl`, `audit_0002.jsonl`, ...).
+3. A `RotationAnchor` entry becomes the **first** line of the new active file. Unlike every other
+   entry, its own stored `prevHash` is the previous file's final hash — not `""`.
+
+`AuditLogVerifier.Verify(path)` treats a leading `RotationAnchor`'s stored `prevHash` as the seed
+for that file's chain (instead of requiring `""`), so the new file verifies on its own without
+reading the old one — the cross-file link lives in the bytes, not in verifier state.
+`AuditLogVerifier.VerifyChainedSet(pathsInOrder)` additionally checks that each file's anchor
+`prevHash` equals the previous file's final line hash, proving the whole rotated set is one chain.
+
+If the writer crashes between appending the marker and renaming the file, the next rotation attempt
+detects the existing trailing `RotationMarker` and reuses its hash instead of appending a duplicate.
+
 ## Performance
 
 - `IAuditLog.Record()` only **enqueues** to a `ConcurrentQueue` on the main thread — ~microseconds.
-- A background loop (`AuditLogWriter`) flushes every 500ms or 10 entries:
+- A background loop (`AuditLogWriter`) flushes every 500ms, **draining the queue until empty** each
+  tick (no longer capped at 10 entries per flush) so a burst cannot outrun the writer indefinitely:
   - SHA-256 of ~1 KB: ~tenths of microseconds
   - `File.AppendAllText` for one line: sub-millisecond
   - Total background overhead: negligible
-- Rotation at 50 MB → `audit_0001.jsonl`, `audit_0002.jsonl`, etc.
+- The queue is bounded (10,000 entries). If producers still outrun the flush loop, the **oldest**
+  entries are dropped and the cumulative drop count is itself audited as a periodic `QueueDropped`
+  marker — so sustained backpressure shows up in the log instead of silently growing without bound.
+- `_seq`/`_prevHash` (the chain head) are only advanced **after** the file append succeeds. On a
+  write failure the batch is put back at the front of the queue and retried on the next flush tick,
+  so the chain can never reference a record that isn't actually on disk.
+- `Dispose()` drains the entire queue (not just one batch), bounded by a ~2s deadline so a stuck
+  disk can't hang shutdown forever.
+- All flush entry points (the 500ms timer, `Dispose()`, and the test-only `FlushForTesting()`) share
+  one lock so they can never interleave and corrupt the chain head.
+- Rotation at 50 MB → `audit_0001.jsonl`, `audit_0002.jsonl`, etc. (see above).
+- On WebGL, a successful flush also calls `CoreAi_PersistFsSync` (via the shared
+  `CoreAiWebGlPersistence` helper) so the write reaches IndexedDB without waiting for
+  `Application.Quit` — the same mechanism `FileAgentMemoryStore` and friends use.
 - No gameplay thread blocking.
 
 ## Multiplayer Future

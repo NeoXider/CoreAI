@@ -52,6 +52,16 @@ namespace CoreAI.Infrastructure.Lua
 
         private static readonly IReadOnlyList<LuaModManifest> Empty = new LuaModManifest[0];
 
+        /// <summary>
+        /// Process-wide mutation locks keyed by each mod's package directory (plus a root key), one entry
+        /// per distinct mod id ever mutated - not per currently loaded mod - so cardinality tracks the
+        /// lifetime mod count rather than the live <c>DefaultMaxMods</c>-bounded set. Entries are
+        /// intentionally never evicted: a caller could already hold the <see cref="SemaphoreSlim"/>
+        /// instance fetched from this dictionary while a concurrent eviction-then-<c>GetOrAdd</c> for the
+        /// same key hands a second caller a fresh instance, which would silently break the mutual
+        /// exclusion this lock exists for. In practice the key set is bounded by the number of distinct
+        /// mods ever installed/authored on this host.
+        /// </summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks =
             new(StringComparer.Ordinal);
 

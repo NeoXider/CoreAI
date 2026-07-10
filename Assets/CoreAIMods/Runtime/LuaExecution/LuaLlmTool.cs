@@ -29,7 +29,11 @@ namespace CoreAI.Ai
         public string Name => LuaTool.ExecuteLuaToolName;
 
         /// <inheritdoc />
-        public bool AllowDuplicates => true;
+        // Arbitrary Lua can mutate host/world state non-idempotently, so identical cross-turn echoes
+        // must not re-run. AllowDuplicates=false lets ToolExecutionPolicy suppress only a CROSS-TURN
+        // byte-identical echo (structured no-op); several DIFFERENT Lua blocks in one turn, intra-turn
+        // repeats, and the retry of a FAILED block all still execute.
+        public bool AllowDuplicates => false;
 
         /// <inheritdoc />
         public string Description => LuaTool.ExecuteLuaDescription;

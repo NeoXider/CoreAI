@@ -28,7 +28,7 @@ namespace CoreAI.Tests.EditMode
                 ContainerBuilder builder = new();
 
                 // Services the real composition root registers elsewhere; the installer's entry
-                // points (LuaModRuntimeTicker -> bindings chain) resolve them eagerly at Build().
+                // points resolve them eagerly at Build().
                 builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
                 builder.RegisterInstance<ILog>(Log.Instance);
                 builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();

@@ -21,6 +21,22 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>Maximum width/precision a single <c>string.format</c> conversion specifier may request.</summary>
         public const int MaxStringFormatLength = MaxStringRepLength;
 
+        /// <summary>
+        /// Maximum length of the string that <c>table.concat</c> may build, for the same reason and
+        /// with the same value as <see cref="MaxStringRepLength"/>: a single VM instruction can join an
+        /// entire table's elements into one huge string.
+        /// </summary>
+        public const int MaxTableConcatLength = MaxStringRepLength;
+
+        /// <summary>
+        /// Default per-execution GC allocation budget (bytes). Unlike the caps above, this is enforced
+        /// by sampling <see cref="System.GC.GetTotalMemory(bool)"/> between VM instructions (Mono does not implement the thread-local allocation counter)
+        /// (see <see cref="LuaCsExecutionGuard"/>) rather than at a specific library call, because plain
+        /// string concatenation (<c>s = s .. s</c>) has no library call site to intercept. It is the
+        /// last line of defense against allocation bombs built purely from concatenation opcodes.
+        /// </summary>
+        public const long MaxAllocatedBytesBudget = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
+
         /// <summary>Creates a secured Lua-CSharp state and registers the allowed Lua APIs.</summary>
         public LuaState Create(LuaCsApiRegistry registry = null)
         {
@@ -83,6 +99,16 @@ namespace CoreAI.Sandbox.LuaCs
                 stringLib["format"] = new LuaFunction("format",
                     (ctx, ct) => CappedStringFormat(ctx, ct, originalFormat));
             }
+
+            // table.concat(list [, sep [, i [, j]]]) allocates its whole result in one VM instruction,
+            // the same allocation-bomb class as string.rep/string.format above. Replace it with a
+            // version that aborts once the running result would exceed MaxTableConcatLength.
+            LuaValue tableLibValue = state.Environment["table"];
+            if (tableLibValue.Type == LuaValueType.Table)
+            {
+                LuaTable tableLib = tableLibValue.Read<LuaTable>();
+                tableLib["concat"] = new LuaFunction("concat", CappedTableConcat);
+            }
         }
 
         private static void RemoveGlobal(LuaState state, string name)
@@ -127,6 +153,53 @@ namespace CoreAI.Sandbox.LuaCs
                 }
 
                 sb.Append(s);
+            }
+
+            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(sb.ToString()));
+        }
+
+        // table.concat replacement: mirrors Lua-CSharp's own Lua.Standard.TableLibrary.Concat algorithm
+        // (same start/end/sep defaults and the same "invalid value" error), but aborts as soon as the
+        // in-progress result exceeds MaxTableConcatLength instead of finishing the (potentially huge)
+        // build first.
+        private static System.Threading.Tasks.ValueTask<int> CappedTableConcat(
+            LuaFunctionExecutionContext ctx,
+            CancellationToken ct)
+        {
+            LuaTable table = ctx.GetArgument<LuaTable>(0);
+            string sep = ctx.HasArgument(1) ? ctx.GetArgument<string>(1) : "";
+            long start = ctx.HasArgument(2) ? (long)ctx.GetArgument<double>(2) : 1;
+            long end = ctx.HasArgument(3) ? (long)ctx.GetArgument<double>(3) : table.ArrayLength;
+
+            StringBuilder sb = new(512);
+            for (long i = start; i <= end; i++)
+            {
+                LuaValue v = table[i];
+                if (v.Type == LuaValueType.String)
+                {
+                    sb.Append(v.Read<string>());
+                }
+                else if (v.Type == LuaValueType.Number)
+                {
+                    sb.Append(v.Read<double>().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new InvalidOperationException($"invalid value ({v.Type}) at index {i} in table for 'concat'"));
+                }
+
+                if (i != end)
+                {
+                    sb.Append(sep);
+                }
+
+                if (sb.Length > MaxTableConcatLength)
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new InvalidOperationException(
+                            $"LuaCsSecureEnvironment: table.concat result would exceed {MaxTableConcatLength} chars."));
+                }
             }
 
             return new System.Threading.Tasks.ValueTask<int>(ctx.Return(sb.ToString()));

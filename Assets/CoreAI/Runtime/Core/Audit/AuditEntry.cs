@@ -10,7 +10,16 @@ namespace CoreAI.Audit
         ToolCall,
         WorldMutation,
         PolicyDecision,
-        ChainReset
+        ChainReset,
+
+        /// <summary>Final entry of a file being rotated away; its hash is what the next file's <see cref="RotationAnchor"/> embeds as the cross-file link.</summary>
+        RotationMarker,
+
+        /// <summary>First entry of a file created by rotation; its stored <c>prevHash</c> is the previous file's final hash rather than the empty-string genesis.</summary>
+        RotationAnchor,
+
+        /// <summary>Audits that the writer's bounded in-memory queue dropped older entries due to sustained backpressure.</summary>
+        QueueDropped
     }
 
     public readonly struct AuditEntry
@@ -224,6 +233,58 @@ namespace CoreAI.Audit
                 policyDecision: "reset",
                 result: "error",
                 resultDetail: reason ?? "");
+        }
+
+        /// <summary>
+        /// Marks the last entry of a file about to be rotated away. Chained normally from the
+        /// current head — its resulting hash becomes the anchor embedded in the next file's
+        /// <see cref="ForRotationAnchor"/> entry.
+        /// </summary>
+        public static AuditEntry ForRotationMarker(long seq, string actor, string prevHash)
+        {
+            return new AuditEntry(
+                seq: seq,
+                kind: AuditEntryKind.RotationMarker,
+                traceId: "",
+                actor: actor,
+                policyDecision: "rotated",
+                result: "ok",
+                prevHash: prevHash);
+        }
+
+        /// <summary>
+        /// First entry of a file created by rotation. Its own <c>prevHash</c> field is the previous
+        /// file's final hash (not the empty-string genesis), so the link between files is embedded
+        /// directly in the chain rather than only in <paramref name="previousFileHash"/> metadata.
+        /// </summary>
+        public static AuditEntry ForRotationAnchor(long seq, string actor, string previousFileName, string previousFileHash)
+        {
+            return new AuditEntry(
+                seq: seq,
+                kind: AuditEntryKind.RotationAnchor,
+                traceId: "",
+                actor: actor,
+                toolName: previousFileName ?? "",
+                args: JsonConvert.SerializeObject(new { previousFile = previousFileName ?? "", previousHash = previousFileHash ?? "" }),
+                policyDecision: "anchored",
+                result: "ok",
+                prevHash: previousFileHash);
+        }
+
+        /// <summary>
+        /// Audits that the bounded writer queue dropped older entries because producers outran the
+        /// flush loop. <paramref name="droppedCount"/> is the cumulative count since the writer started.
+        /// </summary>
+        public static AuditEntry ForQueueDropped(long seq, string actor, long droppedCount)
+        {
+            return new AuditEntry(
+                seq: seq,
+                kind: AuditEntryKind.QueueDropped,
+                traceId: "",
+                actor: actor,
+                policyDecision: "backpressure",
+                result: "dropped",
+                resultDetail: $"entries dropped: {droppedCount}");
         }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using CoreAI.Infrastructure.Lua;
 
 namespace CoreAI.Ai.Hub
 {
@@ -39,6 +40,18 @@ namespace CoreAI.Ai.Hub
 
         /// <inheritdoc />
         public abstract bool IsLoaded(string id);
+
+        /// <inheritdoc />
+        public abstract IReadOnlyList<LuaScriptRevision> ListModVersions(string id);
+
+        /// <inheritdoc />
+        public abstract bool TryRevertMod(string id, int revisionIndex, out string restoredSource);
+
+        /// <inheritdoc />
+        public abstract string ExportMod(string id);
+
+        /// <summary>Runs the VM-specific import (bundle parse + load/reload + persist).</summary>
+        protected abstract bool RuntimeImport(string bundleJson, LuaCapabilities hostGrant, bool allowFull);
 
         /// <inheritdoc />
         public abstract string RecentErrors(string id);
@@ -111,6 +124,8 @@ namespace CoreAI.Ai.Hub
                     Author = manifest.Author,
                     Version = manifest.Version,
                     Origin = manifest.Origin,
+                    UpdateAvailable = manifest.UpdateAvailable,
+                    SeededVersion = manifest.SeededVersion,
                     Capabilities = manifest.Capabilities,
                     StoredActive = manifest.Active,
                     IsStored = true
@@ -258,6 +273,97 @@ namespace CoreAI.Ai.Hub
 
             RaiseChanged();
             return true;
+        }
+
+        /// <inheritdoc />
+        public bool ImportMod(string bundleJson)
+        {
+            if (string.IsNullOrWhiteSpace(bundleJson))
+            {
+                return false;
+            }
+
+            // The runtime import loads/persists and fires ModSourceLoaded on success, which the adapters
+            // already relay to ModsChanged — no extra RaiseChanged needed here.
+            return RuntimeImport(bundleJson, _grant, _allowFull);
+        }
+
+        /// <inheritdoc />
+        public bool ApplyBundledUpdate(string id)
+        {
+            string modId = (id ?? "").Trim();
+            if (modId.Length == 0 || _store == null)
+            {
+                return false;
+            }
+
+            // Never touch a user-authored mod that happens to share an id with a bundled one — mirrors
+            // BundledModSeeder.SeedOne's own guard (empty Origin = not ours to overwrite).
+            if (!_store.TryLoad(modId, out _, out LuaModManifest existing) || existing == null ||
+                string.IsNullOrEmpty(existing.Origin))
+            {
+                return false;
+            }
+
+            BundledMod? match = FindBundledMod(modId);
+            if (match == null || string.IsNullOrWhiteSpace(match.Value.Source))
+            {
+                return false;
+            }
+
+            SaveOrReload(modId, match.Value.Source);
+
+            // SaveOrReload's Persist() already clears UpdateAvailable, but it preserves the pre-update
+            // SeededVersion/SeededHash — re-stamp them to the applied bundle so a later seed pass compares
+            // against what is now actually on disk (otherwise the stale hash would look "user-edited" and
+            // immediately re-flag UpdateAvailable on the next seed).
+            if (_store.TryLoad(modId, out string savedSource, out LuaModManifest saved) && saved != null)
+            {
+                saved.SeededVersion = string.IsNullOrWhiteSpace(match.Value.Version) ? saved.Version : match.Value.Version;
+                saved.SeededHash = Fnv1a(savedSource);
+                saved.UpdateAvailable = false;
+                try
+                {
+                    _store.Save(modId, savedSource, saved);
+                }
+                catch
+                {
+                    // Best-effort: the mod already updated in the runtime + store; the seed-marker
+                    // touch-up only matters for a later seed pass.
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Finds a mod with the given id among the bundled sources (currently Resources-only).</summary>
+        private static BundledMod? FindBundledMod(string modId)
+        {
+            foreach (BundledMod mod in new ResourcesBundledModSource().Load())
+            {
+                if (string.Equals(mod.Id, modId, StringComparison.Ordinal))
+                {
+                    return mod;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>FNV-1a 32-bit hex digest, matching <c>BundledModSeeder.Fnv1a</c>'s edit-detection fingerprint.</summary>
+        private static string Fnv1a(string text)
+        {
+            const uint offset = 2166136261;
+            const uint prime = 16777619;
+            uint hash = offset;
+            byte[] bytes = Encoding.UTF8.GetBytes(text ?? "");
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                hash ^= bytes[i];
+                hash *= prime;
+            }
+
+            return hash.ToString("x8");
         }
 
         /// <summary>Writes source + a header-derived manifest to the store, preserving bundling markers.</summary>
