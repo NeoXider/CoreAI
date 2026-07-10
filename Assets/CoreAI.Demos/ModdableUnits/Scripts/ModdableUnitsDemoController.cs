@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
-using CoreAI.Infrastructure.Lua;
 using VContainer;
 #endif
 
@@ -17,11 +17,11 @@ namespace CoreAI.Demos
     /// nearest enemy and attacks in range. The whole game emerges from mods.
     /// </summary>
     public sealed class ModdableUnitsDemoController : MonoBehaviour
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         , IUnitForge
 #endif
     {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         private const int MaxLogLines = 12;
         private const int MaxUnits = 64;
         private const float ArenaHalfWidth = 7f;
@@ -84,9 +84,12 @@ namespace CoreAI.Demos
             _mods.ModEventEmitted += OnModEvent;
             _mods.ModSourceLoaded += OnModLoaded;
 
-            // Expose the forge API to every WorldEdit-capable Lua script/mod created in this scene.
+            // The forge API (forge_define / forge_spawn / ...) is authored as a Lua-CSharp gameplay
+            // binding set. NOTE: the active Lua-CSharp mod runtime does not yet expose a host seam for
+            // injecting per-scene extension bindings, so these bindings cannot currently be surfaced to
+            // running mods from the demo layer alone. The instance is kept ready so the forge can be
+            // wired the moment CoreAI.Mods adds such an extension point.
             _bindings = new UnitForgeLuaBindings(this);
-            GameLuaBindingsExtensibility.Register(_bindings, LuaCapabilities.WorldEdit);
 
             EnsureUnitRoot();
             _status = "Empty arena. Ask chat to write a mod that forges units.";
@@ -103,7 +106,8 @@ namespace CoreAI.Demos
 
             if (_bindings != null)
             {
-                GameLuaBindingsExtensibility.Unregister(_bindings);
+                // No runtime seam to unregister from (see Start); just drop the reference.
+                _bindings = null;
             }
         }
 
@@ -439,7 +443,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[ModdableUnitsDemo] MoonSharp is unavailable or COREAI_NO_LUA is set; demo is inactive.");
+                "[ModdableUnitsDemo] COREAI_NO_LUA is set; demo is inactive.");
             enabled = false;
         }
 #endif

@@ -3,7 +3,6 @@ using CoreAI.ExampleGame.ArenaProgression.Domain;
 using CoreAI.ExampleGame.ArenaProgression.Presenter;
 using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.ExampleGame.ArenaProgression.View;
-using CoreAI.Infrastructure.Lua;
 using Neo.Progression;
 using UnityEngine;
 
@@ -98,7 +97,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 balance,
                 OpenDraftDebug);
 
-            GameLuaBindingsExtensibility.Register(_luaBindings);
+            // TODO(lua-cs): host-side custom binding extensibility. The MoonSharp-era global
+            // GameLuaBindingsExtensibility hook was removed with the VM. The Lua-CSharp gameplay
+            // bindings are assembled inside LuaCsModRuntimeFactory; wiring a game's own
+            // ILuaCsGameRuntimeBindings into that stack is a follow-up feature. The bindings object is
+            // still constructed here as the reference API surface (see ArenaProgressionLuaBindings).
         }
 
         public void OpenDraftDebug()
@@ -108,11 +111,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 
         private void OnDestroy()
         {
-            if (_luaBindings != null)
-            {
-                GameLuaBindingsExtensibility.Unregister(_luaBindings);
-                _luaBindings = null;
-            }
+            _luaBindings = null;
 
             ArenaProgressionRuntimeHub.ClearSession();
             _saveMeta?.Execute();

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
@@ -15,7 +15,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class WaveAutoBattlerModsDemoController : MonoBehaviour
     {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         public const string HeroDamageSlot = "hero_damage";
         public const string HeroAttackIntervalSlot = "hero_attack_interval";
         public const string HeroRegenSlot = "hero_regen";
@@ -470,7 +470,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[WaveAutoBattlerModsDemo] MoonSharp is unavailable or COREAI_NO_LUA is set; demo is inactive.");
+                "[WaveAutoBattlerModsDemo] COREAI_NO_LUA is set; demo is inactive.");
             enabled = false;
         }
 #endif

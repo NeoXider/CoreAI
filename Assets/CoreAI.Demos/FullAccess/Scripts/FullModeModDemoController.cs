@@ -1,5 +1,5 @@
 using UnityEngine;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
@@ -20,7 +20,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class FullModeModDemoController : MonoBehaviour
     {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         private const string FullModeModId = "full_mode_cube";
 
         /// <summary>
@@ -279,7 +279,7 @@ namespace CoreAI.Demos
 #else
         private void Start()
         {
-            Debug.LogWarning("[FullModeModDemo] MoonSharp is unavailable or COREAI_NO_LUA is set; demo is inactive.");
+            Debug.LogWarning("[FullModeModDemo] COREAI_NO_LUA is set; demo is inactive.");
             enabled = false;
         }
 #endif

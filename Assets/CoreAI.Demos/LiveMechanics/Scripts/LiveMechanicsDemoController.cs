@@ -1,10 +1,9 @@
 using UnityEngine;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
-using CoreAI.Infrastructure.Lua;
 using VContainer;
 #endif
 
@@ -12,13 +11,13 @@ namespace CoreAI.Demos
 {
     /// <summary>
     /// Demo driver for "the LLM rewrites game mechanics live": a tiny auto-battle loop whose
-    /// rules go through <c>LuaLogicSlots</c>. The scene also hosts the CoreAI chat panel routed
+    /// rules go through <c>LuaCsLogicSlots</c>. The scene also hosts the CoreAI chat panel routed
     /// to the built-in <c>Programmer</c> role, so a real model can call <c>execute_lua</c> and
     /// redefine the declared slots (or load mods / publish world commands) while the battle runs.
     /// </summary>
     public sealed class LiveMechanicsDemoController : MonoBehaviour
     {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         /// <summary>Slot: damage per hero attack, args (atk, def) → number.</summary>
         public const string DamageSlot = "damage_formula";
 
@@ -77,14 +76,14 @@ namespace CoreAI.Demos
             _slots.DeclareSlot(LootSlot);
             _slots.DeclareSlot(BossRewardSlot);
             LoadPersistedRules();
-            GameLuaToolExecutor.LuaExecutedSuccessfully += OnLuaExecutedSuccessfully;
+            LuaCsGameToolExecutor.LuaExecutedSuccessfully += OnLuaExecutedSuccessfully;
             _status = "Press C to open the chat and ask the AI to change the rules.";
             Log("Battle started. Default rules: damage = atk - def, attack every 2s, loot = 10 gold.");
         }
 
         private void OnDestroy()
         {
-            GameLuaToolExecutor.LuaExecutedSuccessfully -= OnLuaExecutedSuccessfully;
+            LuaCsGameToolExecutor.LuaExecutedSuccessfully -= OnLuaExecutedSuccessfully;
         }
 
         private void Update()
@@ -265,7 +264,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[LiveMechanicsDemo] MoonSharp is unavailable or COREAI_NO_LUA is set; demo is inactive.");
+                "[LiveMechanicsDemo] COREAI_NO_LUA is set; demo is inactive.");
             enabled = false;
         }
 #endif

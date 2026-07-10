@@ -1,7 +1,7 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using System;
-using CoreAI.Ai;
-using CoreAI.Sandbox;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Sandbox.LuaCs;
 
 namespace CoreAI.Demos
 {
@@ -29,9 +29,9 @@ namespace CoreAI.Demos
     }
 
     /// <summary>
-    /// Lua API that lets mods extend the game with brand-new content. Registered through
-    /// <see cref="CoreAI.Infrastructure.Lua.GameLuaBindingsExtensibility"/> under the
-    /// <see cref="LuaCapabilities.WorldEdit"/> tier, so only world-editing mods can forge units.
+    /// Lua API that lets mods extend the game with brand-new content. Implemented as a Lua-CSharp
+    /// gameplay binding set (<see cref="ILuaCsGameRuntimeBindings"/>) that a host wires into the mod
+    /// runtime at the WorldEdit tier, so only world-editing mods can forge units.
     /// Exposed functions:
     /// <list type="bullet">
     /// <item><c>forge_define(name, team, hp, dmg, speed, range, color)</c> → bool</item>
@@ -40,10 +40,10 @@ namespace CoreAI.Demos
     /// <item><c>forge_clear()</c> — remove live units, keep definitions</item>
     /// <item><c>forge_reset()</c> — remove units and definitions</item>
     /// </list>
-    /// Deliberately uses only plain CLR types (no direct MoonSharp types) so this demo assembly
-    /// never needs a hard reference to the optional MoonSharp package.
+    /// Deliberately uses only plain CLR types (no direct Lua VM types) in its host-facing surface, so
+    /// this demo assembly stays decoupled from the concrete Lua runtime.
     /// </summary>
-    public sealed class UnitForgeLuaBindings : IGameLuaRuntimeBindings
+    public sealed class UnitForgeLuaBindings : ILuaCsGameRuntimeBindings
     {
         private readonly IUnitForge _forge;
 
@@ -52,7 +52,7 @@ namespace CoreAI.Demos
             _forge = forge ?? throw new ArgumentNullException(nameof(forge));
         }
 
-        public void RegisterGameplayApis(LuaApiRegistry registry)
+        public void RegisterGameplayApis(LuaCsApiRegistry registry)
         {
             registry.Register("forge_define",
                 new Func<string, string, double, double, double, double, string, bool>(Define));

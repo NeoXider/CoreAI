@@ -1,15 +1,14 @@
 using System;
-using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.ExampleGame.ArenaProgression.Domain;
 using CoreAI.ExampleGame.ArenaProgression.UseCases;
-using CoreAI.Infrastructure.Lua;
-using CoreAI.Sandbox;
+using CoreAI.Sandbox.LuaCs;
 using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
     /// <summary>Lua API surface for arena progression; see <c>Docs/ARENA_PROGRESSION.md</c>.</summary>
-    public sealed class ArenaProgressionLuaBindings : IGameLuaRuntimeBindings
+    public sealed class ArenaProgressionLuaBindings : ILuaCsGameRuntimeBindings
     {
         private readonly IAddSessionKillXpUseCase _addSessionKillXp;
         private readonly IAddMetaXpUseCase _addMetaXp;
@@ -40,7 +39,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             _openDraftDebug = openDraftDebug;
         }
 
-        public void RegisterGameplayApis(LuaApiRegistry registry)
+        public void RegisterGameplayApis(LuaCsApiRegistry registry)
         {
             registry.Register("arena_add_session_xp", (Action<object>)(v =>
             {

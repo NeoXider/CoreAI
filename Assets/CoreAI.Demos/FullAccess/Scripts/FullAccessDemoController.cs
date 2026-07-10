@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using UnityEngine;
 
 namespace CoreAI.Demos

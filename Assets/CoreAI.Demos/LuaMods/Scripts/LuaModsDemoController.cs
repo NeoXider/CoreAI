@@ -1,5 +1,5 @@
 using UnityEngine;
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
@@ -12,13 +12,13 @@ namespace CoreAI.Demos
 {
     /// <summary>
     /// Demo driver for "Lua as a second game language": loads persistent Lua mods into the
-    /// DI <c>LuaModRuntime</c>, emits game events to them, and shows a <c>LuaLogicSlots</c>
+    /// DI <c>LuaModRuntime</c>, emits game events to them, and shows a <c>LuaCsLogicSlots</c>
     /// formula override falling back to the C# default. No LLM is required — the same runtime
     /// the AI pipeline uses is driven directly from the UI.
     /// </summary>
     public sealed class LuaModsDemoController : MonoBehaviour
     {
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
         private const string WaveDirectorModId = "wave_director";
         private const string DamageTunerModId = "damage_tuner";
         private const string DamageSlot = "damage_formula";
@@ -134,7 +134,7 @@ namespace CoreAI.Demos
 
         private void DrawDamageTunerSection()
         {
-            GUILayout.Label("<b>2. Damage formula via LuaLogicSlots (Read | LogicOverride)</b>", RichLabel());
+            GUILayout.Label("<b>2. Damage formula via LuaCsLogicSlots (Read | LogicOverride)</b>", RichLabel());
 
             const double atk = 25d;
             const double def = 10d;
@@ -212,7 +212,7 @@ namespace CoreAI.Demos
 #else
         private void Start()
         {
-            Debug.LogWarning("[LuaModsDemo] MoonSharp is unavailable or COREAI_NO_LUA is set; demo is inactive.");
+            Debug.LogWarning("[LuaModsDemo] COREAI_NO_LUA is set; demo is inactive.");
             enabled = false;
         }
 #endif

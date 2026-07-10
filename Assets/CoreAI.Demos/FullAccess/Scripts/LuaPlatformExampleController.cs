@@ -1,4 +1,4 @@
-#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+#if !COREAI_NO_LUA
 using System.Collections;
 using System.Collections.Generic;
 using CoreAI.Ai;
@@ -9,7 +9,7 @@ using VContainer;
 namespace CoreAI.Demos
 {
     /// <summary>
-    /// Example host that creates every Lua script itself and loads it into <see cref="LuaModRuntime"/>:
+    /// Example host that creates every Lua script itself and loads it into <see cref="ILuaModRuntime"/>:
     /// a two-mod platform self-test (timers, tick alias, variables/closures, store, cross-mod events,
     /// coroutines) plus a self-playing 3D falling-blocks game ("Tetris") built entirely from one Lua mod
     /// on the WorldEdit API. No LLM involved — this is the deterministic reference the chat agent is

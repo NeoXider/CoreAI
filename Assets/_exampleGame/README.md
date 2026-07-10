@@ -38,7 +38,6 @@ Detailed run and meta gameplay concept: [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGU
 | **MessagePipe** + **MessagePipe.VContainer** | Message bus + container registration |
 | **R3** (`com.cysharp.r3`) | Reactivity for UI and state |
 | **UniTask** | Async without extra allocations |
-| **MoonSharp** (`org.moonsharp.moonsharp`) | Lua sandbox for scripts / use cases (together with **CoreAI**) |
 | **AI Navigation** | Agents on grids/navmeshes (as needed) |
 | **UGUI / UI Toolkit** (through Unity modules) | Hub and run interfaces |
 | **Test Framework** | Tests |
@@ -51,7 +50,7 @@ Plugins in `Assets/Plugins` (for example debug utilities) are included as they e
 |-----------|------------|
 | **LLMUnity** + **OpenAI-compatible HTTP** | Implementations of **`ILlmClient`**; see [`LLMUNITY_SETUP_AND_MODELS.md`](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md) |
 | **Orchestration** | **`IAiOrchestrationService`** / **`AiOrchestrator`**, roles from **`BuiltInAgentRoleIds`** |
-| **Lua** | **`LuaAiEnvelopeProcessor`**, MoonSharp sandbox, Programmer repair on error |
+| **Lua** | **`LuaAiEnvelopeProcessor`**, Lua-CSharp sandbox (bundled, no external package), Programmer repair on error |
 
 The example game **depends** on the public **CoreAI** API (**`com.neoxider.coreai`**), not the other way around: `_exampleGame` contains only game-specific scenes, prefabs, presenters, and use cases for the "arena + hub" mode.
 

@@ -5,7 +5,6 @@
     "CoreAI.Core",
     "CoreAI.Source",
     "CoreAI.Mods",
-    "MoonSharp.Interpreter",
     "Neo.Progression",
     "Neo.Save",
     "Neo.Tools.Random",
