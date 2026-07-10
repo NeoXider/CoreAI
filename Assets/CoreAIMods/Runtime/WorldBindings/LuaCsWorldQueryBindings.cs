@@ -68,13 +68,13 @@ namespace CoreAI.Ai.LuaCs
                 GameObject[] rootObjects = SceneManager.GetActiveScene().GetRootGameObjects();
                 List<object> results = new();
 
-                for (int i = 0; i < rootObjects.Length; i++)
+                bool truncated = WorldQuerySceneWalker.CollectByName(
+                    rootObjects, searchPattern, MaxFindResults, MatchesPattern, results);
+                if (truncated)
                 {
-                    CollectObjectsRecursive(rootObjects[i], searchPattern, results);
-                    if (results.Count >= MaxFindResults)
-                    {
-                        break;
-                    }
+                    Debug.LogWarning(
+                        $"coreai_world_find: visited-node budget ({WorldQuerySceneWalker.MaxVisitedNodes}) " +
+                        "reached before the scene walk finished; results may be incomplete.");
                 }
 
                 return results;
@@ -133,32 +133,9 @@ namespace CoreAI.Ai.LuaCs
                 }));
         }
 
-        private static void CollectObjectsRecursive(GameObject parent, string searchPattern, List<object> results)
+        private static bool MatchesPattern(string objectName, string searchPattern)
         {
-            if (parent == null || results.Count >= MaxFindResults)
-            {
-                return;
-            }
-
-            if (string.IsNullOrEmpty(searchPattern) ||
-                parent.name.IndexOf(searchPattern, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                results.Add(parent.name);
-            }
-
-            if (results.Count >= MaxFindResults)
-            {
-                return;
-            }
-
-            for (int i = 0; i < parent.transform.childCount; i++)
-            {
-                CollectObjectsRecursive(parent.transform.GetChild(i).gameObject, searchPattern, results);
-                if (results.Count >= MaxFindResults)
-                {
-                    return;
-                }
-            }
+            return objectName.IndexOf(searchPattern, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool IsFinite(double value)
