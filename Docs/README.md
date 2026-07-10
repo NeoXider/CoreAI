@@ -37,6 +37,10 @@ Use these paths when you have a concrete task:
 |---|---|
 | [TODO.md](../TODO.md) | Live backlog, completed archive, and remaining feature-level debt. |
 | [TODO/MultiAgent_Orchestration_v2.0.md](../TODO/MultiAgent_Orchestration_v2.0.md) | Multi-agent orchestration plan. |
+| [REPOSITORY_AUDIT_2026-07-10.md](REPOSITORY_AUDIT_2026-07-10.md) | Audit #1: architecture, correctness, stability, security, performance findings F-01…F-25. |
+| [REPOSITORY_AUDIT_2_2026-07-10.md](REPOSITORY_AUDIT_2_2026-07-10.md) | Audit #2: verification of the remediation wave, new findings A-01…A-06, release gate. |
+| [IDEA_IMPROVEMENT_AUDIT_2026-07-10.md](IDEA_IMPROVEMENT_AUDIT_2026-07-10.md) | Product/idea audit: pillars, positioning, license friction, top-10 idea improvements. |
+| [Local/Progress/](Local/Progress/) | Session-level remediation reports (`PROGRESS.*`) referenced by the audits (local-only, gitignored). |
 
 ## Business Plans
 
