@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
@@ -46,17 +47,28 @@ namespace CoreAI.Composition
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
 
+            int maxRetries = settings != null ? settings.MaxLlmRequestRetries : 0;
             builder.Register<ILlmClient>(c =>
-                new LoggingLlmClientDecorator(
-                    new RoutingLlmClient(
-                        c.Resolve<ILlmClientRegistry>(),
-                        c.Resolve<IPublisher<LlmBackendSelected>>(),
-                        c.Resolve<IPublisher<LlmRequestStarted>>(),
-                        c.Resolve<IPublisher<LlmRequestCompleted>>(),
-                        c.Resolve<IPublisher<LlmUsageReported>>()),
-                    c.Resolve<ILog>(),
-                    llmTimeout,
-                    settings != null ? settings.MaxLlmRequestRetries : 0), Lifetime.Singleton);
+                // Portable-core request timeout (works headless/standalone; Unity CoreAiChatService keeps
+                // its PlayerLoop timer for WebGL — both target LlmRequestTimeoutSeconds and are additive).
+                new TimeoutLlmClientDecorator(
+                    new LoggingLlmClientDecorator(
+                        // Streaming-path retry (pre-commit only) — the logging decorator's HTTP retry covers
+                        // the non-streaming path; this closes the streaming single-shot gap.
+                        new RetryingStreamingLlmClientDecorator(
+                            new RoutingLlmClient(
+                                c.Resolve<ILlmClientRegistry>(),
+                                c.Resolve<IPublisher<LlmBackendSelected>>(),
+                                c.Resolve<IPublisher<LlmRequestStarted>>(),
+                                c.Resolve<IPublisher<LlmRequestCompleted>>(),
+                                c.Resolve<IPublisher<LlmUsageReported>>()),
+                            maxRetries,
+                            attempt => TimeSpan.FromSeconds(Math.Min(1 << attempt, 8)),
+                            msg => c.Resolve<ILog>().Warn(msg, LogTag.Llm)),
+                        c.Resolve<ILog>(),
+                        llmTimeout,
+                        maxRetries),
+                    () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
 
             // Resolve and cache required local values.
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **R6 resilience: streaming-path retry + portable-core request timeout.** Two new `CoreAI.Core`
+  decorators: `RetryingStreamingLlmClientDecorator` retries a stream only BEFORE it commits content (so a
+  transient pre-first-token failure recovers without duplicating output or re-firing tool side effects),
+  closing the gap where only `CompleteAsync` retried; `TimeoutLlmClientDecorator` bounds both the streaming
+  and non-streaming paths off `LlmRequestTimeoutSeconds` so headless/standalone hosts get a request timeout
+  too (previously only the Unity `CoreAiChatService` enforced it). 12 EditMode tests.
+
 ## 5.4.0 - MoonSharp removed; Lua-CSharp is the only VM (2026-07-10)
 
 - **MoonSharp fully removed — Lua-CSharp is now the single Lua runtime.** The legacy MoonSharp VM and its
