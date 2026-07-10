@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Logging;
 using VContainer.Unity;
@@ -8,9 +9,16 @@ namespace CoreAI.Composition
     /// <summary>
     /// VContainer entry point that initializes and resets the global CoreAI facade.
     /// </summary>
+    /// <remarks>
+    /// When an additive scene spins up a second entry point, it is registered as a standby
+    /// owner rather than dropped: if the current owner is disposed (e.g. its scope/scene is
+    /// unloaded), ownership hands off to the next live standby so the CoreAI facade keeps
+    /// resolving instead of going stale until someone re-initializes it manually.
+    /// </remarks>
     public sealed class CoreAIGameEntryPoint : IStartable, IDisposable
     {
         private static readonly object StartGate = new();
+        private static readonly List<CoreAIGameEntryPoint> StandbyInstances = new();
         private static bool _isInitialized;
 
         /// <summary>
@@ -23,6 +31,7 @@ namespace CoreAI.Composition
         private readonly AgentMemoryPolicy _policy;
         private readonly IAgentMemoryStore _memoryStore;
         private bool _started;
+        private bool _isOwner;
 
         /// <summary>Initializes a new instance of CoreAIGameEntryPoint.</summary>
         public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
@@ -37,6 +46,8 @@ namespace CoreAI.Composition
         /// <summary>Starts the entry point and registers CoreAI services for runtime use.</summary>
         public void Start()
         {
+            bool becomeOwner;
+
             lock (StartGate)
             {
                 if (_started)
@@ -44,18 +55,36 @@ namespace CoreAI.Composition
                     return;
                 }
 
+                _started = true;
+
                 if (_isInitialized)
                 {
-                    _logger.Debug(
-                        "CoreAI already initialized in this process. Duplicate CoreAIGameEntryPoint start skipped.",
-                        LogTag.Composition);
-                    return;
+                    // Another entry point already owns the facade; register as a standby owner
+                    // so we can take over if that owner is later disposed (e.g. additive scene unload).
+                    StandbyInstances.Add(this);
+                    becomeOwner = false;
                 }
-
-                _isInitialized = true;
-                _started = true;
+                else
+                {
+                    _isInitialized = true;
+                    _isOwner = true;
+                    becomeOwner = true;
+                }
             }
 
+            if (!becomeOwner)
+            {
+                _logger.Debug(
+                    "CoreAI already initialized in this process. This CoreAIGameEntryPoint is registered as a standby owner.",
+                    LogTag.Composition);
+                return;
+            }
+
+            InitializeAsOwner();
+        }
+
+        private void InitializeAsOwner()
+        {
             CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
 
             _logger.Info(
@@ -76,6 +105,9 @@ namespace CoreAI.Composition
 
         public void Dispose()
         {
+            bool wasOwner;
+            CoreAIGameEntryPoint promoted = null;
+
             lock (StartGate)
             {
                 if (!_started)
@@ -84,10 +116,49 @@ namespace CoreAI.Composition
                 }
 
                 _started = false;
-                _isInitialized = false;
+                wasOwner = _isOwner;
+
+                if (wasOwner)
+                {
+                    _isOwner = false;
+                    _isInitialized = false;
+
+                    while (StandbyInstances.Count > 0)
+                    {
+                        CoreAIGameEntryPoint candidate = StandbyInstances[0];
+                        StandbyInstances.RemoveAt(0);
+
+                        // Skip standbys that were disposed while still waiting (never became owner).
+                        if (!candidate._started)
+                        {
+                            continue;
+                        }
+
+                        candidate._isOwner = true;
+                        _isInitialized = true;
+                        promoted = candidate;
+                        break;
+                    }
+                }
+                else
+                {
+                    StandbyInstances.Remove(this);
+                }
             }
 
-            CoreAIAgent.Reset();
+            if (!wasOwner)
+            {
+                return;
+            }
+
+            if (promoted != null)
+            {
+                promoted.InitializeAsOwner();
+            }
+            else
+            {
+                CoreAIAgent.Reset();
+            }
         }
 
         internal static void ResetInitializationGuardForTests()
@@ -95,6 +166,7 @@ namespace CoreAI.Composition
             lock (StartGate)
             {
                 _isInitialized = false;
+                StandbyInstances.Clear();
             }
         }
 
