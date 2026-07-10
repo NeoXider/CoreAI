@@ -24,7 +24,7 @@ namespace CoreAI.Sandbox.LuaCs
     public sealed class LuaCsExecutionGuard
     {
         /// <summary>Default per-execution GC allocation budget enforced between VM instructions.</summary>
-        public const long DefaultMaxAllocatedBytesBudget = 64 * 1024 * 1024;
+        public const long DefaultMaxAllocatedBytesBudget = 256 * 1024 * 1024;
 
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
@@ -34,7 +34,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="maxSteps">Maximum Lua-CSharp instruction steps allowed for one guarded call.</param>
         /// <param name="maxAllocatedBytes">
         /// Maximum total GC allocation (bytes) permitted for one guarded call, checked on every
-        /// instruction. Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (64MB).
+        /// instruction. Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (256MB).
         /// <c>&lt;= 0</c> disables the check.
         /// </param>
         public LuaCsExecutionGuard(

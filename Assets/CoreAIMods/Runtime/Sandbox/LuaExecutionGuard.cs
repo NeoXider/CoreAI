@@ -31,7 +31,7 @@ namespace CoreAI.Sandbox
         /// <param name="maxAllocatedBytes">
         /// Maximum total GC allocation (bytes) permitted for one guarded call, checked on every VM
         /// instruction. Defaults to
-        /// <see cref="InstructionLimitDebugger.DefaultMaxAllocatedBytesBudget"/> (64MB).
+        /// <see cref="InstructionLimitDebugger.DefaultMaxAllocatedBytesBudget"/> (256MB).
         /// </param>
         public LuaExecutionGuard(
             int timeoutMs = 2000,

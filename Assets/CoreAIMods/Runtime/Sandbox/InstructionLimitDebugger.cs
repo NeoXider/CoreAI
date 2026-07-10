@@ -20,7 +20,7 @@ namespace CoreAI.Sandbox
     internal sealed class InstructionLimitDebugger : IDebugger
     {
         /// <summary>Default per-execution GC allocation budget enforced between VM instructions.</summary>
-        public const long DefaultMaxAllocatedBytesBudget = 64 * 1024 * 1024;
+        public const long DefaultMaxAllocatedBytesBudget = 256 * 1024 * 1024;
 
         private long _maxSteps;
         private int _timeoutMs;
