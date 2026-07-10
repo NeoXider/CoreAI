@@ -1,9 +1,10 @@
 {
-  "name": "CoreAI.Tests.PlayMode.LlmVerification",
+  "name": "CoreAI.Benchmark.Tests",
   "rootNamespace": "",
   "references": [
     "CoreAI.Tests.PlayMode.Shared",
     "CoreAI.Tests.PlayMode.LlmInfra",
+    "CoreAI.Benchmarking",
     "CoreAI.Core",
     "CoreAI.Mods",
     "CoreAI.Source",

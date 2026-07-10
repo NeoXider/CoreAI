@@ -125,9 +125,9 @@ CoreAI includes a local game-creation benchmark that measures how well an LLM bu
 
 </details>
 
-Comparisons are rebuilt from any set of past report JSONs you pick — see [custom comparisons](Docs/BENCHMARK.md#custom-comparisons-from-hand-picked-reports) in the benchmark guide.
+Comparisons are rebuilt from any set of past report JSONs you pick — see [custom comparisons](Assets/CoreAIBenchmark/README.md#custom-comparisons-from-hand-picked-reports) in the benchmark guide.
 
-Benchmark docs: [full benchmark guide](Docs/BENCHMARK.md) and [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed). Per-model G6 free-build castle screenshots live in the [benchmark guide's gallery](Docs/BENCHMARK.md#castle-gallery---g6-free-build-visual).
+Benchmark docs: [full benchmark guide](Assets/CoreAIBenchmark/README.md) and [benchmark design](Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed). Per-model G6 free-build castle screenshots live in the [benchmark guide's gallery](Assets/CoreAIBenchmark/README.md#castle-gallery---g6-free-build-visual).
 
 ---
 
@@ -633,7 +633,7 @@ var storyteller = new AgentBuilder("Storyteller")
 Start from the index and pick the level that matches your goal:
 
 - **Game-Creation Benchmark:** live PlayMode benchmark guide and design for scored model-driven game creation:
-  [full benchmark guide](Docs/BENCHMARK.md), [benchmark design](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md),
+  [full benchmark guide](Assets/CoreAIBenchmark/README.md), [benchmark design](Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/BENCHMARK_DESIGN.md),
   and [an example full report](Docs/Images/example_report/example_report.md).
 
 > 🧭 **[Docs/README.md](Docs/README.md)** — repository documentation entry point.
