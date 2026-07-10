@@ -216,6 +216,61 @@ namespace CoreAI.Tests.EditMode
             Assert.AreSame(history, pruned);
         }
 
+        /// <summary>
+        /// Hardening: a Full-policy tool block indents the tool output under "  Detail:", and that output may
+        /// itself contain markdown/YAML lines like "  - read_file: ok". Those nested lines must NOT be parsed
+        /// as tool names — otherwise a later block whose Detail merely mentions an older tool would wrongly
+        /// supersede and drop it. Here the newer block ran 'list_dir' but its Detail text contains
+        /// "- spawn_quiz: ok"; the older real 'spawn_quiz' result must survive.
+        /// </summary>
+        [Test]
+        public void Prune_IgnoresNestedDetailLines_DoesNotFalselySupersede()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok created quiz"),
+                Msg("assistant", "noted"),
+                Msg("tool",
+                    "## Tool Results\n- list_dir: ok\n  Detail:\n  Files found:\n  - spawn_quiz: ok\n  - other: FAILED"),
+                Msg("user", "continue")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            // The older spawn_quiz block is NOT superseded (the newer block's only real tool is list_dir),
+            // so nothing is removed and the original array is returned unchanged.
+            Assert.AreSame(history, pruned,
+                "Nested Detail lines must not be treated as tool names; the older result must survive.");
+        }
+
+        /// <summary>
+        /// The genuine supersede path still works when the entry is a real top-level "- name: status" bullet,
+        /// even for the Full policy with a following indented Detail block.
+        /// </summary>
+        [Test]
+        public void Prune_StillSupersedes_RealTopLevelEntry_WithFullDetail()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok old\n  Detail:\n  old detail"),
+                Msg("assistant", "noted"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok fresh\n  Detail:\n  fresh detail"),
+                Msg("user", "continue")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            // Older spawn_quiz block IS dropped (same real tool, newer wins).
+            Assert.AreEqual(4, pruned.Length);
+            Assert.AreEqual("opening", pruned[0].Content);
+            Assert.AreEqual("noted", pruned[1].Content);
+            Assert.AreEqual("## Tool Results\n- spawn_quiz: ok fresh\n  Detail:\n  fresh detail",
+                pruned[2].Content);
+            Assert.AreEqual("continue", pruned[3].Content);
+        }
+
         private static ChatMessage Msg(string role, string content)
         {
             return new ChatMessage { Role = role, Content = content };

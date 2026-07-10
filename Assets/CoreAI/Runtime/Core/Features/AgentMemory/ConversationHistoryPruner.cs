@@ -267,6 +267,19 @@ namespace CoreAI.Ai
             return string.Equals(message.Role, "tool", StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Extracts the tool names from a "## Tool Results" memory block written by
+        /// <c>AiOrchestrator.BuildToolResultsMemoryBlock</c>. Each real entry is a TOP-LEVEL bullet of the
+        /// exact shape <c>- {name}: {ok|FAILED}[ detail]</c>.
+        /// <para>
+        /// Hardened against the <c>Full</c> policy, whose entries are followed by an indented
+        /// <c>  Detail:</c> block containing arbitrary tool output — which itself may contain lines like
+        /// <c>  - foo: bar</c> (markdown/YAML/diff). A naive "first '-' … first ':'" parse would treat that
+        /// nested content as tool names and wrongly supersede/drop tool messages. We therefore require:
+        /// (1) the bullet is at column 0 (no leading whitespace — nested detail is always indented), and
+        /// (2) the value after the colon starts with a known status token (<c>ok</c> / <c>FAILED</c>).
+        /// </para>
+        /// </summary>
         private static List<string> ExtractToolNames(string content)
         {
             List<string> toolNames = new();
@@ -281,25 +294,24 @@ namespace CoreAI.Ai
             for (int i = 0; i < lines.Length; i++)
             {
                 string line = lines[i];
-                int start = 0;
-                while (start < line.Length && char.IsWhiteSpace(line[start]))
-                {
-                    start++;
-                }
 
-                if (start >= line.Length || line[start] != '-')
+                // Entry bullets are at column 0. Any leading whitespace means this is nested Detail content
+                // (Full policy indents it by two spaces), never a tool-name entry — skip it.
+                if (line.Length < 2 || line[0] != '-' || line[1] != ' ')
                 {
                     continue;
                 }
 
-                start++;
-                while (start < line.Length && char.IsWhiteSpace(line[start]))
-                {
-                    start++;
-                }
-
+                int start = 2;
                 int colon = line.IndexOf(':', start);
                 if (colon <= start)
+                {
+                    continue;
+                }
+
+                // The value after "name:" must begin with a status token; otherwise this "- x: y" line is
+                // arbitrary content that merely resembles an entry, not a real tool result.
+                if (!ValueStartsWithStatus(line, colon + 1))
                 {
                     continue;
                 }
@@ -312,6 +324,38 @@ namespace CoreAI.Ai
             }
 
             return toolNames;
+        }
+
+        /// <summary>True when the text after a tool entry's colon begins with "ok" or "FAILED".</summary>
+        private static bool ValueStartsWithStatus(string line, int valueStart)
+        {
+            int p = valueStart;
+            while (p < line.Length && line[p] == ' ')
+            {
+                p++;
+            }
+
+            return StartsWithToken(line, p, "ok") || StartsWithToken(line, p, "FAILED");
+        }
+
+        /// <summary>Ordinal match of <paramref name="token"/> at <paramref name="pos"/>, ended by end-of-line or a space.</summary>
+        private static bool StartsWithToken(string line, int pos, string token)
+        {
+            if (pos + token.Length > line.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < token.Length; i++)
+            {
+                if (line[pos + i] != token[i])
+                {
+                    return false;
+                }
+            }
+
+            int after = pos + token.Length;
+            return after >= line.Length || line[after] == ' ';
         }
 
         private static bool IsExactConsecutiveDuplicate(ChatMessage left, ChatMessage right)
