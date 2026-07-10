@@ -66,7 +66,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
                 Task.FromResult<object>("{\"Success\":true}"));
 
-            // Global settings default is 10; override to 2 must win.
+            // Global settings default is 20; a per-request override of 2 must win.
             SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 true, new List<Ai.ILlmTool>(), "TestRole", 5, "",
@@ -109,8 +109,42 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
             await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
 
-            // 25 tool roundtrips + 1 final text turn = 26 model calls; the default-10 valve never fired.
+            // 25 tool roundtrips + 1 final text turn = 26 model calls; the default-20 valve never fired.
             Assert.AreEqual(26, callCount, "Override of 0 must not cap the loop (unlimited)");
+        }
+
+        /// <summary>
+        /// With NO per-request override (null), the loop is capped by the GLOBAL settings value — proving the
+        /// settings-driven safety valve terminates a runaway tool-calling model even without a per-agent or
+        /// per-call override. Complements the override-path tests above.
+        /// </summary>
+        [Test]
+        public async Task GlobalSettingsRoundtripCap_TerminatesLoop()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                // Never stop on its own — force the safety valve to be what ends the loop.
+                return MakeToolCallResponse("ok_tool", "call_" + callCount);
+            });
+
+            MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.SetMaxToolCallRoundtrips(3); // global cap; no per-request override passed below
+
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                settings, true, new List<Ai.ILlmTool>(), "TestRole", 50, "",
+                null, null, null); // maxRoundtripsOverride = null → inherit the global cap
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { okTool } };
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
+
+            // 3 tool roundtrips → over cap → one final tools-disabled summary roundtrip (F6) = 4 model calls.
+            Assert.AreEqual(4, callCount,
+                "The global settings cap (3) must stop the loop after 3 roundtrips + 1 final no-tools summary");
         }
 
         [Test]
