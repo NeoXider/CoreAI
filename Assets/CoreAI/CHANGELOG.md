@@ -8,6 +8,15 @@
   observed rule as Lua) — the "director-AI / beyond the chat box" axis. Prompts state the goal, not the
   tool syntax, so weaker local models visibly fail the conditional-selection step. Scores are only
   comparable within a suite version; v2 starts a new leaderboard section.
+- **Benchmark v2 — less hand-holding, more intelligence.** Reworded prompts that previously dictated the
+  exact solution so the test measures understanding, not transcription: G6 castle no longer prescribes
+  "four corner towers + walls + 24 objects" (every model just built that) — it now asks for a
+  believable, detailed castle with a lived-in courtyard and surroundings, and grading rewards richness,
+  variety and detail while treating tower/wall/gate/keep as non-mandatory castle *signals* (a keep-and-
+  courtyard or asymmetric fort scores fine). G1 arena/coin-collector no longer dictate which primitive
+  shape each object must be, and the coin-collector describes the Lua rules in words instead of pasting
+  the function bodies — the model must choose shapes and derive the formulas itself. G5 (instruction
+  discipline) and G2 (code-transcription baseline) keep their intentional strictness.
 - **Circuit breaker for LLM backends** (`CircuitBreakerLlmClientDecorator`). After N consecutive
   TRANSIENT failures (timeout, rate-limit, backend-unavailable, provider/routing error) the breaker
   trips **open** and short-circuits calls with `BackendUnavailable` *without invoking the backend* — so a

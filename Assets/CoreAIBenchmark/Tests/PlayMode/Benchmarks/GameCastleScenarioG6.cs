@@ -190,24 +190,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "are NOT all the same base size: cube/sphere are 1m unscaled, but cylinder and capsule are " +
                 "already 2m TALL unscaled at 1m diameter — for a tower/pillar of height H standing on the ground, " +
                 "use scaleY = H/2 (not H) and place its pivot at y = H/2.\n\n" +
-                "A castle MUST have, at minimum: four corner towers, walls connecting them into a closed perimeter, a " +
-                "gate gap at the front, and a central keep. Then add grandeur: battlements along the walls, flags on " +
-                "top of the towers, roofs, a bridge, a moat ring, trees and torches outside.\n\n" +
-                "If you are unsure how to lay it out, follow this proven skeleton and then EXTEND it with more detail:\n" +
-                "- Ground: prefabKey='cube' at (0,0,0), scaleX=18, scaleY=0.2, scaleZ=18.\n" +
-                "- Four corner towers: prefabKey='cylinder' at (-6,1.5,-6), (6,1.5,-6), (-6,1.5,6), (6,1.5,6), scaleX=1.4, scaleY=1.5, scaleZ=1.4 " +
-                "(cylinder's 2m unscaled height × scaleY=1.5 = 3m tall tower standing on the ground).\n" +
-                "- Walls: cubes connecting towers. A wall piece is about 2 meters long and thin: scaleX=2, scaleY=1.2, scaleZ=0.35 for east-west walls, or scaleX=0.35, scaleY=1.2, scaleZ=2 for north-south walls. " +
-                "Leave the front edge z=6 open in the middle for the gate.\n" +
-                "- Keep: several cubes near (0,1,0), at least 3 meters wide/tall using scaleX/scaleY/scaleZ.\n" +
-                "- Flags: prefabKey='cylinder' on top of each tower at y=4, with thin scaleX/scaleZ and taller scaleY.\n" +
-                "- Battlements: small cubes at y=3 along the wall tops; torches (cylinders) flanking the gate.\n\n" +
-                "Aim for AT LEAST 24 objects — ideally 30+. Place walls so the towers actually connect into a " +
-                "perimeter and keep every targetName distinct. Do not stop early: keep emitting spawn calls until the " +
-                "castle is full and detailed — quantity and structure come first.\n\n" +
-                "Give it natural variety — varied tower heights, differently sized pieces, angled roofs — so it " +
-                "does not read as a grid of identical cubes. Use scaleX, scaleY, scaleZ and rotations fx/fy/fz " +
-                "directly in spawn calls; do not build everything from default 1m cubes.\n\n" +
+                "It should clearly read as a castle, but HOW you compose it is up to you — do not just place a " +
+                "ring of four towers and stop. Aim for a place that feels alive and interesting to look at. " +
+                "Think about what makes a castle memorable and CHOOSE what to include, for example: a lived-in " +
+                "courtyard (a well, market stalls, crates, barrels, a training dummy, benches, a campfire), " +
+                "buildings of different heights and rooflines, a gatehouse and a road leading up to it, and a " +
+                "surrounding world that continues past the walls — outbuildings, gardens, tents, trees, a pond " +
+                "or moat, rocks, fences, a watchtower on a hill. The area BEHIND and AROUND the castle should " +
+                "not be empty. Uneven, asymmetric, hand-placed layouts read as more real than a perfect grid.\n\n" +
+                "Depth and detail are what score here, not a fixed part count. Prefer many small, varied, " +
+                "purposeful pieces (props, decorations, level-of-detail) over a few big blocks. Give every " +
+                "object a DISTINCT targetName, and keep spawning until the scene feels full and finished.\n\n" +
+                "Sizing note for standing pieces: cylinder and capsule are already 2m tall unscaled at 1m " +
+                "diameter, so for a tower/pillar of height H use scaleY = H/2 and pivot y = H/2. Use " +
+                "scaleX/scaleY/scaleZ and rotations fx/fy/fz freely for long, tall, thin or angled parts so it " +
+                "does not read as a grid of identical cubes.\n\n" +
                 "COLOR the castle: use action='set_color' with targetName and stringValue as an HTML color to " +
                 "tint each major group — e.g. grey stone '#9aa0a8' walls and towers, dark red '#8e3b2f' roofs " +
                 "and flags, brown '#6b4a2f' gate and bridge, green '#3f7d3a' treetops, blue '#3b6ea5' moat " +
@@ -260,18 +257,24 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 if (!genericFreeBuild)
                 {
-                    g.Add("corner_towers", "placed four recognizable corner towers", 15,
-                        cornerTowerQuadrants >= 4, true,
+                    // "Reads as a castle" is rewarded through recognizable castle-ness, but NONE of these are
+                    // mandatory or dictate an exact layout: a model that expresses the castle differently
+                    // (a keep-and-courtyard, a hillside fort, an asymmetric stronghold) is not punished. We
+                    // reward the SIGNALS of a castle, each worth a little, so richness/variety/detail below
+                    // carry the score — not a fixed four-towers-and-walls recipe.
+                    int castleSignals =
+                        (cornerTowerQuadrants >= 2 ? 1 : 0) + // some towers, not necessarily 4 corners
+                        (wallSides >= 2 ? 1 : 0) +            // some enclosing walls, not a full perimeter
+                        (gateGap ? 1 : 0) +
+                        (centralKeep ? 1 : 0);
+                    g.Add("reads_as_castle", "shows recognizable castle features (towers/walls/gate/keep)", 12,
+                        castleSignals >= 2,
                         dimension: BenchmarkDimension.TaskCompletion,
-                        detail: $"{cornerTowerQuadrants}/4 tower quadrants");
-                    g.Add("connected_perimeter", "built wall runs on all four sides", 15,
-                        wallSides >= 4, true,
+                        detail: $"{castleSignals}/4 castle signals (towers={cornerTowerQuadrants}, walls={wallSides}, gate={gateGap}, keep={centralKeep})");
+                    g.Add("castle_depth", "went beyond a bare wall ring — richer, fuller castle", 16,
+                        castleSignals >= 3 && extras >= 4,
                         dimension: BenchmarkDimension.TaskCompletion,
-                        detail: $"{wallSides}/4 wall sides");
-                    g.Add("front_gate_gap", "left a front gate gap between side wall runs", 8, gateGap,
-                        dimension: BenchmarkDimension.TaskCompletion);
-                    g.Add("central_keep", "built a central keep near the castle middle", 10, centralKeep,
-                        dimension: BenchmarkDimension.TaskCompletion);
+                        detail: $"{castleSignals}/4 signals + {extras} detail groups");
                 }
 
                 g.Add("transform_variety", "used explicit scale or rotation for varied sizes/angles",
@@ -285,13 +288,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     detail: $"{nonUniformScaled} non-uniform scaled spawns");
                 g.Add("detail_groups", genericFreeBuild
                         ? "added named detail groups beyond the core layout"
-                        : "added flags, battlements, moat, bridge, torches, trees, or roofs",
-                    genericFreeBuild ? 5 : 10,
-                    genericFreeBuild ? namedDetailGroups >= 3 : extras >= 3,
+                        : "filled it with props/decor/surroundings (courtyard, outbuildings, life around it)",
+                    genericFreeBuild ? 5 : 14,
+                    genericFreeBuild ? namedDetailGroups >= 3 : namedDetailGroups >= 5,
                     dimension: BenchmarkDimension.TaskCompletion,
                     detail: genericFreeBuild
                         ? $"{namedDetailGroups} named detail groups"
-                        : $"{extras} extra-detail groups");
+                        : $"{namedDetailGroups} named detail groups / {extras} castle extras");
 
                 // Soft, non-mandatory: the prompt now explicitly asks for set_color tints on the major
                 // groups (an all-grey scene reads as unfinished in the hero shot).

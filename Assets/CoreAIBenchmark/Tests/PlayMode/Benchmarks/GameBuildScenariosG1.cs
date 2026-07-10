@@ -126,10 +126,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             protected override bool UsesLua => false;
 
             public override string Goal =>
-                "Build a small arena with the world_command tool. Spawn exactly five objects, each with " +
-                "action='spawn' and a distinct targetName. Choose a fitting primitive prefabKey for each: " +
-                "prefabKey='capsule' for 'Player', and prefabKey='sphere' for 'Enemy1', 'Enemy2', 'Enemy3', " +
-                "'Enemy4'. Place them at distinct x/z positions so they do not all overlap. Do not spawn anything else.";
+                "Set up a small combat arena with the world_command tool: one player and four enemies. Give " +
+                "them the clear names 'Player', 'Enemy1', 'Enemy2', 'Enemy3', 'Enemy4', pick whatever " +
+                "primitive shape you think best represents each, and place them at distinct positions so they " +
+                "don't overlap. Build only what was asked — the player and the four enemies, nothing else.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -204,12 +204,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override string Goal =>
                 "Build a simple coin-collector game.\n" +
-                "1. With world_command action='spawn', spawn exactly five objects with distinct targetName and a " +
-                "fitting primitive prefabKey: 'Player' (capsule), 'Coin1', 'Coin2', 'Coin3' (cylinder), 'Goal' (cube).\n" +
-                "Place the Player, coins, and Goal at distinct x/z positions so the layout is playable.\n" +
-                "2. With execute_lua, define two logic slots:\n" +
-                "logic_define('score_formula', function(coins) return coins end)\n" +
-                "logic_define('win_condition', function(score) return score >= 3 end)\n" +
+                "1. With world_command action='spawn', create the playable objects: a 'Player', three coins " +
+                "named 'Coin1', 'Coin2', 'Coin3', and a 'Goal'. Pick fitting primitive shapes yourself and " +
+                "place them at distinct positions so the layout is playable. Spawn only these five objects.\n" +
+                "2. With execute_lua, define two logic slots: a 'score_formula' that takes the number of coins " +
+                "collected and returns the score (one point per coin), and a 'win_condition' that takes the " +
+                "score and returns true once the player has collected at least 3 coins. Use " +
+                "logic_define('name', function(...) ... end); work out the bodies yourself.\n" +
                 LuaVerificationNote;
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
