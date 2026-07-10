@@ -7,7 +7,7 @@
 **CoreAI is a Unity framework for LLM-powered NPCs and agents that call your game code** — function calling, tools, persistent memory, and runtime Lua — running on a **local 4 GB model** or any **OpenAI-compatible API**. No cloud keys required, no scripted dialogue trees.
 
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
-[![EditMode tests](https://img.shields.io/badge/EditMode-1314%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![EditMode tests](https://img.shields.io/badge/EditMode-1%2C500%2B%20passing-brightgreen)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI%20API-blue)](#-recommended-models)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
@@ -73,7 +73,7 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
 | [Integration examples & ideas](#-integration-examples--ideas) | Practical game-design patterns using CoreAI tools & memory |
-| [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
+| [Architecture](#%EF%B8%8F-architecture) | Five packages, install profiles, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
 | [Tests](#-tests) | EditMode & PlayMode |
@@ -439,12 +439,28 @@ How can you use CoreAI in your game? Here are some "Brainrot-free" ideas:
 
 ## 🏛️ Architecture
 
-The repository consists of **two packages**:
+The repository ships as **five UPM packages**. Only the first two are required; Mods, Hub, and Benchmark are optional and installed independently:
 
-| Package | What's inside | Dependencies |
+| Package | What's inside | Depends on |
 |---------|--------------|--------------|
-| **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
-| **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MEAI, MessagePipe, tests | Depends on `coreai` |
+| **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity: orchestration, tools, memory, routing | — |
+| **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), LLM clients (MEAI), MessagePipe, chat UI, tests | `coreai` |
+| **[com.neoxider.coreaimods](Assets/CoreAiMods)** | Optional Lua modding layer — MoonSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` (+ MoonSharp) |
+| **[com.neoxider.coreaihub](Assets/CoreAiHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) | `coreai` + `coreaiunity` |
+| **[com.neoxider.coreaibenchmark](Assets/CoreAiBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` |
+
+Mods and Hub are independent optional installs — neither requires the other. When **both** are present, Mods' Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define, adding a Mods page to the Hub window; without Hub installed, that assembly compiles out and Mods works standalone (`execute_lua`/`manage_mods` tools, no Hub UI).
+
+**Install profiles:**
+
+| Profile | Packages |
+|---|---|
+| **Base** | `coreai` + `coreaiunity` |
+| **+Mods** | Base + `coreaimods` (+ MoonSharp) |
+| **+Hub** | Base + `coreaihub` |
+| **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation) |
+
+See [INSTALL.md](INSTALL.md) for step-by-step instructions per profile.
 
 <details><summary>Architecture diagram</summary>
 

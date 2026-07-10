@@ -1,14 +1,32 @@
 # CoreAI — Installation
 
-CoreAI ships as two UPM packages that share the same version (lockstep semver):
+CoreAI ships as **five UPM packages**. `coreai` + `coreaiunity` are the required base (lockstep semver);
+`coreaimods`, `coreaihub`, and `coreaibenchmark` are independent optional installs on top of the base:
 
-| Package | What it is |
-|---|---|
-| `com.neoxider.coreai` | Portable C# core (orchestration, tools, memory, sandbox). No `UnityEngine`. |
-| `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). Depends on the core. |
+| Package | What it is | Depends on |
+|---|---|---|
+| `com.neoxider.coreai` | Portable C# core (orchestration, tools, memory, routing). No `UnityEngine`. | — |
+| `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). | `coreai` |
+| `com.neoxider.coreaimods` | Optional Lua modding layer (MoonSharp sandbox, `execute_lua`/`manage_mods` tools, mod runtime). | `coreai` + `coreaiunity` (+ MoonSharp) |
+| `com.neoxider.coreaihub` | Optional UI Toolkit Hub window (tabbed Chat/Settings/Statistics/Mods pages). | `coreai` + `coreaiunity` |
+| `com.neoxider.coreaibenchmark` | Dev/test-only LLM game-creation benchmark harness. | `coreai` + `coreaiunity` |
 
-**LLM** (Microsoft.Extensions.AI) and **Lua** (MoonSharp) are **optional modules**. The core compiles
-without them; features light up automatically when the package is present. Install only what your game uses.
+Mods and Hub are installed independently — neither requires the other. When both are present, Mods'
+Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define and
+adds a Mods page to the Hub window; without Hub, that assembly compiles out and Mods still works
+standalone through its tools.
+
+**Install profiles** — jump to the matching section below:
+
+| Profile | Packages | Section |
+|---|---|---|
+| **Base** | `coreai` + `coreaiunity` | [§1](#1-install-coreai-base) + [§2](#2-llm-module-microsoftextensionsai-via-nuget) |
+| **+Mods** | Base + `coreaimods` (+ MoonSharp) | [§3](#3-mods-module-lua) |
+| **+Hub** | Base + `coreaihub` | [§4](#4-hub-module-ui-toolkit) |
+| **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation) | [§3](#3-mods-module-lua) + [§4](#4-hub-module-ui-toolkit) + [§5](#5-benchmark-module-dev-only) |
+
+**LLM** (Microsoft.Extensions.AI) is an **optional module within the base**. The core compiles
+without it; features light up automatically when the NuGet package is present. Install only what your game uses.
 
 Requirements: **Unity 6000.0+**.
 
@@ -101,11 +119,12 @@ CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest
 
 ---
 
-## 3. Lua module (MoonSharp)
+## 3. Mods module (Lua)
 
-Lua scripting (sandbox, AI-written gameplay scripts, mods) needs the MoonSharp package.
+Lua modding (sandbox, `execute_lua`/`manage_mods` tools, AI-written gameplay scripts, mod runtime) is
+a separate package, `com.neoxider.coreaimods`, on top of the base. It requires the MoonSharp package.
 
-### 3.1 Install
+### 3.1 Install MoonSharp
 
 ```
 CoreAI → Setup → Modules → MoonSharp (Lua) → Enable + Update to latest
@@ -113,25 +132,72 @@ CoreAI → Setup → Modules → MoonSharp (Lua) → Enable + Update to latest
 
 (or manifest: `"org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"`).
 
-The package's presence **automatically** sets the `COREAI_HAS_MOONSHARP` version-define — nothing to
-configure by hand. Remove the package and all Lua code compiles out with no errors.
+### 3.2 Install the Mods package
 
-### 3.2 Switches
+**Window → Package Manager → `+` → Add package from git URL…**
 
-- **Soft-disable** (keep the package, compile Lua out): scripting define `COREAI_NO_LUA`, or
+```text
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiMods
+```
+
+With MoonSharp present, the package's `COREAI_HAS_MOONSHARP` version-define lights up the Lua
+sandbox, `execute_lua`/`manage_mods` tools, and the mod runtime automatically. Remove either the
+`coreaimods` package or MoonSharp and the Lua code compiles out with no errors elsewhere in the project.
+
+### 3.3 Switches
+
+- **Soft-disable** (keep the packages, compile Lua out): scripting define `COREAI_NO_LUA`, or
   `CoreAI → Setup → Modules → MoonSharp (Lua) → Disable Lua (keep package)`.
   Runtime code is guarded by `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA`.
 - **WebGL:** Lua on the WebGL player is **on by default** (new settings assets); toggle with
   `CoreAISettingsAsset.EnableLuaOnWebGl`. IL2CPP stripping protection (`link.xml` preserving
   `MoonSharp.Interpreter`) ships in the package; the Full `unity_*` reflection tier stays disabled on WebGL.
+- **Hub integration:** if `com.neoxider.coreaihub` (§4) is also installed, Mods' `CoreAI.Mods.Hub`
+  assembly auto-enables via the `COREAI_HAS_HUB` version define and adds a Mods page to the Hub
+  window — no extra configuration needed either way.
 
 ---
 
-## 4. Optional modules at a glance
+## 4. Hub module (UI Toolkit)
+
+The Hub is an optional tabbed UI Toolkit window (Chat, Settings, Statistics, Mods, and C#/Lua-authored
+pages) rendered from CoreAI's `HubPageRegistry`. Without it, CoreAI still exposes the registry so you
+can render pages on your own uGUI/UITK canvas via the API.
+
+**Window → Package Manager → `+` → Add package from git URL…**
+
+```text
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiHub
+```
+
+No further setup — the Hub window picks up any pages already registered by the base and Mods packages.
+
+---
+
+## 5. Benchmark module (dev-only)
+
+`com.neoxider.coreaibenchmark` is the LLM game-creation benchmark harness (scenario groups G1-G7,
+scoring, role-fitness reports) used to evaluate model quality — it is a development/test-time tool,
+not something a shipped game depends on.
+
+**Window → Package Manager → `+` → Add package from git URL…**
+
+```text
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiBenchmark
+```
+
+See the [full benchmark guide](Assets/CoreAIBenchmark/README.md) for scenario details and how to run a
+local multi-model sweep.
+
+---
+
+## 6. Optional modules at a glance
 
 | Module | Package | Auto-define when installed | Manual switch |
 |---|---|---|---|
-| Lua | `org.moonsharp.moonsharp` | `COREAI_HAS_MOONSHARP` | `COREAI_NO_LUA` (soft-disable) |
+| Mods (Lua) | `com.neoxider.coreaimods` + `org.moonsharp.moonsharp` | `COREAI_HAS_MOONSHARP` | `COREAI_NO_LUA` (soft-disable) |
+| Hub (UI Toolkit) | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` (consumed by Mods' Hub integration) | — |
+| Benchmark | `com.neoxider.coreaibenchmark` | — | dev/test-only, not referenced by runtime code |
 | Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | — |
 | LLM pipeline (MEAI) | NuGet `Microsoft.Extensions.AI` | — (on by default) | `COREAI_NO_LLM` (compile out) |
 
@@ -143,7 +209,7 @@ CoreAI → Setup → Modules → Report module status
 
 ---
 
-## 5. Verify
+## 7. Verify
 
 1. No compile errors in the Console.
 2. `CoreAI → Setup → Create Chat Demo Scene` → press **Play** → type a message.

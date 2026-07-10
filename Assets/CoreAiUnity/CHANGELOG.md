@@ -4,7 +4,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-### 5.1.0 - audit remediation: durability, fallback correctness, sandbox hardening (2026-07-10)
+## 5.1.0 - audit remediation: durability, fallback correctness, sandbox hardening (2026-07-10)
 
 Release of the 2026-07-10 audit remediation wave (findings F-01…F-16 of
 `Docs/REPOSITORY_AUDIT_2026-07-10.md`; verification in `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`).
@@ -35,13 +35,13 @@ ship the same version.
   (self-disables without the Hub package); benchmark suite extracted into
   `com.neoxider.coreaibenchmark`; package dependency graphs now match real asmdef references.
 
-### 5.0.13 - Tool round splits streaming assistant bubble (2026-07-09)
+## 5.0.13 - Tool round splits streaming assistant bubble (2026-07-09)
 
 - **Fix: assistant prose streamed before and after a tool round now lands in two separate bubbles (claude/cursor-style) instead of one.** Previously the streaming bubble opened at the start of the turn was reused for all prose, so tool-call bubbles were appended *below* it — leaving the final answer at the top and the tool calls at the bottom, forcing the user to scroll up. At a tool-round boundary the in-flight prose bubble is now sealed and any post-tool prose opens a fresh bubble beneath the tool-call bubbles.
 - The full assistant transcript (both prose parts concatenated exactly once) is unchanged, so history/hydration behaviour is unaffected.
 - **Tests:** `CoreAiChatPanelToolRoundBubbleEditModeTests` pins the split (`Streaming_WithToolRound_SplitsProseIntoSeparateBubbles`) and the no-tool single-bubble case (`Streaming_WithoutToolRound_KeepsSingleProseBubble`).
 
-### 5.0.12 - Immutable audit log (2026-07-09)
+## 5.0.12 - Immutable audit log (2026-07-09)
 
 - **New audit log system: immutable, append-only, tamper-evident.** All LLM requests/responses, tool calls, and world mutations are recorded to a single SHA-256-chained JSONL file at `persistentDataPath/CoreAI/Audit/audit.jsonl`. Background writer, rotation at 50 MB, zero main-thread blocking.
 - **New portable core types:** `IAuditLog`, `AuditEntry` (struct with `AuditEntryKind` discriminator), `AuditHash` (SHA-256 + chain helper), `AuditContext` (traceId-keyed prompt hash + model cache), `NullAuditLog`.
@@ -50,7 +50,7 @@ ship the same version.
 - **Tests:** `AuditHashEditModeTests`, `AuditEntryEditModeTests`, `AuditLogWriterEditModeTests` cover hash chain, entry serialization, context caching, null log.
 - **Docs:** New `AUDIT_LOG.md` with architecture, field reference, tamper-evidence verification, performance characteristics. Updated `ARCHITECTURE.md` and `DOCS_INDEX.md`.
 
-### 5.0.11 - World state save/load with colour persistence (2026-07-09)
+## 5.0.11 - World state save/load with colour persistence (2026-07-09)
 
 - **New world state save/load system (`WorldStateManager`).** All AI-spawned objects (`WorldObjectComponent`) are auto-saved to `persistentDataPath/CoreAI/WorldState/world_state.json` on Play Mode exit and auto-loaded on next entry. Includes:
   - `IWorldStateManager.Save()` / `TryLoad()` / `Reset()` API
@@ -70,7 +70,7 @@ ship the same version.
 - **Tests:** `WorldStateManagerPlayModeTests` covers save/load/reset, explicit-colour persistence, and prefab material preservation.
 - **Demo registry:** `DemoPrefabRegistry` now also exposes `test.marker` (a sphere prefab) alongside `enemy.basic`.
 
-### 5.0.10 - Self-spawning model-download indicator for mobile builds (2026-07-06)
+## 5.0.10 - Self-spawning model-download indicator for mobile builds (2026-07-06)
 
 - **New `CoreAiModelDownloadOverlay`: a drop-in, self-spawning on-screen indicator for LLMUnity's
   first-run model download.** With "Download on Build" the GGUF is fetched on first launch (in
@@ -86,7 +86,7 @@ ship the same version.
 - Editor preview: **CoreAI ▸ Debug ▸ Preview Model Download Overlay** (run in Play Mode) animates a fake
   download so you can see the indicator without a real multi-GB fetch.
 
-### 5.0.9 - Don't trip LLMUnity's start guard when configuring an already-started LLM (2026-07-06)
+## 5.0.9 - Don't trip LLMUnity's start guard when configuring an already-started LLM (2026-07-06)
 
 - **Fix: `LlmUnityHostConfigurator.ApplyFromSettings` no longer sets start-sensitive LLMUnity fields
   (`remote`/`port`/`numGPULayers`/`flashAttention`/`model`) after the server has already started.** A
@@ -102,7 +102,7 @@ ship the same version.
   **Download on Build** (`LLMManager.SetDownloadOnStart(true)`) so the model downloads to
   `persistentDataPath` on first launch instead of being packed into the APK.
 
-### 5.0.8 - LLMUnity runs as a local OpenAI server with native tool-calling (2026-07-05)
+## 5.0.8 - LLMUnity runs as a local OpenAI server with native tool-calling (2026-07-05)
 
 - **The LLMUnity backend now runs the local GGUF model as its own built-in OpenAI-compatible server and
   CoreAI drives it through the native HTTP pipeline** (same path as LM Studio / OpenAI), giving real
@@ -122,7 +122,7 @@ ship the same version.
   (a cross-backend text fallback) is unchanged. WebGL is unaffected (the whole LLMUnity path stays behind
   `!UNITY_WEBGL`); Android ships the server-capable `libllamalib_android.so` (`LLM_Start_Server` exported).
 
-### 5.0.7 - warn when a hand-set LLMUnity field conflicts with CoreAI (2026-07-05)
+## 5.0.7 - warn when a hand-set LLMUnity field conflicts with CoreAI (2026-07-05)
 
 - **`LlmUnityHostConfigurator.ApplyFromSettings` now logs a clear warning** (once, when it configures the
   agent) if the resolved `LLMAgent` has `remote == true` or `overflowStrategy != None` before CoreAI
@@ -131,7 +131,7 @@ ship the same version.
   and points `remote` users at CoreAI's `ClientOwnedApi` / `ServerManagedApi` (HTTP) instead, which is
   unrelated to LLMUnity's own `remote` server feature.
 
-### 5.0.6 - force LLMUnity Overflow Strategy to None (CoreAI owns context) (2026-07-05)
+## 5.0.6 - force LLMUnity Overflow Strategy to None (CoreAI owns context) (2026-07-05)
 
 - **`LLMAgent.overflowStrategy` is now explicitly set to `ContextOverflowStrategy.None`** wherever CoreAI
   creates the agent - runtime (`LlmUnityHostConfigurator.ApplyFromSettings`) and Editor
@@ -143,7 +143,7 @@ ship the same version.
   backend-agnostic, role-aware, persisted compaction (`LlmAssistedConversationContextManager`).
 - Documented the rationale in `Docs/MemorySystem.md`.
 
-### 5.0.5 - remove brittle default-backend assertion from singleton test (2026-07-05)
+## 5.0.5 - remove brittle default-backend assertion from singleton test (2026-07-05)
 
 - **Removed `CoreAISettingsAssetEditModeTests.Singleton_ShouldLoadFromResources`.** It hardcoded the
   shipped `Resources/CoreAISettings.asset` default (`BackendType == OpenAiHttp`,
@@ -151,7 +151,7 @@ ship the same version.
   including a local, uncommitted edit - even though nothing about singleton loading was actually
   wrong. Singleton load/reset behavior is already covered by `SetInstance_ShouldOverrideSingleton`.
 
-### 5.0.4 - standalone menu to create the LLMUnity host (2026-07-05)
+## 5.0.4 - standalone menu to create the LLMUnity host (2026-07-05)
 
 - **New `CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)` menu item** creates the `LLM` +
   `LLMAgent` objects in the current scene on demand, regardless of `CoreAISettingsAsset.ExecutionMode`
@@ -160,7 +160,7 @@ ship the same version.
   `TryCreateLlmUnityObjects` (idempotent: warns instead of duplicating if `LLM` already exists) and
   selects/pings the created object afterward.
 
-### 5.0.3 - Chat Demo scene creates the LLMUnity host too (2026-07-05)
+## 5.0.3 - Chat Demo scene creates the LLMUnity host too (2026-07-05)
 
 - **`CoreAI/Setup/Create Chat Demo Scene` now creates `LLM` + `LLMAgent`** in the generated scene
   when `CoreAISettingsAsset` needs a local LLMUnity host (`ExecutionMode.LocalModel`, or `Auto` with
@@ -175,14 +175,14 @@ ship the same version.
   idempotent (a second call detects the existing `LLM` and skips instead of creating a duplicate)
   and `NeedsLlmUnity` returns `false` for a `null` settings reference.
 
-### 5.0.2 - fix no-Lua consumer compile (2026-07-05)
+## 5.0.2 - fix no-Lua consumer compile (2026-07-05)
 
 - **`LuaModRuntimeTickDriver` is now guarded by `COREAI_HAS_MOONSHARP && !COREAI_NO_LUA`** - it was
   the only Lua-referencing file without the guard, so projects without the MoonSharp package failed
   to compile the package (`CS0246: LuaModRuntime could not be found`). Audited the whole Runtime
   tree: every other Lua reference already sits behind the define.
 
-### 5.0.1 - package ships the full WebGL link.xml (2026-07-05)
+## 5.0.1 - package ships the full WebGL link.xml (2026-07-05)
 
 - **`link.xml` now ships complete inside the package** (MoonSharp, `UnityEngine.Resources` /
   `TextAsset`, MEAI assemblies, `CoreAI.Core`, `CoreAI.Source` preserves). Unity picks up package
@@ -192,7 +192,7 @@ ship the same version.
   assemblies (`LUA_ACCESS_MODES.md`).
 - `Resources/AgentSkills/LuaModding.txt` regenerated with the edit-existing-mod workflow.
 
-### 5.0.0 - skills via inspector/SO, runtime API, Resources override (2026-07-04)
+## 5.0.0 - skills via inspector/SO, runtime API, Resources override (2026-07-04)
 
 - **CoreAILifetimeScope "Role Skills"** - bind agent roles to `SkillSetAsset[]` in the inspector
   (instructions from a TextAsset or inline text); registered automatically at container build.
@@ -210,7 +210,7 @@ ship the same version.
   (Medium + IL2CPP OptimizeSize, fixes the LLVM linker OOM) documented in LUA_ACCESS_MODES.md.
 - **Semver:** major (5.0), lockstep with **`com.neoxider.coreai` 5.0.0** - the on-demand skills platform for built-in roles.
 
-### 4.20.0 - Mod timers actually tick; Lua input API; mod editor panel; Lua platform example (2026-07-04)
+## 4.20.0 - Mod timers actually tick; Lua input API; mod editor panel; Lua platform example (2026-07-04)
 
 - **Semver:** minor with **`com.neoxider.coreai` 4.20.0** (`hooks_on('tick')` alias, `{id=...}` table
   coercion - see the core changelog).
@@ -246,7 +246,7 @@ ship the same version.
   `All|Full` when the scope enables Full Lua (was: hardcoded `All`, silently stripping `unity_*` mods
   on every restart).
 
-### 4.19.0 - WebGL Full Lua on; SSE fetch bridge stabilized + tested; cumulative usage (2026-07-04)
+## 4.19.0 - WebGL Full Lua on; SSE fetch bridge stabilized + tested; cumulative usage (2026-07-04)
 
 - **Semver:** minor with **`com.neoxider.coreai` 4.19.0** (WebGL Full-Lua crash fix, rate-limit window parsing, tool-error accounting - see the core changelog).
 - **Full Lua no longer force-disabled on the WebGL player.** `CoreAILifetimeScope` passes the inspector's `enableFullLuaAccess` through on WebGL now that the IL2CPP crash is fixed; availability is still gated by `SecureLuaEnvironment.WebGlLuaOptIn` (`EnableLuaOnWebGl`). Lua PlayMode test fixtures dropped their `!UNITY_WEBGL` guards (the blind spot that hid the crash).
@@ -256,7 +256,7 @@ ship the same version.
 - **Tool loop parity upgrades (audit close-out, see core changelog).** Streaming history trimming, final no-tools summary turn at caps, schema hints on conversion errors, deterministic synthetic tool_call_ids, raw-args echo for parse errors, intra-batch duplicates allowed, non-streaming cumulative usage. Held hybrid prose is flushed before native tool roundtrips (no more lost words after an unclosed `{`).
 - **Chat tool bubbles render real results.** `CoreAiToolCallChatFormatter` unwraps `JsonElement` values instead of showing `{"ValueKind":N}`.
 
-### 4.18.4 - lockstep with com.neoxider.coreai 4.18.4 (2026-07-04)
+## 4.18.4 - lockstep with com.neoxider.coreai 4.18.4 (2026-07-04)
 
 - Transient-HTTP rescue chain (request -> retry -> non-streaming fallback -> typed error) for
   429/408/5xx (see the core package changelog); regression tests live in this package. 36/36.
@@ -265,7 +265,7 @@ ship the same version.
   the WebGL null-function investigation.
 - FullAccessDemo scene now ships the `CoreAiBackendPanel` prefab (runtime API settings UI).
 
-### 4.18.3 — lockstep with com.neoxider.coreai 4.18.3 (2026-07-04)
+## 4.18.3 — lockstep with com.neoxider.coreai 4.18.3 (2026-07-04)
 
 - Bounded HTTP 429 retries (2, Retry-After-aware) before the RateLimited error surfaces (see the
   core package changelog); regression tests live in this package's test assembly. SSE fixture: 35/35.
@@ -275,13 +275,13 @@ ship the same version.
   the LLM backend at runtime via `CoreAiBackend.ApplyHttpApi`. Synthetic DOM events cannot reach
   Unity 6's Input System, so this is the supported headless path for WebGL smoke tests.
 
-### 4.18.2 — lockstep with com.neoxider.coreai 4.18.2 (2026-07-04)
+## 4.18.2 — lockstep with com.neoxider.coreai 4.18.2 (2026-07-04)
 
 - Starved-stream watchdog: keep-alive-only SSE attempts abort after 15s instead of waiting for the
   server to close the connection (see the core package changelog); the EditMode regression test
   lives in this package's test assembly.
 
-### 4.18.1 — lockstep with com.neoxider.coreai 4.18.1 (2026-07-03)
+## 4.18.1 — lockstep with com.neoxider.coreai 4.18.1 (2026-07-03)
 
 - Starved-SSE fallback to a non-streaming completion (see the core package changelog); the EditMode
   regression test lives in this package's test assembly. SSE fixture: 32/32.

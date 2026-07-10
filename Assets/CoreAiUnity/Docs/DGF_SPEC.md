@@ -47,6 +47,16 @@
 
 ## 3. Current repository state (normative snapshot)
 
+> **Current architecture note:** the two-layer (`coreai` / `coreaiunity`) boundary below predates the
+> Lua/Hub/Benchmark package split. The repository now ships **five UPM packages** —
+> `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
+> `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
+> `com.neoxider.coreaihub` (optional UI Toolkit Hub window), and `com.neoxider.coreaibenchmark`
+> (dev/test-only benchmark harness). `CoreAI.Core` no longer references MoonSharp — the Lua sandbox
+> and `execute_lua`/`manage_mods` tools live entirely in `CoreAI.Mods`. See [INSTALL.md](../../../INSTALL.md)
+> and the root [README.md §Architecture](../../../README.md#%EF%B8%8F-architecture) for the current
+> package/dependency graph; treat the rest of this section as historical unless it is updated.
+
 ### 3.0 Boundary between CoreAI and CoreAIUnity (normative)
 
 | Layer | Package / assembly | Contents |

@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### 5.1.0 - audit remediation: safe mutation pipeline, bounded queues/stores (2026-07-10)
+## 5.1.0 - audit remediation: safe mutation pipeline, bounded queues/stores (2026-07-10)
 
 - **Tool execution policy (F-01):** per-call duplicate signatures registered only on success (failed
   calls stay retryable), a single serialized mutation chain covering `world_command`,
@@ -21,53 +21,53 @@
 - Audits: `Docs/REPOSITORY_AUDIT_2026-07-10.md` and `Docs/REPOSITORY_AUDIT_2_2026-07-10.md` in the
   repository root document the findings and the verification of this wave.
 
-### 5.0.10 - version lockstep with coreaiunity 5.0.10 (2026-07-06)
+## 5.0.10 - version lockstep with coreaiunity 5.0.10 (2026-07-06)
 
 - No changes; released to keep both packages on identical versions. (The self-spawning model-download
   indicator lives entirely in the Unity layer.)
 
-### 5.0.9 - version lockstep with coreaiunity 5.0.9 (2026-07-06)
+## 5.0.9 - version lockstep with coreaiunity 5.0.9 (2026-07-06)
 
 - No changes; released to keep both packages on identical versions. (The LLMUnity host-configuration
   start-guard fix lives entirely in the Unity layer.)
 
-### 5.0.8 - version lockstep with coreaiunity 5.0.8 (2026-07-05)
+## 5.0.8 - version lockstep with coreaiunity 5.0.8 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions. (The LLMUnity-as-OpenAI-server
   native tool-calling work lives entirely in the Unity layer.)
 
-### 5.0.7 - version lockstep with coreaiunity 5.0.7 (2026-07-05)
+## 5.0.7 - version lockstep with coreaiunity 5.0.7 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.6 - version lockstep with coreaiunity 5.0.6 (2026-07-05)
+## 5.0.6 - version lockstep with coreaiunity 5.0.6 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.5 - version lockstep with coreaiunity 5.0.5 (2026-07-05)
+## 5.0.5 - version lockstep with coreaiunity 5.0.5 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.4 - version lockstep with coreaiunity 5.0.4 (2026-07-05)
+## 5.0.4 - version lockstep with coreaiunity 5.0.4 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.3 - version lockstep with coreaiunity 5.0.3 (2026-07-05)
+## 5.0.3 - version lockstep with coreaiunity 5.0.3 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.2 - version lockstep with coreaiunity 5.0.2 (2026-07-05)
+## 5.0.2 - version lockstep with coreaiunity 5.0.2 (2026-07-05)
 
 - No changes; released to keep both packages on identical versions.
 
-### 5.0.1 - skill teaches editing existing mods (2026-07-05)
+## 5.0.1 - skill teaches editing existing mods (2026-07-05)
 
 - **Lua Modding skill**: explicit "improve an existing mod" workflow - `get_source` first, then
   `reload` with the FULL updated source; every reload stores a revision (`versions` / `revert`);
   `forget` = delete (unload + remove the persisted copy). Verified live: a 9B model reads,
   rewrites and reloads an existing mod and deletes one via `forget` from chat alone.
 
-### 5.0.0 - on-demand skills for built-in roles; "Lua Modding" skill (2026-07-04)
+## 5.0.0 - on-demand skills for built-in roles; "Lua Modding" skill (2026-07-04)
 
 - **`AgentMemoryPolicy.AddSkillForRole(roleId, skill)`** - attaches an on-demand skill catalog to
   ANY role (built-in or custom), not only AgentBuilder-assembled agents. First skill registers the
@@ -88,7 +88,7 @@
   caches `ParameterInfo[]` per registration.
 - **Semver:** major (5.0), lockstep with **`com.neoxider.coreaiunity` 5.0.0** - the on-demand skills platform for built-in roles.
 
-### 4.20.0 - hooks_on('tick') alias; {id=...} table coercion for numeric params (2026-07-04)
+## 4.20.0 - hooks_on('tick') alias; {id=...} table coercion for numeric params (2026-07-04)
 
 - **`hooks_on('tick'/'update'/'frame')` registers a real per-frame timer.** `hooks_on` receives only
   NAMED events, but LLM-written mods routinely register these spellings expecting a frame callback and
@@ -102,7 +102,7 @@
 - **Semver:** minor, lockstep with **`com.neoxider.coreaiunity` 4.20.0** (mod tick driver, Lua input
   API, mod source editor panel, Lua platform example demo - see that changelog).
 
-### 4.19.0 - WebGL Full Lua fixed; real 429 retry windows; tool-error accounting (2026-07-04)
+## 4.19.0 - WebGL Full Lua fixed; real 429 retry windows; tool-error accounting (2026-07-04)
 
 - **WebGL Full Lua fixed (the "RuntimeError: null function" player crash).** Root cause via a development-build stack trace: MoonSharp's `Script` static ctor loads resources through reflection (`UnityAssetsScriptLoader.LoadResourcesWithReflection` -> `Resources.LoadAll`), and IL2CPP stripped those reflection-only UnityEngine members, so the invoke jumped to a null method pointer and halted the whole wasm player. Fix: preserve `UnityEngine.Resources` + `UnityEngine.TextAsset` in `Assets/link.xml`. Verified live in a browser: the staged diagnostic (Script ctor -> sandbox -> host callback -> `unity_find` -> `unity_set_scale`) passes, and a real model turn found and scaled the demo cube via Full Lua.
 - **429 retry now waits the provider's REAL window.** On WebGL, fetch cannot read `Retry-After` (CORS), so the single transient retry used a 2s formula and always landed inside a still-closed TPM window, wasting the whole rescue chain. `ResolveRateLimitBackoffMs` now parses the window from the error body ("Please try again in 14.017s" - Groq format, minutes+seconds, capped 20s, +250ms margin), and `BuildHttpException` surfaces it as `RetryAfterSeconds` on the typed error.
@@ -111,7 +111,7 @@
 - **Tool loop parity upgrades (audit close-out).** History trimming now applies to the STREAMING tool loop too (shared `ToolCallHistoryTrimmer`; assistant/tool pairs never orphaned; default `maxToolCallHistoryMessages` is 20, 0 = unlimited). At the roundtrip cap or max-errors guard the model gets ONE final tools-disabled summarization turn instead of empty/canned text. Argument type-conversion failures feed the compact schema back to the model. Deterministic `tool_call_id` synthesis when a provider omits ids (same id on echo and reply); parse-error calls echo the model's raw argument string, not internal markers. Intra-batch/intra-turn identical calls all execute ("spawn tree x3" works; only the cross-turn echo guard remains). Non-streaming turns report whole-turn summed usage (`LlmUsageAccumulator`).
 - **Tool-result wire hardening.** A `System.Text.Json.JsonElement` result can no longer reach the model as Newtonsoft's `{"ValueKind":N}` reflection garbage - the wire builder emits the element's actual JSON/string.
 
-### 4.18.4 - transient-HTTP chain: request -> retry -> non-streaming fallback -> typed error (2026-07-04)
+## 4.18.4 - transient-HTTP chain: request -> retry -> non-streaming fallback -> typed error (2026-07-04)
 
 - **A transient HTTP failure (429/408/5xx) on the streamed path now walks the full rescue chain
   before any error reaches the player.** Previously 429 got its bounded retries and then threw;
@@ -125,7 +125,7 @@
   `RateLimited429Exhausted_ThrowsRateLimited` (fallback also 429 -> typed error, no hidden rounds).
   SSE fixture: 36/36.
 
-### 4.18.3 — bounded HTTP 429 retries before the RateLimited error surfaces (2026-07-04)
+## 4.18.3 — bounded HTTP 429 retries before the RateLimited error surfaces (2026-07-04)
 
 - **An HTTP 429 no longer fails the turn on the first hit.** Previously 429 was never retried:
   the transient-retry classifier only matched local-model reload texts, so a burst-rate-limited
@@ -138,7 +138,7 @@
   3 opens) and `GetStreamingResponseAsync_RateLimited429Exhausted_ThrowsRateLimited` (three 429s →
   typed RateLimited after exactly 1+2 attempts). SSE fixture: 35/35.
 
-### 4.18.2 — starved-stream watchdog: abort keep-alive-only SSE attempts early (2026-07-04)
+## 4.18.2 — starved-stream watchdog: abort keep-alive-only SSE attempts early (2026-07-04)
 
 - **A starved SSE attempt no longer waits for the server to close the connection.** Confirmed in a
   WebGL production build: a proxy hiding an upstream failure behind HTTP 200 held each streaming
@@ -155,7 +155,7 @@
   that never closes and never sends a data line: 3 early-aborted attempts, exactly 1 non-streaming
   completion, fallback text surfaces through the stream).
 
-### 4.18.1 — starved SSE stream falls back to a non-streaming completion (2026-07-03)
+## 4.18.1 — starved SSE stream falls back to a non-streaming completion (2026-07-03)
 
 - **An SSE 200 with zero data deltas no longer eats the whole retry budget and no longer ends in
   silence.** A starved stream (typically an upstream rate limit hidden behind a proxy: HTTP 200,

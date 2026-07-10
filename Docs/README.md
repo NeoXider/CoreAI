@@ -15,8 +15,14 @@ wrong folder.
 |---|---|---|
 | CoreAI Unity package | [Assets/CoreAiUnity/Docs/DOCS_INDEX.md](../Assets/CoreAiUnity/Docs/DOCS_INDEX.md) | You need setup, chat UI, streaming, settings, architecture, tests, or Unity integration docs. |
 | Portable CoreAI package | [Assets/CoreAI/Docs/README.md](../Assets/CoreAI/Docs/README.md) | You need host-agnostic contracts: agents, tools, routing, MEAI, Lua sandbox, and tool-calling rules. |
+| CoreAI Mods (Lua, optional) | [INSTALL.md §3](../INSTALL.md#3-mods-module-lua) · [LUA_SANDBOX_SECURITY.md](../Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | You need the `com.neoxider.coreaimods` package: Lua sandbox, `execute_lua`/`manage_mods` tools, mod runtime. |
+| CoreAI Hub (UI Toolkit, optional) | [INSTALL.md §4](../INSTALL.md#4-hub-module-ui-toolkit) | You need the `com.neoxider.coreaihub` tabbed Hub window and its page registry. |
+| CoreAI Benchmark (dev-only) | [Assets/CoreAIBenchmark/README.md](../Assets/CoreAIBenchmark/README.md) | You need the `com.neoxider.coreaibenchmark` LLM game-creation benchmark harness. |
 | Example game | [Assets/_exampleGame/README.md](../Assets/_exampleGame/README.md) | You need the RogueliteArena sample, scene setup, progression, or AI wave planning notes. |
 | NeoxiderTools | [Assets/NeoxiderTools/Docs/README.md](../Assets/NeoxiderTools/Docs/README.md) | You need shared utility/toolkit documentation used by this Unity project. |
+
+The full five-package dependency graph and install profiles (Base / +Mods / +Hub / Full) live in
+[INSTALL.md](../INSTALL.md).
 
 ## Common Reading Paths
 
