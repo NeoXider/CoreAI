@@ -26,7 +26,8 @@ namespace CoreAI.Demos
 
         private const int MaxLogLines = 14;
         private const float EnemySpacing = 1.35f;
-        private static readonly int BaseColorProperty = Shader.PropertyToID("_Color");
+        private static readonly int BaseColorProperty = Shader.PropertyToID("_BaseColor");
+        private static readonly int LegacyColorProperty = Shader.PropertyToID("_Color");
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
@@ -42,7 +43,7 @@ namespace CoreAI.Demos
         private GameObject _heroVisual;
         private GUIStyle _richLabelStyle;
         private IReadOnlyList<LuaModInfo> _cachedMods = System.Array.Empty<LuaModInfo>();
-        private Material _entityMaterial;
+        private MaterialPropertyBlock _colorBlock;
         private float _heroHp;
         private float _heroMaxHp = 120f;
         private float _heroAttack = 16f;
@@ -102,10 +103,6 @@ namespace CoreAI.Demos
                 _mods.ModSourceUnloaded -= OnModsChanged;
             }
 
-            if (_entityMaterial != null)
-            {
-                Destroy(_entityMaterial);
-            }
         }
 
         private void OnModsChanged(string modId, string source, LuaCapabilities capabilities)
@@ -455,11 +452,14 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _entityMaterial ??= new Material(Shader.Find("Standard"));
-            renderer.sharedMaterial = _entityMaterial;
-            var block = new MaterialPropertyBlock();
-            block.SetColor(BaseColorProperty, color);
-            renderer.SetPropertyBlock(block);
+            // Keep the SRP-compatible material assigned by CoreAiPrimitiveFactory. Replacing it with
+            // the Built-in "Standard" shader turns these objects pink in URP. A property block also
+            // avoids allocating one material instance per entity.
+            _colorBlock ??= new MaterialPropertyBlock();
+            _colorBlock.Clear();
+            _colorBlock.SetColor(BaseColorProperty, color);
+            _colorBlock.SetColor(LegacyColorProperty, color);
+            renderer.SetPropertyBlock(_colorBlock);
         }
 
         private GUIStyle RichLabel()

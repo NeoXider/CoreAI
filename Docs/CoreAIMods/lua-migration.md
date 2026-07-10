@@ -48,9 +48,9 @@ should serve live, in-session mutation, not just static mod loading.
   until Phase 2 is green.
 
 ## Reality on disk (verified 2026-07-07, branch feat/coreaimods-extraction)
-- Lua module already extracted: `Assets/CoreAIMods/` = `com.neoxider.coreaimods` v5.0.10, asmdef `CoreAI.Mods`.
+- Lua module already extracted: `Assets/CoreAIMods/` = `com.neoxider.coreaimods` v5.2.0, asmdef `CoreAI.Mods`.
 - MoonSharp already removed from `CoreAI.Core` + `CoreAI.Source` (core is Lua-free). `ILuaExecutor` seam exists
-  (`Assets/CoreAIMods/Runtime/LuaExecution/LuaTool.cs`). Versions lockstep (core/unity/mods = 5.0.10).
+  (`Assets/CoreAIMods/Runtime/LuaExecution/LuaTool.cs`). All five packages are versioned in lockstep.
 - MoonSharp still used in **~17 files** under `Assets/CoreAIMods/Runtime` — this is the migration surface.
 - **No `CoreAiModsLifetimeScope`/`CoreAiModsInstaller` exists** → the Lua runtime/tools are NOT wired by the
   running composition root today (only by test fakes). Building this scope is in-scope.

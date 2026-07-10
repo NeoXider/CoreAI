@@ -1,18 +1,20 @@
 # CoreAI release checklist
 
-Use this checklist before every commit or release that changes Assets/CoreAI or Assets/CoreAiUnity.
+Use this checklist before every commit or release that changes any of the five UPM packages:
+`CoreAI`, `CoreAiUnity`, `CoreAIMods`, `CoreAIHub`, or `CoreAIBenchmark`.
 
 ## Versioning
 
-- Update Assets/CoreAI/package.json when portable API or runtime behavior changes.
-- Update Assets/CoreAiUnity/package.json when Unity runtime, editor tooling, or docs change.
-- Keep the com.neoxider.coreai dependency in Assets/CoreAiUnity/package.json aligned with the CoreAI package version.
+- Update the affected package manifests and keep all five package versions in lockstep.
+- Keep every internal `com.neoxider.coreai*` dependency aligned with that version.
+- `CoreAIBenchmark` depends on Core, Unity, and Mods because G1-G7 execute real Lua tools.
 - Keep changelog headings consistent with package.json versions.
 
 ## Changelog
 
 - Update Assets/CoreAI/CHANGELOG.md for portable core changes.
 - Update Assets/CoreAiUnity/CHANGELOG.md for Unity layer changes.
+- Record Mods/Hub/Benchmark changes in the same release entry until those packages gain dedicated changelogs.
 - Add migration notes when a change affects contracts or recommended usage.
 
 ## Documentation

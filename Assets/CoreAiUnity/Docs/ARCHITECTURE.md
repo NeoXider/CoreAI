@@ -12,7 +12,7 @@ Game code should depend on public contracts such as `IAiOrchestrationService`, `
 
 Streaming is the default everywhere, not just for chat/live UI. When `ICoreAISettings.EnableStreaming` is on, `AiOrchestrator.RunTaskAsync` (agent/task execution) runs through `ILlmClient.CompleteStreamingAsync` via a `CompleteForTaskAsync` helper that collapses the stream back into an `LlmCompletionResult`. Non-interactive task execution therefore uses the same execute-as-you-stream tool loop (including bounded-parallel tool calls) as chat. Non-streaming `CompleteAsync` is the fallback only when `EnableStreaming` is off. Effective streaming still honours the per-role (`AgentBuilder.WithStreaming`) and UI (`CoreAiChatConfig.EnableStreaming`) overrides.
 
-Tool calls execute in **parallel** on both the batch and the streamed path, bounded by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential/legacy). Mutating built-ins (`memory`, `manage_mods`, `manage_skills`) are serialized relative to each other and result order is always preserved.
+Tool calls execute in **parallel** on both the batch and the streamed path, bounded by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential/legacy). Mutating built-ins (`memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`, `call_skill_tool`) are serialized relative to each other. Streamed mutations wait for turn completion so whole-turn echoes can be rejected before side effects; result order is preserved.
 
 ## LLM Mode Flow
 

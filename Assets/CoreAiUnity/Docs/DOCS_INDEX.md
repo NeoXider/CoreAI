@@ -22,6 +22,7 @@ Package manifests:
 | Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
 | Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md), [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
 | Run or extend tests | [../Tests/README.md](../Tests/README.md) | Test-specific docs listed below |
+| Ship to players / budget costs | [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md), [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) |
 
 ## First Run
 
@@ -88,8 +89,11 @@ Package manifests:
 | [SCRIPTABLE_OBJECTS.md](SCRIPTABLE_OBJECTS.md) | ScriptableObject assets used by the package and their roles. |
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
-| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for both packages. |
+| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for the five-package graph. |
+| [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | What the player's machine needs per deployment mode: local GGUF, cloud, proxy, hybrid fallback. |
+| [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) | Token anatomy of a turn, measuring real usage, spend caps, and a designer budget worksheet. |
 | [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
+| [DETERMINISM_AND_REPLAY.md](DETERMINISM_AND_REPLAY.md) | Effect-determinism contract, host-authoritative pattern, and the proposed audit-log replayer. |
 | [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 

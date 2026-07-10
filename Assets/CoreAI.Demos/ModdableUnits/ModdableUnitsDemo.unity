@@ -440,6 +440,60 @@ MonoBehaviour:
     width: 430
     height: 460
   showPanel: 1
+  transientModIds:
+  - auto_repair_smoke
+--- !u!1 &1424676151
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1424676152}
+  - component: {fileID: 1424676153}
+  m_Layer: 0
+  m_Name: CoreAiMods
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1424676152
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1424676151}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2106438250}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1424676153
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1424676151}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 246dc9124f4d62b408c1b063ef72d69b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Composition.CoreAiModsLifetimeScope
+  parentReference:
+    TypeName: CoreAI.Composition.CoreAILifetimeScope
+  autoRun: 1
+  autoInjectGameObjects: []
+  enableFullLuaAccess: 0
+  enableFullLuaPrivateAccess: 0
+  allowedLuaScenes: []
+  blacklistPolicy: {fileID: 0}
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -727,18 +781,18 @@ MonoBehaviour:
     y: 412
     width: 560
     height: 180
+  chatReserveWidth: 700
   prompts:
-  - Label: 'Start a battle'
-    Prompt: Make a small starter battle: create a few blue allied knights on the left
-      and green goblins on the right. Save it as a mod so I can unload it later.
-  - Label: 'Add archers and boss'
+  - Label: Start a battle
+    Prompt: 
+  - Label: Add archers and boss
     Prompt: Add a new long-range allied archer and a large enemy ogre boss to the
       current fight. Save this as a separate mod and tell me what it adds.
-  - Label: 'Endless waves'
-    Prompt: Make the fight continue on its own: when there are too few enemies, spawn
-      more small enemies, and if allies are wiped out, bring back a defender. Save it
-      as a mod.
+  - Label: Endless waves
+    Prompt: 
   submitWhenInputUnavailable: 0
+  _showPanel: 1
+  _toggleKey: 289
 --- !u!4 &2100352201
 Transform:
   m_ObjectHideFlags: 0
@@ -795,6 +849,7 @@ MonoBehaviour:
   luaAllowedScenes: []
   enableFullLuaAccess: 0
   enableFullLuaPrivateAccess: 0
+  roleSkills: []
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
 --- !u!4 &2106438250
@@ -809,7 +864,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1424676152}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807

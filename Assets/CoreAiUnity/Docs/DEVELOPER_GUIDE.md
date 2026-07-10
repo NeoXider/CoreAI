@@ -26,7 +26,7 @@ For teams who **wire the core into their own game** or **extend this repository*
 
 | Assembly | Folder | Constraint |
 |--------|-------|-------------|
-| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. Since **v1.5.0** also owns portable LLM pipeline: **`LoggingLlmClientDecorator`**, **`ToolExecutionPolicy`** (uses **`ILlmAsyncMarshaler`** via **`ICoreAISettings.ToolInvocationMarshaler`**), **`SmartToolCallingChatClient`**, **`ClientLimitedLlmClientDecorator`**, portable abstractions **`IToolCallEventPublisher`**, **`IToolExecutionNotifier`**, **`ILlmPreflightAnnotator`**, and **`ILog`**. |
+| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, queue, session snapshot, LLM policy, memory, tools, and portable extension points. Lua VM/sandbox implementations live in **CoreAI.Mods**, not Core. |
 | **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, Lua bindings (`report` / `add`). Unity-side adapters: **`MessagePipeToolCallEventPublisher`**, **`CoreAiToolExecutionNotifier`**. Package **`com.neoxider.coreaiunity`**. |
 | **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit (**includes `UnityMainThreadLlmAsyncMarshalerEditModeTests`**, **v1.5.14** — Edit Mode deadlock regression). |
 | **CoreAI.Tests.PlayMode.FastNoLlm** | `Assets/CoreAiUnity/Tests/PlayMode/FastNoLlm/` | Fast Play Mode: stubs, orchestrator smoke, UITK/chat panel, Lua (**no loaded model / no HTTP LLM dependency** where avoidable). |
@@ -144,7 +144,7 @@ In Unity, `MessagePipeToolCallEventPublisher` bridges these calls to `GlobalMess
 
 Additionally, `IToolExecutionNotifier.NotifyToolExecuted` fires after each successful tool execution — in Unity this delegates to `CoreAi.NotifyToolExecuted` via `CoreAiToolExecutionNotifier`.
 
-Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionPolicy` with the same adapters, ensuring **identical event sequences** regardless of execution path. Within one LLM turn, tool calls run in **bounded parallel** on both paths, capped by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential). Mutating built-ins (`memory`, `manage_mods`, `manage_skills`) are serialized relative to each other; result order is always preserved.
+Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionPolicy` with the same adapters, ensuring **identical event sequences** regardless of execution path. Within one LLM turn, tool calls run in **bounded parallel** on both paths, capped by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential). Mutating built-ins (`memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`, `call_skill_tool`) are serialized relative to each other; streamed mutations wait until turn completion so replay can be rejected before side effects; result order is preserved.
 
 Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized `ArgumentsJson`. Use `Info.CallId` when correlating start/completed/failed logs, especially when providers issue several tool calls in one response.
 

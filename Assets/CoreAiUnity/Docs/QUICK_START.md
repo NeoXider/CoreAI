@@ -34,6 +34,16 @@ If Unity reports missing Git dependencies, use:
 CoreAI -> Setup -> Install Git Dependencies
 ```
 
+To install the LLM pipeline (`Microsoft.Extensions.AI` via NuGetForUnity), use:
+
+```text
+CoreAI -> Setup -> Install LLM Pipeline (NuGet)...
+```
+
+It detects whether the NuGet DLLs are already resolvable, guides you through
+installing NuGetForUnity if it is missing, and otherwise adds the package to
+`Assets/packages.config` and triggers a restore automatically.
+
 ## 3. Create A Scene
 
 Choose one path.

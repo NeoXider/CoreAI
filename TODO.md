@@ -2,29 +2,33 @@
 
 > Updated 2026-07-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Test baseline: EditMode 1,583 (verified green 2026-07-10), PlayMode `FastNoLlm` (deterministic).
+> Release candidate: 5.2.0. Verified 2026-07-10: EditMode 1,598 total / 1,594 passed /
+> 0 failed / 4 third-party ignored; PlayMode `FastNoLlm` 67/67 (includes ten-scene demo smoke);
+> live local `qwen3.5-4b-mtp` memory and `world_command` checks 2/2.
 
 ## [R0] IMMEDIATE — verification gate on next editor start (blocks release)
 
-> Three commits landed while the editor was unavailable (`4c6ed232` audit worker thread,
-> `1ded0a65` entry-point handoff, `ad7c3764` query walker) — code-reviewed but NOT compiled.
-> On the next Unity start, in order; fix any red before anything else:
-- [ ] Compile clean (0 `error CS`), let Unity generate `.meta` for `Assets/Resources/CoreAIPresets/`.
-- [ ] Full EditMode suite green (was 1,583/1,583 before these three commits).
-- [ ] PlayMode `FastNoLlm` suite green (never completed on 2026-07-10 — editor was busy; includes the
-      new world-state, camera-capture, and entry-point-handoff tests).
-- [ ] Then: delete the closed audit docs (`Docs/REPOSITORY_AUDIT_2026-07-10.md`,
+> The previously uncompiled audit wave is now compiled and verified in Unity 6000.3.14f1.
+- [x] Compile clean (0 `error CS`); Hub integration compiled in the monorepo via `COREAI_HAS_HUB`.
+- [x] Full EditMode suite green: 1,598 total / 1,594 passed / 4 third-party ignored / 0 failed.
+- [x] PlayMode `FastNoLlm` suite green: 67/67.
+- [ ] Delete the audit docs only after their remaining findings are closed or transferred. Do not
+      delete them yet: durability, package-isolation, full-tier query, and CI findings remain open.
+      Candidate files: `Docs/REPOSITORY_AUDIT_2026-07-10.md`,
       `Docs/REPOSITORY_AUDIT_2_2026-07-10.md`, `Docs/CoreAIMods/audit-*.md`,
       `Docs/CoreAIMods/optimization-review.md`) — owner's rule: closed audits get deleted, and every
       code finding in them is either fixed or tracked here.
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 
-- [ ] Run every demo scene end-to-end (Hub, MiniRpg, WaveAutoBattler, FullAccess, LuaMods,
-      LiveMechanics, ModdableUnits, WorldCommands): delete demos that don't showcase anything,
-      finish the ones that almost do. Known cosmetic debt: pink URP materials + missing hit
-      animations in WaveAutoBattler.
-- [ ] Verify the AI writes mods through the Hub chat in each kept demo with local 4B/9B/27B
+- [x] Deterministic startup smoke for all ten published scenes (including Skills and
+      LiveMechanicsModsChat): no missing scripts, scope/camera present, supported shaders, no
+      unexpected startup errors. Fixed missing Mods scopes, Mirror remnants, Hub wiring, and Wave URP color.
+- [ ] Complete manual interaction drivers for every demo (buttons, input, battle loops, F9/F10,
+      mod load/unload/restart persistence) with screenshots; startup smoke is not full UX acceptance.
+- [x] Representative local 4B live checks: memory write and real `world_command` spawn pass on
+      `qwen3.5-4b-mtp`.
+- [ ] Verify the AI writes mods through the Hub chat in each kept Hub-enabled demo with local 4B/9B/27B
       (LM Studio) and Opus 4.8 via the bundled preset (`Assets/Resources/CoreAIPresets/`,
       bridge: `agent.sh openai-server -e claude -m opus`).
 - [ ] Benchmark package (`com.neoxider.coreaibenchmark`): run the suite through the bridge with
@@ -42,9 +46,16 @@
       queries, revision stores, audit burst, WebGL persistence cadence).
 - [ ] **F-22**: package-local test assemblies so standalone UPM graphs are proven, not just monorepo.
 - [ ] **F-21**: replace remaining fixed `Task.Delay` waits in async tests with signal-based waits.
-- [ ] Streaming mutating-call deferral: HEAD policy serializes mutations and suppresses cross-turn
-      echoes per-call, but mid-stream mutating calls still execute on arrival; defer them to turn
-      finalization (the original F-01 recommendation #2, lost in the 2026-07-10 rollback incident).
+- [x] Streaming mutating-call deferral: mutating calls wait for turn completion, whole-turn echoes
+      are rejected before side effects, and partial retries execute only failed slots.
+- [ ] Cross-request idempotency: add executor-level stable idempotency keys. Current replay state is
+      request-local and `ToolExecutionPolicy.Reset()` intentionally clears it.
+- [ ] Full-tier Lua queries: move recursive `unity_list_objects` / `unity_find_all` /
+      `unity_find_by_tag` / `unity_find_by_component` implementations onto the shared budgeted walker.
+- [ ] Durability: WebGL sync after `WorldStateManager.Reset`; recoverable two-phase audit rotation;
+      surface audit worker failures during runtime rather than only at Dispose/testing flush.
+- [ ] Resolve `allowedLuaScenes` contract mismatch (tooltip says empty=none; runtime treats empty as
+      any Build Settings scene) and add an explicit security-policy test.
 - [ ] Hub "Audit Log" page: viewer + chain-integrity badge over `AuditLogVerifier` (natural home for
       the new read/verify API).
 

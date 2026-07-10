@@ -26,6 +26,7 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | File | Topic |
 |------|--------|
 | [AGENT_BUILDER.md](AGENT_BUILDER.md) | Fluent `AgentBuilder`: tools, modes, memory, recipes |
+| [CONTENT_SAFETY.md](CONTENT_SAFETY.md) | Pluggable `IContentFilter` contract, wordlist baseline, moderation guidance |
 | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) | Tools and prompts without Unity APIs |
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |

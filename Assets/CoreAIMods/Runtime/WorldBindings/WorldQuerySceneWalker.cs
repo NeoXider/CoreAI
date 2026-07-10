@@ -40,11 +40,20 @@ namespace CoreAI.Infrastructure.World
             List<object> results)
         {
             Stack<GameObject> stack = new();
+            bool truncated = false;
+            int scheduled = 0;
             for (int i = rootObjects.Count - 1; i >= 0; i--)
             {
                 if (rootObjects[i] != null)
                 {
+                    if (scheduled >= MaxVisitedNodes)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
                     stack.Push(rootObjects[i]);
+                    scheduled++;
                 }
             }
 
@@ -77,11 +86,18 @@ namespace CoreAI.Infrastructure.World
                 Transform t = current.transform;
                 for (int i = t.childCount - 1; i >= 0; i--)
                 {
+                    if (scheduled >= MaxVisitedNodes)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
                     stack.Push(t.GetChild(i).gameObject);
+                    scheduled++;
                 }
             }
 
-            return false;
+            return truncated;
         }
     }
 }

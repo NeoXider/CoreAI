@@ -61,22 +61,22 @@
 
 | Layer | Package / assembly | Contents |
 |------|-------------------|----------|
-| **Engine-agnostic core** | **`com.neoxider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), **MoonSharp** sandbox, typed commands and extension points. **No** `UnityEngine`, **no** explicit implementation for Unity, Unreal, Godot, etc. — only portable logic and abstractions; binding to the “game world” is external via interface implementations and injection. |
+| **Engine-agnostic core** | **`com.neoxider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), typed commands and extension points. **No** `UnityEngine` and no Lua VM implementation; game and Lua bindings are supplied by host/module packages. |
 | **Unity implementation** | **`com.neoxider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Concrete **Unity** implementation: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), Unity console logging, file stores, main-thread marshaling, UI wiring. Depends on **`com.neoxider.coreai`**. |
 
-**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; **`CoreAI.Core`** shall contain only portable .NET/C# (plus MoonSharp/VContainer per asmdef). **`RegisterCorePortable`** registers a default **`InMemoryConversationSummaryStore`** as **`IConversationSummaryStore`** unless the host suppresses it (**`CoreAILifetimeScope`** registers **`FileConversationSummaryStore`** first and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**). **`RegisterCorePortable`** also registers **`NullAgentMemoryStore`** as **`IAgentMemoryStore`** unless **`suppressDefaultAgentMemoryStore: true`** — **`CoreAILifetimeScope`** always suppresses and then registers **`FileAgentMemoryStore`** on all Unity players (including WebGL, with IDBFS flush via **`CoreAi_PersistFsSync`**) so VContainer never sees two implementations for **`IAgentMemoryStore`** (**v1.5.22**, WebGL agent memory since **v1.6.19**).
+**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; Lua VM/sandbox implementations reside in **`CoreAI.Mods`** / package **`coreaimods`**; **`CoreAI.Core`** remains portable .NET/C#. **`RegisterCorePortable`** registers a default **`InMemoryConversationSummaryStore`** as **`IConversationSummaryStore`** unless the host suppresses it (**`CoreAILifetimeScope`** registers **`FileConversationSummaryStore`** first and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**). **`RegisterCorePortable`** also registers **`NullAgentMemoryStore`** as **`IAgentMemoryStore`** unless **`suppressDefaultAgentMemoryStore: true`** — **`CoreAILifetimeScope`** always suppresses and then registers **`FileAgentMemoryStore`** on all Unity players (including WebGL, with IDBFS flush via **`CoreAi_PersistFsSync`**) so VContainer never sees two implementations for **`IAgentMemoryStore`**.
 
 ### 3.1 Packages (`Packages/manifest.json`)
 
 - **VContainer**, **MessagePipe** + **MessagePipe.VContainer**
 - **R3**, **UniTask**
-- **MoonSharp** (`org.moonsharp.moonsharp`, UPM)
+- **MoonSharp / Lua-CSharp** are implementation dependencies of `com.neoxider.coreaimods`, not Core.
 - **MCPForUnity** (`com.coplaydev.unity-mcp`) — editor automation; **mandatory** test execution path for agent/CI with Cursor — see **§11–12**.
 - **LLM for Unity** ([LLMUnity](https://github.com/undreamai/LLMUnity), package `ai.undream.llm` in manifest) — local/remote inference (llama.cpp), `LLM` / `LLMAgent`, grammar/RAG per package documentation. The core still introduces **`ILlmClient`**; the **reference** implementation is a thin adapter over LLMUnity + **stub** mode (§5.2).
 
 ### 3.2 Assembly `CoreAI.Core` (`Assets/CoreAI/Runtime/Core/CoreAI.Core.asmdef`)
 
-- `noEngineReferences: true`; assembly references: **MoonSharp.Interpreter** only (UPM MoonSharp asmdef name). **VContainer** is **not** referenced here — composition stays in **`CoreAI.Source`**.
+- `noEngineReferences: true`; no MoonSharp, Unity, MessagePipe, or VContainer reference. Composition stays in host/module assemblies.
 - Portable logic: AI contracts, MVP orchestrator, Lua sandbox, session snapshot DTO.
 
 ### 3.3 Assembly `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)
@@ -162,7 +162,7 @@ flowchart LR
 
 - Contracts and DTOs: session snapshot, commands, agent roles, validation results.
 - **AI orchestrator** (queue, priorities, timeouts) — on abstractions only: `ILlmClient`, `IClock`, `ILog` (project interfaces, not `UnityEngine.Debug`).
-- **MoonSharp sandbox** — interpreter **does not depend on Unity** (pure .NET); whitelist and globals policy live in **`CoreAI.Core`**; UPM reference `org.moonsharp.moonsharp` in `CoreAI.Core.asmdef` is **normal** for the template.
+- **Lua sandbox** — interpreter implementations, capability bindings, and globals policy live in **`CoreAI.Mods`**; Core exposes portable seams only.
 - **`ILlmClient`** implementations: HTTP to Ollama/OpenAI, stub (§5.2) — without Unity.
 - A simplified **command bus** (`ICommandBus` / light pub-sub) if full **MessagePipe** is undesirable outside Unity; or a thin wrapper over the same pattern without Unity dependencies.
 

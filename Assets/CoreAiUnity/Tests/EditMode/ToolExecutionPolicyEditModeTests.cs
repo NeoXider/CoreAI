@@ -1551,6 +1551,43 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteBatch_PartialFailureRetry_RunsOnlyPreviouslyFailedSlot()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
+                new List<ILlmTool>(), false, "test", 3);
+            int stableInvocations = 0;
+            int flakyInvocations = 0;
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
+                {
+                    stableInvocations++;
+                    return "stable";
+                }), new MEAI.AIFunctionFactoryOptions { Name = "stable", Description = "stable" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
+                {
+                    flakyInvocations++;
+                    return flakyInvocations == 1 ? "Error: transient" : "recovered";
+                }), new MEAI.AIFunctionFactoryOptions { Name = "flaky", Description = "flaky" }));
+            List<MEAI.FunctionCallContent> calls = new()
+            {
+                MakeToolCall("stable", new Dictionary<string, object> { { "n", 1 } }),
+                MakeToolCall("flaky", new Dictionary<string, object> { { "n", 2 } })
+            };
+
+            ToolExecutionPolicy.BatchToolCallResult first =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult retry =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+
+            Assert.IsTrue(first.AnyFailed);
+            Assert.IsTrue(retry.AnyFailed,
+                "The successful slot is represented as a suppressed duplicate in the retry result.");
+            Assert.IsFalse(retry.AllFailed, "The previously failed slot must be allowed to recover.");
+            Assert.AreEqual(1, stableInvocations, "A successful side effect must not repeat on retry.");
+            Assert.AreEqual(2, flakyInvocations, "The failed slot must remain retryable with identical args.");
+        }
+
+        [Test]
         public async Task ExecuteBatch_MutatingTools_AreSerialized_NeverOverlap()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
@@ -1684,7 +1721,11 @@ namespace CoreAI.Tests.EditMode
                 {
                     new StubTool { Name = "memory" },
                     new StubTool { Name = "manage_mods" },
-                    new StubTool { Name = "manage_skills" }
+                    new StubTool { Name = "manage_skills", AllowDuplicates = true },
+                    new StubTool { Name = "world_command" },
+                    new StubTool { Name = "component_command" },
+                    new StubTool { Name = "execute_lua" },
+                    new StubTool { Name = "call_skill_tool" }
                 },
                 false, "test", 3);
 
@@ -1711,29 +1752,118 @@ namespace CoreAI.Tests.EditMode
                 return "ok";
             };
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
-            foreach (string name in new[] { "memory", "manage_mods", "manage_skills" })
+            string[] mutatingTools =
+            {
+                "memory", "manage_mods", "manage_skills", "world_command", "component_command",
+                "execute_lua", "call_skill_tool"
+            };
+            foreach (string name in mutatingTools)
             {
                 opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
                     new MEAI.AIFunctionFactoryOptions { Name = name, Description = name }));
             }
 
             ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
-            await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("memory", new Dictionary<string, object> { { "n", 1 } }), opts,
-                CancellationToken.None);
-            await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("manage_mods", new Dictionary<string, object> { { "n", 2 } }), opts,
-                CancellationToken.None);
-            await policy.ExecuteStreamedAsync(
-                turn, MakeToolCall("manage_skills", new Dictionary<string, object> { { "n", 3 } }), opts,
-                CancellationToken.None);
+            for (int i = 0; i < mutatingTools.Length; i++)
+            {
+                await policy.ExecuteStreamedAsync(
+                    turn,
+                    MakeToolCall(mutatingTools[i], new Dictionary<string, object> { { "n", i } }),
+                    opts,
+                    CancellationToken.None);
+            }
             ToolExecutionPolicy.BatchToolCallResult batch =
                 await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
 
             Assert.IsFalse(batch.AnyFailed);
-            Assert.AreEqual(3, batch.Results.Count);
+            Assert.AreEqual(mutatingTools.Length, batch.Results.Count);
             Assert.IsFalse(overlapped,
                 "State-mutating built-ins in one streamed turn must be serialized, never concurrent.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_MultiCallMutatingEcho_IsRejectedBeforeSideEffectsRepeat()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool> { new StubTool { Name = "world_command" } },
+                false, "test", 3);
+
+            int invoked = 0;
+            Func<CancellationToken, Task<string>> body = ct =>
+            {
+                Interlocked.Increment(ref invoked);
+                return Task.FromResult("ok");
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(body,
+                new MEAI.AIFunctionFactoryOptions { Name = "world_command", Description = "mutates world" }));
+            Dictionary<string, object?> argsA = new() { { "name", "A" } };
+            Dictionary<string, object?> argsB = new() { { "name", "B" } };
+
+            async Task<ToolExecutionPolicy.BatchToolCallResult> RunTurnAsync()
+            {
+                ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+                await policy.ExecuteStreamedAsync(
+                    turn, MakeToolCall("world_command", argsA), opts, CancellationToken.None);
+                await policy.ExecuteStreamedAsync(
+                    turn, MakeToolCall("world_command", argsB), opts, CancellationToken.None);
+                return await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+            }
+
+            ToolExecutionPolicy.BatchToolCallResult first = await RunTurnAsync();
+            ToolExecutionPolicy.BatchToolCallResult echo = await RunTurnAsync();
+
+            Assert.IsFalse(first.AnyFailed);
+            Assert.IsTrue(echo.AnyFailed);
+            Assert.IsTrue(echo.AllFailed);
+            Assert.AreEqual(2, Volatile.Read(ref invoked),
+                "An echoed streamed mutation turn must be rejected before it applies side effects twice.");
+        }
+
+        [Test]
+        public async Task StreamedTurn_PartialMutationRetry_RunsOnlyPreviouslyFailedSideEffect()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool>
+                {
+                    new StubTool { Name = "world_command" },
+                    new StubTool { Name = "execute_lua" }
+                }, false, "test", 3);
+            int worldInvocations = 0;
+            int luaInvocations = 0;
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
+                {
+                    worldInvocations++;
+                    return "world changed";
+                }), new MEAI.AIFunctionFactoryOptions { Name = "world_command", Description = "world" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
+                {
+                    luaInvocations++;
+                    return luaInvocations == 1 ? "Error: transient Lua failure" : "lua recovered";
+                }), new MEAI.AIFunctionFactoryOptions { Name = "execute_lua", Description = "lua" }));
+            Dictionary<string, object?> worldArgs = new() { { "name", "A" } };
+            Dictionary<string, object?> luaArgs = new() { { "code", "return 1" } };
+
+            async Task<ToolExecutionPolicy.BatchToolCallResult> RunTurnAsync()
+            {
+                ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+                await policy.ExecuteStreamedAsync(
+                    turn, MakeToolCall("world_command", worldArgs), opts, CancellationToken.None);
+                await policy.ExecuteStreamedAsync(
+                    turn, MakeToolCall("execute_lua", luaArgs), opts, CancellationToken.None);
+                return await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+            }
+
+            ToolExecutionPolicy.BatchToolCallResult first = await RunTurnAsync();
+            ToolExecutionPolicy.BatchToolCallResult retry = await RunTurnAsync();
+
+            Assert.IsTrue(first.AnyFailed);
+            Assert.IsTrue(retry.AnyFailed,
+                "The previously successful mutation is represented as a suppressed duplicate.");
+            Assert.IsFalse(retry.AllFailed, "The failed mutation must remain retryable.");
+            Assert.AreEqual(1, worldInvocations, "The successful world mutation must not repeat.");
+            Assert.AreEqual(2, luaInvocations, "The failed Lua mutation must execute again and recover.");
         }
 
         [Test]

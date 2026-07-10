@@ -50,7 +50,7 @@ Parsing rules:
 
 ## 2. Manifest extension (persisted metadata)
 
-Extend `LuaModManifest` (Assets/CoreAI/Runtime/Core/Features/LuaExecution/LuaModManifest.cs) with new
+Extend `LuaModManifest` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModManifest.cs`) with new
 fields. It is a plain JSON DTO; new fields are backward-compatible (missing => default):
 
 - `string Category = "";`     — "/"-separated category path for the tree.
@@ -110,7 +110,7 @@ algorithm everywhere.
 
 ### 4.1 LLM
 
-`manage_mods` (Assets/CoreAI/Runtime/Core/Features/LuaExecution/LuaModsLlmTool.cs) already handles
+`manage_mods` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModsLlmTool.cs`) already handles
 load/reload/unload/forget/export/import/versions/revert/diagnostics. Add: honor `category` (from the
 header or an explicit arg) and expose it in `list` output. No behavior change to existing actions.
 
@@ -183,4 +183,4 @@ Fixes:
 - WebGL: `Resources` works; `StreamingAssets` needs `UnityWebRequest`; `FileLuaModSourceStore` already
   flushes IDBFS. Keep the seeder synchronous only for the Resources source; async for the rest.
 - no-Lua / no-MoonSharp builds: everything guarded; the core compiles without the package.
-- Both packages `com.neoxider.coreai` and `com.neoxider.coreaiunity` bump in lockstep at release time.
+- All five `com.neoxider.coreai*` packages bump in lockstep at release time.

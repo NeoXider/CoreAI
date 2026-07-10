@@ -44,6 +44,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private int _consecutiveErrors;
         private readonly HashSet<string> _executedSignatures = new();
+        private readonly Dictionary<string, bool[]> _partialBatchSuccesses = new();
         private readonly List<LlmToolCallTrace> _executedTraces = new();
 
         /// <summary>
@@ -112,6 +113,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             _consecutiveErrors = 0;
             _executedSignatures.Clear();
+            _partialBatchSuccesses.Clear();
             _executedTraces.Clear();
         }
 
@@ -146,7 +148,7 @@ namespace CoreAI.Infrastructure.Llm
             DuplicatePlan plan = BuildDuplicatePlan(toolCalls);
             // This entry point has no execution phase, so register the signature immediately
             // (legacy semantics: a checked batch counts as seen).
-            if (plan.PendingBatchSignature != null)
+            if (plan.PendingBatchSignature != null && !plan.HasDuplicates)
             {
                 _executedSignatures.Add(plan.PendingBatchSignature);
             }
@@ -174,6 +176,7 @@ namespace CoreAI.Infrastructure.Llm
             public bool[] IsDuplicateIndex = Array.Empty<bool>();
             public bool HasDuplicates;
             public bool HasExecutable;
+            public string[] Signatures = Array.Empty<string>();
 
             /// <summary>
             /// Batch signature awaiting registration. Registered only AFTER the batch executes
@@ -190,6 +193,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 IndexedResults = new ToolCallResult[toolCalls?.Count ?? 0],
                 IsDuplicateIndex = new bool[toolCalls?.Count ?? 0],
+                Signatures = new string[toolCalls?.Count ?? 0],
                 HasExecutable = toolCalls != null && toolCalls.Count > 0
             };
 
@@ -198,13 +202,12 @@ namespace CoreAI.Infrastructure.Llm
                 return plan;
             }
 
-            string[] signatures = new string[toolCalls.Count];
             List<string> reducedSignatures = new();
             for (int i = 0; i < toolCalls.Count; i++)
             {
                 if (TryBuildDuplicateSignature(toolCalls[i], out string signature))
                 {
-                    signatures[i] = signature;
+                    plan.Signatures[i] = signature;
                     reducedSignatures.Add(signature);
                 }
             }
@@ -219,13 +222,25 @@ namespace CoreAI.Infrastructure.Llm
             {
                 for (int i = 0; i < toolCalls.Count; i++)
                 {
-                    if (signatures[i] != null)
+                    if (plan.Signatures[i] != null)
                     {
                         MarkDuplicate(plan, i, toolCalls[i]);
                     }
                 }
 
                 return plan;
+            }
+
+            if (_partialBatchSuccesses.TryGetValue(batchSig, out bool[] succeededSlots))
+            {
+                int count = Math.Min(toolCalls.Count, succeededSlots.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    if (succeededSlots[i] && plan.Signatures[i] != null)
+                    {
+                        MarkDuplicate(plan, i, toolCalls[i]);
+                    }
+                }
             }
 
             plan.PendingBatchSignature = batchSig;
@@ -261,7 +276,10 @@ namespace CoreAI.Infrastructure.Llm
                 canonicalName = fc?.Name ?? "";
             }
 
-            if (match != null && match.AllowDuplicates)
+            // Mutating built-ins are never exempt from the cross-turn replay guard. A tool can
+            // legitimately allow identical calls inside one turn (manage_skills is one example),
+            // but replaying the same completed turn must not apply its side effects again.
+            if (match != null && match.AllowDuplicates && !IsSerializedToolName(canonicalName))
             {
                 return false;
             }
@@ -881,8 +899,16 @@ namespace CoreAI.Infrastructure.Llm
         /// of them risks lost updates or torn reads. Matched case-insensitively against the (possibly repaired)
         /// tool name. See <see cref="IsSerializedTool"/> and <see cref="ExecuteBatchAsync"/>.
         /// </summary>
-        private static readonly HashSet<string> SerializedMutatingToolNames =
-            new(StringComparer.OrdinalIgnoreCase) { "memory", "manage_mods", "manage_skills" };
+        private static readonly HashSet<string> SerializedMutatingToolNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "memory",
+            "manage_mods",
+            "manage_skills",
+            "world_command",
+            "component_command",
+            "execute_lua",
+            "call_skill_tool"
+        };
 
         /// <summary>
         /// Whether a tool call must be serialized relative to other mutating calls in the same batch.
@@ -893,7 +919,12 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static bool IsSerializedTool(MEAI.FunctionCallContent fc)
         {
-            return fc?.Name != null && SerializedMutatingToolNames.Contains(fc.Name);
+            return IsSerializedToolName(fc?.Name);
+        }
+
+        private static bool IsSerializedToolName(string toolName)
+        {
+            return toolName != null && SerializedMutatingToolNames.Contains(toolName);
         }
 
         /// <summary>
@@ -946,6 +977,7 @@ namespace CoreAI.Infrastructure.Llm
                     ToolCallResult r = duplicatePlan.IsDuplicateIndex[i]
                         ? duplicatePlan.IndexedResults[i]
                         : await ExecuteSingleAsync(toolCalls[i], chatOptions, cancellationToken).ConfigureAwait(false);
+                    duplicatePlan.IndexedResults[i] = r;
                     seqResults.Add(r.Result);
                     if (!r.Succeeded)
                     {
@@ -967,7 +999,7 @@ namespace CoreAI.Infrastructure.Llm
                 else
                 {
                     RecordSuccess();
-                    RegisterExecutedSignature(duplicatePlan);
+                    RegisterExecutionOutcome(duplicatePlan, duplicatePlan.IndexedResults, seqAnyFailed, seqAllFailed);
                 }
 
                 return new BatchToolCallResult
@@ -1067,7 +1099,7 @@ namespace CoreAI.Infrastructure.Llm
             else
             {
                 RecordSuccess();
-                RegisterExecutedSignature(duplicatePlan);
+                RegisterExecutionOutcome(duplicatePlan, indexed, anyFailed, allFailed);
             }
 
             return new BatchToolCallResult
@@ -1104,6 +1136,15 @@ namespace CoreAI.Infrastructure.Llm
 
             /// <summary>Scheduled (parallel-mode) call tasks, drained at turn completion.</summary>
             internal readonly List<Task> InFlight = new();
+
+            /// <summary>
+            /// Mutating calls are buffered until the complete streamed turn is known. This lets the
+            /// whole-turn replay guard reject an echoed multi-call turn before any side effect runs.
+            /// Production streaming always completes through <see cref="CompleteStreamedTurnAsync"/>.
+            /// </summary>
+            internal readonly List<DeferredStreamedCall> DeferredMutations = new();
+            internal readonly HashSet<StreamedSlot> PreviouslySuccessfulSlots = new();
+            internal bool IsFinalized;
 
             /// <summary>
             /// Single ordered chain for serialized (mutating) tool calls, batch parity: each
@@ -1151,6 +1192,23 @@ namespace CoreAI.Infrastructure.Llm
 
                 result = (ToolCallResult)boxed;
                 return true;
+            }
+        }
+
+        internal sealed class DeferredStreamedCall
+        {
+            internal readonly MEAI.FunctionCallContent FunctionCall;
+            internal readonly MEAI.ChatOptions ChatOptions;
+            internal readonly StreamedSlot Slot;
+
+            internal DeferredStreamedCall(
+                MEAI.FunctionCallContent functionCall,
+                MEAI.ChatOptions chatOptions,
+                StreamedSlot slot)
+            {
+                FunctionCall = functionCall;
+                ChatOptions = chatOptions;
+                Slot = slot;
             }
         }
 
@@ -1218,6 +1276,15 @@ namespace CoreAI.Infrastructure.Llm
                 };
                 slot.Set(suppressed);
                 return suppressed;
+            }
+
+            // A streamed multi-call echo cannot be identified until the turn is complete. Buffer
+            // state-mutating calls so CompleteStreamedTurnAsync can compare the combined signature
+            // before any side effect is applied. Read-only calls keep execute-as-you-stream latency.
+            if (IsSerializedTool(fc))
+            {
+                turn.DeferredMutations.Add(new DeferredStreamedCall(fc, chatOptions, slot));
+                return null;
             }
 
             int maxParallel = Math.Max(1, _settings.MaxParallelToolCalls);
@@ -1288,6 +1355,13 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public BatchToolCallResult CompleteStreamedTurn(StreamedTurn turn)
         {
+            if (turn.DeferredMutations.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "CompleteStreamedTurn cannot execute deferred mutating tool calls synchronously. " +
+                    "Use CompleteStreamedTurnAsync.");
+            }
+
             foreach (Task inFlight in turn.InFlight)
             {
                 if (!inFlight.IsCompleted)
@@ -1326,6 +1400,58 @@ namespace CoreAI.Infrastructure.Llm
             StreamedTurn turn,
             CancellationToken cancellationToken)
         {
+            if (turn.DeferredMutations.Count > 0)
+            {
+                string combined = BuildStreamedTurnSignature(turn);
+                bool fullEcho = combined != null && _executedSignatures.Contains(combined);
+                _partialBatchSuccesses.TryGetValue(combined ?? "", out bool[] partialSuccesses);
+                for (int deferredIndex = 0; deferredIndex < turn.DeferredMutations.Count; deferredIndex++)
+                {
+                    DeferredStreamedCall deferred = turn.DeferredMutations[deferredIndex];
+                    int slotIndex = turn.Slots.IndexOf(deferred.Slot);
+                    bool alreadySucceeded = partialSuccesses != null &&
+                                            slotIndex >= 0 &&
+                                            slotIndex < partialSuccesses.Length &&
+                                            partialSuccesses[slotIndex];
+                    if (fullEcho || alreadySucceeded)
+                    {
+                        string duplicate =
+                            $"Duplicate tool call '{deferred.FunctionCall.Name}' with same arguments - skipped.";
+                        AddTrace(new LlmToolCallTrace(
+                            deferred.FunctionCall.Name ?? "", false, 0d, "duplicate", duplicate));
+                        deferred.Slot.Set(new ToolCallResult
+                        {
+                            Result = new MEAI.FunctionResultContent(deferred.FunctionCall.CallId, duplicate),
+                            Succeeded = false
+                        });
+                        if (alreadySucceeded)
+                        {
+                            turn.PreviouslySuccessfulSlots.Add(deferred.Slot);
+                        }
+                        continue;
+                    }
+
+                    // All mutating built-ins share this ordered loop, so different mutation types
+                    // cannot race each other even when MaxParallelToolCalls is greater than one.
+                    try
+                    {
+                        deferred.Slot.Set(await ExecuteSingleAsync(
+                                deferred.FunctionCall,
+                                deferred.ChatOptions,
+                                cancellationToken)
+                            .ConfigureAwait(false));
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        deferred.Slot.Set(CreateFinalizedFailure(
+                            deferred.Slot.CallId,
+                            "Error: Tool call was cancelled while finalizing the streamed turn."));
+                    }
+                }
+
+                turn.DeferredMutations.Clear();
+            }
+
             if (turn.InFlight.Count > 0)
             {
                 Task allInFlight = Task.WhenAll(turn.InFlight);
@@ -1396,6 +1522,12 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private BatchToolCallResult FinalizeStreamedTurn(StreamedTurn turn)
         {
+            if (turn.IsFinalized)
+            {
+                throw new InvalidOperationException("The streamed turn has already been finalized.");
+            }
+
+            turn.IsFinalized = true;
             // Collate strictly in arrival order (batch parity: original call order), independent
             // of completion order. A slot still empty here means its call never produced a result
             // before finalization (cancelled / stream aborted mid-flight): it collates as an
@@ -1403,18 +1535,19 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.AIContent> results = new(turn.Slots.Count);
             bool anyFailed = false;
             bool allFailed = true;
-            foreach (StreamedSlot slot in turn.Slots)
+            bool[] logicalSuccesses = new bool[turn.Slots.Count];
+            for (int slotIndex = 0; slotIndex < turn.Slots.Count; slotIndex++)
             {
+                StreamedSlot slot = turn.Slots[slotIndex];
                 if (!slot.TryGet(out ToolCallResult r))
                 {
-                    r = new ToolCallResult
-                    {
-                        Result = new MEAI.FunctionResultContent(slot.CallId,
-                            "Error: Tool call did not complete - the turn was finalized (cancelled " +
-                            "or stream aborted) while the call was still in flight."),
-                        Succeeded = false
-                    };
+                    r = CreateFinalizedFailure(slot.CallId,
+                        "Error: Tool call did not complete - the turn was finalized (cancelled " +
+                        "or stream aborted) while the call was still in flight.");
                 }
+
+                logicalSuccesses[slotIndex] =
+                    r.Succeeded || turn.PreviouslySuccessfulSlots.Contains(slot);
 
                 results.Add(r.Result);
                 if (!r.Succeeded)
@@ -1440,15 +1573,13 @@ namespace CoreAI.Infrastructure.Llm
                 // Check the combined turn signature BEFORE recording the turn's outcome, mirroring
                 // ExecuteBatchAsync where BuildDuplicatePlan checks the whole-batch signature first.
                 // Contains() means this exact turn already executed earlier in the request: a
-                // whole-turn echo. The per-call guard in ExecuteStreamedAsync only catches single-call
-                // echoes (a multi-call turn's combined signature does not exist mid-stream — see the
-                // comment there), so a multi-call echo's calls have already re-executed by the time we
-                // get here. Batch parity is restored at the ERROR-ACCOUNTING level: without this branch
-                // the re-executed calls succeed, RecordSuccess() resets the counter, and a model stuck
+                // whole-turn echo. Read-only calls may already have executed because a multi-call
+                // signature does not exist mid-stream; mutating calls are deferred and suppressed in
+                // CompleteStreamedTurnAsync. This branch restores turn-level error accounting: otherwise
+                // successful read-only results reset the counter, and a model stuck
                 // echoing the same batch never trips the max-consecutive-errors guard (it runs to the
-                // iteration cap instead). Suppressing the re-execution itself is intentionally out of
-                // scope: the results were already streamed back on the wire.
-                string combined = string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal));
+                // iteration cap instead).
+                string combined = BuildStreamedTurnSignature(turn);
                 if (_executedSignatures.Contains(combined))
                 {
                     string echoDetail =
@@ -1466,9 +1597,31 @@ namespace CoreAI.Infrastructure.Llm
 
                 // Register only when the turn made progress: a fully-failed turn must stay
                 // retryable with identical args (the error feedback explicitly asks for a retry).
-                if (!(anyFailed && allFailed))
+                if (!anyFailed)
                 {
                     _executedSignatures.Add(combined);
+                    _partialBatchSuccesses.Remove(combined);
+                }
+                else if (!allFailed || logicalSuccesses.Any(succeeded => succeeded))
+                {
+                    if (_partialBatchSuccesses.TryGetValue(combined, out bool[] existing) &&
+                        existing.Length == logicalSuccesses.Length)
+                    {
+                        for (int i = 0; i < logicalSuccesses.Length; i++)
+                        {
+                            logicalSuccesses[i] = logicalSuccesses[i] || existing[i];
+                        }
+                    }
+
+                    if (logicalSuccesses.All(succeeded => succeeded))
+                    {
+                        _partialBatchSuccesses.Remove(combined);
+                        _executedSignatures.Add(combined);
+                    }
+                    else
+                    {
+                        _partialBatchSuccesses[combined] = logicalSuccesses;
+                    }
                 }
             }
 
@@ -1494,15 +1647,65 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
+        private static string BuildStreamedTurnSignature(StreamedTurn turn)
+        {
+            return turn.Signatures.Count == 0
+                ? null
+                : string.Join("|", turn.Signatures.OrderBy(s => s, StringComparer.Ordinal));
+        }
+
+        private static ToolCallResult CreateFinalizedFailure(string callId, string message)
+        {
+            return new ToolCallResult
+            {
+                Result = new MEAI.FunctionResultContent(callId, message),
+                Succeeded = false
+            };
+        }
+
         /// <summary>
         /// Registers a batch signature for the cross-turn echo guard. Called only after the batch
         /// executed with at least one success, so a fully-failed batch stays retryable verbatim.
         /// </summary>
-        private void RegisterExecutedSignature(DuplicatePlan plan)
+        private void RegisterExecutionOutcome(
+            DuplicatePlan plan,
+            ToolCallResult[] indexedResults,
+            bool anyFailed,
+            bool allFailed)
         {
-            if (plan?.PendingBatchSignature != null)
+            if (plan?.PendingBatchSignature == null || allFailed)
+            {
+                return;
+            }
+
+            if (!anyFailed)
             {
                 _executedSignatures.Add(plan.PendingBatchSignature);
+                _partialBatchSuccesses.Remove(plan.PendingBatchSignature);
+                return;
+            }
+
+            bool[] successes = _partialBatchSuccesses.TryGetValue(plan.PendingBatchSignature, out bool[] existing)
+                ? (bool[])existing.Clone()
+                : new bool[indexedResults.Length];
+            if (successes.Length != indexedResults.Length)
+            {
+                successes = new bool[indexedResults.Length];
+            }
+
+            for (int i = 0; i < indexedResults.Length; i++)
+            {
+                successes[i] = successes[i] || plan.IsDuplicateIndex[i] || indexedResults[i].Succeeded;
+            }
+
+            if (successes.All(succeeded => succeeded))
+            {
+                _partialBatchSuccesses.Remove(plan.PendingBatchSignature);
+                _executedSignatures.Add(plan.PendingBatchSignature);
+            }
+            else
+            {
+                _partialBatchSuccesses[plan.PendingBatchSignature] = successes;
             }
         }
 

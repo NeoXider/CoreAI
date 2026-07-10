@@ -1,5 +1,9 @@
 # CoreAI Game-Creation Benchmark
 
+Package graph: `com.neoxider.coreaibenchmark` 5.2.0 depends on `com.neoxider.coreai`,
+`com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
+required because the scenarios instantiate and execute the real Lua tool/runtime.
+
 The CoreAI Game-Creation Benchmark measures how well an LLM can build a game inside CoreAI, not how well it can describe one. Each scenario drives the real `execute_lua` and `world_command` tools, then grades the resulting world commands, Lua logic slots, simulated playthroughs, screenshots, and tool-call trace.
 
 The benchmark answers the practical production question: is this model usable for my game, and for which role? A model can be fast and conversational but still fail as a scene builder, mechanic author, tool operator, programmer, orchestrator, or QA agent if it cannot call tools correctly, obey constraints, or reason through game rules.
@@ -244,3 +248,11 @@ The G6 scenario is a free-form visual build (default: castle). Each model author
 chat-only bridge fix; its suite score in the table is from the full G1-G7 run.
 See [the full example report](../../Docs/Images/example_report/example_report.md) for a complete
 per-scenario breakdown and transcript example.
+
+## Community Leaderboard
+
+Ranked results (cloud and local, suite v1.6) with a public submission workflow live on the
+[community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
+[How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,
+model file/quantization, and hardware — the leaderboard page lists the exact requirements and
+honesty rules.

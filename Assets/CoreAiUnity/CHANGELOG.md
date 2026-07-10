@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.2.0 - verified demos and release stabilization (2026-07-10)
+
+- Fixed Hub/MiniRpg missing components and restored valid Hub/chat asset wiring in MiniRpg and
+  WaveAutoBattler; Wave runtime colors now keep the active render-pipeline material.
+- Removed a stale Path Tracing managed reference from the URP global settings that produced a
+  missing-type console exception on Unity 6000.3 / URP 17.3.
+- Added a one-click NuGet bootstrapper, Director AI controller recipe with scene-lifetime
+  cancellation, content-filter tests, and a ten-scene deterministic demo smoke gate.
+- Enabled the optional Mods/Hub integration in the source-tree development project and documented
+  the five-package 5.2.0 graph. The benchmark package now declares its real Mods dependency.
+- Verification snapshot: EditMode 1,598 total (1,594 passed, 4 third-party ignored), FastNoLlm
+  PlayMode 67/67; representative live tests use the local `qwen3.5-4b-mtp` profile.
+
 ## 5.1.0 - audit remediation: durability, fallback correctness, sandbox hardening (2026-07-10)
 
 Release of the 2026-07-10 audit remediation wave (findings F-01…F-16 of

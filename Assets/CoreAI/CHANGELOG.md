@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## 5.2.0 - stability gate and extension APIs (2026-07-10)
+
+- Added the public `IContentFilter` extension point, passthrough implementation, and baseline
+  word-list filter. The filter is host-wired by design; CoreAI does not claim automatic moderation.
+- Hardened `ToolExecutionPolicy`: every state-mutating built-in shares one serialization policy;
+  streamed mutations are deferred until the complete turn is known; whole-turn echoes are rejected
+  before side effects; partial failures retry only the failed slots.
+- Added focused regression coverage for streamed mutation replay, partial-success retries, and
+  duplicate/error accounting.
+
 ## 5.1.0 - audit remediation: safe mutation pipeline, bounded queues/stores (2026-07-10)
 
 - **Tool execution policy (F-01):** per-call duplicate signatures registered only on success (failed

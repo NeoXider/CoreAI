@@ -31,7 +31,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 - 🆓 **Works out of the box, scales to production** — one-liner `await CoreAi.AskAsync("…")` for your first feature; full `AgentBuilder` + orchestrator + per-role routing when you need it.
 - 🧩 **No forced heavy dependencies** — LLM and Lua are **optional modules** (`COREAI_NO_LLM` / `COREAI_NO_LUA`, auto-detected from installed packages). Install only what your game uses.
-- 🛡️ **Built for small local models** — auto-repairs tool-name casing, retries with feedback, survives streaming `<think>` splits, caps runaway generation. The full PlayMode suite passes on a local **Qwen3.5-4B** GGUF.
+- 🛡️ **Built for small local models** — auto-repairs tool-name casing, retries with feedback, survives streaming `<think>` splits, caps runaway generation. Recorded live checks on **Qwen3.5-4B** cover real memory and world-command tool calls; deterministic suites use stubs.
 
 ### Is it for you?
 
@@ -45,7 +45,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 ### ⚡ At a glance
 
 - 🧠 **Agents that call your code** — real function calling with tool retry, auto-repair, and memory
-- 🏠 **Local-first** — full PlayMode suite passes on a 4 GB GGUF; no data leaves the player's machine
+- 🏠 **Local-first** — representative live PlayMode tool calls pass on a 4B local model; no data leaves the player's machine
 - 💬 **Drop-in chat UI** — one menu click creates a working streaming chat scene
 - 🎯 **Self-Service Skills** — the model sees 2 meta-tools instead of hundreds (~91% token savings)
 - 🌊 **Streaming that survives reality** — split `<think>` tags, fragmented tool calls, SSE chunking
@@ -278,7 +278,7 @@ public class WeatherLlmTool : ILlmTool
 {
     public string Name => "get_weather";
     public string Description => "Get current weather.";
-    public IEnumerable<AIFunction> CreateAIFunctions() 
+    public IEnumerable<AIFunction> CreateAIFunctions()
     {
         yield return AIFunctionFactory.Create(
             async ct => await _provider.GetWeatherAsync(ct), "get_weather", "Get weather.");
@@ -401,7 +401,7 @@ Executes: {"name":"memory", ...}  ← silently fixed, no error shown
 | Qwen3.5-2B | 2B | ⚠️ Works | Works, but sometimes makes mistakes |
 | Qwen3.5-0.8B | 0.8B | ⚠️ Basic | Most tests pass, struggles with multi-step |
 
-> 💡 **Recommendation: Qwen3.5-4B locally or Qwen3.5-35B (MoE) via API**  
+> 💡 **Recommendation: Qwen3.5-4B locally or Qwen3.5-35B (MoE) via API**
 > MoE models (Mixture of Experts) activate only 3B parameters per inference — fast as 4B, accurate as 35B.
 
 ### 🧪 PlayMode Test Results by Model Size
@@ -419,8 +419,8 @@ The table below is a snapshot of a recorded PlayMode run against real LLM backen
 | Chat History (persistent context) | ❌ Too small | ⚠️ Mostly | ✅ Pass |
 | Player Chat (NPC dialogue) | ✅ Pass | ✅ Pass | ✅ Pass |
 
-> 🏆 **Qwen3.5-4B passed all tests in this recorded run.** This is the recommended minimum for production use.  
-> 📊 **Qwen3.5-0.8B passes most tests** — impressive for its size! Struggles only with complex multi-step tool calling chains.  
+> 🏆 **Qwen3.5-4B passed every live case in this recorded run.** Re-run the cases your game depends on before shipping.
+> 📊 **Qwen3.5-0.8B passes most tests** — impressive for its size! Struggles only with complex multi-step tool calling chains.
 > 📈 **2B is a solid middle ground** — occasional mistakes in multi-step scenarios, but mostly reliable.
 
 ---
@@ -445,9 +445,9 @@ The repository ships as **five UPM packages**. Only the first two are required; 
 |---------|--------------|--------------|
 | **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity: orchestration, tools, memory, routing | — |
 | **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), LLM clients (MEAI), MessagePipe, chat UI, tests | `coreai` |
-| **[com.neoxider.coreaimods](Assets/CoreAiMods)** | Optional Lua modding layer — MoonSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` (+ MoonSharp) |
-| **[com.neoxider.coreaihub](Assets/CoreAiHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) | `coreai` + `coreaiunity` |
-| **[com.neoxider.coreaibenchmark](Assets/CoreAiBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` |
+| **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — MoonSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` (+ MoonSharp) |
+| **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) | `coreai` + `coreaiunity` |
+| **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
 
 Mods and Hub are independent optional installs — neither requires the other. When **both** are present, Mods' Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define, adding a Mods page to the Hub window; without Hub installed, that assembly compiles out and Mods works standalone (`execute_lua`/`manage_mods` tools, no Hub UI).
 
@@ -637,7 +637,7 @@ var storyteller = new AgentBuilder("Storyteller")
     .Build();
 ```
 
-> 📖 **Full setup guide with LLM configuration:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
+> 📖 **Full setup guide with LLM configuration:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)
 > 🏗️ **Agent Builder reference + ready recipes:** [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 ---
@@ -741,8 +741,8 @@ The **`version`** field in each package’s `package.json` is the authoritative 
 
 ## 🤝 Author and Community
 
-**Author:** [Neoxider](https://github.com/NeoXider)  
-**Ecosystem:** [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools)  
+**Author:** [Neoxider](https://github.com/NeoXider)
+**Ecosystem:** [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools)
 **License:** [LICENSE](LICENSE)
 
 **Contact:** neoxider@gmail.com | [GitHub Issues](https://github.com/NeoXider/CoreAI/issues)

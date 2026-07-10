@@ -17,10 +17,13 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
-            for (int i = 0; i < _created.Count; i++)
+            // Destroy deepest children first and detach them before destruction. Destroying a
+            // 5,000-level root recursively can overflow Unity's native destruction stack.
+            for (int i = _created.Count - 1; i >= 0; i--)
             {
                 if (_created[i] != null)
                 {
+                    _created[i].transform.SetParent(null, worldPositionStays: false);
                     Object.DestroyImmediate(_created[i]);
                 }
             }

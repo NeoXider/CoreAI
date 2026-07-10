@@ -137,7 +137,7 @@ CoreAI → Setup → Modules → MoonSharp (Lua) → Enable + Update to latest
 **Window → Package Manager → `+` → Add package from git URL…**
 
 ```text
-https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiMods
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMods
 ```
 
 With MoonSharp present, the package's `COREAI_HAS_MOONSHARP` version-define lights up the Lua
@@ -167,7 +167,7 @@ can render pages on your own uGUI/UITK canvas via the API.
 **Window → Package Manager → `+` → Add package from git URL…**
 
 ```text
-https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiHub
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIHub
 ```
 
 No further setup — the Hub window picks up any pages already registered by the base and Mods packages.
@@ -183,7 +183,7 @@ not something a shipped game depends on.
 **Window → Package Manager → `+` → Add package from git URL…**
 
 ```text
-https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiBenchmark
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIBenchmark
 ```
 
 See the [full benchmark guide](Assets/CoreAIBenchmark/README.md) for scenario details and how to run a

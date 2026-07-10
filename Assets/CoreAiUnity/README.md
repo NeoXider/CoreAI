@@ -170,7 +170,8 @@ Full package map: [DOCS_INDEX](Docs/DOCS_INDEX.md). Repository-wide entry point:
 | Qwen3.5-2B | 2B | ⚠️ Works | Occasional mistakes in multi-step |
 | Qwen3.5-0.8B | 0.8B | ⚠️ Basic | Most tests pass |
 
-> 🏆 **Qwen3.5-4B** passes the full PlayMode suite and is the production minimum.
+> 🏆 **Qwen3.5-4B** passes the recorded representative live tool-call run. The full deterministic
+> EditMode/FastNoLlm suites do not depend on a model; re-run your own live scenarios before shipping.
 
 ---
 
