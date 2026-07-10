@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **`CoreAI → Getting Started` welcome window.** A single onboarding entry point that opens automatically
+  on first import: a one-click launcher for every bundled demo (each with a one-line description and an
+  offline/needs-model tag, strongest demos featured first), the current backend status with quick links to
+  Settings and recommended models, a "30-second start" Create-Chat-Demo button, and links to Quick Start /
+  full walkthrough / demo READMEs. Makes the 10 demo scenes discoverable instead of buried under menus.
+
 ## 5.2.0 - verified demos and release stabilization (2026-07-10)
 
 - Fixed Hub/MiniRpg missing components and restored valid Hub/chat asset wiring in MiniRpg and

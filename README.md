@@ -40,7 +40,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 | 🟢 **New / prototyping** | `CoreAI → Setup → Create Chat Demo Scene` → Play, or `await CoreAi.AskAsync("…")` | ~5 min |
 | 🔵 **Building a real game** | `AgentBuilder` + tools + `IAiOrchestrationService`, per-role LLM routing | grows with you |
 
-> 🚀 **30-second start:** install (below) → `CoreAI → Setup → Create Chat Demo Scene` → press **Play** → type. Jump to [Quick Start](#-quick-start).
+> 🚀 **30-second start:** install (below) → open **`CoreAI → Getting Started`** (opens automatically on first import) → one-click **Create Chat Demo Scene** or launch any bundled demo → press **Play** → type. Jump to [Quick Start](#-quick-start).
 
 ### ⚡ At a glance
 
