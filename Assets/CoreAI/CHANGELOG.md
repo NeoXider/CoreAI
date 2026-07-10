@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Circuit breaker for LLM backends** (`CircuitBreakerLlmClientDecorator`). After N consecutive
+  TRANSIENT failures (timeout, rate-limit, backend-unavailable, provider/routing error) the breaker
+  trips **open** and short-circuits calls with `BackendUnavailable` *without invoking the backend* — so a
+  dead primary no longer costs `timeout × (retries+1)` every turn. After a cooldown it half-opens and
+  admits one probe: success closes it, failure re-opens it. Caller-caused failures (auth, invalid
+  request, context-length, cancellation) never trip it. Covers both `CompleteAsync` and the streaming
+  path. Deterministic (injected monotonic clock); 6 EditMode tests.
+
 ## 5.2.0 - stability gate and extension APIs (2026-07-10)
 
 - Added the public `IContentFilter` extension point, passthrough implementation, and baseline
