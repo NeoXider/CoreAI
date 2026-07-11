@@ -172,7 +172,7 @@ No further setup — the Hub window picks up any pages already registered by the
 
 ## 5. Benchmark module (dev-only)
 
-`com.neoxider.coreaibenchmark` is the LLM game-creation benchmark harness (scenario groups G1-G7,
+`com.neoxider.coreaibenchmark` is the LLM game-creation benchmark harness (scenario groups G1-G8,
 scoring, role-fitness reports) used to evaluate model quality — it is a development/test-time tool,
 not something a shipped game depends on.
 

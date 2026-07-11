@@ -1,6 +1,6 @@
 # CoreAI Game-Creation Benchmark
 
-Package graph: `com.neoxider.coreaibenchmark` 5.3.0 depends on `com.neoxider.coreai`,
+Package graph: `com.neoxider.coreaibenchmark` 5.4.0 depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
@@ -222,6 +222,8 @@ runs start a separate leaderboard and must not be mixed with those scores. Histo
 Frontier hosted models, run through the [`cli-agents`](https://github.com/) `openai-server` bridge — an
 OpenAI-compatible shim over the Claude Code / Codex CLIs. This is a **separate leaderboard** from the local
 LM Studio models above (different suite version *and* different backend class). Ranked by suite base score.
+
+![CoreAI Game-Creation Benchmark v2 — frontier-model comparison](../../Docs/Images/benchmark_v2_frontier.svg)
 
 | # | Model | Score | Pass-rate | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tokens |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|

@@ -20,8 +20,10 @@ Tool calls execute in **parallel** on both the batch and the streamed path, boun
 flowchart TD
     Game["Game or UI"] --> Orchestrator["IAiOrchestrationService"]
     Orchestrator --> LlmClient["ILlmClient"]
-    LlmClient --> Logging["LoggingLlmClientDecorator"]
-    Logging --> Routing["RoutingLlmClient"]
+    LlmClient --> Timeout["TimeoutLlmClientDecorator"]
+    Timeout --> Logging["LoggingLlmClientDecorator"]
+    Logging --> RetryStream["RetryingStreamingLlmClientDecorator"]
+    RetryStream --> Routing["RoutingLlmClient"]
     Routing --> Registry["LlmClientRegistry"]
     Registry --> LocalModel["LocalModel"]
     Registry --> ClientOwnedApi["ClientOwnedApi"]
@@ -84,9 +86,9 @@ If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChat
 
 ## Timeout & Retry Rule (v1.5.1)
 
-**Timeout:** enforced exclusively by `CoreAiChatService` via UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) passes `CancellationToken` through without wrapping. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
+**Timeout:** the interactive UI timeout is enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). Since **5.4.0** the portable pipeline also wraps every client in `TimeoutLlmClientDecorator`, which applies a request timeout off `ICoreAISettings.LlmRequestTimeoutSeconds` on both the streaming and non-streaming paths (belt-and-braces for hosts that call the pipeline outside the chat service). See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
 
-**Retries:** network-level retries (HTTP 429, 5xx, exponential backoff) are handled exclusively by `LoggingLlmClientDecorator`. The orchestrator does not multiply those retries with its own counters.
+**Retries:** network-level retries (HTTP 429, 5xx, exponential backoff) are handled exclusively by `LoggingLlmClientDecorator`. The orchestrator does not multiply those retries with its own counters. Since **5.4.0** `RetryingStreamingLlmClientDecorator` additionally retries a *streaming* call, but only before the stream commits any content, so a mid-stream failure is never silently restarted. `LlmPipelineInstaller` composes the chain as `Timeout( Logging( RetryingStreaming( routed ) ) )`.
 
 **Context-length retry:** in addition to network retries above, **`AiOrchestrator.RunTaskAsync`** may issue bounded additional LLM calls when the completion result carries **`ContextLengthExceeded`**, after rebuilding prompts with progressively tighter history compaction.
 

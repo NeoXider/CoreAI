@@ -25,6 +25,13 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
   Symbols, compiling all Lua features out). Both must stay green.
 - **Sandbox coverage gate** — the `lua` job fails if the `SecureLuaSandboxEditModeTests`
   escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
+- **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
+  `com.neoxider.coreai` package compiles and tests on its own, without the Unity layer.
+- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all five packages carry
+  the same lockstep version and that their internal dependency pins agree.
+- **`merge-queue-gate` job** — on the `merge_group` trigger the workflow **fails** (does not skip)
+  when `UNITY_LICENSE` is absent, so a PR can never be merged through the queue without the licensed
+  test run having actually executed.
 
 The workflow requires the standard [GameCI](https://game.ci/docs/github/getting-started) repository
 secrets: `UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
