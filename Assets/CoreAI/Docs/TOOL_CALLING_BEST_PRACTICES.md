@@ -241,6 +241,10 @@ Guidelines that follow from this:
   `list_prefabs` lets the model learn valid `prefabKey` values before spawning,
   the same way `list_animations` and `list_objects` let it learn valid
   `animationName`/`targetName` values.
+- **Spawn meaningful hierarchies for compound objects.** Create a named `empty` root before its parts,
+  then set the parent on posts, roofs, props and decorations. Parented coordinates are local by default;
+  use `worldPositionStays=true` only when an existing world transform must be preserved. This costs no
+  extra parent call when the parent is supplied during `spawn` or per `spawn_batch` item.
 
 ## Verification Checklist
 

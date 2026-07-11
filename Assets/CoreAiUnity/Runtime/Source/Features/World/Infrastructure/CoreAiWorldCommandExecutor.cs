@@ -261,7 +261,7 @@ namespace CoreAI.Infrastructure.World
 
             if (spawned != null)
             {
-                TryParentSpawned(spawned, env.stringValue);
+                TryParentSpawned(spawned, env.stringValue, env.worldPositionStays);
 
                 if (spawned.GetComponent<WorldObjectComponent>() == null)
                 {
@@ -341,6 +341,9 @@ namespace CoreAI.Infrastructure.World
                         ? $"{namePrefix}_{i + 1}"
                         : $"{prefab}_{i + 1}";
                 string parent = !string.IsNullOrWhiteSpace(item.parent) ? item.parent : env.stringValue;
+                bool worldPositionStays = item.hasWorldPositionStays
+                    ? item.worldPositionStays
+                    : env.worldPositionStays;
 
                 bool itemHasRotation = item.rx != 0f || item.ry != 0f || item.rz != 0f;
                 Vector3 euler = itemHasRotation ? new Vector3(item.rx, item.ry, item.rz) : defaultEuler;
@@ -354,6 +357,7 @@ namespace CoreAI.Infrastructure.World
                 CoreAiWorldCommandEnvelope itemEnv = CoreAiWorldCommandEnvelope.Spawn(
                     prefab, name, new Vector3(item.x, item.y, item.z), euler, uniformScale, nonUniformScale);
                 itemEnv.stringValue = parent ?? "";
+                itemEnv.worldPositionStays = worldPositionStays;
 
                 GameObject spawned = TrySpawnCore(itemEnv, out _);
                 if (spawned == null)
@@ -617,13 +621,27 @@ namespace CoreAI.Infrastructure.World
             }
 
             bool legacySetTransform = string.Equals(env.action, "set_transform", StringComparison.Ordinal);
+            bool hasParentCommand = !string.IsNullOrWhiteSpace(env.stringValue);
+            bool useLocalSpace = false;
+            if (hasParentCommand && !env.worldPositionStays)
+            {
+                useLocalSpace = TryParentSpawned(go, env.stringValue, false) && go.transform.parent != null;
+            }
+
             if (legacySetTransform || (env.hasPosition && !HasAxisPositionFlags(env)))
             {
-                go.transform.position = new Vector3(env.x, env.y, env.z);
+                if (useLocalSpace)
+                {
+                    go.transform.localPosition = new Vector3(env.x, env.y, env.z);
+                }
+                else
+                {
+                    go.transform.position = new Vector3(env.x, env.y, env.z);
+                }
             }
             else if (env.hasPosition || HasAxisPositionFlags(env))
             {
-                Vector3 pos = go.transform.position;
+                Vector3 pos = useLocalSpace ? go.transform.localPosition : go.transform.position;
                 if (env.hasX)
                 {
                     pos.x = env.x;
@@ -639,16 +657,30 @@ namespace CoreAI.Infrastructure.World
                     pos.z = env.z;
                 }
 
-                go.transform.position = pos;
+                if (useLocalSpace)
+                {
+                    go.transform.localPosition = pos;
+                }
+                else
+                {
+                    go.transform.position = pos;
+                }
             }
 
             if (legacySetTransform || (env.hasRotation && !HasAxisRotationFlags(env)))
             {
-                go.transform.rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+                if (useLocalSpace)
+                {
+                    go.transform.localRotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+                }
+                else
+                {
+                    go.transform.rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+                }
             }
             else if (env.hasRotation || HasAxisRotationFlags(env))
             {
-                Vector3 rot = go.transform.eulerAngles;
+                Vector3 rot = useLocalSpace ? go.transform.localEulerAngles : go.transform.eulerAngles;
                 if (env.hasFx)
                 {
                     rot.x = env.fx;
@@ -664,7 +696,14 @@ namespace CoreAI.Infrastructure.World
                     rot.z = env.fz;
                 }
 
-                go.transform.rotation = Quaternion.Euler(rot);
+                if (useLocalSpace)
+                {
+                    go.transform.localRotation = Quaternion.Euler(rot);
+                }
+                else
+                {
+                    go.transform.rotation = Quaternion.Euler(rot);
+                }
             }
 
             if (legacySetTransform)
@@ -676,11 +715,14 @@ namespace CoreAI.Infrastructure.World
                 go.transform.localScale = ResolveChangeScale(go.transform.localScale, env);
             }
 
-            TryParentSpawned(go, env.stringValue);
+            if (hasParentCommand && env.worldPositionStays)
+            {
+                TryParentSpawned(go, env.stringValue, true);
+            }
             return true;
         }
 
-        private bool TryParentSpawned(GameObject child, string parentName)
+        private bool TryParentSpawned(GameObject child, string parentName, bool worldPositionStays = true)
         {
             if (child == null || string.IsNullOrWhiteSpace(parentName))
             {
@@ -689,7 +731,7 @@ namespace CoreAI.Infrastructure.World
 
             if (parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
-                child.transform.SetParent(null, true);
+                child.transform.SetParent(null, worldPositionStays);
                 return true;
             }
 
@@ -700,7 +742,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            child.transform.SetParent(parent.transform, true);
+            child.transform.SetParent(parent.transform, worldPositionStays);
             return true;
         }
 

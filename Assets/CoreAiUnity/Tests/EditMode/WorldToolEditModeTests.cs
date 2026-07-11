@@ -56,6 +56,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3f, envelope.scaleY);
             Assert.AreEqual(4f, envelope.scaleZ);
             Assert.AreEqual("Root", envelope.stringValue);
+            Assert.IsFalse(envelope.worldPositionStays,
+                "Parented spawns should use local coordinates by default.");
         }
 
         [Test]
@@ -82,6 +84,13 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(45f, envelope.fy);
             Assert.AreEqual(2.5f, envelope.scaleY);
             Assert.AreEqual("Root", envelope.stringValue);
+            Assert.IsFalse(envelope.worldPositionStays);
+
+            await tool.ExecuteAsync("change", targetName: "obj1", stringValue: "OtherRoot",
+                worldPositionStays: true);
+            envelope = JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
+            Assert.IsTrue(envelope.worldPositionStays,
+                "The model must be able to request world-space-preserving parenting explicitly.");
         }
 
         [Test]
@@ -392,7 +401,11 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("change", tool.Description);
             StringAssert.Contains("set_color", tool.Description);
             StringAssert.Contains("destroy", tool.Description);
+            StringAssert.Contains("worldPositionStays", tool.Description);
+            StringAssert.Contains("empty root", tool.Description);
+            StringAssert.Contains("meaningful hierarchy", tool.Description);
             StringAssert.Contains("action", tool.ParametersSchema);
+            StringAssert.Contains("worldPositionStays", tool.ParametersSchema);
             Assert.IsFalse(tool.ParametersSchema.Contains("move"));
             Assert.IsFalse(tool.ParametersSchema.Contains("update_score"));
             Assert.IsFalse(tool.ParametersSchema.Contains("spawn_particles"));
@@ -410,13 +423,15 @@ namespace CoreAI.Tests.EditMode
                 Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
             string id = Guid.NewGuid().ToString("N");
             GameObject parent = new($"BatchParent_{id}");
+            parent.transform.position = new Vector3(10f, 0f, 0f);
 
             try
             {
                 string itemsJson = JsonConvert.SerializeObject(new object[]
                 {
                     new { name = $"Coin_{id}_1", x = 1f, y = 0f, z = 0f, color = "#ff0000" },
-                    new { name = $"Coin_{id}_2", x = 2f, y = 0f, z = 0f, color = "#00ff00" },
+                    new { name = $"Coin_{id}_2", x = 2f, y = 0f, z = 0f, worldPositionStays = true,
+                        color = "#00ff00" },
                     new { name = $"Coin_{id}_3", x = 3f, y = 0f, z = 0f }
                 });
 
@@ -438,8 +453,15 @@ namespace CoreAI.Tests.EditMode
                 GameObject first = GameObject.Find($"Coin_{id}_1");
                 Assert.IsNotNull(first);
                 Assert.AreEqual(parent.transform, first.transform.parent);
+                Assert.AreEqual(1f, first.transform.localPosition.x, 0.001f,
+                    "Batch items should use parent-local coordinates by default.");
                 Assert.IsTrue(first.GetComponent<Renderer>().HasPropertyBlock(),
                     "Per-item color should apply a MaterialPropertyBlock.");
+
+                GameObject second = GameObject.Find($"Coin_{id}_2");
+                Assert.IsNotNull(second);
+                Assert.AreEqual(2f, second.transform.position.x, 0.001f,
+                    "A per-item worldPositionStays=true override should preserve world coordinates.");
 
                 GameObject third = GameObject.Find($"Coin_{id}_3");
                 Assert.IsNotNull(third);

@@ -37,7 +37,8 @@ Removed from the public API and docs: `move`, `rotate`, `set_scale`, `parent`, `
 
 Required: `prefabKey`, `targetName`.
 
-Optional: `x/y/z`, `fx/fy/fz`, `scale`, `scaleX/scaleY/scaleZ`, `stringValue` for parent.
+Optional: `x/y/z`, `fx/fy/fz`, `scale`, `scaleX/scaleY/scaleZ`, `stringValue` for parent,
+`worldPositionStays` (default `false`).
 
 ```json
 {
@@ -53,18 +54,29 @@ Optional: `x/y/z`, `fx/fy/fz`, `scale`, `scaleX/scaleY/scaleZ`, `stringValue` fo
     "scaleX": 8,
     "scaleY": 2,
     "scaleZ": 0.5,
-    "stringValue": "CastleRoot"
+    "stringValue": "CastleRoot",
+    "worldPositionStays": false
   }
 }
 ```
 
 `scale` is a uniform fallback. Use `scaleX/scaleY/scaleZ` when the requested object dimensions matter in meters.
 
+When `stringValue` names a parent, transform coordinates are local to that parent by default. Set
+`worldPositionStays: true` to preserve a world-space transform while attaching. With no parent, local and
+world coordinates are identical. The parent must exist before the child is spawned.
+
+For a compound object, create one named `empty` root and parent its pieces under it. For example,
+`well_root` should own the base, posts, crossbar and roof; `market_stall_root` should own its table, posts,
+awning and props. Prefer meaningful groups over leaving every spawned piece at the scene root.
+
 ### `change`
 
 Required: `targetName`.
 
-Optional: any subset of `x/y/z`, `fx/fy/fz`, `scale`, `scaleX/scaleY/scaleZ`, `stringValue` for parent. Only supplied fields are changed.
+Optional: any subset of `x/y/z`, `fx/fy/fz`, `scale`, `scaleX/scaleY/scaleZ`, `stringValue` for parent,
+and `worldPositionStays`. Only supplied fields are changed. When a new parent is supplied, coordinates are
+local by default; use `worldPositionStays: true` to preserve world space.
 
 ```json
 {

@@ -4,6 +4,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Structured world spawning.** Added `worldPositionStays` to `world_command` `spawn`, `spawn_batch`, and
+  `change`. The default is `false`, so parented position/rotation values are local; `true` preserves the
+  world transform. Batch items can override the call-level default. Tool guidance now recommends named
+  `empty` roots for wells, stalls, buildings, and other compound objects.
+
 ## 5.5.0 - R6 resilience, benchmark v2 tooling, CI/package gates (2026-07-11)
 
 - **R6 resilience wiring.** `LlmPipelineInstaller` now composes `Timeout( Logging( RetryingStreaming( routed )))`,

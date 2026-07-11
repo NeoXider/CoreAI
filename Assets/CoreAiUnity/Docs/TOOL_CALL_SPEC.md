@@ -229,6 +229,7 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 | `scale` | float | Optional uniform scale fallback. |
 | `scaleX`, `scaleY`, `scaleZ` | float | Optional per-axis scale for meter-accurate dimensions. |
 | `stringValue` | string | Scene name, search query, parent name, HTML colour, or clip key depending on action. |
+| `worldPositionStays` | bool | Parenting policy for `spawn`/`change`. Default `false`: coordinates are local to the named parent. `true`: preserve world transform. |
 | `animationName` | string | Animation name. |
 | `textToDisplay` | string | Text to display. |
 | `volume` | float | Audio volume. |
@@ -236,8 +237,8 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 **Examples:**
 
 ```json
-// Spawn with optional position, rotation, non-uniform scale, and parent
-{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "cube", "targetName": "wall_1", "x": 0, "y": 1, "z": 0, "fy": 90, "scaleX": 8, "scaleY": 2, "scaleZ": 0.5, "stringValue": "CastleRoot"}}
+// Spawn with optional local position, rotation, non-uniform scale, and parent
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "cube", "targetName": "wall_1", "x": 0, "y": 1, "z": 0, "fy": 90, "scaleX": 8, "scaleY": 2, "scaleZ": 0.5, "stringValue": "CastleRoot", "worldPositionStays": false}}
 
 // Change only supplied fields
 {"name": "world_command", "arguments": {"action": "change", "targetName": "wall_1", "x": 2, "fy": 180, "scaleY": 3, "stringValue": "none"}}
@@ -256,6 +257,11 @@ Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingL
 ```
 
 **When to use:** Creator / Designer AI that dynamically drives the world. For scene inspection and instance-level scene operations, use `scene_tool`; it is separate from `world_command`.
+
+For compound spawned objects, create a named `empty` root first and parent related pieces beneath it. Use
+local coordinates (the default) for parts such as posts, roofs and props; use `worldPositionStays: true`
+only when attaching an already world-positioned object. This keeps the hierarchy meaningful and lets the
+whole object move as one unit.
 ### 5. Component command tool
 
 **Purpose:** Add, remove, configure, and list Unity components on existing GameObjects through a curated catalog. This tool does not use reflection.

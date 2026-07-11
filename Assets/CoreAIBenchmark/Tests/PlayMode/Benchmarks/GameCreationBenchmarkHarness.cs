@@ -399,6 +399,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public float FloatValue;
             public float Fx, Fy, Fz;
             public float ScaleX, ScaleY, ScaleZ;
+            public bool WorldPositionStays;
             public bool HasPosition, HasRotation, HasScale;
             public bool HasX, HasY, HasZ;
             public bool HasFx, HasFy, HasFz;
@@ -446,6 +447,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         ScaleX = env.scaleX,
                         ScaleY = env.scaleY,
                         ScaleZ = env.scaleZ,
+                        WorldPositionStays = env.worldPositionStays,
                         HasPosition = env.hasPosition,
                         HasRotation = env.hasRotation,
                         HasScale = env.hasScale,
@@ -627,8 +629,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             bool expected = ExpectedNames.Count == 0 || ExpectedNames.Contains(key);
                             UnityEngine.GameObject go = BuildVisual(
                                 key, cmd.PrefabKeyOrName, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z),
-                                expected, false);
-                            ApplyInlineTransform(go, cmd);
+                                expected, false, cmd.StringValue, cmd.WorldPositionStays);
+                            ApplyInlineTransform(go, cmd, !string.IsNullOrWhiteSpace(cmd.StringValue)
+                                && !cmd.WorldPositionStays);
                             _objects[key] = go;
                         }
                     }
@@ -662,15 +665,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     else if (action == "change"
                              && _objects.TryGetValue(name, out UnityEngine.GameObject ch) && ch != null)
                     {
-                        // 'change' is the current unified update action (position/rotation/scale/parent);
-                        // without this the scene screenshot silently showed the object's original spawn
-                        // transform even when the model correctly repositioned/rescaled/rotated it afterward.
-                        if (cmd.X != 0f || cmd.Y != 0f || cmd.Z != 0f)
+                        bool hasParent = TryResolveParent(cmd.StringValue, out UnityEngine.Transform parent);
+                        bool localTransform = hasParent && !cmd.WorldPositionStays;
+                        if (localTransform)
                         {
-                            ch.transform.position = new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z);
+                            ch.transform.SetParent(parent, false);
                         }
 
-                        ApplyInlineTransform(ch, cmd);
+                        ApplyInlineTransform(ch, cmd, localTransform);
+                        if (hasParent && cmd.WorldPositionStays)
+                        {
+                            ch.transform.SetParent(parent, true);
+                        }
                     }
                     else if (action == "set_color"
                              && _objects.TryGetValue(name, out UnityEngine.GameObject col) && col != null
@@ -697,16 +703,38 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
             }
 
-            private static void ApplyInlineTransform(UnityEngine.GameObject go, RecordedWorldCommand cmd)
+            private static void ApplyInlineTransform(
+                UnityEngine.GameObject go, RecordedWorldCommand cmd, bool localTransform)
             {
                 if (go == null || cmd == null)
                 {
                     return;
                 }
 
-                if (cmd.Fx != 0f || cmd.Fy != 0f || cmd.Fz != 0f)
+                if (cmd.HasPosition || cmd.X != 0f || cmd.Y != 0f || cmd.Z != 0f)
                 {
-                    go.transform.rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                    UnityEngine.Vector3 position = new(cmd.X, cmd.Y, cmd.Z);
+                    if (localTransform)
+                    {
+                        go.transform.localPosition = position;
+                    }
+                    else
+                    {
+                        go.transform.position = position;
+                    }
+                }
+
+                if (cmd.HasRotation || cmd.Fx != 0f || cmd.Fy != 0f || cmd.Fz != 0f)
+                {
+                    UnityEngine.Quaternion rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                    if (localTransform)
+                    {
+                        go.transform.localRotation = rotation;
+                    }
+                    else
+                    {
+                        go.transform.rotation = rotation;
+                    }
                 }
 
                 if (cmd.FloatValue > 0f || cmd.ScaleX > 0f || cmd.ScaleY > 0f || cmd.ScaleZ > 0f)
@@ -781,10 +809,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private UnityEngine.GameObject BuildVisual(
-                string key, string prefabKey, UnityEngine.Vector3 pos, bool expected, bool ghost)
+                string key, string prefabKey, UnityEngine.Vector3 pos, bool expected, bool ghost,
+                string parentName = "", bool worldPositionStays = false)
             {
                 (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) = ShapeFor(prefabKey);
-                UnityEngine.GameObject go = UnityEngine.GameObject.CreatePrimitive(prim);
+                bool isEmpty = string.Equals(prefabKey?.Trim(), "empty", StringComparison.OrdinalIgnoreCase);
+                if (isEmpty)
+                {
+                    scale = UnityEngine.Vector3.one;
+                }
+                UnityEngine.GameObject go = isEmpty
+                    ? new UnityEngine.GameObject()
+                    : UnityEngine.GameObject.CreatePrimitive(prim);
                 go.name = ghost ? $"ghost:{key}" : key;
                 UnityEngine.Collider col = go.GetComponent<UnityEngine.Collider>();
                 if (col != null)
@@ -792,8 +828,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     UnityEngine.Object.DestroyImmediate(col);
                 }
 
-                go.transform.SetParent(Root, false);
-                go.transform.position = pos;
+                bool hasParent = TryResolveParent(parentName, out UnityEngine.Transform parent);
+                go.transform.SetParent(hasParent ? parent : Root, hasParent && worldPositionStays);
+                if (hasParent && !worldPositionStays)
+                {
+                    go.transform.localPosition = pos;
+                }
+                else
+                {
+                    go.transform.position = pos;
+                }
                 go.transform.localScale = scale;
 
                 UnityEngine.Color objColor =
@@ -835,6 +879,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 tm.alignment = UnityEngine.TextAlignment.Center;
                 tm.color = labelColor;
                 return go;
+            }
+
+            private bool TryResolveParent(string parentName, out UnityEngine.Transform parent)
+            {
+                parent = null;
+                if (string.IsNullOrWhiteSpace(parentName)
+                    || !_objects.TryGetValue(parentName.Trim(), out UnityEngine.GameObject parentObject)
+                    || parentObject == null)
+                {
+                    return false;
+                }
+
+                parent = parentObject.transform;
+                return true;
             }
 
             /// <summary>Adds a faint placeholder for every expected object the model never spawned, so the

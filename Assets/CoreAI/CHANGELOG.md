@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Structured world spawning.** `world_command` `spawn`, `spawn_batch`, and `change` expose
+  `worldPositionStays` (default `false`). Parented transforms are local by default; callers can pass `true`
+  to preserve world space. The tool contract now recommends named `empty` roots and meaningful child
+  hierarchies for compound objects. The visual benchmark executor now preserves those parent relationships
+  in generated scene prefabs instead of flattening every spawned object under the benchmark root.
+
 ## 5.5.0 - R6 resilience, benchmark v2 tooling, CI/package gates (2026-07-11)
 
 - **Benchmark: model-authored castles export as prefabs.** Every G6 free-build run now saves the built scene

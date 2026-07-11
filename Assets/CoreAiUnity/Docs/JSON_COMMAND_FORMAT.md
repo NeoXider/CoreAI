@@ -165,7 +165,14 @@ unsupported failure when `SecureLuaEnvironment.IsSupported` is `false`.
 }
 ```
 
-`prefabKey` and `targetName` are required. Position, rotation (`fx/fy/fz`), uniform `scale`, per-axis `scaleX/scaleY/scaleZ`, and parent (`stringValue`) are optional. `scale` is a uniform fallback; use per-axis scale for meter-accurate dimensions.
+`prefabKey` and `targetName` are required. Position, rotation (`fx/fy/fz`), uniform `scale`, per-axis
+`scaleX/scaleY/scaleZ`, parent (`stringValue`), and `worldPositionStays` are optional. When a parent is set,
+coordinates are local by default (`worldPositionStays: false`); `true` preserves world space. Without a
+parent, local and world coordinates are identical. `scale` is a uniform fallback; use per-axis scale for
+meter-accurate dimensions.
+
+For compound objects, create a named `empty` root first and parent related pieces beneath it instead of
+leaving every piece at scene root.
 
 `prefabKey` may be a registered prefab key or a built-in primitive key (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) when `AllowWorldPrimitives` is enabled. Registered prefabs take precedence.
 

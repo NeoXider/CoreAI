@@ -53,14 +53,19 @@ namespace CoreAI.Infrastructure.Llm
             "cylinder/capsule unscaled=2m TALL at 1m diameter (already twice a cube's height at the same scaleY). " +
             "Actions, params -> result (all results are compact JSON {success,message,action}; " +
             "message never echoes full inputs back):\n" +
-            "spawn(prefabKey,targetName,x/y/z?,fx/fy/fz?,scale|scaleX/Y/Z?,stringValue=parent?) -> ok, echoes applied transform. " +
+            "spawn(prefabKey,targetName,x/y/z?,fx/fy/fz?,scale|scaleX/Y/Z?,stringValue=parent?,worldPositionStays=false?) -> ok, echoes applied transform. " +
             "prefabKey is a registered prefab key or a primitive (cube, sphere, cylinder, capsule, empty); " +
             "an unknown key's error lists available keys — call list_prefabs first if unsure.\n" +
             "spawn_batch(prefabKey?,targetName=namePrefix?,x/y/z/fx/fy/fz/scale*/stringValue=parent as per-item " +
             "defaults,itemsJson=JSON array of up to 100 {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?," +
-            "parent?,color?}) -> ONE call spawns every item -> {ok,spawned,failed,names:[first few]}.\n" +
+            "parent?,worldPositionStays?,color?}) -> ONE call spawns every item -> {ok,spawned,failed,names:[first few]}. " +
+            "With a parent, transform coordinates are LOCAL by default; set worldPositionStays=true to preserve world space. " +
+            "Without a parent, local and world coordinates are identical. Create the parent before its children.\n" +
+            "For compound objects and related spawned parts, prefer a meaningful hierarchy: create one named empty root " +
+            "(for example stall_root or well_root), then parent posts, roofs, props, and decoration under it instead of " +
+            "leaving every piece flat at scene root.\n" +
             "list_prefabs() -> {prefabs:[registered keys],primitives:[built-in shapes]}.\n" +
-            "change(targetName,x?/y?/z?,fx?/fy?/fz?,scale?|scaleX/Y/Z?,stringValue=parent?) -> ok; only given fields change.\n" +
+            "change(targetName,x?/y?/z?,fx?/fy?/fz?,scale?|scaleX/Y/Z?,stringValue=parent?,worldPositionStays=false?) -> ok; only given fields change.\n" +
             "set_color(targetName,stringValue=htmlColor) -> ok. destroy(targetName) -> ok, removes the object.\n" +
             "load_scene(stringValue=sceneName) / reload_scene() -> ok. set_active(targetName) -> ok.\n" +
             "play_animation(targetName,animationName|stringValue) / stop_animation(targetName) -> ok; " +
@@ -77,9 +82,9 @@ namespace CoreAI.Infrastructure.Llm
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects"),
             ("targetName", "string", false,
                 "Object name to target. Required for spawn and most object actions."),
-            ("x", "number", false, "World X coordinate in meters for spawn/change; omit to leave unchanged on change."),
-            ("y", "number", false, "World Y coordinate in meters for spawn/change; omit to leave unchanged on change."),
-            ("z", "number", false, "World Z coordinate in meters for spawn/change; omit to leave unchanged on change."),
+            ("x", "number", false, "X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
+            ("y", "number", false, "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
+            ("z", "number", false, "Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
             ("fx", "number", false,
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force."),
             ("fy", "number", false,
@@ -101,11 +106,13 @@ namespace CoreAI.Infrastructure.Llm
             ("textToDisplay", "string", false, "Text for show_text"),
             ("stringValue", "string", false,
                 "Generic string value (search pattern for list_objects, clip name for play_sound, parent object name for change/spawn, HTML color for set_color)"),
+            ("worldPositionStays", "boolean", false,
+                "Parenting transform policy for spawn/change. Default false: supplied position/rotation are local to parent. True: preserve world transform. Ignored when no parent is set."),
             ("volume", "number", false, "Volume level 0.0-1.0 for set_volume"),
             ("itemsJson", "string", false,
                 "spawn_batch only: JSON array of up to 100 items, each " +
-                "{prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}. " +
-                "Fields an item omits fall back to this call's prefabKey/x/y/z/fx/fy/fz/scale*/stringValue as defaults.")
+                "{prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,worldPositionStays?,color?}. " +
+                "Fields an item omits fall back to this call's prefabKey/x/y/z/fx/fy/fz/scale*/stringValue/worldPositionStays as defaults.")
         );
 
         public AIFunction CreateAIFunction()
@@ -123,12 +130,12 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
-            [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
+            [Description("X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
             float? x = null,
             [Description(
-                "World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+                "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
-            [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
+            [Description("Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
             float? z = null,
             [Description(
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]
@@ -157,13 +164,16 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Generic string value. For spawn/change this is the parent object name; for set_color it is an HTML color; for list_objects it is the search pattern.")]
             string? stringValue = null,
+            [Description(
+                "Parenting transform policy for spawn/change. Default false: coordinates are local to parent. True: preserve world transform. Ignored without parent.")]
+            bool worldPositionStays = false,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
             [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             [Description(
-                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}.")]
+                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,worldPositionStays?,color?}.")]
             string? itemsJson = null,
             CancellationToken cancellationToken = default);
 
@@ -171,12 +181,12 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
-            [Description("World X coordinate in meters for spawn/change. Omit on change to leave X unchanged.")]
+            [Description("X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
             float? x = null,
             [Description(
-                "World Y coordinate in meters for spawn/change. Y is height; omit on change to leave Y unchanged.")]
+                "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
-            [Description("World Z coordinate in meters for spawn/change. Omit on change to leave Z unchanged.")]
+            [Description("Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
             float? z = null,
             [Description(
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]
@@ -209,13 +219,16 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Generic string value (search pattern for list_objects, clip name for play_sound, parent object name for spawn/change, HTML color for set_color)")]
             string? stringValue = null,
+            [Description(
+                "Parenting transform policy for spawn/change. Default false: coordinates are local to parent. True: preserve world transform. Ignored without parent.")]
+            bool worldPositionStays = false,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
             [Description("Text for show_text")] string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             [Description(
-                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,color?}.")]
+                "spawn_batch only: JSON array of up to 100 items, each {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,worldPositionStays?,color?}.")]
             string? itemsJson = null,
             CancellationToken cancellationToken = default)
         {
@@ -261,6 +274,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(stringValue))
                 {
                     args.Append($" stringValue={stringValue}");
+                    args.Append($" worldPositionStays={worldPositionStays}");
                 }
 
                 if (!string.IsNullOrEmpty(animationName))
@@ -291,7 +305,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (action == "spawn_batch")
                 {
                     return await ExecuteSpawnBatchAsync(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX,
-                        scaleY, scaleZ, stringValue, itemsJson, cancellationToken);
+                        scaleY, scaleZ, stringValue, worldPositionStays, itemsJson, cancellationToken);
                 }
 
                 if (action == "list_prefabs")
@@ -302,9 +316,9 @@ namespace CoreAI.Infrastructure.Llm
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
                     "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY,
-                        scaleZ, stringValue),
+                        scaleZ, stringValue, worldPositionStays),
                     "change" => CreateChangeCommand(targetName, x, y, z, fx, fy, fz, scale, scaleX, scaleY, scaleZ,
-                        stringValue),
+                        stringValue, worldPositionStays),
                     "set_color" => CreateSetColorCommand(targetName, stringValue),
                     "destroy" => CreateDestroyCommand(targetName),
                     "load_scene" => CreateLoadSceneCommand(stringValue),
@@ -423,7 +437,8 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private async Task<string> ExecuteSpawnBatchAsync(
             string? prefabKey, string? namePrefix, float? x, float? y, float? z, float? fx, float? fy, float? fz,
-            float? scale, float? scaleX, float? scaleY, float? scaleZ, string? parent, string? itemsJson,
+            float? scale, float? scaleX, float? scaleY, float? scaleZ, string? parent, bool worldPositionStays,
+            string? itemsJson,
             CancellationToken cancellationToken)
         {
             const string action = "spawn_batch";
@@ -438,8 +453,16 @@ namespace CoreAI.Infrastructure.Llm
             List<CoreAiSpawnBatchItem> items;
             try
             {
-                items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<CoreAiSpawnBatchItem>>(itemsJson) ??
-                        new List<CoreAiSpawnBatchItem>();
+                Newtonsoft.Json.Linq.JArray rawItems = Newtonsoft.Json.Linq.JArray.Parse(itemsJson);
+                items = rawItems.ToObject<List<CoreAiSpawnBatchItem>>() ?? new List<CoreAiSpawnBatchItem>();
+                for (int i = 0; i < items.Count && i < rawItems.Count; i++)
+                {
+                    if (rawItems[i] is Newtonsoft.Json.Linq.JObject rawItem &&
+                        rawItem.TryGetValue("worldPositionStays", StringComparison.OrdinalIgnoreCase, out _))
+                    {
+                        items[i].hasWorldPositionStays = true;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -470,7 +493,8 @@ namespace CoreAI.Infrastructure.Llm
                 new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
                     Positive(scaleZ) ? scaleZ.Value : 0f),
                 parent ?? "",
-                items.ToArray());
+                items.ToArray(),
+                worldPositionStays);
 
             string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
             cancellationToken.ThrowIfCancellationRequested();
@@ -535,7 +559,8 @@ namespace CoreAI.Infrastructure.Llm
         private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float? x,
             float? y, float? z, float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY,
             float? scaleZ,
-            string? parentName)
+            string? parentName,
+            bool worldPositionStays)
         {
             if (string.IsNullOrEmpty(prefabKey) || string.IsNullOrEmpty(targetName))
             {
@@ -561,17 +586,20 @@ namespace CoreAI.Infrastructure.Llm
                     new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
                         Positive(scaleZ) ? scaleZ.Value : 0f));
                 env.stringValue = parentName ?? "";
+                env.worldPositionStays = worldPositionStays;
                 return env;
             }
 
             CoreAiWorldCommandEnvelope plain = CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos);
             plain.stringValue = parentName ?? "";
+            plain.worldPositionStays = worldPositionStays;
             return plain;
         }
 
         private static CoreAiWorldCommandEnvelope CreateChangeCommand(string? targetName, float? x, float? y, float? z,
             float? fx, float? fy, float? fz, float? scale, float? scaleX, float? scaleY, float? scaleZ,
-            string? parentName)
+            string? parentName,
+            bool worldPositionStays)
         {
             if (string.IsNullOrEmpty(targetName))
             {
@@ -603,7 +631,8 @@ namespace CoreAI.Infrastructure.Llm
                 new Vector3(Positive(scaleX) ? scaleX.Value : 0f, Positive(scaleY) ? scaleY.Value : 0f,
                     Positive(scaleZ) ? scaleZ.Value : 0f),
                 hasScale,
-                parentName);
+                parentName,
+                worldPositionStays);
         }
 
         private static CoreAiWorldCommandEnvelope CreateDestroyCommand(string? targetName)

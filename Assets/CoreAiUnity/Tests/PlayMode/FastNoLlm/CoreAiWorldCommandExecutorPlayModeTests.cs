@@ -18,6 +18,74 @@ namespace CoreAI.Tests.PlayMode
     public sealed class CoreAiWorldCommandExecutorPlayModeTests
     {
         [UnityTest]
+        public IEnumerator WorldLlmTool_ParentedSpawn_DefaultsLocal_AndCanPreserveWorldTransform()
+        {
+            yield return null;
+
+            string id = Guid.NewGuid().ToString("N");
+            string parentName = $"ParentSpace_{id}";
+            string localChildName = $"LocalChild_{id}";
+            string worldChildName = $"WorldChild_{id}";
+            string secondParentName = $"SecondParentSpace_{id}";
+            GameObject parent = new(parentName);
+            parent.transform.position = new Vector3(10f, 0f, 0f);
+            parent.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            GameObject secondParent = new(secondParentName);
+            secondParent.transform.position = new Vector3(-5f, 3f, 7f);
+            secondParent.transform.rotation = Quaternion.Euler(0f, 120f, 0f);
+
+            CoreAiWorldCommandExecutor executor =
+                new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            WorldLlmTool tool = new(executor, settings, GameLoggerUnscopedFallback.Instance);
+            GameObject localChild = null;
+            GameObject worldChild = null;
+
+            try
+            {
+                yield return ExecuteToolSuccess(tool.ExecuteAsync("spawn", prefabKey: "cube",
+                    targetName: localChildName, x: 1f, y: 2f, z: 3f, stringValue: parentName));
+                localChild = GameObject.Find(localChildName);
+                Assert.IsNotNull(localChild);
+                Assert.AreSame(parent.transform, localChild.transform.parent);
+                AssertVector3(new Vector3(1f, 2f, 3f), localChild.transform.localPosition,
+                    "default parent-local spawn position");
+
+                yield return ExecuteToolSuccess(tool.ExecuteAsync("spawn", prefabKey: "cube",
+                    targetName: worldChildName, x: 1f, y: 2f, z: 3f, fy: 15f, stringValue: parentName,
+                    worldPositionStays: true));
+                worldChild = GameObject.Find(worldChildName);
+                Assert.IsNotNull(worldChild);
+                Assert.AreSame(parent.transform, worldChild.transform.parent);
+                AssertVector3(new Vector3(1f, 2f, 3f), worldChild.transform.position,
+                    "world-preserving spawn position");
+                Assert.AreEqual(15f, worldChild.transform.eulerAngles.y, 0.01f);
+
+                yield return ExecuteToolSuccess(tool.ExecuteAsync("change", targetName: localChildName,
+                    x: 2f, y: 0.5f, z: -1f, fy: 30f, stringValue: parentName));
+                AssertVector3(new Vector3(2f, 0.5f, -1f), localChild.transform.localPosition,
+                    "default parent-local change position");
+                Assert.AreEqual(30f, localChild.transform.localEulerAngles.y, 0.01f);
+
+                yield return ExecuteToolSuccess(tool.ExecuteAsync("change", targetName: worldChildName,
+                    x: -2f, y: 4f, z: 6f, fy: 25f, stringValue: secondParentName,
+                    worldPositionStays: true));
+                Assert.AreSame(secondParent.transform, worldChild.transform.parent);
+                AssertVector3(new Vector3(-2f, 4f, 6f), worldChild.transform.position,
+                    "world-preserving change position");
+                Assert.AreEqual(25f, worldChild.transform.eulerAngles.y, 0.01f);
+            }
+            finally
+            {
+                if (localChild != null) UnityEngine.Object.Destroy(localChild);
+                if (worldChild != null) UnityEngine.Object.Destroy(worldChild);
+                UnityEngine.Object.Destroy(parent);
+                UnityEngine.Object.Destroy(secondParent);
+                UnityEngine.Object.Destroy(settings);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator WorldCommandExecutor_PrimitiveSpawnScaleParentListAndDestroy_IsDeterministic()
         {
             yield return null;

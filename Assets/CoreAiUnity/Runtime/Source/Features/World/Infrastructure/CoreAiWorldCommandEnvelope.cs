@@ -14,6 +14,8 @@ namespace CoreAI.Infrastructure.World
         public float floatValue;
         public string stringValue = "";
 
+        public bool worldPositionStays;
+
         // Spawn
         public string prefabKeyOrName = "";
 
@@ -165,7 +167,8 @@ namespace CoreAI.Infrastructure.World
             float uniformScale,
             Vector3 nonUniformScale,
             bool hasScale,
-            string parentName)
+            string parentName,
+            bool worldPositionStays = false)
         {
             return Change(
                 targetName,
@@ -182,7 +185,8 @@ namespace CoreAI.Infrastructure.World
                 uniformScale,
                 nonUniformScale,
                 hasScale,
-                parentName);
+                parentName,
+                worldPositionStays);
         }
 
         public static CoreAiWorldCommandEnvelope Change(
@@ -200,7 +204,8 @@ namespace CoreAI.Infrastructure.World
             float uniformScale,
             Vector3 nonUniformScale,
             bool hasScale,
-            string parentName)
+            string parentName,
+            bool worldPositionStays = false)
         {
             return new CoreAiWorldCommandEnvelope
             {
@@ -225,7 +230,8 @@ namespace CoreAI.Infrastructure.World
                 hasFx = hasFx,
                 hasFy = hasFy,
                 hasFz = hasFz,
-                stringValue = parentName ?? ""
+                stringValue = parentName ?? "",
+                worldPositionStays = worldPositionStays
             };
         }
 
@@ -375,7 +381,8 @@ namespace CoreAI.Infrastructure.World
             float defaultUniformScale,
             Vector3 defaultNonUniformScale,
             string defaultParent,
-            CoreAiSpawnBatchItem[] items)
+            CoreAiSpawnBatchItem[] items,
+            bool worldPositionStays = false)
         {
             return new CoreAiWorldCommandEnvelope
             {
@@ -393,6 +400,7 @@ namespace CoreAI.Infrastructure.World
                 scaleY = defaultNonUniformScale.y,
                 scaleZ = defaultNonUniformScale.z,
                 stringValue = defaultParent ?? "",
+                worldPositionStays = worldPositionStays,
                 items = items ?? System.Array.Empty<CoreAiSpawnBatchItem>()
             };
         }
@@ -467,6 +475,8 @@ namespace CoreAI.Infrastructure.World
         public float scaleY;
         public float scaleZ;
         public string parent = "";
+        public bool worldPositionStays;
+        public bool hasWorldPositionStays;
         public string color = "";
     }
 }
