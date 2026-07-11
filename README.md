@@ -89,6 +89,8 @@ CoreAI ships a game-creation benchmark: it scores how well an LLM builds and cha
 
 **Top-tier models — v2 frontier sweep (2026-07-11):**
 
+<img src="Docs/Images/benchmark_v2_frontier.svg" alt="CoreAI Game-Creation Benchmark v2 — top-tier frontier-model comparison ranked by suite score" width="900">
+
 | # | Model | Suite | Pass-rate |
 |---:|---|---:|---:|
 | 1 | `gpt-5.6-sol` | **96.6** | 85.7% |
