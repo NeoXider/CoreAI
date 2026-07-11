@@ -26,6 +26,7 @@ namespace CoreAI.Editor
             /// <summary>Scene asset name WITHOUT extension — resolved by AssetDatabase so it works whether the
             /// demos live under Assets/ (dev monorepo) or Packages/ (UPM install) or an imported Sample.</summary>
             public readonly string SceneName;
+
             public readonly string Title;
             public readonly string Blurb;
             public readonly bool NeedsLlm;
@@ -48,43 +49,43 @@ namespace CoreAI.Editor
             new("🔥 Live Mechanics — AI changes the game from chat",
                 "LiveMechanicsDemo",
                 "A real LLM rewrites gameplay live: the Programmer role writes Lua through execute_lua → logic slots / mods / world commands.",
-                needsLlm: true, featured: true),
+                true, true),
             new("🔥 Moddable Units — a whole game built from mods",
                 "ModdableUnitsDemo",
                 "Mods define new unit types and armies (forge_define / forge_spawn) and drive the fight via hooks; the host just runs the auto-battle.",
-                needsLlm: true, featured: true),
+                true, true),
             new("🔥 Hub — drop-in AI control panel",
                 "CoreAiHubDemo",
                 "A ready UI Toolkit Hub with Chat, Settings, Statistics, Mods, and World State pages — the fastest way to feel the whole stack.",
-                needsLlm: true, featured: true),
+                true, true),
             new("Skills — agents load tools on demand",
                 "SkillsDemo",
                 "SkillSet + AgentBuilder: a game-master agent with crafting/combat skills via read_skill / call_skill_tool.",
-                needsLlm: true, featured: false),
+                true, false),
             new("Full Access — Programmer inspects & moves the scene",
                 "FullAccessDemo",
                 "Opt-in full-tier unity_* access: inspect objects/components/transforms, then move/rotate/parent from Lua.",
-                needsLlm: true, featured: false),
+                true, false),
             new("Mini RPG — first-person world + Hub chat",
                 "MiniRpgModsDemo",
                 "A small first-person environment wired to the Hub chat with mod-ready prompts.",
-                needsLlm: true, featured: false),
+                true, false),
             new("Wave Auto-Battler — rules changed by mods",
                 "WaveAutoBattlerModsDemo",
                 "A playable wave loop whose rules and rewards are edited by persistent Lua mods (F9 mods panel, F10 usage overlay).",
-                needsLlm: true, featured: false),
+                true, false),
             new("Live Mechanics Mods Chat — persistent manage_mods",
                 "LiveMechanicsModsChatDemo",
                 "Chat-driven load/reload/unload of Lua mods that persist and autoload on the next scene start.",
-                needsLlm: true, featured: false),
+                true, false),
             new("Lua Mods — hooks, timers, events (offline)",
                 "LuaModsDemo",
                 "Lua mod hooks/timers/events/store + capability tiers; override the damage formula from Lua. Runs with no model.",
-                needsLlm: false, featured: false),
+                false, false),
             new("World Commands — the AI command pipeline (offline)",
                 "WorldCommandsDemo",
                 "IAiGameCommandSink → AiGameCommandRouter → world executor: the same path LLM agents and Lua use. Runs with no model.",
-                needsLlm: false, featured: false),
+                false, false)
         };
 
         /// <summary>Resolves a scene asset path by name across Assets/ and Packages/, or null if not found.</summary>
@@ -332,7 +333,8 @@ namespace CoreAI.Editor
                 {
                     string candidate = AssetDatabase.GUIDToAssetPath(guids[i]);
                     if (Path.GetFileName(candidate).Equals(docName + ".md", System.StringComparison.OrdinalIgnoreCase)
-                        || Path.GetFileNameWithoutExtension(candidate).Equals(bare, System.StringComparison.OrdinalIgnoreCase))
+                        || Path.GetFileNameWithoutExtension(candidate)
+                            .Equals(bare, System.StringComparison.OrdinalIgnoreCase))
                     {
                         path = candidate;
                         break;

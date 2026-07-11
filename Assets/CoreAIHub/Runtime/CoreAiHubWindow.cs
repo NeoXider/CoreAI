@@ -50,8 +50,7 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private StyleSheet styleSheet;
 
-        [Tooltip("Text shown in the content area when no page is registered.")]
-        [SerializeField]
+        [Tooltip("Text shown in the content area when no page is registered.")] [SerializeField]
         private string emptyStateText = "No Hub pages registered.";
 
         private UIDocument _document;
@@ -206,7 +205,10 @@ namespace CoreAI.Hub.UI
         }
 
         /// <summary>Collapses the Hub to just its toggle button, or restores the full window.</summary>
-        public void ToggleCollapsed() => SetCollapsed(!_collapsed);
+        public void ToggleCollapsed()
+        {
+            SetCollapsed(!_collapsed);
+        }
 
         /// <summary>Hides the tabs + content when collapsed (leaving the toggle), restores them when expanded.</summary>
         public void SetCollapsed(bool collapsed)
@@ -467,7 +469,7 @@ namespace CoreAI.Hub.UI
             VisualElement content = ResolvePageContent(pageId, page);
 
             _content.Clear();
-            ApplyFullBleed(page is CoreAI.Hub.IHubFullBleedPage);
+            ApplyFullBleed(page is IHubFullBleedPage);
             if (content != null)
             {
                 _content.Add(content);
@@ -501,7 +503,8 @@ namespace CoreAI.Hub.UI
             }
 
             _content.Clear();
-            if (_activePageId != null && _pageContent.TryGetValue(_activePageId, out VisualElement content) && content != null)
+            if (_activePageId != null && _pageContent.TryGetValue(_activePageId, out VisualElement content) &&
+                content != null)
             {
                 _content.Add(content);
             }

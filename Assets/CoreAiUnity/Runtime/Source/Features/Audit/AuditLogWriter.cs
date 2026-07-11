@@ -186,7 +186,8 @@ namespace CoreAI.Features.Audit
                     // The chain itself was read fine — only rotation failed (e.g. disk full/locked).
                     // Leave _seq/_prevHash as read; the oversized file will be retried on the next
                     // flush tick instead of discarding an otherwise-valid chain.
-                    Debug.LogWarning($"[AuditLogWriter] Startup rotation failed, will retry on next flush: {ex.Message}");
+                    Debug.LogWarning(
+                        $"[AuditLogWriter] Startup rotation failed, will retry on next flush: {ex.Message}");
                 }
             }
         }
@@ -225,7 +226,8 @@ namespace CoreAI.Features.Audit
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AuditLogWriter] Audit log tail line is corrupt, chain cannot be resumed: {ex.Message}");
+                Debug.LogError(
+                    $"[AuditLogWriter] Audit log tail line is corrupt, chain cannot be resumed: {ex.Message}");
                 _prevHash = "";
                 AppendChainResetMarker($"corrupt tail line: {ex.Message}");
             }
@@ -233,7 +235,7 @@ namespace CoreAI.Features.Audit
 
         private void AppendChainResetMarker(string reason)
         {
-            EnqueueRaw(AuditEntry.ForChainReset(seq: 0, actor: "system", reason: reason));
+            EnqueueRaw(AuditEntry.ForChainReset(0, "system", reason));
             FlushBatch();
         }
 
@@ -380,7 +382,8 @@ namespace CoreAI.Features.Audit
                 FlushBatch();
                 if (DateTime.UtcNow - start >= DisposeDrainDeadline)
                 {
-                    EnqueueLog(LogType.Warning, "[AuditLogWriter] Dispose drain deadline (2s) reached with entries still queued.");
+                    EnqueueLog(LogType.Warning,
+                        "[AuditLogWriter] Dispose drain deadline (2s) reached with entries still queued.");
                     break;
                 }
             }
@@ -449,7 +452,8 @@ namespace CoreAI.Features.Audit
                 }
                 catch (Exception ex)
                 {
-                    EnqueueLog(LogType.Warning, $"[AuditLogWriter] Rotation failed, re-queuing {batch.Count} pending entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
+                    EnqueueLog(LogType.Warning,
+                        $"[AuditLogWriter] Rotation failed, re-queuing {batch.Count} pending entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
                     RequeueFront(batch);
                     return;
                 }
@@ -467,20 +471,20 @@ namespace CoreAI.Features.Audit
                 // the canonical preimage: the stored line is this same entry with only the hash
                 // field filled in, so a verifier can reconstruct it exactly.
                 AuditEntry finalEntry = new(
-                    seq: localSeq,
-                    kind: entry.Kind,
-                    traceId: entry.TraceId,
-                    actor: entry.Actor,
-                    model: entry.Model,
-                    promptHash: entry.PromptHash,
-                    toolName: entry.ToolName,
-                    args: entry.Args,
-                    policyDecision: entry.PolicyDecision,
-                    result: entry.Result,
-                    resultDetail: entry.ResultDetail,
-                    durationMs: entry.DurationMs,
-                    worldDiff: entry.WorldDiff,
-                    rollbackHandle: entry.RollbackHandle,
+                    localSeq,
+                    entry.Kind,
+                    entry.TraceId,
+                    entry.Actor,
+                    entry.Model,
+                    entry.PromptHash,
+                    entry.ToolName,
+                    entry.Args,
+                    entry.PolicyDecision,
+                    entry.Result,
+                    entry.ResultDetail,
+                    entry.DurationMs,
+                    entry.WorldDiff,
+                    entry.RollbackHandle,
                     sourceTag: entry.SourceTag,
                     prevHash: localPrevHash,
                     hash: "");
@@ -503,7 +507,8 @@ namespace CoreAI.Features.Audit
             }
             catch (Exception ex)
             {
-                EnqueueLog(LogType.Warning, $"[AuditLogWriter] Write failed, re-queuing {batch.Count} entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
+                EnqueueLog(LogType.Warning,
+                    $"[AuditLogWriter] Write failed, re-queuing {batch.Count} entr{(batch.Count == 1 ? "y" : "ies")}: {ex.Message}");
                 RequeueFront(batch);
             }
         }
@@ -546,7 +551,7 @@ namespace CoreAI.Features.Audit
             }
 
             _lastReportedDroppedCount = dropped;
-            EnqueueRaw(AuditEntry.ForQueueDropped(seq: 0, actor: "system", droppedCount: dropped));
+            EnqueueRaw(AuditEntry.ForQueueDropped(0, "system", dropped));
         }
 
         /// <summary>
@@ -572,7 +577,7 @@ namespace CoreAI.Features.Audit
                 File.AppendAllText(path, Environment.NewLine);
             }
 
-            using (StreamWriter writer = new(path, append: true))
+            using (StreamWriter writer = new(path, true))
             {
                 foreach (string line in lines)
                 {

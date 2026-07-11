@@ -82,9 +82,12 @@ namespace CoreAI.Infrastructure.Llm
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects"),
             ("targetName", "string", false,
                 "Object name to target. Required for spawn and most object actions."),
-            ("x", "number", false, "X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
-            ("y", "number", false, "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
-            ("z", "number", false, "Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
+            ("x", "number", false,
+                "X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
+            ("y", "number", false,
+                "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
+            ("z", "number", false,
+                "Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit to leave unchanged on change."),
             ("fx", "number", false,
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force."),
             ("fy", "number", false,
@@ -130,12 +133,14 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
-            [Description("X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
+            [Description(
+                "X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
             float? x = null,
             [Description(
                 "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
-            [Description("Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
+            [Description(
+                "Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
             float? z = null,
             [Description(
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]
@@ -181,12 +186,14 @@ namespace CoreAI.Infrastructure.Llm
             [Description(
                 "Command: spawn, spawn_batch, list_prefabs, change, set_color, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, apply_force, set_velocity, list_objects")]
             string action,
-            [Description("X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
+            [Description(
+                "X coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave X unchanged.")]
             float? x = null,
             [Description(
                 "Y coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Y is height; omit on change to leave Y unchanged.")]
             float? y = null,
-            [Description("Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
+            [Description(
+                "Z coordinate in meters for spawn/change: local when parent is set and worldPositionStays=false; otherwise world. Omit on change to leave Z unchanged.")]
             float? z = null,
             [Description(
                 "Rotation X in degrees for spawn/change. Also Force X for apply_force.")]

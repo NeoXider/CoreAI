@@ -102,7 +102,6 @@ namespace CoreAI.Demos
                 _mods.ModSourceLoaded -= OnModsChanged;
                 _mods.ModSourceUnloaded -= OnModsChanged;
             }
-
         }
 
         private void OnModsChanged(string modId, string source, LuaCapabilities capabilities)

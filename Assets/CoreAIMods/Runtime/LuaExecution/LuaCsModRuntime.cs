@@ -626,7 +626,8 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Finds the revision with the given stable <see cref="LuaScriptRevision.Index"/>, or null if it was evicted or never recorded.</summary>
-        private static LuaScriptRevision FindRevisionByIndex(IReadOnlyList<LuaScriptRevision> history, int revisionIndex)
+        private static LuaScriptRevision FindRevisionByIndex(IReadOnlyList<LuaScriptRevision> history,
+            int revisionIndex)
         {
             for (int i = 0; i < history.Count; i++)
             {

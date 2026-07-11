@@ -85,15 +85,11 @@ namespace CoreAI.Audit
         public string RollbackHandle { get; }
         public string SourceTag { get; }
 
-        [JsonIgnore]
-        public string PrevHash { get; }
-        [JsonIgnore]
-        public string Hash { get; }
+        [JsonIgnore] public string PrevHash { get; }
+        [JsonIgnore] public string Hash { get; }
 
-        [JsonProperty("prevHash")]
-        private string PrevHashForSerialization => PrevHash;
-        [JsonProperty("hash")]
-        private string HashForSerialization => Hash;
+        [JsonProperty("prevHash")] private string PrevHashForSerialization => PrevHash;
+        [JsonProperty("hash")] private string HashForSerialization => Hash;
 
         /// <summary>
         /// Returns a copy of this entry with only the <see cref="Hash"/> field changed — used to
@@ -103,24 +99,24 @@ namespace CoreAI.Audit
         public AuditEntry WithHash(string hash)
         {
             return new AuditEntry(
-                seq: Seq,
-                kind: Kind,
-                traceId: TraceId,
-                actor: Actor,
-                model: Model,
-                promptHash: PromptHash,
-                toolName: ToolName,
-                args: Args,
-                policyDecision: PolicyDecision,
-                result: Result,
-                resultDetail: ResultDetail,
-                durationMs: DurationMs,
-                worldDiff: WorldDiff,
-                rollbackHandle: RollbackHandle,
-                prevHash: PrevHash,
-                hash: hash,
-                sourceTag: SourceTag,
-                ts: Ts);
+                Seq,
+                Kind,
+                TraceId,
+                Actor,
+                Model,
+                PromptHash,
+                ToolName,
+                Args,
+                PolicyDecision,
+                Result,
+                ResultDetail,
+                DurationMs,
+                WorldDiff,
+                RollbackHandle,
+                PrevHash,
+                hash,
+                SourceTag,
+                Ts);
         }
 
         public static AuditEntry ForToolCall(
@@ -137,18 +133,18 @@ namespace CoreAI.Audit
             double durationMs)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.ToolCall,
-                traceId: traceId,
-                actor: actor,
-                model: model,
-                promptHash: promptHash,
-                toolName: toolName,
-                args: args,
-                policyDecision: policyDecision,
-                result: result,
-                resultDetail: resultDetail,
-                durationMs: durationMs);
+                seq,
+                AuditEntryKind.ToolCall,
+                traceId,
+                actor,
+                model,
+                promptHash,
+                toolName,
+                args,
+                policyDecision,
+                result,
+                resultDetail,
+                durationMs);
         }
 
         public static AuditEntry ForWorldMutation(
@@ -163,10 +159,10 @@ namespace CoreAI.Audit
             string rollbackHandle = "")
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.WorldMutation,
-                traceId: traceId,
-                actor: actor,
+                seq,
+                AuditEntryKind.WorldMutation,
+                traceId,
+                actor,
                 toolName: commandTypeId,
                 args: jsonPayload,
                 policyDecision: success ? "allowed" : "failed",
@@ -186,12 +182,12 @@ namespace CoreAI.Audit
             bool streaming)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.LlmRequest,
-                traceId: traceId,
-                actor: actor,
-                model: model,
-                promptHash: promptHash,
+                seq,
+                AuditEntryKind.LlmRequest,
+                traceId,
+                actor,
+                model,
+                promptHash,
                 args: $"{{\"routingProfile\":\"{routingProfileId}\",\"streaming\":{streaming}}}",
                 policyDecision: "started",
                 result: "pending");
@@ -207,12 +203,12 @@ namespace CoreAI.Audit
             string error)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.LlmResponse,
-                traceId: traceId,
-                actor: actor,
-                model: model,
-                promptHash: promptHash,
+                seq,
+                AuditEntryKind.LlmResponse,
+                traceId,
+                actor,
+                model,
+                promptHash,
                 policyDecision: success ? "completed" : "failed",
                 result: success ? "ok" : "error",
                 resultDetail: error);
@@ -226,10 +222,10 @@ namespace CoreAI.Audit
         public static AuditEntry ForChainReset(long seq, string actor, string reason)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.ChainReset,
-                traceId: "",
-                actor: actor,
+                seq,
+                AuditEntryKind.ChainReset,
+                "",
+                actor,
                 policyDecision: "reset",
                 result: "error",
                 resultDetail: reason ?? "");
@@ -243,10 +239,10 @@ namespace CoreAI.Audit
         public static AuditEntry ForRotationMarker(long seq, string actor, string prevHash)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.RotationMarker,
-                traceId: "",
-                actor: actor,
+                seq,
+                AuditEntryKind.RotationMarker,
+                "",
+                actor,
                 policyDecision: "rotated",
                 result: "ok",
                 prevHash: prevHash);
@@ -257,15 +253,17 @@ namespace CoreAI.Audit
         /// file's final hash (not the empty-string genesis), so the link between files is embedded
         /// directly in the chain rather than only in <paramref name="previousFileHash"/> metadata.
         /// </summary>
-        public static AuditEntry ForRotationAnchor(long seq, string actor, string previousFileName, string previousFileHash)
+        public static AuditEntry ForRotationAnchor(long seq, string actor, string previousFileName,
+            string previousFileHash)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.RotationAnchor,
-                traceId: "",
-                actor: actor,
+                seq,
+                AuditEntryKind.RotationAnchor,
+                "",
+                actor,
                 toolName: previousFileName ?? "",
-                args: JsonConvert.SerializeObject(new { previousFile = previousFileName ?? "", previousHash = previousFileHash ?? "" }),
+                args: JsonConvert.SerializeObject(new
+                    { previousFile = previousFileName ?? "", previousHash = previousFileHash ?? "" }),
                 policyDecision: "anchored",
                 result: "ok",
                 prevHash: previousFileHash);
@@ -278,10 +276,10 @@ namespace CoreAI.Audit
         public static AuditEntry ForQueueDropped(long seq, string actor, long droppedCount)
         {
             return new AuditEntry(
-                seq: seq,
-                kind: AuditEntryKind.QueueDropped,
-                traceId: "",
-                actor: actor,
+                seq,
+                AuditEntryKind.QueueDropped,
+                "",
+                actor,
                 policyDecision: "backpressure",
                 result: "dropped",
                 resultDetail: $"entries dropped: {droppedCount}");

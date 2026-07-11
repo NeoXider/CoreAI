@@ -443,7 +443,7 @@ namespace CoreAI.Hub.UI
 
         private DropdownField MakeGgufModelDropdown()
         {
-            var options = new System.Collections.Generic.List<string> { GgufAutoLabel };
+            List<string> options = new() { GgufAutoLabel };
             string[] models = CoreAiBackend.GetLlmUnityModelFileNames();
             if (models != null)
             {

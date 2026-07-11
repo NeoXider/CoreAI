@@ -202,7 +202,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_100Revisions_BoundedHistory_OriginalAndCurrentIntact()
         {
-            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 20);
+            MemoryLuaScriptVersionStore s = new(20);
             for (int i = 0; i < 100; i++)
             {
                 s.RecordSuccessfulExecution("k", "v" + i);
@@ -226,7 +226,7 @@ namespace CoreAI.Tests.EditMode
             // maxIntermediateRevisions is large so only the byte budget drives eviction; each 11-char
             // revision is 11 UTF-8 bytes, and a 15-byte budget cannot hold any intermediate revision
             // alongside original+current, so eviction converges to exactly those two entries.
-            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 1000, maxTotalBytes: 15);
+            MemoryLuaScriptVersionStore s = new(1000, 15);
             for (int i = 0; i < 5; i++)
             {
                 s.RecordSuccessfulExecution("k", "0123456789" + i);
@@ -241,7 +241,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_RevertToEvictedRevision_ReturnsNoChange()
         {
-            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 2);
+            MemoryLuaScriptVersionStore s = new(2);
             for (int i = 0; i < 10; i++)
             {
                 s.RecordSuccessfulExecution("k", "v" + i);
@@ -256,7 +256,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_RevertToStillKeptRevision_UsesStableIndexNotPosition()
         {
-            MemoryLuaScriptVersionStore s = new(maxIntermediateRevisions: 2);
+            MemoryLuaScriptVersionStore s = new(2);
             for (int i = 0; i < 10; i++)
             {
                 s.RecordSuccessfulExecution("k", "v" + i);
@@ -284,7 +284,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             {
-                FileLuaScriptVersionStore a = new(new NullGameLogger(), path, maxIntermediateRevisions: 5);
+                FileLuaScriptVersionStore a = new(new NullGameLogger(), path, 5);
                 for (int i = 0; i < 50; i++)
                 {
                     a.RecordSuccessfulExecution("k", "v" + i);

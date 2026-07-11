@@ -34,7 +34,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private abstract class G7Scenario : GameBenchmarkScenario
         {
             public sealed override string Group => "G7";
+
             public override int Difficulty => 9;
+
             // No scene shot for G7: the Player/Gate/Key puzzle photographs as a cluttered composite of
             // overlapping primitives and floating world-space labels that is unreadable and adds nothing
             // to the score (user-reported). Grading reads world state + Lua consistency, not the image.

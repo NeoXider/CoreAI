@@ -32,13 +32,13 @@ namespace CoreAI.Features.Audit
             bool success = _inner.TryExecute(cmd);
 
             _auditLog.Record(AuditEntry.ForWorldMutation(
-                seq: 0,
-                traceId: cmd?.TraceId ?? "",
-                actor: cmd?.SourceRoleId ?? "",
-                commandTypeId: cmd?.CommandTypeId ?? "",
-                jsonPayload: cmd?.JsonPayload ?? "",
-                sourceTag: cmd?.SourceTag ?? "",
-                success: success));
+                0,
+                cmd?.TraceId ?? "",
+                cmd?.SourceRoleId ?? "",
+                cmd?.CommandTypeId ?? "",
+                cmd?.JsonPayload ?? "",
+                cmd?.SourceTag ?? "",
+                success));
 
             return success;
         }

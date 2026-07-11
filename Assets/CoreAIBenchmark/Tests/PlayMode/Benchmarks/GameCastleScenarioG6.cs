@@ -291,13 +291,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // carry the score — not a fixed four-towers-and-walls recipe.
                     int castleSignals =
                         (cornerTowerQuadrants >= 2 ? 1 : 0) + // some towers, not necessarily 4 corners
-                        (wallSides >= 2 ? 1 : 0) +            // some enclosing walls, not a full perimeter
+                        (wallSides >= 2 ? 1 : 0) + // some enclosing walls, not a full perimeter
                         (gateGap ? 1 : 0) +
                         (centralKeep ? 1 : 0);
                     g.Add("reads_as_castle", "shows recognizable castle features (towers/walls/gate/keep)", 12,
                         castleSignals >= 2,
                         dimension: BenchmarkDimension.TaskCompletion,
-                        detail: $"{castleSignals}/4 castle signals (towers={cornerTowerQuadrants}, walls={wallSides}, gate={gateGap}, keep={centralKeep})");
+                        detail:
+                        $"{castleSignals}/4 castle signals (towers={cornerTowerQuadrants}, walls={wallSides}, gate={gateGap}, keep={centralKeep})");
                     g.Add("castle_depth", "went beyond a bare wall ring — richer, fuller castle", 16,
                         castleSignals >= 3 && extras >= 4,
                         dimension: BenchmarkDimension.TaskCompletion,
@@ -743,7 +744,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 // Add the vision tool only when the world executor can actually render (visual mode). A null
                 // camera tool means this run degrades to a text-only build rather than erroring.
-                CoreAI.Vision.CameraLlmTool cam = env.CameraTool(RoleId);
+                Vision.CameraLlmTool cam = env.CameraTool(RoleId);
                 if (cam != null)
                 {
                     b.WithTool(cam);

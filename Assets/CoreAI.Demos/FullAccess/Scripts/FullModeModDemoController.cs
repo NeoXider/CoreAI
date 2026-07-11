@@ -111,7 +111,7 @@ namespace CoreAI.Demos
 
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _mods.ModReportEmitted += OnModReport;
-            _status = CoreAI.Ai.LuaCs.LuaCsModRuntime.IsSupported
+            _status = Ai.LuaCs.LuaCsModRuntime.IsSupported
                 ? "Ready. Load the Full-mode mod to start."
                 : "Lua sandbox is not supported on this platform.";
         }

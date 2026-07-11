@@ -29,13 +29,13 @@ namespace CoreAI.Features.Audit
                     .Subscribe(evt =>
                     {
                         _auditLog.Record(AuditEntry.ForLlmRequest(
-                            seq: 0,
-                            traceId: evt.TraceId,
-                            actor: evt.RoleId,
-                            model: AuditContext.GetModel(evt.TraceId),
-                            promptHash: AuditContext.GetPromptHash(evt.TraceId),
-                            routingProfileId: evt.RoutingProfileId,
-                            streaming: evt.Streaming));
+                            0,
+                            evt.TraceId,
+                            evt.RoleId,
+                            AuditContext.GetModel(evt.TraceId),
+                            AuditContext.GetPromptHash(evt.TraceId),
+                            evt.RoutingProfileId,
+                            evt.Streaming));
                     }));
 
             _subscriptions.Add(
@@ -43,13 +43,13 @@ namespace CoreAI.Features.Audit
                     .Subscribe(evt =>
                     {
                         _auditLog.Record(AuditEntry.ForLlmResponse(
-                            seq: 0,
-                            traceId: evt.TraceId,
-                            actor: evt.RoleId,
-                            model: AuditContext.GetModel(evt.TraceId),
-                            promptHash: AuditContext.GetPromptHash(evt.TraceId),
-                            success: evt.Success,
-                            error: evt.Error));
+                            0,
+                            evt.TraceId,
+                            evt.RoleId,
+                            AuditContext.GetModel(evt.TraceId),
+                            AuditContext.GetPromptHash(evt.TraceId),
+                            evt.Success,
+                            evt.Error));
 
                         AuditContext.Cleanup(evt.TraceId);
                     }));

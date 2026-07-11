@@ -77,8 +77,16 @@ namespace CoreAI.Tests.PlayMode
             }
             finally
             {
-                if (localChild != null) UnityEngine.Object.Destroy(localChild);
-                if (worldChild != null) UnityEngine.Object.Destroy(worldChild);
+                if (localChild != null)
+                {
+                    UnityEngine.Object.Destroy(localChild);
+                }
+
+                if (worldChild != null)
+                {
+                    UnityEngine.Object.Destroy(worldChild);
+                }
+
                 UnityEngine.Object.Destroy(parent);
                 UnityEngine.Object.Destroy(secondParent);
                 UnityEngine.Object.Destroy(settings);

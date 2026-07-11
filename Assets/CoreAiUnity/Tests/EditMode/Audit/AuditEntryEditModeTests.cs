@@ -10,17 +10,17 @@ namespace CoreAI.Tests.EditMode.Audit
         public void ForToolCall_SetsCorrectFields()
         {
             AuditEntry entry = AuditEntry.ForToolCall(
-                seq: 1,
-                traceId: "trace-1",
-                actor: "creator",
-                model: "gpt-4",
-                promptHash: "abc123",
-                toolName: "world_command",
-                args: "{\"action\":\"spawn\"}",
-                policyDecision: "allowed",
-                result: "ok",
-                resultDetail: "{\"ok\":true}",
-                durationMs: 45);
+                1,
+                "trace-1",
+                "creator",
+                "gpt-4",
+                "abc123",
+                "world_command",
+                "{\"action\":\"spawn\"}",
+                "allowed",
+                "ok",
+                "{\"ok\":true}",
+                45);
 
             Assert.AreEqual(1, entry.Seq);
             Assert.AreEqual(AuditEntryKind.ToolCall, entry.Kind);
@@ -38,13 +38,13 @@ namespace CoreAI.Tests.EditMode.Audit
         public void ForWorldMutation_SetsCorrectFields()
         {
             AuditEntry entry = AuditEntry.ForWorldMutation(
-                seq: 2,
-                traceId: "trace-2",
-                actor: "mod",
-                commandTypeId: "spawn",
-                jsonPayload: "{\"prefab\":\"cube\"}",
-                sourceTag: "lua:world_command",
-                success: true);
+                2,
+                "trace-2",
+                "mod",
+                "spawn",
+                "{\"prefab\":\"cube\"}",
+                "lua:world_command",
+                true);
 
             Assert.AreEqual(2, entry.Seq);
             Assert.AreEqual(AuditEntryKind.WorldMutation, entry.Kind);
@@ -60,8 +60,8 @@ namespace CoreAI.Tests.EditMode.Audit
         public void ForWorldMutation_Failure_SetsError()
         {
             AuditEntry entry = AuditEntry.ForWorldMutation(
-                seq: 3, traceId: "t", actor: "a",
-                commandTypeId: "spawn", jsonPayload: "{}", sourceTag: "test", success: false);
+                3, "t", "a",
+                "spawn", "{}", "test", false);
 
             Assert.AreEqual("failed", entry.PolicyDecision);
             Assert.AreEqual("error", entry.Result);
@@ -109,9 +109,9 @@ namespace CoreAI.Tests.EditMode.Audit
         public void Serialization_RoundTrip_KeepsFields()
         {
             AuditEntry original = AuditEntry.ForToolCall(
-                seq: 42, traceId: "tr", actor: "a", model: "m", promptHash: "ph",
-                toolName: "test", args: "{}", policyDecision: "allowed",
-                result: "ok", resultDetail: "done", durationMs: 100);
+                42, "tr", "a", "m", "ph",
+                "test", "{}", "allowed",
+                "ok", "done", 100);
 
             string json = JsonConvert.SerializeObject(original, new JsonSerializerSettings
             {

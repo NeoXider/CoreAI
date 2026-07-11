@@ -90,7 +90,8 @@ namespace CoreAI.Audit
                 }
                 catch (Exception ex)
                 {
-                    return new AuditVerifyResult(false, lineCount, lineCount, $"line {lineCount}: unparsable ({ex.Message})");
+                    return new AuditVerifyResult(false, lineCount, lineCount,
+                        $"line {lineCount}: unparsable ({ex.Message})");
                 }
 
                 long seq = obj["Seq"]?.Value<long>() ?? lineCount;
@@ -110,7 +111,8 @@ namespace CoreAI.Audit
 
                 if (storedPrevHash != prevHash)
                 {
-                    return new AuditVerifyResult(false, lineCount, seq, $"seq {seq}: prevHash does not match chain head");
+                    return new AuditVerifyResult(false, lineCount, seq,
+                        $"seq {seq}: prevHash does not match chain head");
                 }
 
                 obj["hash"] = "";
@@ -119,7 +121,8 @@ namespace CoreAI.Audit
 
                 if (computedHash != storedHash)
                 {
-                    return new AuditVerifyResult(false, lineCount, seq, $"seq {seq}: hash does not match recomputed chain value");
+                    return new AuditVerifyResult(false, lineCount, seq,
+                        $"seq {seq}: hash does not match recomputed chain value");
                 }
 
                 prevHash = computedHash;
@@ -154,8 +157,8 @@ namespace CoreAI.Audit
                 if (i > 0)
                 {
                     bool linked = entries.Count > 0
-                        && entries[0].Kind == AuditEntryKind.RotationAnchor
-                        && entries[0].PrevHash == expectedAnchorHash;
+                                  && entries[0].Kind == AuditEntryKind.RotationAnchor
+                                  && entries[0].PrevHash == expectedAnchorHash;
 
                     if (!linked)
                     {
@@ -195,24 +198,24 @@ namespace CoreAI.Audit
             }
 
             return new AuditEntry(
-                seq: obj["Seq"]?.Value<long>() ?? 0,
-                kind: kind,
-                traceId: (string)obj["TraceId"] ?? "",
-                actor: (string)obj["Actor"] ?? "",
-                model: (string)obj["Model"] ?? "",
-                promptHash: (string)obj["PromptHash"] ?? "",
-                toolName: (string)obj["ToolName"] ?? "",
-                args: (string)obj["Args"] ?? "",
-                policyDecision: (string)obj["PolicyDecision"] ?? "",
-                result: (string)obj["Result"] ?? "",
-                resultDetail: (string)obj["ResultDetail"] ?? "",
-                durationMs: obj["DurationMs"]?.Value<double>() ?? 0,
-                worldDiff: (string)obj["WorldDiff"] ?? "",
-                rollbackHandle: (string)obj["RollbackHandle"] ?? "",
-                prevHash: (string)obj["prevHash"] ?? "",
-                hash: (string)obj["hash"] ?? "",
-                sourceTag: (string)obj["SourceTag"] ?? "",
-                ts: ts);
+                obj["Seq"]?.Value<long>() ?? 0,
+                kind,
+                (string)obj["TraceId"] ?? "",
+                (string)obj["Actor"] ?? "",
+                (string)obj["Model"] ?? "",
+                (string)obj["PromptHash"] ?? "",
+                (string)obj["ToolName"] ?? "",
+                (string)obj["Args"] ?? "",
+                (string)obj["PolicyDecision"] ?? "",
+                (string)obj["Result"] ?? "",
+                (string)obj["ResultDetail"] ?? "",
+                obj["DurationMs"]?.Value<double>() ?? 0,
+                (string)obj["WorldDiff"] ?? "",
+                (string)obj["RollbackHandle"] ?? "",
+                (string)obj["prevHash"] ?? "",
+                (string)obj["hash"] ?? "",
+                (string)obj["SourceTag"] ?? "",
+                ts);
         }
     }
 }

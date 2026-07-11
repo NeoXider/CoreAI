@@ -34,7 +34,7 @@ namespace CoreAI.Ai.Hub
             registry.Register(
                 WorldStateHubPage.DefaultPageId,
                 () => new WorldStateHubPage(manager),
-                order: 300);
+                300);
 
             if (window.Registry == null)
             {

@@ -1135,6 +1135,7 @@ namespace CoreAI.Infrastructure.Llm
             /// Production streaming always completes through <see cref="CompleteStreamedTurnAsync"/>.
             /// </summary>
             internal readonly List<DeferredStreamedCall> DeferredMutations = new();
+
             internal readonly HashSet<StreamedSlot> PreviouslySuccessfulSlots = new();
             internal bool IsFinalized;
 
@@ -1420,6 +1421,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             turn.PreviouslySuccessfulSlots.Add(deferred.Slot);
                         }
+
                         continue;
                     }
 
@@ -1874,4 +1876,3 @@ namespace CoreAI.Infrastructure.Llm
     }
 }
 #endif
-

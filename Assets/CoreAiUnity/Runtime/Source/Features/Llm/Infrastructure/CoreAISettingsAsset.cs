@@ -984,7 +984,8 @@ namespace CoreAI.Infrastructure.Llm
             int maxTokens = 2048,
             bool overrideTemperature = true)
         {
-            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
+            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens,
+                overrideTemperature);
             executionMode = LlmExecutionMode.ServerManagedApi;
         }
 

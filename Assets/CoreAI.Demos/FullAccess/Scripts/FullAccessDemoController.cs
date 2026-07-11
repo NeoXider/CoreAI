@@ -51,11 +51,11 @@ namespace CoreAI.Demos
 
         private System.Collections.IEnumerator EnableAgentDropdownWhenReady()
         {
-            CoreAI.Chat.CoreAiChatPanel panel = null;
+            Chat.CoreAiChatPanel panel = null;
             float deadline = Time.realtimeSinceStartup + 5f;
             while (Time.realtimeSinceStartup < deadline)
             {
-                panel = FindFirstObjectByType<CoreAI.Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
+                panel = FindFirstObjectByType<Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
                 if (panel != null)
                 {
                     break;

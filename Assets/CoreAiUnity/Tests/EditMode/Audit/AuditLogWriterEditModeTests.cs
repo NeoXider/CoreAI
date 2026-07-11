@@ -28,8 +28,13 @@ namespace CoreAI.Tests.EditMode.Audit
             _writer?.Dispose();
             if (Directory.Exists(_testFolder))
             {
-                try { Directory.Delete(_testFolder, recursive: true); }
-                catch { }
+                try
+                {
+                    Directory.Delete(_testFolder, true);
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -69,7 +74,7 @@ namespace CoreAI.Tests.EditMode.Audit
         [Test]
         public void NullAuditLog_DoesNotThrow()
         {
-            var log = NullAuditLog.Instance;
+            NullAuditLog log = NullAuditLog.Instance;
             Assert.DoesNotThrow(() =>
                 log.Record(AuditEntry.ForToolCall(0, "t", "a", "m", "ph", "test", "{}", "allowed", "ok", "", 0)));
         }
@@ -79,9 +84,9 @@ namespace CoreAI.Tests.EditMode.Audit
             for (int i = 0; i < count; i++)
             {
                 writer.Record(AuditEntry.ForToolCall(
-                    seq: 0, traceId: $"trace-{i}", actor: "creator", model: "gpt-4", promptHash: "ph",
-                    toolName: "test_tool", args: $"{{\"i\":{i}}}", policyDecision: "allowed",
-                    result: "ok", resultDetail: "", durationMs: i));
+                    0, $"trace-{i}", "creator", "gpt-4", "ph",
+                    "test_tool", $"{{\"i\":{i}}}", "allowed",
+                    "ok", "", i));
             }
         }
 
@@ -135,9 +140,9 @@ namespace CoreAI.Tests.EditMode.Audit
                     for (int i = 0; i < perThread; i++)
                     {
                         _writer.Record(AuditEntry.ForToolCall(
-                            seq: 0, traceId: $"trace-{threadIndex}-{i}", actor: "creator", model: "gpt-4",
-                            promptHash: "ph", toolName: "test_tool", args: $"{{\"i\":{i}}}",
-                            policyDecision: "allowed", result: "ok", resultDetail: "", durationMs: i));
+                            0, $"trace-{threadIndex}-{i}", "creator", "gpt-4",
+                            "ph", "test_tool", $"{{\"i\":{i}}}",
+                            "allowed", "ok", "", i));
                     }
                 });
             }
@@ -196,7 +201,8 @@ namespace CoreAI.Tests.EditMode.Audit
 
             // Enqueue well past the bounded-queue limit (10_000) without flushing, forcing drop-oldest.
             RecordN(_writer, 10_500);
-            Assert.Greater(_writer.DroppedCount, 0, "Expected the bounded queue to drop the oldest entries under sustained backlog.");
+            Assert.Greater(_writer.DroppedCount, 0,
+                "Expected the bounded queue to drop the oldest entries under sustained backlog.");
 
             _writer.FlushForTesting();
 

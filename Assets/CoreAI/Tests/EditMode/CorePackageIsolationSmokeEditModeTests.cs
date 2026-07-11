@@ -47,7 +47,7 @@ namespace CoreAI.Core.Tests.EditMode
         public async Task RetryingStreamingDecorator_NonStreaming_DelegatesThroughCorePackage()
         {
             EchoClient inner = new();
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 2);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 2);
 
             LlmCompletionResult result = await sut.CompleteAsync(new LlmCompletionRequest { UserPayload = "x" });
 

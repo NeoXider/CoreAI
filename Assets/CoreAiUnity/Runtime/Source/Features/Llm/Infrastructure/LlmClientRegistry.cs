@@ -278,7 +278,7 @@ namespace CoreAI.Infrastructure.Llm
                         modelName = "local";
                     }
 
-                    var adapter = new LlmUnityServerHttpSettings(
+                    LlmUnityServerHttpSettings adapter = new(
                         llmUnityAssetSettings, llmUnityAssetSettings.LlmUnityServerPort, modelName, "");
                     return new OpenAiChatLlmClient(adapter, _settings, _logger, _memoryStore);
 #endif

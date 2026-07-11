@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -224,7 +225,7 @@ namespace CoreAI
                     LLMManager.LoadFromDisk();
                 }
 
-                var list = new System.Collections.Generic.List<string>();
+                List<string> list = new();
                 if (LLMManager.modelEntries != null)
                 {
                     foreach (ModelEntry entry in LLMManager.modelEntries)
@@ -243,7 +244,7 @@ namespace CoreAI
             catch (Exception ex)
             {
                 LogWarning("GetLlmUnityModelFileNames: LLMUnity model scan failed: " + ex.Message);
-                return System.Array.Empty<string>();
+                return Array.Empty<string>();
             }
 #else
             return System.Array.Empty<string>();

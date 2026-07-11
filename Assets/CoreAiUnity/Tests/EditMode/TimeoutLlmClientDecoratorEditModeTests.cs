@@ -107,7 +107,10 @@ namespace CoreAI.Tests.EditMode
 
         // ---- helpers ----
 
-        private static LlmCompletionRequest Req() => new() { AgentRoleId = "Test", UserPayload = "hi" };
+        private static LlmCompletionRequest Req()
+        {
+            return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
+        }
 
         private static async Task<List<LlmStreamChunk>> Drain(IAsyncEnumerable<LlmStreamChunk> stream)
         {

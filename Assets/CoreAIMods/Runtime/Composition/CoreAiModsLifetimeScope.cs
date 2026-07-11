@@ -21,17 +21,22 @@ namespace CoreAI.Composition
         [Header("Lua capability grant")]
         [Tooltip("When on, mods loaded by this composition may reach the Full tier (reflection over " +
                  "arbitrary GameObjects/components). Host/singleplayer only — never grant to a networked client.")]
-        [SerializeField] private bool enableFullLuaAccess;
+        [SerializeField]
+        private bool enableFullLuaAccess;
 
         [Tooltip("When on, Full-tier Lua reflection may touch non-public members. Requires Full access.")]
-        [SerializeField] private bool enableFullLuaPrivateAccess;
+        [SerializeField]
+        private bool enableFullLuaPrivateAccess;
 
-        [Tooltip("Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = any scene in Build Settings.")]
-        [SerializeField] private string[] allowedLuaScenes;
+        [Tooltip(
+            "Scenes the Lua coreai_world_load_scene binding is allowed to load. Empty = any scene in Build Settings.")]
+        [SerializeField]
+        private string[] allowedLuaScenes;
 
         [Tooltip("Optional ScriptableObject implementing IFullLuaAccessBlacklistPolicy to deny Full-tier " +
                  "reflection access to specific component types/members. Leave empty to allow all (default).")]
-        [SerializeField] private ScriptableObject blacklistPolicy;
+        [SerializeField]
+        private ScriptableObject blacklistPolicy;
 
         // Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —

@@ -15,8 +15,9 @@ namespace CoreAI.Sandbox.LuaCs
     {
         private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
 
-        private readonly Dictionary<string, Func<LuaFunctionExecutionContext, CancellationToken, ValueTask<int>>> _callbacks =
-            new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Func<LuaFunctionExecutionContext, CancellationToken, ValueTask<int>>>
+            _callbacks =
+                new(StringComparer.Ordinal);
 
         private readonly Dictionary<string, LuaFunction> _luaFunctions = new(StringComparer.Ordinal);
 
@@ -99,7 +100,8 @@ namespace CoreAI.Sandbox.LuaCs
                 state.Environment[kv.Key] = CreateFunction(kv.Key, kv.Value);
             }
 
-            foreach (KeyValuePair<string, Func<LuaFunctionExecutionContext, CancellationToken, ValueTask<int>>> kv in _callbacks)
+            foreach (KeyValuePair<string, Func<LuaFunctionExecutionContext, CancellationToken, ValueTask<int>>> kv in
+                     _callbacks)
             {
                 string name = kv.Key;
                 Func<LuaFunctionExecutionContext, CancellationToken, ValueTask<int>> callback = kv.Value;

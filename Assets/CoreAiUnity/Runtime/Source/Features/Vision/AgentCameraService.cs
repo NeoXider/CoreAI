@@ -120,7 +120,8 @@ namespace CoreAI.Vision
         /// Movement gate: outputs the camera the agent may move, or a typed <paramref name="denial"/>
         /// explaining why not (unmarked / movement disabled / wrong role / no camera).
         /// </summary>
-        bool TryResolveMovableCamera(string cameraName, string agentRoleId, out Camera camera, out CameraMoveDenial denial);
+        bool TryResolveMovableCamera(string cameraName, string agentRoleId, out Camera camera,
+            out CameraMoveDenial denial);
 
         /// <summary>
         /// Applies a move/rotate/look-at to an already-gated camera. <paramref name="errorCode"/> is null on
@@ -212,7 +213,7 @@ namespace CoreAI.Vision
 
         public Camera ResolveCaptureCamera(string cameraName, string agentRoleId, out bool isMain)
         {
-            Camera cam = ResolveCameraCandidate(cameraName, agentRoleId, preferOwn: true);
+            Camera cam = ResolveCameraCandidate(cameraName, agentRoleId, true);
             isMain = cam != null && cam == Camera.main;
             return cam;
         }

@@ -51,7 +51,7 @@ namespace CoreAI.Infrastructure.World
         // spawn_batch: per-item overrides. Any item field left at its default falls back to the
         // envelope-level default carried in the fields above (prefabKeyOrName, x/y/z, fx/fy/fz,
         // floatValue/scaleX/Y/Z, stringValue as parent).
-        public CoreAiSpawnBatchItem[] items = System.Array.Empty<CoreAiSpawnBatchItem>();
+        public CoreAiSpawnBatchItem[] items = Array.Empty<CoreAiSpawnBatchItem>();
 
         public static CoreAiWorldCommandEnvelope Spawn(string prefabKeyOrName, string targetName, Vector3 pos)
         {
@@ -401,7 +401,7 @@ namespace CoreAI.Infrastructure.World
                 scaleZ = defaultNonUniformScale.z,
                 stringValue = defaultParent ?? "",
                 worldPositionStays = worldPositionStays,
-                items = items ?? System.Array.Empty<CoreAiSpawnBatchItem>()
+                items = items ?? Array.Empty<CoreAiSpawnBatchItem>()
             };
         }
 

@@ -392,7 +392,7 @@ namespace CoreAI.Tests.EditMode
         {
             // F-11: history is bounded (original + last N intermediate + current); a revert must resolve
             // revisions by their stable index, not by array position, once eviction has removed entries.
-            MemoryLuaScriptVersionStore versions = new(maxIntermediateRevisions: 2);
+            MemoryLuaScriptVersionStore versions = new(2);
             LuaCsModRuntime runtime = new(versionStore: versions);
 
             runtime.LoadMod("m", "local x = 0");

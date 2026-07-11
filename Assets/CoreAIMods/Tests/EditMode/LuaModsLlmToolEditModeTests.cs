@@ -52,7 +52,8 @@ namespace CoreAI.Tests.EditMode
             return new LuaModsLlmTool(runtime, _settings, NullLog.Instance, granted, allowManagement);
         }
 
-        private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null, string code = null)
+        private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null,
+            string code = null)
         {
             string json = await tool.ExecuteAsync(action, modId, code);
             return JObject.Parse(json);

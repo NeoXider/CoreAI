@@ -74,12 +74,12 @@ namespace CoreAI.Composition
             // Lua coreai_world_load_scene binding, instead of the native path bypassing it.
             builder.Register(c =>
                     {
-                        var inner = new CoreAiWorldCommandExecutor(
+                        CoreAiWorldCommandExecutor inner = new(
                             c.Resolve<IGameLogger>(),
                             c.Resolve<ICoreAiPrefabRegistry>(),
                             allowedLuaScenes,
                             c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true);
-                        var audit = c.ResolveOrDefault<IAuditLog>();
+                        IAuditLog audit = c.ResolveOrDefault<IAuditLog>();
                         return audit != null
                             ? (ICoreAiWorldCommandExecutor)new AuditedWorldCommandExecutor(inner, audit)
                             : inner;
@@ -116,16 +116,16 @@ namespace CoreAI.Composition
         {
             // Factory lambda: the service's clock/rate-limit ctor args are not container-resolvable, so
             // construct with its production defaults (Stopwatch clock, 1s capture rate limit).
-            builder.Register(_ => new CoreAI.Vision.AgentCameraService(), Lifetime.Singleton)
-                .As<CoreAI.Vision.IAgentCameraService>();
+            builder.Register(_ => new Vision.AgentCameraService(), Lifetime.Singleton)
+                .As<Vision.IAgentCameraService>();
 
             builder.RegisterBuildCallback(container =>
             {
                 try
                 {
                     AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
-                    CoreAI.Vision.IAgentCameraService cameraService =
-                        container.Resolve<CoreAI.Vision.IAgentCameraService>();
+                    Vision.IAgentCameraService cameraService =
+                        container.Resolve<Vision.IAgentCameraService>();
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new CoreAI.Vision.CameraLlmTool(cameraService, BuiltInAgentRoleIds.Programmer));
                 }

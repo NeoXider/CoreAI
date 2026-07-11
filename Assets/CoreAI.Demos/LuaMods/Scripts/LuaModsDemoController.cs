@@ -59,7 +59,7 @@ namespace CoreAI.Demos
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             _slots.DeclareSlot(DamageSlot);
             _mods.ModEventEmitted += OnModEvent;
-            _status = CoreAI.Ai.LuaCs.LuaCsModRuntime.IsSupported
+            _status = LuaCsModRuntime.IsSupported
                 ? "Ready. Load a mod to start."
                 : "Lua sandbox is not supported on this platform.";
         }

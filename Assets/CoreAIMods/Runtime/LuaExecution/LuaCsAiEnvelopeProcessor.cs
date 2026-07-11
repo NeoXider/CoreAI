@@ -96,7 +96,7 @@ namespace CoreAI.Ai.LuaCs
                 LuaState state = _sandbox.Create(registry);
                 LuaValue[] results = _sandbox.RunChunk(state, lua);
                 string summary = Truncate(LuaCsGameToolExecutor.Summarize(results),
-                    LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
+                    MaxResultSummaryLength);
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))
                 {
                     _luaScriptVersions.RecordSuccessfulExecution(cmd.LuaScriptVersionKey.Trim(), lua);
@@ -151,7 +151,7 @@ namespace CoreAI.Ai.LuaCs
         private static string NormalizeError(string message)
         {
             string flat = (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
-            return Truncate(flat, LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
+            return Truncate(flat, MaxErrorMessageLength);
         }
 
         private void PublishLuaFailure(ApplyAiGameCommand cmd, string message)

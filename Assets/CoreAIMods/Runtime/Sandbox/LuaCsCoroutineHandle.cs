@@ -89,7 +89,7 @@ namespace CoreAI.Sandbox.LuaCs
             // result and the thread transitions to Dead + disposes itself SYNCHRONOUSLY, instead of
             // throwing a C# exception that would leave the thread half-executed. That is exactly the
             // self-cleaning, no-hang behaviour we want for a host-driven top-level coroutine.
-            _coroutine = ownerState.CreateCoroutine(function, isProtectedMode: true);
+            _coroutine = ownerState.CreateCoroutine(function, true);
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
         }

@@ -555,7 +555,7 @@ namespace CoreAI.Chat
         /// <summary>The role currently driving the chat — the runtime-switched role when agent switching is
         /// active, otherwise the configured role. Used for history hydration, tool-call display, and stop/clear
         /// so switching agents re-targets the whole panel, not just outgoing requests.</summary>
-        private string ActiveRoleId => _activeRoleId ?? (Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat);
+        private string ActiveRoleId => _activeRoleId ?? Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat;
 
         /// <summary>
         /// Enables the agent/role dropdown at runtime (e.g. from a demo controller). Safe to call before or
@@ -581,7 +581,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            var roles = new System.Collections.Generic.List<string>(BuiltInAgentRoleIds.AllBuiltInRoles);
+            List<string> roles = new(BuiltInAgentRoleIds.AllBuiltInRoles);
             int index = Mathf.Max(0, roles.IndexOf(_activeRoleId ?? Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat));
 
             _agentDropdown = new DropdownField(roles, index);

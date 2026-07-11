@@ -120,7 +120,8 @@ namespace CoreAI.Sandbox.LuaCs
                 if (steps > maxSteps)
                 {
                     throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException($"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({maxSteps})"));
+                        new InvalidOperationException(
+                            $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({maxSteps})"));
                 }
 
                 if (sw.ElapsedMilliseconds > timeoutMs)

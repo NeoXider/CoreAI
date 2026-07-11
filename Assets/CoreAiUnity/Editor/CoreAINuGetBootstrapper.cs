@@ -35,8 +35,10 @@ namespace CoreAI.Editor
 
         private const string NuGetForUnityAssemblyName = "NugetForUnity";
         private const string NuGetForUnityHomeUrl = "https://github.com/GlitchEnzo/NuGetForUnity";
+
         private const string NuGetForUnityUpmGitUrl =
             "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity";
+
         private const string ManualRestoreMenuPath = "NuGet/Restore Packages";
 
         [MenuItem(MenuPath, priority = MenuPriority)]
@@ -159,7 +161,7 @@ namespace CoreAI.Editor
             {
                 try
                 {
-                    if (assembly.GetType(MeaiProbeTypeName, throwOnError: false) != null)
+                    if (assembly.GetType(MeaiProbeTypeName, false) != null)
                     {
                         return true;
                     }

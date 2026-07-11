@@ -313,7 +313,9 @@ namespace CoreAI.Ai.Hub
             string caps = string.IsNullOrWhiteSpace(mod.Capabilities) ? "" : $"  caps: {mod.Capabilities}";
             string status = mod.IsLoaded
                 ? $"  loaded  handlers: {mod.Handlers}  timers: {mod.Timers}  errors: {mod.Errors}"
-                : (mod.IsStored ? "  stored (disabled)" : "");
+                : mod.IsStored
+                    ? "  stored (disabled)"
+                    : "";
             string version = string.IsNullOrWhiteSpace(mod.Version) ? "" : $"  v{mod.Version}";
             string bundled = string.IsNullOrWhiteSpace(mod.Origin) ? "" : "  [bundled]";
             return id + version + caps + status + bundled;

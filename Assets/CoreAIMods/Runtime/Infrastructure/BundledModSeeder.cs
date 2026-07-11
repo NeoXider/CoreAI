@@ -64,8 +64,11 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             /// <inheritdoc />
-            public override string ToString() =>
-                $"installed={Installed}, updated={Updated}, updateAvailable={FlaggedForUpdate}, skipped={Skipped}";
+            public override string ToString()
+            {
+                return
+                    $"installed={Installed}, updated={Updated}, updateAvailable={FlaggedForUpdate}, skipped={Skipped}";
+            }
         }
 
         /// <summary>Seeds/updates every bundled mod into the store. Never throws.</summary>
@@ -121,7 +124,13 @@ namespace CoreAI.Infrastructure.Lua
             return result;
         }
 
-        private enum Outcome { Installed, Updated, Flagged, Skipped }
+        private enum Outcome
+        {
+            Installed,
+            Updated,
+            Flagged,
+            Skipped
+        }
 
         private Outcome SeedOne(BundledMod mod, string origin)
         {
@@ -135,7 +144,7 @@ namespace CoreAI.Infrastructure.Lua
 
             if (!_store.TryLoad(id, out string existingSource, out LuaModManifest existing) || existing == null)
             {
-                _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, active: HeaderActive(mod.Source)));
+                _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source)));
                 return Outcome.Installed;
             }
 
@@ -152,7 +161,8 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             bool userEdited = !string.IsNullOrEmpty(existing.SeededHash) &&
-                              !string.Equals(Fnv1a(existingSource ?? ""), existing.SeededHash, StringComparison.Ordinal);
+                              !string.Equals(Fnv1a(existingSource ?? ""), existing.SeededHash,
+                                  StringComparison.Ordinal);
 
             if (userEdited)
             {
@@ -163,12 +173,15 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             // Update in place, preserving the player's enabled/disabled choice.
-            LuaModManifest updated = BuildManifest(mod, origin, newHash, active: existing.Active);
+            LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
             _store.Save(id, mod.Source, updated);
             return Outcome.Updated;
         }
 
-        private static bool HeaderActive(string source) => LuaModHeader.Parse(source ?? "", "").Active;
+        private static bool HeaderActive(string source)
+        {
+            return LuaModHeader.Parse(source ?? "", "").Active;
+        }
 
         private static LuaModManifest BuildManifest(BundledMod mod, string origin, string hash, bool active)
         {

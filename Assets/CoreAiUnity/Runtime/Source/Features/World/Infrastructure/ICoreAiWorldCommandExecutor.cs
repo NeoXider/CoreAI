@@ -11,10 +11,7 @@ namespace CoreAI.Infrastructure.World
 
         string[] LastListedAnimations { get; }
 
-        System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects
-        {
-            get;
-        }
+        List<Dictionary<string, object>> LastListedObjects { get; }
 
         /// <summary>Prefab keys returned by the most recent <c>list_prefabs</c> command.</summary>
         IReadOnlyList<string> LastListedPrefabKeys => System.Array.Empty<string>();

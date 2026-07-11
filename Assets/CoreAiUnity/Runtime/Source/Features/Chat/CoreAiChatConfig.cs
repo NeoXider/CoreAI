@@ -11,7 +11,8 @@ namespace CoreAI.Chat
         [Header("Agent")] [Tooltip("Agent role id used for prompt routing and chat history.")] [SerializeField]
         private string _roleId = Ai.BuiltInAgentRoleIds.SmartChat;
 
-        [Tooltip("Show an agent/role dropdown in the chat header so the user can switch the responding agent at runtime.")]
+        [Tooltip(
+            "Show an agent/role dropdown in the chat header so the user can switch the responding agent at runtime.")]
         [SerializeField]
         private bool _allowAgentSwitching;
 

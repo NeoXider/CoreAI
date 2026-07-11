@@ -47,17 +47,17 @@ namespace CoreAI.Hub.UI
             registry.Register(
                 ChatPageId,
                 () => new HubChatPage(chatTemplate, chatStyleSheet, chatConfig),
-                order: 0);
+                0);
 
             registry.Register(
                 SettingsPageId,
                 () => new HubSettingsPage(settings, chatConfig),
-                order: 100);
+                100);
 
             registry.Register(
                 StatisticsPageId,
                 () => new HubStatisticsPage(metrics, settings),
-                order: 200);
+                200);
         }
     }
 }

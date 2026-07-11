@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 3, openDurationMs: 1000, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 3, 1000, clock.NowMs);
 
             // 3 transient failures trip the breaker.
             inner.NextResults.Enqueue(Fail(LlmErrorCode.BackendUnavailable));
@@ -49,7 +49,7 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 2, openDurationMs: 1000, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
 
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
@@ -77,7 +77,7 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 1, openDurationMs: 500, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 500, clock.NowMs);
 
             inner.NextResults.Enqueue(Fail(LlmErrorCode.BackendUnavailable));
             await breaker.CompleteAsync(Req());
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 2, openDurationMs: 1000, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
 
             // Auth + invalid-request + context-length are the caller's problem, not backend health.
             inner.NextResults.Enqueue(Fail(LlmErrorCode.AuthExpired));
@@ -121,11 +121,11 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 3, openDurationMs: 1000, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 3, 1000, clock.NowMs);
 
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
-            inner.NextResults.Enqueue(Success());          // resets the counter
+            inner.NextResults.Enqueue(Success()); // resets the counter
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
             inner.NextResults.Enqueue(Fail(LlmErrorCode.Timeout));
 
@@ -143,7 +143,7 @@ namespace CoreAI.Tests.EditMode
         {
             ProgrammableLlmClient inner = new();
             ManualClock clock = new();
-            CircuitBreakerLlmClientDecorator breaker = new(inner, failureThreshold: 2, openDurationMs: 1000, clock.NowMs);
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
 
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
@@ -163,12 +163,25 @@ namespace CoreAI.Tests.EditMode
 
         // ---- helpers ----
 
-        private static LlmCompletionRequest Req() => new() { AgentRoleId = "Test", UserPayload = "hi" };
-        private static LlmCompletionResult Success() => new() { Ok = true, Content = "ok" };
-        private static LlmCompletionResult Fail(LlmErrorCode code) =>
-            new() { Ok = false, Error = code.ToString(), ErrorCode = code };
-        private static LlmStreamChunk ErrChunk(LlmErrorCode code) =>
-            new() { IsDone = true, Error = code.ToString(), ErrorCode = code };
+        private static LlmCompletionRequest Req()
+        {
+            return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
+        }
+
+        private static LlmCompletionResult Success()
+        {
+            return new LlmCompletionResult { Ok = true, Content = "ok" };
+        }
+
+        private static LlmCompletionResult Fail(LlmErrorCode code)
+        {
+            return new LlmCompletionResult { Ok = false, Error = code.ToString(), ErrorCode = code };
+        }
+
+        private static LlmStreamChunk ErrChunk(LlmErrorCode code)
+        {
+            return new LlmStreamChunk { IsDone = true, Error = code.ToString(), ErrorCode = code };
+        }
 
         private static async Task<List<LlmStreamChunk>> Drain(IAsyncEnumerable<LlmStreamChunk> stream)
         {
@@ -184,8 +197,16 @@ namespace CoreAI.Tests.EditMode
         private sealed class ManualClock
         {
             private long _ms;
-            public long NowMs() => _ms;
-            public void Advance(long ms) => _ms += ms;
+
+            public long NowMs()
+            {
+                return _ms;
+            }
+
+            public void Advance(long ms)
+            {
+                _ms += ms;
+            }
         }
 
         private sealed class ProgrammableLlmClient : ILlmClient
@@ -199,7 +220,9 @@ namespace CoreAI.Tests.EditMode
                 LlmCompletionRequest request, CancellationToken cancellationToken = default)
             {
                 CallCount++;
-                LlmCompletionResult r = NextResults.Count > 0 ? NextResults.Dequeue() : new LlmCompletionResult { Ok = true };
+                LlmCompletionResult r = NextResults.Count > 0
+                    ? NextResults.Dequeue()
+                    : new LlmCompletionResult { Ok = true };
                 return Task.FromResult(r);
             }
 

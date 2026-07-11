@@ -113,7 +113,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>Same as <see cref="SeedOriginal"/> but reports whether the store was actually mutated.</summary>
-        public bool SeedOriginalChanged(string overlayKey, string originalPayload, bool overwriteExistingOriginal = false)
+        public bool SeedOriginalChanged(string overlayKey, string originalPayload,
+            bool overwriteExistingOriginal = false)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
             {

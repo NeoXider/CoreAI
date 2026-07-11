@@ -136,7 +136,9 @@ namespace CoreAI.Hub.UI
                     CultureInfo.InvariantCulture,
                     "{0:N0} context / {1}",
                     _settings.ContextWindowTokens,
-                    _settings.MaxTokens > 0 ? _settings.MaxTokens.ToString("N0", CultureInfo.InvariantCulture) + " max output" : "provider output default");
+                    _settings.MaxTokens > 0
+                        ? _settings.MaxTokens.ToString("N0", CultureInfo.InvariantCulture) + " max output"
+                        : "provider output default");
             }
 
             if (_metrics == null || _completions == null)
@@ -152,7 +154,9 @@ namespace CoreAI.Hub.UI
             _completions.text = total.ToString(CultureInfo.InvariantCulture);
             _successFail.text = string.Format(CultureInfo.InvariantCulture, "{0} / {1}", ok, failed);
             _successRate.text = total == 0 ? "no completions yet" : Percent(ok, total);
-            _avgLatency.text = total == 0 ? "-" : _metrics.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture) + " ms";
+            _avgLatency.text = total == 0
+                ? "-"
+                : _metrics.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture) + " ms";
             _retryPressure.text = total == 0
                 ? "no completions yet"
                 : string.Format(
@@ -204,7 +208,8 @@ namespace CoreAI.Hub.UI
                     rm.AverageLatencyMs.ToString("0", CultureInfo.InvariantCulture),
                     rm.StructuredRetries,
                     rm.CommandsPublished);
-                _rolesContainer.Add(HubPageWidgets.MakeRow(string.IsNullOrEmpty(kvp.Key) ? "(default)" : kvp.Key, value));
+                _rolesContainer.Add(
+                    HubPageWidgets.MakeRow(string.IsNullOrEmpty(kvp.Key) ? "(default)" : kvp.Key, value));
             }
         }
 

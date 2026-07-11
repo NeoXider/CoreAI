@@ -104,7 +104,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_100Revisions_BoundedHistory_OriginalAndCurrentIntact()
         {
-            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 20);
+            MemoryDataOverlayVersionStore s = new(20);
             for (int i = 0; i < 100; i++)
             {
                 s.RecordSuccessfulApply("k", "p" + i);
@@ -125,7 +125,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_ByteBudget_EvictsMiddleButKeepsOriginalAndCurrent()
         {
-            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 1000, maxTotalBytes: 15);
+            MemoryDataOverlayVersionStore s = new(1000, 15);
             for (int i = 0; i < 5; i++)
             {
                 s.RecordSuccessfulApply("k", "0123456789" + i);
@@ -140,7 +140,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_RetentionPolicy_RevertToEvictedRevision_ReturnsNoChange()
         {
-            MemoryDataOverlayVersionStore s = new(maxIntermediateRevisions: 2);
+            MemoryDataOverlayVersionStore s = new(2);
             for (int i = 0; i < 10; i++)
             {
                 s.RecordSuccessfulApply("k", "p" + i);
@@ -167,7 +167,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             {
-                FileDataOverlayVersionStore a = new(new NullGameLogger(), path, maxIntermediateRevisions: 5);
+                FileDataOverlayVersionStore a = new(new NullGameLogger(), path, 5);
                 for (int i = 0; i < 50; i++)
                 {
                     a.RecordSuccessfulApply("k", "p" + i);

@@ -38,18 +38,24 @@ namespace CoreAI.Infrastructure.Llm
         public TimeoutLlmClientDecorator(ILlmClient inner, Func<float> timeoutSecondsProvider)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-            _timeoutSecondsProvider = timeoutSecondsProvider ?? throw new ArgumentNullException(nameof(timeoutSecondsProvider));
+            _timeoutSecondsProvider =
+                timeoutSecondsProvider ?? throw new ArgumentNullException(nameof(timeoutSecondsProvider));
         }
 
         /// <inheritdoc />
         public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
 
         /// <inheritdoc />
-        public bool SupportsNativeToolCallingForRole(string agentRoleId) =>
-            _inner.SupportsNativeToolCallingForRole(agentRoleId);
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return _inner.SupportsNativeToolCallingForRole(agentRoleId);
+        }
 
         /// <inheritdoc />
-        public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _inner.SetTools(tools);
+        }
 
         /// <inheritdoc />
         public async Task<LlmCompletionResult> CompleteAsync(
@@ -91,9 +97,9 @@ namespace CoreAI.Infrastructure.Llm
             if (timeoutSeconds <= 0f)
             {
                 await foreach (LlmStreamChunk chunk in _inner
-                    .CompleteStreamingAsync(request, cancellationToken)
-                    .WithCancellation(cancellationToken)
-                    .ConfigureAwait(false))
+                                   .CompleteStreamingAsync(request, cancellationToken)
+                                   .WithCancellation(cancellationToken)
+                                   .ConfigureAwait(false))
                 {
                     yield return chunk;
                 }

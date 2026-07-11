@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode
             {
                 if (_created[i] != null)
                 {
-                    _created[i].transform.SetParent(null, worldPositionStays: false);
+                    _created[i].transform.SetParent(null, false);
                     Object.DestroyImmediate(_created[i]);
                 }
             }
@@ -40,7 +40,7 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < childCount; i++)
             {
                 GameObject child = CreateObject("Leaf");
-                child.transform.SetParent(root.transform, worldPositionStays: false);
+                child.transform.SetParent(root.transform, false);
             }
 
             List<object> results = new();
@@ -71,7 +71,7 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < depth; i++)
             {
                 GameObject child = CreateObject("DeepChild");
-                child.transform.SetParent(current, worldPositionStays: false);
+                child.transform.SetParent(current, false);
                 current = child.transform;
             }
 

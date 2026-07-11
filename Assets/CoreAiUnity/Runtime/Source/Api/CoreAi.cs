@@ -227,15 +227,15 @@ namespace CoreAI
                 try
                 {
                     AgentMemoryPolicy policy = (AgentMemoryPolicy)_scope.Container.Resolve(typeof(AgentMemoryPolicy));
-                    CoreAI.Session.ISessionTelemetryProvider telemetry =
-                        (CoreAI.Session.ISessionTelemetryProvider)_scope.Container.Resolve(
-                            typeof(CoreAI.Session.ISessionTelemetryProvider));
+                    Session.ISessionTelemetryProvider telemetry =
+                        (Session.ISessionTelemetryProvider)_scope.Container.Resolve(
+                            typeof(Session.ISessionTelemetryProvider));
                     if (policy == null || telemetry == null)
                     {
                         return false;
                     }
 
-                    policy.AddToolForRole(roleId.Trim(), new CoreAI.Ai.GameStateLlmTool(telemetry));
+                    policy.AddToolForRole(roleId.Trim(), new GameStateLlmTool(telemetry));
                     return true;
                 }
                 catch (Exception ex)

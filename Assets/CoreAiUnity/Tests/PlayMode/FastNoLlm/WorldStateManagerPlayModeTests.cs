@@ -86,13 +86,13 @@ namespace CoreAI.Tests.PlayMode
         private static void DestroyAllWorldObjects()
         {
             WorldObjectComponent[] tags =
-                UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+                Object.FindObjectsByType<WorldObjectComponent>(
                     FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (WorldObjectComponent t in tags)
             {
                 if (t != null && t.gameObject != null)
                 {
-                    UnityEngine.Object.DestroyImmediate(t.gameObject);
+                    Object.DestroyImmediate(t.gameObject);
                 }
             }
         }
@@ -118,7 +118,7 @@ namespace CoreAI.Tests.PlayMode
         // via the tracked component instead.
         private static GameObject FindInactiveByName(string name)
         {
-            WorldObjectComponent[] tags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+            WorldObjectComponent[] tags = Object.FindObjectsByType<WorldObjectComponent>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (WorldObjectComponent t in tags)
             {
@@ -152,8 +152,8 @@ namespace CoreAI.Tests.PlayMode
             manager.Save();
             Assert.IsTrue(File.Exists(_saveFilePath), "Save should write the world_state.json file.");
 
-            UnityEngine.Object.DestroyImmediate(cube);
-            UnityEngine.Object.DestroyImmediate(sphere);
+            Object.DestroyImmediate(cube);
+            Object.DestroyImmediate(sphere);
             yield return null;
 
             Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
@@ -185,7 +185,7 @@ namespace CoreAI.Tests.PlayMode
                 "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
             Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
 
-            GameObject enemy = UnityEngine.Object.Instantiate(prefab, new Vector3(5, 0.5f, 0), Quaternion.identity);
+            GameObject enemy = Object.Instantiate(prefab, new Vector3(5, 0.5f, 0), Quaternion.identity);
             enemy.name = "TestEnemy";
             Tag(enemy, "enemy.basic");
             // Intentionally no SetColor — prefab material must be preserved.
@@ -194,7 +194,7 @@ namespace CoreAI.Tests.PlayMode
                 GameLoggerUnscopedFallback.Instance,
                 new StubPrefabRegistry(prefab, "enemy.basic"));
             manager.Save();
-            UnityEngine.Object.DestroyImmediate(enemy);
+            Object.DestroyImmediate(enemy);
             yield return null;
 
             Assert.IsTrue(manager.TryLoad(), "Prefab should reload from the registry.");
@@ -231,8 +231,8 @@ namespace CoreAI.Tests.PlayMode
                 WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
                 manager.Save();
 
-                UnityEngine.Object.DestroyImmediate(childGo);
-                UnityEngine.Object.DestroyImmediate(parentGo);
+                Object.DestroyImmediate(childGo);
+                Object.DestroyImmediate(parentGo);
                 yield return null;
 
                 Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
@@ -249,7 +249,7 @@ namespace CoreAI.Tests.PlayMode
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(decoy);
+                Object.DestroyImmediate(decoy);
             }
         }
 
@@ -264,7 +264,7 @@ namespace CoreAI.Tests.PlayMode
             manager.Save();
             Assert.IsTrue(File.Exists(_saveFilePath));
 
-            UnityEngine.Object.DestroyImmediate(cube);
+            Object.DestroyImmediate(cube);
             yield return null;
 
             // Save again with zero tracked objects — the stale snapshot (still listing "TempCube")
@@ -275,8 +275,9 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(manager.TryLoad(), "TryLoad of an empty snapshot should still succeed (clean slate).");
             yield return null;
 
-            Assert.IsNull(GameObject.Find("TempCube"), "Deleted object must not reappear after loading the empty snapshot.");
-            int count = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(FindObjectsSortMode.None).Length;
+            Assert.IsNull(GameObject.Find("TempCube"),
+                "Deleted object must not reappear after loading the empty snapshot.");
+            int count = Object.FindObjectsByType<WorldObjectComponent>(FindObjectsSortMode.None).Length;
             Assert.AreEqual(0, count, "World should contain zero tracked objects after loading an empty snapshot.");
         }
 
@@ -287,14 +288,14 @@ namespace CoreAI.Tests.PlayMode
                 "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
             Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
 
-            GameObject enemy = UnityEngine.Object.Instantiate(prefab, new Vector3(2, 0, 0), Quaternion.identity);
+            GameObject enemy = Object.Instantiate(prefab, new Vector3(2, 0, 0), Quaternion.identity);
             enemy.name = "RetainedEnemy";
             Tag(enemy, "enemy.basic");
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
             WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
             manager.Save();
-            UnityEngine.Object.DestroyImmediate(enemy);
+            Object.DestroyImmediate(enemy);
             yield return null;
 
             // Simulate the prefab becoming unavailable (registry never resolves it) — load must
@@ -313,7 +314,8 @@ namespace CoreAI.Tests.PlayMode
 
             // Prefab becomes available again; loading should now restore the retained object.
             WorldStateManager managerPrefabRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
-            Assert.IsTrue(managerPrefabRestored.TryLoad(), "TryLoad should succeed once the prefab is available again.");
+            Assert.IsTrue(managerPrefabRestored.TryLoad(),
+                "TryLoad should succeed once the prefab is available again.");
             yield return null;
 
             GameObject restored = GameObject.Find("RetainedEnemy");
@@ -351,7 +353,7 @@ namespace CoreAI.Tests.PlayMode
 
             WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
             manager.Save();
-            UnityEngine.Object.DestroyImmediate(cube);
+            Object.DestroyImmediate(cube);
             yield return null;
 
             Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
@@ -383,7 +385,7 @@ namespace CoreAI.Tests.PlayMode
 
             WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
             manager.Save();
-            UnityEngine.Object.DestroyImmediate(cube);
+            Object.DestroyImmediate(cube);
             yield return null;
 
             // Simulate a stale INACTIVE tracked object left behind in the scene, sharing the
@@ -401,7 +403,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(manager.TryLoad(), "TryLoad should succeed.");
             yield return null;
 
-            WorldObjectComponent[] afterLoad = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
+            WorldObjectComponent[] afterLoad = Object.FindObjectsByType<WorldObjectComponent>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
             int matching = 0;
             foreach (WorldObjectComponent t in afterLoad)
@@ -424,14 +426,14 @@ namespace CoreAI.Tests.PlayMode
                 "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
             Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
 
-            GameObject enemy = UnityEngine.Object.Instantiate(prefab, new Vector3(3, 0, 0), Quaternion.identity);
+            GameObject enemy = Object.Instantiate(prefab, new Vector3(3, 0, 0), Quaternion.identity);
             enemy.name = "UnresolvedThenReset";
             Tag(enemy, "enemy.basic");
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
             WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
             manager.Save();
-            UnityEngine.Object.DestroyImmediate(enemy);
+            Object.DestroyImmediate(enemy);
             yield return null;
 
             // Load while the prefab is unavailable — the object is retained in memory as unresolved.
@@ -440,7 +442,8 @@ namespace CoreAI.Tests.PlayMode
                 new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should succeed even with an unresolved prefab.");
             yield return null;
-            Assert.IsNull(GameObject.Find("UnresolvedThenReset"), "Object should not spawn while its prefab is unresolved.");
+            Assert.IsNull(GameObject.Find("UnresolvedThenReset"),
+                "Object should not spawn while its prefab is unresolved.");
 
             // F-04B: Reset must be truly final — it must discard the retained-unresolved list, not
             // just delete the save file.

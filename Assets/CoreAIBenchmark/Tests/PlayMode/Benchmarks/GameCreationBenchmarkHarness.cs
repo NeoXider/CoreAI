@@ -317,7 +317,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public readonly LuaCsLogicSlots LogicSlots = new();
             public int ExecutionCount;
             public int FailedExecutions;
+
             public string LastError = "";
+
             // Lua-CSharp state persists across chunks so a seeded formula (logic_define) stays installed
             // for later invocations, mirroring the reused MoonSharp Script this replaced.
             private LuaState _state;
@@ -499,23 +501,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         /// <summary>Spins a directional light's azimuth at a fixed elevation — a full circle every 3
         /// minutes — so a recorded build timelapse has moving shadows instead of a static sun.</summary>
-        private sealed class LiveSunOrbit : UnityEngine.MonoBehaviour
+        private sealed class LiveSunOrbit : MonoBehaviour
         {
             private const float DegreesPerSecond = 360f / 180f;
 
             private void Update()
             {
-                transform.Rotate(0f, DegreesPerSecond * UnityEngine.Time.deltaTime, 0f, UnityEngine.Space.World);
+                transform.Rotate(0f, DegreesPerSecond * Time.deltaTime, 0f, Space.World);
             }
         }
 
         public sealed class VisualBenchmarkWorldExecutor : RecordingWorldExecutor
         {
-            private readonly Dictionary<string, UnityEngine.GameObject> _objects =
+            private readonly Dictionary<string, GameObject> _objects =
                 new(StringComparer.OrdinalIgnoreCase);
 
             // Translucent placeholders for expected objects the model never spawned (added at capture time).
-            private readonly List<UnityEngine.GameObject> _ghosts = new();
+            private readonly List<GameObject> _ghosts = new();
 
             /// <summary>Object names the scene should contain — drives the ✓/✗ status marker + correctness tint.</summary>
             public readonly HashSet<string> ExpectedNames = new(StringComparer.OrdinalIgnoreCase);
@@ -523,18 +525,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>When true, per-object name labels are not drawn (free-build hero shots stay uncluttered).</summary>
             public bool HideLabels;
 
-            public UnityEngine.Transform Root { get; }
+            public Transform Root { get; }
             public int ObjectCount => _objects.Count;
 
             // Live preview camera + light so the Game view shows the model building the scene in real time
             // (objects pop in as commands stream), instead of staring at an empty view until the final shot.
-            private UnityEngine.GameObject _liveCamGo;
-            private UnityEngine.GameObject _liveLightGo;
-            private UnityEngine.TextMesh _liveModelLabel;
+            private GameObject _liveCamGo;
+            private GameObject _liveLightGo;
+            private TextMesh _liveModelLabel;
 
             public VisualBenchmarkWorldExecutor()
             {
-                Root = new UnityEngine.GameObject("BenchmarkScene").transform;
+                Root = new GameObject("BenchmarkScene").transform;
                 CreateLivePreview();
             }
 
@@ -542,47 +544,47 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 try
                 {
-                    _liveLightGo = new UnityEngine.GameObject("BenchmarkLivePreviewLight");
-                    UnityEngine.Light light = _liveLightGo.AddComponent<UnityEngine.Light>();
-                    light.type = UnityEngine.LightType.Directional;
+                    _liveLightGo = new GameObject("BenchmarkLivePreviewLight");
+                    Light light = _liveLightGo.AddComponent<Light>();
+                    light.type = LightType.Directional;
                     light.intensity = 1.3f;
                     // Same shadow tuning as the final "BenchmarkKey" shot light (see CaptureSceneScreenshot):
                     // a fresh AddComponent'd Light defaults to LightShadows.None, and the default bias
                     // peter-pans shadows on these ~1m objects, so the live Game view looked flat too.
-                    light.shadows = UnityEngine.LightShadows.Soft;
+                    light.shadows = LightShadows.Soft;
                     light.shadowStrength = 1f;
                     light.shadowBias = 0.01f;
                     light.shadowNormalBias = 0.2f;
-                    _liveLightGo.transform.rotation = UnityEngine.Quaternion.Euler(48f, -32f, 0f);
+                    _liveLightGo.transform.rotation = Quaternion.Euler(48f, -32f, 0f);
                     // Orbit the sun azimuth (elevation stays fixed, so the scene never goes dark) for a
                     // more watchable build timelapse — a full 360 deg sweep every 3 minutes.
                     _liveLightGo.AddComponent<LiveSunOrbit>();
 
-                    _liveCamGo = new UnityEngine.GameObject("BenchmarkLivePreviewCamera");
-                    UnityEngine.Camera cam = _liveCamGo.AddComponent<UnityEngine.Camera>();
-                    cam.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
-                    cam.backgroundColor = new UnityEngine.Color(0.10f, 0.11f, 0.13f);
+                    _liveCamGo = new GameObject("BenchmarkLivePreviewCamera");
+                    Camera cam = _liveCamGo.AddComponent<Camera>();
+                    cam.clearFlags = CameraClearFlags.SolidColor;
+                    cam.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
                     cam.fieldOfView = 50f;
                     cam.nearClipPlane = 0.05f;
                     cam.farClipPlane = 500f;
                     // Frame the -9..9 build volume from a 3/4 angle so objects appear in place as they spawn.
-                    cam.transform.position = new UnityEngine.Vector3(14f, 16f, -22f);
-                    cam.transform.LookAt(new UnityEngine.Vector3(0f, 2f, 0f));
+                    cam.transform.position = new Vector3(14f, 16f, -22f);
+                    cam.transform.LookAt(new Vector3(0f, 2f, 0f));
 
                     // HUD label rigidly parented to the camera (fixed local transform => fixed screen
                     // position) so a recorded sweep video always shows which model is currently building.
-                    UnityEngine.GameObject labelGo = new("BenchmarkLiveModelLabel");
+                    GameObject labelGo = new("BenchmarkLiveModelLabel");
                     labelGo.transform.SetParent(cam.transform, false);
-                    labelGo.transform.localPosition = new UnityEngine.Vector3(-3.7f, 2.35f, 6f);
-                    labelGo.transform.localRotation = UnityEngine.Quaternion.identity;
-                    _liveModelLabel = labelGo.AddComponent<UnityEngine.TextMesh>();
+                    labelGo.transform.localPosition = new Vector3(-3.7f, 2.35f, 6f);
+                    labelGo.transform.localRotation = Quaternion.identity;
+                    _liveModelLabel = labelGo.AddComponent<TextMesh>();
                     _liveModelLabel.text = "";
                     _liveModelLabel.characterSize = 0.035f;
                     _liveModelLabel.fontSize = 60;
-                    _liveModelLabel.fontStyle = UnityEngine.FontStyle.Bold;
-                    _liveModelLabel.anchor = UnityEngine.TextAnchor.UpperLeft;
-                    _liveModelLabel.alignment = UnityEngine.TextAlignment.Left;
-                    _liveModelLabel.color = UnityEngine.Color.white;
+                    _liveModelLabel.fontStyle = FontStyle.Bold;
+                    _liveModelLabel.anchor = TextAnchor.UpperLeft;
+                    _liveModelLabel.alignment = TextAlignment.Left;
+                    _liveModelLabel.color = Color.white;
                 }
                 catch (Exception ex)
                 {
@@ -627,20 +629,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         if (!_objects.ContainsKey(key))
                         {
                             bool expected = ExpectedNames.Count == 0 || ExpectedNames.Contains(key);
-                            UnityEngine.GameObject go = BuildVisual(
-                                key, cmd.PrefabKeyOrName, new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z),
+                            GameObject go = BuildVisual(
+                                key, cmd.PrefabKeyOrName, new Vector3(cmd.X, cmd.Y, cmd.Z),
                                 expected, false, cmd.StringValue, cmd.WorldPositionStays);
                             ApplyInlineTransform(go, cmd, !string.IsNullOrWhiteSpace(cmd.StringValue)
-                                && !cmd.WorldPositionStays);
+                                                          && !cmd.WorldPositionStays);
                             _objects[key] = go;
                         }
                     }
-                    else if (action == "move" && _objects.TryGetValue(name, out UnityEngine.GameObject mv) &&
+                    else if (action == "move" && _objects.TryGetValue(name, out GameObject mv) &&
                              mv != null)
                     {
-                        mv.transform.position = new UnityEngine.Vector3(cmd.X, cmd.Y, cmd.Z);
+                        mv.transform.position = new Vector3(cmd.X, cmd.Y, cmd.Z);
                     }
-                    else if (action == "destroy" && _objects.TryGetValue(name, out UnityEngine.GameObject d))
+                    else if (action == "destroy" && _objects.TryGetValue(name, out GameObject d))
                     {
                         if (d != null)
                         {
@@ -650,22 +652,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         _objects.Remove(name);
                     }
                     else if (action == "set_scale"
-                             && _objects.TryGetValue(name, out UnityEngine.GameObject sc) && sc != null
+                             && _objects.TryGetValue(name, out GameObject sc) && sc != null
                              && cmd.FloatValue > 0f)
                     {
                         // Honour the model's uniform scale so towers/walls vary in size (natural variety).
                         sc.transform.localScale =
-                            UnityEngine.Vector3.one * UnityEngine.Mathf.Clamp(cmd.FloatValue, 0.05f, 50f);
+                            Vector3.one * Mathf.Clamp(cmd.FloatValue, 0.05f, 50f);
                     }
                     else if (action == "rotate"
-                             && _objects.TryGetValue(name, out UnityEngine.GameObject ro) && ro != null)
+                             && _objects.TryGetValue(name, out GameObject ro) && ro != null)
                     {
-                        ro.transform.rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                        ro.transform.rotation = Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
                     }
                     else if (action == "change"
-                             && _objects.TryGetValue(name, out UnityEngine.GameObject ch) && ch != null)
+                             && _objects.TryGetValue(name, out GameObject ch) && ch != null)
                     {
-                        bool hasParent = TryResolveParent(cmd.StringValue, out UnityEngine.Transform parent);
+                        bool hasParent = TryResolveParent(cmd.StringValue, out Transform parent);
                         bool localTransform = hasParent && !cmd.WorldPositionStays;
                         if (localTransform)
                         {
@@ -679,7 +681,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         }
                     }
                     else if (action == "set_color"
-                             && _objects.TryGetValue(name, out UnityEngine.GameObject col) && col != null
+                             && _objects.TryGetValue(name, out GameObject col) && col != null
                              && !string.IsNullOrWhiteSpace(cmd.StringValue))
                     {
                         string hex = cmd.StringValue.Trim();
@@ -688,9 +690,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             hex = "#" + hex;
                         }
 
-                        if (UnityEngine.ColorUtility.TryParseHtmlString(hex, out UnityEngine.Color parsed))
+                        if (ColorUtility.TryParseHtmlString(hex, out Color parsed))
                         {
-                            foreach (UnityEngine.Renderer r in col.GetComponentsInChildren<UnityEngine.Renderer>())
+                            foreach (Renderer r in col.GetComponentsInChildren<Renderer>())
                             {
                                 TintRenderer(r, parsed);
                             }
@@ -704,7 +706,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             private static void ApplyInlineTransform(
-                UnityEngine.GameObject go, RecordedWorldCommand cmd, bool localTransform)
+                GameObject go, RecordedWorldCommand cmd, bool localTransform)
             {
                 if (go == null || cmd == null)
                 {
@@ -713,7 +715,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 if (cmd.HasPosition || cmd.X != 0f || cmd.Y != 0f || cmd.Z != 0f)
                 {
-                    UnityEngine.Vector3 position = new(cmd.X, cmd.Y, cmd.Z);
+                    Vector3 position = new(cmd.X, cmd.Y, cmd.Z);
                     if (localTransform)
                     {
                         go.transform.localPosition = position;
@@ -726,7 +728,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 if (cmd.HasRotation || cmd.Fx != 0f || cmd.Fy != 0f || cmd.Fz != 0f)
                 {
-                    UnityEngine.Quaternion rotation = UnityEngine.Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
+                    Quaternion rotation = Quaternion.Euler(cmd.Fx, cmd.Fy, cmd.Fz);
                     if (localTransform)
                     {
                         go.transform.localRotation = rotation;
@@ -743,17 +745,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
             }
 
-            private static UnityEngine.Vector3 ResolveScale(RecordedWorldCommand cmd)
+            private static Vector3 ResolveScale(RecordedWorldCommand cmd)
             {
                 float uniform = cmd.FloatValue > 0f
-                    ? UnityEngine.Mathf.Clamp(cmd.FloatValue, 0.01f, 100f)
+                    ? Mathf.Clamp(cmd.FloatValue, 0.01f, 100f)
                     : 1f;
                 if (cmd.ScaleX <= 0f && cmd.ScaleY <= 0f && cmd.ScaleZ <= 0f)
                 {
-                    return UnityEngine.Vector3.one * uniform;
+                    return Vector3.one * uniform;
                 }
 
-                return new UnityEngine.Vector3(
+                return new Vector3(
                     AxisScale(cmd.ScaleX, uniform),
                     AxisScale(cmd.ScaleY, uniform),
                     AxisScale(cmd.ScaleZ, uniform));
@@ -761,33 +763,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             private static float AxisScale(float value, float fallback)
             {
-                return value > 0f ? UnityEngine.Mathf.Clamp(value, 0.01f, 100f) : fallback;
+                return value > 0f ? Mathf.Clamp(value, 0.01f, 100f) : fallback;
             }
 
             // The model now chooses each object's primitive via prefabKey (cube/sphere/cylinder/capsule/
             // plane); the harness no longer guesses a shape from the object's name. ShapeFor maps that
             // key to a primitive + a sensible per-shape default scale, and HashColor gives each object a
             // stable distinct colour so the scene reads like a prototype instead of identical grey cubes.
-            private static (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) ShapeFor(string prefabKey)
+            private static (PrimitiveType prim, Vector3 scale) ShapeFor(string prefabKey)
             {
-                UnityEngine.Vector3 S(float x, float y, float z)
+                Vector3 S(float x, float y, float z)
                 {
                     return new Vector3(x, y, z);
                 }
 
                 if (!CoreAiPrimitiveFactory.TryGetPrimitiveType(
-                        prefabKey, out UnityEngine.PrimitiveType prim))
+                        prefabKey, out PrimitiveType prim))
                 {
-                    prim = UnityEngine.PrimitiveType.Cube;
+                    prim = PrimitiveType.Cube;
                 }
 
                 switch (prim)
                 {
-                    case UnityEngine.PrimitiveType.Cylinder:
+                    case PrimitiveType.Cylinder:
                         return (prim, S(0.6f, 1.3f, 0.6f));
-                    case UnityEngine.PrimitiveType.Capsule:
+                    case PrimitiveType.Capsule:
                         return (prim, S(0.7f, 0.95f, 0.7f));
-                    case UnityEngine.PrimitiveType.Plane:
+                    case PrimitiveType.Plane:
                         return (prim, S(1.2f, 1f, 1.2f));
                     default: // Cube, Sphere
                         return (prim, S(0.9f, 0.9f, 0.9f));
@@ -796,7 +798,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             // Neutral stone for any object the model did not colour itself — colours are the model's call
             // (it tints via set_color). Plane/ground gets a muted earth tone in BuildVisual.
-            private static readonly UnityEngine.Color DefaultObjectColor = new(0.62f, 0.63f, 0.67f);
+            private static readonly Color DefaultObjectColor = new(0.62f, 0.63f, 0.67f);
 
             /// <summary>
             /// Spawns the model-chosen primitive (<paramref name="prefabKey"/>) for <paramref name="key"/>,
@@ -805,30 +807,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// </summary>
             private static float Safe(float v)
             {
-                return UnityEngine.Mathf.Max(UnityEngine.Mathf.Abs(v), 0.05f);
+                return Mathf.Max(Mathf.Abs(v), 0.05f);
             }
 
-            private UnityEngine.GameObject BuildVisual(
-                string key, string prefabKey, UnityEngine.Vector3 pos, bool expected, bool ghost,
+            private GameObject BuildVisual(
+                string key, string prefabKey, Vector3 pos, bool expected, bool ghost,
                 string parentName = "", bool worldPositionStays = false)
             {
-                (UnityEngine.PrimitiveType prim, UnityEngine.Vector3 scale) = ShapeFor(prefabKey);
+                (PrimitiveType prim, Vector3 scale) = ShapeFor(prefabKey);
                 bool isEmpty = string.Equals(prefabKey?.Trim(), "empty", StringComparison.OrdinalIgnoreCase);
                 if (isEmpty)
                 {
-                    scale = UnityEngine.Vector3.one;
+                    scale = Vector3.one;
                 }
-                UnityEngine.GameObject go = isEmpty
-                    ? new UnityEngine.GameObject()
-                    : UnityEngine.GameObject.CreatePrimitive(prim);
+
+                GameObject go = isEmpty
+                    ? new GameObject()
+                    : GameObject.CreatePrimitive(prim);
                 go.name = ghost ? $"ghost:{key}" : key;
-                UnityEngine.Collider col = go.GetComponent<UnityEngine.Collider>();
+                Collider col = go.GetComponent<Collider>();
                 if (col != null)
                 {
                     UnityEngine.Object.DestroyImmediate(col);
                 }
 
-                bool hasParent = TryResolveParent(parentName, out UnityEngine.Transform parent);
+                bool hasParent = TryResolveParent(parentName, out Transform parent);
                 go.transform.SetParent(hasParent ? parent : Root, hasParent && worldPositionStays);
                 if (hasParent && !worldPositionStays)
                 {
@@ -838,14 +841,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     go.transform.position = pos;
                 }
+
                 go.transform.localScale = scale;
 
-                UnityEngine.Color objColor =
-                    ghost ? new UnityEngine.Color(0.34f, 0.36f, 0.40f) :
-                    ExpectedNames.Count > 0 && !expected ? new UnityEngine.Color(0.86f, 0.36f, 0.34f) :
-                    prim == UnityEngine.PrimitiveType.Plane ? new UnityEngine.Color(0.42f, 0.46f, 0.40f) :
+                Color objColor =
+                    ghost ? new Color(0.34f, 0.36f, 0.40f) :
+                    ExpectedNames.Count > 0 && !expected ? new Color(0.86f, 0.36f, 0.34f) :
+                    prim == PrimitiveType.Plane ? new Color(0.42f, 0.46f, 0.40f) :
                     DefaultObjectColor;
-                UnityEngine.Renderer rend = go.GetComponent<UnityEngine.Renderer>();
+                Renderer rend = go.GetComponent<Renderer>();
                 if (rend != null)
                 {
                     TintRenderer(rend, objColor);
@@ -857,35 +861,35 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 string mark = ExpectedNames.Count == 0 ? "" : ghost || !expected ? "  ✗" : "  ✓";
-                UnityEngine.Color labelColor =
-                    ghost ? new UnityEngine.Color(0.72f, 0.74f, 0.78f) :
-                    expected || ExpectedNames.Count == 0 ? UnityEngine.Color.white :
-                    new UnityEngine.Color(1f, 0.62f, 0.58f);
+                Color labelColor =
+                    ghost ? new Color(0.72f, 0.74f, 0.78f) :
+                    expected || ExpectedNames.Count == 0 ? Color.white :
+                    new Color(1f, 0.62f, 0.58f);
 
-                UnityEngine.GameObject labelGo = new("Label");
+                GameObject labelGo = new("Label");
                 labelGo.transform.SetParent(go.transform, false);
                 // Counter the object's (often non-uniform) scale so the label text is never squashed, and
                 // sit it a fixed world distance above the object's top regardless of that scale.
-                labelGo.transform.localScale = new UnityEngine.Vector3(
+                labelGo.transform.localScale = new Vector3(
                     1f / Safe(scale.x), 1f / Safe(scale.y), 1f / Safe(scale.z));
                 labelGo.transform.localPosition =
-                    new UnityEngine.Vector3(0f, (scale.y * 0.5f + 0.5f) / Safe(scale.y), 0f);
-                UnityEngine.TextMesh tm = labelGo.AddComponent<UnityEngine.TextMesh>();
+                    new Vector3(0f, (scale.y * 0.5f + 0.5f) / Safe(scale.y), 0f);
+                TextMesh tm = labelGo.AddComponent<TextMesh>();
                 tm.text = (ghost ? key + " (missing)" : key) + mark;
                 tm.characterSize = 0.03f;
                 tm.fontSize = 80;
-                tm.fontStyle = UnityEngine.FontStyle.Bold;
-                tm.anchor = UnityEngine.TextAnchor.LowerCenter;
-                tm.alignment = UnityEngine.TextAlignment.Center;
+                tm.fontStyle = FontStyle.Bold;
+                tm.anchor = TextAnchor.LowerCenter;
+                tm.alignment = TextAlignment.Center;
                 tm.color = labelColor;
                 return go;
             }
 
-            private bool TryResolveParent(string parentName, out UnityEngine.Transform parent)
+            private bool TryResolveParent(string parentName, out Transform parent)
             {
                 parent = null;
                 if (string.IsNullOrWhiteSpace(parentName)
-                    || !_objects.TryGetValue(parentName.Trim(), out UnityEngine.GameObject parentObject)
+                    || !_objects.TryGetValue(parentName.Trim(), out GameObject parentObject)
                     || parentObject == null)
                 {
                     return false;
@@ -899,7 +903,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// picture shows what is MISSING. Cosmetic, runs after grading.</summary>
             public void AddMissingGhosts()
             {
-                foreach (UnityEngine.GameObject ghost in _ghosts)
+                foreach (GameObject ghost in _ghosts)
                 {
                     if (ghost != null)
                     {
@@ -926,7 +930,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 missing.Sort(StringComparer.OrdinalIgnoreCase);
                 foreach (string name in missing)
                 {
-                    _ghosts.Add(BuildVisual(name, "", UnityEngine.Vector3.zero, true, true));
+                    _ghosts.Add(BuildVisual(name, "", Vector3.zero, true, true));
                 }
             }
 
@@ -941,7 +945,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 List<string> keys = new(_objects.Keys);
                 keys.Sort(StringComparer.OrdinalIgnoreCase);
 
-                List<UnityEngine.GameObject> live = new();
+                List<GameObject> live = new();
                 foreach (string k in keys)
                 {
                     if (_objects[k] != null)
@@ -950,7 +954,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
-                foreach (UnityEngine.GameObject g in _ghosts)
+                foreach (GameObject g in _ghosts)
                 {
                     if (g != null)
                     {
@@ -964,8 +968,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return;
                 }
 
-                int cols = UnityEngine.Mathf.CeilToInt(UnityEngine.Mathf.Sqrt(n));
-                int rows = UnityEngine.Mathf.CeilToInt(n / (float)cols);
+                int cols = Mathf.CeilToInt(Mathf.Sqrt(n));
+                int rows = Mathf.CeilToInt(n / (float)cols);
                 const float sp = 1.9f;
                 float w = (cols - 1) * sp;
                 float d = (rows - 1) * sp;
@@ -975,25 +979,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     int c = i % cols;
                     int r = i / cols;
                     live[i].transform.position =
-                        new UnityEngine.Vector3(c * sp - w * 0.5f, 0.5f, r * sp - d * 0.5f);
+                        new Vector3(c * sp - w * 0.5f, 0.5f, r * sp - d * 0.5f);
                 }
             }
 
-            public UnityEngine.Bounds ComputeBounds()
+            public Bounds ComputeBounds()
             {
-                UnityEngine.Bounds b = new(UnityEngine.Vector3.zero, UnityEngine.Vector3.one);
+                Bounds b = new(Vector3.zero, Vector3.one);
                 bool first = true;
 
-                List<UnityEngine.GameObject> all = new(_objects.Values);
+                List<GameObject> all = new(_objects.Values);
                 all.AddRange(_ghosts);
-                foreach (UnityEngine.GameObject go in all)
+                foreach (GameObject go in all)
                 {
                     if (go == null)
                     {
                         continue;
                     }
 
-                    UnityEngine.Renderer r = go.GetComponent<UnityEngine.Renderer>();
+                    Renderer r = go.GetComponent<Renderer>();
                     if (r == null)
                     {
                         continue;
@@ -1014,17 +1018,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             /// <summary>Rotates every name label to face the capture camera so the text is readable.</summary>
-            public void FaceCamera(UnityEngine.Camera cam)
+            public void FaceCamera(Camera cam)
             {
                 if (cam == null || Root == null)
                 {
                     return;
                 }
 
-                foreach (UnityEngine.TextMesh tm in Root.GetComponentsInChildren<UnityEngine.TextMesh>())
+                foreach (TextMesh tm in Root.GetComponentsInChildren<TextMesh>())
                 {
-                    tm.transform.rotation = UnityEngine.Quaternion.LookRotation(
-                        tm.transform.position - cam.transform.position, UnityEngine.Vector3.up);
+                    tm.transform.rotation = Quaternion.LookRotation(
+                        tm.transform.position - cam.transform.position, Vector3.up);
                 }
             }
 
@@ -1058,7 +1062,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public BenchmarkEnvironment(ICoreAISettings settings, bool visual = false)
             {
                 Settings = settings;
-                bool canRender = UnityEngine.SystemInfo.graphicsDeviceType
+                bool canRender = SystemInfo.graphicsDeviceType
                                  != UnityEngine.Rendering.GraphicsDeviceType.Null;
                 World = visual && canRender ? new VisualBenchmarkWorldExecutor() : new RecordingWorldExecutor();
             }
@@ -1093,7 +1097,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public LuaLlmTool LuaTool()
             {
-                return new LuaLlmTool(Lua, Settings, CoreAI.Logging.NullLog.Instance);
+                return new LuaLlmTool(Lua, Settings, Logging.NullLog.Instance);
             }
 
             public WorldLlmTool WorldTool()
@@ -1115,7 +1119,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 return new CoreAI.Vision.CameraLlmTool(
-                    new CoreAI.Vision.AgentCameraService(), agentRoleId);
+                    new Vision.AgentCameraService(), agentRoleId);
             }
         }
 
@@ -1747,7 +1751,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             foreach (LlmToolCallTrace tr in capturedTurn.Tools)
                             {
                                 if (tr.Name != null &&
-                                    tr.Name.StartsWith("camera", System.StringComparison.OrdinalIgnoreCase))
+                                    tr.Name.StartsWith("camera", StringComparison.OrdinalIgnoreCase))
                                 {
                                     cameraCalls++;
                                 }
@@ -1799,7 +1803,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return;
                 }
 
-                UnityEngine.GameObject root = vis.Root.gameObject;
+                GameObject root = vis.Root.gameObject;
 
                 // Written OUTSIDE the benchmark package (plain Assets/Benchmark/) so generated art never
                 // ships with com.neoxider.coreaibenchmark. Per-model layout: GeneratedCastles/<model>/ holds the
@@ -1825,11 +1829,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // Bake MaterialPropertyBlock colours into real MATERIAL ASSETS (one per unique colour) so the
                 // prefab keeps its palette: SaveAsPrefabAsset drops runtime-instance materials (the renderer
                 // would come back null / render pink), so the shared material must be a project asset.
-                UnityEngine.Shader lit = UnityEngine.Shader.Find("Universal Render Pipeline/Lit")
-                                         ?? UnityEngine.Shader.Find("Standard");
-                System.Collections.Generic.Dictionary<int, UnityEngine.Material> palette = new();
-                UnityEngine.MaterialPropertyBlock mpb = new();
-                foreach (UnityEngine.Renderer rend in root.GetComponentsInChildren<UnityEngine.Renderer>(true))
+                Shader lit = Shader.Find("Universal Render Pipeline/Lit")
+                             ?? Shader.Find("Standard");
+                Dictionary<int, Material> palette = new();
+                MaterialPropertyBlock mpb = new();
+                foreach (Renderer rend in root.GetComponentsInChildren<Renderer>(true))
                 {
                     if (rend == null)
                     {
@@ -1837,7 +1841,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
 
                     rend.GetPropertyBlock(mpb);
-                    UnityEngine.Color c = mpb.GetColor(BaseColorId);
+                    Color c = mpb.GetColor(BaseColorId);
                     if (c.a <= 0f)
                     {
                         c = mpb.GetColor(ColorId);
@@ -1845,14 +1849,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     if (c.a <= 0f)
                     {
-                        c = rend.sharedMaterial != null ? rend.sharedMaterial.color : UnityEngine.Color.gray;
+                        c = rend.sharedMaterial != null ? rend.sharedMaterial.color : Color.gray;
                     }
 
-                    UnityEngine.Color32 c32 = c;
+                    Color32 c32 = c;
                     int key = (c32.r << 16) | (c32.g << 8) | c32.b;
-                    if (!palette.TryGetValue(key, out UnityEngine.Material mat))
+                    if (!palette.TryGetValue(key, out Material mat))
                     {
-                        mat = new UnityEngine.Material(lit);
+                        mat = new Material(lit);
                         if (mat.HasProperty(BaseColorId))
                         {
                             mat.SetColor(BaseColorId, c);
@@ -1870,7 +1874,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 // A self-identifying child so the saved prefab always says who built it and how it scored.
-                UnityEngine.GameObject label = new($"BuiltBy_{FileSafe(modelId)}__{score:0}of100");
+                GameObject label = new($"BuiltBy_{FileSafe(modelId)}__{score:0}of100");
                 label.transform.SetParent(root.transform, false);
 
                 string path = UnityEditor.AssetDatabase.GenerateUniqueAssetPath(
@@ -1878,7 +1882,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 UnityEditor.PrefabUtility.SaveAsPrefabAsset(root, path);
                 Debug.Log($"[Benchmark] saved castle prefab (built by {modelId}, {score:0}/100): {path}");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.LogWarning($"[Benchmark] castle prefab save failed: {ex.Message}");
             }
@@ -1891,7 +1895,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return "unknown";
             }
 
-            System.Text.StringBuilder sb = new(s.Length);
+            StringBuilder sb = new(s.Length);
             foreach (char ch in s)
             {
                 sb.Append(char.IsLetterOrDigit(ch) || ch == '-' || ch == '.' ? ch : '_');
@@ -1917,7 +1921,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         // Shared by the main and inset scene cameras: a soft daylight sky instead of the old
         // near-black void, so report shots read as daytime scenes.
-        private static readonly UnityEngine.Color DaySkyColor = new(0.53f, 0.65f, 0.80f);
+        private static readonly Color DaySkyColor = new(0.53f, 0.65f, 0.80f);
 
         /// <summary>
         /// Frames a camera over the spawned objects, renders to a 4K (3840x2160) RenderTexture with four
@@ -1930,24 +1934,24 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             VisualBenchmarkWorldExecutor vis, string model, string header, string subtitle, bool freeBuildLayout,
             string heroStats, Action<byte[]> onPng)
         {
-            UnityEngine.GameObject camGo = null;
-            UnityEngine.GameObject camBGo = null;
-            UnityEngine.GameObject camCGo = null;
-            UnityEngine.GameObject camDGo = null;
-            UnityEngine.GameObject camEGo = null;
-            UnityEngine.GameObject keyGo = null;
-            UnityEngine.GameObject fillGo = null;
-            UnityEngine.GameObject groundGo = null;
-            UnityEngine.Camera cam = null;
-            UnityEngine.RenderTexture rt = null;
-            UnityEngine.RenderTexture rtB = null;
-            UnityEngine.RenderTexture rtC = null;
-            UnityEngine.RenderTexture rtD = null;
-            UnityEngine.RenderTexture rtE = null;
-            UnityEngine.Vector3 sceneCenter = UnityEngine.Vector3.zero;
+            GameObject camGo = null;
+            GameObject camBGo = null;
+            GameObject camCGo = null;
+            GameObject camDGo = null;
+            GameObject camEGo = null;
+            GameObject keyGo = null;
+            GameObject fillGo = null;
+            GameObject groundGo = null;
+            Camera cam = null;
+            RenderTexture rt = null;
+            RenderTexture rtB = null;
+            RenderTexture rtC = null;
+            RenderTexture rtD = null;
+            RenderTexture rtE = null;
+            Vector3 sceneCenter = Vector3.zero;
             float sceneExt = 1.2f;
-            UnityEngine.Rendering.AmbientMode prevAmbientMode = UnityEngine.RenderSettings.ambientMode;
-            UnityEngine.Color prevAmbientLight = UnityEngine.RenderSettings.ambientLight;
+            UnityEngine.Rendering.AmbientMode prevAmbientMode = RenderSettings.ambientMode;
+            Color prevAmbientLight = RenderSettings.ambientLight;
 
             try
             {
@@ -1955,8 +1959,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // views looking at the shadow side of the build read several stops darker than the hero
                 // view — as if each inset had a different sun. A flat ambient floor lifts the unlit
                 // faces so every angle reads as the same daytime scene. Restored in finally.
-                UnityEngine.RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-                UnityEngine.RenderSettings.ambientLight = new UnityEngine.Color(0.42f, 0.46f, 0.53f);
+                RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+                RenderSettings.ambientLight = new Color(0.42f, 0.46f, 0.53f);
 
                 // Switch off the live preview camera/light so only the capture rig lights the final shot.
                 vis.HideLivePreview();
@@ -1967,14 +1971,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     vis.LayoutForCapture();
                 }
 
-                UnityEngine.Bounds bounds = vis.ComputeBounds();
-                float ext = UnityEngine.Mathf.Max(bounds.extents.magnitude, 1.2f);
+                Bounds bounds = vis.ComputeBounds();
+                float ext = Mathf.Max(bounds.extents.magnitude, 1.2f);
                 sceneCenter = bounds.center;
                 sceneExt = ext;
 
-                camGo = new UnityEngine.GameObject("BenchmarkCamera");
-                cam = camGo.AddComponent<UnityEngine.Camera>();
-                cam.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+                camGo = new GameObject("BenchmarkCamera");
+                cam = camGo.AddComponent<Camera>();
+                cam.clearFlags = CameraClearFlags.SolidColor;
                 // Daylight sky, not a void: the report shots must read as DAYTIME (the dark
                 // near-black backdrop made every hero image look like a night scene).
                 cam.backgroundColor = DaySkyColor;
@@ -1988,36 +1992,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // consistently build castles gate-forward toward -Z, so the old offset photographed
                 // every scene from BEHIND (user-reported); from (-X,+Z) the hero shot faces the front.
                 cam.transform.position =
-                    bounds.center + new UnityEngine.Vector3(-ext * 1.13f, ext * 1.0f, ext * 1.8f);
+                    bounds.center + new Vector3(-ext * 1.13f, ext * 1.0f, ext * 1.8f);
                 cam.transform.LookAt(bounds.center);
 
                 // A grounded floor so the objects sit on a surface instead of floating in a void.
-                groundGo = UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Quad);
+                groundGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
                 groundGo.name = "BenchmarkGround";
                 DestroyCollider(groundGo);
                 groundGo.transform.position =
-                    new UnityEngine.Vector3(bounds.center.x, bounds.min.y - 0.02f, bounds.center.z);
-                groundGo.transform.rotation = UnityEngine.Quaternion.Euler(90f, 0f, 0f);
-                float gsize = UnityEngine.Mathf.Max(bounds.size.x, bounds.size.z) + ext * 4f + 6f;
-                groundGo.transform.localScale = new UnityEngine.Vector3(gsize, gsize, 1f);
-                UnityEngine.Renderer gr = groundGo.GetComponent<UnityEngine.Renderer>();
+                    new Vector3(bounds.center.x, bounds.min.y - 0.02f, bounds.center.z);
+                groundGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                float gsize = Mathf.Max(bounds.size.x, bounds.size.z) + ext * 4f + 6f;
+                groundGo.transform.localScale = new Vector3(gsize, gsize, 1f);
+                Renderer gr = groundGo.GetComponent<Renderer>();
                 if (gr != null)
                 {
                     // Light warm-grey ground for the daytime look — dark enough that white
                     // primitives and their shadows still separate from it.
-                    TintRenderer(gr, new UnityEngine.Color(0.47f, 0.49f, 0.45f));
+                    TintRenderer(gr, new Color(0.47f, 0.49f, 0.45f));
                 }
 
                 // Key + cool fill so the cubes read as 3D instead of flat silhouettes. A freshly
                 // AddComponent'd Light defaults to LightShadows.None, so without setting it explicitly
                 // the "3D" scene renders with no shadows at all — only the key casts (soft), so there is
                 // one clean shadow direction instead of the fill adding a second, conflicting one.
-                keyGo = new UnityEngine.GameObject("BenchmarkKey");
-                UnityEngine.Light key = keyGo.AddComponent<UnityEngine.Light>();
-                key.type = UnityEngine.LightType.Directional;
+                keyGo = new GameObject("BenchmarkKey");
+                Light key = keyGo.AddComponent<Light>();
+                key.type = LightType.Directional;
                 key.intensity = 1.35f;
-                key.color = new UnityEngine.Color(1.0f, 0.96f, 0.87f); // warm afternoon sun
-                key.shadows = UnityEngine.LightShadows.Soft;
+                key.color = new Color(1.0f, 0.96f, 0.87f); // warm afternoon sun
+                key.shadows = LightShadows.Soft;
                 // Full strength + a small bias: the default bias is tuned for room/level-scale scenes and
                 // "peter-pans" (detaches/hides) the shadow on these ~1m benchmark objects, which was why
                 // shadows looked barely-there even with shadows correctly enabled.
@@ -2028,46 +2032,46 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // (~0.9x height) and read as barely-there in the report; 33 deg throws ~1.5x-height
                 // shadows across the ground — the screenshot light is static and independent of the
                 // live-preview day/night orbit, so the report always gets "daytime" shadows.
-                keyGo.transform.rotation = UnityEngine.Quaternion.Euler(33f, -40f, 0f);
+                keyGo.transform.rotation = Quaternion.Euler(33f, -40f, 0f);
 
-                fillGo = new UnityEngine.GameObject("BenchmarkFill");
-                UnityEngine.Light fill = fillGo.AddComponent<UnityEngine.Light>();
-                fill.type = UnityEngine.LightType.Directional;
+                fillGo = new GameObject("BenchmarkFill");
+                Light fill = fillGo.AddComponent<Light>();
+                fill.type = LightType.Directional;
                 fill.intensity = 0.7f; // brighter sky-bounce fill for the daytime look
-                fill.color = new UnityEngine.Color(0.72f, 0.82f, 1.0f);
-                fillGo.transform.rotation = UnityEngine.Quaternion.Euler(-15f, 150f, 0f);
+                fill.color = new Color(0.72f, 0.82f, 1.0f);
+                fillGo.transform.rotation = Quaternion.Euler(-15f, 150f, 0f);
 
                 // Screen-aligned overlay (parented to the camera): a top results bar and a bottom caption
                 // bar with solid backdrops, so the header and "what it checks" read as a clean card, not
                 // text floating in the scene. Front-parallel quads never skew under perspective.
                 const float zb = 1.5f;
-                float halfH = zb * UnityEngine.Mathf.Tan(cam.fieldOfView * 0.5f * UnityEngine.Mathf.Deg2Rad);
+                float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
                 float fullW = 2f * halfH * (ShotWidth / (float)ShotHeight);
-                UnityEngine.Transform p = cam.transform;
-                UnityEngine.Color verdict = VerdictColor(header);
+                Transform p = cam.transform;
+                Color verdict = VerdictColor(header);
 
                 float topH = 0.62f * halfH;
                 float topY = halfH - topH * 0.5f;
-                AddQuad(p, new UnityEngine.Vector3(0f, topY, zb), new UnityEngine.Vector2(fullW, topH),
-                    new UnityEngine.Color(0.09f, 0.10f, 0.12f));
-                AddQuad(p, new UnityEngine.Vector3(0f, halfH - 0.012f, zb - 0.01f),
-                    new UnityEngine.Vector2(fullW, 0.024f), verdict);
+                AddQuad(p, new Vector3(0f, topY, zb), new Vector2(fullW, topH),
+                    new Color(0.09f, 0.10f, 0.12f));
+                AddQuad(p, new Vector3(0f, halfH - 0.012f, zb - 0.01f),
+                    new Vector2(fullW, 0.024f), verdict);
                 // Model name is the headline (so each scene/castle image says which model built it),
                 // with the scenario + score + verdict as the line below. Long hyphenated model ids are
                 // wrapped (and shrunk) so they never overflow the banner.
                 string m = model ?? "";
                 float mSize = m.Length > 42 ? 0.0064f : m.Length > 26 ? 0.0086f : 0.0112f;
-                AddCameraText(p, WrapModel(m, 30), new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.02f),
-                    mSize, UnityEngine.Color.white, true);
-                AddCameraText(p, WrapText(header ?? "", 58), new UnityEngine.Vector3(0f, halfH - 0.225f, zb - 0.02f),
+                AddCameraText(p, WrapModel(m, 30), new Vector3(0f, halfH - 0.085f, zb - 0.02f),
+                    mSize, Color.white, true);
+                AddCameraText(p, WrapText(header ?? "", 58), new Vector3(0f, halfH - 0.225f, zb - 0.02f),
                     0.0068f, verdict, true);
 
                 // Stats line (free-build hero only): tool-calls · spawns · generation time · tokens, in a
                 // muted colour just under the score line, so the effort behind the scene is on the image.
                 if (!string.IsNullOrEmpty(heroStats))
                 {
-                    AddCameraText(p, WrapText(heroStats, 72), new UnityEngine.Vector3(0f, halfH - 0.315f, zb - 0.02f),
-                        0.0044f, new UnityEngine.Color(0.78f, 0.82f, 0.88f), false);
+                    AddCameraText(p, WrapText(heroStats, 72), new Vector3(0f, halfH - 0.315f, zb - 0.02f),
+                        0.0044f, new Color(0.78f, 0.82f, 0.88f), false);
                 }
 
                 string cap = WrapText(subtitle ?? "", 52);
@@ -2075,13 +2079,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     float botH = 0.42f * halfH;
                     float botY = -halfH + botH * 0.5f;
-                    AddQuad(p, new UnityEngine.Vector3(0f, botY, zb), new UnityEngine.Vector2(fullW, botH),
-                        new UnityEngine.Color(0.09f, 0.10f, 0.12f));
-                    AddCameraText(p, cap, new UnityEngine.Vector3(0f, botY, zb - 0.02f),
-                        0.0072f, new UnityEngine.Color(0.84f, 0.86f, 0.90f), false);
+                    AddQuad(p, new Vector3(0f, botY, zb), new Vector2(fullW, botH),
+                        new Color(0.09f, 0.10f, 0.12f));
+                    AddCameraText(p, cap, new Vector3(0f, botY, zb - 0.02f),
+                        0.0072f, new Color(0.84f, 0.86f, 0.90f), false);
                 }
 
-                rt = new UnityEngine.RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
+                rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
                 vis.FaceCamera(cam);
                 cam.targetTexture = rt;
             }
@@ -2092,9 +2096,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             // Frame 1: the main camera (with its banner overlay) renders to rt under the SRP render loop
             // (Camera.Render() is not supported under SRP, so we rely on the normal render loop).
-            yield return new UnityEngine.WaitForEndOfFrame();
+            yield return new WaitForEndOfFrame();
 
-            UnityEngine.Texture2D texMain = ReadRenderTexture(rt);
+            Texture2D texMain = ReadRenderTexture(rt);
 
             // Hide the main camera (and its parented banner quads) so the two inset cameras capture a clean
             // scene, then render the scene from two other angles for the composite.
@@ -2109,28 +2113,28 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // (same convention as the hero camera flip), so stand just outside the front gate, low to
                 // the ground, and look through the gap toward the keep. Uses the zoom extent floor so a
                 // tiny scene still fits the narrow frustum. Below it stays the top-down overview.
-                float gateExt = UnityEngine.Mathf.Max(sceneExt, 2.8f);
-                rtB = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                float gateExt = Mathf.Max(sceneExt, 2.8f);
+                rtB = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camBGo = MakeInsetCamera("BenchmarkCameraB",
-                    sceneCenter + new UnityEngine.Vector3(gateExt * 0.06f, gateExt * 0.22f, gateExt * 1.25f),
-                    sceneCenter + new UnityEngine.Vector3(0f, gateExt * 0.08f, 0f), rtB, 42f);
-                rtC = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                    sceneCenter + new Vector3(gateExt * 0.06f, gateExt * 0.22f, gateExt * 1.25f),
+                    sceneCenter + new Vector3(0f, gateExt * 0.08f, 0f), rtB, 42f);
+                rtC = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camCGo = MakeInsetCamera("BenchmarkCameraC",
-                    sceneCenter + new UnityEngine.Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
+                    sceneCenter + new Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
                     sceneCenter, rtC);
                 // LEFT column — two close-up "zoom" shots at different magnifications (narrow FOV, near,
                 // low angle): detail views the wide hero framing can't show (larger models build
                 // compositions worth zooming into). The zoom cameras get a HIGHER extent floor than the
                 // scene's own 1.2 minimum: at 20-32 deg FOV and these offsets, a tiny scene (a lone 1m
                 // cube) would not fit the frustum at all — found by the independent Codex audit.
-                float zoomExt = UnityEngine.Mathf.Max(sceneExt, 2.8f);
-                rtD = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                float zoomExt = Mathf.Max(sceneExt, 2.8f);
+                rtD = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camDGo = MakeInsetCamera("BenchmarkCameraD",
-                    sceneCenter + new UnityEngine.Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
+                    sceneCenter + new Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
                     sceneCenter, rtD, 32f);
-                rtE = new UnityEngine.RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                rtE = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
                 camEGo = MakeInsetCamera("BenchmarkCameraE",
-                    sceneCenter + new UnityEngine.Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
+                    sceneCenter + new Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
                     sceneCenter, rtE, 20f);
             }
             catch (Exception ex)
@@ -2139,13 +2143,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             // Frame 2: the inset cameras render their small views.
-            yield return new UnityEngine.WaitForEndOfFrame();
+            yield return new WaitForEndOfFrame();
 
             byte[] png = null;
-            UnityEngine.Texture2D texB = null;
-            UnityEngine.Texture2D texC = null;
-            UnityEngine.Texture2D texD = null;
-            UnityEngine.Texture2D texE = null;
+            Texture2D texB = null;
+            Texture2D texC = null;
+            Texture2D texD = null;
+            Texture2D texE = null;
             try
             {
                 if (texMain != null)
@@ -2155,7 +2159,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     texD = ReadRenderTextureDownscaled(rtD, InsetWidth, InsetHeight);
                     texE = ReadRenderTextureDownscaled(rtE, InsetWidth, InsetHeight);
                     CompositeInsets(texMain, texB, texC, texD, texE);
-                    png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
+                    png = ImageConversion.EncodeToPNG(texMain);
                 }
             }
             catch (Exception ex)
@@ -2165,7 +2169,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     if (texMain != null)
                     {
-                        png = UnityEngine.ImageConversion.EncodeToPNG(texMain);
+                        png = ImageConversion.EncodeToPNG(texMain);
                     }
                 }
                 catch
@@ -2202,8 +2206,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 DestroyGo(fillGo);
                 DestroyGo(groundGo);
                 DestroyScratchMeshes();
-                UnityEngine.RenderSettings.ambientMode = prevAmbientMode;
-                UnityEngine.RenderSettings.ambientLight = prevAmbientLight;
+                RenderSettings.ambientMode = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
             }
 
             onPng?.Invoke(png);
@@ -2217,40 +2221,40 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// views crisp in the 4K composite (straight 1:1 renders read as blurry thumbnails —
         /// user-reported).
         /// </summary>
-        private static UnityEngine.Texture2D ReadRenderTextureDownscaled(
-            UnityEngine.RenderTexture src, int w, int h)
+        private static Texture2D ReadRenderTextureDownscaled(
+            RenderTexture src, int w, int h)
         {
             if (src == null)
             {
                 return null;
             }
 
-            UnityEngine.RenderTexture small = UnityEngine.RenderTexture.GetTemporary(w, h, 0);
+            RenderTexture small = RenderTexture.GetTemporary(w, h, 0);
             try
             {
-                UnityEngine.Graphics.Blit(src, small);
+                Graphics.Blit(src, small);
                 return ReadRenderTexture(small);
             }
             finally
             {
-                UnityEngine.RenderTexture.ReleaseTemporary(small);
+                RenderTexture.ReleaseTemporary(small);
             }
         }
 
-        private static UnityEngine.Texture2D ReadRenderTexture(UnityEngine.RenderTexture rt)
+        private static Texture2D ReadRenderTexture(RenderTexture rt)
         {
             if (rt == null)
             {
                 return null;
             }
 
-            UnityEngine.RenderTexture prev = UnityEngine.RenderTexture.active;
-            UnityEngine.Texture2D tex = null;
+            RenderTexture prev = RenderTexture.active;
+            Texture2D tex = null;
             try
             {
-                UnityEngine.RenderTexture.active = rt;
-                tex = new UnityEngine.Texture2D(rt.width, rt.height, UnityEngine.TextureFormat.RGB24, false);
-                tex.ReadPixels(new UnityEngine.Rect(0, 0, rt.width, rt.height), 0, 0);
+                RenderTexture.active = rt;
+                tex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
                 tex.Apply();
             }
             catch (Exception ex)
@@ -2259,19 +2263,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
             finally
             {
-                UnityEngine.RenderTexture.active = prev;
+                RenderTexture.active = prev;
             }
 
             return tex;
         }
 
-        private static UnityEngine.GameObject MakeInsetCamera(
-            string name, UnityEngine.Vector3 position, UnityEngine.Vector3 lookAt, UnityEngine.RenderTexture rt,
+        private static GameObject MakeInsetCamera(
+            string name, Vector3 position, Vector3 lookAt, RenderTexture rt,
             float fieldOfView = 50f)
         {
-            UnityEngine.GameObject go = new(name);
-            UnityEngine.Camera c = go.AddComponent<UnityEngine.Camera>();
-            c.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
+            GameObject go = new(name);
+            Camera c = go.AddComponent<Camera>();
+            c.clearFlags = CameraClearFlags.SolidColor;
             c.backgroundColor = DaySkyColor;
             c.fieldOfView = fieldOfView;
             c.nearClipPlane = 0.05f;
@@ -2288,8 +2292,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // shots down the LEFT column. All metrics scale from the main image dimensions so the layout is
         // resolution-independent; two per column never reaches the bottom caption bar.
         private static void CompositeInsets(
-            UnityEngine.Texture2D main, UnityEngine.Texture2D b, UnityEngine.Texture2D c,
-            UnityEngine.Texture2D d, UnityEngine.Texture2D e)
+            Texture2D main, Texture2D b, Texture2D c,
+            Texture2D d, Texture2D e)
         {
             if (main == null)
             {
@@ -2298,8 +2302,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             const int iw = InsetWidth;
             const int ih = InsetHeight;
-            int margin = UnityEngine.Mathf.RoundToInt(main.height * (16f / 720f));
-            int bannerPx = UnityEngine.Mathf.RoundToInt(main.height * (151f / 720f)); // top results bar, kept clear
+            int margin = Mathf.RoundToInt(main.height * (16f / 720f));
+            int bannerPx = Mathf.RoundToInt(main.height * (151f / 720f)); // top results bar, kept clear
             int xLeft = margin;
             int xRight = main.width - margin - iw;
             int y1 = main.height - bannerPx - margin - ih;
@@ -2312,20 +2316,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         private static void PasteInset(
-            UnityEngine.Texture2D main, UnityEngine.Texture2D inset, int x, int y, int w, int h)
+            Texture2D main, Texture2D inset, int x, int y, int w, int h)
         {
             if (main == null || inset == null || inset.width != w || inset.height != h)
             {
                 return;
             }
 
-            int border = UnityEngine.Mathf.Max(3, main.width / 640); // ~6px at 4K, matches the 3px-at-720p look
-            int fx = UnityEngine.Mathf.Max(0, x - border);
-            int fy = UnityEngine.Mathf.Max(0, y - border);
-            int fw = UnityEngine.Mathf.Min(main.width - fx, w + 2 * border);
-            int fh = UnityEngine.Mathf.Min(main.height - fy, h + 2 * border);
-            UnityEngine.Color[] frame = new UnityEngine.Color[fw * fh];
-            UnityEngine.Color frameColor = new(0.04f, 0.05f, 0.06f);
+            int border = Mathf.Max(3, main.width / 640); // ~6px at 4K, matches the 3px-at-720p look
+            int fx = Mathf.Max(0, x - border);
+            int fy = Mathf.Max(0, y - border);
+            int fw = Mathf.Min(main.width - fx, w + 2 * border);
+            int fh = Mathf.Min(main.height - fy, h + 2 * border);
+            Color[] frame = new Color[fw * fh];
+            Color frameColor = new(0.04f, 0.05f, 0.06f);
             for (int i = 0; i < frame.Length; i++)
             {
                 frame[i] = frameColor;
@@ -2339,7 +2343,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private static void DestroyTex(UnityEngine.Texture2D tex)
+        private static void DestroyTex(Texture2D tex)
         {
             if (tex != null)
             {
@@ -2347,7 +2351,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private static void DestroyRt(UnityEngine.RenderTexture rt)
+        private static void DestroyRt(RenderTexture rt)
         {
             if (rt != null)
             {
@@ -2355,7 +2359,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private static void DestroyGo(UnityEngine.GameObject go)
+        private static void DestroyGo(GameObject go)
         {
             if (go != null)
             {
@@ -2370,26 +2374,26 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         public static IEnumerator CaptureModelCard(BenchmarkReport report, Action<byte[]> onPng)
         {
-            UnityEngine.GameObject camGo = null;
-            UnityEngine.Camera cam = null;
-            UnityEngine.RenderTexture rt = null;
+            GameObject camGo = null;
+            Camera cam = null;
+            RenderTexture rt = null;
 
             try
             {
-                camGo = new UnityEngine.GameObject("ModelCardCamera");
-                cam = camGo.AddComponent<UnityEngine.Camera>();
-                cam.clearFlags = UnityEngine.CameraClearFlags.SolidColor;
-                cam.backgroundColor = new UnityEngine.Color(0.07f, 0.08f, 0.10f);
+                camGo = new GameObject("ModelCardCamera");
+                cam = camGo.AddComponent<Camera>();
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0.07f, 0.08f, 0.10f);
                 cam.fieldOfView = 50f;
                 cam.nearClipPlane = 0.05f;
                 cam.farClipPlane = 50f;
                 cam.allowMSAA = true;
-                cam.transform.position = UnityEngine.Vector3.zero;
-                cam.transform.rotation = UnityEngine.Quaternion.identity;
+                cam.transform.position = Vector3.zero;
+                cam.transform.rotation = Quaternion.identity;
 
-                UnityEngine.Transform p = cam.transform;
+                Transform p = cam.transform;
                 const float zb = 1.6f;
-                float halfH = zb * UnityEngine.Mathf.Tan(cam.fieldOfView * 0.5f * UnityEngine.Mathf.Deg2Rad);
+                float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
 
                 // --- data ---
                 Dictionary<BenchmarkDimension, double> dim = new();
@@ -2426,7 +2430,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     : headerLine.Length > 34 ? 0.0100f
                     : 0.0135f;
                 AddCameraText(p, headerLine,
-                    new UnityEngine.Vector3(0f, halfH - 0.085f, zb - 0.05f), headerSize, UnityEngine.Color.white, true);
+                    new Vector3(0f, halfH - 0.085f, zb - 0.05f), headerSize, Color.white, true);
                 bool anyAssessed = false;
                 foreach (RoleFitness.RoleScore r in fit.Roles)
                 {
@@ -2449,37 +2453,37 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     : summaryLine.Length > 55 ? 0.0075f
                     : 0.0085f;
                 AddCameraText(p, summaryLine,
-                    new UnityEngine.Vector3(0f, halfH - 0.185f, zb - 0.05f), summarySize,
-                    new UnityEngine.Color(0.62f, 0.66f, 0.72f), false);
+                    new Vector3(0f, halfH - 0.185f, zb - 0.05f), summarySize,
+                    new Color(0.62f, 0.66f, 0.72f), false);
 
                 // --- radar (left) ---
-                UnityEngine.GameObject radar = new("Radar");
+                GameObject radar = new("Radar");
                 radar.transform.SetParent(p, false);
-                radar.transform.localPosition = new UnityEngine.Vector3(-0.62f, -0.10f, zb);
-                radar.transform.localRotation = UnityEngine.Quaternion.identity;
-                UnityEngine.Transform rp = radar.transform;
+                radar.transform.localPosition = new Vector3(-0.62f, -0.10f, zb);
+                radar.transform.localRotation = Quaternion.identity;
+                Transform rp = radar.transform;
                 const float R = 0.40f;
 
-                UnityEngine.Vector2[] dir = new UnityEngine.Vector2[6];
-                UnityEngine.Vector2[] rim = new UnityEngine.Vector2[6];
-                UnityEngine.Vector2[] data = new UnityEngine.Vector2[6];
+                Vector2[] dir = new Vector2[6];
+                Vector2[] rim = new Vector2[6];
+                Vector2[] data = new Vector2[6];
                 for (int i = 0; i < 6; i++)
                 {
-                    float ang = (90f - i * 60f) * UnityEngine.Mathf.Deg2Rad;
-                    dir[i] = new UnityEngine.Vector2(UnityEngine.Mathf.Cos(ang), UnityEngine.Mathf.Sin(ang));
+                    float ang = (90f - i * 60f) * Mathf.Deg2Rad;
+                    dir[i] = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
                     rim[i] = dir[i] * R;
                     double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
-                    data[i] = dir[i] * (R * (float)UnityEngine.Mathf.Clamp01((float)v / 100f));
+                    data[i] = dir[i] * (R * (float)Mathf.Clamp01((float)v / 100f));
                 }
 
                 // Concentric grid rings at 25/50/75/100% + spokes, so the hexagon reads as a real radar.
-                UnityEngine.Color gridOuter = new(0.34f, 0.37f, 0.43f);
-                UnityEngine.Color gridInner = new(0.22f, 0.24f, 0.29f);
+                Color gridOuter = new(0.34f, 0.37f, 0.43f);
+                Color gridInner = new(0.22f, 0.24f, 0.29f);
                 float[] rings = { 0.25f, 0.5f, 0.75f, 1f };
                 foreach (float frac in rings)
                 {
                     bool outer = frac > 0.99f;
-                    UnityEngine.Color rc = outer ? gridOuter : gridInner;
+                    Color rc = outer ? gridOuter : gridInner;
                     float th = outer ? 0.0035f : 0.002f;
                     for (int i = 0; i < 6; i++)
                     {
@@ -2489,37 +2493,37 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 for (int i = 0; i < 6; i++)
                 {
-                    AddLine(rp, UnityEngine.Vector2.zero, rim[i], 0.018f, 0.002f, gridInner);
+                    AddLine(rp, Vector2.zero, rim[i], 0.018f, 0.002f, gridInner);
                 }
 
-                AddFilledPolygon(rp, data, 0.0f, new UnityEngine.Color(0.26f, 0.56f, 0.92f));
+                AddFilledPolygon(rp, data, 0.0f, new Color(0.26f, 0.56f, 0.92f));
                 for (int i = 0; i < 6; i++)
                 {
-                    AddLine(rp, data[i], data[(i + 1) % 6], -0.01f, 0.005f, new UnityEngine.Color(0.62f, 0.85f, 1f));
+                    AddLine(rp, data[i], data[(i + 1) % 6], -0.01f, 0.005f, new Color(0.62f, 0.85f, 1f));
                 }
 
                 for (int i = 0; i < 6; i++)
                 {
                     double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
-                    UnityEngine.Vector2 lp = rim[i] * 1.34f;
+                    Vector2 lp = rim[i] * 1.34f;
                     AddCameraText(rp, $"{axisLabels[i]} {v:0}",
-                        new UnityEngine.Vector3(lp.x, lp.y, -0.02f), 0.0072f,
-                        new UnityEngine.Color(0.80f, 0.84f, 0.90f), false);
+                        new Vector3(lp.x, lp.y, -0.02f), 0.0072f,
+                        new Color(0.80f, 0.84f, 0.90f), false);
                 }
 
                 // The headline game-fit number, big, in the dead centre of the radar so it stands out.
-                AddQuad(rp, new UnityEngine.Vector3(0f, 0f, -0.03f), new UnityEngine.Vector2(0.27f, 0.175f),
-                    new UnityEngine.Color(0.05f, 0.06f, 0.08f));
+                AddQuad(rp, new Vector3(0f, 0f, -0.03f), new Vector2(0.27f, 0.175f),
+                    new Color(0.05f, 0.06f, 0.08f));
                 string centre = anyAssessed ? fit.Overall.ToString("0.#", inv) : "n/a";
-                AddCameraText(rp, centre, new UnityEngine.Vector3(0f, 0.016f, -0.05f), 0.0135f,
-                    UnityEngine.Color.white, true);
-                AddCameraText(rp, "game-fit /10", new UnityEngine.Vector3(0f, -0.052f, -0.05f), 0.0047f,
-                    new UnityEngine.Color(0.66f, 0.70f, 0.76f), false);
+                AddCameraText(rp, centre, new Vector3(0f, 0.016f, -0.05f), 0.0135f,
+                    Color.white, true);
+                AddCameraText(rp, "game-fit /10", new Vector3(0f, -0.052f, -0.05f), 0.0047f,
+                    new Color(0.66f, 0.70f, 0.76f), false);
 
                 // --- role bars (right) ---
                 AddCameraText(p, "Game-fitness by role (0–10)",
-                    new UnityEngine.Vector3(0.02f, 0.40f, zb - 0.05f), 0.0085f,
-                    new UnityEngine.Color(0.62f, 0.66f, 0.72f), false, UnityEngine.TextAnchor.MiddleLeft);
+                    new Vector3(0.02f, 0.40f, zb - 0.05f), 0.0085f,
+                    new Color(0.62f, 0.66f, 0.72f), false, TextAnchor.MiddleLeft);
 
                 // barW is kept short of the ~1.326-unit perspective-frustum half-width so the rating
                 // number (up to "10", drawn from barX0+barW+0.02) never gets clipped at the right edge.
@@ -2528,32 +2532,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     RoleFitness.RoleScore role = fit.Roles[j];
                     float y = 0.28f - j * 0.125f;
-                    AddCameraText(p, Shorten(role.Role), new UnityEngine.Vector3(0.02f, y, zb - 0.05f),
-                        0.0078f, UnityEngine.Color.white, false, UnityEngine.TextAnchor.MiddleLeft);
+                    AddCameraText(p, Shorten(role.Role), new Vector3(0.02f, y, zb - 0.05f),
+                        0.0078f, Color.white, false, TextAnchor.MiddleLeft);
 
-                    AddQuad(p, new UnityEngine.Vector3(barX0 + barW * 0.5f, y, zb),
-                        new UnityEngine.Vector2(barW, 0.05f),
-                        new UnityEngine.Color(0.16f, 0.17f, 0.20f));
+                    AddQuad(p, new Vector3(barX0 + barW * 0.5f, y, zb),
+                        new Vector2(barW, 0.05f),
+                        new Color(0.16f, 0.17f, 0.20f));
 
                     if (role.Assessed)
                     {
-                        float frac = UnityEngine.Mathf.Clamp01((float)role.Rating / 10f);
-                        float fw = UnityEngine.Mathf.Max(barW * frac, 0.004f);
-                        AddQuad(p, new UnityEngine.Vector3(barX0 + fw * 0.5f, y, zb - 0.01f),
-                            new UnityEngine.Vector2(fw, 0.05f), RatingColor(role.Rating));
+                        float frac = Mathf.Clamp01((float)role.Rating / 10f);
+                        float fw = Mathf.Max(barW * frac, 0.004f);
+                        AddQuad(p, new Vector3(barX0 + fw * 0.5f, y, zb - 0.01f),
+                            new Vector2(fw, 0.05f), RatingColor(role.Rating));
                         AddCameraText(p, role.Rating.ToString("0.#", inv),
-                            new UnityEngine.Vector3(barX0 + barW + 0.02f, y, zb - 0.05f),
-                            0.0078f, UnityEngine.Color.white, true, UnityEngine.TextAnchor.MiddleLeft);
+                            new Vector3(barX0 + barW + 0.02f, y, zb - 0.05f),
+                            0.0078f, Color.white, true, TextAnchor.MiddleLeft);
                     }
                     else
                     {
-                        AddCameraText(p, "n/a", new UnityEngine.Vector3(barX0 + 0.04f, y, zb - 0.05f),
-                            0.0072f, new UnityEngine.Color(0.55f, 0.58f, 0.62f), false,
-                            UnityEngine.TextAnchor.MiddleLeft);
+                        AddCameraText(p, "n/a", new Vector3(barX0 + 0.04f, y, zb - 0.05f),
+                            0.0072f, new Color(0.55f, 0.58f, 0.62f), false,
+                            TextAnchor.MiddleLeft);
                     }
                 }
 
-                rt = new UnityEngine.RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
+                rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
                 cam.targetTexture = rt;
             }
             catch (Exception ex)
@@ -2561,20 +2565,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Debug.LogWarning($"[Benchmark] model-card setup failed: {ex.Message}");
             }
 
-            yield return new UnityEngine.WaitForEndOfFrame();
+            yield return new WaitForEndOfFrame();
 
             byte[] png = null;
-            UnityEngine.Texture2D tex = null;
-            UnityEngine.RenderTexture prevActive = UnityEngine.RenderTexture.active;
+            Texture2D tex = null;
+            RenderTexture prevActive = RenderTexture.active;
             try
             {
                 if (cam != null && rt != null)
                 {
-                    UnityEngine.RenderTexture.active = rt;
-                    tex = new UnityEngine.Texture2D(rt.width, rt.height, UnityEngine.TextureFormat.RGB24, false);
-                    tex.ReadPixels(new UnityEngine.Rect(0, 0, rt.width, rt.height), 0, 0);
+                    RenderTexture.active = rt;
+                    tex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false);
+                    tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
                     tex.Apply();
-                    png = UnityEngine.ImageConversion.EncodeToPNG(tex);
+                    png = ImageConversion.EncodeToPNG(tex);
                 }
             }
             catch (Exception ex)
@@ -2583,7 +2587,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
             finally
             {
-                UnityEngine.RenderTexture.active = prevActive;
+                RenderTexture.active = prevActive;
                 if (cam != null)
                 {
                     cam.targetTexture = null;
@@ -2650,59 +2654,59 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return role;
         }
 
-        private static UnityEngine.Color RatingColor(double rating)
+        private static Color RatingColor(double rating)
         {
             if (rating >= 8.0)
             {
-                return new UnityEngine.Color(0.36f, 0.78f, 0.45f);
+                return new Color(0.36f, 0.78f, 0.45f);
             }
 
             if (rating >= 6.5)
             {
-                return new UnityEngine.Color(0.55f, 0.80f, 0.40f);
+                return new Color(0.55f, 0.80f, 0.40f);
             }
 
             if (rating >= 4.0)
             {
-                return new UnityEngine.Color(0.93f, 0.74f, 0.33f);
+                return new Color(0.93f, 0.74f, 0.33f);
             }
 
-            return new UnityEngine.Color(0.88f, 0.42f, 0.40f);
+            return new Color(0.88f, 0.42f, 0.40f);
         }
 
-        private static void AddCameraText(UnityEngine.Transform parent, string text,
-            UnityEngine.Vector3 localPos, float size, UnityEngine.Color color, bool bold,
-            UnityEngine.TextAnchor anchor = UnityEngine.TextAnchor.MiddleCenter)
+        private static void AddCameraText(Transform parent, string text,
+            Vector3 localPos, float size, Color color, bool bold,
+            TextAnchor anchor = TextAnchor.MiddleCenter)
         {
             if (string.IsNullOrEmpty(text))
             {
                 return;
             }
 
-            UnityEngine.GameObject go = new("OverlayText");
+            GameObject go = new("OverlayText");
             go.transform.SetParent(parent, false);
             go.transform.localPosition = localPos;
-            go.transform.localRotation = UnityEngine.Quaternion.identity;
-            UnityEngine.TextMesh tm = go.AddComponent<UnityEngine.TextMesh>();
+            go.transform.localRotation = Quaternion.identity;
+            TextMesh tm = go.AddComponent<TextMesh>();
             tm.text = text;
             tm.characterSize = size;
             tm.fontSize = 96;
             tm.anchor = anchor;
-            tm.alignment = anchor == UnityEngine.TextAnchor.MiddleLeft
-                ? UnityEngine.TextAlignment.Left
-                : UnityEngine.TextAlignment.Center;
-            tm.fontStyle = bold ? UnityEngine.FontStyle.Bold : UnityEngine.FontStyle.Normal;
+            tm.alignment = anchor == TextAnchor.MiddleLeft
+                ? TextAlignment.Left
+                : TextAlignment.Center;
+            tm.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
             tm.color = color;
         }
 
         /// <summary>Adds a flat, screen-aligned coloured quad parented to <paramref name="parent"/>.</summary>
-        private static void AddQuad(UnityEngine.Transform parent, UnityEngine.Vector3 localPos,
-            UnityEngine.Vector2 size, UnityEngine.Color color)
+        private static void AddQuad(Transform parent, Vector3 localPos,
+            Vector2 size, Color color)
         {
-            UnityEngine.GameObject q = UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Quad);
+            GameObject q = GameObject.CreatePrimitive(PrimitiveType.Quad);
             q.name = "OverlayQuad";
             DestroyCollider(q);
-            UnityEngine.Renderer r = q.GetComponent<UnityEngine.Renderer>();
+            Renderer r = q.GetComponent<Renderer>();
             if (r != null)
             {
                 r.sharedMaterial = MakeUnlitMaterial(color);
@@ -2710,30 +2714,30 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             q.transform.SetParent(parent, false);
             q.transform.localPosition = localPos;
-            q.transform.localRotation = UnityEngine.Quaternion.identity;
-            q.transform.localScale = new UnityEngine.Vector3(size.x, size.y, 1f);
+            q.transform.localRotation = Quaternion.identity;
+            q.transform.localScale = new Vector3(size.x, size.y, 1f);
         }
 
-        private static void DestroyCollider(UnityEngine.GameObject go)
+        private static void DestroyCollider(GameObject go)
         {
-            UnityEngine.Collider col = go.GetComponent<UnityEngine.Collider>();
+            Collider col = go.GetComponent<Collider>();
             if (col != null)
             {
                 UnityEngine.Object.DestroyImmediate(col);
             }
         }
 
-        private static readonly int BaseColorId = UnityEngine.Shader.PropertyToID("_BaseColor");
-        private static readonly int ColorId = UnityEngine.Shader.PropertyToID("_Color");
-        private static readonly UnityEngine.MaterialPropertyBlock TintBlock = new();
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+        private static readonly MaterialPropertyBlock TintBlock = new();
 
-        private static readonly Dictionary<(UnityEngine.Color color, bool doubleSided), UnityEngine.Material>
+        private static readonly Dictionary<(Color color, bool doubleSided), Material>
             UnlitMaterialCache = new();
 
-        private static readonly List<UnityEngine.Mesh> ScratchMeshes = new();
+        private static readonly List<Mesh> ScratchMeshes = new();
 
         /// <summary>Tints a renderer without touching renderer.material, which would instantiate a material.</summary>
-        private static void TintRenderer(UnityEngine.Renderer r, UnityEngine.Color c)
+        private static void TintRenderer(Renderer r, Color c)
         {
             if (r == null)
             {
@@ -2748,7 +2752,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>Tints a material across pipelines — URP/Lit uses <c>_BaseColor</c>, built-in uses <c>_Color</c>.</summary>
-        private static void Tint(UnityEngine.Material m, UnityEngine.Color c)
+        private static void Tint(Material m, Color c)
         {
             if (m == null)
             {
@@ -2767,18 +2771,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>An unlit, solid-colour material for overlay bars — works under URP and the built-in pipeline.</summary>
-        private static UnityEngine.Material MakeUnlitMaterial(UnityEngine.Color c, bool doubleSided = false)
+        private static Material MakeUnlitMaterial(Color c, bool doubleSided = false)
         {
-            (UnityEngine.Color color, bool doubleSided) key = (c, doubleSided);
-            if (UnlitMaterialCache.TryGetValue(key, out UnityEngine.Material cached) && cached != null)
+            (Color color, bool doubleSided) key = (c, doubleSided);
+            if (UnlitMaterialCache.TryGetValue(key, out Material cached) && cached != null)
             {
                 return cached;
             }
 
-            UnityEngine.Shader s = UnityEngine.Shader.Find("Universal Render Pipeline/Unlit")
-                                   ?? UnityEngine.Shader.Find("Unlit/Color")
-                                   ?? UnityEngine.Shader.Find("Sprites/Default");
-            UnityEngine.Material m = new(s);
+            Shader s = Shader.Find("Universal Render Pipeline/Unlit")
+                       ?? Shader.Find("Unlit/Color")
+                       ?? Shader.Find("Sprites/Default");
+            Material m = new(s);
             Tint(m, c);
             if (doubleSided && m.HasProperty("_Cull"))
             {
@@ -2790,47 +2794,47 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>A thin coloured line (a quad) from <paramref name="a"/> to <paramref name="b"/> in the parent's local XY.</summary>
-        private static void AddLine(UnityEngine.Transform parent, UnityEngine.Vector2 a, UnityEngine.Vector2 b,
-            float z, float thickness, UnityEngine.Color color)
+        private static void AddLine(Transform parent, Vector2 a, Vector2 b,
+            float z, float thickness, Color color)
         {
-            UnityEngine.Vector2 mid = (a + b) * 0.5f;
-            UnityEngine.Vector2 d = b - a;
+            Vector2 mid = (a + b) * 0.5f;
+            Vector2 d = b - a;
             float len = d.magnitude;
             if (len < 1e-5f)
             {
                 return;
             }
 
-            float ang = UnityEngine.Mathf.Atan2(d.y, d.x) * UnityEngine.Mathf.Rad2Deg;
-            UnityEngine.GameObject q = UnityEngine.GameObject.CreatePrimitive(UnityEngine.PrimitiveType.Quad);
+            float ang = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+            GameObject q = GameObject.CreatePrimitive(PrimitiveType.Quad);
             q.name = "OverlayLine";
             DestroyCollider(q);
-            UnityEngine.Renderer r = q.GetComponent<UnityEngine.Renderer>();
+            Renderer r = q.GetComponent<Renderer>();
             if (r != null)
             {
                 r.sharedMaterial = MakeUnlitMaterial(color);
             }
 
             q.transform.SetParent(parent, false);
-            q.transform.localPosition = new UnityEngine.Vector3(mid.x, mid.y, z);
-            q.transform.localRotation = UnityEngine.Quaternion.Euler(0f, 0f, ang);
-            q.transform.localScale = new UnityEngine.Vector3(len, thickness, 1f);
+            q.transform.localPosition = new Vector3(mid.x, mid.y, z);
+            q.transform.localRotation = Quaternion.Euler(0f, 0f, ang);
+            q.transform.localScale = new Vector3(len, thickness, 1f);
         }
 
         /// <summary>A filled convex polygon (triangle fan from the centroid) in the parent's local XY.</summary>
-        private static void AddFilledPolygon(UnityEngine.Transform parent, UnityEngine.Vector2[] pts,
-            float z, UnityEngine.Color color)
+        private static void AddFilledPolygon(Transform parent, Vector2[] pts,
+            float z, Color color)
         {
             if (pts == null || pts.Length < 3)
             {
                 return;
             }
 
-            UnityEngine.Vector3[] verts = new UnityEngine.Vector3[pts.Length + 1];
-            verts[0] = UnityEngine.Vector3.zero;
+            Vector3[] verts = new Vector3[pts.Length + 1];
+            verts[0] = Vector3.zero;
             for (int i = 0; i < pts.Length; i++)
             {
-                verts[i + 1] = new UnityEngine.Vector3(pts[i].x, pts[i].y, 0f);
+                verts[i + 1] = new Vector3(pts[i].x, pts[i].y, 0f);
             }
 
             int[] tris = new int[pts.Length * 3];
@@ -2841,21 +2845,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 tris[i * 3 + 2] = (i + 1) % pts.Length + 1;
             }
 
-            UnityEngine.Mesh mesh = new() { vertices = verts, triangles = tris };
+            Mesh mesh = new() { vertices = verts, triangles = tris };
             mesh.RecalculateBounds();
             ScratchMeshes.Add(mesh);
 
-            UnityEngine.GameObject go = new("OverlayPolygon");
+            GameObject go = new("OverlayPolygon");
             go.transform.SetParent(parent, false);
-            go.transform.localPosition = new UnityEngine.Vector3(0f, 0f, z);
-            go.transform.localRotation = UnityEngine.Quaternion.identity;
-            go.AddComponent<UnityEngine.MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<UnityEngine.MeshRenderer>().sharedMaterial = MakeUnlitMaterial(color, true);
+            go.transform.localPosition = new Vector3(0f, 0f, z);
+            go.transform.localRotation = Quaternion.identity;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = MakeUnlitMaterial(color, true);
         }
 
         private static void DestroyScratchMeshes()
         {
-            foreach (UnityEngine.Mesh mesh in ScratchMeshes)
+            foreach (Mesh mesh in ScratchMeshes)
             {
                 if (mesh != null)
                 {
@@ -2922,29 +2926,29 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return sb.ToString();
         }
 
-        private static UnityEngine.Color VerdictColor(string header)
+        private static Color VerdictColor(string header)
         {
             if (string.IsNullOrEmpty(header))
             {
-                return UnityEngine.Color.white;
+                return Color.white;
             }
 
             if (header.EndsWith("PASS", StringComparison.Ordinal))
             {
-                return new UnityEngine.Color(0.45f, 0.85f, 0.50f);
+                return new Color(0.45f, 0.85f, 0.50f);
             }
 
             if (header.EndsWith("PARTIAL", StringComparison.Ordinal))
             {
-                return new UnityEngine.Color(0.95f, 0.80f, 0.35f);
+                return new Color(0.95f, 0.80f, 0.35f);
             }
 
             if (header.EndsWith("FAIL", StringComparison.Ordinal))
             {
-                return new UnityEngine.Color(0.92f, 0.45f, 0.42f);
+                return new Color(0.92f, 0.45f, 0.42f);
             }
 
-            return UnityEngine.Color.white;
+            return Color.white;
         }
 
         /// <summary>

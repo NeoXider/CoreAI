@@ -361,7 +361,7 @@ namespace CoreAI.Composition
                 modelName = "local";
             }
 
-            var adapter = new LlmUnityServerHttpSettings(settings, settings.LlmUnityServerPort, modelName, "");
+            LlmUnityServerHttpSettings adapter = new(settings, settings.LlmUnityServerPort, modelName, "");
             return new OpenAiChatLlmClient(adapter, settings, logger, memoryStore);
 #endif
         }
@@ -415,8 +415,8 @@ namespace CoreAI.Composition
                 }
 
                 string trimmed = configured.Trim();
-                bool isRelative = trimmed.StartsWith("/", System.StringComparison.Ordinal)
-                                  && !trimmed.StartsWith("//", System.StringComparison.Ordinal);
+                bool isRelative = trimmed.StartsWith("/", StringComparison.Ordinal)
+                                  && !trimmed.StartsWith("//", StringComparison.Ordinal);
                 if (!isRelative)
                 {
                     return trimmed;
@@ -430,8 +430,8 @@ namespace CoreAI.Composition
 
                 try
                 {
-                    System.Uri baseUri = new(host);
-                    System.Uri resolved = new(baseUri, trimmed);
+                    Uri baseUri = new(host);
+                    Uri resolved = new(baseUri, trimmed);
                     return resolved.ToString().TrimEnd('/');
                 }
                 catch

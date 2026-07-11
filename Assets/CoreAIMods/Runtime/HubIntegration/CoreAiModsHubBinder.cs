@@ -20,16 +20,18 @@ namespace CoreAI.Ai.Hub
     public sealed class CoreAiModsHubBinder : MonoBehaviour
     {
         [Tooltip("Hub window to add the Mods tab to. Leave empty to find one on this GameObject or the scene.")]
-        [SerializeField] private CoreAiHubWindow hubWindow;
+        [SerializeField]
+        private CoreAiHubWindow hubWindow;
 
         [Tooltip("Grant Full tier to mods created/edited through the Mods tab (host/singleplayer only).")]
-        [SerializeField] private bool allowFullTier = true;
+        [SerializeField]
+        private bool allowFullTier = true;
 
         private void Start()
         {
             CoreAiHubWindow window = hubWindow != null
                 ? hubWindow
-                : (GetComponent<CoreAiHubWindow>() ?? FindFirstObjectByType<CoreAiHubWindow>());
+                : GetComponent<CoreAiHubWindow>() ?? FindFirstObjectByType<CoreAiHubWindow>();
             if (window == null)
             {
                 return; // no Hub in the scene — nothing to light up
@@ -58,11 +60,11 @@ namespace CoreAI.Ai.Hub
                 registry.Register(
                     HubSettingsPage.DefaultPageId,
                     () => new HubSettingsPage(settings),
-                    order: 100);
+                    100);
                 registry.Register(
                     HubStatisticsPage.DefaultPageId,
                     () => new HubStatisticsPage(metrics, settings),
-                    order: 200);
+                    200);
             }
 
             LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
@@ -70,7 +72,7 @@ namespace CoreAI.Ai.Hub
             LuaCapabilities grant = allowFullTier
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            HubModsPages.Register(registry, runtime, sourceStore, grant, allowFull: allowFullTier);
+            HubModsPages.Register(registry, runtime, sourceStore, grant, allowFullTier);
 
             if (window.Registry == null)
             {

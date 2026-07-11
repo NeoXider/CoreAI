@@ -13,6 +13,7 @@ namespace CoreAI.Chat
         /// agent (e.g. Programmer, SmartChat, AINpc) at runtime. Default false.
         /// </summary>
         bool AllowAgentSwitching { get; }
+
         string HeaderTitle { get; }
         string WelcomeMessage { get; }
         bool LoadPersistedChatOnStartup { get; }

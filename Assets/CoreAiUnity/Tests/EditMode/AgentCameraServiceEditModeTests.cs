@@ -55,7 +55,7 @@ namespace CoreAI.Tests.EditMode
         public void TryResolveMovableCamera_UnmarkedCamera_DeniedAsNotMarked()
         {
             NewCamera("PlayerCam");
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             bool ok = service.TryResolveMovableCamera("PlayerCam", Role, out Camera cam, out CameraMoveDenial denial);
 
@@ -69,8 +69,8 @@ namespace CoreAI.Tests.EditMode
         public void TryResolveMovableCamera_MarkedAndAllowMove_Permitted()
         {
             Camera drone = NewCamera("DroneCam");
-            Mark(drone, role: "", allowMove: true);
-            var service = new AgentCameraService();
+            Mark(drone, "", true);
+            AgentCameraService service = new();
 
             bool ok = service.TryResolveMovableCamera("DroneCam", Role, out Camera cam, out CameraMoveDenial denial);
 
@@ -83,8 +83,8 @@ namespace CoreAI.Tests.EditMode
         public void TryResolveMovableCamera_AllowMoveFalse_DeniedAsMovementDisabled()
         {
             Camera cam = NewCamera("CaptureOnlyCam");
-            Mark(cam, role: "", allowMove: false);
-            var service = new AgentCameraService();
+            Mark(cam, "", false);
+            AgentCameraService service = new();
 
             bool ok = service.TryResolveMovableCamera("CaptureOnlyCam", Role, out _, out CameraMoveDenial denial);
 
@@ -96,8 +96,8 @@ namespace CoreAI.Tests.EditMode
         public void TryResolveMovableCamera_WrongRole_Denied()
         {
             Camera cam = NewCamera("AnalyzerCam");
-            Mark(cam, role: "Analyzer", allowMove: true);
-            var service = new AgentCameraService();
+            Mark(cam, "Analyzer", true);
+            AgentCameraService service = new();
 
             bool ok = service.TryResolveMovableCamera("AnalyzerCam", Role, out _, out CameraMoveDenial denial);
 
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode
         public void TryReserveCapture_RateLimitsPerAgent_UsingInjectedClock()
         {
             double now = 100.0;
-            var service = new AgentCameraService(() => now, minCaptureIntervalSeconds: 1.0);
+            AgentCameraService service = new(() => now, 1.0);
 
             Assert.IsTrue(service.TryReserveCapture(Role, out _), "First capture is allowed.");
 
@@ -125,7 +125,7 @@ namespace CoreAI.Tests.EditMode
         public void TryReserveCapture_IndependentPerRole()
         {
             double now = 0.0;
-            var service = new AgentCameraService(() => now, minCaptureIntervalSeconds: 1.0);
+            AgentCameraService service = new(() => now, 1.0);
 
             Assert.IsTrue(service.TryReserveCapture("Programmer", out _));
             Assert.IsTrue(service.TryReserveCapture("Analyzer", out _),
@@ -138,8 +138,8 @@ namespace CoreAI.Tests.EditMode
         {
             NewCamera("PlainCam");
             Camera drone = NewCamera("DroneCam");
-            Mark(drone, role: "", allowMove: true);
-            var service = new AgentCameraService();
+            Mark(drone, "", true);
+            AgentCameraService service = new();
 
             IReadOnlyList<AgentCameraInfo> cameras = service.ListCameras(Role);
 
@@ -158,8 +158,8 @@ namespace CoreAI.Tests.EditMode
         {
             NewCamera("PlainCam");
             Camera drone = NewCamera("OwnedCam");
-            Mark(drone, role: Role, allowMove: true);
-            var service = new AgentCameraService();
+            Mark(drone, Role, true);
+            AgentCameraService service = new();
 
             Camera resolved = service.ResolveCaptureCamera("", Role, out bool isMain);
 
@@ -171,7 +171,7 @@ namespace CoreAI.Tests.EditMode
         public void ResolveCaptureCamera_ExplicitName_ResolvesThatCamera()
         {
             Camera target = NewCamera("SideCam");
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             Camera resolved = service.ResolveCaptureCamera("SideCam", Role, out _);
 
@@ -183,7 +183,7 @@ namespace CoreAI.Tests.EditMode
         {
             Camera inactive = NewCamera("InactiveCaptureCam");
             inactive.gameObject.SetActive(false);
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             Camera resolved = service.ResolveCaptureCamera("InactiveCaptureCam", Role, out _);
 
@@ -194,9 +194,9 @@ namespace CoreAI.Tests.EditMode
         public void TryResolveMovableCamera_ExplicitInactiveName_DeniedAsNoCamera()
         {
             Camera inactive = NewCamera("InactiveMovableCam");
-            Mark(inactive, role: "", allowMove: true);
+            Mark(inactive, "", true);
             inactive.gameObject.SetActive(false);
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             bool ok = service.TryResolveMovableCamera(
                 "InactiveMovableCam", Role, out Camera resolved, out CameraMoveDenial denial);
@@ -210,7 +210,7 @@ namespace CoreAI.Tests.EditMode
         public void TryApplyLook_SetsPosition_AndRejectsNoChange()
         {
             Camera cam = NewCamera("MoveCam");
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             bool applied = service.TryApplyLook(cam, 1f, 2f, 3f, null, null, null, null, out string err);
             Assert.IsTrue(applied);
@@ -228,7 +228,7 @@ namespace CoreAI.Tests.EditMode
             Camera cam = NewCamera("LookCamera");
             GameObject target = NewGameObject("LookTarget");
             target.transform.position = new Vector3(4f, 2f, 8f);
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             bool applied = service.TryApplyLook(
                 cam, 1f, 2f, 3f, null, null, null, target.name, out string error);
@@ -246,7 +246,7 @@ namespace CoreAI.Tests.EditMode
             Camera cam = NewCamera("RestoreCamera");
             Vector3 originalPosition = new(9f, 8f, 7f);
             cam.transform.position = originalPosition;
-            var service = new AgentCameraService();
+            AgentCameraService service = new();
 
             bool applied = service.TryApplyLook(
                 cam, 1f, 2f, 3f, null, null, null, "MissingLookTarget", out string error);

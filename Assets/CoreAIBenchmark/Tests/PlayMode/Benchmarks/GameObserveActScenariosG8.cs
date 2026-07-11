@@ -149,9 +149,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     nonObservationCommands++;
                     bool requestedDestroy = string.Equals(
-                        command.Action, "destroy", StringComparison.OrdinalIgnoreCase)
-                        && (string.Equals(command.TargetName?.Trim(), "Debris1", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(command.TargetName?.Trim(), "Debris2", StringComparison.OrdinalIgnoreCase));
+                                                command.Action, "destroy", StringComparison.OrdinalIgnoreCase)
+                                            && (string.Equals(command.TargetName?.Trim(), "Debris1",
+                                                    StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(command.TargetName?.Trim(), "Debris2",
+                                                    StringComparison.OrdinalIgnoreCase));
                     onlyRequestedDestroys &= requestedDestroy;
                 }
 

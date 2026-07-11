@@ -87,8 +87,10 @@ namespace CoreAI.Demos
 
             // ExecuteAsync completes synchronously (RunChunk drives the VM under a guard and returns a
             // finished Task), so blocking here cannot deadlock — there is no async continuation to await.
-            LuaTool.LuaResult Run(string code) =>
-                executor.ExecuteAsync(code, CancellationToken.None).GetAwaiter().GetResult();
+            LuaTool.LuaResult Run(string code)
+            {
+                return executor.ExecuteAsync(code, CancellationToken.None).GetAwaiter().GetResult();
+            }
 
             Check("host callback marshalling (host_add(2,3) == 5)", () =>
             {

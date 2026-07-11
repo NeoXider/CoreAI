@@ -192,7 +192,8 @@ namespace CoreAI.Ai
 
             AppendMemoryTailMessage(ref chatHistory, memoryParts.TailBlock);
             AppendWorldStateTailMessage(ref chatHistory, worldState);
-            string promptText = (system ?? "") + "\n" + (user ?? "") + "\n" + string.Join("\n", (System.Collections.IEnumerable)chatHistory ?? System.Array.Empty<object>());
+            string promptText = (system ?? "") + "\n" + (user ?? "") + "\n" + string.Join("\n",
+                (System.Collections.IEnumerable)chatHistory ?? Array.Empty<object>());
             AuditContext.SetPromptHash(traceId, AuditHash.Compute(promptText));
             int estimatedPromptTokens =
                 _tokenEstimator.EstimateText(system ?? "") +

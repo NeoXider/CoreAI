@@ -46,7 +46,8 @@ namespace CoreAI.Tests.EditMode
         {
             LuaCsModRuntime runtime = BuildRuntime();
 
-            Assert.IsFalse(runtime.GetModReportLoggingEnabled("m"), "A freshly loaded mod's LogReports is muted by default.");
+            Assert.IsFalse(runtime.GetModReportLoggingEnabled("m"),
+                "A freshly loaded mod's LogReports is muted by default.");
 
             bool eventFired = false;
             runtime.ModReportEmitted += (modId, message) => eventFired = true;
@@ -69,7 +70,8 @@ namespace CoreAI.Tests.EditMode
 
             IReadOnlyList<LuaModReport> reports = runtime.GetRecentReports("m");
             Assert.AreEqual(1, reports.Count);
-            Assert.AreEqual("a\tb", reports[0].Message, "print() joins its arguments with tabs, same as ModReportEmitted.");
+            Assert.AreEqual("a\tb", reports[0].Message,
+                "print() joins its arguments with tabs, same as ModReportEmitted.");
         }
 
         [Test]
@@ -97,7 +99,8 @@ namespace CoreAI.Tests.EditMode
             int clearedA = runtime.ClearRecentReports("a");
             Assert.AreEqual(1, clearedA);
             Assert.IsEmpty(runtime.GetRecentReports("a"));
-            Assert.AreEqual(1, runtime.GetRecentReports("b").Count, "Clearing one mod must not touch another's reports.");
+            Assert.AreEqual(1, runtime.GetRecentReports("b").Count,
+                "Clearing one mod must not touch another's reports.");
 
             int clearedRest = runtime.ClearRecentReports();
             Assert.AreEqual(1, clearedRest);

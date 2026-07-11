@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
             inner.NextStreams.Enqueue(new[] { Text("hello"), Done() });
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 2, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 2, null);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
@@ -38,10 +38,10 @@ namespace CoreAI.Tests.EditMode
         public async Task EmptyStream_IsTreatedAsTransient_AndRetried()
         {
             StubStreamingClient inner = new();
-            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>());     // ends with no content
+            inner.NextStreams.Enqueue(Array.Empty<LlmStreamChunk>()); // ends with no content
             inner.NextStreams.Enqueue(new[] { Text("recovered"), Done() });
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 1, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1, null);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
@@ -56,7 +56,7 @@ namespace CoreAI.Tests.EditMode
             // A single stream that commits text and THEN emits a (would-be retryable) error.
             inner.NextStreams.Enqueue(new[] { Text("partial"), ErrChunk(LlmErrorCode.BackendUnavailable) });
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 3, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
@@ -74,7 +74,7 @@ namespace CoreAI.Tests.EditMode
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.Timeout) });
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.Timeout) });
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 2, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 2, null);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
@@ -90,7 +90,7 @@ namespace CoreAI.Tests.EditMode
             StubStreamingClient inner = new();
             inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.InvalidRequest) });
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 3, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
 
             List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
 
@@ -106,7 +106,7 @@ namespace CoreAI.Tests.EditMode
             using CancellationTokenSource cts = new();
             cts.Cancel();
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 3, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
 
             bool cancelled = false;
             try
@@ -128,7 +128,7 @@ namespace CoreAI.Tests.EditMode
             StubStreamingClient inner = new();
             inner.NextResult = new LlmCompletionResult { Ok = true, Content = "direct" };
 
-            RetryingStreamingLlmClientDecorator sut = new(inner, maxRetryAttempts: 3, retryDelay: null);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, null);
 
             LlmCompletionResult result = await sut.CompleteAsync(Req());
 
@@ -139,11 +139,25 @@ namespace CoreAI.Tests.EditMode
 
         // ---- helpers ----
 
-        private static LlmCompletionRequest Req() => new() { AgentRoleId = "Test", UserPayload = "hi" };
-        private static LlmStreamChunk Text(string t) => new() { Text = t };
-        private static LlmStreamChunk Done() => new() { IsDone = true };
-        private static LlmStreamChunk ErrChunk(LlmErrorCode code) =>
-            new() { IsDone = true, Error = code.ToString(), ErrorCode = code };
+        private static LlmCompletionRequest Req()
+        {
+            return new LlmCompletionRequest { AgentRoleId = "Test", UserPayload = "hi" };
+        }
+
+        private static LlmStreamChunk Text(string t)
+        {
+            return new LlmStreamChunk { Text = t };
+        }
+
+        private static LlmStreamChunk Done()
+        {
+            return new LlmStreamChunk { IsDone = true };
+        }
+
+        private static LlmStreamChunk ErrChunk(LlmErrorCode code)
+        {
+            return new LlmStreamChunk { IsDone = true, Error = code.ToString(), ErrorCode = code };
+        }
 
         private static string Concat(IEnumerable<LlmStreamChunk> chunks)
         {

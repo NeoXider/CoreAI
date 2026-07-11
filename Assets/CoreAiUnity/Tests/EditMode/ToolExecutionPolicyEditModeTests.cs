@@ -1559,15 +1559,15 @@ namespace CoreAI.Tests.EditMode
             int flakyInvocations = 0;
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
             opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
-                {
-                    stableInvocations++;
-                    return "stable";
-                }), new MEAI.AIFunctionFactoryOptions { Name = "stable", Description = "stable" }));
+            {
+                stableInvocations++;
+                return "stable";
+            }), new MEAI.AIFunctionFactoryOptions { Name = "stable", Description = "stable" }));
             opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
-                {
-                    flakyInvocations++;
-                    return flakyInvocations == 1 ? "Error: transient" : "recovered";
-                }), new MEAI.AIFunctionFactoryOptions { Name = "flaky", Description = "flaky" }));
+            {
+                flakyInvocations++;
+                return flakyInvocations == 1 ? "Error: transient" : "recovered";
+            }), new MEAI.AIFunctionFactoryOptions { Name = "flaky", Description = "flaky" }));
             List<MEAI.FunctionCallContent> calls = new()
             {
                 MakeToolCall("stable", new Dictionary<string, object> { { "n", 1 } }),
@@ -1772,6 +1772,7 @@ namespace CoreAI.Tests.EditMode
                     opts,
                     CancellationToken.None);
             }
+
             ToolExecutionPolicy.BatchToolCallResult batch =
                 await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
 
@@ -1833,15 +1834,15 @@ namespace CoreAI.Tests.EditMode
             int luaInvocations = 0;
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
             opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
-                {
-                    worldInvocations++;
-                    return "world changed";
-                }), new MEAI.AIFunctionFactoryOptions { Name = "world_command", Description = "world" }));
+            {
+                worldInvocations++;
+                return "world changed";
+            }), new MEAI.AIFunctionFactoryOptions { Name = "world_command", Description = "world" }));
             opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() =>
-                {
-                    luaInvocations++;
-                    return luaInvocations == 1 ? "Error: transient Lua failure" : "lua recovered";
-                }), new MEAI.AIFunctionFactoryOptions { Name = "execute_lua", Description = "lua" }));
+            {
+                luaInvocations++;
+                return luaInvocations == 1 ? "Error: transient Lua failure" : "lua recovered";
+            }), new MEAI.AIFunctionFactoryOptions { Name = "execute_lua", Description = "lua" }));
             Dictionary<string, object?> worldArgs = new() { { "name", "A" } };
             Dictionary<string, object?> luaArgs = new() { { "code", "return 1" } };
 

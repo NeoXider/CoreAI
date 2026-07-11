@@ -228,6 +228,7 @@ namespace CoreAI.Infrastructure.Llm
                                 BuildMissingRequiredToolInstruction(requiredToolName)));
                             continue;
                         }
+
                         // A COMPLETELY empty response (no text, no tool call) after this same request has
                         // already executed at least one SUCCESSFUL tool call is the model trailing off
                         // mid-task, not a deliberate "I'm done" - unlike a text-only response, which is
@@ -263,6 +264,7 @@ namespace CoreAI.Infrastructure.Llm
                             _logger.Info(
                                 $"[SmartToolCall] Iteration {iteration}: Text response, stopping.", LogTag.Llm);
                         }
+
                         int maxResponseChars = _settings.MaxResponseChars;
                         if (maxResponseChars > 0)
                         {
@@ -354,6 +356,7 @@ namespace CoreAI.Infrastructure.Llm
                                 LogTag.Llm);
                         }
                     }
+
                     // Prevent unbounded message growth during long tool-calling loops.
                     // Only count tool-related messages (Assistant with FunctionCallContent + Tool result).
                     int maxHistoryMsgs = _settings.MaxToolCallHistoryMessages;

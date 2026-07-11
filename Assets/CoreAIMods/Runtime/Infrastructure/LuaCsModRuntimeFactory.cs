@@ -149,16 +149,16 @@ namespace CoreAI.Ai.LuaCs
                 capabilities: options.Capabilities);
 
             LuaCsModRuntime runtime = new(
-                gameplayBindings: bindings.Register,
-                store: options.ModStore,
-                log: options.Log,
-                handlerTimeoutMs: options.HandlerTimeoutMs,
-                handlerMaxSteps: options.HandlerMaxSteps,
-                sourceStore: options.ModSourceStore,
-                autoPersistMods: options.AutoPersistMods,
+                bindings.Register,
+                options.ModStore,
+                options.Log,
+                options.HandlerTimeoutMs,
+                options.HandlerMaxSteps,
+                options.ModSourceStore,
+                options.AutoPersistMods,
                 // Share the version store the gameplay bindings already use: the runtime keys mod history
                 // under a "mod:" prefix, so it never collides with the coreai_lua_* script slots.
-                versionStore: options.LuaScriptVersions);
+                options.LuaScriptVersions);
 
             LuaCsGameToolExecutor executor = new(
                 new LuaCsSecureEnvironment(),

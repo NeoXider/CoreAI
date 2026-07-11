@@ -296,7 +296,8 @@ namespace CoreAI.Infrastructure.World
                 return $"prefab not found: '{key}'.";
             }
 
-            string message = $"Unknown prefabKey '{key}'. Available primitives: {CoreAiPrimitiveFactory.SupportedKeys}.";
+            string message =
+                $"Unknown prefabKey '{key}'. Available primitives: {CoreAiPrimitiveFactory.SupportedKeys}.";
 
             if (_prefabRegistry is ICoreAiPrefabCatalog catalog)
             {
@@ -321,7 +322,7 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         private bool TrySpawnBatch(CoreAiWorldCommandEnvelope env)
         {
-            CoreAiSpawnBatchItem[] items = env.items ?? System.Array.Empty<CoreAiSpawnBatchItem>();
+            CoreAiSpawnBatchItem[] items = env.items ?? Array.Empty<CoreAiSpawnBatchItem>();
             int count = Math.Min(items.Length, MaxSpawnBatchSize);
             string namePrefix = (env.targetName ?? "").Trim();
             string defaultPrefab = (env.prefabKeyOrName ?? "").Trim();
@@ -719,6 +720,7 @@ namespace CoreAI.Infrastructure.World
             {
                 TryParentSpawned(go, env.stringValue, true);
             }
+
             return true;
         }
 

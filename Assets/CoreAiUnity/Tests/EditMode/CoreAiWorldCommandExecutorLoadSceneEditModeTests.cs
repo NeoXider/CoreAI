@@ -62,8 +62,8 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiWorldCommandExecutor executor = new(
                 GameLoggerUnscopedFallback.Instance,
-                prefabRegistry: null,
-                allowedScenes: new[] { "OnlyThisSceneIsAllowed" });
+                null,
+                new[] { "OnlyThisSceneIsAllowed" });
             string activeSceneBefore = SceneManager.GetActiveScene().name;
 
             string json = JsonUtility.ToJson(CoreAiWorldCommandEnvelope.LoadScene("SomeOtherScene"));
@@ -92,8 +92,8 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiWorldCommandExecutor executor = new(
                 GameLoggerUnscopedFallback.Instance,
-                prefabRegistry: null,
-                allowedScenes: System.Array.Empty<string>());
+                null,
+                System.Array.Empty<string>());
             string activeSceneBefore = SceneManager.GetActiveScene().name;
 
             string json = JsonUtility.ToJson(CoreAiWorldCommandEnvelope.LoadScene(

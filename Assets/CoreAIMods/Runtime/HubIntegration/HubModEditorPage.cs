@@ -267,7 +267,8 @@ namespace CoreAI.Ai.Hub
             row.style.alignItems = Align.Center;
             row.style.marginBottom = 2f;
 
-            string when = new DateTime(revision.UtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            string when = new DateTime(revision.UtcTicks, DateTimeKind.Utc).ToLocalTime()
+                .ToString("yyyy-MM-dd HH:mm:ss");
             string preview = FirstLinePreview(revision.Source);
             Label label = HubModWidgets.MakeMutedLabel(
                 $"#{revision.Index}  {when}  ({revision.Source.Length} chars)  {preview}");

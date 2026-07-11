@@ -73,8 +73,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                byte[] tiny = AgentCameraService.CaptureToBytes(cam, 1, CaptureImageFormat.Jpeg, out int tw, out int th);
-                byte[] huge = AgentCameraService.CaptureToBytes(cam, 8000, CaptureImageFormat.Jpeg, out int hw, out int hh);
+                byte[] tiny =
+                    AgentCameraService.CaptureToBytes(cam, 1, CaptureImageFormat.Jpeg, out int tw, out int th);
+                byte[] huge =
+                    AgentCameraService.CaptureToBytes(cam, 8000, CaptureImageFormat.Jpeg, out int hw, out int hh);
 
                 Assert.Greater(tiny.Length, 0);
                 Assert.Greater(huge.Length, 0);

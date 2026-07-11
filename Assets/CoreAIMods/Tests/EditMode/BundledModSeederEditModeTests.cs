@@ -14,50 +14,98 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class BundledModSeederEditModeTests
     {
-        private static string Mod(string id, string version, bool active = true, string body = "report('hi')") =>
-            $"--[[@coreai\nid: {id}\nname: {id}\nversion: {version}\nactive: {(active ? "true" : "false")}\n" +
-            $"capabilities: All\ncategory: Samples\n]]\n{body}\n";
+        private static string Mod(string id, string version, bool active = true, string body = "report('hi')")
+        {
+            return $"--[[@coreai\nid: {id}\nname: {id}\nversion: {version}\nactive: {(active ? "true" : "false")}\n" +
+                   $"capabilities: All\ncategory: Samples\n]]\n{body}\n";
+        }
 
         private sealed class FakeSource : IBundledModSource
         {
             private readonly List<BundledMod> _mods = new();
             public string Origin { get; set; } = "resources";
-            public void Add(string id, string version, bool active = true, string body = "report('hi')") =>
+
+            public void Add(string id, string version, bool active = true, string body = "report('hi')")
+            {
                 _mods.Add(new BundledMod(id, Mod(id, version, active, body), version));
-            public IReadOnlyList<BundledMod> Load() => _mods;
+            }
+
+            public IReadOnlyList<BundledMod> Load()
+            {
+                return _mods;
+            }
         }
 
         private sealed class MemStore : ILuaModSourceStore
         {
-            private sealed class E { public string Source; public LuaModManifest Manifest; }
+            private sealed class E
+            {
+                public string Source;
+                public LuaModManifest Manifest;
+            }
+
             private readonly Dictionary<string, E> _e = new(StringComparer.Ordinal);
 
-            public void Save(string id, string source, LuaModManifest manifest) =>
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
                 _e[id] = new E { Source = source, Manifest = manifest };
+            }
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
             {
-                if (_e.TryGetValue(id, out E e)) { source = e.Source; manifest = e.Manifest; return true; }
-                source = ""; manifest = null; return false;
+                if (_e.TryGetValue(id, out E e))
+                {
+                    source = e.Source;
+                    manifest = e.Manifest;
+                    return true;
+                }
+
+                source = "";
+                manifest = null;
+                return false;
             }
 
             public IReadOnlyList<LuaModManifest> List()
             {
                 List<LuaModManifest> r = new();
-                foreach (E e in _e.Values) if (e.Manifest != null) r.Add(e.Manifest);
+                foreach (E e in _e.Values)
+                {
+                    if (e.Manifest != null)
+                    {
+                        r.Add(e.Manifest);
+                    }
+                }
+
                 return r;
             }
 
             public void SetActive(string id, bool active)
             {
-                if (_e.TryGetValue(id, out E e) && e.Manifest != null) e.Manifest.Active = active;
+                if (_e.TryGetValue(id, out E e) && e.Manifest != null)
+                {
+                    e.Manifest.Active = active;
+                }
             }
 
-            public void Delete(string id) => _e.Remove(id);
+            public void Delete(string id)
+            {
+                _e.Remove(id);
+            }
 
-            public bool Has(string id) => _e.ContainsKey(id);
-            public LuaModManifest ManifestOf(string id) => _e.TryGetValue(id, out E e) ? e.Manifest : null;
-            public string SourceOf(string id) => _e.TryGetValue(id, out E e) ? e.Source : null;
+            public bool Has(string id)
+            {
+                return _e.ContainsKey(id);
+            }
+
+            public LuaModManifest ManifestOf(string id)
+            {
+                return _e.TryGetValue(id, out E e) ? e.Manifest : null;
+            }
+
+            public string SourceOf(string id)
+            {
+                return _e.TryGetValue(id, out E e) ? e.Source : null;
+            }
         }
 
         [Test]

@@ -18,7 +18,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            LLMAgent agent = UnityEngine.Object.FindFirstObjectByType<LLMAgent>();
+            LLMAgent agent = Object.FindFirstObjectByType<LLMAgent>();
             if (agent == null)
             {
                 Debug.LogWarning("[LLMUnity Test] Could not get LLMAgent reference");

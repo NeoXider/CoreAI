@@ -66,16 +66,19 @@ namespace CoreAI.Tests.PlayMode
             // B) AGENT (PlainChat) — full orchestrator pipeline with a light, tool-free role.
             ThroughputProbe agentLight = new();
             yield return WarmThenMeasure(
-                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText), CancellationToken.None),
+                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText),
+                    CancellationToken.None),
                 timeout, "agent-plainchat", agentLight);
 
             // C) AGENT (Creator) — full orchestrator pipeline with the tool-configured game-master role.
             ThroughputProbe agentHeavy = new();
             yield return WarmThenMeasure(
-                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText), CancellationToken.None),
+                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText),
+                    CancellationToken.None),
                 timeout, "agent-creator", agentHeavy);
 
-            Debug.Log($"[ChatSpeed] ===== Direct vs Agent (same model/server: {_setup.BackendName}, {direct.Model}) =====");
+            Debug.Log(
+                $"[ChatSpeed] ===== Direct vs Agent (same model/server: {_setup.BackendName}, {direct.Model}) =====");
             Debug.Log(Line("A) DIRECT (raw client, minimal prompt, no tools)", direct));
             Debug.Log(Line("B) AGENT  (orchestrator, PlainChat, no tools)   ", agentLight));
             Debug.Log(Line("C) AGENT  (orchestrator, Creator + tools)       ", agentHeavy));
@@ -109,10 +112,10 @@ namespace CoreAI.Tests.PlayMode
         /// whichever path runs last looks fastest regardless of prompt size.
         /// </summary>
         private IEnumerator WarmThenMeasure(
-            System.Func<IAsyncEnumerable<LlmStreamChunk>> streamFactory,
+            Func<IAsyncEnumerable<LlmStreamChunk>> streamFactory,
             float timeout, string label, ThroughputProbe probe)
         {
-            var warm = new ThroughputProbe();
+            ThroughputProbe warm = new();
             yield return _setup.RunAndWait(MeasureAsync(streamFactory(), warm), timeout, label + "-warm");
             yield return _setup.RunAndWait(MeasureAsync(streamFactory(), probe), timeout, label);
         }
@@ -133,7 +136,10 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>Formats a signed millisecond delta with an explicit +/- and no double sign (e.g. "-2418").</summary>
-        private static string Signed(double ms) => (ms >= 0 ? "+" : "") + ms.ToString("0");
+        private static string Signed(double ms)
+        {
+            return (ms >= 0 ? "+" : "") + ms.ToString("0");
+        }
 
         private static string Line(string label, ThroughputProbe p)
         {

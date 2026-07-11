@@ -35,7 +35,9 @@ namespace CoreAI.Ai.LuaCs
 
         private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<int, UnityEngine.Object>>
             UnityObjectResolveCacheByType = new();
-        private static readonly ConcurrentDictionary<(Type Type, int ObjectId), float> UnityObjectMissedScanTime = new();
+
+        private static readonly ConcurrentDictionary<(Type Type, int ObjectId), float>
+            UnityObjectMissedScanTime = new();
 
         private const float MissedIdRescanIntervalSeconds = 1f;
 
@@ -614,7 +616,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             ConcurrentDictionary<int, UnityEngine.Object> cache =
-                UnityObjectResolveCacheByType.GetOrAdd(wanted, static _ => new ConcurrentDictionary<int, UnityEngine.Object>());
+                UnityObjectResolveCacheByType.GetOrAdd(wanted,
+                    static _ => new ConcurrentDictionary<int, UnityEngine.Object>());
             if (cache.TryGetValue(objectId, out UnityEngine.Object cached) && cached != null)
             {
                 return cached;

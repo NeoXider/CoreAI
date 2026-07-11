@@ -54,9 +54,9 @@ namespace CoreAI.Tests.PlayMode
             {
             }
 
-            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return Array.Empty<Ai.ChatMessage>();
+                return Array.Empty<ChatMessage>();
             }
         }
 

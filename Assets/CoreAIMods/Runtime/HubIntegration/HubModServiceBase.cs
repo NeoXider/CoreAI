@@ -318,7 +318,8 @@ namespace CoreAI.Ai.Hub
             // immediately re-flag UpdateAvailable on the next seed).
             if (_store.TryLoad(modId, out string savedSource, out LuaModManifest saved) && saved != null)
             {
-                saved.SeededVersion = string.IsNullOrWhiteSpace(match.Value.Version) ? saved.Version : match.Value.Version;
+                saved.SeededVersion =
+                    string.IsNullOrWhiteSpace(match.Value.Version) ? saved.Version : match.Value.Version;
                 saved.SeededHash = Fnv1a(savedSource);
                 saved.UpdateAvailable = false;
                 try

@@ -18,7 +18,8 @@ namespace CoreAI.Tests.EditMode.Audit
         [SetUp]
         public void SetUp()
         {
-            _testFolder = Path.Combine(Application.temporaryCachePath, "AuditVerifierTests_" + Guid.NewGuid().ToString("N"));
+            _testFolder = Path.Combine(Application.temporaryCachePath,
+                "AuditVerifierTests_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_testFolder);
         }
 
@@ -27,8 +28,13 @@ namespace CoreAI.Tests.EditMode.Audit
         {
             if (Directory.Exists(_testFolder))
             {
-                try { Directory.Delete(_testFolder, recursive: true); }
-                catch { }
+                try
+                {
+                    Directory.Delete(_testFolder, true);
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -37,17 +43,17 @@ namespace CoreAI.Tests.EditMode.Audit
             for (int i = 0; i < count; i++)
             {
                 writer.Record(AuditEntry.ForToolCall(
-                    seq: 0,
-                    traceId: $"trace-{i}",
-                    actor: "creator",
-                    model: "gpt-4",
-                    promptHash: "ph",
-                    toolName: "test_tool",
-                    args: $"{{\"i\":{i}}}",
-                    policyDecision: "allowed",
-                    result: "ok",
-                    resultDetail: "",
-                    durationMs: i));
+                    0,
+                    $"trace-{i}",
+                    "creator",
+                    "gpt-4",
+                    "ph",
+                    "test_tool",
+                    $"{{\"i\":{i}}}",
+                    "allowed",
+                    "ok",
+                    "",
+                    i));
             }
 
             writer.FlushForTesting();
@@ -126,7 +132,8 @@ namespace CoreAI.Tests.EditMode.Audit
             }
 
             List<AuditEntry> entries = AuditLogVerifier.ReadAll(filePath);
-            Assert.IsTrue(entries.Any(e => e.Kind == AuditEntryKind.ChainReset), "Expected a ChainReset entry to be appended after resume.");
+            Assert.IsTrue(entries.Any(e => e.Kind == AuditEntryKind.ChainReset),
+                "Expected a ChainReset entry to be appended after resume.");
 
             AuditVerifyResult result = AuditLogVerifier.Verify(filePath);
             Assert.IsFalse(result.Ok, "Truncated tail line should break verification.");
@@ -139,20 +146,20 @@ namespace CoreAI.Tests.EditMode.Audit
 
             // Pad past MaxFileSize (50 MB) with a large Args payload per entry so rotation triggers
             // through the normal flush path rather than by tampering with the file on disk.
-            string padding = new string('x', 11_000);
+            string padding = new('x', 11_000);
             for (int i = 0; i < 5000; i++)
             {
                 writer.Record(AuditEntry.ForToolCall(
-                    seq: 0, traceId: $"trace-{i}", actor: "creator", model: "gpt-4", promptHash: "ph",
-                    toolName: "test_tool", args: padding, policyDecision: "allowed",
-                    result: "ok", resultDetail: "", durationMs: i));
+                    0, $"trace-{i}", "creator", "gpt-4", "ph",
+                    "test_tool", padding, "allowed",
+                    "ok", "", i));
             }
 
             writer.FlushForTesting(); // file now exceeds MaxFileSize, but rotation is checked at the START of a flush
 
             writer.Record(AuditEntry.ForToolCall(
-                seq: 0, traceId: "after-rotation", actor: "creator", model: "gpt-4", promptHash: "ph",
-                toolName: "test_tool", args: "{}", policyDecision: "allowed", result: "ok", resultDetail: "", durationMs: 1));
+                0, "after-rotation", "creator", "gpt-4", "ph",
+                "test_tool", "{}", "allowed", "ok", "", 1));
             writer.FlushForTesting(); // this flush should detect the oversized file and rotate
 
             string rotatedPath = Path.Combine(_testFolder, "audit_0001.jsonl");
@@ -165,7 +172,8 @@ namespace CoreAI.Tests.EditMode.Audit
             Assert.IsTrue(rotatedResult.Ok, $"Rotated file should verify standalone: {rotatedResult.Error}");
 
             AuditVerifyResult activeResult = AuditLogVerifier.Verify(activePath);
-            Assert.IsTrue(activeResult.Ok, $"New active file should verify standalone via anchored genesis: {activeResult.Error}");
+            Assert.IsTrue(activeResult.Ok,
+                $"New active file should verify standalone via anchored genesis: {activeResult.Error}");
 
             List<AuditEntry> rotatedEntries = AuditLogVerifier.ReadAll(rotatedPath);
             Assert.AreEqual(AuditEntryKind.RotationMarker, rotatedEntries[^1].Kind,

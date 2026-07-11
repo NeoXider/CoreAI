@@ -48,9 +48,10 @@ namespace CoreAI.Demos
         [Tooltip("Hard cap on director requests within any rolling 60s window. 0 = uncapped.")] [SerializeField]
         private int maxActionsPerMinute = 3;
 
-        [Tooltip("Optional tags whose object counts are added to every observation (must exist in the Tag Manager), e.g. Enemy, Pickup.")]
+        [Tooltip(
+            "Optional tags whose object counts are added to every observation (must exist in the Tag Manager), e.g. Enemy, Pickup.")]
         [SerializeField]
-        private string[] trackedTags = System.Array.Empty<string>();
+        private string[] trackedTags = Array.Empty<string>();
 
         private AgentConfig _director;
         private readonly Queue<float> _recentRequestTimes = new();

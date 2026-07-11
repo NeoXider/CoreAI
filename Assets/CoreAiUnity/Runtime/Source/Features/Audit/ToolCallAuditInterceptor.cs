@@ -19,36 +19,44 @@ namespace CoreAI.Features.Audit
 
         private void OnCompleted(LlmToolCallCompleted evt)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _auditLog.Record(AuditEntry.ForToolCall(
-                seq: 0,
-                traceId: evt.TraceId,
-                actor: evt.RoleId,
-                model: AuditContext.GetModel(evt.TraceId),
-                promptHash: AuditContext.GetPromptHash(evt.TraceId),
-                toolName: evt.ToolName,
-                args: evt.ArgumentsJson,
-                policyDecision: "allowed",
-                result: "ok",
-                resultDetail: evt.ResultJson,
-                durationMs: evt.DurationMs));
+                0,
+                evt.TraceId,
+                evt.RoleId,
+                AuditContext.GetModel(evt.TraceId),
+                AuditContext.GetPromptHash(evt.TraceId),
+                evt.ToolName,
+                evt.ArgumentsJson,
+                "allowed",
+                "ok",
+                evt.ResultJson,
+                evt.DurationMs));
         }
 
         private void OnFailed(LlmToolCallFailed evt)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _auditLog.Record(AuditEntry.ForToolCall(
-                seq: 0,
-                traceId: evt.TraceId,
-                actor: evt.RoleId,
-                model: AuditContext.GetModel(evt.TraceId),
-                promptHash: AuditContext.GetPromptHash(evt.TraceId),
-                toolName: evt.ToolName,
-                args: evt.ArgumentsJson,
-                policyDecision: "denied",
-                result: "error",
-                resultDetail: evt.Error,
-                durationMs: evt.DurationMs));
+                0,
+                evt.TraceId,
+                evt.RoleId,
+                AuditContext.GetModel(evt.TraceId),
+                AuditContext.GetPromptHash(evt.TraceId),
+                evt.ToolName,
+                evt.ArgumentsJson,
+                "denied",
+                "error",
+                evt.Error,
+                evt.DurationMs));
         }
 
         public void Dispose()

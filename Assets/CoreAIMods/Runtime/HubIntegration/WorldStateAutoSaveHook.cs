@@ -17,7 +17,8 @@ namespace CoreAI.Ai.Hub
     {
         [Tooltip("Seconds between automatic world-state saves. 0 disables periodic saving. Leave at the " +
                  "default to use WorldStateManager's own always-on interval unmodified.")]
-        [SerializeField] private float saveIntervalSeconds = WorldStateManager.DefaultAutoSaveIntervalSeconds;
+        [SerializeField]
+        private float saveIntervalSeconds = WorldStateManager.DefaultAutoSaveIntervalSeconds;
 
         private void Start()
         {

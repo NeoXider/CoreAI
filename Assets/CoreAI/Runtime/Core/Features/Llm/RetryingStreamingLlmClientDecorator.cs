@@ -58,24 +58,31 @@ namespace CoreAI.Infrastructure.Llm
         public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
 
         /// <inheritdoc />
-        public bool SupportsNativeToolCallingForRole(string agentRoleId) =>
-            _inner.SupportsNativeToolCallingForRole(agentRoleId);
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return _inner.SupportsNativeToolCallingForRole(agentRoleId);
+        }
 
         /// <inheritdoc />
-        public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _inner.SetTools(tools);
+        }
 
         /// <inheritdoc />
         public Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
-            CancellationToken cancellationToken = default) =>
-            _inner.CompleteAsync(request, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            return _inner.CompleteAsync(request, cancellationToken);
+        }
 
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            for (int attempt = 0; ; attempt++)
+            for (int attempt = 0;; attempt++)
             {
                 bool committed = false;
                 bool retryablePreCommitFailure = false;
