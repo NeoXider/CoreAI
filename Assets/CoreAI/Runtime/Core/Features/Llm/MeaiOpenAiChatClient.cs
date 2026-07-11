@@ -339,7 +339,7 @@ namespace CoreAI.Infrastructure.Llm
                 _log.Info($"MeaiOpenAiChatClient: Response JSON={responseJson}", LogTag.Llm);
             }
 
-            return ParseResponse(responseJson);
+            return ParseResponse(responseJson, _log);
         }
 
         public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
@@ -1247,7 +1247,7 @@ namespace CoreAI.Infrastructure.Llm
                 return LlmErrorCode.QuotaExceeded;
             }
 
-            if (status == 429 || text.Contains("rate"))
+            if (status == 429 || ContainsRateLimitToken(text))
             {
                 return LlmErrorCode.RateLimited;
             }
@@ -1270,6 +1270,26 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return LlmErrorCode.ProviderError;
+        }
+
+        // WHY: / <summary>
+        // / Conservative rate-limit detection in (lowercased) error text: a bare "rate" substring also
+        // / matched "generate"/"moderate" and misclassified unrelated errors as RateLimited, so only
+        // / specific provider phrasings count. HTTP 429 is handled by status in <see cref="MapHttpStatus"/>.
+        // / </summary>
+        private static bool ContainsRateLimitToken(string lowerText)
+        {
+            return lowerText.Contains("rate limit") ||
+                   lowerText.Contains("rate-limit") ||
+                   lowerText.Contains("rate_limit") ||
+                   lowerText.Contains("ratelimit") ||
+                   lowerText.Contains("too many requests");
+        }
+
+        // WHY: / <summary>EditMode tests: HTTP status + body/detail text → typed error code classification.</summary>
+        internal static LlmErrorCode MapHttpStatusForTests(int status, string body, string fallback)
+        {
+            return MapHttpStatus(status, body, fallback);
         }
 
         private static string ExtractProviderMessage(string responseBody, string fallback)
@@ -1297,8 +1317,9 @@ namespace CoreAI.Infrastructure.Llm
             return fallback ?? responseBody;
         }
 
-        internal static MEAI.ChatResponse ParseResponse(string json)
+        internal static MEAI.ChatResponse ParseResponse(string json, ILog? log = null)
         {
+            ILog logger = log ?? NullLog.Instance;
             try
             {
                 JObject root = JObject.Parse(json);
@@ -1326,14 +1347,16 @@ namespace CoreAI.Infrastructure.Llm
                     foreach (JToken tc in toolCalls)
                     {
                         JObject func = tc["function"] as JObject;
-                        if (func != null)
+                        if (func == null)
                         {
-                            contents.Add(new MEAI.FunctionCallContent(
-                                tc["id"]?.ToString() ?? "",
-                                func["name"]?.ToString() ?? "",
-                                JsonConvert.DeserializeObject<Dictionary<string, object?>>(
-                                    func["arguments"]?.ToString() ?? "{}")));
+                            // WHY: Do not let a shapeless entry vanish silently - surface the loss.
+                            logger.Warn(
+                                "MeaiOpenAiChatClient: dropped non-streaming tool call without a 'function' object.",
+                                LogTag.Llm);
+                            continue;
                         }
+
+                        contents.Add(ParseNonStreamingToolCall(tc, func, logger));
                     }
 
                     response.Messages[0] = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents);
@@ -1346,10 +1369,47 @@ namespace CoreAI.Infrastructure.Llm
 
                 return response;
             }
-            catch
+            catch (Exception ex)
             {
+                logger.Warn(
+                    $"MeaiOpenAiChatClient: failed to parse non-streaming response JSON - returning empty assistant message: {ex.Message}",
+                    LogTag.Llm);
                 return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, ""));
             }
+        }
+
+        // WHY: / <summary>
+        // / Parses ONE non-streaming tool call. Malformed <c>arguments</c> JSON degrades only THIS
+        // / call: it is surfaced with the shared parse-error markers (same contract as the streaming
+        // / accumulator; <see cref="ToolExecutionPolicy"/> turns it into a failed call) instead of
+        // / wiping the assistant text and every other tool call in the message.
+        // / </summary>
+        private static MEAI.FunctionCallContent ParseNonStreamingToolCall(JToken tc, JObject func, ILog log)
+        {
+            string callId = tc["id"]?.ToString() ?? "";
+            string name = func["name"]?.ToString() ?? "";
+            string argsJson = func["arguments"]?.ToString() ?? "{}";
+
+            Dictionary<string, object?> args;
+            try
+            {
+                args = JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsJson)
+                       ?? new Dictionary<string, object?>();
+            }
+            catch (JsonException ex)
+            {
+                log.Warn(
+                    $"MeaiOpenAiChatClient: non-streaming tool call '{name}' (id='{callId}') had malformed arguments JSON - " +
+                    $"surfacing raw string via parse-error markers instead of dropping the whole message: {ex.Message}",
+                    LogTag.Llm);
+                args = new Dictionary<string, object?>
+                {
+                    { ToolCallArgumentMarkers.RawArgumentsKey, argsJson },
+                    { ToolCallArgumentMarkers.ParseErrorKey, true }
+                };
+            }
+
+            return new MEAI.FunctionCallContent(callId, name, args);
         }
 
         private static string StripRedactedThinkingBlock(string text)
@@ -1830,12 +1890,57 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (_pending.Count > 1)
                     {
+                        // WHY: Attribute the fragment when it is NOT genuinely ambiguous: only a call
+                        // whose accumulated argument JSON is still open can own more argument text,
+                        // so a single open call among the pending ones is an unambiguous target.
+                        PendingToolCall soleOpen = FindSoleOpenPendingCall();
+                        if (soleOpen != null)
+                        {
+                            return soleOpen;
+                        }
+
                         MarkAmbiguousMissingIndex(name, argumentsFragment);
                         return null;
                     }
                 }
 
                 return CreateEntry(index, stableId);
+            }
+
+            // WHY: / <summary>
+            // / True while the entry can still accept argument fragments: its accumulated arguments do
+            // / not yet form one complete JSON object. A completed entry gaining anything further would
+            // / only accumulate trailing junk, so it can never own a new fragment.
+            // / </summary>
+            private static bool IsOpenForMoreArguments(PendingToolCall pending)
+            {
+                string argsStr = pending.Arguments.ToString();
+                return argsStr.Length == 0 || !IsCompleteJsonObject(argsStr);
+            }
+
+            // WHY: / <summary>
+            // / Returns the single pending call whose arguments are still open, or null when zero or
+            // / several are open (attribution of an id/index-less fragment truly ambiguous).
+            // / </summary>
+            private PendingToolCall FindSoleOpenPendingCall()
+            {
+                PendingToolCall sole = null;
+                foreach (PendingToolCall pending in _pending)
+                {
+                    if (!IsOpenForMoreArguments(pending))
+                    {
+                        continue;
+                    }
+
+                    if (sole != null)
+                    {
+                        return null;
+                    }
+
+                    sole = pending;
+                }
+
+                return sole;
             }
 
             // WHY: / <summary>
@@ -1898,14 +2003,26 @@ namespace CoreAI.Infrastructure.Llm
 
             private void MarkAmbiguousMissingIndex(string name, string argumentsFragment)
             {
+                // WHY: Poison only calls that could plausibly own the lost fragment (arguments still
+                // open). Calls whose argument JSON is already complete cannot have been corrupted by
+                // it; failing them too used to break ALL parallel tool calls on providers that
+                // occasionally emit an index-less delta.
+                int poisoned = 0;
                 foreach (PendingToolCall pending in _pending)
                 {
+                    if (!IsOpenForMoreArguments(pending))
+                    {
+                        continue;
+                    }
+
                     pending.ForceParseError = true;
+                    poisoned++;
                 }
 
                 _log.Warn(
                     "MeaiOpenAiChatClient: streamed tool-call fragment had no id/index while multiple calls were pending; " +
-                    $"dropping ambiguous fragment instead of merging it (name='{name ?? ""}', args length={argumentsFragment?.Length ?? 0}).",
+                    $"dropping ambiguous fragment and marking {poisoned} still-open call(s) as parse errors " +
+                    $"(name='{name ?? ""}', args length={argumentsFragment?.Length ?? 0}).",
                     LogTag.Llm);
             }
 

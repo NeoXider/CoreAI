@@ -148,6 +148,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void TryExtractToolCallsFromText_UnconvertibleArguments_DropsOnlyThatCallAndLogsIt()
+        {
+            // The good call must survive; the call whose arguments cannot become a dictionary is
+            // dropped, and the drop must leave a log trace instead of being silently discarded.
+            const string text =
+                "{\"name\":\"good_tool\",\"arguments\":{\"a\":1}} " +
+                "{\"name\":\"bad_tool\",\"arguments\":\"not a json object\"}";
+            RecordingLog log = new();
+
+            bool found = SmartToolCallingChatClient.TryExtractToolCallsFromText(
+                text, out List<MEAI.FunctionCallContent> calls, out _, log);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count, "Only the convertible call may survive");
+            Assert.AreEqual("good_tool", calls[0].Name);
+            Assert.IsTrue(log.Warnings.Any(w => w.Contains("bad_tool")),
+                "The dropped text-extracted call must be logged, not silently discarded.");
+        }
+
+        [Test]
         public void ConcatenateAssistantTextContents_JoinsMultipleTextParts()
         {
             MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
@@ -885,6 +905,31 @@ namespace CoreAI.Tests.EditMode
             }
 
             public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// Logger that records warning lines so tests can assert on dropped-call diagnostics.
+        /// </summary>
+        private sealed class RecordingLog : ILog
+        {
+            public List<string> Warnings { get; } = new();
+
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                Warnings.Add(message);
+            }
+
+            public void Error(string message, string tag = null)
             {
             }
         }

@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-11 audit wave)
+
+- **Lua sandbox: nested guarded calls can no longer disarm the outer guard.** `LuaCsExecutionGuard` keeps a
+  per-`LuaState` stack of installed hooks; leaving a nested `mods_call` restores the caller's hook instead of
+  removing it, so step/time/alloc budgets stay armed across direct and indirect (`A→B→A`) cross-mod calls.
+- **Lua mods: transaction scope is reset after every handler/timer/load.** `LuaCsModRuntime` now accepts the
+  shared `ILuaTransactionScope` and resets it in `finally`, so a handler dying between `coreai_world_begin`
+  and commit no longer leaks an open transaction that silently swallows later world commands.
+- **Mod headers: tolerant capability parsing.** Unknown capability tokens are skipped (`Enum.TryParse`,
+  fail-closed to `None` when nothing parses) and `ResourcesBundledModSource` isolates per-mod load failures,
+  so one bad header no longer breaks seeding of all bundled mods.
+- **Non-streaming responses survive one bad tool call.** `ParseResponse` degrades only the malformed call to
+  the parse-error marker contract; the text and remaining calls are preserved (previously the whole message
+  was silently replaced with an empty one).
+- **Streaming: an index-less tool-call delta no longer poisons every pending call.** The fragment is
+  attributed to the sole open call when unambiguous; only genuinely ambiguous open calls are failed, and
+  completed calls are never touched.
+- **Error classification: `rate` substring false positives removed.** Rate-limit detection now requires
+  explicit signals (`rate limit`, `429` status, `too many requests`, `quota`) instead of matching
+  "gene**rate**"/"mode**rate**".
+- **Circuit breaker: half-open admits exactly one probe** (concurrent calls short-circuit) and an abandoned
+  or cancelled stream releases the probe slot without being misclassified as a backend failure; a stream
+  abandoned after a terminal error chunk still counts as a failure.
+- **Tool result classification: top-level `isError: true` (MCP contract) counts as failure**; nested `error`
+  fields in legitimate tool payloads never did and still don't (regression-pinned by test).
+- **Text-extracted tool calls: quoted examples are no longer executed.** The extractor now requires exact
+  call shape (top-level `name` string + `arguments` object), skips backtick/quote-cited spans and fenced
+  code blocks, and preserves parentheses inside quoted arguments via balanced scanning (previously a lazy
+  regex truncated them and dropped the call).
+- **Reasoning no longer persists into conversation history.** Assistant messages are run through the
+  think-block filter before `AppendChatMessage`, so multi-kilobyte reasoning blobs stop inflating every
+  subsequent turn's context.
+- **`InGameLlmChatService`: overlapping requests are serialized** (snapshot → LLM → append under one gate),
+  so a second response always sees the first turn and history order cannot interleave.
+
 ## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
 
 - **`AgentBuilder.Build()` auto-applies to the global policy.** When `CoreAIAgent.Policy` exists, `Build()`

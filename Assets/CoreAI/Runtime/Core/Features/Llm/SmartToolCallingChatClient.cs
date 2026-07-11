@@ -182,7 +182,8 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         string assistantText = ConcatenateAssistantTextContents(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
-                            TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText))
+                            TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText,
+                                _logger))
                         {
                             hasTextExtraction = true;
                             if (_settings.LogMeaiToolCallingSteps)
@@ -414,7 +415,8 @@ namespace CoreAI.Infrastructure.Llm
         internal static bool TryExtractToolCallsFromText(
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
-            out string cleanedText)
+            out string cleanedText,
+            ILog logger = null)
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
             cleanedText = text ?? string.Empty;
@@ -442,8 +444,14 @@ namespace CoreAI.Infrastructure.Llm
                     string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
                     toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    // WHY: A silently dropped extraction leaves the model believing it called the tool
+                    // while nothing executed - leave a trace of exactly what was discarded and why.
+                    (logger ?? NullLog.Instance).Warn(
+                        $"[SmartToolCall] Dropped text-extracted tool call '{m.Name}': arguments JSON could not be " +
+                        $"converted ({ex.Message}). Raw arguments: {m.ArgumentsJson}",
+                        LogTag.Llm);
                 }
             }
 

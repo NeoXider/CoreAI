@@ -1172,7 +1172,10 @@ namespace CoreAI.Ai
                 // payload) and on demand via the game_state tool, so history stays a clean conversation.
                 _memoryStore.AppendChatMessage(bundle.RoleId, "user", task.Hint ?? string.Empty,
                     bundle.RoleConfig.PersistChatHistory);
-                _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
+                // WHY: Persist the assistant turn WITHOUT hidden <think> reasoning: chain-of-thought is
+                // per-turn scratch space (observed up to ~16k chars) that bloats the durable store and
+                // re-enters every future prompt. The UI clamp is visual only; strip at the source.
+                _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", StripReasoningForHistory(content),
                     bundle.RoleConfig.PersistChatHistory);
                 string toolResultsBlock = BuildToolResultsMemoryBlock(
                     result?.ExecutedToolCalls,
@@ -1200,6 +1203,30 @@ namespace CoreAI.Ai
             RecordTokenObservation(bundle, result);
             RecordTrace(bundle, result, content, null);
             return content;
+        }
+
+        /// <summary>
+        /// Removes hidden reasoning (<c>&lt;think&gt;...&lt;/think&gt;</c> blocks, orphan close tags and
+        /// unterminated blocks) from assistant content before it is persisted into conversation history.
+        /// Reuses <see cref="ThinkBlockStreamFilter"/> in one-shot mode so persist-time semantics match
+        /// the streaming display filter. Returns the input unchanged when no think markers are present.
+        /// </summary>
+        internal static string StripReasoningForHistory(string content)
+        {
+            if (string.IsNullOrEmpty(content) ||
+                (content.IndexOf("<think", StringComparison.OrdinalIgnoreCase) < 0 &&
+                 content.IndexOf("</think", StringComparison.OrdinalIgnoreCase) < 0))
+            {
+                return content;
+            }
+
+            ThinkBlockStreamFilter filter = new();
+            string visible = (filter.ProcessChunk(content) + filter.Flush()).Trim();
+
+            // WHY: A whole-message reasoning blob strips to empty; persist the empty marker rather than
+            // the blob — ConversationHistoryPruner already treats reasoning-only assistant turns as
+            // droppable, and re-persisting the raw blob was exactly the incident being fixed.
+            return visible;
         }
 
         private static Microsoft.Extensions.AI.ChatRole ResolveChatHistoryRole(string role)

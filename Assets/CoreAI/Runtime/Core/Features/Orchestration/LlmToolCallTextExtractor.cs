@@ -92,6 +92,13 @@ namespace CoreAI.Ai
                     continue;
                 }
 
+                // WHY: A tool-call JSON wrapped in backticks or matching quotes is the model QUOTING
+                // an example (inline code / citation), not issuing a command — never execute those.
+                if (IsCitedSpan(text, span.Start, span.Length))
+                {
+                    continue;
+                }
+
                 string name;
                 string argsJson;
                 try
@@ -208,7 +215,10 @@ namespace CoreAI.Ai
         /// <summary>
         /// Detects models that emit memory writes as pseudo key/value syntax
         /// instead of JSON tool calls, e.g. <c>Action=write content="exam on June 15"</c>. Map to the
-        /// <c>memory</c> tool so the pipeline can persist and strip the noise.
+        /// <c>memory</c> tool so the pipeline can persist and strip the noise. Only command-shaped
+        /// occurrences count: the pseudo syntax must run to the end of its line (an optional prose
+        /// prefix is allowed) and must not sit inside a fenced code block, so quoting the syntax in
+        /// running prose never synthesizes a memory write.
         /// </summary>
         private static bool TryExtractMemoryPseudoWriteSyntax(string text, out List<Match> matches,
             out string cleanedText)
@@ -220,15 +230,18 @@ namespace CoreAI.Ai
                 return false;
             }
 
+            // WHY: Match on the fence-stripped copy so an Action=write shown inside ```...``` as an
+            // example is never executed; offsets stay valid because StripCodeBlocks preserves length.
+            string search = StripCodeBlocks(text);
             System.Text.RegularExpressions.Match actionWrite =
-                Regex.Match(text, @"\b[Aa]ction\s*=\s*write\b");
+                Regex.Match(search, @"\b[Aa]ction\s*=\s*write\b");
             if (!actionWrite.Success)
             {
                 return false;
             }
 
             int aw = actionWrite.Index;
-            string tailFromAction = text.Substring(aw);
+            string tailFromAction = search.Substring(aw);
             System.Text.RegularExpressions.Match contentMatch = Regex.Match(
                 tailFromAction,
                 @"\bcontent\s*=\s*(?<q>[""'])(?<v>(?:\\.|(?!\k<q>).)*)\k<q>",
@@ -246,12 +259,29 @@ namespace CoreAI.Ai
             }
 
             int spanEnd = aw + contentMatch.Index + contentMatch.Length;
-            string tail = text.Substring(spanEnd);
+            string tail = search.Substring(spanEnd);
             System.Text.RegularExpressions.Match noise =
                 Regex.Match(tail, @"^\s*(?:\w+\s*=\s*[""'][^""']*[""']\s*)+");
             if (noise.Success)
             {
                 spanEnd += noise.Length;
+            }
+
+            // WHY: A command-shaped pseudo write ends its line. Trailing prose on the same line means
+            // the model was talking ABOUT the syntax ("...Action=write content=\"x\" and it worked"),
+            // not issuing it — synthesizing a write from quoted text overwrote real memories.
+            int lineEnd = search.IndexOf('\n', spanEnd);
+            if (lineEnd < 0)
+            {
+                lineEnd = search.Length;
+            }
+
+            for (int k = spanEnd; k < lineEnd; k++)
+            {
+                if (!char.IsWhiteSpace(search[k]))
+                {
+                    return false;
+                }
             }
 
             while (spanEnd > aw && spanEnd <= text.Length && char.IsWhiteSpace(text[spanEnd - 1]))
@@ -308,7 +338,18 @@ namespace CoreAI.Ai
             return result;
         }
 
-        /// <summary>Quick textual heuristic before full JSON parsing.</summary>
+        // WHY: Real tool names are plain identifiers (memory, read_skill). Schema placeholders a model
+        // quotes back — "<tool_name>", "tool name here" — must never reach execution.
+        private static readonly Regex ToolNameShapeRegex = new(
+            @"^[A-Za-z][A-Za-z0-9_\-.]*$",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// Validates that <paramref name="json"/> is a parseable JSON object with the exact tool-call
+        /// shape: a top-level <c>"name"</c> string that looks like a tool identifier plus an
+        /// <c>"arguments"</c> object (or <c>"arguments_json"</c> string). A cheap substring check runs
+        /// first so plain prose never pays for a JSON parse.
+        /// </summary>
         public static bool LooksLikeToolCallJson(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
@@ -317,8 +358,46 @@ namespace CoreAI.Ai
             }
 
             // Accept both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity emits the latter).
-            return json.Contains("\"name\"") &&
-                   (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
+            if (!json.Contains("\"name\"") ||
+                (!json.Contains("\"arguments\"") && !json.Contains("\"arguments_json\"")))
+            {
+                return false;
+            }
+
+            // WHY: Substring hits alone treated schema examples quoted by the model as commands.
+            // Require the exact parsed shape before a candidate is considered executable.
+            try
+            {
+                JObject obj = JObject.Parse(json);
+                JToken nameToken = obj["name"];
+                JToken args = obj["arguments"] ?? obj["arguments_json"];
+                return nameToken != null &&
+                       nameToken.Type == JTokenType.String &&
+                       ToolNameShapeRegex.IsMatch(nameToken.ToString().Trim()) &&
+                       args != null &&
+                       (args.Type == JTokenType.Object || args.Type == JTokenType.String);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// True when the span in <paramref name="text"/> is immediately wrapped in backticks or a
+        /// matching quote pair — prose markers that indicate the JSON is quoted as an example.
+        /// </summary>
+        private static bool IsCitedSpan(string text, int start, int length)
+        {
+            char prev = start > 0 ? text[start - 1] : '\0';
+            int end = start + length;
+            char next = end < text.Length ? text[end] : '\0';
+            if (prev == '`')
+            {
+                return true;
+            }
+
+            return (prev == '"' || prev == '\'') && next == prev;
         }
 
         /// <summary>
@@ -406,9 +485,9 @@ namespace CoreAI.Ai
         /// <c>read_skill("Alchemy")</c> or <c>read_skill(Crafting)</c> or
         /// <c>call_skill_tool("get_recipes", "{\"item\":\"sword\"}")</c>
         /// </summary>
-        private static readonly Regex FunctionCallSyntaxRegex = new(
-            @"\b([a-z_][a-z0-9_]*)\s*\(\s*(.*?)\s*\)",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        private static readonly Regex FunctionCallHeadRegex = new(
+            @"^([a-z_][a-z0-9_]*)\s*\(",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static bool TryExtractFunctionCallSyntax(string text, out List<Match> matches, out string cleanedText)
         {
@@ -421,14 +500,24 @@ namespace CoreAI.Ai
 
             // Only match if the ENTIRE trimmed text looks like a function call (not embedded in prose).
             string trimmed = text.Trim();
-            System.Text.RegularExpressions.Match m = FunctionCallSyntaxRegex.Match(trimmed);
-            if (!m.Success || m.Index != 0 || m.Length < trimmed.Length * 0.8)
+            System.Text.RegularExpressions.Match head = FunctionCallHeadRegex.Match(trimmed);
+            if (!head.Success)
             {
                 return false;
             }
 
-            string funcName = m.Groups[1].Value;
-            string rawArgs = m.Groups[2].Value.Trim();
+            // WHY: The previous lazy (.*?) regex stopped at the FIRST ')', silently truncating
+            // arguments that legitimately contain parentheses — lookup_item("Flame (Fire) Sword")
+            // lost half its argument. Scan for the balanced closing paren, respecting quotes.
+            int openParen = head.Length - 1;
+            int closeParen = FindBalancedCloseParen(trimmed, openParen);
+            if (closeParen < 0 || closeParen + 1 < trimmed.Length * 0.8)
+            {
+                return false;
+            }
+
+            string funcName = head.Groups[1].Value;
+            string rawArgs = trimmed.Substring(openParen + 1, closeParen - openParen - 1).Trim();
 
             Dictionary<string, object> argsDict = new();
             if (!string.IsNullOrEmpty(rawArgs))
@@ -585,6 +674,51 @@ namespace CoreAI.Ai
             }
 
             return s;
+        }
+
+        /// <summary>
+        /// Returns the index of the parenthesis that balances <paramref name="openIndex"/>, or
+        /// <c>-1</c> when unbalanced. Parentheses inside single/double-quoted strings are ignored,
+        /// matching the quote handling of <see cref="SplitFunctionArgs"/>.
+        /// </summary>
+        private static int FindBalancedCloseParen(string s, int openIndex)
+        {
+            int depth = 0;
+            bool inQuote = false;
+            char quoteChar = '"';
+            for (int i = openIndex; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (inQuote)
+                {
+                    if (c == quoteChar && s[i - 1] != '\\')
+                    {
+                        inQuote = false;
+                    }
+
+                    continue;
+                }
+
+                if (c == '"' || c == '\'')
+                {
+                    inQuote = true;
+                    quoteChar = c;
+                }
+                else if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        return i;
+                    }
+                }
+            }
+
+            return -1;
         }
 
         private static string[] SplitFunctionArgs(string argsStr)

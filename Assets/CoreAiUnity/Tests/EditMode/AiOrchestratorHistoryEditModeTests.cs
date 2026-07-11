@@ -436,6 +436,48 @@ namespace CoreAI.Tests.EditMode
                 "CompactSummary should persist the heading plus one compact line for one tool call.");
         }
 
+        [Test]
+        public async Task RunTaskAsync_PersistedAssistantHistory_StripsThinkReasoning()
+        {
+            // FINDING-7: hidden reasoning (observed up to ~16k chars) was persisted verbatim into
+            // conversation history; the chat panel clamp is visual only. Persisting must strip it.
+            string reasoning = "<think>" + new string('r', 16000) + "</think>";
+            TestMemoryStore memory = new();
+            ToolTraceLlmClient llm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = reasoning + "Visible answer"
+            });
+            AgentMemoryPolicy policy = BuildToolResultPolicy("think_role");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            string result = await orchestrator.RunTaskAsync(new AiTaskRequest
+                { RoleId = "think_role", Hint = "hi" });
+
+            StringAssert.Contains("Visible answer", result);
+            Assert.AreEqual("assistant", memory.Appended[1].Role);
+            Assert.AreEqual("Visible answer", memory.Appended[1].Content,
+                "Persisted assistant history must contain only the visible answer.");
+            Assert.That(memory.Appended[1].Content, Does.Not.Contain("<think>"));
+        }
+
+        [Test]
+        public void StripReasoningForHistory_HandlesThinkBlockShapes()
+        {
+            Assert.AreEqual("Visible",
+                AiOrchestrator.StripReasoningForHistory("<think>hidden</think>Visible"));
+            Assert.AreEqual("answer",
+                AiOrchestrator.StripReasoningForHistory("orphan hidden</think>answer"),
+                "Orphan close tag: leading text is hidden reasoning.");
+            Assert.AreEqual("",
+                AiOrchestrator.StripReasoningForHistory("<think>" + new string('x', 16000)),
+                "Unterminated reasoning blob must not be persisted.");
+
+            string plain = "No reasoning here.";
+            Assert.AreSame(plain, AiOrchestrator.StripReasoningForHistory(plain),
+                "Content without think markers is returned unchanged (no allocation).");
+        }
+
         private static AgentMemoryPolicy BuildToolResultPolicy(string roleId)
         {
             AgentMemoryPolicy policy = new();

@@ -161,6 +161,156 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, inner.StreamCallCount, "Open breaker must not start a new inner stream.");
         }
 
+        [Test]
+        public async Task HalfOpen_ConcurrentCalls_OnlyOneProbeReachesInner()
+        {
+            GatedLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            Task<LlmCompletionResult> trip = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Timeout));
+            await trip;
+            Assert.AreEqual("Open", breaker.StateName);
+
+            clock.Advance(1000);
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req());
+            Assert.AreEqual(2, inner.CallCount, "The half-open probe must reach the inner client.");
+
+            // While the probe is still in flight, concurrent calls must be short-circuited.
+            LlmCompletionResult concurrent = await breaker.CompleteAsync(Req());
+            Assert.IsFalse(concurrent.Ok);
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, concurrent.ErrorCode);
+            Assert.AreEqual(2, inner.CallCount,
+                "Half-open must admit exactly ONE probe; concurrent calls must NOT burst onto the backend.");
+
+            inner.Pending.Dequeue().SetResult(Success());
+            LlmCompletionResult probeResult = await probe;
+            Assert.IsTrue(probeResult.Ok);
+            Assert.AreEqual("Closed", breaker.StateName, "A successful probe closes the breaker.");
+        }
+
+        [Test]
+        public async Task HalfOpen_CancelledProbe_ReleasesProbeSlot_WithoutCountingFailure()
+        {
+            GatedLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            Task<LlmCompletionResult> trip = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetResult(Fail(LlmErrorCode.Timeout));
+            await trip;
+            Assert.AreEqual("Open", breaker.StateName);
+
+            clock.Advance(1000);
+            Task<LlmCompletionResult> probe = breaker.CompleteAsync(Req());
+            inner.Pending.Dequeue().SetCanceled();
+            try
+            {
+                await probe;
+                Assert.Fail("A cancelled probe must rethrow the cancellation.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual("HalfOpen", breaker.StateName,
+                "Cancellation is caller intent: it must neither re-open (failure) nor close (success) the breaker.");
+
+            // The probe slot must be free again: the next call becomes the new probe.
+            Task<LlmCompletionResult> retry = breaker.CompleteAsync(Req());
+            Assert.AreEqual(3, inner.CallCount,
+                "After a cancelled probe the slot must be released so the next call can probe.");
+            inner.Pending.Dequeue().SetResult(Success());
+            Assert.IsTrue((await retry).Ok);
+            Assert.AreEqual("Closed", breaker.StateName);
+        }
+
+        [Test]
+        public async Task Streaming_ConsumerAbandonsHealthyStream_NotCountedAsFailure()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 2, 1000, clock.NowMs);
+
+            // Abandon several healthy streams mid-way (user pressed stop) — with threshold 2, any
+            // misclassification of abandonment as failure would trip the breaker open.
+            for (int i = 0; i < 4; i++)
+            {
+                inner.NextStreams.Enqueue(new[]
+                {
+                    new LlmStreamChunk { Text = "chunk-1" },
+                    new LlmStreamChunk { Text = "chunk-2", IsDone = true }
+                });
+                await foreach (LlmStreamChunk _ in breaker.CompleteStreamingAsync(Req()))
+                {
+                    break; // consumer abandons after the first chunk
+                }
+            }
+
+            Assert.AreEqual("Closed", breaker.StateName,
+                "Abandoned healthy streams carry no health verdict and must never trip the breaker.");
+        }
+
+        [Test]
+        public async Task Streaming_HalfOpenProbeAbandoned_ReleasesProbeSlot_ThenNextProbeCloses()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            inner.NextResults.Enqueue(Fail(LlmErrorCode.BackendUnavailable));
+            await breaker.CompleteAsync(Req());
+            Assert.AreEqual("Open", breaker.StateName);
+
+            clock.Advance(1000);
+            inner.NextStreams.Enqueue(new[]
+            {
+                new LlmStreamChunk { Text = "chunk-1" },
+                new LlmStreamChunk { Text = "chunk-2", IsDone = true }
+            });
+            await foreach (LlmStreamChunk _ in breaker.CompleteStreamingAsync(Req()))
+            {
+                break; // probe abandoned before the stream ends
+            }
+
+            Assert.AreEqual("HalfOpen", breaker.StateName,
+                "An abandoned probe stream is no verdict: stay half-open, do not re-open or close.");
+
+            // The released probe slot lets the next (drained) stream act as the new probe and close.
+            inner.NextStreams.Enqueue(new[] { new LlmStreamChunk { Text = "ok", IsDone = true } });
+            await Drain(breaker.CompleteStreamingAsync(Req()));
+            Assert.AreEqual("Closed", breaker.StateName,
+                "A clean probe stream after the abandoned one must close the breaker.");
+            Assert.AreEqual(2, inner.StreamCallCount);
+        }
+
+        [Test]
+        public async Task Streaming_AbandonedAfterTerminalErrorChunk_StillCountsAsFailure()
+        {
+            ProgrammableLlmClient inner = new();
+            ManualClock clock = new();
+            CircuitBreakerLlmClientDecorator breaker = new(inner, 1, 1000, clock.NowMs);
+
+            // The error chunk is followed by more chunks the consumer never reads: the failure
+            // verdict already exists and must be recorded even though the stream was abandoned.
+            inner.NextStreams.Enqueue(new[]
+            {
+                ErrChunk(LlmErrorCode.BackendUnavailable),
+                new LlmStreamChunk { Text = "never-read", IsDone = true }
+            });
+            await foreach (LlmStreamChunk c in breaker.CompleteStreamingAsync(Req()))
+            {
+                if (!string.IsNullOrEmpty(c.Error))
+                {
+                    break;
+                }
+            }
+
+            Assert.AreEqual("Open", breaker.StateName,
+                "A terminal error chunk seen before abandonment is a real failure and must trip a threshold of 1.");
+        }
+
         // ---- helpers ----
 
         private static LlmCompletionRequest Req()
@@ -206,6 +356,35 @@ namespace CoreAI.Tests.EditMode
             public void Advance(long ms)
             {
                 _ms += ms;
+            }
+        }
+
+        /// <summary>
+        /// Inner client whose calls stay in flight until the test completes them explicitly —
+        /// lets tests hold a half-open probe open while issuing concurrent calls deterministically.
+        /// </summary>
+        private sealed class GatedLlmClient : ILlmClient
+        {
+            public readonly Queue<TaskCompletionSource<LlmCompletionResult>> Pending = new();
+            public int CallCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                CallCount++;
+                TaskCompletionSource<LlmCompletionResult> tcs =
+                    new(TaskCreationOptions.RunContinuationsAsynchronously);
+                Pending.Enqueue(tcs);
+                return tcs.Task;
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                yield return new LlmStreamChunk { Text = "ok", IsDone = true };
             }
         }
 

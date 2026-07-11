@@ -694,6 +694,143 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(ok, "Prose with parentheses should NOT trigger function-call extraction.");
         }
 
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_ParensInsideQuotedArgumentPreserved()
+        {
+            // FINDING-2c: the old lazy (.*?) regex stopped at the first ')' and silently
+            // truncated (then rejected) arguments containing parentheses.
+            string input = "lookup_item(\"Flame (Fire) Sword\")";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Parentheses inside a quoted argument must not break extraction.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("lookup_item", matches[0].Name);
+            StringAssert.Contains("Flame (Fire) Sword", matches[0].ArgumentsJson);
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_ParensInsideKeywordValuePreserved()
+        {
+            string input = "world_command(action='say', text='hello (world)')";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("world_command", matches[0].Name);
+            Dictionary<string, object> args = Newtonsoft.Json.JsonConvert
+                .DeserializeObject<Dictionary<string, object>>(matches[0].ArgumentsJson);
+            Assert.AreEqual("say", args["action"]);
+            Assert.AreEqual("hello (world)", args["text"],
+                "The value must keep everything up to the balanced closing paren.");
+        }
+
+        // ------------ FINDING-2a: quoted schema examples must not execute --------
+
+        [Test]
+        public void PortableExtractor_BacktickQuotedSchemaExample_NotExecuted()
+        {
+            string input =
+                "Use `{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}` to clear your memory.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Inline-code (backtick) JSON is a citation, not a command.");
+            Assert.AreEqual(0, matches.Count);
+            Assert.AreEqual(input, LlmToolCallTextExtractor.StripForDisplay(input),
+                "Cited JSON must stay visible in the display text.");
+        }
+
+        [Test]
+        public void PortableExtractor_QuoteWrappedSchemaExample_NotExecuted()
+        {
+            string input =
+                "The docs show '{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}' as the format.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "JSON wrapped in matching quotes is a citation, not a command.");
+        }
+
+        [Test]
+        public void PortableExtractor_FencedCodeBlockExample_NotExecuted()
+        {
+            string input =
+                "Example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}\n```\nDone.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "JSON inside fenced code blocks must be ignored.");
+        }
+
+        [Test]
+        public void PortableExtractor_PlaceholderToolName_NotExecuted()
+        {
+            // A model quoting the schema with a placeholder name must not trigger execution.
+            string input = "Reply with {\"name\":\"<tool_name>\",\"arguments\":{}} to call a tool.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Placeholder tool names are schema examples, not commands.");
+            Assert.IsFalse(LlmToolCallTextExtractor.LooksLikeToolCallJson(
+                "{\"name\":\"<tool_name>\",\"arguments\":{}}"));
+        }
+
+        [Test]
+        public void PortableExtractor_CitedExamplePlusRealCall_OnlyRealCallExecuted()
+        {
+            string input =
+                "Example: `{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}` and now " +
+                "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"real\"}}";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual(1, matches.Count, "Only the non-cited call should be extracted.");
+            StringAssert.Contains("real", matches[0].ArgumentsJson);
+            StringAssert.Contains("`", cleaned, "The cited example must stay in the cleaned text.");
+        }
+
+        // ------------ FINDING-2b: pseudo Action=write only when command-shaped --------
+
+        [Test]
+        public void PortableExtractor_PseudoWrite_WholeMessageOrProsePrefix_StillExtracted()
+        {
+            bool ok = LlmToolCallTextExtractor.TryExtract(
+                "Okay. Action=write content=\"hello\"",
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Command-shaped pseudo write ending the line must still map to memory.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("memory", matches[0].Name);
+            StringAssert.Contains("hello", matches[0].ArgumentsJson);
+            StringAssert.Contains("Okay.", cleaned);
+        }
+
+        [Test]
+        public void PortableExtractor_PseudoWriteQuotedInProse_NotExecuted()
+        {
+            // The model talks ABOUT the syntax mid-sentence — synthesizing a write here
+            // overwrote real memories with quoted text.
+            string input =
+                "Earlier I ran Action=write content=\"exam on June 15\" and it worked fine.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Pseudo write followed by prose on the same line is a citation.");
+        }
+
+        [Test]
+        public void PortableExtractor_PseudoWriteInsideCodeFence_NotExecuted()
+        {
+            string input = "Use this syntax:\n```\nAction=write content=\"example\"\n```";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Pseudo write inside a fenced code block is an example.");
+        }
+
         // ------------ Non-streaming: arguments_json key through SmartToolCallingChatClient --------
 
         [Test]

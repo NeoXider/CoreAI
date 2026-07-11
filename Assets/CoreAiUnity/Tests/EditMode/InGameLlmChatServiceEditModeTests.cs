@@ -158,6 +158,35 @@ namespace CoreAI.Tests.EditMode
 
         #endregion
 
+        #region Overlapping Requests Tests
+
+        [Test]
+        public async Task SendPlayerMessageAsync_OverlappingRequests_SecondSeesFirstTurn()
+        {
+            // FINDING-15: запросы, стартовавшие внахлёст, снимали снапшот истории до того,
+            // как первый ход был дописан — второй запрос не видел первую пару сообщений.
+            BlockingStubLlmClient llm = new();
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts);
+
+            Task<LlmCompletionResult> first = service.SendPlayerMessageAsync("first");
+            Task<LlmCompletionResult> second = service.SendPlayerMessageAsync("second");
+
+            llm.ReleaseOne();
+            llm.ReleaseOne();
+            LlmCompletionResult[] results = await Task.WhenAll(first, second);
+
+            Assert.IsTrue(results[0].Ok);
+            Assert.IsTrue(results[1].Ok);
+            Assert.AreEqual(2, llm.HistoryCounts.Count);
+            Assert.AreEqual(1, llm.HistoryCounts[0], "First request sees only its own message.");
+            Assert.AreEqual(3, llm.HistoryCounts[1],
+                "Second request must see the completed first turn (user+assistant) plus its own message.");
+            Assert.AreEqual(2, service.HistoryPairCount);
+        }
+
+        #endregion
+
         #region Rate Limiter Tests
 
         [Test]
@@ -301,6 +330,30 @@ namespace CoreAI.Tests.EditMode
                     Ok = true,
                     Content = _response
                 });
+            }
+        }
+
+        private sealed class BlockingStubLlmClient : ILlmClient
+        {
+            private readonly SemaphoreSlim _release = new(0);
+            public readonly List<int> HistoryCounts = new();
+
+            public void ReleaseOne()
+            {
+                _release.Release();
+            }
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                lock (HistoryCounts)
+                {
+                    HistoryCounts.Add(request.ChatHistory?.Count ?? 0);
+                }
+
+                await _release.WaitAsync(cancellationToken);
+                return new LlmCompletionResult { Ok = true, Content = "reply" };
             }
         }
 

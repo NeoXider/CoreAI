@@ -116,6 +116,43 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ParseCompletion_MalformedToolCallArguments_DegradesOnlyThatCall()
+        {
+            // One bad tool call must NOT wipe the assistant text and the other calls: the good call
+            // parses normally, the bad one surfaces via the shared parse-error markers (same
+            // contract as the streaming accumulator; ToolExecutionPolicy fails just that call).
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"doing it\",\"tool_calls\":[" +
+                "{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"good\",\"arguments\":\"{\\\"a\\\":1}\"}}," +
+                "{\"id\":\"c2\",\"type\":\"function\",\"function\":{\"name\":\"bad\",\"arguments\":\"{\\\"broken\\\":\"}}" +
+                "]}}]}";
+
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+
+            Assert.AreEqual("doing it", r.Text, "Assistant text must survive a bad tool call.");
+            List<MEAI.FunctionCallContent> calls =
+                r.Messages[0].Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count, "Both tool calls must survive; only the bad one degrades.");
+
+            MEAI.FunctionCallContent good = calls.Single(c => c.Name == "good");
+            Assert.AreEqual(1L, System.Convert.ToInt64(good.Arguments["a"]));
+            Assert.IsFalse(good.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests));
+
+            MEAI.FunctionCallContent bad = calls.Single(c => c.Name == "bad");
+            Assert.IsTrue(bad.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests),
+                "The malformed call must carry the parse-error marker, not silently vanish.");
+            Assert.AreEqual("{\"broken\":",
+                bad.Arguments[MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests]);
+        }
+
+        [Test]
+        public void ParseCompletion_WholeResponseMalformed_ReturnsEmptyMessage()
+        {
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse("this is not json");
+            Assert.AreEqual("", r.Text);
+        }
+
+        [Test]
         public void IsSseDoneLine_DataDone_ReturnsTrue()
         {
             Assert.IsTrue(MeaiOpenAiChatClient.IsSseDoneLineForTests("data: [DONE]"));
@@ -471,8 +508,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void AccumulateToolCallDeltas_MissingIndexWithoutIdWhileMultiplePending_MarksParseError()
+        public void AccumulateToolCallDeltas_MissingIndexWhileAllPendingComplete_DropsFragmentKeepsCalls()
         {
+            // Both pending calls already hold COMPLETE argument JSON, so neither can own the
+            // id/index-less fragment: it is dropped, and both calls must survive UNPOISONED
+            // (previously ALL pending calls were force-failed, breaking parallel tool calling).
             string[] chunks =
             {
                 "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}",
@@ -485,9 +525,61 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(update);
             List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
             Assert.AreEqual(2, calls.Count);
-            Assert.IsTrue(calls.All(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)));
-            Assert.IsTrue(calls.All(c =>
-                c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests)));
+            Assert.IsFalse(calls.Any(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)),
+                "Calls with complete arguments cannot own the lost fragment and must not be poisoned.");
+            Assert.AreEqual(1L, Convert.ToInt64(calls.Single(c => c.Name == "alpha").Arguments["x"]));
+            Assert.AreEqual(2L, Convert.ToInt64(calls.Single(c => c.Name == "beta").Arguments["y"]));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_MissingIndexWithSoleOpenCall_AttributesFragmentToIt()
+        {
+            // Exactly one pending call still has OPEN argument JSON: the id/index-less fragment can
+            // only belong to it, so it must be attributed there and both calls must materialize clean.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"2}\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count);
+            Assert.IsFalse(calls.Any(c => c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)),
+                "An unambiguous index-less fragment must be attributed, not poison the pending calls.");
+            Assert.AreEqual(1L, Convert.ToInt64(calls.Single(c => c.Name == "alpha").Arguments["x"]));
+            Assert.AreEqual(2L, Convert.ToInt64(calls.Single(c => c.Name == "beta").Arguments["y"]),
+                "The fragment must complete the sole open call's arguments.");
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_MissingIndexWithMultipleOpenCalls_PoisonsOnlyOpenOnes()
+        {
+            // Two calls open, one complete: attribution is genuinely ambiguous between the OPEN
+            // calls only - they get parse-error markers, the completed call must survive clean.
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"id\":\"call_c\",\"function\":{\"name\":\"gamma\",\"arguments\":\"{\\\"z\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"unowned\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            List<MEAI.FunctionCallContent> calls = update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(3, calls.Count);
+            MEAI.FunctionCallContent alpha = calls.Single(c => c.Name == "alpha");
+            Assert.IsFalse(alpha.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests),
+                "The completed call cannot own the fragment and must not be poisoned.");
+            Assert.AreEqual(1L, Convert.ToInt64(alpha.Arguments["x"]));
+            Assert.IsTrue(calls.Where(c => c.Name != "alpha").All(c =>
+                    c.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests)),
+                "Both still-open calls are genuinely ambiguous owners and must surface parse errors.");
         }
 
         [Test]

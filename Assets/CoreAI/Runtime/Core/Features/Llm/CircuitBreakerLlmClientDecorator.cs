@@ -44,6 +44,7 @@ namespace CoreAI.Infrastructure.Llm
         private State _state = State.Closed;
         private int _consecutiveFailures;
         private long _openedAtMs;
+        private bool _halfOpenProbeInFlight;
 
         /// <param name="inner">The client to protect.</param>
         /// <param name="failureThreshold">Consecutive transient failures that trip the breaker (min 1).</param>
@@ -89,25 +90,40 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            LlmCompletionResult result;
+            bool classified = false;
             try
             {
-                result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // WHY: Cancellation is caller intent, not a backend fault — do not count it, do not swallow it.
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // WHY: An unexpected throw from the inner client is treated as a transient backend fault.
-                RecordFailure();
-                throw new LlmClientException(ex.Message, LlmErrorCode.ProviderError);
-            }
+                LlmCompletionResult result;
+                try
+                {
+                    result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // WHY: Cancellation is caller intent, not a backend fault — do not count it, do not swallow it.
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // WHY: An unexpected throw from the inner client is treated as a transient backend fault.
+                    RecordFailure();
+                    classified = true;
+                    throw new LlmClientException(ex.Message, LlmErrorCode.ProviderError);
+                }
 
-            RecordResult(result?.Ok ?? false, result?.ErrorCode ?? LlmErrorCode.ProviderError);
-            return result;
+                RecordResult(result?.Ok ?? false, result?.ErrorCode ?? LlmErrorCode.ProviderError);
+                classified = true;
+                return result;
+            }
+            finally
+            {
+                if (!classified)
+                {
+                    // WHY: The call ended without a health verdict (cancellation): release the half-open
+                    // probe slot so the breaker is not stuck waiting for a result that never comes.
+                    ReleaseHalfOpenProbe();
+                }
+            }
         }
 
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
@@ -129,6 +145,8 @@ namespace CoreAI.Infrastructure.Llm
             bool sawTerminalFailure = false;
             LlmErrorCode terminalCode = LlmErrorCode.None;
             bool sawAnyChunk = false;
+            bool streamEnded = false;
+            bool classified = false;
 
             IAsyncEnumerator<LlmStreamChunk> e =
                 _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
@@ -156,6 +174,7 @@ namespace CoreAI.Infrastructure.Llm
                     catch (Exception ex)
                     {
                         RecordFailure();
+                        classified = true;
                         moveError = ex.Message;
                         chunk = default;
                     }
@@ -180,16 +199,32 @@ namespace CoreAI.Infrastructure.Llm
 
                     yield return chunk;
                 }
+
+                streamEnded = true;
             }
             finally
             {
                 await e.DisposeAsync().ConfigureAwait(false);
-            }
 
-            // WHY: Classify the whole stream: a stream that produced an error chunk (or nothing at all) is a
-            // failure; a stream that ended cleanly is a success that closes/keeps-closed the breaker.
-            bool ok = sawAnyChunk && !sawTerminalFailure;
-            RecordResult(ok, ok ? LlmErrorCode.None : terminalCode);
+                // WHY: Classify in the finally so the breaker state also updates when the consumer
+                // abandons the await-foreach early (user stop): a stream that already produced a
+                // terminal error chunk is a failure even then; a completed stream is classified as
+                // before (an error chunk or nothing at all = failure, a clean end = success); an
+                // abandoned/cancelled healthy stream carries no verdict at all — it only releases
+                // the half-open probe slot and is never misclassified as a backend failure.
+                if (!classified)
+                {
+                    if (streamEnded || sawTerminalFailure)
+                    {
+                        bool ok = streamEnded && sawAnyChunk && !sawTerminalFailure;
+                        RecordResult(ok, ok ? LlmErrorCode.None : terminalCode);
+                    }
+                    else
+                    {
+                        ReleaseHalfOpenProbe();
+                    }
+                }
+            }
         }
 
         /// <summary>Current state name for diagnostics/tests: "Closed", "Open", or "HalfOpen".</summary>
@@ -217,6 +252,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (_nowMs() - _openedAtMs >= _openDurationMs)
                     {
                         _state = State.HalfOpen;
+                        _halfOpenProbeInFlight = true;
                         _log?.Invoke("[CircuitBreaker] half-open: admitting one probe request.");
                         rejectReason = null;
                         return true;
@@ -228,9 +264,39 @@ namespace CoreAI.Infrastructure.Llm
                     return false;
                 }
 
-                // WHY: Closed or HalfOpen: allow through (HalfOpen admits the single probe already in flight).
+                if (_state == State.HalfOpen)
+                {
+                    // WHY: Exactly ONE probe may be in flight while half-open. Admitting every concurrent
+                    // caller here used to burst the whole backlog onto a backend that is still likely down.
+                    if (_halfOpenProbeInFlight)
+                    {
+                        rejectReason =
+                            "Circuit breaker half-open: a single probe request is already in flight; " +
+                            "short-circuited until the probe result is known.";
+                        return false;
+                    }
+
+                    _halfOpenProbeInFlight = true;
+                    _log?.Invoke("[CircuitBreaker] half-open: admitting one probe request.");
+                    rejectReason = null;
+                    return true;
+                }
+
                 rejectReason = null;
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Releases the half-open probe slot when a call ends without any success/failure verdict
+        /// (consumer cancelled the call or abandoned the stream). The breaker stays half-open so the
+        /// next call becomes the new probe; abandonment is never counted as a backend failure.
+        /// </summary>
+        private void ReleaseHalfOpenProbe()
+        {
+            lock (_gate)
+            {
+                _halfOpenProbeInFlight = false;
             }
         }
 
@@ -260,6 +326,7 @@ namespace CoreAI.Infrastructure.Llm
             lock (_gate)
             {
                 _consecutiveFailures = 0;
+                _halfOpenProbeInFlight = false;
                 if (_state != State.Closed)
                 {
                     _state = State.Closed;
@@ -272,6 +339,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             lock (_gate)
             {
+                _halfOpenProbeInFlight = false;
                 if (_state == State.HalfOpen)
                 {
                     // WHY: The probe failed — re-open for another cooldown.

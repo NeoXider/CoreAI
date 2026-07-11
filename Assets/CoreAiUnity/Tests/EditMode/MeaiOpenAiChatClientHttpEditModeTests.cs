@@ -282,6 +282,44 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("include_usage", capturedJson);
         }
 
+        [Test]
+        public void MapHttpStatus_BareRateSubstring_IsNotRateLimited()
+        {
+            // "generate"/"moderate" contain "rate": these must classify by status, never as RateLimited.
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(500,
+                    "{\"error\":{\"message\":\"failed to generate a response\"}}", ""));
+            Assert.AreEqual(LlmErrorCode.InvalidRequest,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(400,
+                    "{\"error\":{\"message\":\"input was flagged as moderate risk\"}}", ""));
+        }
+
+        [Test]
+        public void MapHttpStatus_ExplicitRateLimitSignals_AreRateLimited()
+        {
+            Assert.AreEqual(LlmErrorCode.RateLimited,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(429, "", ""));
+            Assert.AreEqual(LlmErrorCode.RateLimited,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(503,
+                    "{\"error\":{\"message\":\"Rate limit reached for requests\"}}", ""));
+            Assert.AreEqual(LlmErrorCode.RateLimited,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(503,
+                    "{\"error\":{\"code\":\"rate_limit_exceeded\"}}", ""));
+            Assert.AreEqual(LlmErrorCode.RateLimited,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(503,
+                    "{\"error\":{\"message\":\"Too many requests, slow down\"}}", ""));
+        }
+
+        [Test]
+        public void MapHttpStatus_QuotaAndAuth_KeepTheirClassification()
+        {
+            Assert.AreEqual(LlmErrorCode.QuotaExceeded,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(402,
+                    "{\"error\":{\"code\":\"quota_exceeded\"}}", ""));
+            Assert.AreEqual(LlmErrorCode.AuthExpired,
+                MeaiOpenAiChatClient.MapHttpStatusForTests(401, "", ""));
+        }
+
         private sealed class TestHttpSettings : IOpenAiHttpSettings
         {
             public static readonly TestHttpSettings Instance = new();

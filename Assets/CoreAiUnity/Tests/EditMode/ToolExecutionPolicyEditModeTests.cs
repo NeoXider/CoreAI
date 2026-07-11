@@ -1402,6 +1402,43 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void IsToolResultSuccess_NestedErrorField_IsNotAFailure()
+        {
+            // Only the TOP-LEVEL object is inspected: a tool legitimately returning an "error"
+            // field inside nested payload data must not feed the consecutive-errors abort counter.
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(
+                "{\"result\":{\"error\":\"entity had an error flag\",\"id\":7},\"count\":1}"));
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(
+                "{\"items\":[{\"isError\":true},{\"isError\":false}],\"total\":2}"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_TopLevelIsErrorTrue_ReturnsFalse()
+        {
+            // MCP-style result contract: an explicit top-level isError:true is a failure signal.
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess(
+                "{\"isError\":true,\"content\":\"tool blew up\"}"));
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess(
+                "{\"IsError\":true}"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_TopLevelIsErrorNotBooleanTrue_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"isError\":false,\"content\":\"ok\"}"));
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"isError\":null}"));
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"isError\":\"unexpected string\"}"),
+                "Only an explicit boolean true may count as a failure signal (conservative).");
+        }
+
+        [Test]
+        public void IsToolResultSuccess_ErrorPrefixOnlyAtStart_MidTextIsNotAFailure()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(
+                "Completed 3 steps. Note: the log line 'error: retrying' was recovered automatically."));
+        }
+
+        [Test]
         public async Task ExecuteSingle_ClassifiesUntruncatedResultBeforeReturningTruncatedPayload()
         {
             StubSettings settings = new() { MaxToolResultChars = 32 };

@@ -1785,6 +1785,15 @@ namespace CoreAI.Infrastructure.Llm
                         return false;
                     }
 
+                    // WHY: MCP-style "isError": only an explicit boolean true is a failure signal;
+                    // any other shape stays neutral (top-level only, no nested probing).
+                    if (string.Equals(property.Name, "isError", StringComparison.OrdinalIgnoreCase) &&
+                        property.Value.Type == JTokenType.Boolean &&
+                        property.Value.Value<bool>())
+                    {
+                        return false;
+                    }
+
                     if ((string.Equals(property.Name, "ok", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(property.Name, "succeeded", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(property.Name, "success", StringComparison.OrdinalIgnoreCase)) &&

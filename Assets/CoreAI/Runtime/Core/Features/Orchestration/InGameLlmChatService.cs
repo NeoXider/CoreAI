@@ -20,6 +20,11 @@ namespace CoreAI.Ai
         private readonly object _historyLock = new();
         private readonly object _rateLock = new();
 
+        // WHY: Overlapping requests raced: the second snapshot could miss the first turn and the
+        // appends could interleave out of order. This gate serializes snapshot -> LLM -> append so
+        // every request sees all previously completed turns in order.
+        private readonly SemaphoreSlim _requestGate = new(1, 1);
+
         private readonly int _maxRequestsPerWindow;
         private readonly TimeSpan _rateLimitWindow;
         private readonly Queue<DateTime> _requestTimestamps = new();
@@ -97,51 +102,61 @@ namespace CoreAI.Ai
                 ? baseSystem
                 : prefix.TrimEnd() + "\n" + baseSystem;
 
-            // WHY: BUG-4 fix: snapshot history under lock, release during LLM call,
-            // then re-acquire to append the response atomically.
-            List<Microsoft.Extensions.AI.ChatMessage> history;
-            lock (_historyLock)
+            // WHY: BUG-4 fix + FINDING-15: the whole snapshot -> LLM -> append sequence runs as one
+            // serialized continuation, so a concurrent request cannot snapshot history that is missing
+            // the previous turn or interleave its append. _historyLock still guards reads
+            // (HistoryPairCount / ClearHistory) that run outside the gate.
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                history = new List<Microsoft.Extensions.AI.ChatMessage>(_turns.Count + 1);
-                foreach ((string role, string text) in _turns)
-                {
-                    ChatRole chatRole = role == "User"
-                        ? ChatRole.User
-                        : ChatRole.Assistant;
-                    history.Add(new Microsoft.Extensions.AI.ChatMessage(chatRole, text));
-                }
-
-                history.Add(new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, message));
-            }
-
-            LlmCompletionResult result = await _llm.CompleteAsync(
-                new LlmCompletionRequest
-                {
-                    AgentRoleId = BuiltInAgentRoleIds.SmartChat,
-                    SystemPrompt = system,
-                    ChatHistory = history,
-                    TraceId = Guid.NewGuid().ToString("N")
-                },
-                cancellationToken).ConfigureAwait(false);
-
-            if (result.Ok && !string.IsNullOrEmpty(result.Content))
-            {
+                List<Microsoft.Extensions.AI.ChatMessage> history;
                 lock (_historyLock)
                 {
-                    _turns.Add(("User", message.Trim()));
-                    _turns.Add(("Assistant", result.Content.Trim()));
-                    while (_turns.Count > _maxMessages)
+                    history = new List<Microsoft.Extensions.AI.ChatMessage>(_turns.Count + 1);
+                    foreach ((string role, string text) in _turns)
                     {
-                        _turns.RemoveAt(0);
-                        if (_turns.Count > 0)
+                        ChatRole chatRole = role == "User"
+                            ? ChatRole.User
+                            : ChatRole.Assistant;
+                        history.Add(new Microsoft.Extensions.AI.ChatMessage(chatRole, text));
+                    }
+
+                    history.Add(new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, message));
+                }
+
+                LlmCompletionResult result = await _llm.CompleteAsync(
+                    new LlmCompletionRequest
+                    {
+                        AgentRoleId = BuiltInAgentRoleIds.SmartChat,
+                        SystemPrompt = system,
+                        ChatHistory = history,
+                        TraceId = Guid.NewGuid().ToString("N")
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                if (result.Ok && !string.IsNullOrEmpty(result.Content))
+                {
+                    lock (_historyLock)
+                    {
+                        _turns.Add(("User", message.Trim()));
+                        _turns.Add(("Assistant", result.Content.Trim()));
+                        while (_turns.Count > _maxMessages)
                         {
                             _turns.RemoveAt(0);
+                            if (_turns.Count > 0)
+                            {
+                                _turns.RemoveAt(0);
+                            }
                         }
                     }
                 }
-            }
 
-            return result;
+                return result;
+            }
+            finally
+            {
+                _requestGate.Release();
+            }
         }
 
         /// <summary>
