@@ -1715,101 +1715,21 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Pattern-aware tool call extraction from text.
-        /// Matches JSON objects that contain both "name" and "arguments" keys (outside fenced ``` blocks),
-        /// then falls back to <see cref="LlmToolCallTextExtractor"/> for pseudo-syntax memory writes
-        /// (e.g. Qwen: <c>Action=write content="..."</c>).
+        /// Pattern-aware tool call extraction from text. Delegates to the portable
+        /// <see cref="LlmToolCallTextExtractor"/> so both layers share one parser: exact call shape
+        /// (top-level <c>"name"</c> string plus <c>"arguments"</c> object / <c>"arguments_json"</c>
+        /// string), backtick/quote-cited spans and fenced ``` blocks skipped, and pseudo-syntax
+        /// memory writes (e.g. Qwen: <c>Action=write content="..."</c>) picked up as fallback.
         /// </summary>
         internal static bool TryExtractToolCallsFromText(
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
             out string cleanedText)
         {
-            toolCalls = new List<MEAI.FunctionCallContent>();
-            cleanedText = text ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return false;
-            }
-
-            // Strip fenced code blocks to avoid matching JSON inside them when giving **non-tool** examples.
-            string textForSearch = StripCodeBlocks(text);
-
-            // Find all balanced JSON objects that look like tool calls (only outside fenced ``` blocks;
-            // StripCodeBlocks blanks ```...``` so examples like ```json {"name":...} ``` are not matched).
-            List<JsonSpan> candidates = FindToolCallJsonSpans(textForSearch);
-
-            if (candidates.Count == 0)
-            {
-                return TryPortableToolExtract(text, out toolCalls, out cleanedText);
-            }
-
-            // Build cleaned text by removing all found tool-call JSON spans (from original text)
-            // *hidden* from search, the positions still correspond to the original text.
-            System.Text.StringBuilder cleanBuilder = new(text.Length);
-            int lastEnd = 0;
-            foreach (JsonSpan span in candidates)
-            {
-                // Verify span is valid in original text too
-                if (span.Start >= text.Length || span.Start + span.Length > text.Length)
-                {
-                    continue;
-                }
-
-                string originalFragment = text.Substring(span.Start, span.Length);
-
-                // Re-validate the fragment in the original text
-                if (!IsValidToolCallJson(originalFragment))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    JObject json = JObject.Parse(originalFragment);
-                    string functionName = json["name"]?.ToString()?.Trim();
-                    // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
-                    JToken argsToken = json["arguments"] ?? json["arguments_json"];
-                    if (string.IsNullOrWhiteSpace(functionName) || argsToken == null)
-                    {
-                        continue;
-                    }
-
-                    // If args is a string (e.g. "arguments_json": "{...}"), parse it as JSON.
-                    string argsStr = argsToken.Type == JTokenType.String
-                        ? argsToken.ToString()
-                        : argsToken.ToString(Formatting.None);
-
-                    Dictionary<string, object?> arguments =
-                        JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsStr)
-                        ?? new Dictionary<string, object?>();
-
-                    // Normalize JObject/JArray values to strings for MEAI compatibility.
-                    NormalizeJTokenValues(arguments);
-
-                    string callId = $"stream_call_{functionName}_{Guid.NewGuid():N}";
-                    toolCalls.Add(new MEAI.FunctionCallContent(callId, functionName, arguments));
-
-                    cleanBuilder.Append(text, lastEnd, span.Start - lastEnd);
-                    lastEnd = span.Start + span.Length;
-                }
-                catch
-                {
-                }
-            }
-
-            if (toolCalls.Count == 0)
-            {
-                return TryPortableToolExtract(text, out toolCalls, out cleanedText);
-            }
-
-            if (lastEnd < text.Length)
-            {
-                cleanBuilder.Append(text, lastEnd, text.Length - lastEnd);
-            }
-
-            cleanedText = cleanBuilder.ToString().Trim();
-            return true;
+            // WHY: This layer used to keep its own, laxer parser that executed cited schema
+            // examples (inline-code/quoted JSON, placeholder tool names). Delegating to the
+            // hardened portable extractor closes that gap instead of duplicating its guards.
+            return TryPortableToolExtract(text, out toolCalls, out cleanedText);
         }
 
         /// <summary>
@@ -1836,6 +1756,9 @@ namespace CoreAI.Infrastructure.Llm
                     Dictionary<string, object?> arguments =
                         JsonConvert.DeserializeObject<Dictionary<string, object?>>(m.ArgumentsJson)
                         ?? new Dictionary<string, object?>();
+
+                    // Normalize JObject/JArray values to strings for MEAI compatibility.
+                    NormalizeJTokenValues(arguments);
 
                     string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
                     toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
@@ -1875,17 +1798,13 @@ namespace CoreAI.Infrastructure.Llm
             return Regex.Replace(text, @"```[\s\S]*?```", m => new string(' ', m.Length));
         }
 
-        /// <summary>Checks if a JSON string looks like a tool call (has "name" and "arguments" or "arguments_json").</summary>
+        /// <summary>Checks if a JSON string has the exact tool-call shape (top-level "name" string plus "arguments" object or "arguments_json" string).</summary>
         internal static bool IsValidToolCallJson(string json)
         {
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return false;
-            }
-
-            // Quick heuristic before parsing: must contain both key patterns
-            return json.Contains("\"name\"") &&
-                   (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
+            // WHY: Shared with the portable extractor so the hybrid-hold span detection and the
+            // execution path agree on what counts as a tool call (substring hits alone treated
+            // quoted schema examples as commands).
+            return LlmToolCallTextExtractor.LooksLikeToolCallJson(json);
         }
 
         /// <summary>

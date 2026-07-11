@@ -1201,6 +1201,58 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void BacktickCitedSchemaExample_NotExtracted()
+        {
+            // Parity with the portable extractor: inline-code JSON is a citation, not a command.
+            string text =
+                "Use `{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}` to clear your memory.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string _);
+
+            Assert.IsFalse(found, "Backtick-cited JSON must not execute.");
+            Assert.AreEqual(0, calls.Count);
+        }
+
+        [Test]
+        public void QuoteWrappedSchemaExample_NotExtracted()
+        {
+            string text =
+                "The docs show '{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}' as the format.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string _);
+
+            Assert.IsFalse(found, "JSON wrapped in matching quotes is a citation, not a command.");
+            Assert.AreEqual(0, calls.Count);
+        }
+
+        [Test]
+        public void PlaceholderToolName_NotExtracted()
+        {
+            string text = "Reply with {\"name\":\"<tool_name>\",\"arguments\":{}} to call a tool.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string _);
+
+            Assert.IsFalse(found, "Placeholder tool names are schema examples, not commands.");
+            Assert.IsFalse(MeaiLlmClient.IsValidToolCallJson("{\"name\":\"<tool_name>\",\"arguments\":{}}"),
+                "IsValidToolCallJson must require the exact tool-call shape (identifier-like name).");
+        }
+
+        [Test]
+        public void CitedExamplePlusRealCall_OnlyRealCallExtracted()
+        {
+            string text =
+                "Example: `{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}` and now " +
+                "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"real\"}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count, "Only the non-cited call should be extracted.");
+            Assert.AreEqual("write", calls[0].Arguments?["action"]?.ToString());
+            Assert.That(cleaned, Does.Contain("`"), "The cited example must stay in the cleaned text.");
+        }
+
+        [Test]
         public void CleanedText_IsTrimmable_NoLeadingTrailingJson()
         {
             // Tool call at very start of text — cleaned should not start with JSON

@@ -391,5 +391,278 @@ namespace CoreAI.Tests.EditMode
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         }
     }
+
+    /// <summary>
+    /// EditMode tests for <see cref="HttpClientOpenAiTransport.OpenSseResponseStreamAsync"/>:
+    /// <see cref="OpenAiHttpPostRequest.TransportTimeoutSeconds"/> bounds ONLY the time-to-headers
+    /// phase (a backend that accepts TCP but never sends headers used to hang until external
+    /// cancellation), never the streaming body, and the error-body read honors the caller token.
+    /// </summary>
+    public sealed class HttpClientOpenAiTransportSseEditModeTests
+    {
+        [SetUp]
+        public void SetUp()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        }
+
+        private static OpenAiHttpPostRequest SseRequest(int timeoutSeconds)
+        {
+            return new OpenAiHttpPostRequest
+            {
+                Url = "http://127.0.0.1:9/v1/chat/completions",
+                JsonBody = "{}",
+                AcceptEventStream = true,
+                TransportTimeoutSeconds = timeoutSeconds
+            };
+        }
+
+        [Test]
+        public async Task OpenSse_BackendNeverSendsHeaders_CancelsAfterTransportTimeout()
+        {
+            // Backend accepts the request but never produces response headers.
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new AsyncDelegateHttpHandler(async (_, ct) =>
+                {
+                    await Task.Delay(System.Threading.Timeout.Infinite, ct);
+                    return null;
+                })) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+            HttpClientOpenAiTransport transport = new();
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                using OpenAiHttpSseOpenResult _ = await transport.OpenSseResponseStreamAsync(
+                    SseRequest(1), System.Threading.CancellationToken.None);
+            }
+            catch (System.OperationCanceledException)
+            {
+                sw.Stop();
+                Assert.Less(sw.ElapsedMilliseconds, 10000,
+                    "Header timeout must fire near TransportTimeoutSeconds, not hang.");
+                return;
+            }
+
+            Assert.Fail("Expected OperationCanceledException when no headers arrive within the transport timeout.");
+        }
+
+        [Test]
+        public async Task OpenSse_HeaderTimeout_DoesNotBoundStreamingBody()
+        {
+            // Headers arrive immediately; the body's first bytes arrive AFTER the 1s header timeout.
+            const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\n";
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new AsyncDelegateHttpHandler((_, _) =>
+                {
+                    StreamContent content = new(new DelayedFirstReadStream(
+                        Encoding.UTF8.GetBytes(sse), firstReadDelayMs: 1600));
+                    content.Headers.ContentType =
+                        new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                })) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+            HttpClientOpenAiTransport transport = new();
+            using OpenAiHttpSseOpenResult open = await transport.OpenSseResponseStreamAsync(
+                SseRequest(1), System.Threading.CancellationToken.None);
+
+            Assert.AreEqual(200, open.StatusCode);
+            Assert.NotNull(open.ResponseStream);
+            using StreamReader reader = new(open.ResponseStream, Encoding.UTF8);
+            string body = await reader.ReadToEndAsync();
+            Assert.AreEqual(sse, body,
+                "The streaming body must stay readable after the header timeout has elapsed.");
+        }
+
+        [Test]
+        public async Task OpenSse_ZeroTransportTimeout_DoesNotAddHeaderTimeout()
+        {
+            // 0/unset preserves the legacy behavior: only the caller token bounds the open phase.
+            const string sse = "data: [DONE]\n\n";
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new AsyncDelegateHttpHandler(async (_, ct) =>
+                {
+                    await Task.Delay(300, ct);
+                    StreamContent content = new(new MemoryStream(Encoding.UTF8.GetBytes(sse)));
+                    content.Headers.ContentType =
+                        new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+                })) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+            HttpClientOpenAiTransport transport = new();
+            using OpenAiHttpSseOpenResult open = await transport.OpenSseResponseStreamAsync(
+                SseRequest(0), System.Threading.CancellationToken.None);
+
+            Assert.AreEqual(200, open.StatusCode);
+        }
+
+        [Test]
+        public async Task OpenSse_ErrorBodyRead_HonorsCallerCancellation()
+        {
+            // Error status arrives, but the error body never does: the body read must observe
+            // the caller token instead of hanging on an uncancellable ReadAsStringAsync.
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new AsyncDelegateHttpHandler((_, _) =>
+                {
+                    HttpResponseMessage response = new(HttpStatusCode.InternalServerError)
+                    {
+                        Content = new StreamContent(new NeverEndingStream())
+                    };
+                    return Task.FromResult(response);
+                })) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+            HttpClientOpenAiTransport transport = new();
+            using System.Threading.CancellationTokenSource cts = new(System.TimeSpan.FromMilliseconds(250));
+            try
+            {
+                using OpenAiHttpSseOpenResult _ = await transport.OpenSseResponseStreamAsync(
+                    SseRequest(0), cts.Token);
+            }
+            catch (System.OperationCanceledException)
+            {
+                return;
+            }
+
+            Assert.Fail("Expected OperationCanceledException while reading a stalled error body.");
+        }
+
+        private sealed class AsyncDelegateHttpHandler : HttpMessageHandler
+        {
+            private readonly System.Func<HttpRequestMessage, System.Threading.CancellationToken,
+                Task<HttpResponseMessage>> _respond;
+
+            public AsyncDelegateHttpHandler(
+                System.Func<HttpRequestMessage, System.Threading.CancellationToken,
+                    Task<HttpResponseMessage>> respond)
+            {
+                _respond = respond;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                System.Threading.CancellationToken cancellationToken)
+            {
+                return _respond(request, cancellationToken);
+            }
+        }
+
+        /// <summary>Read-only stream whose FIRST read completes only after a delay (slow SSE body).</summary>
+        private sealed class DelayedFirstReadStream : Stream
+        {
+            private readonly byte[] _data;
+            private readonly int _firstReadDelayMs;
+            private int _pos;
+            private bool _delayed;
+
+            public DelayedFirstReadStream(byte[] data, int firstReadDelayMs)
+            {
+                _data = data;
+                _firstReadDelayMs = firstReadDelayMs;
+            }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => _data.Length;
+
+            public override long Position
+            {
+                get => _pos;
+                set => throw new System.NotSupportedException();
+            }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
+                System.Threading.CancellationToken cancellationToken)
+            {
+                if (!_delayed)
+                {
+                    _delayed = true;
+                    await Task.Delay(_firstReadDelayMs, cancellationToken);
+                }
+
+                int n = System.Math.Min(count, _data.Length - _pos);
+                System.Array.Copy(_data, _pos, buffer, offset, n);
+                _pos += n;
+                return n;
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                return ReadAsync(buffer, offset, count, System.Threading.CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new System.NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new System.NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new System.NotSupportedException();
+            }
+        }
+
+        /// <summary>Read-only stream that never delivers data; completes only via cancellation.</summary>
+        private sealed class NeverEndingStream : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => long.MaxValue;
+
+            public override long Position
+            {
+                get => 0;
+                set => throw new System.NotSupportedException();
+            }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
+                System.Threading.CancellationToken cancellationToken)
+            {
+                await Task.Delay(System.Threading.Timeout.Infinite, cancellationToken);
+                return 0;
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                return ReadAsync(buffer, offset, count, System.Threading.CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new System.NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new System.NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new System.NotSupportedException();
+            }
+        }
+    }
 }
 #endif

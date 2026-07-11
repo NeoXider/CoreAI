@@ -17,6 +17,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   reload no longer reach dead subscribers from previous scenes (duplicate world mutations).
 - **`world_command destroy` reports failure for missing targets** (was: unconditional success, so the model
   could never self-correct a typo'd object name).
+- **`MeaiLlmClient` text tool-call extraction now delegates to the portable `LlmToolCallTextExtractor`**, so the
+  Unity path gets the same hardening as core: exact call shape required, backtick/quote-cited examples and fenced
+  code blocks never execute, balanced-parenthesis scanning, and the full fallback syntax set (XML, function-call,
+  pseudo `Action=`); nested argument objects are still normalized for MEAI.
 
 ### Added
 

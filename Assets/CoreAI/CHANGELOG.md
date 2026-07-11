@@ -4,6 +4,10 @@
 
 ### Fixed (2026-07-11 audit wave)
 
+- **SSE connect phase honors `TransportTimeoutSeconds`.** `HttpClientOpenAiTransport` now bounds the
+  headers-not-yet-received phase of `OpenSseResponseStreamAsync` with the configured transport timeout
+  (the linked CTS is disposed once headers arrive, so the streaming body itself stays unbounded); a backend
+  that accepts the socket but never answers fails fast instead of eating the whole turn budget.
 - **Lua sandbox: nested guarded calls can no longer disarm the outer guard.** `LuaCsExecutionGuard` keeps a
   per-`LuaState` stack of installed hooks; leaving a nested `mods_call` restores the caller's hook instead of
   removing it, so step/time/alloc budgets stay armed across direct and indirect (`A→B→A`) cross-mod calls.

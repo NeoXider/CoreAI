@@ -95,15 +95,34 @@ namespace CoreAI.Infrastructure.Llm
             httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
             ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
 
-            HttpResponseMessage response =
-                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            // WHY: The streaming client's Timeout is infinite (SSE bodies are long-lived), so a backend
+            // that accepts TCP but never sends response headers used to hang the turn until external
+            // cancellation. Bound ONLY the time-to-headers phase with TransportTimeoutSeconds; the linked
+            // CTS is disposed the moment headers arrive so it never bounds the streaming body (idle-stall
+            // detection there stays with the caller). 0/unset keeps the legacy unbounded behavior.
+            // TimeoutLlmClientDecorator still bounds the WHOLE request at a higher layer; this shorter
+            // header bound only makes a headerless backend fail fast instead of eating the turn budget.
+            HttpResponseMessage response;
+            if (request.TransportTimeoutSeconds > 0)
+            {
+                using CancellationTokenSource headerCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                headerCts.CancelAfter(TimeSpan.FromSeconds(request.TransportTimeoutSeconds));
+                response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
+                    headerCts.Token);
+            }
+            else
+            {
+                response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+            }
 
             int statusCode = (int)response.StatusCode;
             IReadOnlyDictionary<string, IEnumerable<string>> headers = CopyHeaders(response);
 
             if (!response.IsSuccessStatusCode)
             {
-                string errBody = await response.Content.ReadAsStringAsync();
+                string errBody = await ReadBodyTextAsync(response.Content, cancellationToken);
                 response.Dispose();
                 return new OpenAiHttpSseOpenResult
                 {
@@ -120,6 +139,21 @@ namespace CoreAI.Infrastructure.Llm
                 ErrorBodyText = "",
                 ResponseHeaders = headers
             }.WithStreamResponse(stream, response);
+        }
+
+        /// <summary>
+        /// Reads a response body as UTF-8 text with cancellation support. This profile has no
+        /// <c>ReadAsStringAsync(CancellationToken)</c> overload, and after
+        /// <see cref="HttpCompletionOption.ResponseHeadersRead"/> the body still comes from the
+        /// network, so an uncancellable read could hang on a stalled backend.
+        /// </summary>
+        private static async Task<string> ReadBodyTextAsync(HttpContent content,
+            CancellationToken cancellationToken)
+        {
+            using Stream stream = await content.ReadAsStreamAsync();
+            using MemoryStream buffer = new();
+            await stream.CopyToAsync(buffer, 81920, cancellationToken);
+            return Encoding.UTF8.GetString(buffer.ToArray());
         }
 
         private static void ApplyHeaders(HttpRequestMessage httpRequest,
