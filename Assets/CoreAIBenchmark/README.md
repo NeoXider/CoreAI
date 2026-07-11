@@ -229,12 +229,12 @@ LM Studio models above (different suite version *and* different backend class). 
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1 | `codex/gpt-5.6-sol` | **96.6** | 85.7% | 24/3/1 | 96.3 | 100 | 100 | 100 | 100 | 63.9 | 100 | 96.3 | 16379 |
 | 2 | `codex/gpt-5.6-terra` | **93.0** | 86.2% | 25/2/2 | 95.6 | 100 | 84.2 | 97.7 | 99.7 | 62.9 | 100 | 96.3 | 32194 |
-| 3 | `codex/gpt-5.3-spark` | **91.0** | 82.8% | 24/3/2 | 69.7 | 100 | 100 | 100 | 99 | 50 | 100 | 78.5 | 31415 |
+| 3 | `codex/gpt-5.3-spark` | **92.9** | 79.3% | 23/5/1 | 89.9 | 98.7 | 85.2 | 97.7 | 98.7 | 75.4 | 100 | 94.2 | 17616 |
 | 4 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 | 96.3 | 100 | 95.3 | 93 | 80 | 55.6 | 100 | 96.3 | 17188 |
 | 5 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 | 91.9 | 100 | 100 | 97.7 | 87.7 | 25.2 | 100 | 69.7 | 18426 |
 | 6 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 | 91.9 | 95.7 | 94.1 | 93 | 70 | 50 | 93.7 | 96.3 | 18250 |
-| 7 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 | 54.9 | 94.3 | 78.2 | 93 | 100 | 49 | 100 | 42.6 | 19851 |
-| 8 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 | 55.7 | 94.3 | 93 | 93 | 100 | 46 | 93.7 | 9.2 | 21980 |
+| 7 | `claude-opus-4.8` | **83.2** | 79.3% | 23/2/4 | 65.9 | 95.7 | 93 | 93 | 100 | 48 | 93.7 | 36.4 | 26250 |
+| 8 | `claude-fable-5` | **81.4** | 75.9% | 22/3/4 | 81.5 | 94.3 | 78.4 | 93 | 100 | 46 | 93.7 | 36.4 | 22360 |
 
 **Read of the sweep.** The GPT-5.6 family tops the board — `gpt-5.6-sol` is the most consistent (only one
 failed scenario; perfect G3/G4/G5/G7), and `gpt-5.6-terra` has the most passes (25/29, 86.2%). `gpt-5.5`
@@ -249,6 +249,11 @@ agentic coding tool with its own system-prompt/scaffolding) as a raw OpenAI endp
 Claude's native tool-calling as cleanly as the Codex CLI does. For reference, the historical **direct-API**
 v1.6 run scored opus 92.9 / sonnet 88.2 / fable 89.5 — far above this bridge sweep — so read the Claude rows
 as "Claude-CLI-via-bridge", not the models' native tool-calling.
+
+The bridge has since gained a **no-tool-call recovery retry** (it re-prompts when a model describes an action
+in prose but emits no tool call). Re-running the affected models on it recovered several points:
+`opus-4.8` 79.7 → **83.2**, `fable-5` 78.9 → **81.4**, and even `gpt-5.3-spark` 91.0 → **92.9**. The
+`sol`/`terra`/`gpt-5.5`/`luna`/`sonnet` rows predate the retry and would likely gain a little on a re-run.
 
 **Why G6 (free-build castle) is everyone's worst, and the vision variant here means little.** The unbounded
 creative build is genuinely the hardest scenario, but two measurement issues inflate how bad it looks: (1)
