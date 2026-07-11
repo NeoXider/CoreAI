@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **`AgentBuilder.Build()` auto-applies to the global policy.** When `CoreAIAgent.Policy` exists, `Build()`
+  now registers the config immediately (on top of the first-Ask auto-registration), so a role is routable
+  the moment it is built. `BuildDetached()` still leaves the global policy untouched. Solution-wide Rider
+  reformat applied (shared `.editorconfig`; attributes stay one-per-line).
+
 ## 5.6.0 - Simpler agent API, code-style rules, benchmark comparison (2026-07-11)
 
 - **Code style: shared `.editorconfig` + comment convention.** Attributes now always sit on their own
