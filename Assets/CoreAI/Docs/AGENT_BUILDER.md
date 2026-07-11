@@ -339,12 +339,15 @@ Remember what the player bought using memory.")
     .WithChatHistory()
     .Build();
 
-// 2. Register (via global CoreAIAgent.Policy or your own policy)
-blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
-
-// 3. Invoke (one line!)
+// 2. Invoke (one line!) — the first Ask auto-registers the agent with the global
+//    CoreAIAgent.Policy, so no manual registration step is needed.
 blacksmith.AskWithCallback("What do you have?");
 ```
+
+> **`ApplyToPolicy` is now optional.** `AskAsync`/`AskWithCallback` register the built config with the
+> global `CoreAIAgent.Policy` on first use, so newcomers can go straight from `Build()` to `Ask*()`.
+> Call `blacksmith.ApplyToPolicy(policy)` explicitly only when you target a **custom** `AgentMemoryPolicy`,
+> or want the role registered up front (e.g. before routing a task to it through the orchestrator directly).
 
 ### Recipe 2: Storyteller (chat only, no tools)
 

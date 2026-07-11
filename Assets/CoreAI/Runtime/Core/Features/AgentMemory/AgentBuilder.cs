@@ -690,6 +690,12 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Applies this built agent configuration to a mutable <see cref="AgentMemoryPolicy"/>.
+        /// <para>
+        /// For the common case you do NOT need to call this: <c>AskAsync</c>/<c>AskWithCallback</c>
+        /// auto-register the config with the global <see cref="CoreAIAgent.Policy"/> on first use.
+        /// Call this explicitly only when targeting a custom policy, or to register the role up front
+        /// (e.g. so the orchestrator can route to it before the first ask).
+        /// </para>
         /// </summary>
         public void ApplyToPolicy(AgentMemoryPolicy policy)
         {

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **`AgentBuilder`: `ApplyToPolicy` is now optional.** `AskAsync`/`AskWithCallback` auto-register the built
+  `AgentConfig` with the global `CoreAIAgent.Policy` on first use, so the newcomer flow is just `Build()` →
+  `Ask*()` — no manual `ApplyToPolicy(CoreAIAgent.Policy)` step. The explicit call is still available for
+  custom policies or up-front registration; re-applying is idempotent. A null policy (uninitialized lifetime
+  scope) now fails with a clearer message than the old "role not registered".
+- **Benchmark: G7 no longer captures a scene screenshot.** The comprehensive-integration (Player/Gate/Key)
+  scenario photographed as an unreadable composite of overlapping primitives and floating world-space labels
+  that added nothing to the score. G6 (the free-build castle) is now the only hero image; G7 is graded purely
+  on world state + Lua consistency, like the other logic groups.
 - **Structured world spawning.** `world_command` `spawn`, `spawn_batch`, and `change` expose
   `worldPositionStays` (default `false`). Parented transforms are local by default; callers can pass `true`
   to preserve world space. The tool contract now recommends named `empty` roots and meaningful child

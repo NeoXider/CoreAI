@@ -40,10 +40,11 @@ namespace CoreAI.Ai
             int priority = 0,
             CancellationToken cancellationToken = default)
         {
-            // Validate the agent config (role registration) before infrastructure state so an
-            // unregistered role fails with a clear "not registered" message regardless of whether
-            // the orchestrator happens to be initialized yet.
-            ValidateRoleRegistered(config);
+            // Make sure the role is known to the global policy before we run. For the common newcomer
+            // flow this AUTO-REGISTERS the built config, so `Build()` + `Ask*()` just works without an
+            // explicit `ApplyToPolicy(CoreAIAgent.Policy)` call. Done before the orchestrator null-check
+            // so a missing lifetime scope still surfaces its own clear message.
+            EnsureRoleRegistered(config);
 
             if (orchestrator == null)
             {
@@ -61,7 +62,7 @@ namespace CoreAI.Ai
             }, cancellationToken);
         }
 
-        private static void ValidateRoleRegistered(AgentConfig config)
+        private static void EnsureRoleRegistered(AgentConfig config)
         {
             if (string.IsNullOrWhiteSpace(config?.RoleId))
             {
@@ -69,10 +70,20 @@ namespace CoreAI.Ai
             }
 
             AgentMemoryPolicy policy = CoreAIAgent.Policy;
-            if (policy == null || !policy.HasRole(config.RoleId))
+            if (policy == null)
             {
                 throw new InvalidOperationException(
-                    $"Role '{config.RoleId}' is not registered in CoreAIAgent.Policy. Call config.ApplyToPolicy(CoreAIAgent.Policy) (or Use BuildDetached() + explicit ApplyToPolicy()).");
+                    $"Cannot run agent '{config.RoleId}': CoreAIAgent.Policy is null. Initialize CoreAI first " +
+                    "(add CoreAILifetimeScope to the scene / run CoreAI setup) before asking an agent.");
+            }
+
+            // Convenience: register the built config with the global policy on first use, so newcomers
+            // do not have to call ApplyToPolicy(CoreAIAgent.Policy) by hand. Re-applying is idempotent;
+            // advanced users targeting a CUSTOM AgentMemoryPolicy still call ApplyToPolicy on that policy
+            // themselves (and, once registered here, this no-ops).
+            if (!policy.HasRole(config.RoleId))
+            {
+                config.ApplyToPolicy(policy);
             }
         }
 
