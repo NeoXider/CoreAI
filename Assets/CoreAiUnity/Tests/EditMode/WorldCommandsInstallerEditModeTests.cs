@@ -1,6 +1,8 @@
 using CoreAI.Ai;
+using CoreAI.Config;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
@@ -43,6 +45,31 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreSame(registry, asInterface);
                 Assert.AreSame(registry, asConcrete);
+            }
+            finally
+            {
+                Object.DestroyImmediate(registry);
+            }
+        }
+
+        [Test]
+        public void FullScope_ResolvesUnityGameConfigStore_WhenPortableDefaultsRegisterLater()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            try
+            {
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
+                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+                builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+                builder.RegisterWorldCommands(registry);
+                builder.RegisterCorePortable();
+
+                using IObjectResolver container = builder.Build();
+
+                Assert.That(container.Resolve<IGameConfigStore>(), Is.InstanceOf<UnityGameConfigStore>());
             }
             finally
             {

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
@@ -296,6 +297,32 @@ namespace CoreAI.Tests.EditMode
             Assert.LessOrEqual(snap.History.Count, 7, "original + 5 intermediate + current at most.");
             Assert.AreEqual("v0", snap.OriginalLua);
             Assert.AreEqual("v49", snap.CurrentLua);
+        }
+
+        [Test]
+        public void FileStore_InterruptedAtomicWrite_PreservesLiveRevisionHistory()
+        {
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "atomic.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.Delete(path);
+            File.Delete(path + ".tmp");
+            FileLuaScriptVersionStore store = new(new NullGameLogger(), path);
+            store.RecordSuccessfulExecution("k", "v1");
+
+            try
+            {
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = () => throw new IOException("simulated crash");
+                store.RecordSuccessfulExecution("k", "v2");
+            }
+            finally
+            {
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = null;
+            }
+
+            FileLuaScriptVersionStore reopened = new(new NullGameLogger(), path);
+            Assert.IsTrue(reopened.TryGetSnapshot("k", out LuaScriptVersionRecord snapshot));
+            Assert.AreEqual("v1", snapshot.CurrentLua);
+            Assert.IsTrue(File.Exists(path + ".tmp"));
         }
     }
 }

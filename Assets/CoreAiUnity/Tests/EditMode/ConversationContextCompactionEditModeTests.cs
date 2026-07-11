@@ -418,6 +418,69 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void DeterministicManager_RepeatedAndGrowingHistory_FoldsEachPrefixOnce()
+        {
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ConversationContextBuildArgs args = new()
+            {
+                HistoryTokenBudget = 25,
+                CompactionTriggerRatio = 0.8f
+            };
+
+            mgr.BuildSnapshot(
+                "r", MakeHistory(5), new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, args);
+            mgr.BuildSnapshot(
+                "r", MakeHistory(5), new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, args);
+            mgr.BuildSnapshot(
+                "r", MakeHistory(7), new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 }, args);
+
+            string summary = store.LoadSummary("r");
+            Assert.AreEqual(1, CountOccurrences(summary, "- user: msg0"));
+            Assert.AreEqual(1, CountOccurrences(summary, "- assistant: msg1"));
+            Assert.AreEqual(1, CountOccurrences(summary, "- user: msg2"));
+            Assert.AreEqual(1, CountOccurrences(summary, "- assistant: msg3"));
+            Assert.AreEqual(1, CountOccurrences(summary, "- user: msg4"));
+            Assert.AreEqual(2, store.SaveSummaryCalls);
+        }
+
+        [Test]
+        public void DeterministicManager_DeferredPersistence_SavesOnlyOnCommit()
+        {
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ConversationContextSnapshot snapshot = mgr.BuildSnapshot(
+                "r",
+                MakeHistory(5),
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 25,
+                    CompactionTriggerRatio = 0.8f,
+                    DeferSummaryPersistence = true
+                });
+
+            Assert.AreEqual(0, store.SaveSummaryCalls);
+            Assert.AreEqual("", store.LoadSummary("r"));
+            snapshot.Commit();
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+            Assert.AreEqual(snapshot.Summary, store.LoadSummary("r"));
+        }
+
+        private static int CountOccurrences(string text, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += value.Length;
+            }
+
+            return count;
+        }
+
+        [Test]
         public async Task LlmAssisted_CancellationToken_Rethrows()
         {
             InMemoryConversationSummaryStore store = new();
@@ -546,7 +609,7 @@ namespace CoreAI.Tests.EditMode
             ConversationContextSnapshot snap = mgr.BuildSnapshot("roleA", history, roleConfig, buildArgs);
 
             Assert.IsTrue(snap.WasCompacted);
-            Assert.IsTrue(snap.Summary.EndsWith("…"), "Summary should be truncated when over MaxRolledSummaryTokens.");
+            Assert.IsTrue(snap.Summary.StartsWith("…"), "Summary should evict oldest content when over MaxRolledSummaryTokens.");
             string persisted = store.LoadSummary("roleA");
             Assert.AreEqual(snap.Summary, persisted,
                 "Store should receive the same truncated summary as the snapshot.");
@@ -574,7 +637,7 @@ namespace CoreAI.Tests.EditMode
 
             ConversationContextSnapshot snap = mgr.BuildSnapshot("roleB", history, roleConfig, buildArgs);
 
-            Assert.IsTrue(snap.Summary.EndsWith("…"));
+            Assert.IsTrue(snap.Summary.StartsWith("…"));
             Assert.Less(est.EstimateText(snap.Summary), est.EstimateText(new string('q', 800)));
             Assert.AreEqual("tail-only", snap.RecentMessages[^1].Content);
         }

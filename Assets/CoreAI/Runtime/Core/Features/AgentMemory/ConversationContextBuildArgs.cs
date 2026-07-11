@@ -36,5 +36,8 @@ namespace CoreAI.Ai
         /// Maximum newest durable <c>tool</c> / <c>## Tool Results</c> messages retained in the prompt history copy.
         /// </summary>
         public int MaxRetainedToolResultMessages { get; set; }
+
+        /// <summary>Defers durable summary persistence until the owning LLM request succeeds.</summary>
+        public bool DeferSummaryPersistence { get; set; }
     }
 }

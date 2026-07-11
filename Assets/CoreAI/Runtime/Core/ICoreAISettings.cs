@@ -31,6 +31,7 @@ namespace CoreAI
     /// </summary>
     public interface ICoreAISettings
     {
+        const int DefaultConversationRolledSummaryMaxTokens = 2048;
         /// <summary>Max consecutive Programmer Lua repair attempts before stopping the retry loop.</summary>
         int MaxLuaRepairRetries { get; }
 
@@ -163,7 +164,7 @@ namespace CoreAI
         /// <summary>
         /// When greater than zero, caps persisted rolling summary text to roughly this many estimated tokens after each rollup.
         /// </summary>
-        int ConversationRolledSummaryMaxTokens => 0;
+        int ConversationRolledSummaryMaxTokens => DefaultConversationRolledSummaryMaxTokens;
 
         /// <summary>
         /// Compaction (summarization of older turns) only triggers once estimated history tokens reach this

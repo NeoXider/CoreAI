@@ -194,7 +194,7 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
-                return FromException(ex);
+                return FromException(ex, functionClient.LastExecutedToolCalls);
             }
 
             if (response.Messages != null)
@@ -262,7 +262,9 @@ namespace CoreAI.Infrastructure.Llm
             return result;
         }
 
-        private LlmCompletionResult FromException(Exception ex)
+        private LlmCompletionResult FromException(
+            Exception ex,
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls = null)
         {
             if (ex is OperationCanceledException)
             {
@@ -271,7 +273,8 @@ namespace CoreAI.Infrastructure.Llm
                     Ok = false,
                     Error = ex.Message,
                     ErrorCode = LlmErrorCode.Cancelled,
-                    Model = ResolveModelName()
+                    Model = ResolveModelName(),
+                    ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
                 };
             }
 
@@ -285,7 +288,8 @@ namespace CoreAI.Infrastructure.Llm
                     HttpStatus = llmEx.HttpStatus,
                     RetryAfterSeconds = llmEx.RetryAfterSeconds,
                     ProviderErrorBody = llmEx.ProviderErrorBody,
-                    Model = ResolveModelName()
+                    Model = ResolveModelName(),
+                    ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
                 };
             }
 
@@ -294,7 +298,8 @@ namespace CoreAI.Infrastructure.Llm
                 Ok = false,
                 Error = ex.Message,
                 ErrorCode = LlmErrorCode.ProviderError,
-                Model = ResolveModelName()
+                Model = ResolveModelName(),
+                ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
             };
         }
 
@@ -428,6 +433,8 @@ namespace CoreAI.Infrastructure.Llm
             // True only after a batch with at least one GENUINE success (!batch.AllFailed) - an
             // all-failed batch must fall through to the emptyResponsesAfterToolFailure path above instead.
             bool anyToolCallSucceededInStream = false;
+            int streamedExecutedCallCount = 0;
+            MEAI.UsageDetails turnUsage = null;
 
             // Set the moment the final tools-disabled summarization roundtrip starts, so that extra
             // turn can never run twice (recursion/loop guard for RunFinalNoToolsSummaryTurnAsync).
@@ -591,7 +598,7 @@ namespace CoreAI.Infrastructure.Llm
                         };
                         await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
                                            "Streaming tool loop reached the roundtrip cap after successful tool calls",
-                                           capFallback, null, streamModel))
+                                           capFallback, turnUsage, streamModel))
                         {
                             yield return summaryChunk;
                         }
@@ -607,7 +614,7 @@ namespace CoreAI.Infrastructure.Llm
                     };
                     await foreach (LlmStreamChunk summaryChunk in RunFinalNoToolsSummaryTurnAsync(
                                        "Streaming tool loop exceeded the roundtrip cap without a successful tool call",
-                                       capErrorFallback, null, streamModel))
+                                       capErrorFallback, turnUsage, streamModel))
                     {
                         yield return summaryChunk;
                     }
@@ -644,9 +651,7 @@ namespace CoreAI.Infrastructure.Llm
                 // streamed turn's slot count is internal to CoreAI.Core (not visible from this
                 // assembly), and the mid-stream failure handler below must know whether any call
                 // may already have mutated the world.
-                int streamedExecutedCallCount = 0;
                 int chunkCount = 0;
-                MEAI.UsageDetails turnUsage = null;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
                 bool fullIterationBuffer =
                     toolsDeclared && request.BufferFullStreamingIterationWhenToolsDeclared == true;
@@ -771,7 +776,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (Exception ex)
                     {
-                        if (streamedTurn == null || streamedExecutedCallCount == 0)
+                        if (streamedExecutedCallCount == 0)
                         {
                             // No tool has mutated the world yet: preserve legacy behavior and let
                             // the exception escape (FallbackLlmClientDecorator relies on
@@ -789,7 +794,10 @@ namespace CoreAI.Infrastructure.Llm
                         // as an explicit failed result inside the policy. CompleteStreamedTurnAsync
                         // self-bounds the drain by the per-call tool timeout, so passing None here
                         // still cannot hang finalization on a cancellation-ignoring tool.
-                        await policy.CompleteStreamedTurnAsync(streamedTurn, CancellationToken.None);
+                        if (streamedTurn != null)
+                        {
+                            await policy.CompleteStreamedTurnAsync(streamedTurn, CancellationToken.None);
+                        }
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming transport failed after {streamedExecutedCallCount} tool call(s) " +
                             "started mid-stream; finalizing the partial turn instead of abandoning it " +
@@ -1005,8 +1013,13 @@ namespace CoreAI.Infrastructure.Llm
                     // Emit any visible text that preceded the tool calls (skip if already streamed token-by-token).
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(visibleText))
                     {
-                        emittedAnyVisibleText = true;
-                        yield return new LlmStreamChunk { Text = visibleText };
+                        string visibleProse = SanitizeAssistantVisibleText(
+                            StripEmbeddedToolCallJsonForDisplay(visibleText), request);
+                        if (!string.IsNullOrWhiteSpace(visibleProse))
+                        {
+                            emittedAnyVisibleText = true;
+                            yield return new LlmStreamChunk { Text = visibleProse };
+                        }
                     }
                     else if (streamedVisibleToConsumer && hybridToolJsonHold &&
                              hybridRawExclusiveEndEmitted < visibleText.Length)

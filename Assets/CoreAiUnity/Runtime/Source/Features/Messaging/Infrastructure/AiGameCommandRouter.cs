@@ -17,11 +17,13 @@ namespace CoreAI.Infrastructure.Messaging
         /// <summary>Raised after an AI command message is received by the router.</summary>
         public static event Action<ApplyAiGameCommand> CommandReceived;
 
+        private static int _activeRouterCount;
+
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;
         private readonly ICoreAiWorldCommandExecutor _worldExecutor;
         private IDisposable _subscription;
-        private volatile bool _disposed;
+        private int _disposeState;
 
         /// <summary>Creates a router bound to MessagePipe, logging, Lua, and world-command services.</summary>
         public AiGameCommandRouter(
@@ -32,6 +34,7 @@ namespace CoreAI.Infrastructure.Messaging
             _subscriber = subscriber;
             _logger = logger;
             _worldExecutor = worldExecutor;
+            System.Threading.Interlocked.Increment(ref _activeRouterCount);
         }
 
         public void Start()
@@ -47,7 +50,7 @@ namespace CoreAI.Infrastructure.Messaging
                 UniTask.Void(async () =>
                 {
                     await UniTask.SwitchToMainThread();
-                    if (_disposed)
+                    if (System.Threading.Volatile.Read(ref _disposeState) != 0)
                     {
                         return;
                     }
@@ -73,16 +76,22 @@ namespace CoreAI.Infrastructure.Messaging
         /// <summary>Releases subscriptions and runtime resources held by this object.</summary>
         public void Dispose()
         {
-            _disposed = true;
+            if (System.Threading.Interlocked.Exchange(ref _disposeState, 1) != 0)
+            {
+                return;
+            }
+
             _subscription?.Dispose();
 
             // WHY: CommandReceived is process-global (static) while its subscribers are typically
             // scene-scoped (e.g. AiDashboardPresenter). A subscriber that misses its own unsubscribe
             // would survive a scene reload and receive commands routed by the next scene's router —
-            // duplicate world mutations against destroyed objects. The router is registered once per
-            // CoreAILifetimeScope, so clearing on scope teardown is safe: live subscribers in the new
-            // scene re-attach via their own OnEnable/Initialize.
-            CommandReceived = null;
+            // duplicate world mutations against destroyed objects. Additive/overlapping scopes can own
+            // live subscribers concurrently, so only the last router may clear the shared event.
+            if (System.Threading.Interlocked.Decrement(ref _activeRouterCount) == 0)
+            {
+                CommandReceived = null;
+            }
         }
     }
 }

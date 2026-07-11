@@ -153,7 +153,7 @@ namespace CoreAI.Ai
                 // so without this clamp a retry would rebuild a byte-identical oversized request that
                 // overflows again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
                 // policy budget makes each retry actually reduce the prompt.
-                if (contextRetryPass > 0)
+                if (contextRetryPass > 0 && _settings.EnableConversationHistorySummarization)
                 {
                     historyBudget = Math.Min(historyBudget, budget.HistoryTokenBudget);
                 }
@@ -167,14 +167,18 @@ namespace CoreAI.Ai
                     SourceBudget = budget,
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
-                    MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0,
+                    MaxRolledSummaryTokens = maxRolled > 0
+                        ? maxRolled
+                        : ICoreAISettings.DefaultConversationRolledSummaryMaxTokens,
                     CompactionTriggerRatio = compactionTriggerRatio,
                     EnableContextPruning = _settings.EnableContextPruning,
-                    MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages
+                    MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages,
+                    DeferSummaryPersistence = true
                 };
             }
 
-            (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted) =
+            (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted,
+                    ConversationContextSnapshot contextSnapshot) =
                 await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
                     .ConfigureAwait(false);
             system = updatedSystem;
@@ -215,7 +219,8 @@ namespace CoreAI.Ai
                 ContextWindowTokens = contextWindowTokens,
                 HistoryTokenBudget = ctxBuildArgs?.HistoryTokenBudget ?? 0,
                 ChatHistoryMessageCount = chatHistory?.Count ?? 0,
-                EstimatedPromptTokens = estimatedPromptTokens
+                EstimatedPromptTokens = estimatedPromptTokens,
+                ContextSnapshot = contextSnapshot
             };
         }
 
@@ -404,6 +409,7 @@ namespace CoreAI.Ai
             }
 
             content = SanitizeAndPublish(bundle, task, content, user, result);
+            bundle.ContextSnapshot?.Commit();
             return content;
         }
 
@@ -747,6 +753,7 @@ namespace CoreAI.Ai
                     // streamResult.PromptTokens; recording it again here double-applied the EMA and did a
                     // second disk write per streaming turn (the non-streaming path records exactly once).
                     content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
+                    bundle.ContextSnapshot?.Commit();
                 }
                 else if (!string.IsNullOrEmpty(terminalError))
                 {
@@ -950,10 +957,11 @@ namespace CoreAI.Ai
             public int HistoryTokenBudget;
             public int ChatHistoryMessageCount;
             public int EstimatedPromptTokens;
+            public ConversationContextSnapshot ContextSnapshot;
         }
 
         private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool
-                wasCompacted)>
+                wasCompacted, ConversationContextSnapshot contextSnapshot)>
             BuildChatHistoryAsync(
                 string roleId,
                 AgentMemoryPolicy.RoleMemoryConfig roleConfig,
@@ -964,25 +972,36 @@ namespace CoreAI.Ai
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
-                return (system, null, false);
+                return (system, null, false, null);
             }
 
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
             ChatMessage[] history = _memoryStore.GetChatHistory(roleId, maxMessages);
             if (history == null || history.Length == 0)
             {
-                return (system, null, false);
+                return (system, null, false, null);
             }
 
-            ConversationContextSnapshot snapshot =
-                _contextManager is IAsyncConversationContextManager asyncCtx
+            ConversationContextSnapshot snapshot;
+            if (!_settings.EnableConversationHistorySummarization)
+            {
+                snapshot = new ConversationContextSnapshot
+                {
+                    RecentMessages = history,
+                    WasCompacted = false
+                };
+            }
+            else
+            {
+                snapshot = _contextManager is IAsyncConversationContextManager asyncCtx
                     ? await asyncCtx
                         .BuildSnapshotAsync(roleId, history, roleConfig, buildArgs, traceId, cancellationToken)
                         .ConfigureAwait(false)
                     : _contextManager.BuildSnapshot(roleId, history, roleConfig, buildArgs);
+            }
             if (snapshot == null)
             {
-                return (system, null, false);
+                return (system, null, false, null);
             }
 
             string resultSystem = system;
@@ -999,10 +1018,10 @@ namespace CoreAI.Ai
                     return (resultSystem, new List<Microsoft.Extensions.AI.ChatMessage>
                     {
                         new(Microsoft.Extensions.AI.ChatRole.System, summaryBlock)
-                    }, snapshot.WasCompacted);
+                    }, snapshot.WasCompacted, snapshot);
                 }
 
-                return (resultSystem, null, snapshot.WasCompacted);
+                return (resultSystem, null, snapshot.WasCompacted, snapshot);
             }
 
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
@@ -1020,7 +1039,7 @@ namespace CoreAI.Ai
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
             }
 
-            return (resultSystem, chatHistory, snapshot.WasCompacted);
+            return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot);
         }
 
         private static void AppendWorldStateTailMessage(

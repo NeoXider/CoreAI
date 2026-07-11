@@ -111,6 +111,17 @@ namespace CoreAI.Ai
                 };
             }
 
+            int foldStart = ConversationBulletSummary.FindFoldStart(storedSummary, history, splitExclusive);
+            if (foldStart >= splitExclusive)
+            {
+                return new ConversationContextSnapshot
+                {
+                    Summary = LimitSummaryIfNeeded(storedSummary, buildArgs),
+                    RecentMessages = recent.ToArray(),
+                    WasCompacted = true
+                };
+            }
+
             string compactedSummary;
             try
             {
@@ -118,6 +129,7 @@ namespace CoreAI.Ai
                     storedSummary,
                     history,
                     splitExclusive,
+                    foldStart,
                     orchestrationTraceId ?? "t",
                     cancellationToken).ConfigureAwait(false);
             }
@@ -130,34 +142,56 @@ namespace CoreAI.Ai
                 Log.Instance.Warn(
                     $"[LlmAssistedConversationContextManager] LLM compaction failed; using bullet fallback: {ex.Message}",
                     LogTag.Llm);
-                compactedSummary = ConversationBulletSummary.Format(storedSummary, history, splitExclusive);
+                compactedSummary = ConversationBulletSummary.Format(
+                    storedSummary, history, splitExclusive, foldStart);
             }
 
             if (string.IsNullOrWhiteSpace(compactedSummary))
             {
-                compactedSummary = ConversationBulletSummary.Format(storedSummary, history, splitExclusive);
+                compactedSummary = ConversationBulletSummary.Format(
+                    storedSummary, history, splitExclusive, foldStart);
             }
 
             compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs);
-            _summaryStore.SaveSummary(roleId, compactedSummary);
 
-            return new ConversationContextSnapshot
+            // WHY: FindFoldStart re-detects the already-folded prefix by locating the last folded
+            // message's bullet inside the STORED summary. The watermark bullet is stamped only into the
+            // persisted text; the snapshot keeps the clean LLM summary (and honors MaxSummaryChars).
+            string persistedSummary =
+                ConversationBulletSummary.FindFoldStart(compactedSummary, history, splitExclusive) >= splitExclusive
+                    ? compactedSummary
+                    : ConversationBulletSummary.Format(compactedSummary, history, splitExclusive, splitExclusive - 1);
+
+            ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
                 RecentMessages = recent.ToArray(),
                 WasCompacted = true
             };
+
+            if (buildArgs?.DeferSummaryPersistence == true)
+            {
+                snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
+            }
+            else
+            {
+                _summaryStore.SaveSummary(roleId, persistedSummary);
+            }
+
+            return snapshot;
         }
 
         private async Task<string> SummarizeViaLlmAsync(
             string priorSummary,
             ChatMessage[] history,
             int splitExclusive,
+            int startInclusive,
             string traceIdBase,
             CancellationToken cancellationToken)
         {
             // Compactor-only prompts: never the main role system (Teacher, Creator, tool contract, etc.).
-            string userPayload = BuildCompactionUserPayload(priorSummary, history, splitExclusive, _options);
+            string userPayload = BuildCompactionUserPayload(
+                priorSummary, history, splitExclusive, startInclusive, _options);
             string compactTrace = $"{traceIdBase.Trim()}:compact";
 
             LlmCompletionResult result = await _compactionLlm.CompleteAsync(
@@ -185,7 +219,11 @@ namespace CoreAI.Ai
             return NormalizeSummaryText(result.Content, _options.MaxSummaryChars);
         }
 
-        private static string BuildCompactionUserPayload(string priorSummary, ChatMessage[] history, int splitExclusive,
+        private static string BuildCompactionUserPayload(
+            string priorSummary,
+            ChatMessage[] history,
+            int splitExclusive,
+            int startInclusive,
             LlmContextCompactionOptions options)
         {
             int maxChars = options.MaxPayloadChars;
@@ -195,7 +233,7 @@ namespace CoreAI.Ai
             sb.AppendLine(string.IsNullOrWhiteSpace(priorSummary) ? "(none)" : priorSummary.Trim());
             sb.AppendLine();
             sb.AppendLine("## Dialogue lines to fold into the rolling summary (older than the live tail)");
-            for (int i = 0; i < splitExclusive; i++)
+            for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
                 string role = string.IsNullOrWhiteSpace(history[i].Role) ? "unknown" : history[i].Role.Trim();
                 string content = history[i].Content ?? "";

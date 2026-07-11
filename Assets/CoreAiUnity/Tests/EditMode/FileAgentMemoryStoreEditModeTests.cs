@@ -12,8 +12,8 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// Disk layout: <see cref="FileAgentMemoryStore"/> keeps MemoryTool text in <c>memory</c> and chat in
-    /// <c>chatHistoryJson</c>. Chat-history clear preserves long-term memory; memory clear removes the
-    /// role file to match <see cref="IAgentMemoryStore.Clear"/>.
+    /// <c>chatHistoryJson</c>. Chat-history clear preserves long-term memory; memory clear preserves the
+    /// role's history, transcripts, and version snapshots.
     /// </summary>
     public sealed class FileAgentMemoryStoreEditModeTests
     {
@@ -82,20 +82,99 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Clear_MemoryTool_OnDisk_Removes_Role_Row()
+        public async Task MemoryTool_Clear_OnDisk_Preserves_History_Transcripts_And_Versions()
         {
-            FileAgentMemoryStore store = new();
-            store.Save(_roleId, new AgentMemoryState { Memory = "will_clear", LastSystemPrompt = "s" });
-            store.AppendChatMessage(_roleId, "user", "line1", true);
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                AgentMemoryState state = new() { Memory = "will_clear", LastSystemPrompt = "s" };
+                state.RecordVersion("write", state.Memory);
+                store.Save(_roleId, state);
+                store.AppendChatMessage(_roleId, "user", "line1", true);
+                store.AppendTranscriptEntry(_roleId, new ConversationEntry
+                {
+                    Kind = ConversationEntryKind.ToolResult,
+                    Key = "lookup",
+                    Content = "tool transcript"
+                }, true);
 
-            store.Clear(_roleId);
+                MemoryTool tool = new(store, _roleId);
+                string result = await tool.ExecuteAsync("clear");
 
-            // New store instance forces reload from disk (same process would keep ephemeral cache).
-            FileAgentMemoryStore store2 = new();
-            Assert.IsFalse(store2.TryLoad(_roleId, out _), "Clear() should delete the role memory row.");
-            Assert.AreEqual(0, store2.GetChatHistory(_roleId).Length,
-                "Clear() removes all persisted state for the role.");
-            Assert.IsFalse(File.Exists(_filePath), "Clear() should remove the role file.");
+                Assert.That(result, Does.Contain("\"Success\":true"));
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.IsTrue(reloaded.TryLoad(_roleId, out AgentMemoryState loaded));
+                Assert.AreEqual("", loaded.Memory);
+                Assert.GreaterOrEqual(loaded.Versions.Length, 2);
+                Assert.AreEqual("line1", reloaded.GetChatHistory(_roleId).Single().Content);
+                Assert.IsTrue(reloaded.GetTranscriptEntries(_roleId, 0)
+                    .Any(entry => entry.Content == "tool transcript"));
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void Clear_OnDisk_WipesOnlyMemoryDocument()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                AgentMemoryState state = new() { Memory = "clear_directly" };
+                state.RecordVersion("write", state.Memory);
+                store.Save(_roleId, state);
+                store.AppendChatMessage(_roleId, "user", "preserved", true);
+
+                store.Clear(_roleId);
+
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.IsTrue(reloaded.TryLoad(_roleId, out AgentMemoryState loaded));
+                Assert.AreEqual("", loaded.Memory);
+                Assert.AreEqual(1, loaded.Versions.Length);
+                Assert.AreEqual("preserved", reloaded.GetChatHistory(_roleId).Single().Content);
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void AppendWrites_TrimHistoryAndTranscripts_ToConfiguredCaps()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root, 2, 3);
+                for (int i = 0; i < 5; i++)
+                {
+                    store.AppendChatMessage(_roleId, "user", $"chat_{i}", true);
+                }
+
+                for (int i = 0; i < 5; i++)
+                {
+                    store.AppendTranscriptEntry(_roleId, new ConversationEntry
+                    {
+                        Kind = ConversationEntryKind.ToolResult,
+                        Key = "tool",
+                        Content = $"transcript_{i}"
+                    }, true);
+                }
+
+                FileAgentMemoryStore reloaded = new(null, root, 2, 3);
+                CollectionAssert.AreEqual(new[] { "chat_3", "chat_4" },
+                    reloaded.GetChatHistory(_roleId).Select(message => message.Content).ToArray());
+                CollectionAssert.AreEqual(new[] { "transcript_2", "transcript_3", "transcript_4" },
+                    reloaded.GetTranscriptEntries(_roleId, 0).Select(entry => entry.Content).ToArray());
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
         }
 
         [Serializable]

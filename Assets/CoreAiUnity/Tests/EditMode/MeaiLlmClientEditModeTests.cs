@@ -436,6 +436,29 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_ToolExecutedThenProviderThrows_ReturnsFailureWithExecutedToolCalls()
+        {
+            ToolThenThrowChatClient inner = new();
+            MeaiLlmClient client = new(
+                inner,
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                new StatefulMemoryStore());
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "sys",
+                UserPayload = "save",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, result.ErrorCode);
+            Assert.IsTrue(result.ExecutedToolCalls.Any(t => t.Name == "memory" && t.Success));
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson()
         {
             StreamingScriptedChatClient inner = new(
@@ -877,6 +900,47 @@ namespace CoreAI.Tests.EditMode
 
             public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chatMessages, MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class ToolThenThrowChatClient : MEAI.IChatClient
+        {
+            private int _calls;
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                _calls++;
+                if (_calls == 1)
+                {
+                    string toolJson = MemoryToolJson("append", "saved-once");
+                    return Task.FromResult(new MEAI.ChatResponse(
+                        new MEAI.ChatMessage(MEAI.ChatRole.Assistant, toolJson)));
+                }
+
+                throw new LlmClientException(
+                    "provider unavailable after tool",
+                    LlmErrorCode.BackendUnavailable,
+                    503);
+            }
+
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
                 CancellationToken cancellationToken = default)
             {
                 throw new NotSupportedException();

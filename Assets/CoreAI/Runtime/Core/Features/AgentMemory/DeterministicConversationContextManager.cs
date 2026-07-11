@@ -72,17 +72,30 @@ namespace CoreAI.Ai
                 };
             }
 
+            int foldStart = ConversationBulletSummary.FindFoldStart(storedSummary, history, splitExclusive);
             string compactedSummary = LimitSummaryIfNeeded(
-                ConversationBulletSummary.Format(storedSummary, history, splitExclusive),
+                ConversationBulletSummary.Format(storedSummary, history, splitExclusive, foldStart),
                 buildArgs);
-            _summaryStore.SaveSummary(roleId, compactedSummary);
-
-            return new ConversationContextSnapshot
+            ConversationContextSnapshot snapshot = new()
             {
                 Summary = compactedSummary,
                 RecentMessages = recent.ToArray(),
                 WasCompacted = true
             };
+
+            if (foldStart < splitExclusive)
+            {
+                if (buildArgs?.DeferSummaryPersistence == true)
+                {
+                    snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, compactedSummary);
+                }
+                else
+                {
+                    _summaryStore.SaveSummary(roleId, compactedSummary);
+                }
+            }
+
+            return snapshot;
         }
 
         /// <inheritdoc />

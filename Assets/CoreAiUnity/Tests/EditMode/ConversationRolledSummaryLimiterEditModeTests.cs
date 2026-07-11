@@ -14,12 +14,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Apply_WhenOverCap_TruncatesWithEllipsis()
+        public void Apply_WhenOverCap_EvictsOldestAndKeepsNewestWithEllipsis()
         {
             HeuristicTokenEstimator est = new();
-            string text = new('a', 400);
+            string text = new string('a', 400) + "NEWEST";
             string cut = ConversationRolledSummaryLimiter.Apply(text, est, 20);
-            Assert.IsTrue(cut.EndsWith("…"));
+            Assert.IsTrue(cut.StartsWith("…"));
+            Assert.IsTrue(cut.EndsWith("NEWEST"));
             Assert.Less(cut.Length, text.Length);
             Assert.LessOrEqual(est.EstimateText(cut), est.EstimateText(text));
         }

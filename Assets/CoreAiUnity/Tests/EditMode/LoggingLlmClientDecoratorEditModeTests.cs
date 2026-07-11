@@ -112,6 +112,28 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class RetryableFailureWithToolTraceMock : ILlmClient
+        {
+            public int CompleteCallCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "HTTP 503 after mutation",
+                    ErrorCode = LlmErrorCode.BackendUnavailable,
+                    ExecutedToolCalls = new[]
+                    {
+                        new LlmToolCallTrace("world_tool", true, 1d, "native")
+                    }
+                });
+            }
+        }
+
         [Test]
         [Timeout(20_000)]
         public async Task FailedCompletion_RateLimited_RetriesAndSucceeds()
@@ -156,6 +178,23 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("LLM ~", joined);
             StringAssert.Contains("failed completion", joined);
+        }
+
+        [Test]
+        public async Task FailedCompletion_RetryableAfterToolExecution_DoesNotRetry()
+        {
+            RetryableFailureWithToolTraceMock inner = new();
+            LoggingLlmClientDecorator dec = new(inner, new SpyLogger(), 0f, 2);
+
+            LlmCompletionResult result = await dec.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "mutate once"
+            });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(1, inner.CompleteCallCount);
+            Assert.AreEqual(1, result.ExecutedToolCalls.Count);
         }
 
         [Test]

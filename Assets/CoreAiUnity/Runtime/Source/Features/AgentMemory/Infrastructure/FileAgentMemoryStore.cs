@@ -78,6 +78,8 @@ namespace CoreAI.Infrastructure.AiMemory
         private readonly Dictionary<string, List<ChatMessage>> _ephemeralHistory = new();
         private readonly Dictionary<string, List<ConversationEntry>> _transcripts = new();
         private readonly ILog _log;
+        private readonly int _maxChatHistoryMessages;
+        private readonly int _maxTranscriptEntries;
 
         /// <summary>
         /// Serializes all file and in-memory cache access for this store instance so the async
@@ -93,13 +95,16 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Optional override for the storage directory (used by tests); defaults to the CoreAI
         /// agent-memory folder under <see cref="Application.persistentDataPath"/>.
         /// </param>
-        public FileAgentMemoryStore(ILog log = null, string rootDirectory = null)
+        public FileAgentMemoryStore(ILog log = null, string rootDirectory = null,
+            int maxChatHistoryMessages = 30, int maxTranscriptEntries = 120)
         {
             _dir = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
                 : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                     CoreAiPersistentPaths.AgentMemory);
             _log = log;
+            _maxChatHistoryMessages = Math.Max(1, maxChatHistoryMessages);
+            _maxTranscriptEntries = Math.Max(1, maxTranscriptEntries);
         }
 
         /// <summary>
@@ -362,14 +367,18 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             try
             {
-                _ephemeralHistory.Remove(roleId);
-                _transcripts.Remove(roleId);
-                _loadedRoles.Remove(roleId);
-
                 string path = GetPath(roleId);
                 if (File.Exists(path))
                 {
-                    File.Delete(path);
+                    string existingJson = File.ReadAllText(path);
+                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+                    if (p == null)
+                    {
+                        return;
+                    }
+
+                    p.memory = "";
+                    AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
                     PersistFsForWebGl();
                 }
             }
@@ -837,6 +846,8 @@ namespace CoreAI.Infrastructure.AiMemory
                 Content = content,
                 Timestamp = newMsg.Timestamp
             });
+            TrimToLatest(_ephemeralHistory[roleId], _maxChatHistoryMessages);
+            TrimToLatest(_transcripts[roleId], _maxTranscriptEntries);
 
             if (persistToDisk)
             {
@@ -909,6 +920,7 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             EnsureHistoryLoaded(roleId);
             _transcripts[roleId].Add(entry);
+            TrimToLatest(_transcripts[roleId], _maxTranscriptEntries);
 
             if (persistToDisk)
             {
@@ -934,6 +946,15 @@ namespace CoreAI.Infrastructure.AiMemory
             finally
             {
                 _gate.Release();
+            }
+        }
+
+        private static void TrimToLatest<T>(List<T> list, int cap)
+        {
+            int removeCount = list.Count - cap;
+            if (removeCount > 0)
+            {
+                list.RemoveRange(0, removeCount);
             }
         }
 

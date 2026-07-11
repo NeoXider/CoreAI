@@ -476,7 +476,17 @@ namespace CoreAI.Infrastructure.Llm
                     // long stream leaves a live registration attached to the same token, accumulating until
                     // the token (request lifetime) is finally cancelled/disposed.
                     CancellationTokenRegistration registration =
-                        cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+                        cancellationToken.Register(() =>
+                        {
+                            // WHY: release the single pending-read slot only when it still belongs to this read.
+                            if (ReferenceEquals(
+                                    Interlocked.CompareExchange(ref _pendingTcs, null, tcs),
+                                    tcs))
+                            {
+                                _pendingBuffer = null;
+                                tcs.TrySetCanceled(cancellationToken);
+                            }
+                        });
                     tcs.Task.ContinueWith(
                         (_, state) => ((CancellationTokenRegistration)state).Dispose(),
                         registration,

@@ -120,7 +120,7 @@ namespace CoreAI.Ai
                             .ConfigureAwait(false);
 
                     case "clear":
-                        return ClearMemory();
+                        return await ClearMemoryAsync(cancellationToken).ConfigureAwait(false);
 
                     case "str_replace":
                         return await ExecuteStrReplaceAsync(old_text, mutationContent, replace_all, cancellationToken)
@@ -421,24 +421,14 @@ namespace CoreAI.Ai
             }
         }
 
-        private string ClearMemory()
+        private Task<string> ClearMemoryAsync(CancellationToken cancellationToken)
         {
-            // Clear is destructive and not version-tracked because it removes the role key.
-            // Undoable clear would need a separate restore feature.
-            _store.Clear(_roleId);
-
-            if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
-            {
-                Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}",
-                    LogTag.Memory);
-            }
-
-            return SerializeResult(new MemoryResult
-            {
-                Success = true,
-                Message = $"DONE: Memory cleared for {_roleId}.",
-                MemoryLength = 0
-            });
+            return MutateMemoryAsync(
+                "clear",
+                current => string.IsNullOrEmpty(current)
+                    ? MemoryMutationPlan.NoChange($"Memory is already empty for role: {_roleId}.")
+                    : MemoryMutationPlan.Change("", "Memory cleared"),
+                cancellationToken);
         }
 
         private string LoadMemory(out AgentMemoryState state)

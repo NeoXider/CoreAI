@@ -169,6 +169,97 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteStreamingAsync_NextRoundtripFailsAfterToolOnlyTurn_DoesNotReplayTool()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                SuppressFirstTail = true,
+                ThrowOnSecondStreamBeforeContent = true
+            };
+            MeaiLlmClient meai = new(inner, new RecordingLogger(), new StubSettings(), null);
+            RetryingStreamingLlmClientDecorator client = new(meai, 1);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, tool.ExecutionCount);
+            Assert.AreEqual(0, client.RetryCount);
+            Assert.That(chunks.Last().Error, Does.Contain("second roundtrip failed"));
+            Assert.IsTrue(chunks.Last().ExecutedToolCalls.Any(t => t.Name == "world_tool"));
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_NativeToolWithBufferedEcho_StripsEmbeddedToolJson()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                SuppressFirstTail = true,
+                FirstVisibleText =
+                    "Working {\"name\":\"world_tool\",\"arguments\":{\"value\":1}}"
+            };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool },
+                               BufferFullStreamingIterationWhenToolsDeclared = true
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            string visible = string.Concat(chunks.Select(c => c.Text));
+            Assert.That(visible, Does.Contain("Working"));
+            Assert.That(visible, Does.Not.Contain("\"name\""));
+            Assert.That(visible, Does.Not.Contain("\"arguments\""));
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_RoundtripCapSummary_SumsUsageOnTerminalChunk()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                SuppressFirstTail = true,
+                EmitUsage = true
+            };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool },
+                               MaxToolCallRoundtrips = 1
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk terminal = chunks.Last();
+            Assert.AreEqual(9, terminal.PromptTokens);
+            Assert.AreEqual(14, terminal.CompletionTokens);
+            Assert.AreEqual(23, terminal.TotalTokens);
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_StreamThrowsBeforeAnyToolCall_ExceptionPropagates()
         {
             FlagTool tool = new("world_tool");
@@ -340,6 +431,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             public bool Executed { get; private set; }
+            public int ExecutionCount { get; private set; }
             public string Name { get; }
             public string Description => "flag tool";
             public string ParametersSchema => "{}";
@@ -350,6 +442,7 @@ namespace CoreAI.Tests.EditMode
                 Func<CancellationToken, Task<string>> func = _ =>
                 {
                     Executed = true;
+                    ExecutionCount++;
                     return Task.FromResult("{\"Success\":true}");
                 };
                 return MEAI.AIFunctionFactory.Create(func,
@@ -375,6 +468,10 @@ namespace CoreAI.Tests.EditMode
 
             public Exception ThrowAfterToolCall { get; set; }
             public bool ThrowImmediately { get; set; }
+            public bool ThrowOnSecondStreamBeforeContent { get; set; }
+            public bool SuppressFirstTail { get; set; }
+            public bool EmitUsage { get; set; }
+            public string FirstVisibleText { get; set; }
             public bool? ObservedToolExecutedBeforeStreamEnd { get; private set; }
             public int StreamCalls { get; private set; }
 
@@ -398,13 +495,17 @@ namespace CoreAI.Tests.EditMode
                         throw new InvalidOperationException("boom before any tool call");
                     }
 
-                    yield return new MEAI.ChatResponseUpdate(
-                        MEAI.ChatRole.Assistant,
-                        new List<MEAI.AIContent>
-                        {
-                            new MEAI.FunctionCallContent(
-                                "call-1", "world_tool", new Dictionary<string, object>())
-                        });
+                    List<MEAI.AIContent> contents = new()
+                    {
+                        new MEAI.FunctionCallContent(
+                            "call-1", "world_tool", new Dictionary<string, object>())
+                    };
+                    if (!string.IsNullOrEmpty(FirstVisibleText))
+                    {
+                        contents.Add(new MEAI.TextContent(FirstVisibleText));
+                    }
+
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, contents);
                     await Task.Yield();
 
                     // Runs when the consumer requests the NEXT update - by then MeaiLlmClient
@@ -415,13 +516,46 @@ namespace CoreAI.Tests.EditMode
                         throw ThrowAfterToolCall;
                     }
 
-                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "tail");
+                    if (EmitUsage)
+                    {
+                        yield return UsageUpdate(2, 3, 5);
+                    }
+
+                    if (!SuppressFirstTail)
+                    {
+                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "tail");
+                    }
                 }
                 else
                 {
+                    if (ThrowOnSecondStreamBeforeContent)
+                    {
+                        throw new InvalidOperationException("second roundtrip failed");
+                    }
+
                     yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "Done.");
+                    if (EmitUsage)
+                    {
+                        yield return UsageUpdate(7, 11, 18);
+                    }
+
                     await Task.Yield();
                 }
+            }
+
+            private static MEAI.ChatResponseUpdate UsageUpdate(int input, int output, int total)
+            {
+                return new MEAI.ChatResponseUpdate(
+                    MEAI.ChatRole.Assistant,
+                    new List<MEAI.AIContent>
+                    {
+                        new MEAI.UsageContent(new MEAI.UsageDetails
+                        {
+                            InputTokenCount = input,
+                            OutputTokenCount = output,
+                            TotalTokenCount = total
+                        })
+                    });
             }
 
             public object GetService(Type serviceType, object serviceKey = null)

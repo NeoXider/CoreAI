@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 
 namespace CoreAI.Ai
@@ -78,6 +79,11 @@ namespace CoreAI.Ai
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Keeps the legacy length-prefixed mapping for values containing only safe characters. Values
+        /// changed by sanitization gain a stable hash of the original raw text, so their new keys cannot
+        /// collide; existing lossy keys are intentionally not reused and require host-managed migration.
+        /// </summary>
         private static void AppendPart(StringBuilder sb, string value)
         {
             if (sb.Length > 0)
@@ -85,13 +91,33 @@ namespace CoreAI.Ai
                 sb.Append("__");
             }
 
-            // Length-prefix the sanitized value so the part boundary is unambiguous. The "__" delimiter
-            // alone collides with literal '_' that Sanitize preserves, which let distinct scope tuples
-            // (e.g. user "a_"/session "b" vs user "a"/session "_b") map to the same key and share one
-            // memory bucket - a cross-user/session isolation breach. The length prefix makes the encoding
-            // injective so distinct tuples always produce distinct keys.
             string sanitized = Sanitize(value);
-            sb.Append(sanitized.Length).Append(':').Append(sanitized);
+            string raw = value?.Trim() ?? "";
+            // WHY: an unset (null/whitespace) segment is the default in every existing install - it must
+            // keep the legacy "_" key, or upgrading orphans all previously saved memory. The legacy
+            // empty-vs-literal-"_" overlap is retained knowingly; the hash suffix only has to separate
+            // genuinely distinct raw values that sanitize to the same text (the cross-user leak).
+            string encoded = raw.Length == 0 || string.Equals(raw, sanitized, System.StringComparison.Ordinal)
+                ? sanitized
+                : sanitized + "-" + StableHash(value ?? "");
+            sb.Append(encoded.Length).Append(':').Append(encoded);
+        }
+
+        private static string StableHash(string value)
+        {
+            byte[] digest;
+            using (SHA256 sha = SHA256.Create())
+            {
+                digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+            }
+
+            StringBuilder sb = new(12);
+            for (int i = 0; i < 6; i++)
+            {
+                sb.Append(digest[i].ToString("x2"));
+            }
+
+            return sb.ToString();
         }
 
         private static string Sanitize(string value)

@@ -43,6 +43,11 @@ namespace CoreAI.Features.Audit
         /// </summary>
         internal Func<bool> SimulateWriteFailureForTesting;
 
+        internal void RotateForTesting()
+        {
+            RotateNow();
+        }
+
         public AuditLogWriter()
             : this(Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, "Audit"))
         {
@@ -274,14 +279,18 @@ namespace CoreAI.Features.Audit
                 AppendLinesToFile(_filePath, new List<string> { markerLine });
             }
 
-            string rotatedName = Rotate();
+            string rotatedPath = GetNextRotatedPath();
+            string rotatedName = Path.GetFileName(rotatedPath);
 
             const long anchorSeq = 0;
             AuditEntry anchor = AuditEntry.ForRotationAnchor(anchorSeq, "system", rotatedName, markerHash);
             string anchorPreimage = JsonConvert.SerializeObject(anchor, _jsonSettings);
             string anchorHash = AuditHash.Chain(markerHash, anchorPreimage);
             string anchorLine = JsonConvert.SerializeObject(anchor.WithHash(anchorHash), _jsonSettings);
-            AppendLinesToFile(_filePath, new List<string> { anchorLine });
+            string anchorPath = _filePath + ".rotation.tmp";
+            File.WriteAllText(anchorPath, anchorLine + Environment.NewLine);
+            File.Replace(anchorPath, _filePath, rotatedPath);
+            CoreAiWebGlPersistence.Sync();
 
             _seq = anchorSeq;
             _prevHash = anchorHash;
@@ -322,8 +331,8 @@ namespace CoreAI.Features.Audit
             }
         }
 
-        /// <summary>Renames the active file aside and returns the new file's name (not full path).</summary>
-        private string Rotate()
+        /// <summary>Returns the next available rotated-file path.</summary>
+        private string GetNextRotatedPath()
         {
             string dir = Path.GetDirectoryName(_filePath);
             string name = Path.GetFileNameWithoutExtension(_filePath);
@@ -336,8 +345,7 @@ namespace CoreAI.Features.Audit
                 idx++;
             } while (File.Exists(rotated));
 
-            File.Move(_filePath, rotated);
-            return Path.GetFileName(rotated);
+            return rotated;
         }
 
 #if UNITY_WEBGL

@@ -93,5 +93,22 @@ namespace CoreAI.Tests.EditMode
             string keyUser2 = ScopedKeyFor(new AgentMemoryScope("t", "user2", "s", ""), "role");
             Assert.AreNotEqual(keyUser1, keyUser2);
         }
+
+        [Test]
+        public void ScopedKeys_ForbiddenCharacters_DoNotCollide()
+        {
+            string dotted = ScopedKeyFor(new AgentMemoryScope("", "a.b", "", ""), "role");
+            string slashed = ScopedKeyFor(new AgentMemoryScope("", "a/b", "", ""), "role");
+
+            Assert.AreNotEqual(dotted, slashed);
+        }
+
+        [Test]
+        public void ScopedKeys_LosslessValues_PreserveLegacyMapping()
+        {
+            string key = ScopedKeyFor(new AgentMemoryScope("t", "user1", "s", ""), "role");
+
+            Assert.AreEqual("1:t__5:user1__1:s__1:___4:role", key);
+        }
     }
 }

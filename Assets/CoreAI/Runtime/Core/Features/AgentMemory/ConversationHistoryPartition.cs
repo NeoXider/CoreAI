@@ -104,34 +104,63 @@ namespace CoreAI.Ai
 
     internal static class ConversationBulletSummary
     {
-        public static string Format(string existingSummary, ChatMessage[] history, int splitExclusive)
+        public static string Format(
+            string existingSummary,
+            ChatMessage[] history,
+            int splitExclusive,
+            int startInclusive = 0)
         {
-            if (history == null || splitExclusive <= 0)
+            if (history == null || splitExclusive <= startInclusive)
             {
-                return "";
+                return existingSummary?.Trim() ?? "";
             }
 
             StringBuilder sb = new();
             if (!string.IsNullOrWhiteSpace(existingSummary))
             {
                 sb.AppendLine(existingSummary.Trim());
-                sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine("Previous conversation summary:");
             }
 
-            sb.AppendLine("Previous conversation summary:");
-            for (int i = 0; i < splitExclusive; i++)
+            for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
-                string role = string.IsNullOrWhiteSpace(history[i].Role) ? "unknown" : history[i].Role.Trim();
-                string content = history[i].Content ?? "";
-                if (content.Length > 280)
-                {
-                    content = content.Substring(0, 280).TrimEnd() + "...";
-                }
-
-                sb.Append("- ").Append(role).Append(": ").AppendLine(content);
+                sb.AppendLine(FormatMessage(history[i]));
             }
 
             return sb.ToString().Trim();
+        }
+
+        public static int FindFoldStart(string existingSummary, ChatMessage[] history, int splitExclusive)
+        {
+            if (string.IsNullOrWhiteSpace(existingSummary) || history == null || splitExclusive <= 0)
+            {
+                return 0;
+            }
+
+            for (int i = splitExclusive - 1; i >= 0; i--)
+            {
+                if (existingSummary.IndexOf(FormatMessage(history[i]), StringComparison.Ordinal) >= 0)
+                {
+                    return i + 1;
+                }
+            }
+
+            return 0;
+        }
+
+        private static string FormatMessage(ChatMessage message)
+        {
+            string role = string.IsNullOrWhiteSpace(message.Role) ? "unknown" : message.Role.Trim();
+            string content = message.Content ?? "";
+            if (content.Length > 280)
+            {
+                content = content.Substring(0, 280).TrimEnd() + "...";
+            }
+
+            return "- " + role + ": " + content;
         }
     }
 }

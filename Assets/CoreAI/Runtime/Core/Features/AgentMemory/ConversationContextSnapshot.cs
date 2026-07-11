@@ -13,5 +13,14 @@ namespace CoreAI.Ai
 
         /// <summary>True when older history was compacted into <see cref="Summary"/>.</summary>
         public bool WasCompacted { get; set; }
+
+        internal System.Action CommitSummary { get; set; }
+
+        internal void Commit()
+        {
+            System.Action commit = CommitSummary;
+            CommitSummary = null;
+            commit?.Invoke();
+        }
     }
 }

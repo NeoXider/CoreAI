@@ -49,7 +49,10 @@ namespace CoreAI.Infrastructure.Llm
                 LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken);
 
                 // WHY: If primary returned a result but with a retryable error, try secondary
-                if (result != null && !result.Ok && IsRetryableError(result.ErrorCode))
+                if (result != null &&
+                    !result.Ok &&
+                    !HasExecutedToolCalls(result) &&
+                    IsRetryableError(result.ErrorCode))
                 {
                     _logger.Warn(
                         $"[Fallback] Primary failed ({result.ErrorCode}: {result.Error}), falling back to secondary.",
@@ -225,6 +228,11 @@ namespace CoreAI.Infrastructure.Llm
                    code == LlmErrorCode.RateLimited ||
                    code == LlmErrorCode.Timeout ||
                    code == LlmErrorCode.ContextLengthExceeded;
+        }
+
+        private static bool HasExecutedToolCalls(LlmCompletionResult result)
+        {
+            return result?.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0;
         }
     }
 }

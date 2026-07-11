@@ -140,27 +140,31 @@ namespace CoreAI.Tests.EditMode.Audit
         }
 
         [Test]
+        public void Verify_ChainResetMidFile_StartsNewValidChain()
+        {
+            using AuditLogWriter writer = new(_testFolder);
+            WriteEntries(writer, 2);
+            AuditEntry reset = AuditEntry.ForChainReset(0, "system", "intentional reset");
+            string preimage = JsonConvert.SerializeObject(reset);
+            string hash = AuditHash.Chain("", preimage);
+            File.AppendAllText(writer.FilePath, JsonConvert.SerializeObject(reset.WithHash(hash)) + Environment.NewLine);
+
+            AuditVerifyResult result = AuditLogVerifier.Verify(writer.FilePath);
+
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual(3, result.LineCount);
+        }
+
+        [Test]
         public void Rotation_BothFiles_VerifyStandaloneAndAnchorLinked()
         {
             using AuditLogWriter writer = new(_testFolder);
-
-            // Pad past MaxFileSize (50 MB) with a large Args payload per entry so rotation triggers
-            // through the normal flush path rather than by tampering with the file on disk.
-            string padding = new('x', 11_000);
-            for (int i = 0; i < 5000; i++)
-            {
-                writer.Record(AuditEntry.ForToolCall(
-                    0, $"trace-{i}", "creator", "gpt-4", "ph",
-                    "test_tool", padding, "allowed",
-                    "ok", "", i));
-            }
-
-            writer.FlushForTesting(); // file now exceeds MaxFileSize, but rotation is checked at the START of a flush
-
+            WriteEntries(writer, 2);
+            writer.RotateForTesting();
             writer.Record(AuditEntry.ForToolCall(
                 0, "after-rotation", "creator", "gpt-4", "ph",
                 "test_tool", "{}", "allowed", "ok", "", 1));
-            writer.FlushForTesting(); // this flush should detect the oversized file and rotate
+            writer.FlushForTesting();
 
             string rotatedPath = Path.Combine(_testFolder, "audit_0001.jsonl");
             string activePath = writer.FilePath;

@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -179,6 +180,32 @@ namespace CoreAI.Tests.EditMode
             Assert.LessOrEqual(snap.History.Count, 7, "original + 5 intermediate + current at most.");
             Assert.AreEqual("p0", snap.OriginalPayload);
             Assert.AreEqual("p49", snap.CurrentPayload);
+        }
+
+        [Test]
+        public void FileStore_InterruptedAtomicWrite_PreservesLiveRevisionHistory()
+        {
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestDataOverlays", "atomic.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.Delete(path);
+            File.Delete(path + ".tmp");
+            FileDataOverlayVersionStore store = new(new NullGameLogger(), path);
+            store.RecordSuccessfulApply("k", "p1");
+
+            try
+            {
+                FileDataOverlayVersionStore.BeforeAtomicReplaceForTesting = () => throw new IOException("simulated crash");
+                store.RecordSuccessfulApply("k", "p2");
+            }
+            finally
+            {
+                FileDataOverlayVersionStore.BeforeAtomicReplaceForTesting = null;
+            }
+
+            FileDataOverlayVersionStore reopened = new(new NullGameLogger(), path);
+            Assert.IsTrue(reopened.TryGetSnapshot("k", out DataOverlayVersionRecord snapshot));
+            Assert.AreEqual("p1", snapshot.CurrentPayload);
+            Assert.IsTrue(File.Exists(path + ".tmp"));
         }
     }
 }

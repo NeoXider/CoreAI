@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -42,6 +43,24 @@ namespace CoreAI.Tests.EditMode
             // Кастомный список уже содержит memory — синглтон из политики не дублируется.
             Assert.AreEqual(2, retrieved.Count);
             Assert.AreEqual("memory", retrieved[0].Name);
+        }
+
+        [Test]
+        public void AgentMemoryPolicy_SetToolsForRole_PreservesSkillMetaTools()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.AddSkillForRole("TestRole",
+                new SkillSet("MemorySkill", "Uses memory", "Remember facts.", new MemoryLlmTool()));
+
+            policy.SetToolsForRole("TestRole", new ILlmTool[]
+            {
+                new InventoryLlmTool(new TestInventoryProvider())
+            });
+
+            IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole("TestRole");
+            Assert.IsTrue(tools.Any(tool => tool.Name == "read_skill"));
+            Assert.IsTrue(tools.Any(tool => tool.Name == "call_skill_tool"));
+            Assert.IsTrue(tools.Any(tool => tool.Name == "inventory"));
         }
 
         [Test]

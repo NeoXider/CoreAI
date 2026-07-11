@@ -18,72 +18,72 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Infrastructure.Llm
 {
 #if UNITY_EDITOR
-    // WHY: / <summary>Unity Editor only: when set, <see cref="MeaiOpenAiChatClient"/> uses this factory for HTTP instead of <c>new HttpClient()</c> (EditMode tests with <see cref="HttpMessageHandler"/> mocks).</summary>
+    /// <summary>Unity Editor only: when set, <see cref="MeaiOpenAiChatClient"/> uses this factory for HTTP instead of <c>new HttpClient()</c> (EditMode tests with <see cref="HttpMessageHandler"/> mocks).</summary>
     public static class MeaiOpenAiChatClientEditorTestHooks
     {
-        // WHY: / <summary>Must be cleared in test teardown.</summary>
+        /// <summary>Must be cleared in test teardown.</summary>
         public static Func<HttpClient> HttpClientFactory { get; set; }
     }
 #endif
 
-    // WHY: / <summary>
-    // / Stable marker keys placed inside a tool call's arguments dictionary when the streamed
-    // / argument JSON could not be parsed (malformed/truncated). Both the streaming accumulator that
-    // / emits the markers and <see cref="ToolExecutionPolicy"/> that detects them reference these
-    // / shared constants so the contract stays in sync across the assembly.
-    // / </summary>
+    /// <summary>
+    /// Stable marker keys placed inside a tool call's arguments dictionary when the streamed
+    /// argument JSON could not be parsed (malformed/truncated). Both the streaming accumulator that
+    /// emits the markers and <see cref="ToolExecutionPolicy"/> that detects them reference these
+    /// shared constants so the contract stays in sync across the assembly.
+    /// </summary>
     public static class ToolCallArgumentMarkers
     {
-        // WHY: / <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+        /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
         public const string RawArgumentsKey = "__raw_arguments";
 
-        // WHY: / <summary>Marker key (boolean <c>true</c>) set when the accumulated arguments could not be parsed as JSON.</summary>
+        /// <summary>Marker key (boolean <c>true</c>) set when the accumulated arguments could not be parsed as JSON.</summary>
         public const string ParseErrorKey = "__parse_error";
     }
 
-    // WHY: / <summary>
-    // / MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
-    // / Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
-    // / WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
-    // / </summary>
+    /// <summary>
+    /// MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
+    /// Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
+    /// WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
+    /// </summary>
     public sealed class MeaiOpenAiChatClient : MEAI.IChatClient, IDisposable
     {
         private readonly IOpenAiHttpSettings _settings;
         private readonly IOpenAiHttpTransport _transport;
         private readonly ILog _log;
 
-        // WHY: / <summary>
-        // / Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
-        // / server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
-        // / this many seconds instead of waiting for the server to close the stream. A proxy that hides
-        // / an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
-        // / without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
-        // / Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
-        // / </summary>
+        /// <summary>
+        /// Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
+        /// server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
+        /// this many seconds instead of waiting for the server to close the stream. A proxy that hides
+        /// an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
+        /// without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
+        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        /// </summary>
         internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
 
-        // WHY: / <summary>
-        // / Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
-        // / the streamed path then falls back to ONE non-streaming completion, and only if that also
-        // / fails does the typed error surface - "request → retry → fallback request → error".
-        // / The Retry-After header is honored when present, else 2s backoff.
-        // / Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
-        // / </summary>
+        /// <summary>
+        /// Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
+        /// the streamed path then falls back to ONE non-streaming completion, and only if that also
+        /// fails does the typed error surface - "request → retry → fallback request → error".
+        /// The Retry-After header is honored when present, else 2s backoff.
+        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        /// </summary>
         internal static int RateLimitMaxRetries { get; set; } = 1;
 
-        // WHY: / <summary>Transient HTTP statuses worth retrying: 408 timeout, 429 rate limit, any 5xx.</summary>
+        /// <summary>Transient HTTP statuses worth retrying: 408 timeout, 429 rate limit, any 5xx.</summary>
         private static bool IsRetryableHttpStatus(int status)
         {
             return status == 408 || status == 429 || (status >= 500 && status < 600);
         }
 
-        // WHY: / <summary>
-        // / Backoff before a rate-limit retry: Retry-After header when present, else a retry window
-        // / parsed from the error body ("Please try again in 14.017s" - Groq puts it there, and on
-        // / WebGL the Retry-After header is invisible to fetch unless CORS exposes it), else
-        // / 2s * retry index. Capped at 20s so one retry can actually clear a typical TPM window
-        // / instead of guaranteed-failing into it.
-        // / </summary>
+        /// <summary>
+        /// Backoff before a rate-limit retry: Retry-After header when present, else a retry window
+        /// parsed from the error body ("Please try again in 14.017s" - Groq puts it there, and on
+        /// WebGL the Retry-After header is invisible to fetch unless CORS exposes it), else
+        /// 2s * retry index. Capped at 20s so one retry can actually clear a typical TPM window
+        /// instead of guaranteed-failing into it.
+        /// </summary>
         private static int ResolveRateLimitBackoffMs(
             IReadOnlyDictionary<string, IEnumerable<string>> headers, int retryIndex, string errorBody = null)
         {
@@ -108,10 +108,10 @@ namespace CoreAI.Infrastructure.Llm
             return Math.Min(capMs, 2000 * Math.Max(1, retryIndex));
         }
 
-        // WHY: / <summary>
-        // / Extracts a retry window from a rate-limit error body, e.g. Groq's
-        // / "Please try again in 14.0175s" or "try again in 2m3.5s". Returns null when absent.
-        // / </summary>
+        /// <summary>
+        /// Extracts a retry window from a rate-limit error body, e.g. Groq's
+        /// "Please try again in 14.0175s" or "try again in 2m3.5s". Returns null when absent.
+        /// </summary>
         internal static double? TryParseRetryWindowSecondsFromBody(string errorBody)
         {
             if (string.IsNullOrEmpty(errorBody))
@@ -166,12 +166,12 @@ namespace CoreAI.Infrastructure.Llm
             return GetResponseCoreAsync(chatMessages, options, RateLimitMaxRetries, cancellationToken);
         }
 
-        // WHY: / <summary>
-        // / Non-streaming completion with an explicit transient-HTTP retry budget. The public
-        // / <see cref="GetResponseAsync"/> uses <see cref="RateLimitMaxRetries"/>; the streamed path's
-        // / LAST-RESORT fallback passes 0 so the whole turn stays at
-        // / "request → retry → one fallback request → typed error".
-        // / </summary>
+        /// <summary>
+        /// Non-streaming completion with an explicit transient-HTTP retry budget. The public
+        /// <see cref="GetResponseAsync"/> uses <see cref="RateLimitMaxRetries"/>; the streamed path's
+        /// LAST-RESORT fallback passes 0 so the whole turn stays at
+        /// "request → retry → one fallback request → typed error".
+        /// </summary>
         private async Task<MEAI.ChatResponse> GetResponseCoreAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options,
@@ -1813,7 +1813,7 @@ namespace CoreAI.Infrastructure.Llm
                 _log = log ?? NullLog.Instance;
             }
 
-            // WHY: / <summary>
+            /// <summary>
             // / Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
             // / later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
             // / always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
@@ -1907,7 +1907,7 @@ namespace CoreAI.Infrastructure.Llm
                 return CreateEntry(index, stableId);
             }
 
-            // WHY: / <summary>
+            /// <summary>
             // / True while the entry can still accept argument fragments: its accumulated arguments do
             // / not yet form one complete JSON object. A completed entry gaining anything further would
             // / only accumulate trailing junk, so it can never own a new fragment.
@@ -2210,10 +2210,10 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // WHY: / <summary>
-            // / Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
-            // / dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
-            // / and a warning is logged, so callers can detect and recover from a broken stream.
-            // / </summary>
+            /// Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
+            /// dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
+            /// and a warning is logged, so callers can detect and recover from a broken stream.
+            /// </summary>
             private Dictionary<string, object> ParseArguments(string argsStr, string name, PendingToolCall pending)
             {
                 if (pending.ForceParseError)
@@ -2259,7 +2259,7 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            // WHY: / <summary>Mutable accumulation state for one in-progress streamed tool call.</summary>
+            /// <summary>Mutable accumulation state for one in-progress streamed tool call.</summary>
             private sealed class PendingToolCall
             {
                 public int? Index;
@@ -2273,7 +2273,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        // WHY: / <summary>Test hook: exposes the wire-payload message serialization.</summary>
+        /// <summary>Test hook: exposes the wire-payload message serialization.</summary>
         internal static List<Dictionary<string, object>> BuildMessagesPayloadForTests(List<MEAI.ChatMessage> msgs)
         {
             return BuildMessagesPayloadStatic(msgs);
@@ -2426,14 +2426,14 @@ namespace CoreAI.Infrastructure.Llm
             return messages;
         }
 
-        // WHY: / <summary>
-        // / Serializes a tool call's arguments for the assistant <c>tool_calls</c> echo. Parse-error
-        // / calls (arguments carrying <see cref="ToolCallArgumentMarkers.RawArgumentsKey"/>) echo the
-        // / model's ORIGINAL raw argument string instead of the internal marker dictionary - the
-        // / markers are a CoreAI-private contract and leaking
-        // / <c>{"__raw_arguments":...,"__parse_error":true}</c> onto the wire would show the model a
-        // / call shape it never produced.
-        // / </summary>
+        /// <summary>
+        /// Serializes a tool call's arguments for the assistant <c>tool_calls</c> echo. Parse-error
+        /// calls (arguments carrying <see cref="ToolCallArgumentMarkers.RawArgumentsKey"/>) echo the
+        /// model's ORIGINAL raw argument string instead of the internal marker dictionary - the
+        /// markers are a CoreAI-private contract and leaking
+        /// <c>{"__raw_arguments":...,"__parse_error":true}</c> onto the wire would show the model a
+        /// call shape it never produced.
+        /// </summary>
         private static string SerializeToolCallArguments(IDictionary<string, object?> arguments)
         {
             if (arguments != null &&
@@ -2452,13 +2452,13 @@ namespace CoreAI.Infrastructure.Llm
             return JsonConvert.SerializeObject(arguments ?? new Dictionary<string, object?>());
         }
 
-        // WHY: / <summary>
-        // / Builds the OpenAI <c>content</c> value for a message. When the message carries image content
-        // / (<see cref="MEAI.DataContent"/> or <see cref="MEAI.UriContent"/> with an <c>image/*</c> media
-        // / type), the value is a multimodal parts array (<c>{type:"text"}</c> + one or more
-        // / <c>{type:"image_url"}</c>) so vision-capable models receive the image; otherwise it is the plain
-        // / text string (unchanged behavior for text-only messages). Public for test verification.
-        // / </summary>
+        /// <summary>
+        /// Builds the OpenAI <c>content</c> value for a message. When the message carries image content
+        /// (<see cref="MEAI.DataContent"/> or <see cref="MEAI.UriContent"/> with an <c>image/*</c> media
+        /// type), the value is a multimodal parts array (<c>{type:"text"}</c> + one or more
+        /// <c>{type:"image_url"}</c>) so vision-capable models receive the image; otherwise it is the plain
+        /// text string (unchanged behavior for text-only messages). Public for test verification.
+        /// </summary>
         public static object BuildOpenAiMessageContent(string text, IList<MEAI.AIContent> contents)
         {
             List<string> imageUrls = null;

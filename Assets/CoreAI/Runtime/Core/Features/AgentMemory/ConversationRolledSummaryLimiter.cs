@@ -7,7 +7,7 @@ namespace CoreAI.Ai
     {
         /// <summary>
         /// Returns <paramref name="text"/> unchanged when <paramref name="maxTokens"/> is unset or empty text.
-        /// Otherwise trims to the longest prefix whose <see cref="ITokenEstimator.EstimateText"/> is at most <paramref name="maxTokens"/>, then appends an ellipsis when trimmed.
+        /// Otherwise keeps the longest newest suffix whose <see cref="ITokenEstimator.EstimateText"/> is at most <paramref name="maxTokens"/>, then prefixes an ellipsis when trimmed.
         /// </summary>
         public static string Apply(string text, ITokenEstimator estimator, int maxTokens)
         {
@@ -32,7 +32,7 @@ namespace CoreAI.Ai
             while (lo < hi)
             {
                 int mid = (lo + hi + 1) / 2;
-                if (estimator.EstimateText(trimmed.Substring(0, mid)) <= maxTokens)
+                if (estimator.EstimateText(trimmed.Substring(trimmed.Length - mid)) <= maxTokens)
                 {
                     lo = mid;
                 }
@@ -47,8 +47,8 @@ namespace CoreAI.Ai
                 return "…";
             }
 
-            string prefix = trimmed.Substring(0, lo).TrimEnd();
-            return string.IsNullOrEmpty(prefix) ? "…" : prefix + "…";
+            string suffix = trimmed.Substring(trimmed.Length - lo).TrimStart();
+            return string.IsNullOrEmpty(suffix) ? "…" : "…" + suffix;
         }
     }
 }

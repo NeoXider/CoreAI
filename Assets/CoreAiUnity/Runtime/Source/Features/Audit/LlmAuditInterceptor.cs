@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Audit;
 using CoreAI.Messaging;
 using MessagePipe;
+using UnityEngine;
 
 namespace CoreAI.Features.Audit
 {
@@ -17,6 +18,7 @@ namespace CoreAI.Features.Audit
 
             if (!GlobalMessagePipe.IsInitialized)
             {
+                Debug.LogWarning("[LlmAuditInterceptor] MessagePipe is not initialized; LLM audit events will not be captured.");
                 return;
             }
 

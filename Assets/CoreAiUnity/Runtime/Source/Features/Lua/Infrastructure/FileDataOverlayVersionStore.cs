@@ -22,6 +22,7 @@ namespace CoreAI.Infrastructure.Lua
         private readonly MemoryDataOverlayVersionStore _memory;
         private readonly string _filePath;
         private readonly object _ioLock = new();
+        internal static Action BeforeAtomicReplaceForTesting;
 
         public FileDataOverlayVersionStore(
             IGameLogger logger,
@@ -211,12 +212,28 @@ namespace CoreAI.Infrastructure.Lua
                     }
 
                     string json = JsonUtility.ToJson(root, true);
-                    File.WriteAllText(_filePath, json);
+                    WriteAtomically(_filePath, json);
+                    CoreAiWebGlPersistence.Sync();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(GameLogFeature.Core, $"Data overlay versions save failed: {ex.Message}");
                 }
+            }
+        }
+
+        private static void WriteAtomically(string path, string contents)
+        {
+            string tmpPath = path + ".tmp";
+            File.WriteAllText(tmpPath, contents);
+            BeforeAtomicReplaceForTesting?.Invoke();
+            if (File.Exists(path))
+            {
+                File.Replace(tmpPath, path, null);
+            }
+            else
+            {
+                File.Move(tmpPath, path);
             }
         }
 

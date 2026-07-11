@@ -27,13 +27,27 @@ namespace CoreAI.Ai
         {
             lock (_lock)
             {
-                if (tools == null || tools.Count == 0)
+                List<ILlmTool> replacement = tools == null
+                    ? new List<ILlmTool>()
+                    : new List<ILlmTool>(tools);
+
+                if (_roleSkillCatalogs.TryGetValue(roleId, out MutableSkillCatalog catalog))
                 {
-                    _customTools.Remove(roleId);
-                    return;
+                    replacement.RemoveAll(tool => tool != null &&
+                        (string.Equals(tool.Name, "read_skill", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(tool.Name, "call_skill_tool", StringComparison.OrdinalIgnoreCase)));
+                    replacement.Add(ReadSkillLlmTool.Create(catalog));
+                    replacement.Add(CallSkillToolLlmTool.Create(catalog));
                 }
 
-                _customTools[roleId] = new List<ILlmTool>(tools);
+                if (replacement.Count == 0)
+                {
+                    _customTools.Remove(roleId);
+                }
+                else
+                {
+                    _customTools[roleId] = replacement;
+                }
             }
         }
 

@@ -951,6 +951,97 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
         }
 
+        [Test]
+        public async Task RunTaskAsync_ContextOverflowRetry_WhenSummarizationDisabled_KeepsFullChatTail()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "context too long"
+                },
+                new LlmCompletionResult { Ok = true, Content = "ok" });
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"old-context-{i}-".PadRight(90, 'x')
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            TestSettings settings = new()
+            {
+                EnableConversationHistorySummarization = false,
+                MaxContextOverflowRetries = 1
+            };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.AreEqual(10, llm.Requests[0].ChatHistory.Count);
+            Assert.AreEqual(10, llm.Requests[1].ChatHistory.Count);
+            Assert.IsFalse(llm.Requests[1].ChatHistory.Any(m =>
+                (m.Text ?? "").Contains("## Conversation Summary")));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ContextOverflowRetriesFail_DoesNotPersistAttemptSummaries()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "context too long"
+                },
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "still too long"
+                });
+            TestMemoryStore memory = new();
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"old-context-{i}-".PadRight(90, 'x')
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            TestSettings settings = new() { MaxContextOverflowRetries = 1 };
+            InMemoryConversationSummaryStore summaryStore = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(summaryStore));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.AreEqual("", summaryStore.LoadSummary("test_role"));
+        }
+
+        [Test]
+        public void ConversationRolledSummaryDefault_IsBounded()
+        {
+            Assert.Greater(ICoreAISettings.DefaultConversationRolledSummaryMaxTokens, 0);
+        }
+
         private static async Task RunSummaryPlacementRequestAsync(TestLlmClient llm)
         {
             TestMemoryStore memory = new();

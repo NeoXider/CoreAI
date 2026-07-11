@@ -414,6 +414,22 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Fallback_PrimaryReturnsRetryableErrorAfterToolExecution_SecondaryNotCalled()
+        {
+            ErrorResultLlmClient primary = new(LlmErrorCode.BackendUnavailable, true);
+            CountingLlmClient secondary = new("secondary");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(1, result.ExecutedToolCalls.Count);
+            Assert.AreEqual(0, secondary.CallCount);
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
+        [Test]
         public async Task Fallback_PrimaryReturnsNonRetryableError_SecondaryNotCalled()
         {
             ErrorResultLlmClient primary = new(LlmErrorCode.InvalidRequest);
@@ -704,16 +720,25 @@ namespace CoreAI.Tests.EditMode
         private sealed class ErrorResultLlmClient : ILlmClient
         {
             private readonly LlmErrorCode _code;
+            private readonly bool _withExecutedToolCall;
 
-            public ErrorResultLlmClient(LlmErrorCode code)
+            public ErrorResultLlmClient(LlmErrorCode code, bool withExecutedToolCall = false)
             {
                 _code = code;
+                _withExecutedToolCall = withExecutedToolCall;
             }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
             {
                 return Task.FromResult(new LlmCompletionResult
-                    { Ok = false, Error = "backend error", ErrorCode = _code });
+                {
+                    Ok = false,
+                    Error = "backend error",
+                    ErrorCode = _code,
+                    ExecutedToolCalls = _withExecutedToolCall
+                        ? new[] { new LlmToolCallTrace("world_tool", true, 1d, "native") }
+                        : Array.Empty<LlmToolCallTrace>()
+                });
             }
 
             public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,

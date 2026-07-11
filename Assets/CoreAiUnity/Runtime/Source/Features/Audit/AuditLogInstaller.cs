@@ -8,8 +8,7 @@ namespace CoreAI.Features.Audit
     {
         public static void RegisterAuditLog(this IContainerBuilder builder)
         {
-            AuditLogWriter writer = new();
-            builder.RegisterInstance<IAuditLog>(writer);
+            builder.Register<AuditLogWriter>(Lifetime.Singleton).As<IAuditLog>().AsSelf();
 
             builder.Register<LlmAuditInterceptor>(Lifetime.Singleton).AsSelf();
             builder.Register<ToolCallAuditInterceptor>(Lifetime.Singleton).AsSelf();

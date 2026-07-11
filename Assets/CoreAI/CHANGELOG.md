@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 2 — core)
+
+- **Retries can no longer double-execute tools.** A failed completion that carries executed-tool evidence
+  is not replayed by the HTTP retry loop or the fallback chain (the failure propagates instead of
+  re-mutating the world); error results now retain `ExecutedToolCalls`, and the streaming replay-safety
+  guard is cumulative across tool roundtrips (a failure after a tool-only roundtrip no longer looks
+  pre-commit to the streaming retry decorator).
+- **Streaming usage is summed across the whole turn** (was: reset every roundtrip, underreporting
+  multi-roundtrip turns ~N×; the roundtrip-cap fallback reported zero).
+- **Rolling summary converges.** Already-folded prefixes are detected (watermark in the *stored* summary
+  only — the visible summary stays the clean LLM output within `MaxSummaryChars`) and never re-folded, so
+  the summary stops accumulating duplicate bullets; failed overflow retries no longer persist summary
+  changes; retries respect `EnableConversationHistorySummarization=false`; the cap default is 2048 tokens
+  (was 0 = unbounded) and trimming keeps the newest content, evicting the oldest.
+- **`memory(action=clear)` wipes only the memory document** (versioned, revertible); chat history,
+  transcripts, and prior versions survive — the model can no longer erase the user's conversation record.
+- **Agent-memory scope keys are injective.** Distinct raw scope values that sanitize to the same text
+  (`a.b` vs `a/b`) get a stable hash suffix — no more cross-user memory/history sharing; unset and
+  clean values keep their legacy on-disk keys (no data migration for the default case).
+- **Role files stop growing without bound**: chat history and transcripts are trimmed on write to
+  configurable caps (were only trimmed on read).
+- **Replacing a role's tool list no longer disconnects skills**: `read_skill`/`call_skill_tool` are
+  re-asserted when a live skill catalog exists.
+- **Audit chain verifier**: accepts a legitimate mid-file `ChainReset` as a new chain start, and rotation
+  stages its anchor before the atomic swap — a crash between the two no longer bricks verification of all
+  subsequent files.
+
 ### Fixed (2026-07-11 audit wave)
 
 - **SSE connect phase honors `TransportTimeoutSeconds`.** `HttpClientOpenAiTransport` now bounds the

@@ -79,7 +79,10 @@ namespace CoreAI.Composition
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
             builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),
                 Lifetime.Singleton);
-            builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
+            if (!builder.Exists(typeof(IGameConfigStore)))
+            {
+                builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
+            }
             builder.Register<GameConfigPolicy>(Lifetime.Singleton);
             builder.Register<AiOrchestrator>(Lifetime.Singleton);
             builder.Register<IAiOrchestrationService>(c =>

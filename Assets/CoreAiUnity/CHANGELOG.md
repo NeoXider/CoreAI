@@ -4,6 +4,25 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 2 — host)
+
+- **LLM request auditing actually works.** The audit interceptor used to resolve before
+  `GlobalMessagePipe.SetProvider` ran (build-callback order), silently subscribing to nothing — forever.
+  Initialization is now ordered, and a still-uninitialized pipe logs a loud warning instead of nothing.
+- **Lua/overlay revision stores write atomically** (tmp + `Replace`, like world state) and sync WebGL
+  persistence — a crash mid-write no longer erases a script's entire original/current/history record.
+- **`AuditLogWriter` lifetime is scope-owned**: scene reloads no longer leak background flush loops
+  writing the same file concurrently; the tail is flushed on scope teardown.
+- **`NullGameConfigStore` no longer shadows the real host store** (portable defaults register it only
+  when no host store exists; pinned by a container test).
+- **`AiGameCommandRouter` is additive-scene safe**: disposing one scope's router no longer wipes the
+  static `CommandReceived` subscribers of a coexisting scope (active-router refcount; only the last
+  router clears stale subscribers).
+- **WebGL SSE: a cancelled parked read no longer wedges the stream** — the pending-read slot is cleared
+  on cancellation (was: every later read failed with "previous read has not completed").
+- **Buffered native-tool echo strips embedded tool JSON before display** (llama.cpp-style echo of the
+  tool call no longer reaches the user as raw JSON).
+
 ### Fixed (2026-07-11 audit wave)
 
 - **WebGL persistence: IndexedDB flush failures are no longer silent.** `CoreAiWebGlPersistence` and

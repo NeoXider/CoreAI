@@ -97,6 +97,7 @@ namespace CoreAI.Audit
                 long seq = obj["Seq"]?.Value<long>() ?? lineCount;
                 string storedPrevHash = (string)obj["prevHash"] ?? "";
                 string storedHash = (string)obj["hash"] ?? "";
+                bool chainReset = (int?)obj["Kind"] == (int)AuditEntryKind.ChainReset;
 
                 // Anchored genesis: a file created by rotation starts with a RotationAnchor entry
                 // whose own prevHash is the previous file's final hash, not "". Trust that stored
@@ -105,6 +106,11 @@ namespace CoreAI.Audit
                 if (first && (int?)obj["Kind"] == (int)AuditEntryKind.RotationAnchor)
                 {
                     prevHash = storedPrevHash;
+                }
+
+                if (chainReset)
+                {
+                    prevHash = "";
                 }
 
                 first = false;

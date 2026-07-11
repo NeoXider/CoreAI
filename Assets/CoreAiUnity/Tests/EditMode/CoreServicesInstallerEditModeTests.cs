@@ -1,5 +1,8 @@
 using System;
+using System.Collections;
+using System.Reflection;
 using CoreAI.Composition;
+using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Messaging;
@@ -42,6 +45,30 @@ namespace CoreAI.Tests.EditMode
                     disposable.Dispose();
                 }
             }
+        }
+
+        [Test]
+        public void RegisterCore_InitializesAuditInterceptor_AndDisposesWriterWithScope()
+        {
+            ContainerBuilder builder = new();
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+
+            IObjectResolver container = builder.Build();
+            LlmAuditInterceptor interceptor = container.Resolve<LlmAuditInterceptor>();
+            AuditLogWriter writer = container.Resolve<AuditLogWriter>();
+            FieldInfo subscriptionsField = typeof(LlmAuditInterceptor).GetField(
+                "_subscriptions", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo cancellationField = typeof(AuditLogWriter).GetField(
+                "_cts", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.AreEqual(3, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
+            Assert.IsNotNull(cancellationField.GetValue(writer));
+
+            ((IDisposable)container).Dispose();
+
+            Assert.AreEqual(0, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
+            Assert.IsNull(cancellationField.GetValue(writer));
         }
     }
 }

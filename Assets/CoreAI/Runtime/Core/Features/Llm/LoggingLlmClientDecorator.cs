@@ -178,6 +178,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (result != null &&
                 !result.Ok &&
+                !HasExecutedToolCalls(result) &&
                 IsRetryableFailureResult(result, out int httpWaitFromResult) &&
                 _maxHttpRetryAttempts > 0)
             {
@@ -195,6 +196,12 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken);
                         if (result != null && result.Ok)
+                        {
+                            exhausted = false;
+                            break;
+                        }
+
+                        if (HasExecutedToolCalls(result))
                         {
                             exhausted = false;
                             break;
@@ -224,6 +231,12 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
                         if (result != null && result.Ok)
+                        {
+                            exhausted = false;
+                            break;
+                        }
+
+                        if (HasExecutedToolCalls(result))
                         {
                             exhausted = false;
                             break;
@@ -263,7 +276,8 @@ namespace CoreAI.Infrastructure.Llm
                         ErrorCode = result.ErrorCode,
                         HttpStatus = result.HttpStatus,
                         RetryAfterSeconds = result.RetryAfterSeconds,
-                        ProviderErrorBody = result.ProviderErrorBody
+                        ProviderErrorBody = result.ProviderErrorBody,
+                        ExecutedToolCalls = result.ExecutedToolCalls
                     };
                 }
             }
@@ -374,6 +388,11 @@ namespace CoreAI.Infrastructure.Llm
 
             retryAfterSeconds = r.RetryAfterSeconds ?? 0;
             return true;
+        }
+
+        private static bool HasExecutedToolCalls(LlmCompletionResult result)
+        {
+            return result?.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0;
         }
 
         /// <summary>

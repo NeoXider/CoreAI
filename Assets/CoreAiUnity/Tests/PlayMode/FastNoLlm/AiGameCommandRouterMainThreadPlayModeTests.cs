@@ -198,7 +198,7 @@ namespace CoreAI.Tests.PlayMode
             CurrentThreadPublishBus oldBus = new();
             AiGameCommandRouter oldRouter = new(oldBus, new NoOpGameLogger(), new NullWorldExecutor());
             CurrentThreadPublishBus newBus = new();
-            AiGameCommandRouter newRouter = new(newBus, new NoOpGameLogger(), new NullWorldExecutor());
+            AiGameCommandRouter newRouter = null;
 
             int staleCalls = 0;
             bool freshReceived = false;
@@ -221,6 +221,7 @@ namespace CoreAI.Tests.PlayMode
                 // Scene reload: the old scope tears down while its subscriber never unsubscribed.
                 oldRouter.Dispose();
 
+                newRouter = new AiGameCommandRouter(newBus, new NoOpGameLogger(), new NullWorldExecutor());
                 newRouter.Start();
                 AiGameCommandRouter.CommandReceived += OnFreshCommand;
 
@@ -241,6 +242,51 @@ namespace CoreAI.Tests.PlayMode
             {
                 AiGameCommandRouter.CommandReceived -= OnStaleCommand;
                 AiGameCommandRouter.CommandReceived -= OnFreshCommand;
+                oldRouter.Dispose();
+                newRouter?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Verifies that disposing one router does not clear subscribers while another scope's router remains alive.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Router_Dispose_OldScope_PreservesSubscriberFromCoexistingScope()
+        {
+            yield return null;
+
+            CurrentThreadPublishBus oldBus = new();
+            AiGameCommandRouter oldRouter = new(oldBus, new NoOpGameLogger(), new NullWorldExecutor());
+            CurrentThreadPublishBus newBus = new();
+            AiGameCommandRouter newRouter = new(newBus, new NoOpGameLogger(), new NullWorldExecutor());
+            bool newScopeReceived = false;
+
+            void OnNewScopeCommand(ApplyAiGameCommand _)
+            {
+                newScopeReceived = true;
+            }
+
+            try
+            {
+                oldRouter.Start();
+                newRouter.Start();
+                AiGameCommandRouter.CommandReceived += OnNewScopeCommand;
+
+                oldRouter.Dispose();
+                newBus.Publish(SampleEnvelope());
+
+                float deadline = Time.realtimeSinceStartup + 8f;
+                while (!newScopeReceived && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(newScopeReceived,
+                    "Disposing the old router must not remove a subscriber owned by a coexisting live scope.");
+            }
+            finally
+            {
+                AiGameCommandRouter.CommandReceived -= OnNewScopeCommand;
                 oldRouter.Dispose();
                 newRouter.Dispose();
             }

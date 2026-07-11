@@ -40,6 +40,7 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
             new(StringComparer.Ordinal);
+        internal static Action BeforeAtomicReplaceForTesting;
 
         public FileLuaScriptVersionStore(
             IGameLogger logger,
@@ -267,7 +268,8 @@ namespace CoreAI.Infrastructure.Lua
                     }
 
                     string json = JsonUtility.ToJson(root, true);
-                    File.WriteAllText(_filePath, json);
+                    WriteAtomically(_filePath, json);
+                    CoreAiWebGlPersistence.Sync();
 
                     _hasLoaded = true;
                     _lastFileExists = true;
@@ -277,6 +279,21 @@ namespace CoreAI.Infrastructure.Lua
                 {
                     _logger.LogError(GameLogFeature.Core, $"Lua script versions save failed: {ex}");
                 }
+            }
+        }
+
+        private static void WriteAtomically(string path, string contents)
+        {
+            string tmpPath = path + ".tmp";
+            File.WriteAllText(tmpPath, contents);
+            BeforeAtomicReplaceForTesting?.Invoke();
+            if (File.Exists(path))
+            {
+                File.Replace(tmpPath, path, null);
+            }
+            else
+            {
+                File.Move(tmpPath, path);
             }
         }
 

@@ -45,13 +45,15 @@ namespace CoreAI.Composition
                     new MessagePipeAiCommandSink(c.Resolve<IPublisher<ApplyAiGameCommand>>()),
                 Lifetime.Singleton);
 
-            builder.RegisterAuditLog();
-
             builder.RegisterBuildCallback(static resolver =>
             {
                 Log.Instance = resolver.Resolve<ILog>();
                 GlobalMessagePipe.SetProvider(resolver.AsServiceProvider());
             });
+
+            // WHY: Audit interceptors resolve in their build callback and must see this scope's
+            // MessagePipe provider before subscribing.
+            builder.RegisterAuditLog();
         }
     }
 }

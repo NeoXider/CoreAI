@@ -52,6 +52,94 @@
 
 ## Roadmap (prioritized)
 
+### [R4] Runtime UI (UI Toolkit) — AI & mods build in-game interfaces (owner request 2026-07-12)
+
+> **Flagship of the next minor after the audit-wave release.** The agent (and Lua mods) must be able to
+> create, style, animate, and evolve game UI **at runtime**, in one consistent visual theme, and the UI
+> must **persist** across sessions exactly like world state. Runtime target: `UIDocument` on the current
+> Unity 6000.3, `PanelRenderer` behind a version define once the project moves to 6.5+ (it is the successor
+> runtime path). Reference patterns: `CoreAiChatPanel` (already dual UIDocument/embedded-host) and the
+> uitk-6-5 playbook (reload-callback lifecycle, state-class animation, no per-frame `Q`).
+>
+> **Source of truth = native UXML/USS text** (LLMs know these formats from training — better generation
+> than any invented JSON schema), persisted in the version store. **Primary rendering path — the runtime
+> interpreter**: parse the stored UXML text into the element factory and apply a supported USS subset
+> programmatically, identically in a built player and in editor play mode — CoreAI's premise is creating
+> the game (UI included) *inside the running game*, never editor tooling. UXML/USS import and AssetBundle
+> building are editor-only, which is exactly why the interpreter is the core path: on-device generation
+> renders the stored text directly, no import step, no editor. **Secondary (optional, editor-only
+> convenience)**: materialize stored text as real `Assets/CoreAI.Generated/UI/` assets so a developer can
+> "graduate" AI-built screens into shippable project files; AssetBundles/cloud-build remain an optional
+> extension for post-ship UGC delivery. The *theme* always ships as real USS/TSS assets with semantic
+> classes and design tokens; generated UI references those classes, which is what keeps every screen in
+> one style.
+
+- [ ] **UXML element factory + USS subset interpreter** (`CoreAI.Source`): parse UXML text → element tree
+      (`Label/Button/Toggle/Slider/TextField/ProgressBar/Image/ListView/ScrollView/VisualElement` +
+      templates), unknown node types degrade to a labeled placeholder (fail-soft, model self-corrects via
+      query); USS parser covers the documented subset (selectors: class/name/state pseudo, properties:
+      layout/box/text/color/background/border/transition) and reports unsupported rules honestly.
+      EditMode: UXML→tree roundtrip, malformed-markup degradation, USS subset application; parity test
+      interpreter vs editor-import on the same source pins interpreter correctness.
+- [ ] **Editor materialization (secondary, after the interpreter ships)**: store text →
+      `Assets/CoreAI.Generated/UI/<screen>/` files + import, for graduating AI-built screens into
+      shippable assets; the store stays authoritative, live screens keep rendering via the interpreter.
+- [ ] **Theme system**: one shipped `CoreAiRuntimeTheme.uss` (+`.tss`) with design tokens (USS variables:
+      colors/spacing/radius/font sizes) and semantic classes (`cai-panel`, `cai-btn-primary`, `cai-h1`,
+      `cai-row`, state classes `is-open/is-hidden/is-selected/is-disabled`); token *values* editable at
+      runtime (custom-property overrides applied at panel root) and persisted, so "make the UI darker"
+      restyles every screen at once. Reusable style fragments = named class bundles in the spec store
+      (USS-reuse without runtime USS import). EditMode: token override application, class resolution.
+- [ ] **`CoreAiUiRuntime` host** (scene component, DI-registered): owns one `UIDocument` (or
+      `PanelRenderer` via `#if UNITY_6000_5_OR_NEWER`) per screen, follows the reload-callback lifecycle
+      (bindings re-attached idempotently on tree recreation, `Unwire()` before rebind, zero `Q<>` outside
+      the callback), screen router (show/hide/stack), safe teardown with the scope.
+- [ ] **Persistence — UI survives restarts**: `FileUiSourceStore` (UXML/USS text + binding manifest per
+      screen) following the Lua version-store pattern *post-audit-fixes* (atomic tmp+`Replace` writes,
+      original/current/history revisions, revert, `CoreAiWebGlPersistence.Sync()` on WebGL), auto-restore
+      all saved screens on scene start like `WorldStateManager`, save-on-mutation; in the editor the
+      materialized assets double as the shippable form. EditMode: persistence roundtrip, crash-torn-file
+      recovery, revision revert.
+- [ ] **LLM tools** (`ui_command` + `ui_query`): create/update/delete screen, add/remove/move element,
+      set text/value/classes/tokens, bind element event → mod function, show/hide/animate; `ui_query`
+      returns the current spec tree so the model can inspect before editing (mirror of `world_query`).
+      Registered through the standard tool policy; results honest (missing element/screen = failure, so
+      the model can self-correct — same lesson as `destroy`).
+- [ ] **Mods ↔ UI two-way binding** (`CoreAI.Mods`): new `LuaCapabilities.Ui` tier (granted with
+      `Gameplay` by default); Lua API `ui_create(spec)`, `ui_set(screen, element, props)`,
+      `ui_on(screen, element, event, fn)` (click/change/submit → sandboxed handler through the execution
+      guard, budgets enforced), `ui_show/ui_hide/ui_animate`, `ui_tokens(overrides)`; reverse direction:
+      UI events raise mod hooks (`on_ui_event`) so a mod can react to any screen including agent-built
+      ones; mod unload/reload detaches its bindings (no dead-handler leaks — same class of bug as the
+      router static event). EditMode: binding registry attach/detach, capability gating, budget
+      enforcement on UI handlers.
+- [ ] **Animations**: state-class + USS-transition first (theme ships transitions for
+      opacity/translate/scale on `is-open/is-hidden`), `ui_animate` presets (fade/slide/scale/pulse) as
+      class toggles, C# `schedule`-based tween fallback for value animation (progress bars, counters);
+      never animate layout properties; `display:none` sequencing handled per the playbook. PlayMode:
+      state-class transition fires, animate preset completes, hidden screen doesn't consume input.
+- [ ] **Hub page**: list runtime screens with spec source, revision history + revert button, theme token
+      editor, "open/close" toggles (reuses the version-store UI patterns from the Lua pages).
+- [ ] **Built-in "ui-builder" skill** (owner requirement 2026-07-12): ship the UI know-how as a CoreAI
+      skill through the existing skill system (`FileSkillStore` + `read_skill`/`call_skill_tool`) — theme
+      class reference, UXML patterns for common screens (HUD/menu/dialog/inventory), binding recipes,
+      "diagnose & repair" checklist (read `ui_query` → find the broken element/style → minimal fix). The
+      skill is what makes small local models capable: it carries the knowledge so the model only routes.
+- [ ] **Small-model acceptance gate** (owner requirement 2026-07-12, hard criterion): a **9B model WITH
+      the ui-builder skill** — or a **27B model minimum without it** — must both (a) build a working
+      interface from a prompt and (b) repair a deliberately broken one (bad USS class, dead binding,
+      malformed UXML) to working state. Encoded as benchmark scenario "G9: agent builds a functional HUD
+      (health bar + inventory button wired to a mod)" + "G9r: agent repairs a broken HUD", scored on spec
+      validity, binding roundtrip, theme-class usage, and repair success; run against the local small-model
+      tier in the benchmark matrix, not only frontier models. Tool/skill design must serve this bar:
+      few tools, forgiving inputs, honest errors the model can act on.
+- [ ] **Verification gate**: EditMode suites above + PlayMode (screen instantiation, event→mod dispatch
+      roundtrip, persistence across scene reload, animation classes) + the G9/G9r benchmark scenarios
+      passing at the small-model bar above.
+- [ ] **Docs**: `Docs/CoreAIUnity/runtime-ui.md` (architecture, spec schema, theme tokens, recipes),
+      mods docs section for the `ui_*` Lua API, INSTALL quick-start ("agent, build me a settings menu"),
+      README feature bullet. Release: minor bump, all five packages lockstep.
+
 ### [R5] Summarization & context-overflow — live verification
 
 > Compaction is unit-tested with stubs only; `LlmCompactionPerRolePlayModeTests` is FastNoLlm (stub). No live
@@ -122,6 +210,27 @@
 - [ ] EditMode tests + docs + CHANGELOG.
 
 ## Audit cleanup & cheap test gaps (from 2026-06-28 audit, non-blocking)
+
+- [ ] Audit log retention: rotated 50 MB files are never deleted (WebGL: IndexedDB quota exhaustion) and the
+      writer keeps appending to a corrupt-tail file — add retention policy + corrupt-tail quarantine
+      (2026-07-12 audit, deferred from the crash-anchor/ChainReset verifier fixes).
+- [ ] Lost-update races, all latent on the current single-threaded host model (2026-07-12 audit):
+      `IAgentMemoryStore.Revert` vs `MutateAsync` without a per-role lock; `FileSkillStore.Save/Delete`
+      bypass the path-keyed `MutationLocks`; `FileDataOverlayVersionStore` lacks the cross-instance
+      lock + reload-on-change the Lua store has; rolling-summary read-modify-write is non-atomic.
+- [ ] Small confirmed-but-cheap items (2026-07-12 audit): case-insensitive role/skill file collisions
+      ("Guard"/"guard"); `manage_skills update` with empty `tool_names` silently wipes the allowlist;
+      `WorldStateManager` Save/Reset in the same frame snapshots pending-destroy ghosts;
+      transport-internal timeouts map to `Cancelled` (non-retryable → fallback never engages);
+      benchmark zombie scenario task past the 5 s grace leaks orphan primitives between reps;
+      `WorldStateAutoSaveHook` interval=0 ("off") silently resurrects to 60 s.
+- [ ] Mods threading hardening (2026-07-12 adversarial review, both latent — no active bug on the current
+      main-thread model): (a) the shared `ILuaTransactionScope` between the persistent Tick runtime and the
+      one-off `LuaCsGameToolExecutor` means a cross-thread `ResetTransactions()` in one surface's `finally`
+      can wipe the other's open transaction — give each surface its own scope or document/assert the
+      single-thread contract; (b) `LuaCsExecutionGuard`'s per-`LuaState` hook `Stack` relies on the
+      "guard entry per state is never concurrent" invariant — add a debug assert (thread id check) so a
+      future background runner fails loudly instead of silently corrupting the hook stack.
 
 - [ ] Remove now-dead `MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming` (superseded by `GetHybridSafeSegments`; only its own test references it). *(The O(n²) per-delta hybrid rescan is now bounded by a 64 KB held-tail cap — 2026-07-01.)*
 - [ ] Separate inter-token idle timeout (distinct from total request timeout) in SSE streaming.
