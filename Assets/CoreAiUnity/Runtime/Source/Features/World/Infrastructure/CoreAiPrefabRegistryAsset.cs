@@ -39,7 +39,8 @@ namespace CoreAI.Infrastructure.World
             public GameObject Prefab;
         }
 
-        [SerializeField] private List<Entry> entries = new();
+        [SerializeField]
+        private List<Entry> entries = new();
 
         private readonly Dictionary<string, GameObject> _byKey = new(StringComparer.Ordinal);
         private readonly Dictionary<string, GameObject> _byName = new(StringComparer.Ordinal);

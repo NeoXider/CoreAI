@@ -49,15 +49,18 @@ namespace CoreAI.Infrastructure.Llm
         public string unityAgentGameObjectName = "";
 
         /// <summary>Maximum LLM requests allowed by this profile in the current session; zero disables the profile limit.</summary>
-        [Min(0)] [Tooltip("ClientLimited maximum requests in the current session. Zero disables the limit.")]
+        [Min(0)]
+        [Tooltip("ClientLimited maximum requests in the current session. Zero disables the limit.")]
         public int maxRequestsPerSession;
 
         /// <summary>Maximum prompt characters allowed by this profile; zero disables the profile limit.</summary>
-        [Min(0)] [Tooltip("ClientLimited maximum prompt characters per request. Zero disables the limit.")]
+        [Min(0)]
+        [Tooltip("ClientLimited maximum prompt characters per request. Zero disables the limit.")]
         public int maxPromptChars;
 
         /// <summary>Context window in tokens for requests routed to this profile.</summary>
-        [Min(256)] [Tooltip("Context window size in tokens for this profile. Default is 128K.")]
+        [Min(256)]
+        [Tooltip("Context window size in tokens for this profile. Default is 128K.")]
         public int contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
     }
 
@@ -71,9 +74,11 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool enableRoleRouting = true;
 
-        [SerializeField] private List<LlmBackendProfileEntry> profiles = new();
+        [SerializeField]
+        private List<LlmBackendProfileEntry> profiles = new();
 
-        [SerializeField] private List<LlmRoleRouteEntry> routes = new();
+        [SerializeField]
+        private List<LlmRoleRouteEntry> routes = new();
 
         /// <summary>Whether role routing is enabled; otherwise the lifetime scope fallback client is used.</summary>
         public bool EnableRoleRouting => enableRoleRouting;

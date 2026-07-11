@@ -36,7 +36,8 @@ namespace CoreAI.Demos
         private const int MaxLogLines = 12;
         private const string PersistedRulesKey = "demo.live_mechanics.rules";
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
         private LuaCsLogicSlots _slots;

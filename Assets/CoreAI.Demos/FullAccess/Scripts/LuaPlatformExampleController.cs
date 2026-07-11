@@ -24,15 +24,19 @@ namespace CoreAI.Demos
         private const string TetrisId = "tetris3d";
         private const int WindowId = 0x10D_0002;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Hotkey that toggles the panel. Set to None to disable keyboard toggling.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the panel. Set to None to disable keyboard toggling.")]
+        [SerializeField]
         private KeyCode toggleKey = KeyCode.F6;
 
-        [SerializeField] private Rect panelRect = new(470, 92, 400, 330);
+        [SerializeField]
+        private Rect panelRect = new(470, 92, 400, 330);
 
-        [Tooltip("Panel visibility on start; toggle at runtime via the hotkey or PanelVisible.")] [SerializeField]
+        [Tooltip("Panel visibility on start; toggle at runtime via the hotkey or PanelVisible.")]
+        [SerializeField]
         private bool showPanel = true;
 
         /// <summary>Programmatic open/close of the panel (same effect as the hotkey).</summary>

@@ -1,4 +1,4 @@
-﻿using CoreAI.Ai;
+using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
@@ -11,25 +11,37 @@ namespace CoreAI.Presentation
     /// </summary>
     public sealed class AiScheduledTaskTrigger : MonoBehaviour
     {
-        [Tooltip("Empty value resolves through GetComponentInParent or FindAnyObjectByType.")] [SerializeField]
+        [Tooltip("Empty value resolves through GetComponentInParent or FindAnyObjectByType.")]
+        [SerializeField]
         private CoreAILifetimeScope lifetimeScope;
 
-        [SerializeField] private string agentRoleId = BuiltInAgentRoleIds.Creator;
+        [SerializeField]
+        private string agentRoleId = BuiltInAgentRoleIds.Creator;
 
-        [TextArea(2, 8)] [SerializeField] private string taskHint = "periodic_timer";
+        [TextArea(2, 8)]
+        [SerializeField]
+        private string taskHint = "periodic_timer";
 
-        [SerializeField] private int priority;
+        [SerializeField]
+        private int priority;
 
-        [SerializeField] private string cancellationScope = "";
+        [SerializeField]
+        private string cancellationScope = "";
 
-        [Tooltip("Source tag for logs and dashboard entries, for example scheduled_timer:my_id.")] [SerializeField]
+        [Tooltip("Source tag for logs and dashboard entries, for example scheduled_timer:my_id.")]
+        [SerializeField]
         private string sourceTag = "scheduled_timer";
 
-        [Header("Timer")] [SerializeField] private bool timerEnabled = true;
+        [Header("Timer")]
+        [SerializeField]
+        private bool timerEnabled = true;
 
-        [Min(0.1f)] [SerializeField] private float intervalSeconds = 30f;
+        [Min(0.1f)]
+        [SerializeField]
+        private float intervalSeconds = 30f;
 
-        [Tooltip("When enabled, the timer starts counting from OnEnable.")] [SerializeField]
+        [Tooltip("When enabled, the timer starts counting from OnEnable.")]
+        [SerializeField]
         private bool startTimerOnEnable = true;
 
         private float _accum;

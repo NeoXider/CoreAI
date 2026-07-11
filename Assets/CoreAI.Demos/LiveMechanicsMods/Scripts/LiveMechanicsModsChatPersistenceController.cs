@@ -21,20 +21,26 @@ namespace CoreAI.Demos
         private const string DefaultModKeyPrefix = "demo.live_mechanics.mods_chat.mod.";
         private const string ActiveFlagSegment = "__active__.";
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [SerializeField] private string modKeyPrefix = DefaultModKeyPrefix;
+        [SerializeField]
+        private string modKeyPrefix = DefaultModKeyPrefix;
 
-        [SerializeField] private string panelTitle = "Lua Mod Manager";
+        [SerializeField]
+        private string panelTitle = "Lua Mod Manager";
 
         // F9 toggles the mod manager; F10 is reserved for the Token Budget / usage overlay.
-        [Tooltip("Hotkey that toggles the mod manager. Set to None to disable keyboard toggling.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the mod manager. Set to None to disable keyboard toggling.")]
+        [SerializeField]
         private KeyCode toggleKey = KeyCode.F9;
 
-        [SerializeField] private Rect panelRect = new(24, 92, 430, 460);
+        [SerializeField]
+        private Rect panelRect = new(24, 92, 430, 460);
 
-        [SerializeField] private bool showPanel = true;
+        [SerializeField]
+        private bool showPanel = true;
 
         [Tooltip("Saved ids that are validation artifacts and must not autoload in the playable demo.")]
         [SerializeField]

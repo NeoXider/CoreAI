@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace CoreAI.Chat
 {
@@ -8,7 +8,9 @@ namespace CoreAI.Chat
     [CreateAssetMenu(fileName = "CoreAiChatConfig", menuName = "CoreAI/Chat Config")]
     public class CoreAiChatConfig : ScriptableObject, ICoreAiChatOptions, ICoreAiChatTextOptions
     {
-        [Header("Agent")] [Tooltip("Agent role id used for prompt routing and chat history.")] [SerializeField]
+        [Header("Agent")]
+        [Tooltip("Agent role id used for prompt routing and chat history.")]
+        [SerializeField]
         private string _roleId = Ai.BuiltInAgentRoleIds.SmartChat;
 
         [Tooltip(
@@ -16,49 +18,68 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _allowAgentSwitching;
 
-        [Header("UI - Header")] [SerializeField]
+        [Header("UI - Header")]
+        [SerializeField]
         private string _headerTitle = "AI Chat";
 
-        [Header("UI - Welcome")] [SerializeField]
+        [Header("UI - Welcome")]
+        [SerializeField]
         private string _welcomeMessage = "How can I help?";
 
-        [Header("UI - Text Overrides")] [SerializeField]
+        [Header("UI - Text Overrides")]
+        [SerializeField]
         private string _sendButtonText = CoreAiChatOptions.DefaultSendButtonText;
 
-        [SerializeField] private string _stopButtonText = CoreAiChatOptions.DefaultStopButtonText;
+        [SerializeField]
+        private string _stopButtonText = CoreAiChatOptions.DefaultStopButtonText;
 
-        [SerializeField] private string _sendButtonTooltip = CoreAiChatOptions.DefaultSendButtonTooltip;
+        [SerializeField]
+        private string _sendButtonTooltip = CoreAiChatOptions.DefaultSendButtonTooltip;
 
-        [SerializeField] private string _stopButtonTooltip = CoreAiChatOptions.DefaultStopButtonTooltip;
+        [SerializeField]
+        private string _stopButtonTooltip = CoreAiChatOptions.DefaultStopButtonTooltip;
 
-        [SerializeField] private string _clearButtonText = CoreAiChatOptions.DefaultClearButtonText;
+        [SerializeField]
+        private string _clearButtonText = CoreAiChatOptions.DefaultClearButtonText;
 
-        [SerializeField] private string _clearButtonTooltip = CoreAiChatOptions.DefaultClearButtonTooltip;
+        [SerializeField]
+        private string _clearButtonTooltip = CoreAiChatOptions.DefaultClearButtonTooltip;
 
-        [SerializeField] private string _collapseButtonText = CoreAiChatOptions.DefaultCollapseButtonText;
+        [SerializeField]
+        private string _collapseButtonText = CoreAiChatOptions.DefaultCollapseButtonText;
 
-        [SerializeField] private string _collapseButtonTooltip = CoreAiChatOptions.DefaultCollapseButtonTooltip;
+        [SerializeField]
+        private string _collapseButtonTooltip = CoreAiChatOptions.DefaultCollapseButtonTooltip;
 
-        [SerializeField] private string _collapseButtonWithEscTooltip =
+        [SerializeField]
+        private string _collapseButtonWithEscTooltip =
             CoreAiChatOptions.DefaultCollapseButtonWithEscTooltip;
 
-        [SerializeField] private string _openChatTooltip = CoreAiChatOptions.DefaultOpenChatTooltip;
+        [SerializeField]
+        private string _openChatTooltip = CoreAiChatOptions.DefaultOpenChatTooltip;
 
-        [Tooltip("Use {hotkey} for the resolved open-chat key.")] [SerializeField]
+        [Tooltip("Use {hotkey} for the resolved open-chat key.")]
+        [SerializeField]
         private string _openChatWithHotkeyTooltipFormat = CoreAiChatOptions.DefaultOpenChatWithHotkeyTooltipFormat;
 
-        [SerializeField] private string _fabFallbackText = CoreAiChatOptions.DefaultFabFallbackText;
+        [SerializeField]
+        private string _fabFallbackText = CoreAiChatOptions.DefaultFabFallbackText;
 
-        [Tooltip("Load persisted chat history when the panel starts.")] [SerializeField]
+        [Tooltip("Load persisted chat history when the panel starts.")]
+        [SerializeField]
         private bool _loadPersistedChatOnStartup = true;
 
-        [Tooltip("Maximum number of persisted messages restored into the UI. Zero disables restore.")] [SerializeField]
+        [Tooltip("Maximum number of persisted messages restored into the UI. Zero disables restore.")]
+        [SerializeField]
         private int _maxPersistedMessagesForUi = 50;
 
-        [Header("UI - Icons")] [Tooltip("Optional AI avatar icon.")] [SerializeField]
+        [Header("UI - Icons")]
+        [Tooltip("Optional AI avatar icon.")]
+        [SerializeField]
         private Sprite _aiAvatarIcon;
 
-        [Tooltip("Optional user avatar icon.")] [SerializeField]
+        [Tooltip("Optional user avatar icon.")]
+        [SerializeField]
         private Sprite _userAvatarIcon;
 
         [Header("UI - Streaming")]
@@ -71,7 +92,8 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _enableStopGeneration = true;
 
-        [Tooltip("Show tool-call progress entries in chat when available.")] [SerializeField]
+        [Tooltip("Show tool-call progress entries in chat when available.")]
+        [SerializeField]
         private bool _showToolCallsInChat = false;
 
         [Tooltip(
@@ -79,7 +101,8 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _showClearButton = true;
 
-        [Header("UI - Typing Indicator")] [SerializeField]
+        [Header("UI - Typing Indicator")]
+        [SerializeField]
         private string _typingIndicatorText = "";
 
         [Tooltip(
@@ -98,10 +121,12 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _useFullscreenChat;
 
-        [Tooltip("Floating chat window width in pixels when fullscreen is disabled.")] [SerializeField]
+        [Tooltip("Floating chat window width in pixels when fullscreen is disabled.")]
+        [SerializeField]
         private int _chatWidth = 650;
 
-        [Tooltip("Floating chat window height in pixels when fullscreen is disabled.")] [SerializeField]
+        [Tooltip("Floating chat window height in pixels when fullscreen is disabled.")]
+        [SerializeField]
         private int _chatHeight = 910;
 
         [Header("Input")]
@@ -110,23 +135,32 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _sendOnShiftEnter = false;
 
-        [Tooltip("Maximum message length. Zero disables the limit.")] [SerializeField]
+        [Tooltip("Maximum message length. Zero disables the limit.")]
+        [SerializeField]
         private int _maxMessageLength = 2000;
 
-        [Header("Hotkeys")] [Tooltip("Allow opening the collapsed chat from the keyboard.")] [SerializeField]
+        [Header("Hotkeys")]
+        [Tooltip("Allow opening the collapsed chat from the keyboard.")]
+        [SerializeField]
         private bool _enableOpenChatKeyboardShortcut = true;
 
-        [Tooltip("Hotkey used to open the collapsed chat. Ctrl, Cmd, and Alt are not used.")] [SerializeField]
+        [Tooltip("Hotkey used to open the collapsed chat. Ctrl, Cmd, and Alt are not used.")]
+        [SerializeField]
         private KeyCode _openChatHotkey = KeyCode.C;
 
-        [Tooltip("When the chat is open, Esc stops generation or collapses the panel.")] [SerializeField]
+        [Tooltip("When the chat is open, Esc stops generation or collapses the panel.")]
+        [SerializeField]
         private bool _enableEscapeChatShortcuts = true;
 
-        [Header("Errors")] [SerializeField] private string _errorMessagePrefix = "Error: ";
+        [Header("Errors")]
+        [SerializeField]
+        private string _errorMessagePrefix = "Error: ";
 
-        [SerializeField] private string _timeoutMessage = "Timeout.";
+        [SerializeField]
+        private string _timeoutMessage = "Timeout.";
 
-        [SerializeField] private string _noResponseMessage = "Could not get a response. Try again.";
+        [SerializeField]
+        private string _noResponseMessage = "Could not get a response. Try again.";
 
         // === Public API ===
 

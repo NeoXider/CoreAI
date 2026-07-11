@@ -30,22 +30,28 @@ namespace CoreAI.Demos
         private const string PassDirective = "PASS";
         private const float ActionWindowSeconds = 60f;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Seconds between world observations sent to the director.")] [SerializeField]
+        [Tooltip("Seconds between world observations sent to the director.")]
+        [SerializeField]
         private float observationIntervalSeconds = 20f;
 
-        [Tooltip("Agent role id registered for the director in CoreAIAgent.Policy.")] [SerializeField]
+        [Tooltip("Agent role id registered for the director in CoreAIAgent.Policy.")]
+        [SerializeField]
         private string directorRoleId = "Director";
 
-        [Tooltip("Per-reply output token budget for the director. 0 = unlimited.")] [SerializeField]
+        [Tooltip("Per-reply output token budget for the director. 0 = unlimited.")]
+        [SerializeField]
         private int maxOutputTokens = 256;
 
-        [Tooltip("Master switch: when off, no observations are sent (component stays alive).")] [SerializeField]
+        [Tooltip("Master switch: when off, no observations are sent (component stays alive).")]
+        [SerializeField]
         private bool directorEnabled = true;
 
-        [Tooltip("Hard cap on director requests within any rolling 60s window. 0 = uncapped.")] [SerializeField]
+        [Tooltip("Hard cap on director requests within any rolling 60s window. 0 = uncapped.")]
+        [SerializeField]
         private int maxActionsPerMinute = 3;
 
         [Tooltip(

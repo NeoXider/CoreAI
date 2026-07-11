@@ -20,10 +20,12 @@ namespace CoreAI.Presentation
     [DisallowMultipleComponent]
     public sealed class CoreAiLuaModAutoRepair : MonoBehaviour
     {
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope lifetimeScope;
 
-        [Tooltip("Master switch. When off, runtime mod errors are ignored (no auto-repair).")] [SerializeField]
+        [Tooltip("Master switch. When off, runtime mod errors are ignored (no auto-repair).")]
+        [SerializeField]
         private bool autoRepairEnabled = true;
 
         [Tooltip("Consecutive runtime errors a mod must hit before the first repair is attempted.")]
@@ -36,7 +38,9 @@ namespace CoreAI.Presentation
         [SerializeField]
         private int maxAttemptsPerMod = LuaModAutoRepairPolicy.DefaultMaxAttemptsPerMod;
 
-        [Tooltip("Minimum seconds between repair attempts for the same mod.")] [Min(0f)] [SerializeField]
+        [Tooltip("Minimum seconds between repair attempts for the same mod.")]
+        [Min(0f)]
+        [SerializeField]
         private float cooldownSeconds = (float)LuaModAutoRepairPolicy.DefaultCooldownSeconds;
 
         [Tooltip("Optional persistence-key prefix (e.g. 'demo.live_mechanics.mods_chat.mod.') so the " +
@@ -44,7 +48,8 @@ namespace CoreAI.Presentation
         [SerializeField]
         private string modVersionKeyPrefix = "";
 
-        [Tooltip("Source tag for logs and dashboard entries.")] [SerializeField]
+        [Tooltip("Source tag for logs and dashboard entries.")]
+        [SerializeField]
         private string sourceTag = "lua_mod_auto_repair";
 
         private ILuaModRuntime _mods;

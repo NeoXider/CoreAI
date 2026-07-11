@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Text;
 using CoreAI.Ai;
 using UnityEngine;
@@ -13,14 +13,18 @@ namespace CoreAI.Diagnostics
     /// </summary>
     public sealed class OrchestrationDashboard : MonoBehaviour
     {
-        [Header("Metrics Source")] [Tooltip("Optional metrics source. If null, one is created on Start.")]
+        [Header("Metrics Source")]
+        [Tooltip("Optional metrics source. If null, one is created on Start.")]
         private InMemoryAiOrchestrationMetrics _metrics;
 
-        [Header("Display Settings")] [SerializeField]
+        [Header("Display Settings")]
+        [SerializeField]
         private bool _showDashboard = true;
 
-        [SerializeField] private KeyCode _toggleKey = KeyCode.F9;
-        [SerializeField] private float _unresponsiveThresholdSeconds = 300f;
+        [SerializeField]
+        private KeyCode _toggleKey = KeyCode.F9;
+        [SerializeField]
+        private float _unresponsiveThresholdSeconds = 300f;
 
         private Rect _windowRect = new(10, 10, 360, 280);
         private GUIStyle _headerStyle;

@@ -17,27 +17,34 @@ namespace CoreAI.Demos
         {
             public string Label = "Prompt";
 
-            [TextArea(3, 12)] public string Prompt = "";
+            [TextArea(3, 12)]
+            public string Prompt = "";
         }
 
-        [SerializeField] private string title = "Prompt templates";
+        [SerializeField]
+        private string title = "Prompt templates";
 
         [Tooltip("Width/height of the panel. It is auto-anchored to the bottom of the screen, " +
                  "just left of the chat, so it does not overlap the usage / mod panels.")]
         [SerializeField]
         private Rect panelRect = new(12, 420, 520, 180);
 
-        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")] [SerializeField]
+        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")]
+        [SerializeField]
         private float chatReserveWidth = 700f;
 
-        [SerializeField] private PromptButton[] prompts = System.Array.Empty<PromptButton>();
+        [SerializeField]
+        private PromptButton[] prompts = System.Array.Empty<PromptButton>();
 
-        [SerializeField] private bool submitWhenInputUnavailable;
+        [SerializeField]
+        private bool submitWhenInputUnavailable;
 
-        [Tooltip("Show or hide the prompt buttons panel.")] [SerializeField]
+        [Tooltip("Show or hide the prompt buttons panel.")]
+        [SerializeField]
         private bool _showPanel = true;
 
-        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")]
+        [SerializeField]
         private KeyCode _toggleKey = KeyCode.F8;
 
         private CoreAiChatPanel _chatPanel;

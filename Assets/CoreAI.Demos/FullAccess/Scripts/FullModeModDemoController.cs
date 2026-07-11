@@ -59,10 +59,12 @@ namespace CoreAI.Demos
             "end)\n" +
             "report(\"[full_mode_cube] loaded - emit 'tweak_cube' (move) or 'list_members' (discover) [needs Full Lua]\")\n";
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Object the mod moves via unity_* APIs. Auto-created as 'TargetCube' when empty.")] [SerializeField]
+        [Tooltip("Object the mod moves via unity_* APIs. Auto-created as 'TargetCube' when empty.")]
+        [SerializeField]
         private Transform targetCube;
 
         [Tooltip("Optional Lua source override. When unset, the embedded full_mode_cube source is used.")]

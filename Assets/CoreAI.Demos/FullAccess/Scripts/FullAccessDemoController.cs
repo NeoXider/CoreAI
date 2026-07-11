@@ -14,10 +14,12 @@ namespace CoreAI.Demos
         [SerializeField]
         private Transform targetCube;
 
-        [Tooltip("Show or hide the instructions panel.")] [SerializeField]
+        [Tooltip("Show or hide the instructions panel.")]
+        [SerializeField]
         private bool _showPanel = true;
 
-        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")]
+        [SerializeField]
         private KeyCode _toggleKey = KeyCode.F7;
 
         private const float PanelWidth = 440f;

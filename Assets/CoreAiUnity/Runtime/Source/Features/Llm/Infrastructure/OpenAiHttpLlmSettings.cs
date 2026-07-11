@@ -13,22 +13,31 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool useOpenAiCompatibleHttp;
 
-        [SerializeField] private LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi;
+        [SerializeField]
+        private LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi;
 
         [Tooltip(
             "Base URL without trailing slash (e.g., https://api.openai.com/v1 or http://localhost:1234/v1 for LM Studio).")]
         [SerializeField]
         private string apiBaseUrl = OpenAiHttpConstants.DefaultApiBaseUrl;
 
-        [SerializeField] private string apiKey = "";
+        [SerializeField]
+        private string apiKey = "";
 
-        [SerializeField] private string model = "gpt-4o-mini";
+        [SerializeField]
+        private string model = "gpt-4o-mini";
 
-        [SerializeField] [Range(0f, 2f)] private float temperature = 0.2f;
+        [SerializeField]
+        [Range(0f, 2f)]
+        private float temperature = 0.2f;
 
-        [SerializeField] [Min(5)] private int requestTimeoutSeconds = 120;
+        [SerializeField]
+        [Min(5)]
+        private int requestTimeoutSeconds = 120;
 
-        [SerializeField] [Min(64)] private int maxTokens = 2048;
+        [SerializeField]
+        [Min(64)]
+        private int maxTokens = 2048;
 
         [Header("Provider-specific request body")]
         [Tooltip("Raw JSON object merged into each OpenAI-compatible request body. Leave empty for standard requests.")]
@@ -41,21 +50,31 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
 
-        [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")] [SerializeField] [Min(0)]
+        [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")]
+        [SerializeField]
+        [Min(0)]
         private int thinkingBudgetTokens;
 
-        [Header("Client limits")] [SerializeField] [Min(0)]
+        [Header("Client limits")]
+        [SerializeField]
+        [Min(0)]
         private int maxRequestsPerSession;
 
-        [SerializeField] [Min(0)] private int maxPromptChars;
+        [SerializeField]
+        [Min(0)]
+        private int maxPromptChars;
 
-        [Header("🔧 Debug")] [Tooltip("Log outbound prompts/tool definitions.")] [SerializeField]
+        [Header("🔧 Debug")]
+        [Tooltip("Log outbound prompts/tool definitions.")]
+        [SerializeField]
         private bool logLlmInput = true;
 
-        [Tooltip("Log assistant payloads and aggregated tool summaries.")] [SerializeField]
+        [Tooltip("Log assistant payloads and aggregated tool summaries.")]
+        [SerializeField]
         private bool logLlmOutput = true;
 
-        [Tooltip("Dump raw HTTP JSON (development only).")] [SerializeField]
+        [Tooltip("Dump raw HTTP JSON (development only).")]
+        [SerializeField]
         private bool enableHttpDebugLogging = false;
 
         /// <summary>Whether this profile should create an HTTP client.</summary>

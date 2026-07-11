@@ -148,7 +148,8 @@ namespace CoreAI.Ai.LuaCs
 
         // Reentrancy depth of mods_call on the current thread (ticks run on the main thread; a
         // second thread would only ever see its own chain).
-        [ThreadStatic] private static int _crossCallDepth;
+        [ThreadStatic]
+        private static int _crossCallDepth;
 
         /// <summary>
         /// Raised when a mod calls <c>events_emit(name, payload)</c>: (modId, eventName, payload).
@@ -1531,9 +1532,11 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>JSON shape of an export/import bundle: the manifest plus the raw Lua source.</summary>
         private sealed class LuaModBundle
         {
-            [JsonProperty("manifest")] public LuaModManifest Manifest;
+            [JsonProperty("manifest")]
+            public LuaModManifest Manifest;
 
-            [JsonProperty("source")] public string Source = "";
+            [JsonProperty("source")]
+            public string Source = "";
         }
 
         /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>

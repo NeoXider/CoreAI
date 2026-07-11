@@ -8,10 +8,12 @@ namespace CoreAI.Infrastructure.Logging
     [CreateAssetMenu(fileName = "GameLogSettings", menuName = "CoreAI/Logging/Game Log Settings")]
     public sealed class GameLogSettingsAsset : ScriptableObject, IGameLogSettings
     {
-        [Tooltip("Minimum log level; Warning hides Debug and Info.")] [SerializeField]
+        [Tooltip("Minimum log level; Warning hides Debug and Info.")]
+        [SerializeField]
         private GameLogFeature enabledFeatures = GameLogFeature.AllBuiltIn;
 
-        [Tooltip("Minimum log level; Warning hides Debug and Info.")] [SerializeField]
+        [Tooltip("Minimum log level; Warning hides Debug and Info.")]
+        [SerializeField]
         private GameLogLevel minimumLevel = GameLogLevel.Debug;
 
         private void OnValidate()

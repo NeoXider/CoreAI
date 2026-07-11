@@ -19,7 +19,9 @@ namespace CoreAI.Diagnostics
         [Min(0.05f)]
         private float _updateInterval = 0.25f;
 
-        [Tooltip("Rolling window length in seconds for the request-load indicator.")] [SerializeField] [Min(1f)]
+        [Tooltip("Rolling window length in seconds for the request-load indicator.")]
+        [SerializeField]
+        [Min(1f)]
         private float _rollingWindowSeconds = 60f;
 
         [Header("Text Outputs (bind to your UI)")]
@@ -27,10 +29,12 @@ namespace CoreAI.Diagnostics
         [SerializeField]
         private UnityEvent<string> _onTokensTextChanged = new();
 
-        [Tooltip("Cost lines, or a hint when prices are not configured in CoreAISettings.")] [SerializeField]
+        [Tooltip("Cost lines, or a hint when prices are not configured in CoreAISettings.")]
+        [SerializeField]
         private UnityEvent<string> _onCostTextChanged = new();
 
-        [Tooltip("Rate-limiter and rolling-window load lines.")] [SerializeField]
+        [Tooltip("Rate-limiter and rolling-window load lines.")]
+        [SerializeField]
         private UnityEvent<string> _onLoadTextChanged = new();
 
         [Header("State Outputs")]

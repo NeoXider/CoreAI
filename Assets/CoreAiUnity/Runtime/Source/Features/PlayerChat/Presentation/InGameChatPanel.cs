@@ -1,4 +1,4 @@
-﻿using CoreAI.Ai;
+using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using TMPro;
@@ -12,16 +12,20 @@ namespace CoreAI.Presentation.PlayerChat
     /// </summary>
     public sealed class InGameChatPanel : MonoBehaviour
     {
-        [Tooltip("Player message input field (TextMeshPro).")] [SerializeField]
+        [Tooltip("Player message input field (TextMeshPro).")]
+        [SerializeField]
         private TMP_InputField inputField;
 
-        [Tooltip("Conversation output text area (TextMeshPro).")] [SerializeField]
+        [Tooltip("Conversation output text area (TextMeshPro).")]
+        [SerializeField]
         private TMP_Text outputText;
 
-        [Tooltip("Sends the current text to the LLM.")] [SerializeField]
+        [Tooltip("Sends the current text to the LLM.")]
+        [SerializeField]
         private Button sendButton;
 
-        [Tooltip("Clears chat history on the chat service side.")] [SerializeField]
+        [Tooltip("Clears chat history on the chat service side.")]
+        [SerializeField]
         private Button clearHistoryButton;
 
         private IInGameLlmChatService _chat;

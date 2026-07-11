@@ -27,10 +27,12 @@ namespace CoreAI.Demos
         private const float ArenaHalfWidth = 7f;
         private const float ArenaHalfDepth = 4.5f;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Parent for spawned unit visuals. Created automatically when empty.")] [SerializeField]
+        [Tooltip("Parent for spawned unit visuals. Created automatically when empty.")]
+        [SerializeField]
         private Transform unitRoot;
 
         private sealed class Archetype

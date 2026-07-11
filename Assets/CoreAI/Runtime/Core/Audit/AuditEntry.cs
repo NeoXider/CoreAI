@@ -85,11 +85,15 @@ namespace CoreAI.Audit
         public string RollbackHandle { get; }
         public string SourceTag { get; }
 
-        [JsonIgnore] public string PrevHash { get; }
-        [JsonIgnore] public string Hash { get; }
+        [JsonIgnore]
+        public string PrevHash { get; }
+        [JsonIgnore]
+        public string Hash { get; }
 
-        [JsonProperty("prevHash")] private string PrevHashForSerialization => PrevHash;
-        [JsonProperty("hash")] private string HashForSerialization => Hash;
+        [JsonProperty("prevHash")]
+        private string PrevHashForSerialization => PrevHash;
+        [JsonProperty("hash")]
+        private string HashForSerialization => Hash;
 
         /// <summary>
         /// Returns a copy of this entry with only the <see cref="Hash"/> field changed — used to

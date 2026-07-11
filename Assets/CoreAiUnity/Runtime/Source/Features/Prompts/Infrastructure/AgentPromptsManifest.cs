@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Prompts
@@ -34,10 +34,12 @@ namespace CoreAI.Infrastructure.Prompts
         }
 
         /// <summary>Role overrides.</summary>
-        [Header("Built-in Role Overrides")] public List<Entry> roleOverrides = new();
+        [Header("Built-in Role Overrides")]
+        public List<Entry> roleOverrides = new();
 
         /// <summary>Custom agents.</summary>
-        [Header("Custom Agents")] public List<Entry> customAgents = new();
+        [Header("Custom Agents")]
+        public List<Entry> customAgents = new();
 
         /// <summary>Enumerates all prompt manifest entries configured in this asset.</summary>
         public IEnumerable<Entry> EnumerateEntries()

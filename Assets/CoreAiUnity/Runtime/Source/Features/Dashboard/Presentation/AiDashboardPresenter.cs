@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Text;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Messaging;
@@ -11,10 +11,12 @@ namespace CoreAI.Presentation.AiDashboard
     /// </summary>
     public sealed class AiDashboardPresenter : MonoBehaviour
     {
-        [Tooltip("Optional role-permission snapshot displayed in the overlay header.")] [SerializeField]
+        [Tooltip("Optional role-permission snapshot displayed in the overlay header.")]
+        [SerializeField]
         private AiPermissionsAsset permissions;
 
-        [Tooltip("Enable the IMGUI command log overlay.")] [SerializeField]
+        [Tooltip("Enable the IMGUI command log overlay.")]
+        [SerializeField]
         private bool showGui = true;
 
         private readonly List<string> _visible = new();

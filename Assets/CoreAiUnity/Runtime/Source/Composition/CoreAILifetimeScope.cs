@@ -23,16 +23,20 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAILifetimeScope : LifetimeScope
     {
-        [Tooltip("Shared CoreAI settings asset. If null, Resources/CoreAISettings is used.")] [SerializeField]
+        [Tooltip("Shared CoreAI settings asset. If null, Resources/CoreAISettings is used.")]
+        [SerializeField]
         private CoreAISettingsAsset coreAiSettings;
 
-        [Tooltip("Optional log settings asset. If null, DefaultGameLogSettings is used.")] [SerializeField]
+        [Tooltip("Optional log settings asset. If null, DefaultGameLogSettings is used.")]
+        [SerializeField]
         private GameLogSettingsAsset gameLogSettings;
 
-        [Tooltip("Optional prompt overrides and custom agents loaded from TextAssets.")] [SerializeField]
+        [Tooltip("Optional prompt overrides and custom agents loaded from TextAssets.")]
+        [SerializeField]
         private AgentPromptsManifest agentPromptsManifest;
 
-        [Tooltip("Optional ILlmClient routing by role. When null, legacy routing is used.")] [SerializeField]
+        [Tooltip("Optional ILlmClient routing by role. When null, legacy routing is used.")]
+        [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
 
         [Header("World Commands (Lua -> MessagePipe -> main thread)")]
@@ -55,7 +59,8 @@ namespace CoreAI.Composition
         /// </summary>
         public bool FullLuaAccessEnabled => enableFullLuaAccess;
 
-        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")] [SerializeField]
+        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
+        [SerializeField]
         private bool enableFullLuaPrivateAccess;
 
         [Header("Skills")]

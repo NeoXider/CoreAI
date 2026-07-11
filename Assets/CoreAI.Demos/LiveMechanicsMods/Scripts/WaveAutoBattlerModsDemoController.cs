@@ -29,12 +29,15 @@ namespace CoreAI.Demos
         private static readonly int BaseColorProperty = Shader.PropertyToID("_BaseColor");
         private static readonly int LegacyColorProperty = Shader.PropertyToID("_Color");
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [SerializeField] private Transform heroAnchor;
+        [SerializeField]
+        private Transform heroAnchor;
 
-        [SerializeField] private Transform enemyRoot;
+        [SerializeField]
+        private Transform enemyRoot;
 
         private readonly List<EnemyState> _enemies = new();
         private readonly List<string> _log = new();

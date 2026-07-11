@@ -17,13 +17,18 @@ namespace CoreAI.Diagnostics
     [ExecuteAlways]
     public sealed class CoreAiTokenBudgetOverlay : MonoBehaviour
     {
-        [Header("Display Settings")] [Tooltip("Show or hide the overlay window.")] [SerializeField]
+        [Header("Display Settings")]
+        [Tooltip("Show or hide the overlay window.")]
+        [SerializeField]
         private bool _showOverlay = true;
 
-        [Tooltip("Hotkey that toggles the overlay at runtime. Set to None to disable the hotkey.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the overlay at runtime. Set to None to disable the hotkey.")]
+        [SerializeField]
         private KeyCode _toggleKey = KeyCode.F10;
 
-        [Tooltip("Rolling window length in seconds for the request-load indicator.")] [SerializeField] [Min(1f)]
+        [Tooltip("Rolling window length in seconds for the request-load indicator.")]
+        [SerializeField]
+        [Min(1f)]
         private float _rollingWindowSeconds = 60f;
 
         private TokenBudgetRuntimeSource _source;

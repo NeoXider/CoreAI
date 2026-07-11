@@ -25,7 +25,8 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private bool registerAboutPage = false;
 
-        [Tooltip("Register the built-in Chat, Settings, and Statistics pages.")] [SerializeField]
+        [Tooltip("Register the built-in Chat, Settings, and Statistics pages.")]
+        [SerializeField]
         private bool registerBuiltInPages = true;
 
         [Header("Chat page (optional)")]
@@ -33,10 +34,12 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private VisualTreeAsset chatTemplate;
 
-        [Tooltip("Optional chat stylesheet layered on the embedded chat.")] [SerializeField]
+        [Tooltip("Optional chat stylesheet layered on the embedded chat.")]
+        [SerializeField]
         private StyleSheet chatStyleSheet;
 
-        [Tooltip("Optional chat configuration asset (also shown on the Settings page).")] [SerializeField]
+        [Tooltip("Optional chat configuration asset (also shown on the Settings page).")]
+        [SerializeField]
         private CoreAiChatConfig chatConfig;
 
         /// <summary>The registry created and owned by this demo controller.</summary>

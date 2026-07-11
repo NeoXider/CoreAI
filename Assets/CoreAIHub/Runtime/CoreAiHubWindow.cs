@@ -50,7 +50,8 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private StyleSheet styleSheet;
 
-        [Tooltip("Text shown in the content area when no page is registered.")] [SerializeField]
+        [Tooltip("Text shown in the content area when no page is registered.")]
+        [SerializeField]
         private string emptyStateText = "No Hub pages registered.";
 
         private UIDocument _document;

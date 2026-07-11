@@ -23,13 +23,16 @@ namespace CoreAI.Demos
         private const string DamageTunerModId = "damage_tuner";
         private const string DamageSlot = "damage_formula";
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
-        [Tooltip("Mod that spawns enemy waves (Read | WorldEdit).")] [SerializeField]
+        [Tooltip("Mod that spawns enemy waves (Read | WorldEdit).")]
+        [SerializeField]
         private TextAsset waveDirectorMod;
 
-        [Tooltip("Mod that overrides the damage formula (Read | LogicOverride).")] [SerializeField]
+        [Tooltip("Mod that overrides the damage formula (Read | LogicOverride).")]
+        [SerializeField]
         private TextAsset damageTunerMod;
 
         private ILuaModRuntime _mods;
