@@ -87,6 +87,20 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 
 CoreAI includes a local game-creation benchmark that measures how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across eight scenario groups (world-building, Lua logic, math reasoning, playthroughs, instruction adherence, a free-build castle showcase, comprehensive integration, and described-state conditional selection), adds 0-10 game-fitness ratings per role, and can run against any OpenAI-compatible endpoint — cloud APIs or a local LMStudio multi-model sweep.
 
+**Frontier-model sweep (suite v2 / G1-G8, 2026-07-11)** — seven frontier models via the `cli-agents` OpenAI-compatible bridge, one run each; full table + methodology in [`Docs/BENCHMARK_LEADERBOARD.md`](Docs/BENCHMARK_LEADERBOARD.md):
+
+| # | Model | Suite | Pass-rate | P/PA/F |
+|---:|---|---:|---:|---|
+| 1 | `codex/gpt-5.6-sol` | **96.6** | 85.7% | 24/3/1 |
+| 2 | `codex/gpt-5.6-terra` | **93.0** | 86.2% | 25/2/2 |
+| 3 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 |
+| 4 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 |
+| 5 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 |
+| 6 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 |
+| 7 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 |
+
+_Single run per model over the CLI bridge (indicative, not a controlled multi-rep A/B); the G6 image-feedback vision variant is text-only through the bridge. The GPT-5.6 family leads; every model finds the free-build castle (G6) hardest._
+
 **Historical cloud / frontier baseline** — one full G1-G7 run each (suite v1.6, no token caps; do not compare directly with current v1.7/G1-G8 results):
 
 <img src="Docs/Images/benchmark_comparison_cloud.svg" alt="Model comparison — Game-Creation Benchmark, cloud models ranked by suite score" width="900">

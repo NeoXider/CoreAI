@@ -217,6 +217,36 @@ runs start a separate leaderboard and must not be mixed with those scores. Histo
 | 8 | `qwen3.5-0.8b` | **57.8** | 41.7% | 10/4/10 | 94.4 | 80.1 | 91.4 | 100 | 55.6 | 38 | 2.4 | 1% | 43383 | `20260702_222625` |
 | 9 | `lfm2-8b-a1b` | **12.4** | 0% | 0/0/25 | 50.9 | 2.1 | 0 | 0 | 0 | 57.8 | 0 | 0% | 52430 | `20260702_051709` |
 
+## Frontier-model sweep (2026-07-11, suite v2 / G1–G8)
+
+Frontier hosted models, run through the [`cli-agents`](https://github.com/) `openai-server` bridge — an
+OpenAI-compatible shim over the Claude Code / Codex CLIs. This is a **separate leaderboard** from the local
+LM Studio models above (different suite version *and* different backend class). Ranked by suite base score.
+
+| # | Model | Score | Pass-rate | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tokens |
+|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `codex/gpt-5.6-sol` | **96.6** | 85.7% | 24/3/1 | 96.3 | 100 | 100 | 100 | 100 | 63.9 | 100 | 96.3 | 16379 |
+| 2 | `codex/gpt-5.6-terra` | **93.0** | 86.2% | 25/2/2 | 95.6 | 100 | 84.2 | 97.7 | 99.7 | 62.9 | 100 | 96.3 | 32194 |
+| 3 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 | 96.3 | 100 | 95.3 | 93 | 80 | 55.6 | 100 | 96.3 | 17188 |
+| 4 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 | 91.9 | 100 | 100 | 97.7 | 87.7 | 25.2 | 100 | 69.7 | 18426 |
+| 5 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 | 91.9 | 95.7 | 94.1 | 93 | 70 | 50 | 93.7 | 96.3 | 18250 |
+| 6 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 | 54.9 | 94.3 | 78.2 | 93 | 100 | 49 | 100 | 42.6 | 19851 |
+| 7 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 | 55.7 | 94.3 | 93 | 93 | 100 | 46 | 93.7 | 9.2 | 21980 |
+
+**Read of the sweep.** The GPT-5.6 family tops the board — `gpt-5.6-sol` is the most consistent (only one
+failed scenario; perfect G3/G4/G5/G7), and `gpt-5.6-terra` has the most passes (25/29, 86.2%). `gpt-5.5`
+lands a strong third. The Claude models cluster lower here: `sonnet-5` and `opus-4.8` tie on pass-rate
+(75.9%) with different profiles — opus aces instruction-following (G5 100) and integration (G7 100) but
+stumbles on scene-build (G1 54.9) and observe-then-act (G8 42.6); `fable-5` is fastest-to-fail on G8 (9.2).
+Every model finds the **free-build castle (G6)** hardest (25–64), the single clearest headroom signal.
+
+> **Methodology / caveats — read before citing.** Single run per model (reps=1), streaming off, native
+> tools on, temperature 0.1, Unity 6000.3.14f1, suite v2. Run over the CLI bridge (higher latency; each call
+> spawns a CLI subprocess), so absolute tokens/time are not comparable to a direct-API run — tool-calling was
+> verified equivalent to a native OpenAI backend before the sweep. The **G6 image-feedback (vision) variant
+> did not run** — the CLI bridge is text + tool-calls only. Treat these as *indicative* single-shot results,
+> not a controlled multi-rep A/B.
+
 ## Castle Gallery - G6 Free-Build Visual
 
 The G6 scenario is a free-form visual build (default: castle). Each model authors the whole scene from scratch. Below are the available castle screenshots from `Docs/Images/castles/`, showing each model's spatial reasoning and tool-calling capability. Scores are the model's overall suite score from its ranked run; heroes from the 2026-07-02+ runs use the daytime gate-angle camera with close-up insets.
