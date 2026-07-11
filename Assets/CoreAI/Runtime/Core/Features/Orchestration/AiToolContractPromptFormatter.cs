@@ -56,7 +56,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Positive memory trigger — applies to BOTH native and text-shaped tool-calling. Without it a role
+            // WHY: Positive memory trigger — applies to BOTH native and text-shaped tool-calling. Without it a role
             // whose base prompt never mentions memory (e.g. Creator) silently ignores "remember the ..." because
             // nothing maps that soft verb to the memory tool. This guidance previously lived only AFTER the
             // native early-return below, so native tool-calling roles received no memory instruction at all.

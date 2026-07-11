@@ -148,7 +148,7 @@ namespace CoreAI.Ai
                     historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
                 }
 
-                // On a context-overflow retry pass the policy budget is progressively shrunk
+                // WHY: On a context-overflow retry pass the policy budget is progressively shrunk
                 // (0.75^retryLevel). The unlimited and fixed-override branches above ignore that shrink,
                 // so without this clamp a retry would rebuild a byte-identical oversized request that
                 // overflows again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
@@ -247,7 +247,7 @@ namespace CoreAI.Ai
             int contextOverflowPasses = 0;
             int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
 
-            // Single invocation for non-context failures; bounded tighter-history rebuilds when the
+            // WHY: Single invocation for non-context failures; bounded tighter-history rebuilds when the
             // provider reports context-length overflow. Network retries remain in LoggingLlmClientDecorator.
             try
             {
@@ -270,7 +270,7 @@ namespace CoreAI.Ai
                     Stopwatch sw = Stopwatch.StartNew();
                     try
                     {
-                        // Streaming by default (CompleteForTaskAsync): task execution runs through the
+                        // WHY: Streaming by default (CompleteForTaskAsync): task execution runs through the
                         // same execute-as-you-stream tool path as chat when EnableStreaming is on, and
                         // falls back to non-streaming CompleteAsync otherwise. The helper handles the
                         // WebGL SynchronizationContext discipline internally.
@@ -338,7 +338,7 @@ namespace CoreAI.Ai
             }
             catch (OperationCanceledException)
             {
-                // A cancellation (incl. TaskCanceledException from a timeout or a linked token) must
+                // WHY: A cancellation (incl. TaskCanceledException from a timeout or a linked token) must
                 // propagate as cancellation, not fall into the general catch below and collapse to null —
                 // a null result is indistinguishable from a genuine empty model response. Re-throw so the
                 // caller can tell "cancelled" apart from "the model returned nothing".
@@ -448,7 +448,7 @@ namespace CoreAI.Ai
                 int cacheWriteTokens = 0;
                 LlmCompletionResult contextOverflowFailure = null;
 
-                // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
+                // WHY: Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
                 LlmCompletionRequest req = BuildCompletionRequest(
                     bundle, task, bundle.UserPayload,
@@ -522,7 +522,7 @@ namespace CoreAI.Ai
 
                         try
                         {
-                            // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                            // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, and the
                             // continuation must come back through UnitySynchronizationContext.
                             hasNext = await enumerator.MoveNextAsync();
                             current = hasNext ? enumerator.Current : null;
@@ -743,7 +743,7 @@ namespace CoreAI.Ai
                         CacheWriteTokens = cacheWriteTokens,
                         ExecutedToolCalls = executedToolCalls
                     };
-                    // SanitizeAndPublish already records the token-calibration observation from
+                    // WHY: SanitizeAndPublish already records the token-calibration observation from
                     // streamResult.PromptTokens; recording it again here double-applied the EMA and did a
                     // second disk write per streaming turn (the non-streaming path records exactly once).
                     content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
@@ -825,8 +825,8 @@ namespace CoreAI.Ai
                     LlmStreamChunk current;
                     try
                     {
-                        // No ConfigureAwait(false): WebGL has no working ThreadPool, so the continuation
-                        // must resume on UnitySynchronizationContext (mirrors RunStreamingAsync).
+            // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, so the continuation
+            // must resume on UnitySynchronizationContext (mirrors RunStreamingAsync).
                         if (!await enumerator.MoveNextAsync())
                         {
                             break;
@@ -1148,7 +1148,7 @@ namespace CoreAI.Ai
             string userPayload,
             LlmCompletionResult result)
         {
-            // Defense-in-depth: strip leaked tool-call JSON only when tools are actually configured.
+            // WHY: Defense-in-depth: strip leaked tool-call JSON only when tools are actually configured.
             // On plain text roles (no tools), parsing very large reasoning payloads for JSON spans
             // is unnecessary and can stall WebGL UI for a long time.
             if (bundle.Tools != null && bundle.Tools.Count > 0)
@@ -1165,7 +1165,7 @@ namespace CoreAI.Ai
 
             if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
             {
-                // Persist only the raw user intent, NOT the fully-composed userPayload: the composed payload
+                // WHY: Persist only the raw user intent, NOT the fully-composed userPayload: the composed payload
                 // carries per-turn context (telemetry envelope, Lua-repair, mutation-state) that must not
                 // accumulate in history — a stale telemetry snapshot on every turn bloats context and confuses
                 // the model about which state is current. Live state is delivered fresh each turn (current
@@ -1454,7 +1454,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Roadmap §7 cross-turn stale tool results are pruned from the prompt copy before compaction.
+            // WHY: Roadmap §7 cross-turn stale tool results are pruned from the prompt copy before compaction.
             return wroteEntry ? sb.ToString().TrimEnd() : "";
         }
 
@@ -1505,7 +1505,7 @@ namespace CoreAI.Ai
                    value.Substring(value.Length - tail).TrimStart();
         }
 
-        // 0 is meaningful: "explicitly unlimited" wins over the level below and reaches the LLM
+        // WHY: 0 is meaningful: "explicitly unlimited" wins over the level below and reaches the LLM
         // client as 0, which suppresses the settings MaxTokens fallback (no max_tokens sent — a
         // reasoning model's thinking never eats the answer budget). Negative values = unset.
         private static int? ResolveMaxOutputTokens(int? perCall, int? perAgent)
@@ -1597,7 +1597,7 @@ namespace CoreAI.Ai
 
             if (failed.Count > 0)
             {
-                // Surface the failure to the user with the tool name(s) and the real reason, symmetric with
+                // WHY: Surface the failure to the user with the tool name(s) and the real reason, symmetric with
                 // the success path below. Previously this returned null, so a failed tool-only turn fell
                 // through to a misleading generic "LLM request failed." even though the LLM succeeded and a
                 // tool failed. The per-tool "name: detail" strings were already built above.
@@ -1634,7 +1634,7 @@ namespace CoreAI.Ai
             }
             catch
             {
-                // Plain-text tool results are expected.
+                // WHY: Plain-text tool results are expected.
             }
 
             const int maxChars = 240;

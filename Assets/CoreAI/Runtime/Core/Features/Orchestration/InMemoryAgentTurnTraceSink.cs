@@ -48,7 +48,7 @@ namespace CoreAI.Ai
                 string roleId = trace.RoleId ?? "";
                 if (!_latestByRole.ContainsKey(roleId) && _latestByRole.Count >= _maxRoles)
                 {
-                    // Dynamic role IDs (e.g. per-session or per-mod agents) are otherwise unbounded, so
+                    // WHY: Dynamic role IDs (e.g. per-session or per-mod agents) are otherwise unbounded, so
                     // this dictionary would grow for the lifetime of the process. Which specific role is
                     // dropped does not matter - only that cardinality stays capped - so evict any single
                     // entry rather than tracking access order for a true LRU.

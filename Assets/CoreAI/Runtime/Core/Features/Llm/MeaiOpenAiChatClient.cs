@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,72 +18,72 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Infrastructure.Llm
 {
 #if UNITY_EDITOR
-    /// <summary>Unity Editor only: when set, <see cref="MeaiOpenAiChatClient"/> uses this factory for HTTP instead of <c>new HttpClient()</c> (EditMode tests with <see cref="HttpMessageHandler"/> mocks).</summary>
+    // WHY: / <summary>Unity Editor only: when set, <see cref="MeaiOpenAiChatClient"/> uses this factory for HTTP instead of <c>new HttpClient()</c> (EditMode tests with <see cref="HttpMessageHandler"/> mocks).</summary>
     public static class MeaiOpenAiChatClientEditorTestHooks
     {
-        /// <summary>Must be cleared in test teardown.</summary>
+        // WHY: / <summary>Must be cleared in test teardown.</summary>
         public static Func<HttpClient> HttpClientFactory { get; set; }
     }
 #endif
 
-    /// <summary>
-    /// Stable marker keys placed inside a tool call's arguments dictionary when the streamed
-    /// argument JSON could not be parsed (malformed/truncated). Both the streaming accumulator that
-    /// emits the markers and <see cref="ToolExecutionPolicy"/> that detects them reference these
-    /// shared constants so the contract stays in sync across the assembly.
-    /// </summary>
+    // WHY: / <summary>
+    // / Stable marker keys placed inside a tool call's arguments dictionary when the streamed
+    // / argument JSON could not be parsed (malformed/truncated). Both the streaming accumulator that
+    // / emits the markers and <see cref="ToolExecutionPolicy"/> that detects them reference these
+    // / shared constants so the contract stays in sync across the assembly.
+    // / </summary>
     public static class ToolCallArgumentMarkers
     {
-        /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+        // WHY: / <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
         public const string RawArgumentsKey = "__raw_arguments";
 
-        /// <summary>Marker key (boolean <c>true</c>) set when the accumulated arguments could not be parsed as JSON.</summary>
+        // WHY: / <summary>Marker key (boolean <c>true</c>) set when the accumulated arguments could not be parsed as JSON.</summary>
         public const string ParseErrorKey = "__parse_error";
     }
 
-    /// <summary>
-    /// MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
-    /// Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
-    /// WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
-    /// </summary>
+    // WHY: / <summary>
+    // / MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
+    // / Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
+    // / WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
+    // / </summary>
     public sealed class MeaiOpenAiChatClient : MEAI.IChatClient, IDisposable
     {
         private readonly IOpenAiHttpSettings _settings;
         private readonly IOpenAiHttpTransport _transport;
         private readonly ILog _log;
 
-        /// <summary>
-        /// Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
-        /// server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
-        /// this many seconds instead of waiting for the server to close the stream. A proxy that hides
-        /// an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
-        /// without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
-        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
-        /// </summary>
+        // WHY: / <summary>
+        // / Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
+        // / server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
+        // / this many seconds instead of waiting for the server to close the stream. A proxy that hides
+        // / an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
+        // / without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
+        // / Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        // / </summary>
         internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
 
-        /// <summary>
-        /// Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
-        /// the streamed path then falls back to ONE non-streaming completion, and only if that also
-        /// fails does the typed error surface - "request → retry → fallback request → error".
-        /// The Retry-After header is honored when present, else 2s backoff.
-        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
-        /// </summary>
+        // WHY: / <summary>
+        // / Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
+        // / the streamed path then falls back to ONE non-streaming completion, and only if that also
+        // / fails does the typed error surface - "request → retry → fallback request → error".
+        // / The Retry-After header is honored when present, else 2s backoff.
+        // / Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
+        // / </summary>
         internal static int RateLimitMaxRetries { get; set; } = 1;
 
-        /// <summary>Transient HTTP statuses worth retrying: 408 timeout, 429 rate limit, any 5xx.</summary>
+        // WHY: / <summary>Transient HTTP statuses worth retrying: 408 timeout, 429 rate limit, any 5xx.</summary>
         private static bool IsRetryableHttpStatus(int status)
         {
             return status == 408 || status == 429 || (status >= 500 && status < 600);
         }
 
-        /// <summary>
-        /// Backoff before a rate-limit retry: Retry-After header when present, else a retry window
-        /// parsed from the error body ("Please try again in 14.017s" - Groq puts it there, and on
-        /// WebGL the Retry-After header is invisible to fetch unless CORS exposes it), else
-        /// 2s * retry index. Capped at 20s so one retry can actually clear a typical TPM window
-        /// instead of guaranteed-failing into it.
-        /// </summary>
+        // WHY: / <summary>
+        // / Backoff before a rate-limit retry: Retry-After header when present, else a retry window
+        // / parsed from the error body ("Please try again in 14.017s" - Groq puts it there, and on
+        // / WebGL the Retry-After header is invisible to fetch unless CORS exposes it), else
+        // / 2s * retry index. Capped at 20s so one retry can actually clear a typical TPM window
+        // / instead of guaranteed-failing into it.
+        // / </summary>
         private static int ResolveRateLimitBackoffMs(
             IReadOnlyDictionary<string, IEnumerable<string>> headers, int retryIndex, string errorBody = null)
         {
@@ -100,7 +100,7 @@ namespace CoreAI.Infrastructure.Llm
             double? bodySeconds = TryParseRetryWindowSecondsFromBody(errorBody);
             if (bodySeconds.HasValue)
             {
-                // +250ms margin: providers report the window with sub-second precision and a retry
+                // WHY: +250ms margin: providers report the window with sub-second precision and a retry
                 // landing exactly on the boundary still gets rejected.
                 return (int)Math.Min(capMs, bodySeconds.Value * 1000 + 250);
             }
@@ -108,10 +108,10 @@ namespace CoreAI.Infrastructure.Llm
             return Math.Min(capMs, 2000 * Math.Max(1, retryIndex));
         }
 
-        /// <summary>
-        /// Extracts a retry window from a rate-limit error body, e.g. Groq's
-        /// "Please try again in 14.0175s" or "try again in 2m3.5s". Returns null when absent.
-        /// </summary>
+        // WHY: / <summary>
+        // / Extracts a retry window from a rate-limit error body, e.g. Groq's
+        // / "Please try again in 14.0175s" or "try again in 2m3.5s". Returns null when absent.
+        // / </summary>
         internal static double? TryParseRetryWindowSecondsFromBody(string errorBody)
         {
             if (string.IsNullOrEmpty(errorBody))
@@ -166,12 +166,12 @@ namespace CoreAI.Infrastructure.Llm
             return GetResponseCoreAsync(chatMessages, options, RateLimitMaxRetries, cancellationToken);
         }
 
-        /// <summary>
-        /// Non-streaming completion with an explicit transient-HTTP retry budget. The public
-        /// <see cref="GetResponseAsync"/> uses <see cref="RateLimitMaxRetries"/>; the streamed path's
-        /// LAST-RESORT fallback passes 0 so the whole turn stays at
-        /// "request → retry → one fallback request → typed error".
-        /// </summary>
+        // WHY: / <summary>
+        // / Non-streaming completion with an explicit transient-HTTP retry budget. The public
+        // / <see cref="GetResponseAsync"/> uses <see cref="RateLimitMaxRetries"/>; the streamed path's
+        // / LAST-RESORT fallback passes 0 so the whole turn stays at
+        // / "request → retry → one fallback request → typed error".
+        // / </summary>
         private async Task<MEAI.ChatResponse> GetResponseCoreAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options,
@@ -440,7 +440,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (Exception ex)
                 {
-                    // Include the inner exception: the outer "An error occurred while sending the request"
+                    // WHY: Include the inner exception: the outer "An error occurred while sending the request"
                     // is a generic wrapper; the real cause (e.g. WebException ConnectFailure = the local
                     // server refused the TCP connection, vs a read/reset mid-stream) only appears inside.
                     string innerDetail = ex.InnerException != null
@@ -448,7 +448,7 @@ namespace CoreAI.Infrastructure.Llm
                         : "";
                     _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}{innerDetail}", LogTag.Llm);
 
-                    // A transport-level SEND failure (typically a pooled keep-alive connection the local
+                    // WHY: A transport-level SEND failure (typically a pooled keep-alive connection the local
                     // server has already closed — System.Net.Http surfaces it as "An error occurred while
                     // sending the request") is retryable: a fresh attempt opens a new connection. Bounded
                     // to a few quick retries so a genuinely-down backend still surfaces promptly as
@@ -510,7 +510,7 @@ namespace CoreAI.Infrastructure.Llm
                                 continue;
                             }
 
-                            // Retries exhausted: LAST RESORT is one plain (non-streaming) completion in
+                            // WHY: Retries exhausted: LAST RESORT is one plain (non-streaming) completion in
                             // the same turn - request → retry → fallback request → typed error. The
                             // fallback runs with a ZERO transient budget so the turn ends after it.
                             _log.Warn(
@@ -539,7 +539,7 @@ namespace CoreAI.Infrastructure.Llm
                     bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
 
-                    // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
+                    // WHY: buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
                     await foreach (string line in ReadUtf8LinesFromStreamAsync(
                                        stream,
@@ -561,7 +561,7 @@ namespace CoreAI.Infrastructure.Llm
                             break;
                         }
 
-                        // Starved-stream early abort: a proxy hiding an upstream failure behind
+                        // WHY: Starved-stream early abort: a proxy hiding an upstream failure behind
                         // HTTP 200 sends only SSE comment lines (": keep-alive") and can hold the
                         // connection open far longer than callers' turn budgets. If the stream has
                         // produced nothing but comments/blank lines for the first-delta window,
@@ -593,7 +593,7 @@ namespace CoreAI.Infrastructure.Llm
                                             && (update.Contents == null
                                                 || update.Contents.Count == 0
                                                 || update.Contents.All(c => c is MEAI.TextContent));
-                            // Some upstream providers (e.g. OpenRouter `:free` models from Nvidia/etc.)
+                            // WHY: Some upstream providers (e.g. OpenRouter `:free` models from Nvidia/etc.)
                             // batch many tokens into a single SSE delta, which makes streaming look
                             // jumpy in the UI. Re-emit large text-only deltas in small word-sized
                             // pieces with a tiny delay so the UI sees smooth per-word streaming.
@@ -613,7 +613,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        // Execute-as-you-stream: surface every tool call whose arguments JSON is
+                        // WHY: Execute-as-you-stream: surface every tool call whose arguments JSON is
                         // already complete NOW, instead of holding all calls until the final Flush.
                         // The consumer (MeaiLlmClient) can then run each call while the model is
                         // still generating the rest of the turn.
@@ -624,7 +624,7 @@ namespace CoreAI.Infrastructure.Llm
                             yield return completedCalls;
                         }
 
-                        // Re-arm the stall clock only AFTER every update for this line has been
+                        // WHY: Re-arm the stall clock only AFTER every update for this line has been
                         // yielded and consumed. This iterator is pull-based: the consumer
                         // (MeaiLlmClient) executes tool calls between MoveNexts, so re-arming on
                         // line arrival would charge that consumer time against the transport
@@ -646,7 +646,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (parsedSseDeltas == 0)
                     {
-                        // An SSE 200 with zero deltas usually hides an upstream rate limit (e.g. an
+                        // WHY: An SSE 200 with zero deltas usually hides an upstream rate limit (e.g. an
                         // OpenRouter 429 behind a proxy): the stream is starved, but the SAME provider
                         // often still answers a plain completion. Retry the stream only a couple of
                         // times, then fall back to ONE non-streaming completion (mirroring the
@@ -654,7 +654,7 @@ namespace CoreAI.Infrastructure.Llm
                         // that will not produce tokens - the chat stays "busy" that whole time.
                         if (attempt < emptyStreamMaxAttempts)
                         {
-                            // A starved-aborted attempt already spent the whole first-delta window
+                            // WHY: A starved-aborted attempt already spent the whole first-delta window
                             // waiting; retry immediately instead of stacking more backoff on top.
                             int emptyStreamBackoffMs =
                                 starvedAttemptAborted ? 0 : Math.Min(6000, 900 * attempt);
@@ -680,7 +680,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (fallBackToNonStreaming)
             {
-                // Zero transient budget: this IS the fallback request; if it fails too, the typed
+                // WHY: Zero transient budget: this IS the fallback request; if it fails too, the typed
                 // error surfaces (request → retry → fallback → error, no hidden extra rounds).
                 MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken);
                 foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
@@ -690,11 +690,11 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>
-        /// Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
-        /// can render smooth per-word streaming even when an upstream provider batches many tokens
-        /// into one SSE event.
-        /// </summary>
+        // WHY: / <summary>
+        // / Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
+        // / can render smooth per-word streaming even when an upstream provider batches many tokens
+        // / into one SSE event.
+        // / </summary>
         private static IEnumerable<string> SplitForSmoothStreaming(string text)
         {
             if (string.IsNullOrEmpty(text))
@@ -707,7 +707,7 @@ namespace CoreAI.Infrastructure.Llm
             while (i < text.Length)
             {
                 int end = Math.Min(i + targetChunkSize, text.Length);
-                // Extend to the next whitespace to avoid splitting inside a word when possible.
+                // WHY: Extend to the next whitespace to avoid splitting inside a word when possible.
                 while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && end - i < targetChunkSize * 2)
                 {
                     end++;
@@ -722,7 +722,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             cancellationToken.ThrowIfCancellationRequested();
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // Browser WebGL has no reliable worker ThreadPool. A timer-based Task.Delay here can
+            // WHY: Browser WebGL has no reliable worker ThreadPool. A timer-based Task.Delay here can
             // leave a synthetic split delta stuck after the first visible piece on some builds.
             return Task.CompletedTask;
 #else
@@ -730,13 +730,13 @@ namespace CoreAI.Infrastructure.Llm
 #endif
         }
 
-        /// <summary>
-        /// Cross-platform line reader for SSE streams. Bypasses <see cref="StreamReader.ReadLineAsync"/>
-        /// because Mono on Windows can hold lines back until a larger buffer fills, collapsing many small
-        /// token-by-token deltas into a single large yield (visible to the user as "no streaming"). WebGL
-        /// uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
-        /// <see cref="StreamReader.ReadLineAsync"/>.
-        /// </summary>
+        // WHY: / <summary>
+        // / Cross-platform line reader for SSE streams. Bypasses <see cref="StreamReader.ReadLineAsync"/>
+        // / because Mono on Windows can hold lines back until a larger buffer fills, collapsing many small
+        // / token-by-token deltas into a single large yield (visible to the user as "no streaming"). WebGL
+        // / uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
+        // / <see cref="StreamReader.ReadLineAsync"/>.
+        // / </summary>
         private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
             Stream stream,
             int streamIdleTimeoutSeconds,
@@ -750,7 +750,7 @@ namespace CoreAI.Infrastructure.Llm
 
             while (true)
             {
-                // No ConfigureAwait(false): on WebGL the continuation must capture
+                // WHY: No ConfigureAwait(false): on WebGL the continuation must capture
                 // UnitySynchronizationContext, otherwise it gets posted to the (non-existent)
                 // browser ThreadPool and the read pump silently halts after the first await.
                 int read = await ReadWithIdleTimeoutAsync(
@@ -826,7 +826,7 @@ namespace CoreAI.Infrastructure.Llm
 
             int timeoutMs = Math.Max(1, streamIdleTimeoutSeconds) * 1000;
 
-            // Drive the idle timeout off a linked CTS so that when the read wins (the hot path, hit once
+            // WHY: Drive the idle timeout off a linked CTS so that when the read wins (the hot path, hit once
             // per 8 KB read for the whole stream) we cancel the Task.Delay immediately. That releases its
             // underlying System.Threading.Timer and the CancellationTokenRegistration it holds on the
             // request token; leaving it uncancelled accumulates one live ~timeout-length timer per read
@@ -841,7 +841,7 @@ namespace CoreAI.Infrastructure.Llm
                 return await readTask;
             }
 
-            // Idle timeout fired: the read is abandoned. Observe it so its eventual fault (e.g.
+            // WHY: Idle timeout fired: the read is abandoned. Observe it so its eventual fault (e.g.
             // ObjectDisposedException once the caller disposes the stream) does not surface as an
             // unobserved task exception. The buffer it may still write into is iterator-local and is
             // never read again after this throw unwinds the loop.
@@ -853,11 +853,11 @@ namespace CoreAI.Infrastructure.Llm
                 LlmErrorCode.Timeout);
         }
 
-        /// <summary>
-        /// Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
-        /// <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
-        /// as an unobserved task exception on the finalizer thread.
-        /// </summary>
+        // WHY: / <summary>
+        // / Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
+        // / <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
+        // / as an unobserved task exception on the finalizer thread.
+        // / </summary>
         private static void ObserveAbandonedRead(Task readTask)
         {
             _ = readTask.ContinueWith(
@@ -883,10 +883,10 @@ namespace CoreAI.Infrastructure.Llm
                 _log);
         }
 
-        /// <summary>
-        /// EditMode tests: same header list as <see cref="BuildTransportHeaders"/> for an explicit
-        /// <paramref name="omitCorsSensitiveCorrelationHeaders"/> (WebGL player uses <c>true</c>).
-        /// </summary>
+        // WHY: / <summary>
+        // / EditMode tests: same header list as <see cref="BuildTransportHeaders"/> for an explicit
+        // / <paramref name="omitCorsSensitiveCorrelationHeaders"/> (WebGL player uses <c>true</c>).
+        // / </summary>
         internal static List<KeyValuePair<string, string>> BuildTransportHeadersForTests(
             string url,
             bool acceptEventStream,
@@ -931,7 +931,7 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
             }
 
-            // WebGL in the browser: cross-origin requests trigger CORS preflight for non-safelisted headers.
+            // WHY: WebGL in the browser: cross-origin requests trigger CORS preflight for non-safelisted headers.
             // Public gateways (e.g. openrouter.ai) often omit X-Request-Id / Idempotency-Key / X-Tenant-Id from
             // Access-Control-Allow-Headers, which blocks the whole POST before it reaches the API.
 
@@ -1153,7 +1153,7 @@ namespace CoreAI.Infrastructure.Llm
             int? retryAfter = TryParseRetryAfterHeaders(responseHeaders);
             if (!retryAfter.HasValue)
             {
-                // WebGL fetch cannot see Retry-After unless CORS exposes it; Groq-style bodies
+                // WHY: WebGL fetch cannot see Retry-After unless CORS exposes it; Groq-style bodies
                 // carry the window as "Please try again in 14.017s" - surface it on the typed
                 // error so upper layers can show a meaningful "retry in Ns" instead of nothing.
                 double? bodyWindow = TryParseRetryWindowSecondsFromBody(responseBody);
@@ -1446,7 +1446,7 @@ namespace CoreAI.Infrastructure.Llm
             foreach (string line in lines)
             {
                 string trimmed = line.Trim();
-                // OpenAI uses "data: {...}"; some local servers (LM Studio, llama.cpp) omit the space after "data:".
+                // WHY: OpenAI uses "data: {...}"; some local servers (LM Studio, llama.cpp) omit the space after "data:".
                 if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -1484,7 +1484,7 @@ namespace CoreAI.Infrastructure.Llm
             return string.Equals(data, "[DONE]", StringComparison.Ordinal);
         }
 
-        /// <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
+        // WHY: / <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
         internal static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdatesForTests(string raw)
         {
             return ParseSseUpdates(raw, new SseToolCallAccumulator());
@@ -1542,7 +1542,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                // Local servers (LM Studio / llama.cpp) sometimes stream only `message` or `text` per chunk.
+                // WHY: Local servers (LM Studio / llama.cpp) sometimes stream only `message` or `text` per chunk.
                 string messageText = ParseAssistantMessageVisibleText(choice["message"]);
                 if (!string.IsNullOrWhiteSpace(messageText))
                 {
@@ -1567,7 +1567,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
+        // WHY: / <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
         private static MEAI.ChatResponseUpdate TryParseStreamingUsageChunk(JObject obj)
         {
             JToken usageTok = obj["usage"];
@@ -1673,10 +1673,10 @@ namespace CoreAI.Infrastructure.Llm
             return ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
         }
 
-        /// <summary>
-        /// EditMode tests: feed several streaming <c>delta</c> data-line JSON payloads into a single
-        /// accumulator (mirroring multi-chunk <c>tool_calls</c> reassembly) then return the flushed update.
-        /// </summary>
+        // WHY: / <summary>
+        // / EditMode tests: feed several streaming <c>delta</c> data-line JSON payloads into a single
+        // / accumulator (mirroring multi-chunk <c>tool_calls</c> reassembly) then return the flushed update.
+        // / </summary>
         internal static MEAI.ChatResponseUpdate AccumulateToolCallDeltasForTests(IEnumerable<string> dataJsonChunks)
         {
             SseToolCallAccumulator accumulator = new();
@@ -1688,11 +1688,11 @@ namespace CoreAI.Infrastructure.Llm
             return accumulator.Flush();
         }
 
-        /// <summary>
-        /// EditMode tests: feed streaming <c>delta</c> data-line JSON payloads one by one and report,
-        /// per chunk, which tool calls DrainCompleted() surfaced at that point (execute-as-you-stream
-        /// timing), plus the final Flush() leftovers as the last element.
-        /// </summary>
+        // WHY: / <summary>
+        // / EditMode tests: feed streaming <c>delta</c> data-line JSON payloads one by one and report,
+        // / per chunk, which tool calls DrainCompleted() surfaced at that point (execute-as-you-stream
+        // / timing), plus the final Flush() leftovers as the last element.
+        // / </summary>
         internal static List<MEAI.ChatResponseUpdate> DrainPerChunkForTests(IEnumerable<string> dataJsonChunks)
         {
             SseToolCallAccumulator accumulator = new();
@@ -1707,35 +1707,35 @@ namespace CoreAI.Infrastructure.Llm
             return perChunk;
         }
 
-        /// <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
+        // WHY: / <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
         internal static bool IsCompleteJsonObjectForTests(string s)
         {
             return SseToolCallAccumulator.IsCompleteJsonObject(s);
         }
 
-        /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
+        // WHY: / <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
         internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
 
-        /// <summary>EditMode tests: marker key set when accumulated tool-call arguments could not be parsed.</summary>
+        // WHY: / <summary>EditMode tests: marker key set when accumulated tool-call arguments could not be parsed.</summary>
         internal static string ToolCallParseErrorKeyForTests => SseToolCallAccumulator.ParseErrorKey;
 
-        /// <summary>
-        /// Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by stable call id when
-        /// present, otherwise by tool-call index. Parallel compliant calls accumulate independently.
-        /// </summary>
+        // WHY: / <summary>
+        // / Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by stable call id when
+        // / present, otherwise by tool-call index. Parallel compliant calls accumulate independently.
+        // / </summary>
         private sealed class SseToolCallAccumulator
         {
-            /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+            // WHY: / <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
             internal const string RawArgumentsKey = ToolCallArgumentMarkers.RawArgumentsKey;
 
-            /// <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
+            // WHY: / <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
             internal const string ParseErrorKey = ToolCallArgumentMarkers.ParseErrorKey;
 
             private readonly List<PendingToolCall> _pending = new();
             private readonly Dictionary<string, PendingToolCall> _pendingById = new(StringComparer.Ordinal);
             private readonly Dictionary<int, PendingToolCall> _pendingByIndex = new();
 
-            // Tombstones for calls already surfaced by DrainCompleted(). One accumulator instance
+            // WHY: Tombstones for calls already surfaced by DrainCompleted(). One accumulator instance
             // exists per stream response (created fresh per attempt in GetStreamingResponseAsync),
             // so these are per-response by construction and need no explicit reset. They stop
             // misbehaving OpenAI-compat servers that re-send cumulative argument strings (or
@@ -1753,12 +1753,12 @@ namespace CoreAI.Infrastructure.Llm
                 _log = log ?? NullLog.Instance;
             }
 
-            /// <summary>
-            /// Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
-            /// later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
-            /// always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
-            /// arrive in any order across chunks.
-            /// </summary>
+            // WHY: / <summary>
+            // / Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
+            // / later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
+            // / always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
+            // / arrive in any order across chunks.
+            // / </summary>
             public void Feed(int? index, string callId, string name, string argumentsFragment)
             {
                 string stableId = string.IsNullOrWhiteSpace(callId) ? null : callId;
@@ -1838,11 +1838,11 @@ namespace CoreAI.Infrastructure.Llm
                 return CreateEntry(index, stableId);
             }
 
-            /// <summary>
-            /// True when the fragment refers to a call that already drained (and executed). A fragment
-            /// carrying a FRESH stable id that merely reuses a drained index is a genuinely new call,
-            /// so the id check takes precedence over the index tombstone.
-            /// </summary>
+            // WHY: / <summary>
+            // / True when the fragment refers to a call that already drained (and executed). A fragment
+            // / carrying a FRESH stable id that merely reuses a drained index is a genuinely new call,
+            // / so the id check takes precedence over the index tombstone.
+            // / </summary>
             private bool IsDrainedTombstone(int? index, string stableId)
             {
                 if (!string.IsNullOrEmpty(stableId))
@@ -1883,7 +1883,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (index.HasValue)
                 {
                     _pendingByIndex[index.Value] = entry;
-                    // A new call (fresh id) reusing a drained index takes the index over: id-less
+                    // WHY: A new call (fresh id) reusing a drained index takes the index over: id-less
                     // follow-up fragments for it must route here, not be swallowed by the tombstone.
                     _drainedIndexes.Remove(index.Value);
                 }
@@ -1909,17 +1909,17 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
             }
 
-            /// <summary>
-            /// Drains pending calls whose accumulated arguments already form one COMPLETE JSON
-            /// object, emitting them WITHOUT waiting for the stream to end. This is what lets the
-            /// client execute tool calls while the model is still generating the rest of the turn
-            /// (execute-as-you-stream). To preserve the provider's tool_calls index order across
-            /// chunks (dependent pairs like create -> configure must never run out of order), only
-            /// the longest CONTIGUOUS PREFIX of the (index, sequence) order in which every entry
-            /// is ready is drained: an entry that is not ready yet (no name, ambiguity mark, or
-            /// still-open JSON) blocks every later entry, which stays pending and drains on a
-            /// later call or at <see cref="Flush"/> (which also handles malformed/truncated cases).
-            /// </summary>
+            // WHY: / <summary>
+            // / Drains pending calls whose accumulated arguments already form one COMPLETE JSON
+            // / object, emitting them WITHOUT waiting for the stream to end. This is what lets the
+            // / client execute tool calls while the model is still generating the rest of the turn
+            // / (execute-as-you-stream). To preserve the provider's tool_calls index order across
+            // / chunks (dependent pairs like create -> configure must never run out of order), only
+            // / the longest CONTIGUOUS PREFIX of the (index, sequence) order in which every entry
+            // / is ready is drained: an entry that is not ready yet (no name, ambiguity mark, or
+            // / still-open JSON) blocks every later entry, which stays pending and drains on a
+            // / later call or at <see cref="Flush"/> (which also handles malformed/truncated cases).
+            // / </summary>
             public MEAI.ChatResponseUpdate DrainCompleted()
             {
                 if (_pending.Count == 0)
@@ -1983,12 +1983,12 @@ namespace CoreAI.Infrastructure.Llm
                 return argsStr.Length > 0 && IsCompleteJsonObject(argsStr);
             }
 
-            /// <summary>
-            /// True when <paramref name="s"/> is exactly one complete JSON object (balanced braces
-            /// outside strings, string/escape aware, only whitespace after the close). OpenAI tool
-            /// arguments are always a single object, so "balanced and closed" means "no more
-            /// fragments are coming" for a sane provider.
-            /// </summary>
+            // WHY: / <summary>
+            // / True when <paramref name="s"/> is exactly one complete JSON object (balanced braces
+            // / outside strings, string/escape aware, only whitespace after the close). OpenAI tool
+            // / arguments are always a single object, so "balanced and closed" means "no more
+            // / fragments are coming" for a sane provider.
+            // / </summary>
             internal static bool IsCompleteJsonObject(string s)
             {
                 int i = 0;
@@ -2057,7 +2057,7 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
                 update.Contents = new List<MEAI.AIContent>();
 
-                // Emit in ascending tool-call index order so the FunctionCallContent order is
+                // WHY: Emit in ascending tool-call index order so the FunctionCallContent order is
                 // deterministic and matches the provider's tool_calls index order.
                 foreach (PendingToolCall pending in _pending
                              .OrderBy(p => p.Index ?? int.MaxValue)
@@ -2067,7 +2067,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (string.IsNullOrEmpty(pending.Name))
                     {
-                        // An entry with accumulated id/args but no name cannot be invoked. Do not let it
+                        // WHY: An entry with accumulated id/args but no name cannot be invoked. Do not let it
                         // silently vanish - surface it so the loss is observable.
                         if (!string.IsNullOrEmpty(pending.Id) || !string.IsNullOrEmpty(argsStr))
                         {
@@ -2092,11 +2092,11 @@ namespace CoreAI.Infrastructure.Llm
                 return update.Contents.Count > 0 ? update : null;
             }
 
-            /// <summary>
-            /// Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
-            /// dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
-            /// and a warning is logged, so callers can detect and recover from a broken stream.
-            /// </summary>
+            // WHY: / <summary>
+            // / Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
+            // / dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
+            // / and a warning is logged, so callers can detect and recover from a broken stream.
+            // / </summary>
             private Dictionary<string, object> ParseArguments(string argsStr, string name, PendingToolCall pending)
             {
                 if (pending.ForceParseError)
@@ -2142,7 +2142,7 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            /// <summary>Mutable accumulation state for one in-progress streamed tool call.</summary>
+            // WHY: / <summary>Mutable accumulation state for one in-progress streamed tool call.</summary>
             private sealed class PendingToolCall
             {
                 public int? Index;
@@ -2156,7 +2156,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Test hook: exposes the wire-payload message serialization.</summary>
+        // WHY: / <summary>Test hook: exposes the wire-payload message serialization.</summary>
         internal static List<Dictionary<string, object>> BuildMessagesPayloadForTests(List<MEAI.ChatMessage> msgs)
         {
             return BuildMessagesPayloadStatic(msgs);
@@ -2171,7 +2171,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             List<Dictionary<string, object>> messages = new();
 
-            // tool_call_id symmetry for calls that arrived WITHOUT a provider id: the assistant echo
+            // WHY: tool_call_id symmetry for calls that arrived WITHOUT a provider id: the assistant echo
             // derives a deterministic synthetic id, and the matching tool-role reply must use the
             // SAME id or the model sees an unanswered call (and a dangling reply). Ids are queued in
             // emission order; the next tool result with an empty CallId consumes the next queued id
@@ -2202,7 +2202,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
                 {
-                    // One MEAI Tool message can carry SEVERAL FunctionResultContent items (the tool
+                    // WHY: One MEAI Tool message can carry SEVERAL FunctionResultContent items (the tool
                     // loop appends the whole turn's results as a single message). The OpenAI wire
                     // protocol requires ONE tool-role message PER tool_call_id — serializing only the
                     // first result left the model with N tool_calls but a single answer, and models
@@ -2221,7 +2221,7 @@ namespace CoreAI.Infrastructure.Llm
                             string toolCallId = functionResult.CallId;
                             if (string.IsNullOrEmpty(toolCallId) && pendingSyntheticToolCallIds.Count > 0)
                             {
-                                // Pair with the synthetic id the assistant echo emitted for the
+                                // WHY: Pair with the synthetic id the assistant echo emitted for the
                                 // id-less call this result answers (see queue comment above).
                                 toolCallId = pendingSyntheticToolCallIds.Dequeue();
                             }
@@ -2234,7 +2234,7 @@ namespace CoreAI.Infrastructure.Llm
                             string resultStr = functionResult.Result switch
                             {
                                 string s => s,
-                                // Newtonsoft serializes System.Text.Json's JsonElement struct by
+                                // WHY: Newtonsoft serializes System.Text.Json's JsonElement struct by
                                 // reflection into a useless {"ValueKind":N}, which would blind the
                                 // model to its own tool results - emit the element's real JSON.
                                 System.Text.Json.JsonElement je =>
@@ -2263,7 +2263,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             MEAI.FunctionCallContent call = funcCalls[callIndex];
 
-                            // Never invent a RANDOM id: a Guid here could not be reproduced on the
+                            // WHY: Never invent a RANDOM id: a Guid here could not be reproduced on the
                             // matching tool-role reply, leaving the model with an unanswered call it
                             // then re-issues. Derive a deterministic synthetic id instead and queue
                             // it so the paired tool result (also id-less) reuses the exact same id.
@@ -2309,14 +2309,14 @@ namespace CoreAI.Infrastructure.Llm
             return messages;
         }
 
-        /// <summary>
-        /// Serializes a tool call's arguments for the assistant <c>tool_calls</c> echo. Parse-error
-        /// calls (arguments carrying <see cref="ToolCallArgumentMarkers.RawArgumentsKey"/>) echo the
-        /// model's ORIGINAL raw argument string instead of the internal marker dictionary - the
-        /// markers are a CoreAI-private contract and leaking
-        /// <c>{"__raw_arguments":...,"__parse_error":true}</c> onto the wire would show the model a
-        /// call shape it never produced.
-        /// </summary>
+        // WHY: / <summary>
+        // / Serializes a tool call's arguments for the assistant <c>tool_calls</c> echo. Parse-error
+        // / calls (arguments carrying <see cref="ToolCallArgumentMarkers.RawArgumentsKey"/>) echo the
+        // / model's ORIGINAL raw argument string instead of the internal marker dictionary - the
+        // / markers are a CoreAI-private contract and leaking
+        // / <c>{"__raw_arguments":...,"__parse_error":true}</c> onto the wire would show the model a
+        // / call shape it never produced.
+        // / </summary>
         private static string SerializeToolCallArguments(IDictionary<string, object?> arguments)
         {
             if (arguments != null &&
@@ -2335,13 +2335,13 @@ namespace CoreAI.Infrastructure.Llm
             return JsonConvert.SerializeObject(arguments ?? new Dictionary<string, object?>());
         }
 
-        /// <summary>
-        /// Builds the OpenAI <c>content</c> value for a message. When the message carries image content
-        /// (<see cref="MEAI.DataContent"/> or <see cref="MEAI.UriContent"/> with an <c>image/*</c> media
-        /// type), the value is a multimodal parts array (<c>{type:"text"}</c> + one or more
-        /// <c>{type:"image_url"}</c>) so vision-capable models receive the image; otherwise it is the plain
-        /// text string (unchanged behavior for text-only messages). Public for test verification.
-        /// </summary>
+        // WHY: / <summary>
+        // / Builds the OpenAI <c>content</c> value for a message. When the message carries image content
+        // / (<see cref="MEAI.DataContent"/> or <see cref="MEAI.UriContent"/> with an <c>image/*</c> media
+        // / type), the value is a multimodal parts array (<c>{type:"text"}</c> + one or more
+        // / <c>{type:"image_url"}</c>) so vision-capable models receive the image; otherwise it is the plain
+        // / text string (unchanged behavior for text-only messages). Public for test verification.
+        // / </summary>
         public static object BuildOpenAiMessageContent(string text, IList<MEAI.AIContent> contents)
         {
             List<string> imageUrls = null;

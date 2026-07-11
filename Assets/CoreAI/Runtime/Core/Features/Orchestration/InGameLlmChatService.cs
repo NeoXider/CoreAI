@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -20,7 +20,6 @@ namespace CoreAI.Ai
         private readonly object _historyLock = new();
         private readonly object _rateLock = new();
 
-        // Rate limiter
         private readonly int _maxRequestsPerWindow;
         private readonly TimeSpan _rateLimitWindow;
         private readonly Queue<DateTime> _requestTimestamps = new();
@@ -79,7 +78,6 @@ namespace CoreAI.Ai
                 return new LlmCompletionResult { Ok = false, Error = "empty message" };
             }
 
-            // Rate limit check
             if (!TryAcquireRateSlot())
             {
                 return new LlmCompletionResult
@@ -99,7 +97,7 @@ namespace CoreAI.Ai
                 ? baseSystem
                 : prefix.TrimEnd() + "\n" + baseSystem;
 
-            // BUG-4 fix: snapshot history under lock, release during LLM call,
+            // WHY: BUG-4 fix: snapshot history under lock, release during LLM call,
             // then re-acquire to append the response atomically.
             List<Microsoft.Extensions.AI.ChatMessage> history;
             lock (_historyLock)
@@ -153,7 +151,7 @@ namespace CoreAI.Ai
         {
             lock (_rateLock)
             {
-                // Purge expired timestamps so AcceptedInWindow is accurate.
+                // WHY: Purge expired timestamps so AcceptedInWindow is accurate.
                 DateTime now = DateTime.UtcNow;
                 DateTime cutoff = now - _rateLimitWindow;
                 while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoff)
@@ -176,7 +174,7 @@ namespace CoreAI.Ai
         {
             if (_maxRequestsPerWindow <= 0)
             {
-                return true; // No rate limit is configured.
+                return true; // WHY: No rate limit is configured.
             }
 
             lock (_rateLock)

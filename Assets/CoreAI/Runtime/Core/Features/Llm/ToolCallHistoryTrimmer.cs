@@ -34,7 +34,6 @@ namespace CoreAI.Infrastructure.Llm
                 return 0;
             }
 
-            // Count tool-related messages: any with role Tool, or Assistant with FunctionCallContent.
             int toolMessageCount = 0;
             for (int i = 0; i < messages.Count; i++)
             {
@@ -56,7 +55,7 @@ namespace CoreAI.Infrastructure.Llm
             int toRemove = toolMessageCount - maxToolMessages;
             int removed = 0;
 
-            // Remove oldest tool-call units as coupled blocks. Each unit starts at an Assistant
+            // WHY: Remove oldest tool-call units as coupled blocks. Each unit starts at an Assistant
             // tool-call message and extends through every Tool result message that immediately
             // follows it. Removing the unit as a whole keeps every surviving Tool message paired
             // with its preceding Assistant tool_calls message (OpenAI-valid). We may overshoot the
@@ -70,9 +69,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (isToolAssistant)
                 {
-                    int unitToolMessages = 1; // the Assistant tool-call message itself
+                    int unitToolMessages = 1;
 
-                    // Drop the Assistant tool-call message, then every contiguous Tool result it owns.
                     messages.RemoveAt(index);
                     while (index < messages.Count && messages[index].Role == MEAI.ChatRole.Tool)
                     {
@@ -84,7 +82,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
-                    // Preserve non-tool messages (system/user/plain assistant) and skip past them.
+                    // WHY: Preserve non-tool messages (system/user/plain assistant) and skip past them.
                     // A leading Tool message without a preceding Assistant tool-call would already be
                     // malformed; leave it untouched rather than orphan it further.
                     index++;

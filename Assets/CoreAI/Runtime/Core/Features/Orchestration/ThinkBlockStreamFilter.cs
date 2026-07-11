@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 
 namespace CoreAI.Ai
@@ -51,7 +51,7 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        // Keep only a possible closing-tag prefix; all other hidden text stays suppressed.
+                        // WHY: Keep only a possible closing-tag prefix; all other hidden text stays suppressed.
                         _buffer.Clear();
                         _buffer.Append(KeepTailForPossibleTag(buf, CloseTag));
                         return visible.ToString();
@@ -63,7 +63,7 @@ namespace CoreAI.Ai
                     int closeIdx = buf.IndexOf(CloseTag, StringComparison.OrdinalIgnoreCase);
                     if (closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx))
                     {
-                        // Some OpenAI-compatible reasoning models stream hidden thought text without
+                        // WHY: Some OpenAI-compatible reasoning models stream hidden thought text without
                         // the opening tag but still include </think> before the visible answer.
                         // Treat the buffered prefix as hidden and resume after the orphan close tag.
                         buf = buf.Substring(closeIdx + CloseTag.Length);
@@ -82,7 +82,7 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        // Hold a possible opening tag until the next chunk proves whether it is real.
+                        // WHY: Hold a possible opening tag until the next chunk proves whether it is real.
                         int lastLt = buf.LastIndexOf('<');
                         if (lastLt >= 0)
                         {
@@ -136,7 +136,7 @@ namespace CoreAI.Ai
             string tail = _buffer.ToString();
             _buffer.Clear();
 
-            // A partial opening tag at end-of-stream should not be shown to the user.
+            // WHY: A partial opening tag at end-of-stream should not be shown to the user.
             return IsPrefixOf(tail, OpenTag) ? string.Empty : tail;
         }
 

@@ -96,12 +96,12 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (OperationCanceledException)
             {
-                // Cancellation is caller intent, not a backend fault — do not count it, do not swallow it.
+                // WHY: Cancellation is caller intent, not a backend fault — do not count it, do not swallow it.
                 throw;
             }
             catch (Exception ex)
             {
-                // An unexpected throw from the inner client is treated as a transient backend fault.
+                // WHY: An unexpected throw from the inner client is treated as a transient backend fault.
                 RecordFailure();
                 throw new LlmClientException(ex.Message, LlmErrorCode.ProviderError);
             }
@@ -136,7 +136,7 @@ namespace CoreAI.Infrastructure.Llm
                 while (true)
                 {
                     LlmStreamChunk chunk;
-                    // C# forbids `yield` inside a catch, so capture any inner-stream fault here and emit the
+                    // WHY: C# forbids `yield` inside a catch, so capture any inner-stream fault here and emit the
                     // terminal error chunk AFTER the try/catch instead.
                     string moveError = null;
                     try
@@ -185,7 +185,7 @@ namespace CoreAI.Infrastructure.Llm
                 await e.DisposeAsync().ConfigureAwait(false);
             }
 
-            // Classify the whole stream: a stream that produced an error chunk (or nothing at all) is a
+            // WHY: Classify the whole stream: a stream that produced an error chunk (or nothing at all) is a
             // failure; a stream that ended cleanly is a success that closes/keeps-closed the breaker.
             bool ok = sawAnyChunk && !sawTerminalFailure;
             RecordResult(ok, ok ? LlmErrorCode.None : terminalCode);
@@ -227,7 +227,7 @@ namespace CoreAI.Infrastructure.Llm
                     return false;
                 }
 
-                // Closed or HalfOpen: allow through (HalfOpen admits the single probe already in flight).
+                // WHY: Closed or HalfOpen: allow through (HalfOpen admits the single probe already in flight).
                 rejectReason = null;
                 return true;
             }
@@ -247,7 +247,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             else
             {
-                // A caller-caused failure (auth, invalid request, context length, empty) is not the backend's
+                // WHY: A caller-caused failure (auth, invalid request, context length, empty) is not the backend's
                 // health problem — do not trip the breaker, but a half-open probe that returned such a result
                 // still means the backend is reachable, so treat it as a soft success for state purposes.
                 RecordSuccess();
@@ -273,7 +273,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (_state == State.HalfOpen)
                 {
-                    // The probe failed — re-open for another cooldown.
+                    // WHY: The probe failed — re-open for another cooldown.
                     _state = State.Open;
                     _openedAtMs = _nowMs();
                     _log?.Invoke("[CircuitBreaker] re-opened: half-open probe failed.");

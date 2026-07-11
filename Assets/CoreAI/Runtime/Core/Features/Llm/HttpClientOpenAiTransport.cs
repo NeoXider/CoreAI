@@ -38,7 +38,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private static HttpClient CreateSharedHttpClient()
         {
-            // HttpClientHandler is available on .NET Standard 2.0 (Unity's default Mono/IL2CPP profile).
+            // WHY: HttpClientHandler is available on .NET Standard 2.0 (Unity's default Mono/IL2CPP profile).
             // Bypass any system/WinINET proxy: Mono's HttpClient uses the system proxy by default, which
             // can route even 127.0.0.1 / localhost requests through a proxy or VPN filter driver. A local
             // LLM endpoint must never go through a proxy. (SocketsHttpHandler is not exposed by Unity's
@@ -54,7 +54,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch
             {
-                /* some profiles may not support the setter; fall back to default proxy behavior */
+                // WHY: some profiles may not support the setter; fall back to default proxy behavior
             }
 
             return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };

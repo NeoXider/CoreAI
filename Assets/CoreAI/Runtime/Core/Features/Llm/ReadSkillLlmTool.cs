@@ -31,7 +31,7 @@ namespace CoreAI.Ai
         {
             private readonly IReadOnlyList<SkillSet> _skills;
 
-            // When the backing list is a live MutableSkillCatalog (skill authoring), the lookup is
+            // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the lookup is
             // rebuilt per call so a skill the model just created/updated is immediately visible here.
             private readonly bool _isLive;
             private readonly Dictionary<string, SkillSet> _skillsByName;
@@ -185,7 +185,7 @@ namespace CoreAI.Ai
                     });
                 }
 
-                // A skill that declares tools but has them all filtered out by the allowlist is genuinely
+                // WHY: A skill that declares tools but has them all filtered out by the allowlist is genuinely
                 // unavailable. An instructions-only skill (no tools at all — common for agent-authored
                 // skills) is still readable: return its instructions with an empty tool list.
                 bool declaresTools = skill.Tools != null && skill.Tools.Count > 0;
@@ -210,7 +210,6 @@ namespace CoreAI.Ai
                 };
             }
 
-            // Fuzzy match
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
                 if (kvp.Key.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -304,8 +303,8 @@ namespace CoreAI.Ai
             List<string> names = new();
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
-                // Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
-                // only when at least one of their tools survives the allowlist.
+            // WHY: Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
+            // only when at least one of their tools survives the allowlist.
                 bool declaresTools = kvp.Value?.Tools != null && kvp.Value.Tools.Count > 0;
                 bool anyToolAllowed = !declaresTools || SkillSetToolResolver.BuildDescriptors(kvp.Value)
                     .Any(d => IsAllowed(d.Name, allowedToolNames));

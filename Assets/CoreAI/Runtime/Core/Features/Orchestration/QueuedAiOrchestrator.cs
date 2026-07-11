@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -17,7 +17,7 @@ namespace CoreAI.Ai
         private readonly int _maxConcurrent;
         private readonly int _maxPending;
 
-        // BUG-1 fix: single lock for both queue and scope operations to eliminate deadlock risk.
+        // WHY: BUG-1 fix: single lock for both queue and scope operations to eliminate deadlock risk.
         // Previously _scopeLock was nested inside _queueLock in some paths but taken independently
         // in ReleaseScopeToken, creating an inconsistent lock ordering hazard.
         private readonly object _lock = new();
@@ -25,7 +25,7 @@ namespace CoreAI.Ai
         private readonly List<StreamWorkItem> _streamPending = new();
         private readonly Dictionary<string, CancellationTokenSource> _scopeTokens = new(StringComparer.Ordinal);
 
-        // F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
+        // WHY: F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
         // caller/scope token was never cancelled. Never disposed (only Cancel()'d): work already
         // reading its .Token racing with a Dispose()-time Dispose() call would risk ObjectDisposedException;
         // an unreferenced, timer-less CTS is reclaimed by GC once this orchestrator is collected.
@@ -133,7 +133,7 @@ namespace CoreAI.Ai
 
             try
             {
-                // Drain with CancellationToken.None on purpose: when the caller cancels, the producer
+                // WHY: Drain with CancellationToken.None on purpose: when the caller cancels, the producer
                 // observes it, writes the terminal "cancelled" chunk and completes the queue, and the
                 // consumer must deliver that terminal chunk rather than bail out early. Consumer
                 // abandonment (break without cancelling) is handled by the finally below.
@@ -144,7 +144,7 @@ namespace CoreAI.Ai
             }
             finally
             {
-                // Consumer finished or abandoned enumeration (e.g. broke out of the await foreach without
+                // WHY: Consumer finished or abandoned enumeration (e.g. broke out of the await foreach without
                 // cancelling its own token). Signal the producer so it stops draining the inner LLM stream
                 // into the unbounded queue instead of running silently to completion. Intentionally not
                 // disposed: a producer that starts after this point still links to its token, and a CTS
@@ -189,12 +189,12 @@ namespace CoreAI.Ai
             try
             {
                 CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
-                // Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
+                // WHY: Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
                 // when neither the caller nor the cancellation scope token was ever cancelled.
                 linkedCts = CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
                 CancellationToken token = linkedCts.Token;
                 token.ThrowIfCancellationRequested();
-                // WebGL player: keep continuation on Unity SynchronizationContext.
+                // WHY: WebGL player: keep continuation on Unity SynchronizationContext.
                 // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
 #if UNITY_WEBGL && !UNITY_EDITOR
                 string result = await _inner.RunTaskAsync(w.Task, token);
@@ -231,7 +231,7 @@ namespace CoreAI.Ai
             try
             {
                 CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
-                // Always link the lifetime signal (Dispose() teardown) and, when present, the
+                // WHY: Always link the lifetime signal (Dispose() teardown) and, when present, the
                 // consumer-abandonment signal so breaking enumeration without cancelling the caller
                 // token still stops the inner stream.
                 linkedCts = w.ConsumerCancellation != null
@@ -294,7 +294,7 @@ namespace CoreAI.Ai
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
 
-            // Cancelled by the public RunStreamingAsync iterator's finally when the consumer stops
+            // WHY: Cancelled by the public RunStreamingAsync iterator's finally when the consumer stops
             // enumerating (including an early break that does not cancel its own token). The producer
             // links its inner-stream token to this so it stops draining instead of running off-screen.
             public CancellationTokenSource ConsumerCancellation;
@@ -331,7 +331,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose from ReleaseScopeToken.
+            // WHY: BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose from ReleaseScopeToken.
             SafeCancel(activeToCancel);
 
             CancelRemovedPending(removedPending, removedStreamPending);
@@ -399,7 +399,7 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                // F-10: bounded admission instead of an unbounded queue - reject fast rather than
+                // WHY: F-10: bounded admission instead of an unbounded queue - reject fast rather than
                 // growing _pending/_streamPending without limit under sustained offline/slow-LLM load.
                 if (_pending.Count + _streamPending.Count >= _maxPending)
                 {
@@ -442,7 +442,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
+            // WHY: BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
             SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
@@ -470,7 +470,7 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                // F-10: same bounded admission policy as the task path.
+                // WHY: F-10: same bounded admission policy as the task path.
                 if (_pending.Count + _streamPending.Count >= _maxPending)
                 {
                     rejected = true;
@@ -518,7 +518,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
+            // WHY: BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
             SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
@@ -683,7 +683,7 @@ namespace CoreAI.Ai
         {
             while (true)
             {
-                // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, and the
                 // continuation must come back through UnitySynchronizationContext.
                 // CancellationToken.None on purpose: termination is driven by the producer completing the
                 // queue (it writes a terminal "cancelled" chunk on cancellation), so the consumer drains
@@ -713,7 +713,7 @@ namespace CoreAI.Ai
 
             _disposed = true;
 
-            // Unblocks any in-flight RunOneAsync/RunOneStreamingAsync await - both link their token to
+            // WHY: Unblocks any in-flight RunOneAsync/RunOneStreamingAsync await - both link their token to
             // this, so an inner provider call that ignores its own caller/scope token still observes
             // teardown. Their existing IsCancellationLike catch blocks then complete the work item / write
             // a terminal "cancelled" chunk exactly as they do for a normal cancellation.
@@ -734,7 +734,7 @@ namespace CoreAI.Ai
                 _streamPending.Clear();
             }
 
-            // Pending work never got a chance to run: resolve it now instead of leaving it forever
+            // WHY: Pending work never got a chance to run: resolve it now instead of leaving it forever
             // un-awaited. Scope CTS ownership already moved into `scopeTokens` above.
             foreach (WorkItem w in drainedPending)
             {
@@ -820,7 +820,7 @@ namespace CoreAI.Ai
                     Task waitTask;
                     lock (_signalLock)
                     {
-                        // Re-check inside lock to close the race between Write/Complete and the
+                        // WHY: Re-check inside lock to close the race between Write/Complete and the
                         // we await would be missed and the reader would park forever.
                         if (_queue.TryDequeue(out LlmStreamChunk chunk2))
                         {
