@@ -73,6 +73,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        [Timeout(15000)]
+        public void NestedGuardedCall_SameState_OuterBudgetStaysArmed()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            LuaCsExecutionGuard nestedGuard = new(timeoutMs: 2000, maxSteps: 10_000);
+            LuaState state = null;
+            LuaFunction noop = null;
+            registry.Register("nested", new System.Func<double>(() =>
+            {
+                // Mirrors mods_call: a guarded call re-entering the guard on the SAME LuaState.
+                LuaValue[] r = nestedGuard.Execute(state, noop, CancellationToken.None);
+                return r.Length > 0 ? r[0].Read<double>() : 0d;
+            }));
+            state = env.Create(registry);
+            noop = env.RunChunk(state, "return function() return 1 end")[0].Read<LuaFunction>();
+
+            // The nested guard's cleanup must restore the outer hook instead of clearing it; otherwise
+            // the over-budget loop after nested() runs unlimited and the chunk returns normally.
+            LuaCsExecutionGuard outerGuard = new(timeoutMs: 2000, maxSteps: 5_000);
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state,
+                    "nested()\n" +
+                    "local x = 0\n" +
+                    "for i = 1, 100000 do x = x + 1 end\n" +
+                    "return x",
+                    outerGuard));
+
+            Assert.IsTrue(ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS"),
+                $"Expected the OUTER step budget to stay armed after a nested guarded call, got: {ex.Message}");
+        }
+
+        [Test]
         public void AllocationBomb_NormalHundredKbString_StillPasses()
         {
             LuaCsSecureEnvironment env = new();

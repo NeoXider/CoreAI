@@ -77,6 +77,31 @@ capabilities: Read, Gameplay, WorldEdit
         }
 
         [Test]
+        public void Parse_UnknownCapabilityToken_IsSkippedInsteadOfThrowing()
+        {
+            LuaModHeader header = LuaModHeader.Parse(@"--[[@coreai
+id: tolerant
+capabilities: Read, Superpowers, WorldEdit
+]]", "fallback");
+
+            Assert.AreEqual("tolerant", header.Id);
+            Assert.AreEqual("Read, WorldEdit", header.Capabilities,
+                "Unknown capability tokens must be skipped, keeping the known ones.");
+        }
+
+        [Test]
+        public void Parse_OnlyUnknownCapabilityTokens_FallsBackToNone()
+        {
+            LuaModHeader header = LuaModHeader.Parse(@"--[[@coreai
+id: tolerant
+capabilities: Superpowers
+]]", "fallback");
+
+            Assert.AreEqual("None", header.Capabilities,
+                "A capabilities line with no known token must fail closed to None, not throw.");
+        }
+
+        [Test]
         public void Parse_NoHeader_ReturnsFallbackIdAndDefaultActive()
         {
             LuaModHeader header = LuaModHeader.Parse("print('no header')", "fallback_mod");

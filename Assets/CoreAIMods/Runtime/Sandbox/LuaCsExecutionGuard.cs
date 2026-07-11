@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Lua;
 using Lua.Runtime;
@@ -25,6 +27,14 @@ namespace CoreAI.Sandbox.LuaCs
     {
         /// <summary>Default per-execution GC allocation budget enforced between VM instructions.</summary>
         public const long DefaultMaxAllocatedBytesBudget = 256 * 1024 * 1024;
+
+        // WHY: Guarded execution can re-enter on the SAME LuaState (mods_call: a self-call, or A calls B
+        // which calls back into A): a nested finally that simply cleared the hook would disarm the
+        // limits the still-running outer call depends on, letting the rest of the outer chunk run
+        // unlimited (sandbox escape). Track the installed hooks per state — shared across guard
+        // instances via this static table — so a nested guard restores the previous hook on exit and
+        // the hook is only fully uninstalled when the outermost guarded call unwinds.
+        private static readonly ConditionalWeakTable<LuaState, Stack<LuaFunction>> InstalledHooks = new();
 
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
@@ -148,9 +158,11 @@ namespace CoreAI.Sandbox.LuaCs
                 return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
             });
 
-            state.SetHook(hook, string.Empty, 1);
+            Stack<LuaFunction> installed = InstalledHooks.GetOrCreateValue(state);
+            installed.Push(hook);
             try
             {
+                state.SetHook(hook, string.Empty, 1);
                 return body(cancellationToken);
             }
             catch (LuaRuntimeException)
@@ -159,9 +171,19 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
+                installed.Pop();
                 try
                 {
-                    state.SetHook(null, string.Empty, 0);
+                    if (installed.Count > 0)
+                    {
+                        // WHY: An enclosing guarded call is still running on this state: re-arm ITS hook
+                        // instead of clearing, so the outer step/time/alloc limits stay live.
+                        state.SetHook(installed.Peek(), string.Empty, 1);
+                    }
+                    else
+                    {
+                        state.SetHook(null, string.Empty, 0);
+                    }
                 }
                 catch
                 {

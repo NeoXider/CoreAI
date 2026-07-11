@@ -305,6 +305,98 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        [Timeout(15000)]
+        public void LuaCs_ModsCall_SelfCall_CannotDisarmHandlerGuard()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("m", @"
+                mods_export('noop', function() return 1 end)
+                hooks_on('go', function()
+                    mods_call(mod_id(), 'noop')
+                    local x = 0
+                    for i = 1, 1000000 do x = x + 1 end
+                    store_set('escaped', 'yes')
+                end)");
+
+            stack.Runtime.EmitEvent("go", "");
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("", store.Get("m", "escaped"),
+                "A self mods_call must not disarm the outer guard: the over-budget loop after it must be cut.");
+            Assert.IsNotEmpty(stack.Runtime.GetRecentHandlerErrors("m"),
+                "The over-budget handler must fail with a recorded error, not run to completion unlimited.");
+        }
+
+        [Test]
+        [Timeout(15000)]
+        public void LuaCs_ModsCall_IndirectCycle_CannotDisarmHandlerGuard()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("a", @"
+                mods_export('noop', function() return 1 end)
+                hooks_on('go', function()
+                    mods_call('b', 'pong')
+                    local x = 0
+                    for i = 1, 1000000 do x = x + 1 end
+                    store_set('escaped', 'yes')
+                end)");
+            stack.Runtime.LoadMod("b", "mods_export('pong', function() return mods_call('a', 'noop') end)");
+
+            stack.Runtime.EmitEvent("go", "");
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("", store.Get("a", "escaped"),
+                "An A->B->A mods_call cycle must not disarm A's outer guard (self-call bans cannot catch this).");
+            Assert.IsNotEmpty(stack.Runtime.GetRecentHandlerErrors("a"),
+                "The over-budget handler must fail with a recorded error.");
+        }
+
+        [Test]
+        public void LuaCs_HandlerDiesInsideWorldTransaction_NextHandlerCommandStillReachesSink()
+        {
+            MemoryStore store = new();
+            FakeCommandSink sink = new();
+            LuaCsModStack stack = BuildStack(store, sink);
+
+            stack.Runtime.LoadMod("t", @"
+                hooks_on('leak', function()
+                    coreai_world_begin()
+                    error('dies before commit')
+                end)
+                hooks_on('later', function() coreai_world_destroy('victim') end)",
+                LuaCapabilities.WorldEdit);
+
+            stack.Runtime.EmitEvent("leak", "");
+            stack.Runtime.Tick(0);
+            Assert.IsNotEmpty(stack.Runtime.GetRecentHandlerErrors("t"), "The leaking handler must fail.");
+            Assert.AreEqual(0, sink.Commands.Count,
+                "The aborted transaction's buffered commands must never reach the sink.");
+
+            stack.Runtime.EmitEvent("later", "");
+            stack.Runtime.Tick(0);
+            Assert.AreEqual(1, sink.Commands.Count,
+                "A transaction leaked by a dead handler must not silently swallow the next handler's world command.");
+        }
+
+        [Test]
+        public void LuaCs_LoadChunkDiesInsideWorldTransaction_NextLoadCommandStillReachesSink()
+        {
+            FakeCommandSink sink = new();
+            LuaCsModStack stack = BuildStack(new MemoryStore(), sink);
+
+            Assert.Catch(() => stack.Runtime.LoadMod("dying",
+                "coreai_world_begin()\nerror('dies before commit')",
+                LuaCapabilities.WorldEdit));
+            Assert.IsFalse(stack.Runtime.IsLoaded("dying"));
+
+            stack.Runtime.LoadMod("healthy", "coreai_world_destroy('victim')", LuaCapabilities.WorldEdit);
+            Assert.AreEqual(1, sink.Commands.Count,
+                "A transaction leaked by a failing load chunk must not swallow the next load's world command.");
+        }
+
+        [Test]
         public void LuaCs_OneOff_ExecuteReturnsOutput()
         {
             LuaCsModStack stack = BuildStack();

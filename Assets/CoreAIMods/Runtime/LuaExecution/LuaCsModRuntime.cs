@@ -132,6 +132,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly ILuaModStore _store;
         private readonly ILuaModSourceStore _sourceStore;
         private readonly ILuaScriptVersionStore _versionStore;
+        private readonly ILuaTransactionScope _transactionScope;
         private readonly bool _autoPersistMods;
         private readonly ILog _log;
         private readonly List<Mod> _tickScratch = new();
@@ -212,6 +213,13 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="TryRevertMod"/>. Null falls back to <see cref="NullLuaScriptVersionStore"/> (no history —
         /// the prior behaviour).
         /// </param>
+        /// <param name="transactionScope">
+        /// Optional shared transaction scope of the gameplay bindings behind <paramref name="gameplayBindings"/>.
+        /// When supplied, the runtime resets it around every load chunk and guarded handler/timer call —
+        /// mirroring <see cref="LuaCsGameToolExecutor"/> — so a handler that dies between
+        /// <c>coreai_world_begin</c> and commit cannot leave a stale transaction silently buffering the
+        /// world commands of later handlers/timers.
+        /// </param>
         public LuaCsModRuntime(
             Action<LuaCsApiRegistry, LuaCapabilities> gameplayBindings = null,
             ILuaModStore store = null,
@@ -220,7 +228,8 @@ namespace CoreAI.Ai.LuaCs
             long handlerMaxSteps = DefaultHandlerMaxSteps,
             ILuaModSourceStore sourceStore = null,
             bool autoPersistMods = true,
-            ILuaScriptVersionStore versionStore = null)
+            ILuaScriptVersionStore versionStore = null,
+            ILuaTransactionScope transactionScope = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -228,6 +237,7 @@ namespace CoreAI.Ai.LuaCs
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
+            _transactionScope = transactionScope;
             _handlerGuard = new LuaCsExecutionGuard(handlerTimeoutMs, handlerMaxSteps);
         }
 
@@ -406,11 +416,18 @@ namespace CoreAI.Ai.LuaCs
             // during load resolve correctly.
             mod.State = _env.Create(registry);
 
-            // TODO(migration): reset the ported world/unity transaction scope around the load chunk
-            // WHY: (the MoonSharp runtime calls ILuaTransactionScope.ResetTransactions() before/after the
-            // chunk so a transaction left open by a failing load cannot bleed into later scripts).
-            // There is no ported transaction surface yet, so this is a no-op seam for now.
-            _env.RunChunk(mod.State, luaCode);
+            // WHY: Reset the shared transaction scope before/after the load chunk (mirroring the MoonSharp
+            // runtime) so a transaction left open by a failing load cannot bleed into later scripts —
+            // and a transaction leaked elsewhere cannot swallow this chunk's world commands.
+            ResetTransactionScope();
+            try
+            {
+                _env.RunChunk(mod.State, luaCode);
+            }
+            finally
+            {
+                ResetTransactionScope();
+            }
 
             return mod;
         }
@@ -833,10 +850,31 @@ namespace CoreAI.Ai.LuaCs
             }
             finally
             {
-                // TODO(migration): reset the ported world/unity transaction scope here (the MoonSharp
-                // WHY: runtime resets ILuaTransactionScope per guarded call so a transaction opened inside one
-                // invocation cannot leak into the next handler/timer/tick). No-op until gameplay bindings
-                // are ported.
+                // WHY: Reset the shared transaction scope per guarded call (mirroring the MoonSharp runtime
+                // and LuaCsGameToolExecutor) so a transaction opened inside one invocation cannot leak
+                // into the next handler/timer/tick and silently buffer its world commands.
+                ResetTransactionScope();
+            }
+        }
+
+        /// <summary>
+        /// Discards any unfinished world/data transaction on the shared gameplay-binding scope. Best-effort:
+        /// it runs inside finally blocks on the tick path, so a throwing scope must not derail the tick.
+        /// </summary>
+        private void ResetTransactionScope()
+        {
+            if (_transactionScope == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _transactionScope.ResetTransactions();
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] ILuaTransactionScope.ResetTransactions() failed: {ex}");
             }
         }
 

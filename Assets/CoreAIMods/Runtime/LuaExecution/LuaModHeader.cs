@@ -309,7 +309,13 @@ namespace CoreAI.Ai
                 LuaCapabilities capabilities = LuaCapabilities.None;
                 for (int i = 0; i < parts.Length; i++)
                 {
-                    capabilities |= (LuaCapabilities)Enum.Parse(typeof(LuaCapabilities), parts[i], true);
+                    // WHY: Tolerant parse (mirrors HubModServiceBase.ParseCaps): an unknown token in one
+                    // LLM/hand-written header must not throw out of Parse and take down whole-directory
+                    // loads such as ResourcesBundledModSource; unknown tokens are simply skipped.
+                    if (Enum.TryParse(parts[i], true, out LuaCapabilities parsed))
+                    {
+                        capabilities |= parsed;
+                    }
                 }
 
                 return capabilities.ToString();

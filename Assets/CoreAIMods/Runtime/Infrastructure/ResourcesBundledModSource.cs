@@ -48,14 +48,24 @@ namespace CoreAI.Infrastructure.Lua
                     continue;
                 }
 
-                LuaModHeader header = LuaModHeader.Parse(asset.text, asset.name);
-                string id = (header.Id ?? "").Trim();
-                if (id.Length == 0 || !seen.Add(id))
+                // WHY: Per-mod isolation: one asset with a malformed header must not throw out of Load and
+                // kill the seeding of every other bundled mod (and the Hub list with it).
+                try
                 {
-                    continue; // no id, or a duplicate id already taken by an earlier asset
-                }
+                    LuaModHeader header = LuaModHeader.Parse(asset.text, asset.name);
+                    string id = (header.Id ?? "").Trim();
+                    if (id.Length == 0 || !seen.Add(id))
+                    {
+                        continue; // no id, or a duplicate id already taken by an earlier asset
+                    }
 
-                mods.Add(new BundledMod(id, asset.text, header.Version));
+                    mods.Add(new BundledMod(id, asset.text, header.Version));
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning(
+                        $"[ResourcesBundledModSource] Skipping bundled mod asset '{asset.name}': {ex.Message}");
+                }
             }
 
             return mods;

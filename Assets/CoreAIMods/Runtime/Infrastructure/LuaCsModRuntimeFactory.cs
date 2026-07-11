@@ -158,7 +158,11 @@ namespace CoreAI.Ai.LuaCs
                 options.AutoPersistMods,
                 // Share the version store the gameplay bindings already use: the runtime keys mod history
                 // under a "mod:" prefix, so it never collides with the coreai_lua_* script slots.
-                options.LuaScriptVersions);
+                options.LuaScriptVersions,
+                // WHY: The bindings are the shared transaction scope of both surfaces; handing them to the
+                // runtime lets it reset a leaked coreai_world_begin per guarded call, exactly as the
+                // one-off executor resets around every chunk.
+                transactionScope: bindings);
 
             LuaCsGameToolExecutor executor = new(
                 new LuaCsSecureEnvironment(),
