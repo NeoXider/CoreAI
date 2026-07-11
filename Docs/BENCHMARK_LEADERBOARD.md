@@ -34,11 +34,12 @@ CLIs). Ranked by suite base score. Per-group scores are G1…G8; see the benchma
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | 1 | `codex/gpt-5.6-sol` | **96.6** | 85.7% | 24/3/1 | 96.3 | 100 | 100 | 100 | 100 | 63.9 | 100 | 96.3 | 16379 | maintainer |
 | 2 | `codex/gpt-5.6-terra` | **93.0** | 86.2% | 25/2/2 | 95.6 | 100 | 84.2 | 97.7 | 99.7 | 62.9 | 100 | 96.3 | 32194 | maintainer |
-| 3 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 | 96.3 | 100 | 95.3 | 93 | 80 | 55.6 | 100 | 96.3 | 17188 | maintainer |
-| 4 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 | 91.9 | 100 | 100 | 97.7 | 87.7 | 25.2 | 100 | 69.7 | 18426 | maintainer |
-| 5 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 | 91.9 | 95.7 | 94.1 | 93 | 70 | 50 | 93.7 | 96.3 | 18250 | maintainer |
-| 6 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 | 54.9 | 94.3 | 78.2 | 93 | 100 | 49 | 100 | 42.6 | 19851 | maintainer |
-| 7 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 | 55.7 | 94.3 | 93 | 93 | 100 | 46 | 93.7 | 9.2 | 21980 | maintainer |
+| 3 | `codex/gpt-5.3-spark` | **91.0** | 82.8% | 24/3/2 | 69.7 | 100 | 100 | 100 | 99 | 50 | 100 | 78.5 | 31415 | maintainer |
+| 4 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 | 96.3 | 100 | 95.3 | 93 | 80 | 55.6 | 100 | 96.3 | 17188 | maintainer |
+| 5 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 | 91.9 | 100 | 100 | 97.7 | 87.7 | 25.2 | 100 | 69.7 | 18426 | maintainer |
+| 6 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 | 91.9 | 95.7 | 94.1 | 93 | 70 | 50 | 93.7 | 96.3 | 18250 | maintainer |
+| 7 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 | 54.9 | 94.3 | 78.2 | 93 | 100 | 49 | 100 | 42.6 | 19851 | maintainer |
+| 8 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 | 55.7 | 94.3 | 93 | 93 | 100 | 46 | 93.7 | 9.2 | 21980 | maintainer |
 
 > Single run per model (reps=1), streaming off, native tools on, temperature 0.1, Unity 6000.3.14f1. Run over
 > the CLI bridge, so absolute tokens/time are not comparable to a direct-API submission (tool-calling was

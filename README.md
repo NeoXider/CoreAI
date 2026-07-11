@@ -95,11 +95,12 @@ CoreAI ships a game-creation benchmark: it scores how well an LLM builds and cha
 |---:|---|---:|---:|
 | 1 | `gpt-5.6-sol` | **96.6** | 85.7% |
 | 2 | `gpt-5.6-terra` | **93.0** | 86.2% |
-| 3 | `gpt-5.5` | **90.3** | 82.8% |
-| 4 | `gpt-5.6-luna` | **88.1** | 79.3% |
-| 5 | `claude-sonnet-5` | **86.2** | 75.9% |
-| 6 | `claude-opus-4.8` | **79.7** | 75.9% |
-| 7 | `claude-fable-5` | **78.9** | 72.4% |
+| 3 | `gpt-5.3-spark` | **91.0** | 82.8% |
+| 4 | `gpt-5.5` | **90.3** | 82.8% |
+| 5 | `gpt-5.6-luna` | **88.1** | 79.3% |
+| 6 | `claude-sonnet-5` | **86.2** | 75.9% |
+| 7 | `claude-opus-4.8` | **79.7** | 75.9% |
+| 8 | `claude-fable-5` | **78.9** | 72.4% |
 
 One run each via the `cli-agents` bridge (indicative). The Claude rows are held back by a high bridge tool-failure rate, not raw capability — details in the guide. Full tables (v2 + historical + local), methodology, group legend and the per-model castle prefabs: **[benchmark guide](Assets/CoreAIBenchmark/README.md)** · **[leaderboard](Docs/BENCHMARK_LEADERBOARD.md)**.
 
