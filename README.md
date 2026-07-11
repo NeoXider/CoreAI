@@ -104,6 +104,18 @@ CoreAI ships a game-creation benchmark: it scores how well an LLM builds and cha
 
 One run each via the `cli-agents` bridge (indicative).
 
+**Free models via the opencode native API** — the bridge can also drive [opencode](https://opencode.ai)'s
+own headless server (`opencode serve`) with real token streaming, exposing free/local models through one
+OpenAI-compatible endpoint:
+
+| Model (opencode) | Suite | Pass-rate | Notes |
+|---|---:|---:|---|
+| `hy3-free` | **86.9** | 72.4% | full G1–G8, native streaming |
+| `deepseek-v4-flash-free` | 87.2\* | 75.0% | \*partial (G1–G2); the full run hit the free tier's rate limit mid-suite |
+
+> Free opencode-gateway models are rate-limited and meant for use inside opencode, so treat these as
+> indicative "can a free model build a game?" checks, not ranked submissions.
+
 > ⚠️ **Claude scores are understated.** The Claude models (`sonnet-5`, `opus-4.8`, `fable-5`) ran through
 > a non-native, unstable API that gave them a high tool-failure rate (opus ~24%, sonnet ~23%, fable ~36%
 > vs 1–13% for the Codex models) — well-formed tool calls that still failed to land. Those failures cost
