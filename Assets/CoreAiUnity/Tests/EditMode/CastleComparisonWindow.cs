@@ -338,8 +338,13 @@ namespace CoreAI.Tests.EditMode
                 return;
             }
 
-            // 2) Uniform grid sized to the widest / deepest castle so nothing overlaps.
+            // 2) Uniform grid sized so neither the castles NOR their (often wider) 3D name labels overlap.
             float cellWidth = placements.Max(p => p.Bounds.size.x) + _gap;
+            float maxLabelScale = placements.Max(p => Mathf.Max(0.15f, p.Bounds.size.x * 0.035f) * _labelScale);
+            int longestLabel = placements.Max(p => (p.Model.DisplayName + "  00/100").Length);
+            // Rough TextMesh advance ~2.3 world units per character at scale 1.0: widen the cell just enough
+            // to fit the longest label so adjacent names never collide, without pushing castles far apart.
+            cellWidth = Mathf.Max(cellWidth, longestLabel * maxLabelScale * 2.3f + _gap);
             float cellDepth = placements.Max(p => p.Bounds.size.z) + _gap;
             float maxHeight = placements.Max(p => p.Bounds.size.y);
             int columns = Mathf.Clamp(Mathf.Min(_maxPerRow, placements.Count), 1, placements.Count);
@@ -381,6 +386,29 @@ namespace CoreAI.Tests.EditMode
 
             // 3) Frame the whole comparison for the user.
             FrameCamera(overall);
+
+            // Billboard every label to actually FACE the framing camera (readable, not mirrored). A fixed
+            // 180° Y-flip reverses the glyphs; LookRotation toward the camera keeps a correct right-vector.
+            Camera frameCam = Camera.main;
+            if (frameCam != null)
+            {
+                foreach (Transform child in root.transform)
+                {
+                    if (!child.name.StartsWith("Label_"))
+                    {
+                        continue;
+                    }
+
+                    // TextMesh glyphs read correctly when the mesh's +Z points AWAY from the viewer
+                    // (camera looks along the text's +Z). Pointing +Z at the camera mirrors the glyphs.
+                    Vector3 awayFromCam = child.position - frameCam.transform.position;
+                    if (awayFromCam.sqrMagnitude > 0.0001f)
+                    {
+                        child.rotation = Quaternion.LookRotation(awayFromCam, Vector3.up);
+                    }
+                }
+            }
+
             Selection.activeGameObject = root;
             if (SceneView.lastActiveSceneView != null)
             {
@@ -519,7 +547,24 @@ namespace CoreAI.Tests.EditMode
             public string[] CastleLabels = Array.Empty<string>();
 
             // Folder names use underscores as separators; present them as spaces for readability.
-            public string DisplayName => ModelName.Replace('_', ' ');
+            public string DisplayName
+            {
+                get
+                {
+                    string s = ModelName.Replace('_', ' ');
+                    // Drop the routing-provider prefix (e.g. "opencode ", "codex ") so the label shows the
+                    // MODEL, not the gateway -- shorter labels also stop long names overlapping their neighbours.
+                    foreach (string prefix in new[] { "opencode ", "codex ", "zai ", "lmstudio " })
+                    {
+                        if (s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return s.Substring(prefix.Length);
+                        }
+                    }
+
+                    return s;
+                }
+            }
 
             public void RebuildLabels()
             {
