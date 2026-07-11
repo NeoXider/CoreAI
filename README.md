@@ -104,12 +104,11 @@ CoreAI ships a game-creation benchmark: it scores how well an LLM builds and cha
 
 One run each via the `cli-agents` bridge (indicative).
 
-> ⚠️ **Claude scores are understated.** The Claude models (`sonnet-5`, `opus-4.8`, `fable-5`) were driven
-> over the `cli-agents` CLI bridge, not a native API. On that bridge they behaved unstably — a high
-> tool-failure rate (opus ~24%, sonnet ~23%, fable ~36% vs 1–13% for the Codex models) where
-> well-formed tool calls still failed to land. Those failures cost points on tool correctness and task
-> completion, so the Claude rows sit a few points below their true capability. Read them as a **lower
-> bound**, not a ceiling — a native-API run would score higher.
+> ⚠️ **Claude scores are understated.** The Claude models (`sonnet-5`, `opus-4.8`, `fable-5`) ran through
+> a non-native, unstable API that gave them a high tool-failure rate (opus ~24%, sonnet ~23%, fable ~36%
+> vs 1–13% for the Codex models) — well-formed tool calls that still failed to land. Those failures cost
+> points on tool correctness and task completion, so the Claude rows sit a few points below their true
+> capability. Read them as a **lower bound**, not a ceiling — a native API run would score higher.
 
 Full tables (v2 + historical + local), methodology, group legend and the per-model castle prefabs: **[benchmark guide](Assets/CoreAIBenchmark/README.md)** · **[leaderboard](Docs/BENCHMARK_LEADERBOARD.md)**.
 

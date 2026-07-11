@@ -19,10 +19,10 @@
 > `opus-4.8`, `fable-5` and `gpt-5.3-spark` were re-run after the `cli-agents` bridge gained a
 > no-tool-call recovery retry. Single run per model over the CLI bridge; speed is reported, never scored.
 >
-> ⚠️ **Claude scores are understated.** The Claude rows were driven over the CLI bridge, where a high
-> tool-failure rate (opus ~24%, sonnet ~23%, fable ~36% — well-formed calls that still fail to land)
-> cost points on tool correctness and task completion. Read them as a lower bound; a native-API run
-> would score higher. See [BENCHMARK_LEADERBOARD.md](../BENCHMARK_LEADERBOARD.md) for the full per-group (G1…G8) table.
+> ⚠️ **Claude scores are understated.** The Claude rows ran through a non-native, unstable API with a high
+> tool-failure rate (opus ~24%, sonnet ~23%, fable ~36% — well-formed calls that still fail to land) that
+> cost points on tool correctness and task completion. Read them as a lower bound; a native API run would
+> score higher. See [BENCHMARK_LEADERBOARD.md](../BENCHMARK_LEADERBOARD.md) for the full per-group (G1…G8) table.
 
 ```mermaid
 xychart-beta
