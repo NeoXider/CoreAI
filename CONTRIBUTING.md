@@ -38,3 +38,30 @@ secrets: `UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
 
 New Lua-dependent test files must be wrapped in `#if !COREAI_NO_LUA` so the
 `no-lua` job compiles.
+
+## Code style
+
+Formatting is shared through the repo `.editorconfig` (Rider/ReSharper read it directly). Run
+**Rider → Code → Reformat & Cleanup Code** before committing so a diff never mixes logic with style.
+Notably: **every attribute goes on its own line** — never `[SerializeField] private int x;` and never
+`[Tooltip("...")] [SerializeField]` packed together.
+
+### Comments
+
+Keep only comments that carry information the code cannot. Label the intentional kinds with an explicit
+prefix and delete everything else:
+
+- `/// <summary>` — XML docs on public/protected API.
+- `// WHY:` — rationale, non-obvious invariants, ordering constraints, workarounds, external-format notes.
+- `// TODO:` — deferred work.
+- `// HACK:` — deliberate shortcuts worth flagging.
+
+Remove obvious "what" comments that merely restate the next line, step-number narration (`// 1. Create…`),
+and section-divider banners.
+
+## Before you commit (checklist)
+
+1. **Reformat** — Rider *Reformat & Cleanup Code* (applies `.editorconfig`, incl. attribute-per-line).
+2. **Tests** — run the EditMode gate green (CI runs `lua` + `no-lua`; run locally in batchmode for a fast pre-push check).
+3. **Changelog** — add an entry under `[Unreleased]` (or the release section) in the affected package `CHANGELOG.md`.
+4. **Version** — for a release, bump **all five** `package.json` files in lockstep to the same version.

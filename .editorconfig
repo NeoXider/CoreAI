@@ -1,0 +1,32 @@
+root = true
+
+[*]
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# ReSharper / Rider formatting shared with the whole team.
+# Attributes ALWAYS on their own line — never packed onto the member or onto each other
+# (e.g. never `[SerializeField] private int x;` or `[Tooltip("...")] [SerializeField]`).
+resharper_place_attribute_on_same_line = never
+resharper_csharp_place_attribute_on_same_line = never
+resharper_max_attribute_length_for_same_line = 0
+
+# Keep other members from being collapsed onto one line.
+resharper_place_accessorholder_attribute_on_same_line = never
+resharper_place_field_attribute_on_same_line = never
+resharper_place_type_attribute_on_same_line = never
+resharper_place_method_attribute_on_same_line = never
+
+[*.{json,uxml,uss,md,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Unity-generated files: do not fight Unity's own formatting.
+[*.{meta,asset,prefab,unity,asmdef,mat}]
+trim_trailing_whitespace = false
+insert_final_newline = false
