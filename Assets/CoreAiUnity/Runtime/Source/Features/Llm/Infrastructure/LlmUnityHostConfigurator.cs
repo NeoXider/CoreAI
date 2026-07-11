@@ -1,4 +1,4 @@
-﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using System.IO;
 using CoreAI.Infrastructure.Logging;
@@ -33,7 +33,7 @@ namespace CoreAI.Infrastructure.Llm
                     "runs here because CoreAI builds the whole prompt and calls Chat(addToHistory: false).");
             }
 
-            // CoreAI owns conversation-context management (LlmAssistedConversationContextManager builds
+            // WHY: CoreAI owns conversation-context management (LlmAssistedConversationContextManager builds
             // the whole prompt and calls Chat(addToHistory: false)), so LLMUnity's own overflow handling
             // has no history to act on. Force it to None so it can never silently truncate/summarize
             // behind CoreAI's back and so the Inspector no longer implies LLMUnity manages the context -
@@ -41,7 +41,7 @@ namespace CoreAI.Infrastructure.Llm
             // overflowStrategy lives on LLMAgent and is not start-guarded, so it is safe to set anytime.
             agent.overflowStrategy = UndreamAI.LlamaLib.ContextOverflowStrategy.None;
 
-            // Everything below configures the native LLM server and MUST happen before it starts.
+            // WHY: Everything below configures the native LLM server and MUST happen before it starts.
             // LLMUnity guards remote/port/numGPULayers/flashAttention/model with AssertNotStarted (or an
             // implicit RestartServer) and logs an error if they are set after the server has started -
             // which happens when a scene-placed LLM auto-starts in Awake before CoreAI discovers it.
@@ -56,7 +56,7 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            // CoreAI drives LLMUnity as an OpenAI-compatible HTTP server rather than calling
+            // WHY: CoreAI drives LLMUnity as an OpenAI-compatible HTTP server rather than calling
             // LLMAgent.Chat() in-process. llm.remote/llm.port MUST be set before anything can start
             // the native service (CreateServiceAsync runs SetupServer(StartServer) then Start()) -
             // flipping remote=true on an already-started LLM does not bind the socket. Setting them

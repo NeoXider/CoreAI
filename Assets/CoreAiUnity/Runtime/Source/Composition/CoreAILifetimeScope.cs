@@ -131,7 +131,7 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // Full tier works on WebGL/IL2CPP too: the Lua-CSharp runtime is a managed, AOT-safe VM, so
+            // WHY: Full tier works on WebGL/IL2CPP too: the Lua-CSharp runtime is a managed, AOT-safe VM, so
             // there is no wasm "null function" trap to gate around. link.xml preserves the Lua assemblies
             // plus the Resources/TextAsset members CoreAI loads prompts/skills/bundled mods through.
             builder.RegisterWorldCommands(
@@ -185,7 +185,7 @@ namespace CoreAI.Composition
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
-            // File-backed agent memory on all players. WebGL: IDBFS + CoreAi_PersistFsSync (jslib) after writes
+            // WHY: File-backed agent memory on all players. WebGL: IDBFS + CoreAi_PersistFsSync (jslib) after writes
             // so chat/memory JSON survives reload when Application.Quit does not run (tab close).
             RegisterAgentMemoryStore(builder);
 
@@ -245,7 +245,7 @@ namespace CoreAI.Composition
         /// </summary>
         internal static void RegisterAgentMemoryStore(IContainerBuilder builder)
         {
-            // Lambda registration: the ctor's optional string rootDirectory must not be constructor-injected.
+            // WHY: Lambda registration: the ctor's optional string rootDirectory must not be constructor-injected.
             builder.Register(_ => new FileAgentMemoryStore(), Lifetime.Singleton)
                 .As<IAgentMemoryStore>()
                 .As<IConversationTranscriptStore>();

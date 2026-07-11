@@ -100,7 +100,7 @@ namespace CoreAI.Sandbox.LuaCs
                     (ctx, ct) => CappedStringFormat(ctx, ct, originalFormat));
             }
 
-            // table.concat(list [, sep [, i [, j]]]) allocates its whole result in one VM instruction,
+            // WHY: table.concat(list [, sep [, i [, j]]]) allocates its whole result in one VM instruction,
             // the same allocation-bomb class as string.rep/string.format above. Replace it with a
             // version that aborts once the running result would exceed MaxTableConcatLength.
             LuaValue tableLibValue = state.Environment["table"];
@@ -158,7 +158,7 @@ namespace CoreAI.Sandbox.LuaCs
             return new System.Threading.Tasks.ValueTask<int>(ctx.Return(sb.ToString()));
         }
 
-        // table.concat replacement: mirrors Lua-CSharp's own Lua.Standard.TableLibrary.Concat algorithm
+        // WHY: table.concat replacement: mirrors Lua-CSharp's own Lua.Standard.TableLibrary.Concat algorithm
         // (same start/end/sep defaults and the same "invalid value" error), but aborts as soon as the
         // in-progress result exceeds MaxTableConcatLength instead of finishing the (potentially huge)
         // build first.

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -22,7 +22,7 @@ namespace CoreAI.Ai
 
         public bool AllowDuplicates => false;
 
-        // This wrapper expands into multiple native MEAI functions. The aggregate ILlmTool schema is
+        // WHY: This wrapper expands into multiple native MEAI functions. The aggregate ILlmTool schema is
         // intentionally empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
         public string ParametersSchema => "{}";
 
@@ -169,7 +169,6 @@ namespace CoreAI.Ai
                 }
                 else
                 {
-                    // Return roots
                     IEnumerable<GameObject> roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene()
                         .GetRootGameObjects();
                     foreach (GameObject r in roots)
@@ -232,7 +231,7 @@ namespace CoreAI.Ai
         private async Task<string> SetTransformAsync(
             [Description("instanceId of the GameObject to move, rotate, or scale.")]
             int instanceId,
-            // Default values mark these optional in the MEAI function schema so the model (and callers)
+            // WHY: Default values mark these optional in the MEAI function schema so the model (and callers)
             // can pass only the coordinates they want to change; missing values leave the axis untouched.
             [Description("New world position X. Omit to leave unchanged.")]
             float? px = null,
@@ -361,7 +360,7 @@ namespace CoreAI.Ai
                 return 0;
             }
 
-            // Unity 6.5 made BOTH the EntityId->int implicit cast AND Object.GetInstanceID() obsolete ERRORS
+            // WHY: Unity 6.5 made BOTH the EntityId->int implicit cast AND Object.GetInstanceID() obsolete ERRORS
             // (CS0619). EntityId.GetHashCode() yields a stable, session-unique int for the in-session object
             // lookup these ids feed (collisions are negligible at scene-object counts) without any obsolete API.
             return obj.GetEntityId().GetHashCode();

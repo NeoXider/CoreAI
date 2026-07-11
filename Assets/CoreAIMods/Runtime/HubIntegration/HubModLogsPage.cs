@@ -138,7 +138,7 @@ namespace CoreAI.Ai.Hub
             }
             catch (Exception)
             {
-                // Best-effort: clearing history must not break the UI action.
+                // WHY: Best-effort: clearing history must not break the UI action.
             }
 
             Refresh();
@@ -191,7 +191,7 @@ namespace CoreAI.Ai.Hub
                 _logScroll.Add(lastLine);
             }
 
-            // Keep the newest entry in view after a refresh (there's no "user scrolled up" tracking yet,
+            // WHY: Keep the newest entry in view after a refresh (there's no "user scrolled up" tracking yet,
             // so this always snaps to the bottom — acceptable since logs are read-mostly-live here).
             // Deferred one tick: ScrollTo needs the just-added element's layout resolved first.
             if (lastLine != null)
@@ -240,7 +240,7 @@ namespace CoreAI.Ai.Hub
 
         private static VisualElement BuildLine(LogLine line)
         {
-            // Two labels (muted prefix + coloured body) instead of one rich-text string: report/error
+            // WHY: Two labels (muted prefix + coloured body) instead of one rich-text string: report/error
             // text comes from mod-authored content, so it must render as plain text rather than being
             // parsed for markup tags.
             VisualElement row = new() { name = "coreai-hub-modlog-line" };
@@ -279,7 +279,7 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            // LogsChanged may arrive off the UI thread (Tick-time handler errors / mod reports);
+            // WHY: LogsChanged may arrive off the UI thread (Tick-time handler errors / mod reports);
             // marshal the refresh onto the panel's scheduler so VisualElement mutations always run on
             // the main thread.
             _root.schedule.Execute(Refresh);

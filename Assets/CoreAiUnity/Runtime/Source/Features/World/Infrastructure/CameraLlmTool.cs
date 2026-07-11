@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
@@ -21,7 +21,7 @@ namespace CoreAI.Infrastructure.World
 
         public bool AllowDuplicates => false;
 
-        // This wrapper expands into native MEAI functions. The aggregate ILlmTool schema is intentionally
+        // WHY: This wrapper expands into native MEAI functions. The aggregate ILlmTool schema is intentionally
         // empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
         public string ParametersSchema => "{}";
 
@@ -34,7 +34,7 @@ namespace CoreAI.Infrastructure.World
                     Name = "capture_camera",
                     Description =
                         "Take a screenshot from a specific camera (or 'main') and return it as a JPEG Base64 string."
-                } // arguments: cameraName, width, height
+                } // WHY: arguments: cameraName, width, height
             );
         }
 
@@ -64,7 +64,7 @@ namespace CoreAI.Infrastructure.World
                 byte[] jpgBytes = CaptureCameraJpeg(targetCam, width, height);
                 string base64 = Convert.ToBase64String(jpgBytes);
 
-                // Return as Data URI so that if the user wants to append it as an ImageContent, they can parse it easily
+                // WHY: Return as Data URI so that if the user wants to append it as an ImageContent, they can parse it easily
                 return JsonConvert.SerializeObject(new
                 {
                     success = true,
@@ -236,7 +236,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // "data:" prefix is 5 chars; media type spans up to the first ';'.
+            // WHY: "data:" prefix is 5 chars; media type spans up to the first ';'.
             string mediaType = dataUri.Substring(5, semicolon - 5);
             string base64 = dataUri.Substring(comma + 1);
             try
@@ -251,7 +251,7 @@ namespace CoreAI.Infrastructure.World
             }
         }
 
-        // Mirrors the shape serialized by CaptureCameraAsync; only fields needed for the lift.
+        // WHY: Mirrors the shape serialized by CaptureCameraAsync; only fields needed for the lift.
         private sealed class CaptureCameraResult
         {
             public bool success { get; set; }

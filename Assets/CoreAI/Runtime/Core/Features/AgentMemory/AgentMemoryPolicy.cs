@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using CoreAI.AgentMemory;
 
@@ -10,8 +10,6 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class AgentMemoryPolicy
     {
-        // ARCH-4 fix: lock protects all dictionary/set read-write operations
-        // against concurrent access from different coroutines/async continuations.
         private readonly object _lock = new();
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
@@ -279,7 +277,7 @@ namespace CoreAI.Ai
                 bool isProgrammer = roleId == BuiltInAgentRoleIds.Programmer;
                 bool needsExactToolOutput = isProgrammer || roleId == BuiltInAgentRoleIds.CoreMechanic;
                 bool smartCompaction = !isProgrammer;
-                // Programmer keeps history off by default; chat-source runs enable it per-run
+                // WHY: Programmer keeps history off by default; chat-source runs enable it per-run
                 // without mutating global policy (see AiOrchestratorHistoryEditModeTests).
                 // Code/mechanics agents need exact tool output across turns for iterative correctness.
                 RoleMemoryConfig builtIn = new(
@@ -291,7 +289,7 @@ namespace CoreAI.Ai
                         : ToolResultMemoryPolicy.CompactSummary,
                     useLlmContextCompaction: smartCompaction);
 
-                // The Programmer writes/iterates Lua and routinely needs many tool roundtrips in one turn
+                // WHY: The Programmer writes/iterates Lua and routinely needs many tool roundtrips in one turn
                 // (generate → run → read error → fix → re-run …), and the Creator orchestrates a whole
                 // build across many tool calls. Cap both at 0 = unlimited so they are never cut off
                 // mid-task. Other built-in roles inherit the global default (null = 20).
@@ -303,7 +301,7 @@ namespace CoreAI.Ai
                 _roleConfigs[roleId] = builtIn;
             }
 
-            // Built-in chat roles:
+            // WHY: Built-in chat roles:
             // - PlainChat: no MemoryTool by default, persistent chat history only.
             // - SmartChat: MemoryTool + persistent chat history by default.
             _roleConfigs[BuiltInAgentRoleIds.PlainChat] = new RoleMemoryConfig(
@@ -652,10 +650,8 @@ namespace CoreAI.Ai
 
         private readonly Dictionary<string, string> _additionalSystemPrompts = new();
 
-        // ===== Override Universal Prefix (per-role) =====
         private readonly HashSet<string> _overrideUniversalPrefix = new();
 
-        // ===== Streaming override (per-role) =====
         private readonly Dictionary<string, bool> _streamingOverrides = new();
 
         /// <summary>
@@ -740,8 +736,6 @@ namespace CoreAI.Ai
                 return _overrideUniversalPrefix.Contains(roleId.Trim());
             }
         }
-
-        // ===== Streaming (per-role override) =====
 
         /// <summary>
         /// Applies a per-role streaming override; <c>null</c> clears the override and uses

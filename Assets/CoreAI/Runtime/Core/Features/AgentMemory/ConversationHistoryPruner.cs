@@ -167,7 +167,7 @@ namespace CoreAI.Ai
                 int open = content.IndexOf(ThinkOpenTag, i, StringComparison.OrdinalIgnoreCase);
                 int close = content.IndexOf(ThinkCloseTag, i, StringComparison.OrdinalIgnoreCase);
 
-                // Orphan close before any open: treat the leading text as hidden reasoning and drop it.
+                // WHY: Orphan close before any open: treat the leading text as hidden reasoning and drop it.
                 if (close >= 0 && (open < 0 || close < open))
                 {
                     i = close + ThinkCloseTag.Length;
@@ -189,7 +189,7 @@ namespace CoreAI.Ai
                 int matchingClose = content.IndexOf(ThinkCloseTag, afterOpen, StringComparison.OrdinalIgnoreCase);
                 if (matchingClose < 0)
                 {
-                    // Unterminated reasoning block: drop everything to the end.
+                    // WHY: Unterminated reasoning block: drop everything to the end.
                     break;
                 }
 
@@ -295,7 +295,7 @@ namespace CoreAI.Ai
             {
                 string line = lines[i];
 
-                // Entry bullets are at column 0. Any leading whitespace means this is nested Detail content
+                // WHY: Entry bullets are at column 0. Any leading whitespace means this is nested Detail content
                 // (Full policy indents it by two spaces), never a tool-name entry — skip it.
                 if (line.Length < 2 || line[0] != '-' || line[1] != ' ')
                 {
@@ -309,7 +309,7 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                // The value after "name:" must begin with a status token; otherwise this "- x: y" line is
+                // WHY: The value after "name:" must begin with a status token; otherwise this "- x: y" line is
                 // arbitrary content that merely resembles an entry, not a real tool result.
                 if (!ValueStartsWithStatus(line, colon + 1))
                 {

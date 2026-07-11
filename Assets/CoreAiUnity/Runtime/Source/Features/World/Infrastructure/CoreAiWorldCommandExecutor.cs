@@ -109,7 +109,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Clear per-call diagnostics up front so a stale value from a previous command never leaks
+            // WHY: Clear per-call diagnostics up front so a stale value from a previous command never leaks
             // into this command's result (LastErrorMessage/LastSpawnBatchResult are consumed immediately
             // by the caller after a failed/batch call, mirroring LastListedObjects/LastListedAnimations).
             LastErrorMessage = "";
@@ -213,7 +213,7 @@ namespace CoreAI.Infrastructure.World
 
             Vector3 pos = new(env.x, env.y, env.z);
 
-            // The model's explicit coordinates are authoritative by default: adjacent/stacked/on-the-ground
+            // WHY: The model's explicit coordinates are authoritative by default: adjacent/stacked/on-the-ground
             // placements (castle blocks, coins on a floor) are legitimate, and the PhysX broadphase is stale in
             // edit-mode / mid-batch. So the overlap rejection is opt-in (off by default) — only honored when the
             // request explicitly asks to avoid collisions. The check remains available for callers that want it.
@@ -225,7 +225,7 @@ namespace CoreAI.Infrastructure.World
                 return null;
             }
 
-            // Rotation (fx/fy/fz) and scale can be set during spawn for convenience.
+            // WHY: Rotation (fx/fy/fz) and scale can be set during spawn for convenience.
             Quaternion rotation = Quaternion.identity;
             if (env.fx != 0f || env.fy != 0f || env.fz != 0f)
             {
@@ -234,7 +234,7 @@ namespace CoreAI.Infrastructure.World
 
             Vector3 scale = ResolveScale(env);
 
-            // Registered prefab takes precedence; otherwise fall back to a built-in primitive so the world
+            // WHY: Registered prefab takes precedence; otherwise fall back to a built-in primitive so the world
             // tool is usable without any prefab registry assigned.
             GameObject spawned = null;
 
@@ -404,7 +404,6 @@ namespace CoreAI.Infrastructure.World
         private bool ValidateSpawnPosition(Vector3 position, float checkRadius)
         {
             Collider[] overlaps = Physics.OverlapSphere(position, checkRadius);
-            // Iterate through the data sequence.
             foreach (Collider col in overlaps)
             {
                 if (!col.isTrigger)
@@ -773,7 +772,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Validate the scene is actually loadable BEFORE calling SceneManager.LoadScene: a scene
+            // WHY: Validate the scene is actually loadable BEFORE calling SceneManager.LoadScene: a scene
             // missing from (or disabled in) Build Settings logs a Unity error and leaves the current
             // scene running, but SceneManager.LoadScene itself has no return value — so without this
             // check the command sink would still report success and the caller could never self-correct.
@@ -1134,7 +1133,6 @@ namespace CoreAI.Infrastructure.World
                     return false;
                 }
 
-                // Iterate through the data sequence.
                 foreach (AudioSource src in audioSources)
                 {
                     if (src.clip != null && src.clip.name.Equals(clipName, StringComparison.OrdinalIgnoreCase))
@@ -1242,7 +1240,7 @@ namespace CoreAI.Infrastructure.World
                 });
             }
 
-            // Iterate through the data sequence.
+            // WHY: Iterate through the data sequence.
             for (int i = 0; i < parent.transform.childCount; i++)
             {
                 CollectObjectsRecursive(parent.transform.GetChild(i).gameObject, searchPattern, results);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -40,7 +40,7 @@ namespace CoreAI.Ai
             int priority = 0,
             CancellationToken cancellationToken = default)
         {
-            // Make sure the role is known to the global policy before we run. For the common newcomer
+            // WHY: Make sure the role is known to the global policy before we run. For the common newcomer
             // flow this AUTO-REGISTERS the built config, so `Build()` + `Ask*()` just works without an
             // explicit `ApplyToPolicy(CoreAIAgent.Policy)` call. Done before the orchestrator null-check
             // so a missing lifetime scope still surfaces its own clear message.
@@ -77,7 +77,7 @@ namespace CoreAI.Ai
                     "(add CoreAILifetimeScope to the scene / run CoreAI setup) before asking an agent.");
             }
 
-            // Convenience: register the built config with the global policy on first use, so newcomers
+            // WHY: Convenience: register the built config with the global policy on first use, so newcomers
             // do not have to call ApplyToPolicy(CoreAIAgent.Policy) by hand. Re-applying is idempotent;
             // advanced users targeting a CUSTOM AgentMemoryPolicy still call ApplyToPolicy on that policy
             // themselves (and, once registered here, this no-ops).
@@ -108,7 +108,7 @@ namespace CoreAI.Ai
             Action<string> onDone = null,
             int priority = 0)
         {
-            // Capture the caller's synchronization context (Unity main thread when called from it)
+            // WHY: Capture the caller's synchronization context (Unity main thread when called from it)
             // so onDone is safe to use with Unity APIs; without it the continuation after
             // ConfigureAwait(false) may land on a thread-pool thread.
             _ = RunAskFireAndForgetAsync(config, message, onDone, priority, SynchronizationContext.Current);

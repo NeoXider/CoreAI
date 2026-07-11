@@ -49,11 +49,11 @@ namespace CoreAI.Composition
 
             int maxRetries = settings != null ? settings.MaxLlmRequestRetries : 0;
             builder.Register<ILlmClient>(c =>
-                // Portable-core request timeout (works headless/standalone; Unity CoreAiChatService keeps
+                // WHY: Portable-core request timeout (works headless/standalone; Unity CoreAiChatService keeps
                 // its PlayerLoop timer for WebGL — both target LlmRequestTimeoutSeconds and are additive).
                 new TimeoutLlmClientDecorator(
                     new LoggingLlmClientDecorator(
-                        // Streaming-path retry (pre-commit only) — the logging decorator's HTTP retry covers
+                        // WHY: Streaming-path retry (pre-commit only) — the logging decorator's HTTP retry covers
                         // the non-streaming path; this closes the streaming single-shot gap.
                         new RetryingStreamingLlmClientDecorator(
                             new RoutingLlmClient(
@@ -70,7 +70,7 @@ namespace CoreAI.Composition
                         maxRetries),
                     () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
 
-            // Resolve and cache required local values.
+            // WHY: Resolve and cache required local values.
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
@@ -86,7 +86,7 @@ namespace CoreAI.Composition
             }
             else
             {
-                // Record metrics in-memory even without the logging sink, so the Hub's Statistics page can
+                // WHY: Record metrics in-memory even without the logging sink, so the Hub's Statistics page can
                 // surface live completion/latency/per-role stats. Exposed AsSelf for that concrete resolve.
                 builder.Register<InMemoryAiOrchestrationMetrics>(Lifetime.Singleton)
                     .AsImplementedInterfaces()
@@ -109,7 +109,7 @@ namespace CoreAI.Composition
         {
             ILlmClient primaryClient = ResolveLlmClient(settings, logger, memoryStore, agentProvider);
 
-            // Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
+            // WHY: Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
             if (settings != null && settings.HasValidFallbackBackend)
             {
                 ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
@@ -182,7 +182,7 @@ namespace CoreAI.Composition
             ILlmAgentProvider agentProvider)
         {
 #if UNITY_WEBGL
-            // WebGL: try HTTP only, otherwise Offline.
+            // WHY: WebGL: try HTTP only, otherwise Offline.
             ILlmClient http = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
             return http ?? BuildOfflineClient(settings);
 #else

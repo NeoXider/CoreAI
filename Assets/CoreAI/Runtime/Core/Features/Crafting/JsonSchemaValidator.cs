@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 
@@ -67,7 +67,7 @@ namespace CoreAI.Crafting
                 return result;
             }
 
-            // Trim potential markdown fences
+            // WHY: Trim potential markdown fences
             json = json.Trim();
             if (json.StartsWith("```"))
             {
@@ -102,7 +102,7 @@ namespace CoreAI.Crafting
             {
                 JToken token = obj[field.Name];
 
-                // Required check
+                // WHY: Required check
                 if (field.Required && (token == null || token.Type == JTokenType.Null))
                 {
                     result.Errors.Add($"[{_schemaName}] Missing required field '{field.Name}'");
@@ -114,14 +114,14 @@ namespace CoreAI.Crafting
                     continue;
                 }
 
-                // Type check
+                // WHY: Type check
                 if (!CheckType(token, field.Type, out string typeError))
                 {
                     result.Errors.Add($"[{_schemaName}] Field '{field.Name}': {typeError}");
                     continue;
                 }
 
-                // Range check (number/integer)
+                // WHY: Range check (number/integer)
                 if ((field.Type == "number" || field.Type == "integer") &&
                     token.Type != JTokenType.Null)
                 {
@@ -140,7 +140,7 @@ namespace CoreAI.Crafting
                     }
                 }
 
-                // Enum check
+                // WHY: Enum check
                 if (field.AllowedValues != null && field.AllowedValues.Length > 0 &&
                     token.Type == JTokenType.String)
                 {
@@ -225,7 +225,7 @@ namespace CoreAI.Crafting
                 case "integer":
                     if (token.Type != JTokenType.Integer)
                     {
-                        // Allow float that is whole number
+                        // WHY: Allow float that is whole number
                         if (token.Type == JTokenType.Float)
                         {
                             double d = token.Value<double>();

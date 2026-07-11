@@ -63,7 +63,7 @@ namespace CoreAI.Features.Audit
             ResumeChain();
             _cts = new CancellationTokenSource();
 
-            // Serialization + SHA-256 + file I/O run off the main thread wherever real threads
+            // WHY: Serialization + SHA-256 + file I/O run off the main thread wherever real threads
             // exist. WebGL has no threads, so it keeps the original main-thread, frame-budgeted
             // UniTask.Delay loop instead.
 #if UNITY_WEBGL
@@ -83,7 +83,7 @@ namespace CoreAI.Features.Audit
         {
             EnqueueRaw(entry);
 
-            // Bounded queue: drop the oldest entries once the backlog exceeds MaxQueueSize so a burst
+            // WHY: Bounded queue: drop the oldest entries once the backlog exceeds MaxQueueSize so a burst
             // that outruns the flush loop cannot grow the queue without limit and OOM the process.
             while (Interlocked.Read(ref _queueCount) > MaxQueueSize)
             {
@@ -107,7 +107,7 @@ namespace CoreAI.Features.Audit
 
         public void Dispose()
         {
-            // Cancelling wakes the worker's WaitHandle immediately (no need to wait for the next
+            // WHY: Cancelling wakes the worker's WaitHandle immediately (no need to wait for the next
             // 500ms tick); the worker then drains the queue itself, bounded by DisposeDrainDeadline.
             _cts?.Cancel();
 
@@ -115,7 +115,7 @@ namespace CoreAI.Features.Audit
             bool joined = _worker == null || _worker.Join(WorkerJoinTimeout);
             if (!joined || !_queue.IsEmpty)
             {
-                // Worker didn't finish in time (or never started) — fall back to draining on the
+                // WHY: Worker didn't finish in time (or never started) вЂ” fall back to draining on the
                 // calling thread so entries are not silently lost.
                 DrainOnDispose();
             }
@@ -183,7 +183,7 @@ namespace CoreAI.Features.Audit
                 }
                 catch (Exception ex)
                 {
-                    // The chain itself was read fine — only rotation failed (e.g. disk full/locked).
+                    // WHY: The chain itself was read fine вЂ” only rotation failed (e.g. disk full/locked).
                     // Leave _seq/_prevHash as read; the oversized file will be retried on the next
                     // flush tick instead of discarding an otherwise-valid chain.
                     Debug.LogWarning(
@@ -259,7 +259,7 @@ namespace CoreAI.Features.Audit
 
             if (alreadyMarked)
             {
-                // Recovery from a prior partial rotation: the marker was written but the rename
+                // WHY: Recovery from a prior partial rotation: the marker was written but the rename
                 // that should have followed did not complete. Reuse it instead of appending a
                 // second marker whose prevHash would no longer match the file's real chain head.
                 markerHash = (string)lastObj["hash"] ?? _prevHash;
@@ -362,7 +362,7 @@ namespace CoreAI.Features.Audit
         /// <summary>
         /// Background flush loop: wakes every <see cref="FlushIntervalMs"/> or immediately when
         /// <see cref="_cts"/> is cancelled (Dispose). Owns <see cref="_seq"/>/<see cref="_prevHash"/>
-        /// exclusively via <see cref="_flushGate"/> — Record() only ever enqueues.
+        /// exclusively via <see cref="_flushGate"/> вЂ” Record() only ever enqueues.
         /// Must not call any UnityEngine API directly; log messages are deferred via
         /// <see cref="EnqueueLog"/> and emitted on the main thread instead.
         /// </summary>
@@ -374,7 +374,7 @@ namespace CoreAI.Features.Audit
                 FlushBatch();
             }
 
-            // Stop requested: drain whatever remains, bounded by DisposeDrainDeadline so a stuck
+            // WHY: Stop requested: drain whatever remains, bounded by DisposeDrainDeadline so a stuck
             // disk (or a producer that never stops enqueuing) cannot hang application exit forever.
             DateTime start = DateTime.UtcNow;
             while (!_queue.IsEmpty)
@@ -467,7 +467,7 @@ namespace CoreAI.Features.Audit
             {
                 localSeq++;
 
-                // Built ONCE — a single Ts, the real chain-head prevHash, hash left blank. This is
+                // WHY: Built ONCE вЂ” a single Ts, the real chain-head prevHash, hash left blank. This is
                 // the canonical preimage: the stored line is this same entry with only the hash
                 // field filled in, so a verifier can reconstruct it exactly.
                 AuditEntry finalEntry = new(
@@ -500,7 +500,7 @@ namespace CoreAI.Features.Audit
             {
                 AppendLinesToFile(_filePath, lines);
 
-                // Commit the advanced chain head only after the append succeeded, so a failed write
+                // WHY: Commit the advanced chain head only after the append succeeded, so a failed write
                 // can never leave _prevHash pointing at a record that isn't actually on disk.
                 _seq = localSeq;
                 _prevHash = localPrevHash;
@@ -569,7 +569,7 @@ namespace CoreAI.Features.Audit
             bool exists = File.Exists(path);
             long currentSize = exists ? new FileInfo(path).Length : 0;
 
-            // A crash or a corrupt-tail resume can leave the file's last line without a trailing
+            // WHY: A crash or a corrupt-tail resume can leave the file's last line without a trailing
             // newline. Appending straight onto that (StreamWriter's append mode does not insert one)
             // would concatenate the new entry into the corrupt line, making it unparseable.
             if (exists && currentSize > 0 && !EndsWithNewline(path))

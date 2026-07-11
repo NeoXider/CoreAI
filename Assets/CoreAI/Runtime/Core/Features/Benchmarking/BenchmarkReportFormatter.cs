@@ -17,7 +17,6 @@ namespace CoreAI.Benchmarking
             BenchmarkRunMetadata m = report.Metadata;
             StringBuilder sb = new();
 
-            // --- Scorecard: everything that matters about this model, up top ---
             sb.AppendLine($"# 🎮 {m.ModelId} — {F(report.SuiteBaseScore)}/100");
             sb.AppendLine();
             sb.AppendLine($"> **{Grade(report.SuiteBaseScore)}** · " +
@@ -57,7 +56,7 @@ namespace CoreAI.Benchmarking
                           $"({report.TotalCompletionTokens} generated) · {F(report.GenerationTokensPerSecond)} tok/s provider-call " +
                           $"(prefill+decode; effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
                           $"${F(report.TotalCostUsd)} · {F(report.TotalLatencyMs / 1000.0)} s total");
-            // Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
+            // WHY: Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
             // model must not look "smarter". The bonus rewards correctness only.
             sb.AppendLine($"- **Model setup:** backend `{m.Backend}` · native-tools {m.NativeToolCalling} · " +
                           $"streaming {m.Streaming} · temp {F(m.Temperature)} · reps {m.Repetitions} · " +
@@ -75,7 +74,6 @@ namespace CoreAI.Benchmarking
                     $"{report.EnvironmentFailures} environment-failure(s) — see details below.");
             }
 
-            // --- Summary by dimension: the suite split into comparable axes, with bars + a chart ---
             IReadOnlyList<DimensionScore> dims = report.DimensionBreakdown();
             sb.AppendLine();
             sb.AppendLine("## 📐 Summary by dimension");
@@ -91,7 +89,6 @@ namespace CoreAI.Benchmarking
                 sb.AppendLine(DimensionMermaid(dims));
             }
 
-            // --- Game-fitness by role: the headline "is it usable, and for what" answer ---
             RoleFitness.Result fit = RoleFitness.Evaluate(report);
             sb.AppendLine();
             bool anyAssessed = fit.Roles.Any(r => r.Assessed);
@@ -120,7 +117,6 @@ namespace CoreAI.Benchmarking
                 sb.AppendLine($"| {r.Role} | {fitCell} | {RoleVerdict(r.Verdict)} | {r.Reason} |");
             }
 
-            // --- Tool-call statistics: correctness of tool usage, BEFORE the session ---
             sb.AppendLine();
             sb.AppendLine("## 🔧 Tool-call statistics");
             sb.AppendLine();
@@ -137,7 +133,6 @@ namespace CoreAI.Benchmarking
                               $"{r.FailedToolCalls} | {r.InvalidCommands} | {tokens} |");
             }
 
-            // --- Per-scenario mean (only meaningful when repetitions > 1) ---
             IReadOnlyList<ScenarioSummary> summaries = report.Scenarios();
             bool repeated = false;
             foreach (ScenarioSummary s in summaries)
@@ -163,7 +158,6 @@ namespace CoreAI.Benchmarking
                 }
             }
 
-            // --- Scenario scores (each run) ---
             sb.AppendLine();
             sb.AppendLine(repeated ? "## 🏁 Scenario scores (per run)" : "## 🏁 Scenario scores");
             sb.AppendLine();
@@ -180,7 +174,7 @@ namespace CoreAI.Benchmarking
             sb.AppendLine("_Base 0..100; Bonus = correctness + efficiency (fewer tokens & less time than budget), " +
                           "capped 20. `~tokens` = BPE estimate (provider usage unavailable)._");
 
-            // Failed checkpoints, so a run is debuggable from the artifact alone.
+            // WHY: Failed checkpoints, so a run is debuggable from the artifact alone.
             sb.AppendLine();
             sb.AppendLine("## Failed checkpoints");
             bool anyFailure = false;
@@ -227,7 +221,7 @@ namespace CoreAI.Benchmarking
                 sb.AppendLine("_None — every checkpoint passed._");
             }
 
-            // Full model session at the end: the complete per-turn transcript the model produced,
+            // WHY: Full model session at the end: the complete per-turn transcript the model produced,
             // so a run can be understood and debugged from the report alone.
             sb.AppendLine();
             sb.AppendLine("---");
@@ -274,7 +268,6 @@ namespace CoreAI.Benchmarking
                 .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
             sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
 
-            // Header: model + big suite score.
             sb.Append($"<text x=\"20\" y=\"34\" fill=\"#e8e8ea\" font-size=\"18\" font-weight=\"bold\">")
                 .Append(Xml(report.Metadata.ModelId)).Append("</text>");
             string scoreColor = HexColor(report.SuiteBaseScore);
@@ -286,7 +279,6 @@ namespace CoreAI.Benchmarking
                 .Append($"PASS {report.PassCount} · PARTIAL {report.PartialCount} · FAIL {report.FailCount} · ")
                 .Append($"{F(report.PassRate * 100)}% pass-rate</text>");
 
-            // Dimension bars.
             const int barX = 150;
             const int barW = 320;
             int y = 96;
@@ -304,7 +296,6 @@ namespace CoreAI.Benchmarking
                 y += 26;
             }
 
-            // Footer: speed / tokens.
             sb.Append($"<text x=\"20\" y=\"{y + 20}\" fill=\"#9aa0a6\" font-size=\"11\">")
                 .Append($"{report.TotalCompletionTokens} gen tokens · {F(report.GenerationTokensPerSecond)} tok/s · ")
                 .Append($"{F(report.TotalLatencyMs / 1000.0)} s (speed reported, not scored)</text>");
@@ -714,7 +705,7 @@ namespace CoreAI.Benchmarking
 
         private static string Num(string key, double value)
         {
-            // JSON has no NaN/Infinity literal — emit 0 so the document stays parseable.
+            // WHY: JSON has no NaN/Infinity literal — emit 0 so the document stays parseable.
             if (double.IsNaN(value) || double.IsInfinity(value))
             {
                 value = 0;

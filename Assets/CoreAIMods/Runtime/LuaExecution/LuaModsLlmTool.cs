@@ -64,7 +64,7 @@ namespace CoreAI.Ai
         public override string Name => "manage_mods";
 
         /// <inheritdoc />
-        // Mutating mod actions (load/reload/unload/import/forget/revert) are non-idempotent, so an
+        // WHY: Mutating mod actions (load/reload/unload/import/forget/revert) are non-idempotent, so an
         // identical cross-turn echo must not re-run. AllowDuplicates=false lets ToolExecutionPolicy
         // suppress only a CROSS-TURN byte-identical echo (structured no-op) while still allowing
         // intra-turn repeats and never suppressing the retry of a FAILED call.
@@ -366,7 +366,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                // The restored revision failed to reload; the live mod is left untouched.
+                // WHY: The restored revision failed to reload; the live mod is left untouched.
                 return Fail($"revert: mod '{modId.Trim()}' revision {revision} failed to reload: {ex.Message}");
             }
 
@@ -381,7 +381,7 @@ namespace CoreAI.Ai
             int total = errors.Count;
             List<object> items = new(Math.Min(total, MaxDiagnosticsReturned));
 
-            // Return the newest entries (GetRecentHandlerErrors is oldest-first).
+            // WHY: Return the newest entries (GetRecentHandlerErrors is oldest-first).
             int start = total > MaxDiagnosticsReturned ? total - MaxDiagnosticsReturned : 0;
             for (int i = start; i < total; i++)
             {

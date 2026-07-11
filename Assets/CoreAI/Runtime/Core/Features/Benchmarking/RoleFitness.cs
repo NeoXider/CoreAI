@@ -12,7 +12,7 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public static class RoleFitness
     {
-        // Signal keys: the six dimensions plus a derived Speed score.
+        // WHY: Signal keys: the six dimensions plus a derived Speed score.
         private const string Tool = "Tool";
         private const string Intent = "Intent";
         private const string Task = "Task";
@@ -105,7 +105,7 @@ namespace CoreAI.Benchmarking
             }
         };
 
-        // Weight of each agentic role in the overall blend.
+        // WHY: Weight of each agentic role in the overall blend.
         private static readonly Dictionary<string, double> AgenticBlend = new()
         {
             ["Mechanic / GameMaster"] = .30,
@@ -129,7 +129,7 @@ namespace CoreAI.Benchmarking
                 sig[Speed] = Clamp(tps / SpeedTargetTokensPerSecond * 100.0, 0, 100);
             }
 
-            // A model that cannot reliably call tools cannot do agentic work at all (the tiny-model case).
+            // WHY: A model that cannot reliably call tools cannot do agentic work at all (the tiny-model case).
             // Weak instruction-following alone is NOT this — it is handled by each role's own gate, so a
             // model that reasons well but ignores strict rules can still rate as a Programmer.
             bool tiny = sig.TryGetValue(Tool, out double tc) && tc < 40;
@@ -149,7 +149,7 @@ namespace CoreAI.Benchmarking
                 result.Roles.Add(rs);
             }
 
-            // Headline reflects AGENTIC game work only: a chatty model that merely answers in-character
+            // WHY: Headline reflects AGENTIC game work only: a chatty model that merely answers in-character
             // (high NPC) must not inflate the overall "can it build a game" number. Roles whose dimensions
             // this run did not measure are excluded so a partial (single-group) run cannot over-claim.
             List<RoleScore> agentic = result.Roles.Where(r => r.Agentic && r.Assessed).ToList();
@@ -200,12 +200,12 @@ namespace CoreAI.Benchmarking
                 }
                 else if (kv.Key != Speed)
                 {
-                    // A scoring dimension this run never measured (e.g. a single-group run).
+            // WHY: A scoring dimension this run never measured (e.g. a single-group run).
                     missing.Add(Label(kv.Key));
                 }
             }
 
-            // The role cannot be honestly rated unless every dimension it depends on was measured.
+            // WHY: The role cannot be honestly rated unless every dimension it depends on was measured.
             if (missing.Count > 0)
             {
                 return new RoleScore
@@ -222,7 +222,7 @@ namespace CoreAI.Benchmarking
             double avg = wsum > 0 ? sum / wsum : 0;
             double rating = avg / 10.0;
 
-            // Gate: any present gating signal below its minimum caps the role at "Not suitable".
+            // WHY: Gate: any present gating signal below its minimum caps the role at "Not suitable".
             string failGate = null;
             double failVal = 0;
             foreach ((string key, double min) in p.Gates)

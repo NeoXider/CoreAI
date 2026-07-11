@@ -33,7 +33,7 @@ namespace CoreAI.Ai.Hub
         private bool _subscribed;
         private bool _editorOpen;
 
-        // OPT#7: ListMods() re-parses every mod's @coreai header, so it is cached and only reloaded on
+        // TODO: OPT#7: ListMods() re-parses every mod's @coreai header, so it is cached and only reloaded on
         // Refresh / ModsChanged / a mutating action — typing in the search box just re-filters the cache.
         private IReadOnlyList<HubModRecord> _modsCache;
         private string _modsLoadError;
@@ -214,7 +214,7 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            // Group into a category tree. Foldouts keyed by the manifest Category (or "Uncategorized").
+            // WHY: Group into a category tree. Foldouts keyed by the manifest Category (or "Uncategorized").
             SortedDictionary<string, List<HubModRecord>> groups =
                 new(StringComparer.OrdinalIgnoreCase);
             foreach (HubModRecord mod in filtered)
@@ -500,7 +500,7 @@ namespace CoreAI.Ai.Hub
 
         private void OnModsChanged()
         {
-            // Only refresh the list when it is the visible view; the editor manages its own state.
+            // WHY: Only refresh the list when it is the visible view; the editor manages its own state.
             if (_editorOpen)
             {
                 return;
@@ -544,7 +544,7 @@ namespace CoreAI.Ai.Hub
 
         private static void SetPlaceholder(TextField field, string placeholder)
         {
-            // UI Toolkit's TextField has no native placeholder, so fake one: show greyed hint text
+            // WHY: UI Toolkit's TextField has no native placeholder, so fake one: show greyed hint text
             // whenever the field is empty and unfocused, swap to the real (initially empty) value and
             // normal color on focus, and restore the hint if the field is left empty again.
             bool showingPlaceholder = string.IsNullOrEmpty(field.value);

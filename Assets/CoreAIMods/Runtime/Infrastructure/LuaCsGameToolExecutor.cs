@@ -87,7 +87,7 @@ namespace CoreAI.Ai.LuaCs
                 });
             }
 
-            // The world bindings are a shared singleton: a prior chunk that died between
+            // WHY: The world bindings are a shared singleton: a prior chunk that died between
             // coreai_world_begin() and commit/rollback leaves its transaction open, which would
             // silently buffer this chunk's world commands. Reset before running and abort in the
             // finally so a leaked transaction can never bleed across runs in either direction.

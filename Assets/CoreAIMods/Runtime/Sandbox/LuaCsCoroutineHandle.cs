@@ -85,7 +85,7 @@ namespace CoreAI.Sandbox.LuaCs
             _resumeTimeoutMs = resumeTimeoutMs > 0 ? resumeTimeoutMs : DefaultResumeTimeoutMs;
             _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
 
-            // isProtectedMode: true means a hook/runtime error is converted to an [ok=false, error]
+            // WHY: isProtectedMode: true means a hook/runtime error is converted to an [ok=false, error]
             // result and the thread transitions to Dead + disposes itself SYNCHRONOUSLY, instead of
             // throwing a C# exception that would leave the thread half-executed. That is exactly the
             // self-cleaning, no-hang behaviour we want for a host-driven top-level coroutine.
@@ -158,7 +158,7 @@ namespace CoreAI.Sandbox.LuaCs
 
             args ??= EmptyValues;
 
-            // Re-arm a fresh per-resume budget (instruction steps + wall clock) via SetHook, mirroring
+            // WHY: Re-arm a fresh per-resume budget (instruction steps + wall clock) via SetHook, mirroring
             // LuaCsExecutionGuard. In protected mode a breach throws a LuaRuntimeException inside the VM,
             // which Lua-CSharp turns into an [ok=false, error] result and marks the thread Dead.
             long steps = 0;
@@ -190,7 +190,7 @@ namespace CoreAI.Sandbox.LuaCs
             int count;
             try
             {
-                // Single-step drive: a well-behaved handler reaches coroutine.yield synchronously, so
+                // WHY: Single-step drive: a well-behaved handler reaches coroutine.yield synchronously, so
                 // GetResult does not block the (single WASM) thread. A runaway is cut by the hook above.
                 count = _coroutine.ResumeAsync(_callStack, _cts.Token).GetAwaiter().GetResult();
             }

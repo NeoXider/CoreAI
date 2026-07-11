@@ -267,7 +267,7 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // Best-effort: a store failure must not break the UI action.
+                // WHY: Best-effort: a store failure must not break the UI action.
             }
 
             RaiseChanged();
@@ -282,7 +282,7 @@ namespace CoreAI.Ai.Hub
                 return false;
             }
 
-            // The runtime import loads/persists and fires ModSourceLoaded on success, which the adapters
+            // WHY: The runtime import loads/persists and fires ModSourceLoaded on success, which the adapters
             // already relay to ModsChanged — no extra RaiseChanged needed here.
             return RuntimeImport(bundleJson, _grant, _allowFull);
         }
@@ -296,7 +296,7 @@ namespace CoreAI.Ai.Hub
                 return false;
             }
 
-            // Never touch a user-authored mod that happens to share an id with a bundled one — mirrors
+            // WHY: Never touch a user-authored mod that happens to share an id with a bundled one — mirrors
             // BundledModSeeder.SeedOne's own guard (empty Origin = not ours to overwrite).
             if (!_store.TryLoad(modId, out _, out LuaModManifest existing) || existing == null ||
                 string.IsNullOrEmpty(existing.Origin))
@@ -312,7 +312,7 @@ namespace CoreAI.Ai.Hub
 
             SaveOrReload(modId, match.Value.Source);
 
-            // SaveOrReload's Persist() already clears UpdateAvailable, but it preserves the pre-update
+            // WHY: SaveOrReload's Persist() already clears UpdateAvailable, but it preserves the pre-update
             // SeededVersion/SeededHash — re-stamp them to the applied bundle so a later seed pass compares
             // against what is now actually on disk (otherwise the stale hash would look "user-edited" and
             // immediately re-flag UpdateAvailable on the next seed).
@@ -328,7 +328,7 @@ namespace CoreAI.Ai.Hub
                 }
                 catch
                 {
-                    // Best-effort: the mod already updated in the runtime + store; the seed-marker
+                    // WHY: Best-effort: the mod already updated in the runtime + store; the seed-marker
                     // touch-up only matters for a later seed pass.
                 }
             }
@@ -388,7 +388,7 @@ namespace CoreAI.Ai.Hub
                 Active = active
             };
 
-            // Preserve origin/seed markers already recorded for this package so persisting a user edit
+            // WHY: Preserve origin/seed markers already recorded for this package so persisting a user edit
             // does not erase that the mod was seeded from resources/streamingassets/etc.
             try
             {
@@ -402,7 +402,7 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // Ignore: fall back to a fresh manifest when the existing entry cannot be read.
+                // WHY: Ignore: fall back to a fresh manifest when the existing entry cannot be read.
             }
 
             try
@@ -411,7 +411,7 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // Best-effort persistence; the mod is already loaded in the runtime.
+                // WHY: Best-effort persistence; the mod is already loaded in the runtime.
             }
         }
 
@@ -524,7 +524,7 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // Best-effort: dormant/active flag is a convenience, not correctness-critical.
+                // WHY: Best-effort: dormant/active flag is a convenience, not correctness-critical.
             }
         }
 

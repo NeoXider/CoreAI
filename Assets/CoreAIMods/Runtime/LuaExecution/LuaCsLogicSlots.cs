@@ -126,7 +126,7 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentNullException(nameof(registry));
             }
 
-            // logic_define is registered as a raw callback so it can capture ctx.State: a LuaFunction
+            // WHY: logic_define is registered as a raw callback so it can capture ctx.State: a LuaFunction
             // does not carry its owning LuaState, and TryInvoke needs that state to call the override
             // back under the guard.
             registry.RegisterCallback("logic_define", (ctx, ct) =>
@@ -240,7 +240,7 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
-        // Runs the override synchronously under the guard, returning the raw first Lua-CSharp result.
+        // WHY: Runs the override synchronously under the guard, returning the raw first Lua-CSharp result.
         // Formulas never yield, so the sync drive (inside the guard) is safe. Internal: the public
         // surface stays VM-agnostic.
         private bool TryInvokeRaw(string name, out LuaValue result, params object[] args)
@@ -271,7 +271,7 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                // Fail open: a broken override must not break the game loop on every call.
+                // WHY: Fail open: a broken override must not break the game loop on every call.
                 Reset(slot);
                 LastError = $"slot '{slot}': {ex.Message}";
                 _log?.Error($"[LuaCsLogicSlots] Override for '{slot}' failed and was reset: {ex}");

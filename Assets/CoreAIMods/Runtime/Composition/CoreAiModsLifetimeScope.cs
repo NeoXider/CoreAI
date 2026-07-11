@@ -38,14 +38,14 @@ namespace CoreAI.Composition
         [SerializeField]
         private ScriptableObject blacklistPolicy;
 
-        // Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
+        // WHY: Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
         // overriding FindParent to return the parent directly would bypass the deferral and NRE when this
         // scope awakes before the parent.
 
         protected override void Configure(IContainerBuilder builder)
         {
-            // execute_lua's rate limiter is module-owned: the Lua-free core no longer registers it, so the
+            // WHY: execute_lua's rate limiter is module-owned: the Lua-free core no longer registers it, so the
             // mods module supplies it here. The Lua-CSharp sandbox is created inside the factory, so no
             // sandbox registration is needed at this scope.
             builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);

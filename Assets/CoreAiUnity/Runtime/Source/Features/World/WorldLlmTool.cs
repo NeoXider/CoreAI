@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
@@ -40,7 +40,7 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Name => "world_command";
 
-        // World mutations must be idempotent across turns: an echoed or blind-retried identical spawn
+        // WHY: World mutations must be idempotent across turns: an echoed or blind-retried identical spawn
         // would create a second object. AllowDuplicates=false lets ToolExecutionPolicy suppress only a
         // CROSS-TURN identical echo (structured no-op) while still allowing intra-turn repeats
         // ("spawn tree x3" in one turn) and never suppressing the retry of a FAILED call. A genuinely
@@ -357,7 +357,7 @@ namespace CoreAI.Infrastructure.Llm
                     return SerializeResult(false, MissingRequiredParametersMessage(action), action);
                 }
 
-                // World executors commonly touch Unity APIs; always marshal to the Unity main thread.
+                // WHY: World executors commonly touch Unity APIs; always marshal to the Unity main thread.
                 string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
                 cancellationToken.ThrowIfCancellationRequested();
                 await UniTask.SwitchToMainThread(cancellationToken);
@@ -388,7 +388,7 @@ namespace CoreAI.Infrastructure.Llm
                                                  Newtonsoft.Json.JsonConvert.SerializeObject(objs), action);
                 }
 
-                // For spawn, echo the actually-applied transform (incl. rotation/scale when the model passed
+                // WHY: For spawn, echo the actually-applied transform (incl. rotation/scale when the model passed
                 // them) into the result message, so the benchmark transcript records WHAT the model requested
                 // — this is how we verify whether models use inline rotation/scale, not just that spawn ran.
                 if (success && action == "spawn")
@@ -414,7 +414,7 @@ namespace CoreAI.Infrastructure.Llm
                         $"World command 'spawn' executed successfully{extra}{LiveNote()}", action);
                 }
 
-                // A failed spawn (most commonly an unknown prefabKey) carries a self-correcting detail —
+                // WHY: A failed spawn (most commonly an unknown prefabKey) carries a self-correcting detail —
                 // e.g. the available registered/primitive keys — on the executor; surface it instead of the
                 // generic message so the model can fix the call in one round without a blind retry.
                 if (!success && action == "spawn" && !string.IsNullOrEmpty(_executor.LastErrorMessage))
@@ -580,7 +580,7 @@ namespace CoreAI.Infrastructure.Llm
 
             Vector3 pos = new(x ?? 0f, y ?? 0f, z ?? 0f);
 
-            // Only take the rotation+scale overload when the model actually asked for orientation or sizing,
+            // WHY: Only take the rotation+scale overload when the model actually asked for orientation or sizing,
             // so a plain spawn keeps the default rotation/scale (uniformScale <= 0 = leave at default).
             bool hasRotation = fx.HasValue || fy.HasValue || fz.HasValue;
             bool hasScale = Positive(scale) || Positive(scaleX) || Positive(scaleY) || Positive(scaleZ);
@@ -712,7 +712,7 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
-            // Require at least one force component. A fully-omitted vector is a model mistake, not a zero-force
+            // WHY: Require at least one force component. A fully-omitted vector is a model mistake, not a zero-force
             // request; an explicit 0 (e.g. fx=0) still counts as provided and is honored.
             if (x is null && y is null && z is null)
             {
@@ -786,7 +786,7 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
-            // Require at least one velocity component. A fully-omitted vector is a model mistake; an explicit
+            // WHY: Require at least one velocity component. A fully-omitted vector is a model mistake; an explicit
             // 0 on any axis still counts as provided, so an intentional stop (fx=0, fy=0, fz=0) is honored.
             if (fx is null && fy is null && fz is null)
             {

@@ -1,4 +1,4 @@
-﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using System.Net.Http;
 using System.Text;
@@ -104,7 +104,7 @@ namespace CoreAI.Composition
             await WaitForOpenAiServerReadyAsync();
         }
 
-        // llm.started only means the native process launched - CoreAI talks to it over HTTP, so we
+        // WHY: llm.started only means the native process launched - CoreAI talks to it over HTTP, so we
         // additionally poll the OpenAI-compatible endpoint until it accepts a request. Any HTTP
         // response (including an error status) proves the socket is bound and serving; a connection
         // failure means the server isn't listening yet. HttpClient's async calls never block the
@@ -131,11 +131,11 @@ namespace CoreAI.Composition
                 }
                 catch (HttpRequestException)
                 {
-                    // Connection refused/reset - server socket isn't bound yet, keep polling.
+                    // WHY: Connection refused/reset - server socket isn't bound yet, keep polling.
                 }
                 catch (TaskCanceledException)
                 {
-                    // Per-request timeout - server may be slow to respond, keep polling.
+                    // WHY: Per-request timeout - server may be slow to respond, keep polling.
                 }
 
                 await UniTask.Delay(TimeSpan.FromMilliseconds(200), DelayType.Realtime, PlayerLoopTiming.Update);

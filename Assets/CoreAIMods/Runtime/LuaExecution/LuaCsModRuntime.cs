@@ -146,7 +146,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private int _dispatchRotation;
 
-        // Reentrancy depth of mods_call on the current thread (ticks run on the main thread; a
+        // WHY: Reentrancy depth of mods_call on the current thread (ticks run on the main thread; a
         // second thread would only ever see its own chain).
         [ThreadStatic]
         private static int _crossCallDepth;
@@ -368,7 +368,7 @@ namespace CoreAI.Ai.LuaCs
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
 
-            // Record the revision before persisting so PersistMod can stamp the manifest Version from the
+            // WHY: Record the revision before persisting so PersistMod can stamp the manifest Version from the
             // revision count. The version store seeds the original on the first record and dedups identical
             // source, so a rehydrate (which replays the stored current source) does not create a spurious
             // entry. Recording is independent of persistToStore: a masked rehydrate/import still wants its
@@ -401,13 +401,13 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayBindings(registry, capabilities);
             RegisterModApis(registry, mod);
 
-            // Create the state BEFORE running the chunk; the mod-core callbacks capture `mod` and read
+            // WHY: Create the state BEFORE running the chunk; the mod-core callbacks capture `mod` and read
             // mod.State (set here) only when they later run, so self-referential cross-mod calls made
             // during load resolve correctly.
             mod.State = _env.Create(registry);
 
             // TODO(migration): reset the ported world/unity transaction scope around the load chunk
-            // (the MoonSharp runtime calls ILuaTransactionScope.ResetTransactions() before/after the
+            // WHY: (the MoonSharp runtime calls ILuaTransactionScope.ResetTransactions() before/after the
             // chunk so a transaction left open by a failing load cannot bleed into later scripts).
             // There is no ported transaction surface yet, so this is a no-op seam for now.
             _env.RunChunk(mod.State, luaCode);
@@ -456,7 +456,7 @@ namespace CoreAI.Ai.LuaCs
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' unloaded.");
 
-            // Keep the persisted package but mark it dormant so it does not auto-reload next start; the
+            // WHY: Keep the persisted package but mark it dormant so it does not auto-reload next start; the
             // source is not lost (use ForgetMod to delete it). Best-effort: a store failure must not
             // break unloading.
             if (_autoPersistMods)
@@ -587,7 +587,7 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
-            // Revision indices are stable sequence numbers assigned by the version store, not positions in
+            // WHY: Revision indices are stable sequence numbers assigned by the version store, not positions in
             // History: the store's retention policy can evict middle revisions, leaving gaps, so the
             // requested index must be searched rather than used to index the list directly.
             LuaScriptRevision revision = FindRevisionByIndex(snapshot.History, revisionIndex);
@@ -602,7 +602,7 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
-            // Reload first (it can throw on a bad revision, leaving the live mod untouched), then truncate the
+            // WHY: Reload first (it can throw on a bad revision, leaving the live mod untouched), then truncate the
             // version history to the chosen revision so a future revert references a clean lineage. Reload
             // re-records the restored source as the new current revision and re-persists the source store.
             if (IsLoaded(modId))
@@ -684,14 +684,14 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            // Timers always run (bounded to one fire per timer per tick); they are not charged against
+            // WHY: Timers always run (bounded to one fire per timer per tick); they are not charged against
             // the global event budget, so they run for every mod in iteration order.
             for (int i = 0; i < _tickScratch.Count; i++)
             {
                 TickTimers(_tickScratch[i], deltaSeconds);
             }
 
-            // Only event dispatch is charged against the global budget. The start index rotates
+            // WHY: Only event dispatch is charged against the global budget. The start index rotates
             // round-robin every tick so the budget is shared fairly across all mods over successive
             // ticks; mods not reached keep their queued events for later ticks (no drops).
             int count = _tickScratch.Count;
@@ -711,7 +711,7 @@ namespace CoreAI.Ai.LuaCs
                     }
                     catch (Exception ex)
                     {
-                        // Defence in depth: a single mod's dispatch failure must never abort the whole
+                        // WHY: Defence in depth: a single mod's dispatch failure must never abort the whole
                         // per-frame tick for the other mods.
                         mod.ErrorCount++;
                         _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' event dispatch failed: {ex}");
@@ -738,7 +738,7 @@ namespace CoreAI.Ai.LuaCs
                     continue;
                 }
 
-                // One invocation per tick maximum — a long hitch must not burst-fire a timer.
+                // WHY: One invocation per tick maximum — a long hitch must not burst-fire a timer.
                 timer.DueIn = timer.IntervalSeconds;
                 InvokeGuarded(mod, timer.Fn);
             }
@@ -767,14 +767,14 @@ namespace CoreAI.Ai.LuaCs
 
                     evt = mod.Pending.Peek();
 
-                    // Snapshot the handler list under the gate: a dispatched handler may call hooks_on()
+                    // WHY: Snapshot the handler list under the gate: a dispatched handler may call hooks_on()
                     // for the same event, mutating mod.Handlers; enumerating the live list would then
                     // throw out of the (unguarded) tick.
                     handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<LuaFunction> handlers)
                         ? handlers.ToArray()
                         : Array.Empty<LuaFunction>();
 
-                    // No-drop contract: only dequeue when the remaining budget can run every handler of
+                    // WHY: No-drop contract: only dequeue when the remaining budget can run every handler of
                     // this event. Exception: an event whose own handler count exceeds the whole budget
                     // would starve forever, so when nothing has run yet for this mod we dispatch it in
                     // full (bounded by the per-mod handler cap) to guarantee progress.
@@ -808,7 +808,7 @@ namespace CoreAI.Ai.LuaCs
 
                 _handlerGuard.Execute(mod.State, fn, CancellationToken.None, luaArgs);
 
-                // "MaxErrorsBeforeUnload failures in a row": a successful call forgives past errors, so
+                // WHY: "MaxErrorsBeforeUnload failures in a row": a successful call forgives past errors, so
                 // rare sporadic failures over a long lifetime do not unload the mod.
                 mod.ErrorCount = 0;
             }
@@ -823,24 +823,24 @@ namespace CoreAI.Ai.LuaCs
                     message = ex.GetType().Name;
                 }
 
-                // Buffer the failure so the agent can poll it next turn, independent of any host-side
+                // WHY: Buffer the failure so the agent can poll it next turn, independent of any host-side
                 // ModHandlerErrored subscriber.
                 RecordHandlerError(mod.Id, message, mod.ErrorCount);
 
-                // Surface the runtime failure so hosts can drive auto-repair. Fired outside the gate; a
+                // WHY: Surface the runtime failure so hosts can drive auto-repair. Fired outside the gate; a
                 // throwing subscriber must not derail the tick.
                 RaiseModHandlerErrored(mod.Id, message, mod.ErrorCount);
             }
             finally
             {
                 // TODO(migration): reset the ported world/unity transaction scope here (the MoonSharp
-                // runtime resets ILuaTransactionScope per guarded call so a transaction opened inside one
+                // WHY: runtime resets ILuaTransactionScope per guarded call so a transaction opened inside one
                 // invocation cannot leak into the next handler/timer/tick). No-op until gameplay bindings
                 // are ported.
             }
         }
 
-        // Per-subscriber isolated event raises. A host UI/telemetry listener throwing must never make a
+        // WHY: Per-subscriber isolated event raises. A host UI/telemetry listener throwing must never make a
         // healthy mod load/reload/unload/report/error notification appear failed to the caller: every
         // subscriber on the invocation list is called independently, and a subscriber's exception is
         // logged and swallowed rather than propagated or allowed to skip the remaining subscribers.
@@ -963,7 +963,7 @@ namespace CoreAI.Ai.LuaCs
                     throw new ArgumentException("hooks_on: event name and function are required.");
                 }
 
-                // LLM-written mods routinely register hooks_on("tick"/"update"/"frame", fn) expecting a
+                // WHY: LLM-written mods routinely register hooks_on("tick"/"update"/"frame", fn) expecting a
                 // per-frame callback, but hooks_on only receives NAMED events and nothing emits those —
                 // the handler would sit dead forever. Route the intuitive spelling to the timer
                 // machinery at the shortest allowed interval instead.
@@ -1062,13 +1062,13 @@ namespace CoreAI.Ai.LuaCs
                         $"mods_get: '{Normalize(name)}' of mod '{Normalize(targetId)}' is a function - use mods_call.");
                 }
 
-                // Marshal by value: cross-mod reads copy plain data only (no functions/closures/live
+                // WHY: Marshal by value: cross-mod reads copy plain data only (no functions/closures/live
                 // refs), so no mod can mutate another's state behind its back — the multiplayer-
                 // determinism rule.
                 return FromPortable(ToPortable(export, CrossModTableDepth));
             }));
 
-            // Varargs need the raw execution context: a typed LuaValue[] parameter cannot express
+            // WHY: Varargs need the raw execution context: a typed LuaValue[] parameter cannot express
             // "the third and subsequent Lua arguments".
             registry.RegisterCallback("mods_call", (ctx, ct) =>
             {
@@ -1091,7 +1091,7 @@ namespace CoreAI.Ai.LuaCs
                 LuaValue[] marshalled = new LuaValue[extra];
                 for (int i = 0; i < extra; i++)
                 {
-                    // Copy caller args into plain data, then rebuild them for the callee's state.
+                    // WHY: Copy caller args into plain data, then rebuild them for the callee's state.
                     marshalled[i] = FromPortable(ToPortable(ctx.GetArgument(i + 2), CrossModTableDepth));
                 }
 
@@ -1103,7 +1103,7 @@ namespace CoreAI.Ai.LuaCs
                         _handlerGuard.Execute(target.State, exportFn, CancellationToken.None, marshalled);
                     LuaValue first = results.Length > 0 ? results[0] : LuaValue.Nil;
 
-                    // Marshal the result back into the caller's state by value.
+                    // WHY: Marshal the result back into the caller's state by value.
                     return new System.Threading.Tasks.ValueTask<int>(
                         ctx.Return(FromPortable(ToPortable(first, CrossModTableDepth))));
                 }
@@ -1147,7 +1147,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 string text = message ?? "";
 
-                // Buffered regardless of LogReports: the flag only gates the live event/log spam, not
+                // WHY: Buffered regardless of LogReports: the flag only gates the live event/log spam, not
                 // this bounded history, so a Hub logs view can still show a muted mod's history.
                 RecordReport(mod.Id, text);
 
@@ -1159,7 +1159,7 @@ namespace CoreAI.Ai.LuaCs
                 RaiseModReportEmitted(mod.Id, text);
             }));
 
-            // print() inside a mod behaves like report(): same event pipeline, same LogReports mute,
+            // WHY: print() inside a mod behaves like report(): same event pipeline, same LogReports mute,
             // same report buffer. Overrides the basic library's print on this mod's environment.
             registry.RegisterCallback("print", (ctx, ct) =>
             {
@@ -1302,7 +1302,7 @@ namespace CoreAI.Ai.LuaCs
 
         private void EmitFromMod(Mod sender, string evt, string payload)
         {
-            // Deliver to every other mod's queue (no self-delivery: trivial infinite loops).
+            // WHY: Deliver to every other mod's queue (no self-delivery: trivial infinite loops).
             lock (_gate)
             {
                 foreach (Mod mod in _mods.Values)
@@ -1321,7 +1321,7 @@ namespace CoreAI.Ai.LuaCs
         {
             if (mod.Pending.Count >= DefaultMaxQueuedEventsPerMod)
             {
-                // Drop oldest: a stalled mod must not grow its queue without bound.
+                // WHY: Drop oldest: a stalled mod must not grow its queue without bound.
                 mod.Pending.Dequeue();
             }
 
@@ -1397,7 +1397,7 @@ namespace CoreAI.Ai.LuaCs
                     string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
                     LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
 
-                    // Load with the masked runtime tier but do NOT re-persist: the stored manifest already
+                    // WHY: Load with the masked runtime tier but do NOT re-persist: the stored manifest already
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
@@ -1513,7 +1513,7 @@ namespace CoreAI.Ai.LuaCs
                 }
                 else
                 {
-                    // Run with the masked runtime tier, but persist the DECLARED capabilities from the
+                    // WHY: Run with the masked runtime tier, but persist the DECLARED capabilities from the
                     // bundle (not the masked tier) so a later allowFull rehydrate can restore the full
                     // request rather than the stripped-down version.
                     LoadMod(modId, bundle.Source, effectiveCaps, false);

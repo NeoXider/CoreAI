@@ -17,7 +17,7 @@ namespace CoreAI.Infrastructure.Lua
     ///   <see cref="LuaModManifest.SeededHash"/>);</item>
     ///   <item>a newer bundled version <b>updates</b> a previously seeded, <em>unmodified</em> entry
     ///   (the player's enabled/disabled choice is preserved);</item>
-    ///   <item>if the player edited the mod since it was seeded, the update is <b>not</b> forced — the
+    ///   <item>if the player edited the mod since it was seeded, the update is <b>not</b> forced вЂ” the
     ///   entry is flagged <see cref="LuaModManifest.UpdateAvailable"/> instead;</item>
     ///   <item>a same-or-older bundled version, or a user-authored mod that happens to share an id, is
     ///   <b>skipped</b>.</item>
@@ -148,13 +148,13 @@ namespace CoreAI.Infrastructure.Lua
                 return Outcome.Installed;
             }
 
-            // Never clobber a user-authored mod that happens to share this id (empty Origin = not ours).
+            // WHY: Never clobber a user-authored mod that happens to share this id (empty Origin = not ours).
             if (string.IsNullOrEmpty(existing.Origin))
             {
                 return Outcome.Skipped;
             }
 
-            // Only act when the bundled version is strictly newer than what we last seeded.
+            // WHY: Only act when the bundled version is strictly newer than what we last seeded.
             if (CompareVersions(mod.Version, existing.SeededVersion) <= 0)
             {
                 return Outcome.Skipped;
@@ -166,13 +166,13 @@ namespace CoreAI.Infrastructure.Lua
 
             if (userEdited)
             {
-                // Respect the player's edits: keep their source, just surface that an update exists.
+                // WHY: Respect the player's edits: keep their source, just surface that an update exists.
                 existing.UpdateAvailable = true;
                 _store.Save(id, existingSource, existing);
                 return Outcome.Flagged;
             }
 
-            // Update in place, preserving the player's enabled/disabled choice.
+            // WHY: Update in place, preserving the player's enabled/disabled choice.
             LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
             _store.Save(id, mod.Source, updated);
             return Outcome.Updated;
@@ -224,7 +224,7 @@ namespace CoreAI.Infrastructure.Lua
             int count = Math.Max(pa.Length, pb.Length);
             for (int i = 0; i < count; i++)
             {
-                // Missing components count as 0 (so "1.0" == "1.0.0"); a present non-numeric component
+                // WHY: Missing components count as 0 (so "1.0" == "1.0.0"); a present non-numeric component
                 // falls back to an ordinal compare of the whole value so a malformed version never throws.
                 string sa = i < pa.Length ? pa[i].Trim() : "0";
                 string sb = i < pb.Length ? pb[i].Trim() : "0";
@@ -242,7 +242,7 @@ namespace CoreAI.Infrastructure.Lua
             return 0;
         }
 
-        /// <summary>FNV-1a 32-bit hex digest of the UTF-8 bytes — a cheap edit-detection fingerprint.</summary>
+        /// <summary>FNV-1a 32-bit hex digest of the UTF-8 bytes вЂ” a cheap edit-detection fingerprint.</summary>
         internal static string Fnv1a(string text)
         {
             const uint offset = 2166136261;

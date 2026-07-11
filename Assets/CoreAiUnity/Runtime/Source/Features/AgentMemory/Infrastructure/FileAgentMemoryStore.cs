@@ -60,10 +60,10 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             public string lastSystemPrompt;
             public string memory;
-            public string chatHistoryJson; // Serialized chat history JSON payload for persistence.
+            public string chatHistoryJson; // WHY: Serialized chat history JSON payload for persistence.
             public string transcriptEntriesJson;
 
-            // Memory versioning + stable-prefix snapshot. Persisted so the documented rollback feature
+            // WHY: Memory versioning + stable-prefix snapshot. Persisted so the documented rollback feature
             // (ListVersions/Revert) and the system-prompt tail-update prompt-cache optimization survive a
             // reload; the orchestrator re-reads state from disk every request, so dropping these silently
             // disables both. Versions are stored as a JSON string (JsonConvert) since JsonUtility cannot
@@ -439,9 +439,9 @@ namespace CoreAI.Infrastructure.AiMemory
                 _transcripts.Remove(roleId);
             }
 
-            _loadedRoles.Remove(roleId); // re-sync _ephemeralHistory on next access after removing the list above
+            _loadedRoles.Remove(roleId); // WHY: re-sync _ephemeralHistory on next access after removing the list above
 
-            // Wrap the following block with exception-safe behavior.
+            // WHY: Wrap the following block with exception-safe behavior.
             try
             {
                 string path = GetPath(roleId);

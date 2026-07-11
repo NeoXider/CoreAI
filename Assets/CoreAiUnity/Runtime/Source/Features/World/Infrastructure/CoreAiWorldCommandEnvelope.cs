@@ -16,25 +16,21 @@ namespace CoreAI.Infrastructure.World
 
         public bool worldPositionStays;
 
-        // Spawn
         public string prefabKeyOrName = "";
 
-        // Unified XYZ
         public float x;
         public float y;
         public float z;
 
-        // Force
         public float fx;
         public float fy;
         public float fz;
 
-        // Optional non-uniform scale. 0 means "use floatValue/default" for that axis.
+        // WHY: Optional non-uniform scale. 0 means "use floatValue/default" for that axis.
         public float scaleX;
         public float scaleY;
         public float scaleZ;
 
-        // Optional transform block flags for change/set_transform commands.
         public bool hasPosition;
         public bool hasRotation;
         public bool hasScale;
@@ -45,10 +41,9 @@ namespace CoreAI.Infrastructure.World
         public bool hasFy;
         public bool hasFz;
 
-        // Scene
         public string sceneName = "";
 
-        // spawn_batch: per-item overrides. Any item field left at its default falls back to the
+        // WHY: spawn_batch: per-item overrides. Any item field left at its default falls back to the
         // envelope-level default carried in the fields above (prefabKeyOrName, x/y/z, fx/fy/fz,
         // floatValue/scaleX/Y/Z, stringValue as parent).
         public CoreAiSpawnBatchItem[] items = Array.Empty<CoreAiSpawnBatchItem>();

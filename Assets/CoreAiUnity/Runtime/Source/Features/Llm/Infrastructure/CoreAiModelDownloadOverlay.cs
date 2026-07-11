@@ -24,7 +24,7 @@ namespace CoreAI.Infrastructure.Llm
     [DisallowMultipleComponent]
     public sealed class CoreAiModelDownloadOverlay : MonoBehaviour
     {
-        // If nothing ever starts downloading within this window, assume the app has no pending
+        // WHY: If nothing ever starts downloading within this window, assume the app has no pending
         // download (e.g. the model is bundled or absent) and quietly remove the (never-shown) overlay.
         private const float NoDownloadTimeoutSeconds = 30f;
         private const float DoneLingerSeconds = 0.8f;
@@ -42,14 +42,14 @@ namespace CoreAI.Infrastructure.Llm
         private float _doneTimer = -1f;
         private float _errorTimer;
 
-        // Editor-only preview state (see the CoreAI/Debug menu item); animates a fake download.
+        // WHY: Editor-only preview state (see the CoreAI/Debug menu item); animates a fake download.
         private bool _demoMode;
         private float _demoProgress;
 
         private static Font _cachedFont;
 
 #if !UNITY_EDITOR
-        // The download only happens in player builds (LLM.Awake runs LLMManager.Setup under #if !UNITY_EDITOR),
+        // WHY: The download only happens in player builds (LLM.Awake runs LLMManager.Setup under #if !UNITY_EDITOR),
         // so the overlay is compiled to auto-spawn only there. This also keeps it out of Editor PlayMode tests.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoSpawn()
@@ -92,7 +92,7 @@ namespace CoreAI.Infrastructure.Llm
             bool failed = LLM.modelSetupFailed;
             float progress = Mathf.Clamp01(LLMManager.downloadProgress);
 
-            // A download is active while setup is not complete and progress has moved off its idle value of 1.
+            // WHY: A download is active while setup is not complete and progress has moved off its idle value of 1.
             if (!complete && progress < 1f && !_revealed)
             {
                 Reveal();
@@ -123,7 +123,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!_revealed)
                 {
-                    // Setup finished without ever downloading (bundled/local model) - nothing to show.
+                    // WHY: Setup finished without ever downloading (bundled/local model) - nothing to show.
                     Destroy(gameObject);
                     return;
                 }
@@ -144,7 +144,7 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            // Never saw a download start - this app has nothing to fetch; drop the invisible overlay.
+            // WHY: Never saw a download start - this app has nothing to fetch; drop the invisible overlay.
             if (!_revealed && _elapsed >= NoDownloadTimeoutSeconds)
             {
                 Destroy(gameObject);
@@ -330,7 +330,7 @@ namespace CoreAI.Infrastructure.Llm
                 return _cachedFont;
             }
 
-            // Unity 2022+/6 ships the legacy dynamic font as LegacyRuntime.ttf; older editors used Arial.ttf.
+            // WHY: Unity 2022+/6 ships the legacy dynamic font as LegacyRuntime.ttf; older editors used Arial.ttf.
             _cachedFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_cachedFont == null)
             {

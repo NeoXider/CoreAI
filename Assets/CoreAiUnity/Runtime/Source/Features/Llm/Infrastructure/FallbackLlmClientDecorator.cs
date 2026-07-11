@@ -48,7 +48,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken);
 
-                // If primary returned a result but with a retryable error, try secondary
+                // WHY: If primary returned a result but with a retryable error, try secondary
                 if (result != null && !result.Ok && IsRetryableError(result.ErrorCode))
                 {
                     _logger.Warn(
@@ -60,12 +60,12 @@ namespace CoreAI.Infrastructure.Llm
 
                 return result;
             }
-            // The caller's own token was cancelled: this is a genuine user-initiated stop, never fall back.
+            // WHY: The caller's own token was cancelled: this is a genuine user-initiated stop, never fall back.
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            // OperationCanceledException with an un-cancelled caller token is an internal provider/transport
+            // WHY: OperationCanceledException with an un-cancelled caller token is an internal provider/transport
             // timeout (e.g. MeaiOpenAiChatClient's transport-level timeout), not a user cancellation.
             catch (OperationCanceledException ex)
             {
@@ -115,7 +115,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         hasNext = await enumerator.MoveNextAsync();
                     }
-                    // The caller's own token was cancelled: never fall back.
+                    // WHY: The caller's own token was cancelled: never fall back.
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
                         throw;
@@ -166,7 +166,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (chunk.IsDone)
                     {
-                        // Terminal chunk with no visible text/tool call/error: nothing was ever committed,
+                        // WHY: Terminal chunk with no visible text/tool call/error: nothing was ever committed,
                         // so discard it and restart cleanly on the secondary instead of forwarding an empty end.
                         _logger.Warn(
                             "[Fallback] Primary streaming ended without committing any content, falling back to secondary.",
@@ -175,14 +175,14 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 
-                    // Benign pre-commitment control/hint chunk (no text, no tool call, not done): forward it
+                    // WHY: Benign pre-commitment control/hint chunk (no text, no tool call, not done): forward it
                     // and keep watching subsequent MoveNextAsync calls under the same fallback protection.
                     yield return chunk;
                 }
 
                 if (committed)
                 {
-                    // Already streamed real content: continuing failures are no longer safe to fall back
+                    // WHY: Already streamed real content: continuing failures are no longer safe to fall back
                     // from (would duplicate output or re-run tool side effects), so let them propagate.
                     while (await enumerator.MoveNextAsync())
                     {
@@ -200,7 +200,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // Fallback to secondary
+            // WHY: Fallback to secondary
             if (primaryFailed)
             {
                 FallbackCount++;

@@ -1,4 +1,4 @@
-﻿using CoreAI.Ai;
+using CoreAI.Ai;
 using Microsoft.Extensions.AI;
 using CoreAI.Logging;
 
@@ -20,7 +20,7 @@ namespace CoreAI.Ai
             _executor = executor;
             _settings = settings;
             _logger = logger;
-            // Owned here (not in CreateAIFunction) so the sliding window survives repeated
+            // WHY: Owned here (not in CreateAIFunction) so the sliding window survives repeated
             // AIFunction creation; pass the envelope pipeline's limiter to share one budget.
             _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
         }
@@ -29,7 +29,7 @@ namespace CoreAI.Ai
         public string Name => LuaTool.ExecuteLuaToolName;
 
         /// <inheritdoc />
-        // Arbitrary Lua can mutate host/world state non-idempotently, so identical cross-turn echoes
+        // WHY: Arbitrary Lua can mutate host/world state non-idempotently, so identical cross-turn echoes
         // must not re-run. AllowDuplicates=false lets ToolExecutionPolicy suppress only a CROSS-TURN
         // byte-identical echo (structured no-op); several DIFFERENT Lua blocks in one turn, intra-turn
         // repeats, and the retry of a FAILED block all still execute.

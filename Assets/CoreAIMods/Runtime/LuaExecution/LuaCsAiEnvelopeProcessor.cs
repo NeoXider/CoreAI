@@ -71,12 +71,12 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            // Lua-CSharp is a managed, AOT-safe VM and is always supported, so there is no
+            // WHY: Lua-CSharp is a managed, AOT-safe VM and is always supported, so there is no
             // platform-disabled branch here (unlike the MoonSharp SecureLuaEnvironment.IsSupported gate).
 
             if (!_rateLimiter.TryAcquire(Clock.Elapsed.TotalSeconds))
             {
-                // Runaway-loop guard: a failing script (or spamming agent) cannot saturate the
+                // WHY: Runaway-loop guard: a failing script (or spamming agent) cannot saturate the
                 // sandbox/LLM with executions; the failure is reported without scheduling a repair.
                 string limitMsg =
                     $"CoreAI Lua rate limit exceeded ({_rateLimiter.MaxPerWindow} per {_rateLimiter.WindowSeconds:0}s); envelope dropped.";
@@ -85,7 +85,7 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            // Reset the (VM-agnostic) transaction scope before and after so a transaction left open by
+            // WHY: Reset the (VM-agnostic) transaction scope before and after so a transaction left open by
             // an envelope that died between coreai_world_begin() and commit/rollback cannot bleed into
             // the next envelope and silently buffer its world commands.
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
@@ -146,7 +146,7 @@ namespace CoreAI.Ai.LuaCs
             return value.Substring(0, maxLength) + " ...(truncated)";
         }
 
-        // Error text travels into payloads and repair prompts; collapse newlines so host exception
+        // WHY: Error text travels into payloads and repair prompts; collapse newlines so host exception
         // messages (stack fragments, file paths) cannot inject multi-line content, and cap length.
         private static string NormalizeError(string message)
         {

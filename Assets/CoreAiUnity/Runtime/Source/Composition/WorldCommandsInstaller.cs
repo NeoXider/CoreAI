@@ -1,4 +1,4 @@
-﻿using CoreAI;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Audit;
 using CoreAI.Config;
@@ -52,7 +52,7 @@ namespace CoreAI.Composition
             }
             else
             {
-                // No inspector-assigned registry: create a throwaway one. ScriptableObjects are not
+                // WHY: No inspector-assigned registry: create a throwaway one. ScriptableObjects are not
                 // garbage-collected, so register a container-owned disposable that destroys it on scope
                 // teardown instead of leaking one instance per container build (scene reload / play-mode).
                 registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
@@ -62,14 +62,14 @@ namespace CoreAI.Composition
                     .AsSelf();
                 builder.RegisterBuildCallback(container =>
                 {
-                    // Force instantiation so the container tracks it and disposes it on teardown.
+                    // WHY: Force instantiation so the container tracks it and disposes it on teardown.
                     container.Resolve<AutoCreatedPrefabRegistryOwner>();
                 });
             }
 
             builder.RegisterInstance<ICoreAiPrefabRegistry, CoreAiPrefabRegistryAsset>(registry);
 
-            // Factory registration so the load_scene whitelist (allowedLuaScenes) reaches the executor.
+            // WHY: Factory registration so the load_scene whitelist (allowedLuaScenes) reaches the executor.
             // Enforcing it here makes the native world_command tool honour the same restriction as the
             // Lua coreai_world_load_scene binding, instead of the native path bypassing it.
             builder.Register(c =>
@@ -114,7 +114,7 @@ namespace CoreAI.Composition
         /// </summary>
         private static void RegisterAgentVision(IContainerBuilder builder)
         {
-            // Factory lambda: the service's clock/rate-limit ctor args are not container-resolvable, so
+            // WHY: Factory lambda: the service's clock/rate-limit ctor args are not container-resolvable, so
             // construct with its production defaults (Stopwatch clock, 1s capture rate limit).
             builder.Register(_ => new Vision.AgentCameraService(), Lifetime.Singleton)
                 .As<Vision.IAgentCameraService>();
@@ -131,7 +131,7 @@ namespace CoreAI.Composition
                 }
                 catch (VContainerException)
                 {
-                    // Minimal containers (tests, headless tools) may omit the orchestration services; the
+                    // WHY: Minimal containers (tests, headless tools) may omit the orchestration services; the
                     // camera tool is an additive convenience, not a requirement.
                 }
             });

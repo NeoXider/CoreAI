@@ -43,13 +43,13 @@ namespace CoreAI.Ai.Hub
                 return; // mods module not wired in this scene
             }
 
-            // The Hub bootstrap owns the registry (built-in tabs). Add the Mods page to it so the window's
+            // WHY: The Hub bootstrap owns the registry (built-in tabs). Add the Mods page to it so the window's
             // PageRegistered event rebuilds the tab bar with a Mods tab; create one only if none exists yet.
             HubPageRegistry registry = window.Registry ?? new HubPageRegistry();
 
             IObjectResolver container = modsScope.Container;
 
-            // Light up the built-in Settings/Statistics tabs with live DI sources. The Hub's own DI-free
+            // WHY: Light up the built-in Settings/Statistics tabs with live DI sources. The Hub's own DI-free
             // bootstrap (CoreAiHubDemo) registers those pages with null sources, so they render a setup
             // note; re-registering by the same id (last-writer-wins) upgrades them to the running config
             // and live orchestration metrics wherever this module is present.

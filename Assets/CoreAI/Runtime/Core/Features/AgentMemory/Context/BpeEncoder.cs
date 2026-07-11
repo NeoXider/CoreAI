@@ -19,7 +19,7 @@ namespace CoreAI.Ai
     /// </remarks>
     public sealed class BpeEncoder
     {
-        // tiktoken pre-tokenization regexes. cl100k_base and o200k_base use different patterns.
+        // WHY: tiktoken pre-tokenization regexes. cl100k_base and o200k_base use different patterns.
         // These are the canonical patterns; .NET regex supports the needed constructs.
         private const string Cl100kPattern =
             @"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+";
@@ -68,7 +68,7 @@ namespace CoreAI.Ai
             }
             catch
             {
-                // Corrupt/partial data: signal fallback rather than producing wrong counts.
+                // WHY: Corrupt/partial data: signal fallback rather than producing wrong counts.
                 return null;
             }
 
@@ -84,7 +84,7 @@ namespace CoreAI.Ai
             }
             catch
             {
-                // RegexOptions.Compiled is unsupported on some AOT/WebGL targets: retry interpreted.
+                // WHY: RegexOptions.Compiled is unsupported on some AOT/WebGL targets: retry interpreted.
                 try
                 {
                     pattern = new Regex(patternText, RegexOptions.CultureInvariant);
@@ -128,7 +128,7 @@ namespace CoreAI.Ai
             int total = 0;
             int cursor = 0;
 
-            // Walk the string, peeling off special tokens as single tokens and BPE-encoding the gaps.
+            // WHY: Walk the string, peeling off special tokens as single tokens and BPE-encoding the gaps.
             while (cursor < text.Length)
             {
                 int nextSpecial = -1;
@@ -192,13 +192,13 @@ namespace CoreAI.Ai
                 return 0;
             }
 
-            // A single byte is always a known token in byte-level BPE.
+            // WHY: A single byte is always a known token in byte-level BPE.
             if (n == 1)
             {
                 return 1;
             }
 
-            // Segment boundaries: parts[i] is the start index of segment i; there are (count) segments
+            // WHY: Segment boundaries: parts[i] is the start index of segment i; there are (count) segments
             // covering [parts[i], parts[i+1]). Initialize to one byte per segment.
             List<int> starts = new(n + 1);
             for (int i = 0; i <= n; i++)
@@ -226,11 +226,11 @@ namespace CoreAI.Ai
                     break; // no further merges possible
                 }
 
-                // Merge segments bestIdx and bestIdx+1 by removing the boundary between them.
+                // WHY: Merge segments bestIdx and bestIdx+1 by removing the boundary between them.
                 starts.RemoveAt(bestIdx + 1);
             }
 
-            // Number of segments = starts.Count - 1.
+            // WHY: Number of segments = starts.Count - 1.
             return starts.Count - 1;
         }
 
@@ -352,7 +352,7 @@ namespace CoreAI.Ai
 
             public int ComputeHash()
             {
-                // FNV-1a over the slice contents.
+                // WHY: FNV-1a over the slice contents.
                 unchecked
                 {
                     const int prime = 16777619;

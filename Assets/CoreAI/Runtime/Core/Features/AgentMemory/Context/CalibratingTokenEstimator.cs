@@ -77,7 +77,7 @@ namespace CoreAI.Ai
             double updatedScale;
             lock (_lock)
             {
-                // The observed estimate was produced as baseEstimate * _scale. Convert the
+                // WHY: The observed estimate was produced as baseEstimate * _scale. Convert the
                 // real/estimated ratio back into scale units so repeated observations converge
                 // toward real/baseEstimate, not sqrt(real/baseEstimate).
                 double targetScale = _scale * realPromptTokens / estimatedPromptTokens;
@@ -85,7 +85,7 @@ namespace CoreAI.Ai
                 updatedScale = _scale;
             }
 
-            // Persist outside the lock so a blocking disk write in the store does not stall concurrent
+            // WHY: Persist outside the lock so a blocking disk write in the store does not stall concurrent
             // EstimateText/CurrentScale calls (which also take _lock). The in-memory scale is already
             // updated; the store write does not need the estimator lock.
             _store.SaveScale(_modelKey, updatedScale);

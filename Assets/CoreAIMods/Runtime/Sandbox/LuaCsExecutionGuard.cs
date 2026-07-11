@@ -10,7 +10,7 @@ namespace CoreAI.Sandbox.LuaCs
     /// Runs Lua-CSharp chunks/functions with timeout, instruction-step, and total-allocation limits.
     /// <para>
     /// The allocation budget is checked on every instruction inside the same hook used for the step
-    /// count and timeout — <see cref="GC.GetTotalMemory(bool)"/> is a cheap heap-size counter
+    /// count and timeout вЂ” <see cref="GC.GetTotalMemory(bool)"/> is a cheap heap-size counter
     /// read, not a GC pass, so it costs about as much as the timeout's <c>Stopwatch</c> read already
     /// performed on the same hot path. A coarser sampling interval was considered and rejected:
     /// concatenation-doubling (<c>s = s .. s</c>) grows exponentially, so a handful of loop iterations
@@ -105,8 +105,8 @@ namespace CoreAI.Sandbox.LuaCs
             int timeoutMs = _timeoutMs < 1 ? 1 : _timeoutMs;
             long maxAllocatedBytes = _maxAllocatedBytes;
 
-            // Allocation accounting uses GC.GetTotalMemory(false) (managed-heap size, no collection):
-            // Unity's Mono does NOT implement GC.GetAllocatedBytesForCurrentThread — it returns 0
+            // WHY: Allocation accounting uses GC.GetTotalMemory(false) (managed-heap size, no collection):
+            // Unity's Mono does NOT implement GC.GetAllocatedBytesForCurrentThread вЂ” it returns 0
             // unconditionally (verified empirically), so a thread-local counter can never fire here.
             // Heap total is process-wide and therefore noisy (other systems allocate concurrently) and
             // can shrink when a collection runs mid-execution, but an allocation bomb overwhelms both
@@ -130,9 +130,9 @@ namespace CoreAI.Sandbox.LuaCs
                         new TimeoutException($"Lua exceeded {timeoutMs} ms."));
                 }
 
-                // Allocation-bomb backstop: string.rep/string.format/table.concat are capped at their
+                // WHY: Allocation-bomb backstop: string.rep/string.format/table.concat are capped at their
                 // library call sites, but plain concatenation (s = s .. s) has no such call site to
-                // intercept — it is ordinary VM opcodes. Checking total thread allocations between
+                // intercept вЂ” it is ordinary VM opcodes. Checking total thread allocations between
                 // instructions is the only place this hook can catch that pattern.
                 if (maxAllocatedBytes > 0)
                 {

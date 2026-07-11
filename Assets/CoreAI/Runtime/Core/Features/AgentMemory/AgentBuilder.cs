@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using CoreAI.AgentMemory;
 using CoreAI.Logging;
@@ -44,7 +44,7 @@ namespace CoreAI.Ai
 
         private AgentMode _mode = AgentMode.ToolsAndChat;
 
-        // Default chat history keeps agent continuity; callers can opt out to save prompt tokens.
+        // WHY: Default chat history keeps agent continuity; callers can opt out to save prompt tokens.
         private bool _withChatHistory = true;
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
@@ -62,7 +62,7 @@ namespace CoreAI.Ai
         /// <summary>Null = default true (LLM-assisted compaction when global setting allows).</summary>
         private bool? _useLlmContextCompaction;
 
-        // Skill authoring (manage_skills): when set, the agent can create/update/persist/reuse its own skills.
+        // WHY: Skill authoring (manage_skills): when set, the agent can create/update/persist/reuse its own skills.
         private ISkillStore _skillStore;
         private ILuaScriptVersionStore _skillVersionStore;
         private bool _skillAuthoring;
@@ -179,7 +179,7 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(skill));
             }
 
-            // Skill tools are routed through call_skill_tool to keep the prompt surface small.
+            // WHY: Skill tools are routed through call_skill_tool to keep the prompt surface small.
             _skills.Add(skill);
 
             return this;
@@ -483,7 +483,7 @@ namespace CoreAI.Ai
             int ctxTokens = _contextWindowTokens ??
                             _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // final composition time (three-layer architecture):
+            // WHY: final composition time (three-layer architecture):
             //   Layer 1: universalSystemPromptPrefix (project-wide rules)
             //   Layer 2: role base prompt from Manifest / Resources (.txt files)
             //   Layer 3: extra prompt from this builder (the one above)
@@ -600,7 +600,7 @@ namespace CoreAI.Ai
 
             if (_mode == AgentMode.ToolsOnly && _tools.Count == 0)
             {
-                // Already reported by the rule above; no extra issue here.
+                // WHY: Already reported by the rule above; no extra issue here.
             }
 
             if (_useLlmContextCompaction == true)
@@ -734,7 +734,7 @@ namespace CoreAI.Ai
 
             policy.SetStreamingEnabled(RoleId, streamingOverride);
 
-            // Self-service skills: register catalog context provider + meta-tools.
+            // WHY: Self-service skills: register catalog context provider + meta-tools.
             // The catalog (name + description per skill) goes into the system prompt.
             // The model calls read_skill(name) to load instructions + tool schemas,
             // then call_skill_tool(tool_name, args_json) to execute them.
@@ -743,7 +743,7 @@ namespace CoreAI.Ai
             bool hasSkills = Skills != null && Skills.Count > 0;
             if (hasSkills || SkillAuthoringEnabled)
             {
-                // When the agent can author skills, the read_skill / call_skill_tool proxies read from a
+                // WHY: When the agent can author skills, the read_skill / call_skill_tool proxies read from a
                 // LIVE catalog so a skill created via manage_skills is immediately visible to the same
                 // agent. Without authoring, the static snapshot is used (cacheable, unchanged behavior).
                 IReadOnlyList<SkillSet> catalogSkills = Skills ?? (IReadOnlyList<SkillSet>)Array.Empty<SkillSet>();
@@ -755,7 +755,7 @@ namespace CoreAI.Ai
                     catalogSkills = liveCatalog;
                 }
 
-                // Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
+                // WHY: Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
                 // per agent build (host skills), unlike live world-state context, so it stays cacheable.
                 string catalog = SkillSet.BuildCatalog(Skills);
                 if (!string.IsNullOrWhiteSpace(catalog))
@@ -765,10 +765,10 @@ namespace CoreAI.Ai
                         : additionalPrompt.TrimEnd() + "\n\n" + catalog.Trim();
                 }
 
-                // Register read_skill meta-tool (loads instructions + tool schemas)
+                // WHY: Register read_skill meta-tool (loads instructions + tool schemas)
                 policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(catalogSkills));
 
-                // Register call_skill_tool proxy (routes to real skill tools)
+                // WHY: Register call_skill_tool proxy (routes to real skill tools)
                 policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(catalogSkills));
             }
 
@@ -787,7 +787,7 @@ namespace CoreAI.Ai
         /// </summary>
         private void RehydrateAndRegisterAuthoring(AgentMemoryPolicy policy, MutableSkillCatalog liveCatalog)
         {
-            // Index every tool the role already has, by name, so an authored skill can reference it.
+            // WHY: Index every tool the role already has, by name, so an authored skill can reference it.
             Dictionary<string, ILlmTool> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (ILlmTool tool in Tools)
             {
@@ -826,10 +826,10 @@ namespace CoreAI.Ai
                 resolver,
                 RequireKnownSkillTools);
 
-            // Rehydrate persisted skills so prior-session skills reappear in this agent's read_skill catalog.
+            // WHY: Rehydrate persisted skills so prior-session skills reappear in this agent's read_skill catalog.
             coordinator.RehydrateFromStore();
 
-            // One extra visible tool (progressive disclosure: skill bodies still load on demand).
+            // WHY: One extra visible tool (progressive disclosure: skill bodies still load on demand).
             policy.AddToolForRole(RoleId, new ManageSkillsLlmTool(coordinator));
         }
 

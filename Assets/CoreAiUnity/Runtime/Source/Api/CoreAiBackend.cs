@@ -340,7 +340,7 @@ namespace CoreAI
                     AgentRoleId = BuiltInAgentRoleIds.SmartChat,
                     SystemPrompt = "You are a connectivity probe. Reply with the single word: ok",
                     UserPayload = "ping",
-                    // Generous enough for reasoning models that spend tokens on thinking before the
+                    // WHY: Generous enough for reasoning models that spend tokens on thinking before the
                     // visible answer (thinking counts toward max_tokens on OpenAI-compatible servers);
                     // still a negligible probe cost. An empty visible answer after the budget is a
                     // REAL failure signal (limits/reasoning misconfiguration), so the probe surfaces it.
@@ -471,7 +471,7 @@ namespace CoreAI
 
         private static CoreAISettingsAsset? ResolveSettings()
         {
-            // Prefer the scope-registered asset (it is what the pipeline was built from); fall back to
+            // WHY: Prefer the scope-registered asset (it is what the pipeline was built from); fall back to
             // the global instance so pre-bootstrap configuration still lands on the right object.
             if (TryResolveScopeContainer(out CoreAILifetimeScope? scope) && scope?.Container != null)
             {

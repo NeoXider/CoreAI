@@ -67,7 +67,7 @@ namespace CoreAI.Infrastructure.World
         private bool _disposed;
         private CancellationTokenSource _autoSaveCts;
 
-        // Objects whose prefabKey could not be resolved on the last load (e.g. a prefab not yet
+        // WHY: Objects whose prefabKey could not be resolved on the last load (e.g. a prefab not yet
         // registered). Retained in memory and re-written on every Save() so a temporarily missing
         // prefab never permanently deletes the object from the snapshot.
         private List<ObjectData> _unresolvedObjects = new();
@@ -106,14 +106,14 @@ namespace CoreAI.Infrastructure.World
                 TryLoad();
             }
 
-            // The restore attempt above is fully synchronous (TryLoad spawns everything before
+            // WHY: The restore attempt above is fully synchronous (TryLoad spawns everything before
             // returning), so by this point startup restore is done either way. Anything that spawns
             // its own objects on startup (e.g. Lua mod rehydrate, see CoreAiModsInstaller) must wait
             // for this before running — see WORLD_COMMANDS.md §7.
             WorldRestoreCompleted = true;
             RestoreCompleted?.Invoke();
 
-            // Always-on crash protection: previously this only ran in the Hub demo scene via the
+            // WHY: Always-on crash protection: previously this only ran in the Hub demo scene via the
             // optional WorldStateAutoSaveHook MonoBehaviour, so every other scene only persisted on a
             // clean Application.quitting. Starting it here covers every scene that wires WorldStateManager.
             if (Application.isPlaying)
@@ -182,7 +182,7 @@ namespace CoreAI.Infrastructure.World
                 Color color = ReadColor(tag.gameObject);
                 bool hasColor = color.r >= 0f;
 
-                // Prefer the parent's persistentId (stable across renames and duplicate names);
+                // WHY: Prefer the parent's persistentId (stable across renames and duplicate names);
                 // fall back to the parent's name only when the parent isn't itself a tracked
                 // world object (e.g. a static scene root).
                 string parentValue = "";
@@ -215,7 +215,7 @@ namespace CoreAI.Infrastructure.World
                 });
             }
 
-            // Re-append objects whose prefab could not be resolved on the last load, so the
+            // WHY: Re-append objects whose prefab could not be resolved on the last load, so the
             // pending fix doesn't disappear from the snapshot just because it isn't in the scene.
             if (_unresolvedObjects.Count > 0)
             {
@@ -304,7 +304,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // A snapshot with an empty objects array is a valid state (the world was emptied and
+            // WHY: A snapshot with an empty objects array is a valid state (the world was emptied and
             // saved as such) — it must still clean-slate the scene, not be treated as "no data".
             ObjectData[] snapshotObjects = data.objects ?? Array.Empty<ObjectData>();
 
@@ -319,7 +319,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Clean slate: destroy any existing world objects (e.g. from a previous load or
+            // WHY: Clean slate: destroy any existing world objects (e.g. from a previous load or
             // editor-placed objects) so we never accumulate duplicate persistentIds.
             DestroyAllWorldObjects();
 
@@ -407,7 +407,7 @@ namespace CoreAI.Infrastructure.World
 
             DestroyAllWorldObjects();
 
-            // Otherwise a later Save() would re-append entries from a prefab that went missing
+            // WHY: Otherwise a later Save() would re-append entries from a prefab that went missing
             // before this Reset, resurrecting them into the fresh snapshot.
             _unresolvedObjects.Clear();
 
@@ -445,7 +445,7 @@ namespace CoreAI.Infrastructure.World
                 {
                     GameObject go = allTags[i].gameObject;
 
-                    // Object.Destroy() only takes effect at the end of the frame, but the load path
+                    // WHY: Object.Destroy() only takes effect at the end of the frame, but the load path
                     // spawns replacement instances (same names, possibly same parents) within the
                     // same frame. Detach, deactivate, and rename immediately so GameObject.Find()
                     // and name-based parent resolution can never bind to an instance that is merely
