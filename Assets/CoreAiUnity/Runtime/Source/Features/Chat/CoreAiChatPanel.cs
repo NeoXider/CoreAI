@@ -43,7 +43,6 @@ namespace CoreAI.Chat
         private PanelRenderer _panelRenderer;
 #endif
 
-        // === Embedded-host mode (e.g. a CoreAI Hub tab) ===
         // When embedded, the panel renders into a caller-supplied VisualElement instead of its own
         // UIDocument/PanelRenderer. The chat UXML is cloned into that host once the host's panel is
         // ready, then the panel binds to it exactly like the UIDocument path.
@@ -67,7 +66,6 @@ namespace CoreAI.Chat
         [SerializeField]
         protected VisualTreeAsset messageBubbleTemplate;
 
-        // === UI Elements ===
         protected VisualElement Root;
         protected VisualElement ChatContainer;
         protected ScrollView MessageScroll;
@@ -89,7 +87,6 @@ namespace CoreAI.Chat
         /// <summary>Whether the chat panel is currently collapsed into the FAB.</summary>
         public bool IsCollapsed { get; private set; }
 
-        // === Streaming state ===
         private Label _streamingLabel;
         private bool _isStreaming;
         private bool _isSending; // prevents Shift+Enter sending while AI is busy
@@ -122,7 +119,6 @@ namespace CoreAI.Chat
         private KeyCode? _runtimeOverrideOpenChatHotkey;
         private bool? _runtimeOverrideEscapeChatShortcuts;
 
-        // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // True while streaming assistant output is currently visible.
         private bool _nonStreamAssistantOutputStarted; // True while non-stream assistant output has started.
@@ -133,11 +129,9 @@ namespace CoreAI.Chat
         /// </summary>
         private bool _streamingScrollScheduled;
 
-        // === Typing animation ===
         private IVisualElementScheduledItem _typingAnimation;
         private int _typingDotCount;
 
-        // === Service ===
         protected CoreAiChatService _chatService;
 
         public virtual CoreAiChatService ChatService
@@ -222,8 +216,6 @@ namespace CoreAI.Chat
         {
             SetRuntimeOptions(null);
         }
-
-        // ===================== Lifecycle =====================
 
         protected virtual void Awake()
         {
@@ -323,8 +315,6 @@ namespace CoreAI.Chat
             TryRegisterToolCallChatDisplay();
         }
 
-        // ===================== Embedded-host mode =====================
-
         /// <summary>
         /// Creates a chat panel that renders into a caller-supplied <see cref="VisualElement"/> instead of
         /// a <see cref="UIDocument"/>/<c>PanelRenderer</c>, so the whole chat can be embedded inside another
@@ -353,7 +343,7 @@ namespace CoreAI.Chat
             }
 
             GameObject go = new(gameObjectName);
-            go.SetActive(false); // configure the panel before OnEnable runs
+            go.SetActive(false); // WHY: configure the panel before OnEnable runs
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
             panel._embeddedHostMode = true;
             panel._embeddedHost = host;
@@ -364,7 +354,7 @@ namespace CoreAI.Chat
                 panel.config = chatConfig;
             }
 
-            go.SetActive(true); // triggers Awake + OnEnable -> InitializeEmbeddedHost
+            go.SetActive(true); // WHY: triggers Awake + OnEnable -> InitializeEmbeddedHost
             return panel;
         }
 
@@ -525,7 +515,6 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // Resolve and cache required local values.
             bool defaultCollapsed = IsMobileScreen();
             bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
             SetCollapsed(collapsed, false);
@@ -558,8 +547,6 @@ namespace CoreAI.Chat
             _activeRequestCts?.Cancel();
             _activeRequestCts?.Dispose();
         }
-
-        // ===================== Agent switching =====================
 
         private DropdownField _agentDropdown;
         private string _activeRoleId;
@@ -642,8 +629,6 @@ namespace CoreAI.Chat
                 HydrateStartupMessagesFromStore();
             }
         }
-
-        // ===================== UI Binding =====================
 
         protected virtual void BindUI()
         {
@@ -967,7 +952,6 @@ namespace CoreAI.Chat
             float configuredWidth = options.ChatWidth;
             float configuredHeight = options.ChatHeight;
 
-            // Resolve and cache required local values.
             float screenWidth = Mathf.Max(1f, Screen.width);
             float screenHeight = Mathf.Max(1f, Screen.height);
 
@@ -1016,8 +1000,6 @@ namespace CoreAI.Chat
             container.style.width = Mathf.Min(configuredWidth, maxWidth);
             container.style.height = Mathf.Min(configuredHeight, maxHeight);
         }
-
-        // ===================== Collapse / FAB =====================
 
         private static bool IsMobileScreen()
         {
@@ -1276,8 +1258,6 @@ namespace CoreAI.Chat
             return content != null ? content.childCount : MessageScroll.childCount;
         }
 
-        // ===================== Input Handling =====================
-
         private static void MarkInputEventHandled(EventBase evt)
         {
             evt.StopImmediatePropagation();
@@ -1312,7 +1292,6 @@ namespace CoreAI.Chat
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
-            // Resolve and cache required local values.
             bool isEnter =
                 evt.keyCode == KeyCode.Return ||
                 evt.keyCode == KeyCode.KeypadEnter ||
@@ -1468,7 +1447,6 @@ namespace CoreAI.Chat
         {
             try
             {
-                // Resolve and cache required local values.
                 bool noUitkKeyboardFocus =
                     Root == null ||
                     Root.focusController == null ||
@@ -1630,7 +1608,6 @@ namespace CoreAI.Chat
 
             string text = InputField.text.Trim();
 
-            // Max length check
             int maxMessageLength = Options.MaxMessageLength;
             if (maxMessageLength > 0 && text.Length > maxMessageLength)
             {
@@ -1640,7 +1617,6 @@ namespace CoreAI.Chat
             InputField.value = string.Empty;
             InputField.schedule.Execute(FocusInputField);
 
-            // Hook: before sending
             text = OnMessageSending(text);
             if (string.IsNullOrEmpty(text))
             {
@@ -1652,8 +1628,6 @@ namespace CoreAI.Chat
 
             SendToAI(text);
         }
-
-        // ===================== AI Communication =====================
 
         /// <summary>
         /// Submits a message from gameplay/test code through the same turn pipeline used by the UI.
@@ -2003,7 +1977,6 @@ namespace CoreAI.Chat
 
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
-                        // Resolve and cache required local values.
                         string visible = FilterStreamChunk(chunk.Text);
                         if (fullResponse.Length == 0)
                         {
@@ -2103,8 +2076,6 @@ namespace CoreAI.Chat
             }
         }
 
-        // ===================== Think-Block Filter =====================
-
         /// <summary>Resets state used to remove hidden think blocks from model output.</summary>
         private void ResetThinkFilter()
         {
@@ -2131,8 +2102,6 @@ namespace CoreAI.Chat
                 text, @"<think>[\s\S]*?</think>\s*", "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         }
-
-        // ===================== Virtual Extension Points =====================
 
         /// <summary>
         /// Hook for subclasses to validate, rewrite, or cancel outgoing user text.
@@ -2333,8 +2302,6 @@ namespace CoreAI.Chat
             contentSlot.Add(content);
         }
 
-        // ===================== UI Helpers =====================
-
         public void AddMessage(string text, bool isUser)
         {
             if (MessageScroll == null)
@@ -2499,7 +2466,6 @@ namespace CoreAI.Chat
                 string roleId = ActiveRoleId;
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
-                // Cancel orchestrator tasks first
                 try
                 {
                     CoreAi.StopAgent(roleId);
@@ -2761,7 +2727,6 @@ namespace CoreAI.Chat
             TypingIndicator.style.display = DisplayStyle.Flex;
             _typingDotCount = 0;
 
-            // Resolve and cache required local values.
             string baseText = Options.TypingIndicatorText ?? string.Empty;
             _typingAnimation = TypingIndicator.schedule.Execute(() =>
             {
@@ -2773,7 +2738,6 @@ namespace CoreAI.Chat
                 }
 
                 string dots = new('.', _typingDotCount);
-                // Resolve and cache required local values.
                 string pad = new(' ', 3 - _typingDotCount);
                 TypingLabel.text = baseText + dots + pad;
             }).Every(400);
@@ -2888,7 +2852,6 @@ namespace CoreAI.Chat
                 return;
             }
 
-            //
             MessageScroll.schedule.Execute(() =>
             {
                 SnapScrollToBottom();

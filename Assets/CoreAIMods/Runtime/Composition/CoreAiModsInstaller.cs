@@ -67,8 +67,8 @@ namespace CoreAI.Composition
             // IBundledModSource entries (StreamingAssets, Addressables, remote) to extend the set.
             builder.Register<IBundledModSource>(_ => new ResourcesBundledModSource(), Lifetime.Singleton);
 
-            // Build the whole Lua-CSharp stack once from container services (sandbox + gameplay bindings +
-            // persistent runtime + one-off executor), sharing one bindings instance across both surfaces.
+            // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
+            // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
             builder.Register(c => LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = c.Resolve<IGameLogger>(),
@@ -87,14 +87,10 @@ namespace CoreAI.Composition
                 OneOffCapabilities = oneOffCapabilities
             }), Lifetime.Singleton);
 
-            // Facades over the stack: the persistent runtime as the VM-agnostic ILuaModRuntime (manage_mods +
-            // auto-repair) and its concrete type (rehydrate + tick), and the one-off executor as ILuaExecutor.
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)
                 .AsSelf().As<ILuaModRuntime>();
             builder.Register(c => c.Resolve<LuaCsModStack>().ToolExecutor, Lifetime.Singleton)
                 .As<LuaTool.ILuaExecutor>();
-            // The shared logic-override slots both surfaces register through, so a host (e.g. a demo that
-            // declares gameplay formula slots) resolves the same instance every mod's logic_define writes to.
             builder.Register(c => c.Resolve<LuaCsModStack>().GameplayBindings.LogicSlots, Lifetime.Singleton)
                 .AsSelf();
 
@@ -168,9 +164,6 @@ namespace CoreAI.Composition
                 }
             });
 
-            // Native tool-calling path for the built-in Programmer role: execute_lua + manage_mods over the
-            // same Lua-CSharp sandbox and gameplay bindings. Hosts that attach their own tools per role
-            // override via AgentMemoryPolicy.
             builder.RegisterBuildCallback(container =>
             {
                 try
@@ -185,9 +178,6 @@ namespace CoreAI.Composition
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaModsLlmTool(container.Resolve<ILuaModRuntime>(), settings, log, scriptCapabilities));
 
-                    // Full Lua reference on demand (read_skill) so the system prompt stays small.
-                    // A Resources/AgentSkills/LuaModding TextAsset overrides the built-in text, same
-                    // convention as the AgentPrompts/System overrides.
                     TextAsset skillOverride = Resources.Load<TextAsset>("AgentSkills/LuaModding");
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInLuaModdingSkillText.SkillName,

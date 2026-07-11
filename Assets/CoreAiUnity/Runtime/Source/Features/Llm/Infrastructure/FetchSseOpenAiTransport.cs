@@ -408,7 +408,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (n > 0) return Task.FromResult(n);
                 if (_isDone) return Task.FromResult(0);
 
-                // Park the read; PumpPendingRead fulfils when the next chunk arrives or the stream finishes.
+                // WHY: park the read; PumpPendingRead fulfils it when the next chunk arrives or the stream ends.
                 TaskCompletionSource<int> tcs = new TaskCompletionSource<int>();
                 _pendingTcs = tcs;
                 _pendingBuffer = buffer;
@@ -429,7 +429,7 @@ namespace CoreAI.Infrastructure.Llm
                         TaskScheduler.Default);
                 }
 
-                // Chunk/done may have fired before we parked; drain queue / EOF without waiting for another JS callback.
+                // WHY: a chunk/done may have fired before we parked; drain now instead of waiting for another JS callback.
                 PumpPendingRead();
 
                 return tcs.Task;

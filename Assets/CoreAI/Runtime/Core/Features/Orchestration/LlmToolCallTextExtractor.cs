@@ -14,12 +14,9 @@ namespace CoreAI.Ai
     {
         private static readonly Regex CodeBlockRegex = new(@"```[\s\S]*?```", RegexOptions.Compiled);
 
-        // Hermes / Qwen-Agent XML tool-call template emitted by many local GGUF models when native
-        // tool_calls is empty, e.g.:
-        //   <tool_call><function=call_skill_tool>
-        //     <parameter=tool_name>craft_item</parameter>
-        //     <parameter=arguments_json>{"item":"Flame Sword"}</parameter>
-        //   </function></tool_call>
+        // WHY: matches the Hermes / Qwen-Agent XML tool-call template many local GGUF models emit when native
+        // tool_calls is empty, e.g. <function=call_skill_tool><parameter=tool_name>craft_item</parameter>
+        // <parameter=arguments_json>{"item":"Flame Sword"}</parameter></function>.
         private static readonly Regex XmlFunctionRegex = new(
             @"<function\s*=\s*([^>\s]+)\s*>(.*?)</function>",
             RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
@@ -67,14 +64,11 @@ namespace CoreAI.Ai
             List<(int Start, int Length)> spans = FindBalancedToolCallSpans(searchText);
             if (spans.Count == 0)
             {
-                // Hermes/Qwen-Agent XML tool-call template (common local-model fallback when native
-                // tool_calls is empty) before function-call syntax and memory pseudo-write.
                 if (TryExtractXmlToolCallSyntax(text, out matches, out cleanedText))
                 {
                     return true;
                 }
 
-                // Try function-call syntax before memory pseudo-write.
                 if (TryExtractFunctionCallSyntax(text, out matches, out cleanedText))
                 {
                     return true;
@@ -104,14 +98,13 @@ namespace CoreAI.Ai
                 {
                     JObject json = JObject.Parse(original);
                     name = json["name"]?.ToString()?.Trim();
-                    // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
+                    // WHY: "arguments_json" is the Qwen3.5-via-LLMUnity spelling; accept it alongside "arguments".
                     JToken args = json["arguments"] ?? json["arguments_json"];
                     if (string.IsNullOrWhiteSpace(name) || args == null)
                     {
                         continue;
                     }
 
-                    // If args is a string ("arguments_json": "{...}"), parse it as JSON.
                     if (args.Type == JTokenType.String)
                     {
                         string argsStr = args.ToString();
@@ -437,13 +430,9 @@ namespace CoreAI.Ai
             string funcName = m.Groups[1].Value;
             string rawArgs = m.Groups[2].Value.Trim();
 
-            // Build arguments JSON from the raw args string.
-            // Handle: read_skill("Alchemy"), read_skill(Crafting),
-            //         call_skill_tool("get_recipes", '{"item":"sword"}')
             Dictionary<string, object> argsDict = new();
             if (!string.IsNullOrEmpty(rawArgs))
             {
-                // Try to parse as JSON first (e.g. {"skill_name": "Alchemy"})
                 if (rawArgs.StartsWith("{"))
                 {
                     try
@@ -458,7 +447,6 @@ namespace CoreAI.Ai
                 }
                 else
                 {
-                    // Split by comma for multi-arg: call_skill_tool("get_recipes", '{"item":"sword"}')
                     string[] parts = SplitFunctionArgs(rawArgs);
                     if (funcName == "call_skill_tool" && parts.Length >= 2)
                     {
@@ -601,7 +589,6 @@ namespace CoreAI.Ai
 
         private static string[] SplitFunctionArgs(string argsStr)
         {
-            // Simple split respecting quotes and braces.
             List<string> parts = new();
             int depth = 0;
             bool inQuote = false;

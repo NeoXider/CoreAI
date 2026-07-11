@@ -98,8 +98,6 @@ namespace CoreAI.Infrastructure.Llm
                 while (true)
                 {
                     iteration++;
-
-                    // === Max roundtrip safety valve ===
                     // Per-request override wins when supplied (null = inherit global; 0 = unlimited).
                     int maxRoundtrips = _maxRoundtripsOverride ?? _settings.MaxToolCallRoundtrips;
                     if (maxRoundtrips > 0 && iteration > maxRoundtrips)
@@ -230,8 +228,6 @@ namespace CoreAI.Infrastructure.Llm
                                 BuildMissingRequiredToolInstruction(requiredToolName)));
                             continue;
                         }
-
-                        // === Empty response mid-task ===
                         // A COMPLETELY empty response (no text, no tool call) after this same request has
                         // already executed at least one SUCCESSFUL tool call is the model trailing off
                         // mid-task, not a deliberate "I'm done" - unlike a text-only response, which is
@@ -267,8 +263,6 @@ namespace CoreAI.Infrastructure.Llm
                             _logger.Info(
                                 $"[SmartToolCall] Iteration {iteration}: Text response, stopping.", LogTag.Llm);
                         }
-
-                        // === Max response chars truncation ===
                         int maxResponseChars = _settings.MaxResponseChars;
                         if (maxResponseChars > 0)
                         {
@@ -341,8 +335,6 @@ namespace CoreAI.Infrastructure.Llm
                     MEAI.ChatMessage toolTurn = new(MEAI.ChatRole.Tool, batch.Results);
                     messages.Add(assistantTurn);
                     messages.Add(toolTurn);
-
-                    // === Error-feedback lifecycle ===
                     // Track all-failed iterations as removable error feedback; once an iteration
                     // succeeds, drop the obsolete failed pairs (whole Assistant+Tool pairs, so
                     // tool-call / tool-result pairing stays OpenAI-valid).
@@ -362,8 +354,6 @@ namespace CoreAI.Infrastructure.Llm
                                 LogTag.Llm);
                         }
                     }
-
-                    // === Tool call history truncation ===
                     // Prevent unbounded message growth during long tool-calling loops.
                     // Only count tool-related messages (Assistant with FunctionCallContent + Tool result).
                     int maxHistoryMsgs = _settings.MaxToolCallHistoryMessages;
@@ -451,7 +441,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch
                 {
-                    // skip malformed matches
                 }
             }
 

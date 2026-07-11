@@ -418,7 +418,6 @@ namespace CoreAI.Infrastructure.Llm
                     "Tool calls will be stripped from output without execution. Verify tool registration.");
             }
 
-            // Shared policy for the entire streaming session
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
                 _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
@@ -434,7 +433,6 @@ namespace CoreAI.Infrastructure.Llm
             // turn can never run twice (recursion/loop guard for RunFinalNoToolsSummaryTurnAsync).
             bool finalSummaryTurnRan = false;
 
-            // === Final no-tools summarization turn ===
             // When the roundtrip cap or the max-consecutive-errors guard ends the streamed turn, run
             // EXACTLY ONE more model roundtrip with tools disabled so the consumer gets real prose
             // about what was accomplished instead of a canned/empty terminal chunk (Claude/Cursor
@@ -1805,7 +1803,6 @@ namespace CoreAI.Infrastructure.Llm
                 return TryPortableToolExtract(text, out toolCalls, out cleanedText);
             }
 
-            // Append remaining text after last tool call
             if (lastEnd < text.Length)
             {
                 cleanBuilder.Append(text, lastEnd, text.Length - lastEnd);

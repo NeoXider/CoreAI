@@ -149,7 +149,6 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
                     {
-                        // will retry again if attempts remain
                     }
                     catch (Exception nonRetryEx)
                     {
@@ -177,7 +176,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // apply the same retry policy as for LlmClientException above.
             if (result != null &&
                 !result.Ok &&
                 IsRetryableFailureResult(result, out int httpWaitFromResult) &&
@@ -214,7 +212,6 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
                     {
-                        // continue loop
                     }
                     catch (Exception)
                     {

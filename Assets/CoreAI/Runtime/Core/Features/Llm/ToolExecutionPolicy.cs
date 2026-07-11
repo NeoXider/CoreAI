@@ -291,7 +291,6 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch
             {
-                /* swallow */
             }
 
             signature = $"{canonicalName}({argsSig})";
@@ -405,7 +404,6 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
-            // === Kilo-style repair: fix wrong casing before lookup ===
             MEAI.FunctionCallContent repairedFc = TryRepairToolName(fc);
             if (repairedFc == null)
             {
@@ -422,8 +420,6 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             fc = repairedFc;
-
-            // === Parse-error guard: never invoke a tool with malformed/truncated argument JSON ===
             // The streaming accumulator surfaces unparseable tool-call arguments by injecting a
             // ParseErrorKey marker instead of dropping them. Such args are bogus, so short-circuit
             // here (before invoking the real tool) and ask the model to resend complete JSON.
@@ -503,8 +499,6 @@ namespace CoreAI.Infrastructure.Llm
 
                 ILlmAsyncMarshaler marshaler =
                     _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
-
-                // === Per-tool timeout: wrap cancellation token ===
                 int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
                 object result;
                 if (toolTimeoutMs > 0)
@@ -551,8 +545,6 @@ namespace CoreAI.Infrastructure.Llm
                 sw.Stop();
                 string resultText = NormalizeToolResultText(result);
                 bool succeeded = IsToolResultSuccess(resultText);
-
-                // === Tool result truncation ===
                 int maxResultChars = _settings.MaxToolResultChars;
                 if (maxResultChars > 0 && resultText.Length > maxResultChars)
                 {
@@ -1882,3 +1874,4 @@ namespace CoreAI.Infrastructure.Llm
     }
 }
 #endif
+
