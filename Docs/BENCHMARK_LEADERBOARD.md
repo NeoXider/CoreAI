@@ -25,7 +25,7 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 
 ### Frontier models (2026-07-11 maintainer sweep, G1–G8)
 
-<img src="Images/benchmark_v2_frontier.svg" alt="CoreAI Game-Creation Benchmark v2 — frontier-model comparison (suite base score, TerminalBench-style bar chart)" width="900">
+<img src="Images/benchmark_v2_frontier.png" alt="CoreAI Game-Creation Benchmark v2 — frontier-model comparison (suite base score, TerminalBench-style bar chart)" width="900">
 
 Run through the `cli-agents` `openai-server` bridge (an OpenAI-compatible shim over the Claude Code / Codex
 CLIs). Ranked by suite base score. Per-group scores are G1…G8; see the benchmark README for the group legend.

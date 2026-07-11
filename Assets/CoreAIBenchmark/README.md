@@ -223,7 +223,7 @@ Frontier hosted models, run through the [`cli-agents`](https://github.com/) `ope
 OpenAI-compatible shim over the Claude Code / Codex CLIs. This is a **separate leaderboard** from the local
 LM Studio models above (different suite version *and* different backend class). Ranked by suite base score.
 
-![CoreAI Game-Creation Benchmark v2 — frontier-model comparison](../../Docs/Images/benchmark_v2_frontier.svg)
+![CoreAI Game-Creation Benchmark v2 — frontier-model comparison](../../Docs/Images/benchmark_v2_frontier.png)
 
 | # | Model | Score | Pass-rate | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tokens |
 |---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
