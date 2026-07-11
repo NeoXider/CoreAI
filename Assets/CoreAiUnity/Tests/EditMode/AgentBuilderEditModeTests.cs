@@ -65,8 +65,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task AskAsync_Fails_WhenRoleNotRegistered()
+        public async Task AskAsync_Fails_WhenCoreAiNotInitialized()
         {
+            // With auto-registration, an unregistered role no longer fails on "not registered" — the first
+            // Ask registers it into the global policy. It still fails when CoreAI itself was never
+            // initialized (no policy), with a message that points at the missing lifetime scope.
             CoreAIAgent.Reset();
             AgentConfig config = new AgentBuilder("UnregisteredAgent")
                 .WithSystemPrompt("You are unregistered.")
@@ -83,7 +86,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.NotNull(ex, "expected InvalidOperationException");
-            StringAssert.Contains("not registered", ex.Message);
+            StringAssert.Contains("Initialize CoreAI", ex.Message);
         }
 
         [Test]
@@ -95,7 +98,7 @@ namespace CoreAI.Tests.EditMode
                 .BuildDetached();
 
             // Fire-and-forget convenience must never throw into the caller; failures are logged.
-            // Silence the logger so the expected "not registered" error does not trip Unity's
+            // Silence the logger so the expected "not initialized" error does not trip Unity's
             // log assertions in EditMode.
             Logging.ILog savedLog = Logging.Log.Instance;
             Logging.Log.Instance = Logging.NullLog.Instance;

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## 5.6.0 - Simpler agent API, code-style rules, benchmark comparison (2026-07-11)
+
+- **Code style: shared `.editorconfig` + comment convention.** Attributes now always sit on their own
+  line (`resharper_place_attribute_on_same_line = never`; 208 existing one-line attributes split). Comments
+  keep only XML docs plus explicitly-tagged `// WHY:` / `// TODO:` / `// HACK:`; obvious restate-the-code
+  comments and section-divider banners were stripped across the core. See `CONTRIBUTING.md`.
+- **Benchmark: native vertical model-comparison chart.** The frontier chart is now produced by the
+  benchmark's own `Build Model Comparison Report` (vertical bars, 8 models ranked best-first) and rendered
+  to PNG so GitHub shows it. A note marks the Claude rows as understated (a non-native, unstable API gave
+  them a high tool-failure rate, so their scores are a lower bound).
 - **`AgentBuilder`: `ApplyToPolicy` is now optional.** `AskAsync`/`AskWithCallback` auto-register the built
   `AgentConfig` with the global `CoreAIAgent.Policy` on first use, so the newcomer flow is just `Build()` →
   `Ask*()` — no manual `ApplyToPolicy(CoreAIAgent.Policy)` step. The explicit call is still available for

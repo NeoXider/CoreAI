@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.6.0 - Simpler agent API, code-style rules, benchmark comparison (2026-07-11)
+
+- **`ApplyToPolicy` is now optional.** `AskAsync`/`AskWithCallback` auto-register the built `AgentConfig`
+  with the global `CoreAIAgent.Policy` on first use, so the newcomer flow is just `Build()` → `Ask*()`.
+- **Code style + comments.** Shared `.editorconfig` (attributes on their own line); obvious comments stripped
+  and genuine ones tagged `// WHY:` / `// TODO:` / `// HACK:` across the core host source.
+- **Benchmark: G7 stops capturing a scene screenshot** (unreadable composite; G6 stays the only hero image),
+  and the frontier comparison chart is now the benchmark's own vertical bar chart rendered to PNG.
+
 - **Structured world spawning.** Added `worldPositionStays` to `world_command` `spawn`, `spawn_batch`, and
   `change`. The default is `false`, so parented position/rotation values are local; `true` preserves the
   world transform. Batch items can override the call-level default. Tool guidance now recommends named
