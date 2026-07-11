@@ -22,7 +22,17 @@ namespace CoreAI.Infrastructure
         public static void Sync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+            try
+            {
+                CoreAi_PersistFsSync();
+            }
+            catch (System.Exception ex)
+            {
+                // WHY: A failed flush means the preceding write may not survive a reload/tab close —
+                // that must be visible in the console instead of silently losing the data.
+                UnityEngine.Debug.LogWarning(
+                    $"[CoreAiWebGlPersistence] IndexedDB flush failed; last write may not survive a reload: {ex.Message}");
+            }
 #endif
         }
     }

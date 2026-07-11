@@ -82,7 +82,19 @@ namespace CoreAI.Infrastructure.Llm
             // to be captured so the continuation reliably runs on the browser main thread.
             // ConfigureAwait(false) routes the continuation to ThreadPool, which doesn't
             // exist in WebGL, and the await never resumes.
-            StreamState.OpenInfo openInfo = await state.WaitForOpenAsync();
+            StreamState.OpenInfo openInfo;
+            try
+            {
+                openInfo = await state.WaitForOpenAsync();
+            }
+            catch
+            {
+                // WHY: WaitForOpenAsync can throw (typed jslib Timeout, cancellation). On that path the
+                // stream is never handed to the caller, so nothing else would ever dispose the state or
+                // remove its entry from the static States dictionary — clean up here before rethrowing.
+                state.Dispose();
+                throw;
+            }
 
             OpenAiHttpSseOpenResult result = new OpenAiHttpSseOpenResult
             {
@@ -256,9 +268,12 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         CoreAi_FetchSseAbort(CallId);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Browser abort must not throw back into the Unity cancellation path.
+                        // Browser abort must not throw back into the Unity cancellation path, but a
+                        // failed abort leaks the browser-side fetch — log it instead of swallowing.
+                        UnityEngine.Debug.LogWarning(
+                            $"[FetchSSE] CoreAi_FetchSseAbort failed on cancellation (callId={CallId}): {ex.Message}");
                     }
 
                     SignalCancelled(cancellationToken);
@@ -286,8 +301,19 @@ namespace CoreAI.Infrastructure.Llm
                 _stream.PumpPendingRead();
                 // Defensive: if SignalDone fires before SignalOpen (shouldn't happen, but
                 // caller surfaces a transport error instead of awaiting forever.
+                // TODO: In the jslib flow onOpen always precedes onDone; the only way to get here
+                // without an open result is when the onOpen dyncall itself threw and was swallowed
+                // by CoreAiSseFetch.jslib's callOpen catch. In that case the fetch may actually have
+                // succeeded (its chunks are already buffered in _queue), but the real HTTP status is
+                // lost, so this surfaces a fake "HTTP 0 / no headers" error. Recovering the real
+                // result would require the jslib to re-deliver the open info alongside done.
                 _openTcs.TrySetResult(new OpenInfo(0, "fetch completed without headers",
                     new Dictionary<string, IEnumerable<string>>()));
+
+                // onDone is terminal (the jslib finish() guard drops any later callback for this id),
+                // so drop the States entry now: a consumer that abandons the stream without disposing
+                // it would otherwise leak the entry in the static dictionary permanently.
+                States.TryRemove(CallId, out _);
             }
 
             public void SignalError(Exception ex)
@@ -321,6 +347,10 @@ namespace CoreAI.Infrastructure.Llm
                     _openTcs.TrySetResult(new OpenInfo(0, ex?.Message ?? "fetch error",
                         new Dictionary<string, IEnumerable<string>>()));
                 }
+
+                // onError is terminal (the jslib finish() guard drops any later callback for this id),
+                // so drop the States entry now — same abandoned-stream leak rationale as SignalDone.
+                States.TryRemove(CallId, out _);
             }
 
             public void SignalCancelled(CancellationToken cancellationToken)
@@ -344,9 +374,27 @@ namespace CoreAI.Infrastructure.Llm
                 // that is never removed (consumer drops the stream without reading to completion) is a
                 // permanent leak; removing on Dispose bounds the dictionary to live streams only.
                 States.TryRemove(CallId, out _);
-                try { _cancelRegistration.Dispose(); } catch { }
-                try { _signal.Set(); } catch { }
-                try { _signal.Dispose(); } catch { }
+                try
+                {
+                    _cancelRegistration.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    UnityEngine.Debug.LogWarning(
+                        $"[FetchSSE] cancellation registration dispose failed (callId={CallId}): {ex.Message}");
+                }
+
+                try
+                {
+                    _signal.Set();
+                    _signal.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    // Double-dispose race: the signal may already be disposed; still worth surfacing.
+                    UnityEngine.Debug.LogWarning(
+                        $"[FetchSSE] signal release failed on dispose (callId={CallId}): {ex.Message}");
+                }
             }
 
             public FetchSseStream Stream => _stream;
@@ -403,6 +451,14 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (_error != null) return Task.FromException<int>(_error);
                 if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<int>(cancellationToken);
+
+                // WHY: there is a single pending-read slot; a second concurrent ReadAsync would silently
+                // overwrite _pendingTcs and leave the first awaiter hanging until Dispose. Fail loudly.
+                if (_pendingTcs != null)
+                {
+                    return Task.FromException<int>(new InvalidOperationException(
+                        "FetchSseStream supports only one pending ReadAsync at a time; the previous read has not completed."));
+                }
 
                 int n = TryReadNonBlocking(buffer, offset, count);
                 if (n > 0) return Task.FromResult(n);
@@ -507,11 +563,29 @@ namespace CoreAI.Infrastructure.Llm
                     // (with EOF) here, otherwise its TCS and per-read cancellation registration
                     // stay alive until the whole request token ends.
                     PumpPendingRead();
-                    try { CoreAi_FetchSseAbort(_owner.CallId); } catch { }
+                    try
+                    {
+                        CoreAi_FetchSseAbort(_owner.CallId);
+                    }
+                    catch (Exception ex)
+                    {
+                        // A failed abort leaks the browser-side fetch/ReadableStream for this call.
+                        UnityEngine.Debug.LogWarning(
+                            $"[FetchSSE] CoreAi_FetchSseAbort failed on stream dispose (callId={_owner.CallId}): {ex.Message}");
+                    }
+
                     // Owner disposal also removes the States entry and drops the request-token
                     // cancellation registration, which would otherwise pin this stream (queue,
                     // buffered chunks and all) to the caller's token lifetime on the success path.
-                    try { _owner.Dispose(); } catch { }
+                    try
+                    {
+                        _owner.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        UnityEngine.Debug.LogWarning(
+                            $"[FetchSSE] stream state dispose failed (callId={_owner.CallId}): {ex.Message}");
+                    }
                 }
 
                 base.Dispose(disposing);

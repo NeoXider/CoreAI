@@ -41,6 +41,7 @@ namespace CoreAI.Tests.EditMode
         private ToolbarToggle _compareTab;
         private ToolbarToggle _modelsTab;
         private Label _statusLabel;
+        private Button _stopButton;
         private VisualElement _progressFill;
         private Label _progressText;
         private VisualElement _progressLines;
@@ -491,10 +492,21 @@ namespace CoreAI.Tests.EditMode
         private VisualElement BuildRunButtonSection()
         {
             VisualElement section = Section(null);
+            VisualElement row = Row();
             Button run = new(RunBenchmark) { text = "Run benchmark" };
             run.style.height = 34;
             run.style.unityFontStyleAndWeight = FontStyle.Bold;
-            section.Add(run);
+            run.style.flexGrow = 1;
+            row.Add(run);
+            _stopButton = new Button(GameCreationBenchmarkLauncher.StopRunningBenchmark)
+            {
+                text = "Stop (save partial)"
+            };
+            _stopButton.style.height = 34;
+            _stopButton.style.marginLeft = 6;
+            _stopButton.style.display = DisplayStyle.None;
+            row.Add(_stopButton);
+            section.Add(row);
             return section;
         }
 
@@ -664,6 +676,13 @@ namespace CoreAI.Tests.EditMode
             }
 
             bool active = BenchmarkProgress.IsRunning;
+            if (_stopButton != null)
+            {
+                _stopButton.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+                _stopButton.SetEnabled(active && !BenchmarkProgress.StopRequested);
+                _stopButton.text = BenchmarkProgress.StopRequested ? "Stopping…" : "Stop (save partial)";
+            }
+
             // A solo scenario (Total <= 1, e.g. running G6's free build alone) has a count-based Fraction
             // that sits at 0% for its whole multi-minute run and only jumps to 100% at the very end - not
             // useful to a human watching. Fall back to the scenario's own elapsed/remaining wall-clock

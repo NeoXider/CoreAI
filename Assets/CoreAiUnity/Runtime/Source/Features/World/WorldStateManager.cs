@@ -26,12 +26,26 @@ namespace CoreAI.Infrastructure.World
         private static extern void CoreAi_PersistFsSync();
 #endif
 
-        /// <summary>On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a reload/tab close.</summary>
-        private static void PersistFsForWebGl()
+        /// <summary>
+        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a
+        /// reload/tab close. Returns false when the flush threw (the save reached IDBFS memory only),
+        /// so the caller can report the save honestly instead of claiming durable success.
+        /// </summary>
+        private bool PersistFsForWebGl()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+            try
+            {
+                CoreAi_PersistFsSync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(GameLogFeature.Core,
+                    $"[WorldState] IndexedDB flush failed after save: {ex.Message}");
+                return false;
+            }
 #endif
+            return true;
         }
 
         private static readonly Color NoColor = new(-1f, -1f, -1f, -1f);
@@ -262,10 +276,19 @@ namespace CoreAI.Infrastructure.World
                     File.Move(tmpPath, _saveFilePath);
                 }
 
-                PersistFsForWebGl();
-
-                _logger.LogInfo(GameLogFeature.Core,
-                    $"[WorldState] Saved {objects.Count} objects.");
+                if (PersistFsForWebGl())
+                {
+                    _logger.LogInfo(GameLogFeature.Core,
+                        $"[WorldState] Saved {objects.Count} objects.");
+                }
+                else
+                {
+                    // WHY: On WebGL the file only reached the in-memory IDBFS tree; the IndexedDB
+                    // flush threw, so a reload/tab close can still lose this save. Don't claim
+                    // durable success — the flush failure was already logged by PersistFsForWebGl.
+                    _logger.LogWarning(GameLogFeature.Core,
+                        $"[WorldState] Saved {objects.Count} objects to in-memory FS, but the IndexedDB flush failed; the save may not survive a reload.");
+                }
             }
             catch (Exception ex)
             {

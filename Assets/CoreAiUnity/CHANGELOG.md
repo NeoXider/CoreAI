@@ -4,6 +4,26 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed (2026-07-11 audit wave)
+
+- **WebGL persistence: IndexedDB flush failures are no longer silent.** `CoreAiWebGlPersistence` and
+  `WorldStateManager` log a warning when `CoreAi_PersistFsSync` throws, and the "Saved N objects" log is
+  honest about a failed flush (the save may not survive a reload).
+- **WebGL SSE transport hygiene** (`FetchSseOpenAiTransport`): all previously-empty catches log with the
+  call id (including a failed browser-fetch abort), a second concurrent `ReadAsync` fails loudly instead of
+  silently overwriting the pending slot, and terminal callbacks/open-failures always remove the stream's
+  entry from the static state table (no more permanent leaks from abandoned streams).
+- **`AiGameCommandRouter.Dispose()` clears the static `CommandReceived` event**, so commands after a scene
+  reload no longer reach dead subscribers from previous scenes (duplicate world mutations).
+- **`world_command destroy` reports failure for missing targets** (was: unconditional success, so the model
+  could never self-correct a typo'd object name).
+
+### Added
+
+- **Benchmark window: Stop button.** "Stop (save partial)" appears next to "Run benchmark" while a run is
+  active (same cooperative stop as the `CoreAI/Benchmarks/Stop Running Benchmark` menu item: finishes the
+  current scenario, saves a partial report); shows "Stopping…" once requested.
+
 ## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
 
 - **`AgentBuilder.Build()` auto-registers with the global policy** when one exists (immediate routability);

@@ -184,6 +184,68 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        /// <summary>
+        /// Regression coverage for the stale-subscriber audit finding: <see cref="AiGameCommandRouter.CommandReceived"/>
+        /// is process-global (static), so a scene-scoped subscriber that misses its own unsubscribe used to
+        /// survive a scene reload and receive commands routed by the next scene's router (duplicate world
+        /// mutations against destroyed objects). Disposing the router (scope teardown) must clear the event.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Router_Dispose_ClearsStaleStaticSubscribers_FromPreviousScope()
+        {
+            yield return null;
+
+            CurrentThreadPublishBus oldBus = new();
+            AiGameCommandRouter oldRouter = new(oldBus, new NoOpGameLogger(), new NullWorldExecutor());
+            CurrentThreadPublishBus newBus = new();
+            AiGameCommandRouter newRouter = new(newBus, new NoOpGameLogger(), new NullWorldExecutor());
+
+            int staleCalls = 0;
+            bool freshReceived = false;
+
+            void OnStaleCommand(ApplyAiGameCommand _)
+            {
+                staleCalls++;
+            }
+
+            void OnFreshCommand(ApplyAiGameCommand _)
+            {
+                freshReceived = true;
+            }
+
+            try
+            {
+                oldRouter.Start();
+                AiGameCommandRouter.CommandReceived += OnStaleCommand;
+
+                // Scene reload: the old scope tears down while its subscriber never unsubscribed.
+                oldRouter.Dispose();
+
+                newRouter.Start();
+                AiGameCommandRouter.CommandReceived += OnFreshCommand;
+
+                newBus.Publish(SampleEnvelope());
+
+                float deadline = Time.realtimeSinceStartup + 8f;
+                while (!freshReceived && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(freshReceived,
+                    "A subscriber attached after the new router started must receive the command.");
+                Assert.AreEqual(0, staleCalls,
+                    "A subscriber left over from a disposed router's scope must not receive commands routed by the next scope.");
+            }
+            finally
+            {
+                AiGameCommandRouter.CommandReceived -= OnStaleCommand;
+                AiGameCommandRouter.CommandReceived -= OnFreshCommand;
+                oldRouter.Dispose();
+                newRouter.Dispose();
+            }
+        }
+
         [UnityTest]
         public IEnumerator Pipeline_QueuedOrchestrator_Publish_CommandReceived_OnMainThread()
         {

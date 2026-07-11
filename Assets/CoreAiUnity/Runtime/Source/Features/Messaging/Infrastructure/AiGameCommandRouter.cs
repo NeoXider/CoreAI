@@ -75,6 +75,14 @@ namespace CoreAI.Infrastructure.Messaging
         {
             _disposed = true;
             _subscription?.Dispose();
+
+            // WHY: CommandReceived is process-global (static) while its subscribers are typically
+            // scene-scoped (e.g. AiDashboardPresenter). A subscriber that misses its own unsubscribe
+            // would survive a scene reload and receive commands routed by the next scene's router —
+            // duplicate world mutations against destroyed objects. The router is registered once per
+            // CoreAILifetimeScope, so clearing on scope teardown is safe: live subscribers in the new
+            // scene re-attach via their own OnEnable/Initialize.
+            CommandReceived = null;
         }
     }
 }

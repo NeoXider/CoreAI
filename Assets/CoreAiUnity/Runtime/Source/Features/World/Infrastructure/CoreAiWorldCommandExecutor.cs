@@ -749,11 +749,16 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryDestroy(CoreAiWorldCommandEnvelope env)
         {
-            if (ResolveObject(env.targetName, out GameObject go))
+            if (!ResolveObject(env.targetName, out GameObject go))
             {
-                UnityEngine.Object.Destroy(go);
+                // WHY: Returning true here reported "ok" for a typo'd/missing target, so the model
+                // could never self-correct — every other verb fails on an unresolved target.
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] destroy: object not found (name='{env.targetName}')");
+                return false;
             }
 
+            UnityEngine.Object.Destroy(go);
             return true;
         }
 
