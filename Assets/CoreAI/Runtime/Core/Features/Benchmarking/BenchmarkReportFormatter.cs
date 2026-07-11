@@ -57,8 +57,8 @@ namespace CoreAI.Benchmarking
                           $"({report.TotalCompletionTokens} generated) · {F(report.GenerationTokensPerSecond)} tok/s provider-call " +
                           $"(prefill+decode; effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
                           $"${F(report.TotalCostUsd)} · {F(report.TotalLatencyMs / 1000.0)} s total");
-            sb.AppendLine($"- **Speed/efficiency bonus:** mean +{F(report.MeanEfficiencyBonus)} " +
-                          $"(fewer tokens +{F(report.MeanTokenBonus)}, less time +{F(report.MeanTimeBonus)})");
+            // Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
+            // model must not look "smarter". The bonus rewards correctness only.
             sb.AppendLine($"- **Model setup:** backend `{m.Backend}` · native-tools {m.NativeToolCalling} · " +
                           $"streaming {m.Streaming} · temp {F(m.Temperature)} · reps {m.Repetitions} · " +
                           $"parallel-tools {m.MaxParallelToolCalls}");
@@ -307,8 +307,7 @@ namespace CoreAI.Benchmarking
             // Footer: speed / tokens.
             sb.Append($"<text x=\"20\" y=\"{y + 20}\" fill=\"#9aa0a6\" font-size=\"11\">")
                 .Append($"{report.TotalCompletionTokens} gen tokens · {F(report.GenerationTokensPerSecond)} tok/s · ")
-                .Append($"{F(report.TotalLatencyMs / 1000.0)} s · bonus +{F(report.MeanEfficiencyBonus)} ")
-                .Append($"(tok +{F(report.MeanTokenBonus)}, time +{F(report.MeanTimeBonus)})</text>");
+                .Append($"{F(report.TotalLatencyMs / 1000.0)} s (speed reported, not scored)</text>");
 
             sb.Append("</svg>");
             return sb.ToString();

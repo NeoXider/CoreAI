@@ -126,20 +126,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void EfficiencyBonus_RewardsFewerTokensAndLessTime()
+        public void Speed_DoesNotAddToScore()
         {
             List<BenchmarkCheckpoint> perfect = new() { Cp("a", 100, true) };
-            // Used 10% of both budgets -> ~0.9 of each efficiency band (6 each) on top of correctness.
+            // A fast, cheap run (10% of both budgets) earns NO extra points for speed: efficiency is a
+            // reported tok/s metric, not a score, so a merely-faster model cannot look "smarter".
             GoalScore score = GoalScore.Compute(perfect, rawBonus: 0,
                 actualTokens: 100, tokenBudget: 1000, actualMs: 1000, timeBudgetMs: 10000);
 
             Assert.AreEqual(100, score.Base, 1e-6);
-            Assert.AreEqual(10.8, score.EfficiencyBonus, 1e-6); // 5.4 token + 5.4 time
-            Assert.AreEqual(10.8, score.Bonus, 1e-6);
+            Assert.AreEqual(0, score.EfficiencyBonus, 1e-6, "speed must not add to the score");
+            Assert.AreEqual(0, score.Bonus, 1e-6, "with no correctness bonus, a fast run scores no bonus");
         }
 
         [Test]
-        public void EfficiencyBonus_IsGatedOnBase_AndCappedWithCorrectness()
+        public void CorrectnessBonus_IsGatedOnBase_AndCappedAtMaxBonus()
         {
             // Below the bonus gate: a fast cheap run that did not solve earns nothing.
             List<BenchmarkCheckpoint> below = new() { Cp("a", 80, true), Cp("b", 20, false) };
@@ -147,7 +148,7 @@ namespace CoreAI.Tests.EditMode
                 actualMs: 1, timeBudgetMs: 10000);
             Assert.AreEqual(0, gated.Bonus, 1e-6);
 
-            // Correctness + efficiency together never exceed MaxBonus.
+            // The correctness bonus never exceeds MaxBonus (and speed adds nothing to it).
             List<BenchmarkCheckpoint> perfect = new() { Cp("a", 100, true) };
             GoalScore capped = GoalScore.Compute(perfect, rawBonus: 20,
                 actualTokens: 1, tokenBudget: 1000, actualMs: 1, timeBudgetMs: 10000);

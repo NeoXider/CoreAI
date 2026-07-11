@@ -291,9 +291,11 @@ namespace CoreAI.Benchmarking
                 baseScore = hardCap.Value;
             }
 
-            // Bonus is gated: a task must already be near-perfect to earn it. Among solvers, reward the
-            // efficient ones — fewer tokens and less time than budget add on top of the correctness bonus,
-            // with the whole bonus capped at MaxBonus.
+            // Bonus is gated: a task must already be near-perfect to earn it. It rewards being MORE CORRECT
+            // than the pass bar — deliberately NOT being faster. Speed/efficiency is reported separately as a
+            // tok/s metric; folding it into a score made a merely-faster model (e.g. a "spark" tier) look
+            // "smarter" than an equally-correct but slower one. So the token/time efficiency components no
+            // longer add to any score — only the correctness bonus does.
             double correctnessBonus = 0;
             double tokenBonus = 0;
             double timeBonus = 0;
@@ -302,15 +304,8 @@ namespace CoreAI.Benchmarking
             if (baseScore >= BonusEligibilityBase)
             {
                 correctnessBonus = Clamp(rawBonus, 0, MaxBonus);
-                tokenBonus = tokenBudget > 0
-                    ? MaxTokenBonus * Clamp((tokenBudget - Finite(actualTokens)) / tokenBudget, 0, 1)
-                    : 0;
-                timeBonus = timeBudgetMs > 0
-                    ? MaxTimeBonus * Clamp((timeBudgetMs - Finite(actualMs)) / timeBudgetMs, 0, 1)
-                    : 0;
-
-                bonus = Clamp(correctnessBonus + tokenBonus + timeBonus, 0, MaxBonus);
-                efficiencyBonus = bonus - Math.Min(correctnessBonus, bonus);
+                bonus = correctnessBonus;
+                // tokenBonus / timeBonus / efficiencyBonus intentionally stay 0: speed does not add points.
             }
 
             bool allMandatoryPassed = true;
