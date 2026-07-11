@@ -21,7 +21,7 @@ The benchmark answers the practical production question: is this model usable fo
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
 | G8 - Described-state selection | 4/5 | Reasoning over a GIVEN textual world state, not live scene sensing | The prompt describes an already-populated scene; the model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. It is a single-turn conditional-selection test, not sustained multi-turn recovery. |
 
-Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. G6 (hero image) and G7 capture scene screenshots because the built scene is part of the result; the other groups are primarily graded through logic execution and traces.
+Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. Only G6 (the free-build castle) captures a hero scene screenshot, because the built scene is itself the result; all other groups — including G7 — are graded purely through world state, logic execution and tool-call traces, so no screenshot is taken for them.
 
 ## Scoring
 

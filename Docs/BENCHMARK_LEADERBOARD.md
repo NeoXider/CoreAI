@@ -52,6 +52,11 @@ CLIs). Ranked by suite base score. Per-group scores are G1…G8; see the benchma
 > model describes an action in prose but emits no tool call, the biggest source of "0 tool calls → scenario
 > fails" on the agentic Claude CLI. The remaining rows (sol, terra, gpt-5.5, luna, sonnet) predate that fix
 > and would likely gain a few points on a re-run.
+>
+> ⚠️ **Claude scores are understated.** The Claude models ran over the CLI bridge, not a native API, and
+> behaved unstably there — a high tool-failure rate (opus ~24%, sonnet ~23%, fable ~36%, where well-formed
+> tool calls still fail to land) that cost points on tool correctness and task completion. Treat the Claude
+> rows as a **lower bound** on their real capability; a native-API run would score higher.
 
 ## Historical Leaderboard — Suite v1.6
 

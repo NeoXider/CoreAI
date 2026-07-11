@@ -35,7 +35,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public sealed override string Group => "G7";
             public override int Difficulty => 9;
-            public override bool CaptureScene => true;
+            // No scene shot for G7: the Player/Gate/Key puzzle photographs as a cluttered composite of
+            // overlapping primitives and floating world-space labels that is unreadable and adds nothing
+            // to the score (user-reported). Grading reads world state + Lua consistency, not the image.
+            // G6 stays the only hero image; scoring is unaffected.
+            public override bool CaptureScene => false;
             public override int? RepsOverride => 1;
             public override int TokenBudget => 2500;
             public override double TimeBudgetMs => 40000;
