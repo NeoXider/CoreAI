@@ -19,7 +19,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Domain
         [Min(0)]
         public int PreRequestNextWaveWhenAliveAtMost = 2;
 
-        [Header("Пост-волна Analyzer")] public bool RunPostWaveAnalyzer = true;
+        [Header("Пост-волна Analyzer")]
+        public bool RunPostWaveAnalyzer = true;
 
         [Header("Сложность волн (VS-style)")]
         [Header("Сложность волн (VS-style)")]

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
 using CoreAI.Ai;
 using UnityEngine;
@@ -23,6 +23,7 @@ namespace CoreAI.Diagnostics
 
         [SerializeField]
         private KeyCode _toggleKey = KeyCode.F9;
+
         [SerializeField]
         private float _unresponsiveThresholdSeconds = 300f;
 

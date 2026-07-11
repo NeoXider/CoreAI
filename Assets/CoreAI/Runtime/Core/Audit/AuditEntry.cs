@@ -87,11 +87,13 @@ namespace CoreAI.Audit
 
         [JsonIgnore]
         public string PrevHash { get; }
+
         [JsonIgnore]
         public string Hash { get; }
 
         [JsonProperty("prevHash")]
         private string PrevHashForSerialization => PrevHash;
+
         [JsonProperty("hash")]
         private string HashForSerialization => Hash;
 

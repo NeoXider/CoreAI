@@ -24,14 +24,21 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
     /// </summary>
     public sealed class ArenaSurvivalProceduralSetup : MonoBehaviour
     {
-        [SerializeField] private float arenaHalfSize = 22f;
-        [SerializeField] private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
-        [SerializeField] private ArenaDirectorSettings directorSettings;
+        [SerializeField]
+        private float arenaHalfSize = 22f;
 
-        [Tooltip("Если в сцене уже есть пол (Plane) с коллайдером — включите, чтобы не дублировать.")] [SerializeField]
+        [SerializeField]
+        private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
+
+        [SerializeField]
+        private ArenaDirectorSettings directorSettings;
+
+        [Tooltip("Если в сцене уже есть пол (Plane) с коллайдером — включите, чтобы не дублировать.")]
+        [SerializeField]
         private bool skipRuntimeFloor;
 
-        [Tooltip("Опционально: мировая позиция спавна игрока (пустой Transform на сцене).")] [SerializeField]
+        [Tooltip("Опционально: мировая позиция спавна игрока (пустой Transform на сцене).")]
+        [SerializeField]
         private Transform playerSpawnAnchor;
 
         [Header("AI (Creator)")]
@@ -39,7 +46,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         [SerializeField]
         private bool creatorPlansWaves = true;
 
-        [Header("Solo helper")] [Tooltip("Если включено — добавить NPC помощника в команду (соло).")] [SerializeField]
+        [Header("Solo helper")]
+        [Tooltip("Если включено — добавить NPC помощника в команду (соло).")]
+        [SerializeField]
         private bool spawnCompanionBot = true;
 
         [Header("NavMesh")]
@@ -53,7 +62,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         [SerializeField]
         private bool suspendAgentsDuringNavMeshBake = true;
 
-        [Tooltip("Всегда пересобирать NavMesh (дороже). Иначе — только если navMeshData пуст.")] [SerializeField]
+        [Tooltip("Всегда пересобирать NavMesh (дороже). Иначе — только если navMeshData пуст.")]
+        [SerializeField]
         private bool forceFullNavMeshRebuild;
 
         [Header("Отладка")]
@@ -71,7 +81,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         [SerializeField]
         private ArenaProgressionContent arenaProgressionContent;
 
-        [SerializeField] private ArenaUnitBaselineConfig arenaUnitBaselineConfig;
+        [SerializeField]
+        private ArenaUnitBaselineConfig arenaUnitBaselineConfig;
 
 
         private void Start()

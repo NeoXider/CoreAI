@@ -8,11 +8,20 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
 {
     public sealed class ArenaUpgradeCardWidget : MonoBehaviour
     {
-        [SerializeField] private Button button;
-        [SerializeField] private Image frameImage;
-        [SerializeField] private Image iconImage;
-        [SerializeField] private TMP_Text titleText;
-        [SerializeField] private TMP_Text descriptionText;
+        [SerializeField]
+        private Button button;
+
+        [SerializeField]
+        private Image frameImage;
+
+        [SerializeField]
+        private Image iconImage;
+
+        [SerializeField]
+        private TMP_Text titleText;
+
+        [SerializeField]
+        private TMP_Text descriptionText;
 
         private ArenaUpgradeOffer _offer;
         private Action<ArenaUpgradeOffer> _onPick;

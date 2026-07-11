@@ -10,7 +10,9 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     /// </summary>
     public sealed class ArenaAuxLlmEveryNWaves : MonoBehaviour
     {
-        [SerializeField] [Min(1)] private int everyNWaves = 3;
+        [SerializeField]
+        [Min(1)]
+        private int everyNWaves = 3;
 
         private IAiOrchestrationService _orchestrator;
         private ArenaSurvivalSession _session;

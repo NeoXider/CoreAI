@@ -8,15 +8,32 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         order = 15)]
     public sealed class ArenaProgressionContent : ScriptableObject
     {
-        [SerializeField] private ArenaRunBalanceConfig runBalance;
-        [SerializeField] private ArenaPersistenceConfig persistence;
-        [SerializeField] private ArenaUpgradePresentationConfig presentation;
-        [SerializeField] private List<ArenaUpgradeDefinition> upgrades = new();
-        [SerializeField] private ChanceData rarityRoll;
-        [SerializeField] private ChanceData categoryCommonRare;
-        [SerializeField] private ChanceData categoryEpic;
-        [SerializeField] private ChanceData categoryLegendary;
-        [SerializeField] private ChanceData statUpgradeWeights;
+        [SerializeField]
+        private ArenaRunBalanceConfig runBalance;
+
+        [SerializeField]
+        private ArenaPersistenceConfig persistence;
+
+        [SerializeField]
+        private ArenaUpgradePresentationConfig presentation;
+
+        [SerializeField]
+        private List<ArenaUpgradeDefinition> upgrades = new();
+
+        [SerializeField]
+        private ChanceData rarityRoll;
+
+        [SerializeField]
+        private ChanceData categoryCommonRare;
+
+        [SerializeField]
+        private ChanceData categoryEpic;
+
+        [SerializeField]
+        private ChanceData categoryLegendary;
+
+        [SerializeField]
+        private ChanceData statUpgradeWeights;
 
         public ArenaRunBalanceConfig RunBalance => runBalance;
         public ArenaPersistenceConfig Persistence => persistence;

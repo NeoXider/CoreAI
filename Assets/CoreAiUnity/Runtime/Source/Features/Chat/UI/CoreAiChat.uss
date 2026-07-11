@@ -1,195 +1,195 @@
 /* === CoreAI Universal Chat — Default Dark Theme === */
 
 .coreai-chat-container {
-    width: 650px;
-    height: 910px;
-    background-color: rgba(6, 14, 30, 0.93);
-    border-radius: 16px;
-    border-width: 2px;
-    border-color: rgba(17, 160, 181, 0.35);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: absolute;
-    bottom: 24px;
-    right: 24px;
+  width: 650px;
+  height: 910px;
+  background-color: rgba(6, 14, 30, 0.93);
+  border-radius: 16px;
+  border-width: 2px;
+  border-color: rgba(17, 160, 181, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
 }
 
 /* CoreAiChatConfig: Use fullscreen chat — stretch to viewport margins (desktop or large screen) */
 .coreai-chat-container.coreai-chat-fullscreen {
-    border-radius: 12px;
+  border-radius: 12px;
 }
 
 /* Embedded in a host container (e.g. a Hub tab): fill the host edge-to-edge instead of floating as a
    fixed 650x910 panel anchored bottom-right. Higher specificity than .coreai-chat-container, so it wins. */
 .coreai-chat-container.coreai-chat-embedded {
-    position: relative;
-    left: auto;
-    top: auto;
-    right: auto;
-    bottom: auto;
-    /* width: auto + align-self: stretch fills the host cross-axis; an explicit width (even 100%) keeps
-       resolving against the fixed 650 rule on some Unity versions, so use stretch instead. */
-    width: auto;
-    height: auto;
-    align-self: stretch;
-    max-width: none;
-    max-height: none;
-    flex-grow: 1;
-    border-width: 0;
-    border-radius: 0;
+  position: relative;
+  left: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  /* width: auto + align-self: stretch fills the host cross-axis; an explicit width (even 100%) keeps
+     resolving against the fixed 650 rule on some Unity versions, so use stretch instead. */
+  width: auto;
+  height: auto;
+  align-self: stretch;
+  max-width: none;
+  max-height: none;
+  flex-grow: 1;
+  border-width: 0;
+  border-radius: 0;
 }
 
 /* Header */
 .coreai-chat-header {
-    height: 56px;
-    background-color: rgba(10, 22, 45, 0.95);
-    border-bottom-width: 1px;
-    border-bottom-color: rgba(17, 160, 181, 0.3);
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    flex-direction: row;
-    align-items: center;
-    padding-left: 16px;
-    padding-right: 16px;
-    flex-shrink: 0;
+  height: 56px;
+  background-color: rgba(10, 22, 45, 0.95);
+  border-bottom-width: 1px;
+  border-bottom-color: rgba(17, 160, 181, 0.3);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  flex-direction: row;
+  align-items: center;
+  padding-left: 16px;
+  padding-right: 16px;
+  flex-shrink: 0;
 }
 
 .coreai-chat-header-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 16px;
-    background-color: rgba(17, 160, 181, 0.25);
-    border-width: 1.5px;
-    border-color: rgba(77, 208, 225, 0.5);
-    margin-right: 12px;
-    flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background-color: rgba(17, 160, 181, 0.25);
+  border-width: 1.5px;
+  border-color: rgba(77, 208, 225, 0.5);
+  margin-right: 12px;
+  flex-shrink: 0;
 }
 
 .coreai-chat-header-title {
-    color: rgb(77, 208, 225);
-    font-size: 20px;
-    -unity-font-style: bold;
-    letter-spacing: 2px;
-    flex-grow: 1;
-    flex-shrink: 1;
+  color: rgb(77, 208, 225);
+  font-size: 20px;
+  -unity-font-style: bold;
+  letter-spacing: 2px;
+  flex-grow: 1;
+  flex-shrink: 1;
 }
 
 /* Header action button (collapse) */
 .coreai-chat-header-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 16px;
-    background-color: rgba(17, 160, 181, 0.2);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.35);
-    color: rgb(197, 220, 232);
-    font-size: 18px;
-    -unity-font-style: bold;
-    padding: 0;
-    margin-left: 8px;
-    flex-shrink: 0;
-    transition-duration: 0.15s;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background-color: rgba(17, 160, 181, 0.2);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.35);
+  color: rgb(197, 220, 232);
+  font-size: 18px;
+  -unity-font-style: bold;
+  padding: 0;
+  margin-left: 8px;
+  flex-shrink: 0;
+  transition-duration: 0.15s;
 }
 
 .coreai-chat-header-btn:hover {
-    background-color: rgba(77, 208, 225, 0.35);
-    border-color: rgba(77, 208, 225, 0.7);
+  background-color: rgba(77, 208, 225, 0.35);
+  border-color: rgba(77, 208, 225, 0.7);
 }
 
 /* Agent/role dropdown in the header — themed to match the accent buttons instead of the plain default. */
 .coreai-chat-agent-dropdown {
-    flex-shrink: 0;
-    margin-left: 8px;
-    margin-right: 4px;
-    min-width: 120px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  margin-right: 4px;
+  min-width: 120px;
 }
 
 .coreai-chat-agent-dropdown .unity-base-popup-field__input {
-    height: 32px;
-    border-radius: 16px;
-    background-color: rgba(17, 160, 181, 0.2);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.35);
-    padding-left: 12px;
-    padding-right: 8px;
-    -unity-text-align: middle-left;
+  height: 32px;
+  border-radius: 16px;
+  background-color: rgba(17, 160, 181, 0.2);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.35);
+  padding-left: 12px;
+  padding-right: 8px;
+  -unity-text-align: middle-left;
 }
 
 .coreai-chat-agent-dropdown .unity-base-popup-field__input:hover {
-    background-color: rgba(77, 208, 225, 0.35);
-    border-color: rgba(77, 208, 225, 0.7);
+  background-color: rgba(77, 208, 225, 0.35);
+  border-color: rgba(77, 208, 225, 0.7);
 }
 
 .coreai-chat-agent-dropdown .unity-base-popup-field__text {
-    color: rgb(197, 220, 232);
-    font-size: 13px;
-    -unity-font-style: bold;
+  color: rgb(197, 220, 232);
+  font-size: 13px;
+  -unity-font-style: bold;
 }
 
 .coreai-chat-agent-dropdown .unity-base-popup-field__arrow {
-    -unity-background-image-tint-color: rgb(77, 208, 225);
+  -unity-background-image-tint-color: rgb(77, 208, 225);
 }
 
 /* Collapsed state — container hidden, FAB shown instead */
 .coreai-chat-container.coreai-collapsed {
-    display: none;
+  display: none;
 }
 
 /* Floating action button (restore the chat) */
 .coreai-chat-fab {
-    position: absolute;
-    right: 24px;
-    bottom: 24px;
-    width: 56px;
-    height: 56px;
-    border-radius: 28px;
-    background-color: rgba(17, 160, 181, 0.95);
-    border-width: 2px;
-    border-color: rgba(77, 208, 225, 0.75);
-    padding: 0;
-    align-items: center;
-    justify-content: center;
-    transition-duration: 0.15s;
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background-color: rgba(17, 160, 181, 0.95);
+  border-width: 2px;
+  border-color: rgba(77, 208, 225, 0.75);
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  transition-duration: 0.15s;
 }
 
 .coreai-chat-fab:hover {
-    background-color: rgba(77, 208, 225, 1);
-    border-color: rgba(200, 240, 255, 0.9);
+  background-color: rgba(77, 208, 225, 1);
+  border-color: rgba(200, 240, 255, 0.9);
 }
 
 .coreai-chat-fab-icon {
-    color: white;
-    font-size: 29px;
-    -unity-font-style: bold;
-    -unity-text-align: middle-center;
+  color: white;
+  font-size: 29px;
+  -unity-font-style: bold;
+  -unity-text-align: middle-center;
 }
 
 /* Scroll area — horizontal padding lives on the inner content container so the vertical scroller
    stays flush with the panel’s inner right edge (padding on ScrollView itself insets the whole
    scroll chrome and leaves a grey strip beside the track on some Unity versions). */
 .coreai-chat-scroll {
-    flex-grow: 1;
-    flex-shrink: 1;
-    min-height: 0;
-    width: 100%;
-    align-self: stretch;
-    padding-top: 16px;
-    padding-bottom: 16px;
-    padding-left: 0;
-    padding-right: 0;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  width: 100%;
+  align-self: stretch;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* Viewport: flex column so the content container can stretch to the full visible height (needed for
    justify-content: flex-end — otherwise min-height: 100% often resolves to 0 and bubbles stick to the top). */
 .coreai-chat-scroll .unity-scroll-view__content-viewport {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    flex-shrink: 1;
-    min-width: 0;
-    min-height: 0;
-    align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
 }
 
 /* Chat layout: chronological order in DOM (old → new), visually anchored to the bottom of the
@@ -197,179 +197,179 @@
    the scroll content by ~input height (old 143px); that broke percentage height and left a dead band. */
 .coreai-chat-scroll .unity-scroll-view__content-container,
 .coreai-chat-scroll #unity-content-container {
-    flex-grow: 1;
-    flex-shrink: 0;
-    width: 100%;
-    flex-direction: column;
-    justify-content: flex-end;
-    align-items: stretch;
-    align-self: stretch;
-    min-height: 100%;
-    padding-left: 14px;
-    padding-right: 0;
-    padding-bottom: 8px;
+  flex-grow: 1;
+  flex-shrink: 0;
+  width: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  align-self: stretch;
+  min-height: 100%;
+  padding-left: 14px;
+  padding-right: 0;
+  padding-bottom: 8px;
 }
 
 /* UI Toolkit flexbox quirk: ensure ScrollView can shrink in a column layout.
    Without min-height:0, large content may push/overlap the input row. */
 .coreai-chat-container > .coreai-chat-scroll {
-    min-height: 0;
+  min-height: 0;
 }
 
 /* Message rows */
 .coreai-message-row {
-    flex-direction: row;
-    margin-bottom: 14px;
-    align-items: flex-start;
+  flex-direction: row;
+  margin-bottom: 14px;
+  align-items: flex-start;
 }
 
 /* Typing indicator row is part of the fixed bottom stack */
 #coreai-typing-indicator {
-    flex-shrink: 0;
-    padding-left: 14px;
-    padding-right: 14px;
+  flex-shrink: 0;
+  padding-left: 14px;
+  padding-right: 14px;
 }
 
 /* Long in-flight hint (same stack as typing; aligned with bubble text — RedoSchool-style UX). */
 .coreai-long-request-hint {
-    flex-shrink: 0;
-    padding-left: 58px;
-    padding-right: 14px;
-    margin-bottom: 2px;
-    font-size: 17px;
-    -unity-font-style: italic;
-    color: rgba(197, 220, 232, 0.88);
-    white-space: normal;
+  flex-shrink: 0;
+  padding-left: 58px;
+  padding-right: 14px;
+  margin-bottom: 2px;
+  font-size: 17px;
+  -unity-font-style: italic;
+  color: rgba(197, 220, 232, 0.88);
+  white-space: normal;
 }
 
 .coreai-ai-row {
-    flex-direction: row;
-    justify-content: flex-start;
+  flex-direction: row;
+  justify-content: flex-start;
 }
 
 .coreai-user-row {
-    flex-direction: row-reverse;
-    justify-content: flex-start;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 
 /* Avatars */
 .coreai-avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 17px;
-    border-top-left-radius: 17px;
-    border-top-right-radius: 17px;
-    border-bottom-right-radius: 17px;
-    border-bottom-left-radius: 17px;
-    flex-shrink: 0;
-    border-width: 1.5px;
-    overflow: hidden;
-    align-items: center;
-    justify-content: center;
-    -unity-background-scale-mode: scale-and-crop;
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  border-top-left-radius: 17px;
+  border-top-right-radius: 17px;
+  border-bottom-right-radius: 17px;
+  border-bottom-left-radius: 17px;
+  flex-shrink: 0;
+  border-width: 1.5px;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  -unity-background-scale-mode: scale-and-crop;
 }
 
 .coreai-ai-avatar {
-    background-color: rgba(17, 160, 181, 0.3);
-    border-color: rgba(77, 208, 225, 0.6);
-    margin-right: 10px;
+  background-color: rgba(17, 160, 181, 0.3);
+  border-color: rgba(77, 208, 225, 0.6);
+  margin-right: 10px;
 }
 
 .coreai-user-avatar {
-    background-color: rgba(0, 120, 215, 0.3);
-    border-color: rgba(0, 150, 255, 0.6);
-    margin-left: 10px;
+  background-color: rgba(0, 120, 215, 0.3);
+  border-color: rgba(0, 150, 255, 0.6);
+  margin-left: 10px;
 }
 
 /* Message bubbles */
 .coreai-chat-message {
-    padding: 12px 16px;
-    border-radius: 14px;
-    font-size: 18px;
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
-    color: rgb(220, 232, 240);
-    max-width: 494px;
-    border-width: 1px;
-    flex-shrink: 1;
-    -unity-paragraph-spacing: 4px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 18px;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  color: rgb(220, 232, 240);
+  max-width: 494px;
+  border-width: 1px;
+  flex-shrink: 1;
+  -unity-paragraph-spacing: 4px;
 }
 
 .coreai-ai-message {
-    background-color: rgba(14, 30, 55, 0.85);
-    border-color: rgba(17, 160, 181, 0.25);
-    border-bottom-left-radius: 4px;
+  background-color: rgba(14, 30, 55, 0.85);
+  border-color: rgba(17, 160, 181, 0.25);
+  border-bottom-left-radius: 4px;
 }
 
 .coreai-user-message {
-    background-color: rgba(0, 90, 180, 0.45);
-    border-color: rgba(0, 120, 215, 0.6);
-    border-bottom-right-radius: 4px;
+  background-color: rgba(0, 90, 180, 0.45);
+  border-color: rgba(0, 120, 215, 0.6);
+  border-bottom-right-radius: 4px;
 }
 
 /* Optional in-chat tool-call diagnostics (CoreAiChatConfig.ShowToolCallsInChat) */
 .coreai-tool-call-row {
-    flex-direction: row;
-    justify-content: flex-start;
-    margin-top: 6px;
-    margin-bottom: 2px;
+  flex-direction: row;
+  justify-content: flex-start;
+  margin-top: 6px;
+  margin-bottom: 2px;
 }
 
 .coreai-tool-call-message {
-    background-color: rgba(40, 40, 48, 0.92);
-    border-color: rgba(160, 160, 180, 0.35);
-    border-bottom-left-radius: 4px;
-    font-size: 12px;
-    color: rgb(180, 188, 200);
-    max-width: 420px;
+  background-color: rgba(40, 40, 48, 0.92);
+  border-color: rgba(160, 160, 180, 0.35);
+  border-bottom-left-radius: 4px;
+  font-size: 12px;
+  color: rgb(180, 188, 200);
+  max-width: 420px;
 }
 
 /* Streaming active indicator */
 .coreai-streaming-active {
-    border-color: rgba(77, 208, 225, 0.5);
+  border-color: rgba(77, 208, 225, 0.5);
 }
 
 /* Input area */
 .coreai-chat-input-container {
-    flex-direction: row;
-    align-items: flex-end;
-    padding: 12px 14px 16px 14px;
-    background-color: rgba(6, 14, 30, 0.97);
-    border-top-width: 1px;
-    border-top-color: rgba(17, 160, 181, 0.2);
-    border-bottom-left-radius: 14px;
-    border-bottom-right-radius: 14px;
-    flex-shrink: 0;
+  flex-direction: row;
+  align-items: flex-end;
+  padding: 12px 14px 16px 14px;
+  background-color: rgba(6, 14, 30, 0.97);
+  border-top-width: 1px;
+  border-top-color: rgba(17, 160, 181, 0.2);
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+  flex-shrink: 0;
 }
 
 .coreai-chat-input-field {
-    flex-grow: 1;
-    flex-shrink: 1;
-    min-width: 0;
-    min-height: 40px;
-    max-height: 100px;
-    background-color: rgba(255, 255, 255, 0.04);
-    border-radius: 16px;
-    border-width: 1px;
-    border-color: rgba(17, 160, 181, 0.35);
-    color: rgb(197, 220, 232);
-    padding: 8px 16px;
-    margin-right: 10px;
-    font-size: 18px;
-    white-space: normal;
-    overflow: hidden;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 100px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 16px;
+  border-width: 1px;
+  border-color: rgba(17, 160, 181, 0.35);
+  color: rgb(197, 220, 232);
+  padding: 8px 16px;
+  margin-right: 10px;
+  font-size: 18px;
+  white-space: normal;
+  overflow: hidden;
 }
 
 .coreai-chat-input-field > .unity-base-text-field__input {
-    background-color: transparent;
-    border-width: 0;
-    color: rgb(197, 220, 232);
-    -unity-text-align: middle-left;
-    font-size: 18px;
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
+  background-color: transparent;
+  border-width: 0;
+  color: rgb(197, 220, 232);
+  -unity-text-align: middle-left;
+  font-size: 18px;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Unity versions differ in internal class names; ensure typed text is always visible */
@@ -378,56 +378,56 @@
 .coreai-chat-input-field .unity-text-field__input,
 .coreai-chat-input-field .unity-text-input,
 .coreai-chat-input-field .unity-text-input__text {
-    color: rgb(197, 220, 232);
-    -unity-caret-color: rgb(220, 232, 240);
-    -unity-selection-color: rgb(6, 14, 30);
-    -unity-selection-background-color: rgba(77, 208, 225, 0.55);
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
+  color: rgb(197, 220, 232);
+  -unity-caret-color: rgb(220, 232, 240);
+  -unity-selection-color: rgb(6, 14, 30);
+  -unity-selection-background-color: rgba(77, 208, 225, 0.55);
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .coreai-chat-input-field .unity-text-field__placeholder,
 .coreai-chat-input-field .unity-base-text-field__placeholder {
-    color: rgba(197, 220, 232, 0.55);
+  color: rgba(197, 220, 232, 0.55);
 }
 
 .coreai-chat-input-field:focus {
-    border-color: rgba(77, 208, 225, 0.7);
+  border-color: rgba(77, 208, 225, 0.7);
 }
 
 /* Send button */
 .coreai-chat-send-button {
-    width: 40px;
-    height: 40px;
-    background-color: rgba(77, 208, 225, 0.85);
-    color: white;
-    border-radius: 20px;
-    border-width: 0;
-    font-size: 23px;
-    transition-duration: 0.15s;
+  width: 40px;
+  height: 40px;
+  background-color: rgba(77, 208, 225, 0.85);
+  color: white;
+  border-radius: 20px;
+  border-width: 0;
+  font-size: 23px;
+  transition-duration: 0.15s;
 }
 
 .coreai-chat-send-button:hover {
-    background-color: rgba(77, 208, 225, 0.8);
+  background-color: rgba(77, 208, 225, 0.8);
 }
 
 .coreai-chat-send-button:active {
-    background-color: rgba(0, 120, 180, 0.8);
+  background-color: rgba(0, 120, 180, 0.8);
 }
 
 .coreai-chat-send-button-stop {
-    background-color: rgba(205, 46, 65, 0.95);
-    border-width: 1px;
-    border-color: rgba(255, 140, 140, 0.8);
+  background-color: rgba(205, 46, 65, 0.95);
+  border-width: 1px;
+  border-color: rgba(255, 140, 140, 0.8);
 }
 
 .coreai-chat-send-button-stop:hover {
-    background-color: rgba(225, 60, 80, 1);
+  background-color: rgba(225, 60, 80, 1);
 }
 
 .coreai-chat-send-button-stop:active {
-    background-color: rgba(180, 32, 50, 1);
+  background-color: rgba(180, 32, 50, 1);
 }
 
 /* Scrollbar: Telegram-style vertical ScrollView bar.
@@ -435,88 +435,88 @@
    .unity-scroll-view__vertical-scroller -> .unity-scroller__slider ->
    .unity-base-slider__tracker / .unity-base-slider__dragger. */
 .coreai-chat-scroll .unity-scroll-view__content-and-vertical-scroll-container {
-    position: relative;
-    flex-direction: row;
-    flex-grow: 1;
-    width: 100%;
-    align-items: stretch;
-    padding-left: 0;
-    padding-right: 0;
-    margin-left: 0;
-    margin-right: 0;
+  position: relative;
+  flex-direction: row;
+  flex-grow: 1;
+  width: 100%;
+  align-items: stretch;
+  padding-left: 0;
+  padding-right: 0;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller {
-    position: absolute;
-    right: 3px;
-    top: 0;
-    bottom: 0;
-    width: 9px;
-    min-width: 9px;
-    opacity: 1;
-    background-color: transparent;
-    margin-left: 0;
-    margin-right: 0;
-    padding-left: 0;
-    padding-right: 0;
-    border-width: 0;
+  position: absolute;
+  right: 3px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  min-width: 9px;
+  opacity: 1;
+  background-color: transparent;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-width: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__low-button,
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__high-button {
-    display: none;
-    width: 0;
-    height: 0;
-    min-width: 0;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border-width: 0;
+  display: none;
+  width: 0;
+  height: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border-width: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider {
-    flex-grow: 1;
-    align-self: stretch;
-    width: 9px;
-    min-width: 9px;
-    margin: 0;
-    padding: 0;
-    background-color: transparent;
-    border-width: 0;
+  flex-grow: 1;
+  align-self: stretch;
+  width: 9px;
+  min-width: 9px;
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  border-width: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller #unity-tracker,
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__tracker {
-    width: 7px;
-    min-width: 7px;
-    margin-left: 1px;
-    margin-right: 1px;
-    background-color: rgba(15, 21, 31, 0.96);
-    border-radius: 999px;
-    border-width: 0;
+  width: 7px;
+  min-width: 7px;
+  margin-left: 1px;
+  margin-right: 1px;
+  background-color: rgba(15, 21, 31, 0.96);
+  border-radius: 999px;
+  border-width: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger {
-    width: 5px;
-    min-width: 5px;
-    margin-left: 2px;
-    margin-right: 2px;
-    background-color: rgba(116, 124, 135, 0.96);
-    border-radius: 999px;
-    border-width: 0;
+  width: 5px;
+  min-width: 5px;
+  margin-left: 2px;
+  margin-right: 2px;
+  background-color: rgba(116, 124, 135, 0.96);
+  border-radius: 999px;
+  border-width: 0;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger:hover,
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger:active {
-    background-color: rgba(150, 157, 167, 1);
+  background-color: rgba(150, 157, 167, 1);
 }
 
 /* Typing indicator */
 .coreai-typing-message {
-    color: rgba(77, 208, 225, 0.7);
-    font-size: 17px;
-    -unity-font-style: italic;
-    border-width: 0;
-    background-color: rgba(14, 30, 55, 0.5);
-    padding: 8px 14px;
+  color: rgba(77, 208, 225, 0.7);
+  font-size: 17px;
+  -unity-font-style: italic;
+  border-width: 0;
+  background-color: rgba(14, 30, 55, 0.5);
+  padding: 8px 14px;
 }

@@ -21,13 +21,26 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
     [RequireComponent(typeof(CharacterController))]
     public sealed class ArenaCompanionBot : MonoBehaviour
     {
-        [SerializeField] private float followDistance = 2.5f;
-        [SerializeField] private float moveSpeed = 6f;
-        [SerializeField] private float gravity = -25f;
-        [SerializeField] private float enemyAcquireRadius = 12f;
-        [SerializeField] private float attackRange = 2.2f;
-        [SerializeField] private float attackCooldown = 0.55f;
-        [SerializeField] private int attackDamage = 18;
+        [SerializeField]
+        private float followDistance = 2.5f;
+
+        [SerializeField]
+        private float moveSpeed = 6f;
+
+        [SerializeField]
+        private float gravity = -25f;
+
+        [SerializeField]
+        private float enemyAcquireRadius = 12f;
+
+        [SerializeField]
+        private float attackRange = 2.2f;
+
+        [SerializeField]
+        private float attackCooldown = 0.55f;
+
+        [SerializeField]
+        private int attackDamage = 18;
 
         private int _attackDamageRuntime;
         private float _attackCooldownRuntime;

@@ -6,7 +6,8 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 {
     public sealed class ArenaPlayerHealth : MonoBehaviour
     {
-        [SerializeField] private int maxHealth = 100;
+        [SerializeField]
+        private int maxHealth = 100;
 
         public int Current { get; private set; }
         public int Max => _runtimeMax > 0 ? _runtimeMax : maxHealth;

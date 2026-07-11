@@ -8,10 +8,17 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 {
     public class SymbiosisUpgradeCardUI : MonoBehaviour
     {
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI descriptionText;
-        [SerializeField] private Image iconImage;
-        [SerializeField] private Button cardButton;
+        [SerializeField]
+        private TextMeshProUGUI titleText;
+
+        [SerializeField]
+        private TextMeshProUGUI descriptionText;
+
+        [SerializeField]
+        private Image iconImage;
+
+        [SerializeField]
+        private Button cardButton;
 
         private SymbiosisUpgradeData _data;
         private Action<SymbiosisUpgradeData> _onSelected;

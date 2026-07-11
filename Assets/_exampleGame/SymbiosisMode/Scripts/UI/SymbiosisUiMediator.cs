@@ -9,11 +9,15 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
     /// </summary>
     public class SymbiosisUiMediator : MonoBehaviour
     {
-        [Header("UI References")] public RectTransform HealthFill;
+        [Header("UI References")]
+        public RectTransform HealthFill;
+
         public TextMeshProUGUI WaveText;
         public Image GhostColorIndicator;
 
-        [Header("Game References")] private SymbiosisGhostPlayer _localGhost;
+        [Header("Game References")]
+        private SymbiosisGhostPlayer _localGhost;
+
         private ArenaSurvival.Infrastructure.ArenaSurvivalSession _session;
 
         private float _maxFillWidth = 390f;

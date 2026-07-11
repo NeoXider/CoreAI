@@ -616,7 +616,8 @@ namespace CoreAI.Infrastructure.Llm
         public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             // Streaming bypasses the non-streaming tool loop, duplicate detection, and error guard.
             if (options?.Tools != null && options.Tools.Count > 0)

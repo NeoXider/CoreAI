@@ -311,7 +311,8 @@ namespace CoreAI
         public static async IAsyncEnumerable<string> StreamAsync(
             string userMessage,
             string roleId = BuiltInAgentRoleIds.SmartChat,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
             await foreach (LlmStreamChunk chunk in

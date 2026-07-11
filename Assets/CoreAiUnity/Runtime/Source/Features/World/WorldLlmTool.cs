@@ -174,7 +174,8 @@ namespace CoreAI.Infrastructure.Llm
             bool worldPositionStays = false,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
-            [Description("Text for show_text")] string? textToDisplay = null,
+            [Description("Text for show_text")]
+            string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             [Description(
@@ -231,7 +232,8 @@ namespace CoreAI.Infrastructure.Llm
             bool worldPositionStays = false,
             [Description("Name of the animation to play/stop")]
             string? animationName = null,
-            [Description("Text for show_text")] string? textToDisplay = null,
+            [Description("Text for show_text")]
+            string? textToDisplay = null,
             [Description("Volume level 0.0-1.0 for set_volume")]
             float volume = 1f,
             [Description(

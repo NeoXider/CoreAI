@@ -5,19 +5,41 @@ namespace CoreAI.ExampleGame.ArenaCamera.Infrastructure
 {
     public sealed class ArenaFollowCamera : MonoBehaviour
     {
-        [SerializeField] private Transform target;
-        [Header("Orbit")] [SerializeField] private float distance = 7.5f;
-        [SerializeField] private float height = 2.2f;
-        [SerializeField] private float yawDegrees = 0f;
-        [SerializeField] private float pitchDegrees = 18f;
-        [SerializeField] private float rotationSpeed = 0.12f;
-        [SerializeField] private float minPitch = -20f;
-        [SerializeField] private float maxPitch = 65f;
+        [SerializeField]
+        private Transform target;
 
-        [Header("Smoothing")] [SerializeField] private float positionSmooth = 10f;
-        [SerializeField] private float lookSmooth = 12f;
+        [Header("Orbit")]
+        [SerializeField]
+        private float distance = 7.5f;
 
-        [Header("Input")] [Tooltip("Вращать камеру при зажатой ПКМ.")] [SerializeField]
+        [SerializeField]
+        private float height = 2.2f;
+
+        [SerializeField]
+        private float yawDegrees = 0f;
+
+        [SerializeField]
+        private float pitchDegrees = 18f;
+
+        [SerializeField]
+        private float rotationSpeed = 0.12f;
+
+        [SerializeField]
+        private float minPitch = -20f;
+
+        [SerializeField]
+        private float maxPitch = 65f;
+
+        [Header("Smoothing")]
+        [SerializeField]
+        private float positionSmooth = 10f;
+
+        [SerializeField]
+        private float lookSmooth = 12f;
+
+        [Header("Input")]
+        [Tooltip("Вращать камеру при зажатой ПКМ.")]
+        [SerializeField]
         private bool rotateWhileRightMouseHeld = true;
 
         public void SetTarget(Transform t)

@@ -6,15 +6,29 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         order = 10)]
     public sealed class ArenaUnitBaselineConfig : ScriptableObject
     {
-        [SerializeField] private float playerMaxHealth = 100f;
-        [SerializeField] private float playerHpRegenPerSecond;
-        [SerializeField] private float playerMeleeDamage = 28f;
-        [SerializeField] private float playerAttackCooldown = 0.45f;
+        [SerializeField]
+        private float playerMaxHealth = 100f;
 
-        [SerializeField] private float companionMaxHealth = 80f;
-        [SerializeField] private float companionHpRegenPerSecond;
-        [SerializeField] private float companionMeleeDamage = 18f;
-        [SerializeField] private float companionAttackCooldown = 0.55f;
+        [SerializeField]
+        private float playerHpRegenPerSecond;
+
+        [SerializeField]
+        private float playerMeleeDamage = 28f;
+
+        [SerializeField]
+        private float playerAttackCooldown = 0.45f;
+
+        [SerializeField]
+        private float companionMaxHealth = 80f;
+
+        [SerializeField]
+        private float companionHpRegenPerSecond;
+
+        [SerializeField]
+        private float companionMeleeDamage = 18f;
+
+        [SerializeField]
+        private float companionAttackCooldown = 0.55f;
 
         public float PlayerMaxHealth => playerMaxHealth;
         public float PlayerHpRegenPerSecond => playerHpRegenPerSecond;

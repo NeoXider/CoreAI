@@ -1,6 +1,7 @@
 <ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements"
          noNamespaceSchemaLocation="../../../../../../../UIElementsSchema/UIElements.xsd"
          editor-extension-mode="False">
-    <Style src="project://database/Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss?fileID=7433441132597879392&amp;guid=54e4e52b0db8c294fb66ec9495faa77f&amp;type=3#CoreAiChat"/>
-    <CoreAI.Chat.CoreAiChatMessageBubbleElement is-user="false" message-text="Message text"/>
+  <Style
+    src="project://database/Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss?fileID=7433441132597879392&amp;guid=54e4e52b0db8c294fb66ec9495faa77f&amp;type=3#CoreAiChat"/>
+  <CoreAI.Chat.CoreAiChatMessageBubbleElement is-user="false" message-text="Message text"/>
 </ui:UXML>

@@ -17,7 +17,8 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     /// </summary>
     public sealed class ArenaCreatorWavePlanner : MonoBehaviour
     {
-        [SerializeField] private bool enabledInExample = true;
+        [SerializeField]
+        private bool enabledInExample = true;
 
         [Tooltip("After this many consecutive invalid Creator responses, switch to the linear schedule only.")]
         [SerializeField]

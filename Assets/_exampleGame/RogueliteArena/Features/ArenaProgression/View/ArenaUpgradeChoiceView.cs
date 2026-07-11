@@ -7,8 +7,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
 {
     public sealed class ArenaUpgradeChoiceView : MonoBehaviour
     {
-        [SerializeField] private ArenaUpgradePresentationConfig presentation;
-        [SerializeField] private ArenaUpgradeCardWidget[] cardPool = new ArenaUpgradeCardWidget[5];
+        [SerializeField]
+        private ArenaUpgradePresentationConfig presentation;
+
+        [SerializeField]
+        private ArenaUpgradeCardWidget[] cardPool = new ArenaUpgradeCardWidget[5];
 
         private Action<ArenaUpgradeOffer> _callback;
 

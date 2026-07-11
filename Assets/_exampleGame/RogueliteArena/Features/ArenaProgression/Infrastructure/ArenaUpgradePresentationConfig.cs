@@ -7,14 +7,29 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         order = 21)]
     public sealed class ArenaUpgradePresentationConfig : ScriptableObject
     {
-        [SerializeField] private Sprite frameCommon;
-        [SerializeField] private Sprite frameRare;
-        [SerializeField] private Sprite frameEpic;
-        [SerializeField] private Sprite frameLegendary;
-        [SerializeField] private Material materialCommon;
-        [SerializeField] private Material materialRare;
-        [SerializeField] private Material materialEpic;
-        [SerializeField] private Material materialLegendary;
+        [SerializeField]
+        private Sprite frameCommon;
+
+        [SerializeField]
+        private Sprite frameRare;
+
+        [SerializeField]
+        private Sprite frameEpic;
+
+        [SerializeField]
+        private Sprite frameLegendary;
+
+        [SerializeField]
+        private Material materialCommon;
+
+        [SerializeField]
+        private Material materialRare;
+
+        [SerializeField]
+        private Material materialEpic;
+
+        [SerializeField]
+        private Material materialLegendary;
 
         public Sprite GetFrame(ArenaRarity r)
         {

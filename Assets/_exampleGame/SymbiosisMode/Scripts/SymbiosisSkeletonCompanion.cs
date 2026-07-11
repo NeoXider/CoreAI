@@ -15,14 +15,19 @@ namespace CoreAI.ExampleGame.SymbiosisMode
     [RequireComponent(typeof(NetworkObject))]
     public class SymbiosisSkeletonCompanion : NetworkBehaviour
     {
-        [Header("AI Settings")] public CompanionAiMode SelectedAiMode = CompanionAiMode.Off;
+        [Header("AI Settings")]
+        public CompanionAiMode SelectedAiMode = CompanionAiMode.Off;
 
-        [Header("Game Settings (SO)")] [SerializeField]
+        [Header("Game Settings (SO)")]
+        [SerializeField]
         private Settings.SymbiosisGameSettings gameSettings;
 
-        [Header("References")] public SymbiosisGhostPlayer MyGhostOwner;
+        [Header("References")]
+        public SymbiosisGhostPlayer MyGhostOwner;
 
-        [Header("Stats")] public float FollowRadius = 2f;
+        [Header("Stats")]
+        public float FollowRadius = 2f;
+
         public float FollowSpeed = 4f;
         public float VampirismRatio = 0.5f; // 50% of damage becomes heal
         public int Damage = 10;

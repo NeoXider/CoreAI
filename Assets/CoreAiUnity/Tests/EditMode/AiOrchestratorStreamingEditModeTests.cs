@@ -61,7 +61,8 @@ namespace CoreAI.Tests.EditMode
 
             public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
                 AiTaskRequest task,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 StreamCalls++;
                 foreach (string part in _parts)
@@ -100,7 +101,8 @@ namespace CoreAI.Tests.EditMode
 
             public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
                 AiTaskRequest task,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 TaskCompletionSource<string> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 lock (_lock)
@@ -390,7 +392,8 @@ namespace CoreAI.Tests.EditMode
 
             public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
                 AiTaskRequest task,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 yield return new LlmStreamChunk { Text = "first-chunk" };
 

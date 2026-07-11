@@ -15,7 +15,10 @@ namespace CoreAI.ExampleGame.SymbiosisMode.Settings
     public class SymbiosisUpgradeData : ScriptableObject
     {
         public string UpgradeName;
-        [TextArea(2, 4)] public string Description;
+
+        [TextArea(2, 4)]
+        public string Description;
+
         public UpgradeType Type;
         public float Amount;
     }

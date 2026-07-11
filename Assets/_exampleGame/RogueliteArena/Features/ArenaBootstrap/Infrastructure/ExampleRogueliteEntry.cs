@@ -9,9 +9,11 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
     /// </summary>
     public sealed class ExampleRogueliteEntry : MonoBehaviour
     {
-        [SerializeField] private bool logOnStart = true;
+        [SerializeField]
+        private bool logOnStart = true;
 
-        [Tooltip("Если задан — волны и игрок создаются этим компонентом на сцене (рекомендуется).")] [SerializeField]
+        [Tooltip("Если задан — волны и игрок создаются этим компонентом на сцене (рекомендуется).")]
+        [SerializeField]
         private ArenaSurvivalProceduralSetup sceneArenaBootstrap;
 
         [Tooltip("Если нет sceneArenaBootstrap — создать ArenaSurvivalRoot с процедурной ареной при старте.")]

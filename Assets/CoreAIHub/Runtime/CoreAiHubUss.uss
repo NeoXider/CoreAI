@@ -4,59 +4,59 @@
    styling on top, or override these classes in your own project sheet. */
 
 .coreai-hub-root {
-    position: absolute;
-    top: 24px;
-    left: 24px;
-    width: 720px;
-    height: 640px;
-    background-color: rgba(6, 14, 30, 0.93);
-    border-radius: 16px;
-    border-width: 2px;
-    border-color: rgba(17, 160, 181, 0.35);
-    flex-direction: column;
-    overflow: hidden;
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  width: 720px;
+  height: 640px;
+  background-color: rgba(6, 14, 30, 0.93);
+  border-radius: 16px;
+  border-width: 2px;
+  border-color: rgba(17, 160, 181, 0.35);
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Collapsed state: shrink to a small bar holding just the toggle button. */
 .coreai-hub-root.coreai-hub--collapsed {
-    width: 132px;
-    height: 34px;
+  width: 132px;
+  height: 34px;
 }
 
 .coreai-hub-root.coreai-hub--collapsed .coreai-hub-tabbar,
 .coreai-hub-root.coreai-hub--collapsed .coreai-hub-content {
-    display: none;
+  display: none;
 }
 
 /* Collapse/expand toggle (top-right), independent of the tab bar. */
 .coreai-hub-collapse {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    margin: 0;
-    background-color: rgba(17, 160, 181, 0.18);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.5);
-    border-radius: 14px;
-    color: rgb(197, 220, 232);
-    font-size: 18px;
-    -unity-font-style: bold;
-    -unity-text-align: middle-center;
-    transition-duration: 0.15s;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  background-color: rgba(17, 160, 181, 0.18);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.5);
+  border-radius: 14px;
+  color: rgb(197, 220, 232);
+  font-size: 18px;
+  -unity-font-style: bold;
+  -unity-text-align: middle-center;
+  transition-duration: 0.15s;
 }
 
 .coreai-hub-collapse:hover {
-    background-color: rgba(77, 208, 225, 0.4);
-    border-color: rgba(200, 240, 255, 0.9);
+  background-color: rgba(77, 208, 225, 0.4);
+  border-color: rgba(200, 240, 255, 0.9);
 }
 
 /* When collapsed the toggle centres inside the small bar. */
 .coreai-hub-root.coreai-hub--collapsed .coreai-hub-collapse {
-    top: 3px;
-    right: 3px;
+  top: 3px;
+  right: 3px;
 }
 
 /* Tab bar: a vertical ScrollView so a tab row taller than max-height (more tabs than fit) scrolls
@@ -64,109 +64,109 @@
    ScrollView's content container, since that — not the ScrollView root — is what actually parents
    the tab buttons added in CoreAiHubWindow.RebuildTabs. */
 .coreai-hub-tabbar {
-    flex-shrink: 0;
-    max-height: 76px;
-    background-color: rgba(10, 22, 45, 0.95);
-    border-bottom-width: 1px;
-    border-bottom-color: rgba(17, 160, 181, 0.3);
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
+  flex-shrink: 0;
+  max-height: 76px;
+  background-color: rgba(10, 22, 45, 0.95);
+  border-bottom-width: 1px;
+  border-bottom-color: rgba(17, 160, 181, 0.3);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
 }
 
 .coreai-hub-tabbar .unity-scroll-view__content-container {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    /* Right padding reserves space so wrapped tabs never sit under the absolute-positioned
-       collapse button (28px wide, 10px from the right edge). */
-    padding: 8px 44px 8px 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  /* Right padding reserves space so wrapped tabs never sit under the absolute-positioned
+     collapse button (28px wide, 10px from the right edge). */
+  padding: 8px 44px 8px 8px;
 }
 
 .coreai-hub-tab {
-    height: 34px;
-    margin-right: 8px;
-    margin-bottom: 4px;
-    padding-left: 16px;
-    padding-right: 16px;
-    background-color: rgba(17, 160, 181, 0.15);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.35);
-    border-radius: 17px;
-    color: rgb(197, 220, 232);
-    font-size: 15px;
-    -unity-font-style: bold;
-    transition-duration: 0.15s;
+  height: 34px;
+  margin-right: 8px;
+  margin-bottom: 4px;
+  padding-left: 16px;
+  padding-right: 16px;
+  background-color: rgba(17, 160, 181, 0.15);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.35);
+  border-radius: 17px;
+  color: rgb(197, 220, 232);
+  font-size: 15px;
+  -unity-font-style: bold;
+  transition-duration: 0.15s;
 }
 
 .coreai-hub-tab:hover {
-    background-color: rgba(77, 208, 225, 0.3);
-    border-color: rgba(77, 208, 225, 0.7);
+  background-color: rgba(77, 208, 225, 0.3);
+  border-color: rgba(77, 208, 225, 0.7);
 }
 
 .coreai-hub-tab-active {
-    background-color: rgba(77, 208, 225, 0.85);
-    border-color: rgba(200, 240, 255, 0.9);
-    color: rgb(6, 14, 30);
+  background-color: rgba(77, 208, 225, 0.85);
+  border-color: rgba(200, 240, 255, 0.9);
+  color: rgb(6, 14, 30);
 }
 
 /* Content area */
 .coreai-hub-content {
-    flex-grow: 1;
-    flex-shrink: 1;
-    min-height: 0;
-    padding: 16px 16px 16px 16px;
-    overflow: hidden;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  padding: 16px 16px 16px 16px;
+  overflow: hidden;
 }
 
 .coreai-hub-empty {
-    flex-grow: 1;
-    color: rgba(197, 220, 232, 0.6);
-    font-size: 16px;
-    -unity-font-style: italic;
-    -unity-text-align: middle-center;
-    white-space: normal;
+  flex-grow: 1;
+  color: rgba(197, 220, 232, 0.6);
+  font-size: 16px;
+  -unity-font-style: italic;
+  -unity-text-align: middle-center;
+  white-space: normal;
 }
 
 /* Built-in About page */
 .coreai-hub-about {
-    flex-grow: 1;
+  flex-grow: 1;
 }
 
 .coreai-hub-about-title {
-    color: rgb(77, 208, 225);
-    font-size: 22px;
-    -unity-font-style: bold;
-    margin-bottom: 12px;
+  color: rgb(77, 208, 225);
+  font-size: 22px;
+  -unity-font-style: bold;
+  margin-bottom: 12px;
 }
 
 .coreai-hub-about-body {
-    color: rgb(220, 232, 240);
-    font-size: 16px;
-    white-space: normal;
+  color: rgb(220, 232, 240);
+  font-size: 16px;
+  white-space: normal;
 }
 
 /* Built-in Settings / Statistics page controls */
 .coreai-hub-page {
-    flex-grow: 1;
-    min-height: 0;
+  flex-grow: 1;
+  min-height: 0;
 }
 
 .coreai-hub-page-body {
-    flex-grow: 1;
-    padding-right: 8px;
+  flex-grow: 1;
+  padding-right: 8px;
 }
 
 .coreai-hub-field {
-    margin-bottom: 8px;
-    min-height: 32px;
-    color: rgb(220, 232, 240);
+  margin-bottom: 8px;
+  min-height: 32px;
+  color: rgb(220, 232, 240);
 }
 
 .coreai-hub-field .unity-base-field__label {
-    min-width: 132px;
-    color: rgb(220, 232, 240);
-    font-size: 13px;
-    -unity-font-style: bold;
+  min-width: 132px;
+  color: rgb(220, 232, 240);
+  font-size: 13px;
+  -unity-font-style: bold;
 }
 
 .coreai-hub-field .unity-text-input,
@@ -176,14 +176,14 @@
 .coreai-hub-field .unity-base-popup-field__input,
 .coreai-hub-field .unity-popup-field__input,
 .coreai-hub-field .unity-popup-field__text {
-    min-height: 30px;
-    background-color: rgba(8, 16, 32, 0.98);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.35);
-    border-radius: 4px;
-    color: rgb(232, 246, 250);
-    padding-left: 8px;
-    padding-right: 8px;
+  min-height: 30px;
+  background-color: rgba(8, 16, 32, 0.98);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.35);
+  border-radius: 4px;
+  color: rgb(232, 246, 250);
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .coreai-hub-field .unity-text-input:focus,
@@ -193,16 +193,16 @@
 .coreai-hub-field .unity-base-popup-field__input:focus,
 .coreai-hub-field .unity-popup-field__input:focus,
 .coreai-hub-field .unity-popup-field__text:focus {
-    border-color: rgba(96, 230, 245, 0.9);
-    background-color: rgba(10, 24, 45, 1);
+  border-color: rgba(96, 230, 245, 0.9);
+  background-color: rgba(10, 24, 45, 1);
 }
 
 .coreai-hub-field:disabled {
-    opacity: 0.72;
+  opacity: 0.72;
 }
 
 .coreai-hub-field:disabled .unity-base-field__label {
-    color: rgba(200, 220, 230, 0.82);
+  color: rgba(200, 220, 230, 0.82);
 }
 
 .coreai-hub-field:disabled .unity-text-input,
@@ -212,46 +212,46 @@
 .coreai-hub-field:disabled .unity-base-popup-field__input,
 .coreai-hub-field:disabled .unity-popup-field__input,
 .coreai-hub-field:disabled .unity-popup-field__text {
-    background-color: rgba(12, 18, 30, 0.82);
-    border-color: rgba(160, 185, 195, 0.28);
-    color: rgba(215, 230, 236, 0.72);
+  background-color: rgba(12, 18, 30, 0.82);
+  border-color: rgba(160, 185, 195, 0.28);
+  color: rgba(215, 230, 236, 0.72);
 }
 
 .coreai-hub-settings-group {
-    margin-top: 2px;
-    margin-bottom: 6px;
+  margin-top: 2px;
+  margin-bottom: 6px;
 }
 
 .coreai-hub-settings-group-title {
-    margin-top: 10px;
-    margin-bottom: 8px;
+  margin-top: 10px;
+  margin-bottom: 8px;
 }
 
 .coreai-hub-actions {
-    margin-top: 10px;
-    margin-bottom: 4px;
+  margin-top: 10px;
+  margin-bottom: 4px;
 }
 
 .coreai-hub-action-button {
-    height: 30px;
-    margin-right: 8px;
-    margin-bottom: 4px;
-    padding-left: 14px;
-    padding-right: 14px;
-    background-color: rgba(17, 160, 181, 0.18);
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.45);
-    border-radius: 6px;
-    color: rgb(220, 246, 250);
-    -unity-font-style: bold;
+  height: 30px;
+  margin-right: 8px;
+  margin-bottom: 4px;
+  padding-left: 14px;
+  padding-right: 14px;
+  background-color: rgba(17, 160, 181, 0.18);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.45);
+  border-radius: 6px;
+  color: rgb(220, 246, 250);
+  -unity-font-style: bold;
 }
 
 .coreai-hub-action-button:hover {
-    background-color: rgba(77, 208, 225, 0.32);
-    border-color: rgba(120, 236, 250, 0.8);
+  background-color: rgba(77, 208, 225, 0.32);
+  border-color: rgba(120, 236, 250, 0.8);
 }
 
 .coreai-hub-status {
-    color: rgb(77, 208, 225);
-    -unity-font-style: bold;
+  color: rgb(77, 208, 225);
+  -unity-font-style: bold;
 }

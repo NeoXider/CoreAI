@@ -8,10 +8,17 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 {
     public sealed class ArenaEnemyBrain : MonoBehaviour
     {
-        [SerializeField] private float moveSpeed = 2.8f;
-        [SerializeField] private int maxHp = 30;
-        [SerializeField] private float contactTick = 0.35f;
-        [SerializeField] private int contactDamage = 8;
+        [SerializeField]
+        private float moveSpeed = 2.8f;
+
+        [SerializeField]
+        private int maxHp = 30;
+
+        [SerializeField]
+        private float contactTick = 0.35f;
+
+        [SerializeField]
+        private int contactDamage = 8;
 
         private int _hp;
         private float _moveSpeedRuntime;

@@ -96,7 +96,8 @@ namespace CoreAI.Infrastructure.Llm
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             bool primaryFailed = false;
             bool committed = false;

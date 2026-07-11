@@ -6,8 +6,11 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
     [RequireComponent(typeof(CharacterController))]
     public sealed class ArenaPlayerMotor : MonoBehaviour
     {
-        [SerializeField] private float moveSpeed = 7f;
-        [SerializeField] private float gravity = -25f;
+        [SerializeField]
+        private float moveSpeed = 7f;
+
+        [SerializeField]
+        private float gravity = -25f;
 
         private CharacterController _cc;
         private float _vy;

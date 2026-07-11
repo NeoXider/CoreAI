@@ -6,10 +6,17 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 {
     public sealed class ArenaPlayerMelee : MonoBehaviour
     {
-        [SerializeField] private float range = 2.2f;
-        [SerializeField] private float cooldown = 0.45f;
-        [SerializeField] private int damage = 28;
-        [SerializeField] private LayerMask enemyLayers = ~0;
+        [SerializeField]
+        private float range = 2.2f;
+
+        [SerializeField]
+        private float cooldown = 0.45f;
+
+        [SerializeField]
+        private int damage = 28;
+
+        [SerializeField]
+        private LayerMask enemyLayers = ~0;
 
         private float _nextHit;
         private int _damageRuntime;

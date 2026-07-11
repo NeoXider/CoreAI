@@ -112,7 +112,8 @@ namespace CoreAI.Infrastructure.Llm
 
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             if (!TryEnter(out string rejectReason))
             {

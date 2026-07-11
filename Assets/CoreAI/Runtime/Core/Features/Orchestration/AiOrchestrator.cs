@@ -825,8 +825,8 @@ namespace CoreAI.Ai
                     LlmStreamChunk current;
                     try
                     {
-            // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, so the continuation
-            // must resume on UnitySynchronizationContext (mirrors RunStreamingAsync).
+                        // WHY: No ConfigureAwait(false): WebGL has no working ThreadPool, so the continuation
+                        // must resume on UnitySynchronizationContext (mirrors RunStreamingAsync).
                         if (!await enumerator.MoveNextAsync())
                         {
                             break;

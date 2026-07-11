@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -88,7 +88,8 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             if (_disposed)
             {

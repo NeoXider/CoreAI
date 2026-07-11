@@ -7,12 +7,18 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 {
     public class SymbiosisCardSelectionManager : MonoBehaviour
     {
-        [Header("References")] [SerializeField]
+        [Header("References")]
+        [SerializeField]
         private SymbiosisGameSettings gameSettings;
 
-        [SerializeField] private GameObject cardsPanel;
-        [SerializeField] private Transform cardsContainer;
-        [SerializeField] private SymbiosisUpgradeCardUI cardPrefab;
+        [SerializeField]
+        private GameObject cardsPanel;
+
+        [SerializeField]
+        private Transform cardsContainer;
+
+        [SerializeField]
+        private SymbiosisUpgradeCardUI cardPrefab;
 
         private ArenaSurvivalSession _session;
 

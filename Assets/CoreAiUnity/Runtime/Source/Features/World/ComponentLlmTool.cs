@@ -91,9 +91,12 @@ namespace CoreAI.Infrastructure.Llm
             float floatValue = 0f,
             [Description("Boolean value encoded as 0 or 1")]
             int boolValue = 0,
-            [Description("Vector X value")] float x = 0f,
-            [Description("Vector Y value")] float y = 0f,
-            [Description("Vector Z value")] float z = 0f,
+            [Description("Vector X value")]
+            float x = 0f,
+            [Description("Vector Y value")]
+            float y = 0f,
+            [Description("Vector Z value")]
+            float z = 0f,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(action))

@@ -9,9 +9,11 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     [RequireComponent(typeof(Collider))]
     public sealed class ArenaAiRoomEnterTrigger : MonoBehaviour
     {
-        [SerializeField] private string roomId = "main";
+        [SerializeField]
+        private string roomId = "main";
 
-        [Tooltip("Один раз за забег на этот коллайдер.")] [SerializeField]
+        [Tooltip("Один раз за забег на этот коллайдер.")]
+        [SerializeField]
         private bool fireOnce = true;
 
         private bool _fired;

@@ -19,7 +19,9 @@ namespace CoreAI.ExampleGame.SymbiosisMode
         private ILlmClient _llmClient;
         private CoreAILifetimeScope _scope;
 
-        [Header("Status")] [SerializeField] private bool _toolsRegistered;
+        [Header("Status")]
+        [SerializeField]
+        private bool _toolsRegistered;
 
         private void Start()
         {

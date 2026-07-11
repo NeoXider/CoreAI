@@ -8,8 +8,11 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     [Serializable]
     public sealed class ArenaLinearWaveSchedule : IArenaWaveSchedule
     {
-        [SerializeField] private int baseEnemyCount = 2;
-        [SerializeField] private int extraPerWave = 2;
+        [SerializeField]
+        private int baseEnemyCount = 2;
+
+        [SerializeField]
+        private int extraPerWave = 2;
 
         public int GetEnemyCountForWave(int waveIndex1Based)
         {

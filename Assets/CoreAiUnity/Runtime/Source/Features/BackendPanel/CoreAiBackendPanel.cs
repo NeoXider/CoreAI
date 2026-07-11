@@ -34,16 +34,22 @@ namespace CoreAI.UI
 
         [SerializeField]
         private TMP_InputField? baseUrlInput;
+
         [SerializeField]
         private TMP_InputField? apiKeyInput;
+
         [SerializeField]
         private TMP_InputField? modelInput;
+
         [SerializeField]
         private Button? applyButton;
+
         [SerializeField]
         private Button? testButton;
+
         [SerializeField]
         private Button? closeButton;
+
         [SerializeField]
         private TMP_Text? statusText;
 

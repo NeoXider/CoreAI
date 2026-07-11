@@ -10,7 +10,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
     /// </summary>
     public sealed class ArenaSurvivalSession : MonoBehaviour, IArenaSessionAuthority
     {
-        [SerializeField] private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
+        [SerializeField]
+        private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
 
         public bool IsAuthoritativeSimulation => simulationRole == ArenaSimulationRole.AuthoritativeHost;
 

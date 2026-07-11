@@ -305,7 +305,8 @@ namespace CoreAI.Tests.PlayMode
 
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
-                [EnumeratorCancellation] CancellationToken ct = default)
+                [EnumeratorCancellation]
+                CancellationToken ct = default)
             {
                 int idx = Interlocked.Increment(ref _callCount);
                 if (idx == 1)

@@ -303,8 +303,8 @@ namespace CoreAI.Ai
             List<string> names = new();
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
-            // WHY: Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
-            // only when at least one of their tools survives the allowlist.
+                // WHY: Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
+                // only when at least one of their tools survives the allowlist.
                 bool declaresTools = kvp.Value?.Tools != null && kvp.Value.Tools.Count > 0;
                 bool anyToolAllowed = !declaresTools || SkillSetToolResolver.BuildDescriptors(kvp.Value)
                     .Any(d => IsAllowed(d.Name, allowedToolNames));

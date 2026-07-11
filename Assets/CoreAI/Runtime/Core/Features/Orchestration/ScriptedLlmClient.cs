@@ -44,7 +44,8 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             string reply = ResolveReply(request);
             if (!string.IsNullOrEmpty(reply))

@@ -17,15 +17,22 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         [Range(0f, 0.25f)]
         private float enemyCountBreathAmplitude = 0.1f;
 
-        [Tooltip("Период колебания в волнах (например 3.5 — паттерн сложнее-легче).")] [SerializeField] [Min(0.5f)]
+        [Tooltip("Период колебания в волнах (например 3.5 — паттерн сложнее-легче).")]
+        [SerializeField]
+        [Min(0.5f)]
         private float enemyCountBreathPeriodWaves = 4f;
 
-        [SerializeField] private float enemyCountPhaseOffset;
+        [SerializeField]
+        private float enemyCountPhaseOffset;
 
-        [Header("Суммарный рост угрозы (HP / урон / скорость к концу рана)")] [SerializeField] [Min(0.1f)]
+        [Header("Суммарный рост угрозы (HP / урон / скорость к концу рана)")]
+        [SerializeField]
+        [Min(0.1f)]
         private float rampStart = 1f;
 
-        [SerializeField] [Min(0.1f)] private float rampEnd = 2.45f;
+        [SerializeField]
+        [Min(0.1f)]
+        private float rampEnd = 2.45f;
 
         [Tooltip(
             "Опционально: по оси X нормализованный прогресс 0..1 по волне, по Y множитель 0..1 к интерполяции rampStart→rampEnd. Пусто = SmoothStep.")]
@@ -38,9 +45,12 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         [Range(0f, 0.35f)]
         private float statBreathAmplitude = 0.16f;
 
-        [SerializeField] [Min(0.5f)] private float statBreathPeriodWaves = 3.25f;
+        [SerializeField]
+        [Min(0.5f)]
+        private float statBreathPeriodWaves = 3.25f;
 
-        [SerializeField] private float statBreathPhaseOffset;
+        [SerializeField]
+        private float statBreathPhaseOffset;
 
         [Tooltip("Урон колеблется слабее HP (меньше случайных ваншотов в «лёгкой» волне).")]
         [SerializeField]
@@ -53,7 +63,9 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         [Range(0.35f, 1f)]
         private float spawnIntervalEndFactor = 0.62f;
 
-        [Tooltip("В «жёстких» фазах синуса спавн чуть ускоряется.")] [SerializeField] [Range(0f, 0.25f)]
+        [Tooltip("В «жёстких» фазах синуса спавн чуть ускоряется.")]
+        [SerializeField]
+        [Range(0f, 0.25f)]
         private float spawnBreathCoupling = 0.12f;
 
         public ArenaWaveDifficultySample Evaluate(int waveIndex1Based, int totalWavesInRun)

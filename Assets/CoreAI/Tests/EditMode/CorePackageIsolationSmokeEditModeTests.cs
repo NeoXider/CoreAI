@@ -68,7 +68,8 @@ namespace CoreAI.Core.Tests.EditMode
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
                 LlmCompletionRequest request,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 await Task.Yield();
                 yield return new LlmStreamChunk { Text = "echo", IsDone = true };

@@ -116,7 +116,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
                 LlmCompletionRequest request,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 StringBuilder text = new();
                 LlmStreamChunk last = null;

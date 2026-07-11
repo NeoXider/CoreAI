@@ -78,7 +78,8 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             bool authExpired = false;
             bool emittedVisibleText = false;

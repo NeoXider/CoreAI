@@ -16,20 +16,25 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     /// </summary>
     public sealed class ArenaAiTaskBus : MonoBehaviour
     {
-        [Header("События сессии")] [SerializeField]
+        [Header("События сессии")]
+        [SerializeField]
         private bool reactToWaveChanged = true;
 
-        [SerializeField] private bool reactToLowPlayerHp = true;
+        [SerializeField]
+        private bool reactToLowPlayerHp = true;
 
         [Tooltip("Доля текущего HP; ниже — одна задача AINpc на «кризис» (до восстановления выше hysteresis).")]
         [Range(0.05f, 0.9f)]
         [SerializeField]
         private float lowHpRatio = 0.28f;
 
-        [Tooltip("Снять блок кризиса, когда HP выше этой доли.")] [Range(0.1f, 0.95f)] [SerializeField]
+        [Tooltip("Снять блок кризиса, когда HP выше этой доли.")]
+        [Range(0.1f, 0.95f)]
+        [SerializeField]
         private float lowHpHysteresisRatio = 0.38f;
 
-        [SerializeField] private bool reactToBossDefeated = true;
+        [SerializeField]
+        private bool reactToBossDefeated = true;
 
         private CoreAILifetimeScope _scope;
         private ArenaSurvivalSession _session;

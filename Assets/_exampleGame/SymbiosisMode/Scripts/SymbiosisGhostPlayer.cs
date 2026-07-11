@@ -9,7 +9,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode
     [RequireComponent(typeof(NetworkObject))]
     public class SymbiosisGhostPlayer : NetworkBehaviour
     {
-        [Header("Game Settings (SO)")] [SerializeField]
+        [Header("Game Settings (SO)")]
+        [SerializeField]
         private Settings.SymbiosisGameSettings gameSettings;
 
         public float Health = 100f;

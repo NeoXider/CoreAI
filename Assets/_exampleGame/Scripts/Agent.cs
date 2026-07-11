@@ -7,10 +7,12 @@ public class Agent : MonoBehaviour
     private AgentConfig _agentWithTools;
     private AgentConfig _agentChatOnly;
 
-    [Header("Тестовые сообщения")] [TextArea(2, 5)]
+    [Header("Тестовые сообщения")]
+    [TextArea(2, 5)]
     public string MessageWithTools = "Привет! Запомни, что мой любимый цвет красный.";
 
-    [TextArea(2, 5)] public string MessageChatOnly = "Сделай текст жирным: Я очень рад тебя видеть!";
+    [TextArea(2, 5)]
+    public string MessageChatOnly = "Сделай текст жирным: Я очень рад тебя видеть!";
 
     private void Start()
     {

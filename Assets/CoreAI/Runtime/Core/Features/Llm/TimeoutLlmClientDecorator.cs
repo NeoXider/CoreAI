@@ -91,7 +91,8 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
         {
             float timeoutSeconds = _timeoutSecondsProvider();
             if (timeoutSeconds <= 0f)
