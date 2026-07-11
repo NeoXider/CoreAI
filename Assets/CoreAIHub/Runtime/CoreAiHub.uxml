@@ -1,10 +1,12 @@
-<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" editor-extension-mode="False">
-    <Style src="CoreAiHubUss.uss" />
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         editor-extension-mode="False">
+    <Style src="CoreAiHubUss.uss"/>
     <ui:VisualElement name="coreai-hub-root" class="coreai-hub-root">
-        <ui:ScrollView name="coreai-hub-tabbar" class="coreai-hub-tabbar" mode="Vertical" horizontal-scroller-visibility="Hidden" vertical-scroller-visibility="Auto" />
+        <ui:ScrollView name="coreai-hub-tabbar" class="coreai-hub-tabbar" mode="Vertical"
+                       horizontal-scroller-visibility="Hidden" vertical-scroller-visibility="Auto"/>
         <ui:VisualElement name="coreai-hub-content" class="coreai-hub-content">
-            <ui:Label name="coreai-hub-empty" class="coreai-hub-empty" />
+            <ui:Label name="coreai-hub-empty" class="coreai-hub-empty"/>
         </ui:VisualElement>
-        <ui:Button name="coreai-hub-collapse" text="&#8211;" class="coreai-hub-collapse" />
+        <ui:Button name="coreai-hub-collapse" text="&#8211;" class="coreai-hub-collapse"/>
     </ui:VisualElement>
 </ui:UXML>
