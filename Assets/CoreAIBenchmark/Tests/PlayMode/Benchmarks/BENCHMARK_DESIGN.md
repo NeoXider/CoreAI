@@ -2,7 +2,7 @@
 
 A scored benchmark that measures how well a model **builds a game** with CoreAI — driving the
 real `execute_lua` and `world_command` tools — rather than how well it chats. Each scenario is
-graded **0..100** (with a bounded efficiency bonus that can push the displayed total above 100),
+graded **0..100** (with a bounded correctness bonus that can push the displayed total above 100),
 so runs are comparable across models and over time.
 
 ## Scoring model (portable core)
@@ -16,10 +16,10 @@ under dotnet (`GoalScoreEditModeTests`). Summary:
   (harness-level), plus scenario-specific penalties (over-building, disallowed actions).
 - **Hard caps**: incomplete run (timeout/fault) or final-state failure → cap 60; tool never fired
   (prose only) → cap 40.
-- **Bonus** 0..20, **gated on base ≥ 90** (only solvers earn it), composed of:
-  - *correctness/robustness* (the scenario's requested bonus), and
-  - *efficiency* — **fewer tokens** (up to 6) and **less time** (up to 6) than the scenario's budget;
-    the further under budget, the more points. Total bonus is capped at 20.
+- **Bonus** 0..20, **gated on base ≥ 90** (only solvers earn it): the scenario's requested
+  *correctness/robustness* bonus — being **more right** than the pass bar. **Correctness only.**
+  Token/time efficiency is **reported as a tok/s metric, never scored**, so a merely-faster model
+  cannot look smarter than an equally-correct but slower one. Total bonus is capped at 20.
 - `Total = Base + Bonus`; suites are compared on **Base** only.
 - Verdict: **PASS** (base ≥ 90 and all mandatory checkpoints) / **PARTIAL** (50–89) / **FAIL** (< 50).
 - Non-finite inputs are sanitized so a single NaN can never poison a score.
@@ -54,13 +54,13 @@ cannot call tools reads clearly as 'Not suitable for agentic roles'. Shown in th
 
 The Markdown report is structured for quick reading and reuse:
 **embedded SVG results card** → **scorecard** (model, suite score, grade, verdict, generation tok/s,
-speed/efficiency bonus) → **dimension bars + a Mermaid chart** → **tool-call statistics** (counts /
+speed reported not scored) → **dimension bars + a Mermaid chart** → **tool-call statistics** (counts /
 failures / invalid, before the session) → **scenario scores** → **failed checkpoints** → **full model
 session** (the complete per-turn transcript, at the end).
 
 Speed is reported honestly as **generation tokens/sec** (completion tokens ÷ wall-clock); prompt tokens
-are excluded because they are prefilled far faster than generated. The efficiency bonus is split into a
-**token** part and a **time** part so the reward for being fast and cheap is explicit.
+are excluded because they are prefilled far faster than generated. Speed is **reported, never scored** —
+a token/time figure in the report, not points in the bonus — so a faster model never looks smarter.
 
 Reports are machine-readable too: the JSON carries the summary, per-dimension scores, tool stats, and
 per-checkpoint dimensions, so **`Build Model Comparison Report`** can parse many runs and emit

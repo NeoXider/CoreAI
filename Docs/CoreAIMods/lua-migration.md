@@ -1,8 +1,14 @@
 # CoreAIMods VM migration (MoonSharp → Lua-CSharp) + mod-feature polish — working plan
 
-> Status: DRAFT v2 (repo-state snapshot refreshed 2026-07-10). This is a migration plan, not a claim
-> that Lua-CSharp is already the production VM.
-> All code, docs, commit messages in English. MoonSharp stays live until Phase 2 is green.
+> **ARCHIVED / HISTORICAL (completed).** This migration shipped in **5.4.0**: MoonSharp was fully
+> removed and Lua-CSharp (LuaCs) is now the only, production Lua VM. This document is kept for
+> historical context only — its present-tense wording ("MoonSharp stays live", "Prod stays on
+> MoonSharp until…") describes the plan as it stood *before* the swap and no longer reflects the
+> current codebase. Do not treat it as a description of current state.
+>
+> Status (historical): DRAFT v2 (repo-state snapshot refreshed 2026-07-10). This was a migration plan,
+> not a claim that Lua-CSharp was already the production VM at the time of writing.
+> All code, docs, commit messages in English.
 > Module name decision: **keep `com.neoxider.coreaimods` / `CoreAI.Mods`** (no rename). A rename to
 > CoreAILua, if ever wanted, is a separate GUID-preserving PR — never bundled with the VM swap.
 

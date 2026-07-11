@@ -85,7 +85,7 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 
 ## Game-Creation Benchmark
 
-CoreAI ships a game-creation benchmark: it scores how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools — 0-100 across eight scenario groups (**suite v2**, G1-G8), against any OpenAI-compatible endpoint.
+CoreAI ships a game-creation benchmark: it scores how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools — 0-100 across eight scenario groups (**suite v1.7**, benchmark v2 prompts, G1-G8), against any OpenAI-compatible endpoint.
 
 **Top-tier models — v2 frontier sweep (2026-07-11):**
 
@@ -450,7 +450,8 @@ See [INSTALL.md](INSTALL.md) for step-by-step instructions per profile.
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              LoggingLlmClientDecorator                        │
+│   LLM pipeline: Timeout( Logging( RetryingStreaming( … ) ) )  │
+│  • Request timeout  • Logging  • Pre-commit stream retry      │
 │  • HTTP retry (429/5xx)  • Retry-After  • Exp. backoff        │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓

@@ -1,8 +1,12 @@
 # CoreAIMods extraction + CoreAI Hub (pages) — implementation plan
 
-Status: active. This document is the repo-side plan for (1) extracting the whole Lua layer into a
-separate `com.neoxider.coreaimods` package, (2) the extensible **CoreAI Hub** page system, and
+Status: active (planning). This document is the repo-side plan for (1) extracting the whole Lua layer
+into a separate `com.neoxider.coreaimods` package, (2) the extensible **CoreAI Hub** page system, and
 (3) mod features (bundled/updatable mods, categories). Companion spec: `Docs/coreai-mod-system.md`.
+
+> Note (2026-07): the MoonSharp → Lua-CSharp VM swap referenced below is **already complete** (shipped
+> in 5.4.0; MoonSharp fully removed, LuaCs is the only VM). Any present-tense "MoonSharp" wording in
+> this plan is historical — only the Hub/mod-feature items remain forward-looking.
 
 ## Goals
 

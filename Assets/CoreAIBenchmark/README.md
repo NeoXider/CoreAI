@@ -1,6 +1,6 @@
 # CoreAI Game-Creation Benchmark
 
-Package graph: `com.neoxider.coreaibenchmark` 5.4.0 depends on `com.neoxider.coreai`,
+Package graph: `com.neoxider.coreaibenchmark` 5.5.0 depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
