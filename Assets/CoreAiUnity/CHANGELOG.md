@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
+
+- **`AgentBuilder.Build()` auto-registers with the global policy** when one exists (immediate routability);
+  `BuildDetached()` stays inert. Solution-wide Rider reformat under the shared `.editorconfig` (attributes
+  one-per-line) and the `// WHY:` / `// TODO:` / `// HACK:` comment convention applied across the host source.
+
 ## 5.6.0 - Simpler agent API, code-style rules, benchmark comparison (2026-07-11)
 
 - **`ApplyToPolicy` is now optional.** `AskAsync`/`AskWithCallback` auto-register the built `AgentConfig`

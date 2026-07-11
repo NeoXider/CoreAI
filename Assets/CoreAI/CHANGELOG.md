@@ -2,10 +2,14 @@
 
 ## [Unreleased]
 
+## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
+
 - **`AgentBuilder.Build()` auto-applies to the global policy.** When `CoreAIAgent.Policy` exists, `Build()`
   now registers the config immediately (on top of the first-Ask auto-registration), so a role is routable
-  the moment it is built. `BuildDetached()` still leaves the global policy untouched. Solution-wide Rider
-  reformat applied (shared `.editorconfig`; attributes stay one-per-line).
+  the moment it is built. `BuildDetached()` still leaves the global policy untouched.
+- **Code-style pass.** Solution-wide Rider reformat under the shared `.editorconfig` (attributes stay
+  one-per-line, verified 0 re-collapsed); obvious comments stripped and genuine ones tagged
+  `// WHY:` / `// TODO:` / `// HACK:` across the whole runtime (portable core, Unity host, Lua-CSharp mods).
 
 ## 5.6.0 - Simpler agent API, code-style rules, benchmark comparison (2026-07-11)
 
