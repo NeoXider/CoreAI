@@ -235,17 +235,43 @@ LM Studio models above (different suite version *and* different backend class). 
 
 **Read of the sweep.** The GPT-5.6 family tops the board — `gpt-5.6-sol` is the most consistent (only one
 failed scenario; perfect G3/G4/G5/G7), and `gpt-5.6-terra` has the most passes (25/29, 86.2%). `gpt-5.5`
-lands a strong third. The Claude models cluster lower here: `sonnet-5` and `opus-4.8` tie on pass-rate
-(75.9%) with different profiles — opus aces instruction-following (G5 100) and integration (G7 100) but
-stumbles on scene-build (G1 54.9) and observe-then-act (G8 42.6); `fable-5` is fastest-to-fail on G8 (9.2).
-Every model finds the **free-build castle (G6)** hardest (25–64), the single clearest headroom signal.
+lands a strong third.
+
+**Why the Claude models sit lower here — a bridge artifact, not a capability verdict.** The gap tracks
+tool-call FAILURE rate almost exactly: through the `cli-agents` bridge the Codex models failed 1.5–13.5% of
+their tool calls (terra 1.5%, sol 2.8%), while the Claude models failed **22–32%** (opus 22%, sonnet 23.2%,
+fable 32.1%) — with `invalid world commands = 0` for everyone, so the calls were well-formed but the
+*operations* failed (wrong object refs, bad sequencing). The bridge drives the **Claude Code CLI** (an
+agentic coding tool with its own system-prompt/scaffolding) as a raw OpenAI endpoint, which does not surface
+Claude's native tool-calling as cleanly as the Codex CLI does. For reference, the historical **direct-API**
+v1.6 run scored opus 92.9 / sonnet 88.2 / fable 89.5 — far above this bridge sweep — so read the Claude rows
+as "Claude-CLI-via-bridge", not the models' native tool-calling.
+
+**Why G6 (free-build castle) is everyone's worst, and the vision variant here means little.** The unbounded
+creative build is genuinely the hardest scenario, but two measurement issues inflate how bad it looks: (1)
+this sweep ran with the G6 **image-feedback (vision) variant enabled**, and the CLI bridge is text + tool-calls
+only — **no model tested could actually see the screenshot**, so the "image-feedback" number is just a second
+noisy free-build sample, not a vision measurement; (2) an earlier version of the vision prompt *coached* the
+model to "use the camera and refine", which made non-vision models waste effort and score worse — that
+coaching has since been removed, so the two G6 variants are now identical except for tool availability (a
+clean A/B). A verified `gpt-5.3-spark` re-run after the fix scores the two variants on par (65.6 vs 68.9),
+confirming vision-feedback is neutral for a non-vision model rather than harmful.
 
 > **Methodology / caveats — read before citing.** Single run per model (reps=1), streaming off, native
 > tools on, temperature 0.1, Unity 6000.3.14f1, suite v2. Run over the CLI bridge (higher latency; each call
-> spawns a CLI subprocess), so absolute tokens/time are not comparable to a direct-API run — tool-calling was
-> verified equivalent to a native OpenAI backend before the sweep. The **G6 image-feedback (vision) variant
-> did not run** — the CLI bridge is text + tool-calls only. Treat these as *indicative* single-shot results,
-> not a controlled multi-rep A/B.
+> spawns a CLI subprocess), so absolute tokens/time are not comparable to a direct-API run. The Claude rows
+> are penalised by a high bridge tool-failure rate (see above), and the G6 image-feedback numbers do not
+> measure vision (no bridge model can see). Treat these as *indicative* single-shot results, not a controlled
+> multi-rep A/B.
+
+### Model-authored castles are exported as prefabs
+
+Every G6 free-build run now saves the model's actual scene as a reusable Unity **prefab** — not just a flat
+screenshot — under `Assets/Benchmark/<model>/` (git-ignored, outside this package): the built hierarchy with
+per-object colours baked into real material assets (a `Materials/` subfolder beside the prefab) and a
+self-identifying `BuiltBy_<model>__<score>of100` child. So each model's castle is inspectable and reusable in
+the editor, labelled with who built it. Verified on `gpt-5.3-spark`: a 101-object castle prefab, all
+renderers materialised.
 
 ## Castle Gallery - G6 Free-Build Visual
 

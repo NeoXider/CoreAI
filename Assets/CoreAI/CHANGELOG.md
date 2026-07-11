@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Benchmark: model-authored castles export as prefabs.** Every G6 free-build run now saves the built scene
+  as a reusable Unity prefab under `Assets/Benchmark/<model>/` (per-model folder, colours baked into real
+  material assets in a `Materials/` subfolder, plus a `BuiltBy_<model>__<score>of100` label child), not just a
+  screenshot. Written outside the benchmark package and git-ignored.
+- **Benchmark: G6 image-feedback prompt no longer coaches vision.** The vision variant's system prompt was
+  telling the model to "use the camera and refine", which biased the A/B and made non-vision models score
+  worse. It is now identical to the plain free-build prompt — the only difference is the camera tool being
+  available — so the scenario measures whether a model discovers and uses vision on its own.
 - **R6 resilience: streaming-path retry + portable-core request timeout.** Two new `CoreAI.Core`
   decorators: `RetryingStreamingLlmClientDecorator` retries a stream only BEFORE it commits content (so a
   transient pre-first-token failure recovers without duplicating output or re-firing tool side effects),

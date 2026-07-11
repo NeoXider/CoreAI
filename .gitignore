@@ -131,3 +131,9 @@ FirebaseCppApp-*.so
 /tools/**/[Bb]in/
 /tools/**/[Oo]bj/
 /[Aa]ssets/_Recovery/
+
+# Benchmark-generated castle prefabs (built by models during the G6 free-build)
+
+# Benchmark-generated castle prefabs (built by models during the G6 free-build)
+Assets/Benchmark/
+Assets/Benchmark.meta

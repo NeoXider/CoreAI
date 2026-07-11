@@ -1680,9 +1680,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (scenario.FreeBuildLayout)
                     {
                         int spawns = env.World.Count("spawn");
+                        // Count camera/vision tool calls so the picture itself shows whether the model actually
+                        // LOOKED at its build (image-feedback variant) or never used vision at all — "0 looks"
+                        // makes an unused vision run obvious at a glance.
+                        int cameraCalls = 0;
+                        foreach (CapturedTurn capturedTurn in obs.CapturedTurns)
+                        {
+                            foreach (LlmToolCallTrace tr in capturedTurn.Tools)
+                            {
+                                if (tr.Name != null &&
+                                    tr.Name.StartsWith("camera", System.StringComparison.OrdinalIgnoreCase))
+                                {
+                                    cameraCalls++;
+                                }
+                            }
+                        }
+
                         double genSec = obs.GenerationMs / 1000.0;
                         double tokPerSec = genSec > 0.001 ? completionTokens / genSec : 0.0;
-                        heroStats = $"{obs.ToolCalls} tool-calls · {spawns} spawns · " +
+                        heroStats = $"{obs.ToolCalls} tool-calls · {spawns} spawns · {cameraCalls} camera looks · " +
                                     $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
                                     $"{(fromProvider ? "" : "~")} · {tokPerSec:0.#} tok/s ({totalTokens:0} total)";
                     }
@@ -1691,6 +1707,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         scenario.FreeBuildLayout, heroStats, png => result.SceneScreenshotPng = png);
                 }
 
+#if UNITY_EDITOR
+                // Persist the built free-build scene (the castle) as a reusable, inspectable Unity prefab —
+                // not just a flat screenshot — labelled with the model that authored it. Free-build only.
+                if (scenario.FreeBuildLayout && vis.ObjectCount > 0)
+                {
+                    SaveCastlePrefab(vis, modelId, scenario.Id, score.Base);
+                }
+#endif
+
                 // Always tear down the spawned scene, even when no screenshot was taken, so a visual
                 // scenario never leaks its GameObjects into the next run.
                 vis.Cleanup();
@@ -1698,6 +1723,125 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             onResult?.Invoke(result);
         }
+
+#if UNITY_EDITOR
+        // Saves the built free-build scene (the castle) as a Unity prefab so the model's work is inspectable
+        // and reusable beyond a flat screenshot, labelled with the model that authored it. Per-object colours
+        // live in runtime MaterialPropertyBlocks (which do NOT serialize into a prefab), so they are baked into
+        // real shared materials first. Editor-only: PrefabUtility / AssetDatabase do not exist in a player, and
+        // benchmarks only ever run in the editor. Prefabs land in Assets/Benchmark/<model>/ (git-ignored,
+        // OUTSIDE the benchmark package) as "<scenario>.prefab" with a Materials/ subfolder beside them.
+        private static void SaveCastlePrefab(
+            VisualBenchmarkWorldExecutor vis, string modelId, string scenarioId, double score)
+        {
+            try
+            {
+                if (vis == null || vis.Root == null)
+                {
+                    return;
+                }
+
+                UnityEngine.GameObject root = vis.Root.gameObject;
+
+                // Written OUTSIDE the benchmark package (plain Assets/Benchmark/) so generated art never
+                // ships with com.neoxider.coreaibenchmark. Per-model layout: GeneratedCastles/<model>/ holds the
+                // prefab, with its own Materials/ subfolder.
+                const string rootDir = "Assets/Benchmark";
+                if (!UnityEditor.AssetDatabase.IsValidFolder(rootDir))
+                {
+                    UnityEditor.AssetDatabase.CreateFolder("Assets", "Benchmark");
+                }
+
+                string modelDir = $"{rootDir}/{FileSafe(modelId)}";
+                if (!UnityEditor.AssetDatabase.IsValidFolder(modelDir))
+                {
+                    UnityEditor.AssetDatabase.CreateFolder(rootDir, FileSafe(modelId));
+                }
+
+                string matDir = $"{modelDir}/Materials";
+                if (!UnityEditor.AssetDatabase.IsValidFolder(matDir))
+                {
+                    UnityEditor.AssetDatabase.CreateFolder(modelDir, "Materials");
+                }
+
+                // Bake MaterialPropertyBlock colours into real MATERIAL ASSETS (one per unique colour) so the
+                // prefab keeps its palette: SaveAsPrefabAsset drops runtime-instance materials (the renderer
+                // would come back null / render pink), so the shared material must be a project asset.
+                UnityEngine.Shader lit = UnityEngine.Shader.Find("Universal Render Pipeline/Lit")
+                                         ?? UnityEngine.Shader.Find("Standard");
+                System.Collections.Generic.Dictionary<int, UnityEngine.Material> palette = new();
+                UnityEngine.MaterialPropertyBlock mpb = new();
+                foreach (UnityEngine.Renderer rend in root.GetComponentsInChildren<UnityEngine.Renderer>(true))
+                {
+                    if (rend == null)
+                    {
+                        continue;
+                    }
+
+                    rend.GetPropertyBlock(mpb);
+                    UnityEngine.Color c = mpb.GetColor(BaseColorId);
+                    if (c.a <= 0f)
+                    {
+                        c = mpb.GetColor(ColorId);
+                    }
+
+                    if (c.a <= 0f)
+                    {
+                        c = rend.sharedMaterial != null ? rend.sharedMaterial.color : UnityEngine.Color.gray;
+                    }
+
+                    UnityEngine.Color32 c32 = c;
+                    int key = (c32.r << 16) | (c32.g << 8) | c32.b;
+                    if (!palette.TryGetValue(key, out UnityEngine.Material mat))
+                    {
+                        mat = new UnityEngine.Material(lit);
+                        if (mat.HasProperty(BaseColorId))
+                        {
+                            mat.SetColor(BaseColorId, c);
+                        }
+
+                        mat.color = c;
+                        string matPath = UnityEditor.AssetDatabase.GenerateUniqueAssetPath(
+                            $"{matDir}/c_{c32.r:X2}{c32.g:X2}{c32.b:X2}.mat");
+                        UnityEditor.AssetDatabase.CreateAsset(mat, matPath);
+                        palette[key] = mat;
+                    }
+
+                    rend.sharedMaterial = mat;
+                    rend.SetPropertyBlock(null);
+                }
+
+                // A self-identifying child so the saved prefab always says who built it and how it scored.
+                UnityEngine.GameObject label = new($"BuiltBy_{FileSafe(modelId)}__{score:0}of100");
+                label.transform.SetParent(root.transform, false);
+
+                string path = UnityEditor.AssetDatabase.GenerateUniqueAssetPath(
+                    $"{modelDir}/{FileSafe(scenarioId)}.prefab");
+                UnityEditor.PrefabUtility.SaveAsPrefabAsset(root, path);
+                Debug.Log($"[Benchmark] saved castle prefab (built by {modelId}, {score:0}/100): {path}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[Benchmark] castle prefab save failed: {ex.Message}");
+            }
+        }
+
+        private static string FileSafe(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                return "unknown";
+            }
+
+            System.Text.StringBuilder sb = new(s.Length);
+            foreach (char ch in s)
+            {
+                sb.Append(char.IsLetterOrDigit(ch) || ch == '-' || ch == '.' ? ch : '_');
+            }
+
+            return sb.ToString();
+        }
+#endif
 
         // 4K (2160p) output for every report image. The overlay (banner/caption/insets) is either
         // world-space or sized relative to these, so the whole card scales with them.

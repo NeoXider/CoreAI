@@ -728,12 +728,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Same free-form build, but the model can capture and look at its own scene and refine it — " +
                 "measures whether vision feedback improves the result.";
 
-            public override string SystemPrompt =>
-                base.SystemPrompt +
-                " You also have a camera tool: call camera_capture to SEE a screenshot of your scene so far, " +
-                "judge what looks wrong or empty, and keep improving it — fill gaps, fix proportions, add " +
-                "missing detail — then capture again to check. Use vision to make the final result look good, " +
-                "not just to place objects blindly.";
+            // Deliberately IDENTICAL to the plain free-build prompt: the image-feedback variant must NOT
+            // mention the camera or coach the model to "look and refine". The only difference between the two
+            // runs is that this one is handed the camera_capture tool (in BuildAgent) — whether the model
+            // discovers and uses vision to improve its build on its own is exactly what this scenario measures.
+            // Telling it to use vision would bias the A/B (and, empirically, coaching made the result worse).
+            public override string SystemPrompt => base.SystemPrompt;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
             {

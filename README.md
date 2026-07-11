@@ -85,63 +85,21 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 
 ## Game-Creation Benchmark
 
-CoreAI includes a local game-creation benchmark that measures how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across eight scenario groups (world-building, Lua logic, math reasoning, playthroughs, instruction adherence, a free-build castle showcase, comprehensive integration, and described-state conditional selection), adds 0-10 game-fitness ratings per role, and can run against any OpenAI-compatible endpoint — cloud APIs or a local LMStudio multi-model sweep.
+CoreAI ships a game-creation benchmark: it scores how well an LLM builds and changes a game by driving real `execute_lua` and `world_command` tools — 0-100 across eight scenario groups (**suite v2**, G1-G8), against any OpenAI-compatible endpoint.
 
-**Frontier-model sweep (suite v2 / G1-G8, 2026-07-11)** — seven frontier models via the `cli-agents` OpenAI-compatible bridge, one run each; full table + methodology in [`Docs/BENCHMARK_LEADERBOARD.md`](Docs/BENCHMARK_LEADERBOARD.md):
+**Top-tier models — v2 frontier sweep (2026-07-11):**
 
-| # | Model | Suite | Pass-rate | P/PA/F |
-|---:|---|---:|---:|---|
-| 1 | `codex/gpt-5.6-sol` | **96.6** | 85.7% | 24/3/1 |
-| 2 | `codex/gpt-5.6-terra` | **93.0** | 86.2% | 25/2/2 |
-| 3 | `codex/gpt-5.5` | **90.3** | 82.8% | 24/2/3 |
-| 4 | `codex/gpt-5.6-luna` | **88.1** | 79.3% | 23/2/4 |
-| 5 | `claude-sonnet-5` | **86.2** | 75.9% | 22/4/3 |
-| 6 | `claude-opus-4.8` | **79.7** | 75.9% | 22/2/5 |
-| 7 | `claude-fable-5` | **78.9** | 72.4% | 21/3/5 |
+| # | Model | Suite | Pass-rate |
+|---:|---|---:|---:|
+| 1 | `gpt-5.6-sol` | **96.6** | 85.7% |
+| 2 | `gpt-5.6-terra` | **93.0** | 86.2% |
+| 3 | `gpt-5.5` | **90.3** | 82.8% |
+| 4 | `gpt-5.6-luna` | **88.1** | 79.3% |
+| 5 | `claude-sonnet-5` | **86.2** | 75.9% |
+| 6 | `claude-opus-4.8` | **79.7** | 75.9% |
+| 7 | `claude-fable-5` | **78.9** | 72.4% |
 
-_Single run per model over the CLI bridge (indicative, not a controlled multi-rep A/B); the G6 image-feedback vision variant is text-only through the bridge. The GPT-5.6 family leads; every model finds the free-build castle (G6) hardest._
-
-**Historical cloud / frontier baseline** — one full G1-G7 run each (suite v1.6, no token caps; do not compare directly with current v1.7/G1-G8 results):
-
-<img src="Docs/Images/benchmark_comparison_cloud.svg" alt="Model comparison — Game-Creation Benchmark, cloud models ranked by suite score" width="900">
-
-<details><summary>Full ranking table — cloud models</summary>
-
-| # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
-|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 1 | `GPT-5.5` | **97** | 96% | 24/1/0 | 74.6 | 100 | 99.6 | 100 | 100 | 100 | 4.3 | 14.3% | 13789 | `20260703_024825` |
-| 2 | `glm-5.2` | **93.5** | 77.3% | 17/4/1 | 68.8 | 100 | 96.3 | 100 | 100 | 96.3 | 2 | 6.5% | 80861 | `20260702_234351` |
-| 3 | `GPT-5.3 Codex Spark` | **93.2** | 87.5% | 21/2/1 | 92.6 | 94.1 | 91.2 | 0 | 96.3 | 96.3 | 4.4 | 7.1% | 14009 | `20260703_033023` |
-| 4 | `claude-opus-4.8` | **92.9** | 87.5% | 21/3/0 | 59.3 | 94.1 | 99.5 | 100 | 100 | 96.3 | 3.3 | 10.4% | 25758 | `20260702_171849` |
-| 5 | `claude-haiku-4.5` | **92.7** | 80% | 20/4/1 | 86.8 | 91 | 99.6 | 100 | 100 | 83.8 | 3.5 | 1.4% | 36569 | `20260703_010715` |
-| 6 | `claude-fable-5` | **89.5** | 80% | 20/4/1 | 57.9 | 88.9 | 95.6 | 100 | 90 | 96.3 | 3.3 | 5.6% | 27312 | `20260702_191106` |
-| 7 | `claude-sonnet-5` | **88.2** | 84% | 21/1/3 | 72.8 | 94.4 | 92 | 100 | 100 | 78.7 | 4.2 | 10.6% | 16391 | `20260702_195533` |
-
-</details>
-
-**Local models (LMStudio)** — same suite on consumer hardware:
-
-<img src="Docs/Images/benchmark_comparison_local.svg" alt="Model comparison — Game-Creation Benchmark, local models ranked by suite score" width="900">
-
-<details><summary>Full ranking table — local models</summary>
-
-| # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
-|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 1 | `qwen3.6-27b-heretic-…-imatrix-max` | **93.1** | 87% | 20/1/2 | 98 | 96.1 | 96.8 | 100 | 100 | 88 | 1.3 | 9.7% | 52495 | `20260702_062928` |
-| 2 | `deepreinforce-ai_ornith-1.0-9b` | **92.1** | 68.2% | 15/7/0 | 68.8 | 93.3 | 99.5 | 100 | 100 | 83.8 | 2.6 | 15.6% | 96801 | `20260702_093857` |
-| 3 | `qwen3.5-4b-mtp` | **92** | 84% | 21/3/1 | 93 | 100 | 93.5 | 100 | 100 | 91.7 | 4.7 | 11.9% | 62773 | `20260702_205410` |
-| 4 | `qwen3.6-27b-fable-5-experimental` | **87.3** | 73.7% | 14/3/2 | 85.9 | 83.3 | 88.9 | 100 | 80 | 83.8 | 1.9 | 32.2% | 58974 | `20260702_054314` |
-| 5 | `qwen3.5-2b` | **84.8** | 75% | 18/2/4 | 92.6 | 100 | 83.3 | 100 | 66.7 | 91.2 | 4.4 | 8.5% | 57656 | `20260702_225056` |
-| 6 | `deepreinforce-ai_ornith-1.0-35b` | **81.1** | 65.2% | 15/4/4 | 83.3 | 87.5 | 91.3 | 100 | 95.8 | 78.7 | 3.5 | 16.8% | 70744 | `20260702_101519` |
-| 7 | `qwythos-9b-claude-mythos-5-1m` | **81** | 62.5% | 15/5/4 | 69.4 | 84.6 | 91.7 | 100 | 88.9 | 78.7 | 3.2 | 18.2% | 63570 | `20260702_052949` |
-| 8 | `qwen3.5-0.8b` | **57.8** | 41.7% | 10/4/10 | 94.4 | 80.1 | 91.4 | 100 | 55.6 | 38 | 2.4 | 1% | 43383 | `20260702_222625` |
-| 9 | `lfm2-8b-a1b` | **12.4** | 0% | 0/0/25 | 50.9 | 2.1 | 0 | 0 | 0 | 57.8 | 0 | 0% | 52430 | `20260702_051709` |
-
-</details>
-
-Comparisons are rebuilt from any set of past report JSONs you pick — see [custom comparisons](Assets/CoreAIBenchmark/README.md#custom-comparisons-from-hand-picked-reports) in the benchmark guide.
-
-Benchmark docs: [full benchmark guide](Assets/CoreAIBenchmark/README.md) and [benchmark design](Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/BENCHMARK_DESIGN.md). Want the full detail behind one score — per-scenario checkpoints, every tool call, and the exact system prompt sent to the model? See [an example full report](Docs/Images/example_report/example_report.md) (one curated run; every real run writes to a gitignored `TestResults/CoreAI/Benchmarks/` and is not committed). Per-model G6 free-build castle screenshots live in the [benchmark guide's gallery](Assets/CoreAIBenchmark/README.md#castle-gallery---g6-free-build-visual).
+One run each via the `cli-agents` bridge (indicative). The Claude rows are held back by a high bridge tool-failure rate, not raw capability — details in the guide. Full tables (v2 + historical + local), methodology, group legend and the per-model castle prefabs: **[benchmark guide](Assets/CoreAIBenchmark/README.md)** · **[leaderboard](Docs/BENCHMARK_LEADERBOARD.md)**.
 
 ---
 
