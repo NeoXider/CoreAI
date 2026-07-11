@@ -203,6 +203,28 @@ namespace CoreAI.Tests.EditMode
             EditorUtility.RevealInFinder(index);
         }
 
+        [MenuItem("CoreAI/Benchmarks/Stop Running Benchmark (save partial)", priority = 90)]
+        public static void StopRunningBenchmark()
+        {
+            if (!BenchmarkProgress.IsRunning)
+            {
+                EditorUtility.DisplayDialog("CoreAI Benchmark", "No benchmark is currently running.", "OK");
+                return;
+            }
+
+            // Cooperative stop: the suite loop breaks between scenario reps and still writes the report for
+            // everything finished so far (partial), instead of the run vanishing with no artifacts.
+            BenchmarkProgress.RequestStop();
+            Debug.Log("[Benchmark] Stop requested — the suite will finish the current scenario, then save a "
+                      + "partial report and exit.");
+        }
+
+        [MenuItem("CoreAI/Benchmarks/Stop Running Benchmark (save partial)", validate = true)]
+        public static bool StopRunningBenchmarkValidate()
+        {
+            return BenchmarkProgress.IsRunning && !BenchmarkProgress.StopRequested;
+        }
+
         [MenuItem("CoreAI/Benchmarks/Build Model Comparison Report", priority = 140)]
         public static void BuildComparisonReport()
         {

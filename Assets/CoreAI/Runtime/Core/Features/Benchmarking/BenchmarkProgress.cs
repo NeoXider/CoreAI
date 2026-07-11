@@ -39,6 +39,23 @@ namespace CoreAI.Benchmarking
         public static float Fraction => Total <= 0 ? 0f : (float)Completed / Total;
 
         /// <summary>
+        /// Cooperative stop flag. A Stop button sets it via <see cref="RequestStop"/>; the suite loop
+        /// checks it between scenario reps and, when set, breaks GRACEFULLY — the report for everything
+        /// finished so far is still written (same path as the soft time-budget stop), instead of the run
+        /// vanishing with no artifacts when Play mode is exited mid-scenario.
+        /// </summary>
+        public static bool StopRequested { get; private set; }
+
+        /// <summary>Requests a graceful stop of the running suite (partial report is still saved).</summary>
+        public static void RequestStop()
+        {
+            lock (Gate)
+            {
+                StopRequested = true;
+            }
+        }
+
+        /// <summary>
         /// True when the current scenario's elapsed/remaining wall-clock time is known and worth showing -
         /// a single long-running scenario (e.g. G6's free build alone, <see cref="Total"/> == 1) sits at a
         /// meaningless 0% count-based fraction for its whole multi-minute run otherwise.
@@ -66,6 +83,7 @@ namespace CoreAI.Benchmarking
             lock (Gate)
             {
                 IsRunning = true;
+                StopRequested = false;
                 Total = total < 0 ? 0 : total;
                 Completed = 0;
                 ModelId = modelId ?? "";

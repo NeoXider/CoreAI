@@ -288,6 +288,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     int scenarioReps = scenario.RepsOverride ?? repetitions;
                     for (int rep = 1; rep <= scenarioReps; rep++)
                     {
+                        // Manual Stop button (BenchmarkProgress.RequestStop): break GRACEFULLY between reps so
+                        // the report for everything finished so far is still written, instead of losing the
+                        // whole run when Play mode is exited mid-scenario. Same graceful path as the budget gate.
+                        if (BenchmarkProgress.StopRequested)
+                        {
+                            budgetHit = true;
+                            Debug.LogWarning(
+                                $"[Benchmark] Stop requested after {report.Results.Count} scenario result(s); " +
+                                "stopping early and writing the report for everything finished so far.");
+                            break;
+                        }
+
                         // Start-gate on every rep (not just per scenario). The worst case for the NUnit
                         // backstop is NOT one timeout: the retry loop below reruns a hard-failed attempt
                         // up to maxAttempts times, each allowed the full per-scenario timeout (which the
