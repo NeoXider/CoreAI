@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 5.5.0 - R6 resilience, benchmark v2 tooling, CI/package gates (2026-07-11)
+
 - **Benchmark: model-authored castles export as prefabs.** Every G6 free-build run now saves the built scene
   as a reusable Unity prefab under `Assets/Benchmark/<model>/` (per-model folder, colours baked into real
   material assets in a `Materials/` subfolder, plus a `BuiltBy_<model>__<score>of100` label child), not just a

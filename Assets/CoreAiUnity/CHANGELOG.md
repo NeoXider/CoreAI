@@ -4,8 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.5.0 - R6 resilience, benchmark v2 tooling, CI/package gates (2026-07-11)
+
 - **R6 resilience wiring.** `LlmPipelineInstaller` now composes `Timeout( Logging( RetryingStreaming( routed )))`,
   so the portable-core request timeout and the pre-commit streaming retry are on by default for every backend.
+- **Benchmark v2 tooling.** G6 free-build now exports each model's castle as a Unity prefab
+  (`Assets/Benchmark/<model>/`, colours baked into material assets, a `BuiltBy_<model>` label child); the hero
+  screenshot shows a "camera looks" counter; the image-feedback prompt no longer coaches vision use. The v2
+  frontier-model sweep (7 models) is published in the leaderboard with a comparison chart and honest caveats.
 - **F-12 CI gate.** Added a `merge_group` trigger with a `merge-queue-gate` job that FAILS (not skips) when
   `UNITY_LICENSE` is absent on the merge queue, plus a fork-safe `package-graph` job that checks all five
   packages are version-locked and every internal `com.neoxider.*` dependency pin resolves.
