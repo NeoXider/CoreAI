@@ -119,7 +119,7 @@ header or an explicit arg) and expose it in `list` output. No behavior change to
 > **Status: implemented.** The Hub is a **UI Toolkit** window (`CoreAiHubWindow` + `CoreAiHub.uxml` /
 > `CoreAiHubUss.uss`, Unity 6.3 `UIDocument`), not uGUI/IMGUI. Pages register into `HubPageRegistry`;
 > the module's `CoreAiModsHubBinder` lights up the Mods tab and upgrades Settings/Statistics with live
-> DI sources. Menu `CoreAI → Setup → Add Hub` drops in the ready prefab. See `Docs/CoreAI/hub-pages.md`.
+> DI sources. Menu `CoreAI → Setup → Add Hub` drops in the ready prefab (install/usage: `INSTALL.md` §4).
 
 A single floating window (`CoreAI Hub`) built on UI Toolkit, replacing the old F7–F10 IMGUI panels.
 Collapses to a compact bar via the top-right toggle. Tabs:

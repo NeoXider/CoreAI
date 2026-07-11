@@ -1,23 +1,10 @@
 # TODO
 
-> Updated 2026-07-10. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-07-11. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Release candidate: 5.3.0. Verified 2026-07-10: EditMode 1,613 total / 1,609 passed /
-> 0 failed / 4 optional third-party ignored; deterministic G8 PlayMode 3/3; full local
-> `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
-
-## [R0] IMMEDIATE — verification gate on next editor start (blocks release)
-
-> The previously uncompiled audit wave is now compiled and verified in Unity 6000.3.14f1.
-- [x] Compile clean (0 `error CS`); Hub integration compiled in the monorepo via `COREAI_HAS_HUB`.
-- [x] Full EditMode suite green: 1,613 total / 1,609 passed / 4 optional third-party ignored / 0 failed.
-- [x] Final post-5.3.0 PlayMode `FastNoLlm`: 67/67 passed.
-- [x] Local 4B benchmark gate: suite v1.7 / benchmark v2, 88.1/100; G8 3/3.
-- [x] Audit docs removed (2026-07-10). Per the owner's rule ("no audits should live in the project"),
-      all 2026-07-10 audit reports were deleted after their still-open code findings were transferred to
-      live TODO items: **CI** (F-12, below), **package isolation** (F-22, below), **durability** and
-      **full-tier Lua query** (in the R0.6 residual list below). Product/idea bets from the idea audit
-      moved to `Assets/CoreAiUnity/Docs/BACKLOG.md` ("Idea / positioning bets").
+> Released: 5.6.1 (2026-07-11, all five packages in lockstep). Last full verification 2026-07-10:
+> EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
+> PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 
@@ -30,9 +17,10 @@
       `qwen3.5-4b-mtp`.
 - [ ] Verify the AI writes mods through the Hub chat in each kept Hub-enabled demo with local 4B/9B/27B
       (LM Studio) and Opus 4.8 via the bundled preset (`Assets/Resources/CoreAIPresets/`,
-      bridge: `agent.sh openai-server -e claude -m opus`).
-- [ ] Benchmark package (`com.neoxider.coreaibenchmark`): run the suite through the bridge with
-      `-m spark` (unlimited) as the API model; fix scenario breakage from the 5.1.0 wave if any.
+      bridge: `agent.sh openai-server -e claude -m opus`). *(API models are already proven through the
+      same bridge in the benchmark v2 sweep — remaining gap is specifically Hub-chat mod-writing per demo.)*
+- [x] Benchmark package (`com.neoxider.coreaibenchmark`): suite ran through the bridge with `-m spark` —
+      full v1.7 G1-G8 run on the leaderboard (92.9, row 3); no scenario breakage from the 5.1.0 wave.
 
 ## [R0.6] Release-engineering residuals (from the two 2026-07-10 repository audits)
 
@@ -99,6 +87,26 @@
 - [ ] Pass `response_format` / `json_schema` to OpenAI-compatible providers; GBNF grammar for local models
       where supported; keep post-validation as the fallback. (Decide whether to build.)
 
+### [R7.5] Multi-API — per-agent LLM provider configuration (owner request 2026-07-11)
+
+> Per-ROLE provider routing already ships: `LlmRoutingManifest` (role pattern → profile →
+> `OpenAiHttpLlmSettings` with its own URL/key/model) resolved per request by `RoutingLlmClient` via
+> `ILlmClientRegistry`. What's missing is the code-first/dev-facing layer (est. M, ~5 files).
+- [ ] `AgentBuilder.WithLlmProfile(profileId)` / `WithLlmBackend(OpenAiHttpOptions)` → `AgentConfig` →
+      policy (`SetLlmProfileForRole`, pattern of existing `SetTemperature`).
+- [ ] Explicit profile on the request: make `LlmCompletionRequest.RoutingProfileId` an input hint
+      (today write-only diagnostics); `RoutingLlmClient.Prepare` prefers it over role-pattern match.
+- [ ] Runtime profile registration: `RegisterProfile(profileId, OpenAiHttpOptions)` on the registry
+      (build `OpenAiChatLlmClient` without an SO asset — `IOpenAiHttpSettings` ctor already exists).
+- [ ] Per-profile fallback + limits: `FallbackLlmClientDecorator` and timeout/retry settings currently
+      apply only to the legacy-fallback client / global settings — decide per-profile story.
+- [ ] Hot-swap consistency: `CoreAiBackend.SetApiKey/SetApiBaseUrl` rebuilds only the legacy fallback;
+      profile clients need re-`ApplyManifest`/`ApplyRouteTable` on change.
+- [ ] Key hygiene: N providers = N plaintext `apiKey` fields in `.asset` files; provide an out-of-asset
+      key source (env var / `IServerManagedAuthProvider`-style) before promoting multi-API.
+- [ ] Docs: "per-agent providers" recipe (inspector-only path needs zero code: N × `OpenAiHttpLlmSettings`
+      + manifest on `CoreAILifetimeScope`).
+
 ### [R8] Vision — finish (feature already shipped)
 
 - [ ] PlayMode round-trip `[Explicit]` test against a real vision-capable model (capture → model → assert).
@@ -131,7 +139,8 @@
       2026-07-01, found via a live G6 benchmark report contradiction (`0 tool-calls` / `1 spawns`); the same
       root cause explained every "tool ran but stats say 0" symptom (benchmark `ToolCalls`/`FailedToolCalls`
       undercounts, `ToolErrorRate` misreporting, "used tool" checkpoints failing despite executor state
-      proving a tool ran). See `Docs/BENCHMARK_STATS_AUDIT_2026-07-01.md` (Codex audit) for the full trace.
+      proving a tool ran). *(The Codex audit doc with the full trace was removed per the "no audits in
+      the project" rule; the trace survives in git history.)*
 - [ ] Benchmark harness: `RecordingWorldExecutor.InvalidCommandCount` is tracked separately from `ToolCalls`
       (invalid/malformed world commands are invisible in the "Tool calls" column). Defensible as a distinct
       metric, but worth an explicit decision — either document the split or fold invalid attempts into
@@ -176,6 +185,18 @@
 
 ## Shipped (recent)
 
+- 5.6.x — build-time policy registration; simpler agent API (`AgentBuilder.Build()` auto-applies to the
+  global policy); solution-wide code-style pass (WHY/TODO/HACK comment rules); benchmark castle
+  comparison scene + Stop-with-partial-report; native-API free models in README.
+- 5.5.0 — [R6] resilience wave: `TimeoutLlmClientDecorator` + `RetryingStreamingLlmClientDecorator`
+  wired into the pipeline, `CircuitBreakerLlmClientDecorator` primitive; benchmark v2 tooling; CI
+  merge-queue gate + package-graph job (F-12 partial).
+- 5.4.0 — MoonSharp removed; Lua-CSharp is the only VM.
+- 5.3.0 — benchmark v2; resilience primitives (`FallbackLlmClientDecorator` covered by tests).
+- 5.1.0-5.2.0 — audit remediation: safe mutation pipeline, bounded queues/stores; stability gate and
+  extension APIs; streaming mutating-call deferral; `allowedLuaScenes` contract pinned.
+- 5.0.x — on-demand skills for built-in roles ("Lua Modding" skill); benchmark package extracted to
+  `com.neoxider.coreaibenchmark`; version lockstep across five packages.
 - 4.17.0 — tool-call history unlimited by default (`MaxToolCallHistoryMessages = 0`); per-agent / per-call
   `MaxToolCallRoundtrips` override (`0` = unlimited, Programmer/Creator default unlimited), default cap raised
   10 → 20; clearer cap-reached stop message; honest provider-call tok/s labeling; `BenchmarkInfo.GroupDifficulty10`
