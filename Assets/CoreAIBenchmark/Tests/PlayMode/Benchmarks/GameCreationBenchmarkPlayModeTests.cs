@@ -200,6 +200,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.IsNotNull(captured);
         }
 
+        [Test]
+        public void StopDroppedRepetition_IsNotCountedAsCompleted()
+        {
+            Assert.IsFalse(ShouldCountCompletedRepetition(true));
+            Assert.IsTrue(ShouldCountCompletedRepetition(false));
+        }
+
+        [Test]
+        public void StopWithNoResults_SkipsNonEmptyReportRequirement()
+        {
+            Assert.IsFalse(ShouldRequireScenarioResults(true, 0));
+            Assert.IsTrue(ShouldRequireScenarioResults(false, 0));
+            Assert.IsTrue(ShouldRequireScenarioResults(true, 1));
+        }
+
         [UnityTest]
         [Timeout(NUnitTimeoutMs)] // 110 min — last-resort NUnit backstop; the SOFT suite budget (which still
         // writes artifacts) is the real terminator, clamped in
@@ -335,6 +350,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""),
                             timeout);
                         ScenarioResult captured = null;
+                        bool droppedForStop = false;
                         // Retry on ANY hard failure that produced no measurement — provider/model crash,
                         // failed-to-load, timeout, dropped connection — so a crash never counts as a model
                         // failure. A run that COMPLETED but scored low is NOT retried (that is the
@@ -360,6 +376,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             // WHY: retry, so exclude the stop-aborted scenario from model scoring.
                             if (AbortRetryForStop(BenchmarkProgress.StopRequested, ref captured))
                             {
+                                droppedForStop = true;
+                                // TODO: Preserve the dropped attempt's token and cost totals without adding it to scored report results.
                                 Debug.LogWarning($"[Benchmark] {scenario.Name}: stop requested — skipping " +
                                                  $"remaining retry attempt(s) after attempt {attempt}/{maxAttempts}.");
                                 break;
@@ -367,6 +385,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                             Debug.LogWarning($"[Benchmark] {scenario.Name}: run failed " +
                                              $"({captured.Failure}); retry {attempt}/{maxAttempts - 1}.");
+                        }
+
+                        if (!ShouldCountCompletedRepetition(droppedForStop))
+                        {
+                            continue;
                         }
 
                         if (captured != null)
@@ -417,6 +440,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                       $"Tokens {report.TotalTokens} | total latency {report.TotalLatencyMs:0} ms\n" +
                       $"Report: {artifactPath}");
 
+            if (!ShouldRequireScenarioResults(BenchmarkProgress.StopRequested, report.Results.Count))
+            {
+                Debug.LogWarning("[Benchmark] Stop requested before any scenario completed; empty partial report saved.");
+                yield break;
+            }
+
             Assert.Greater(report.Results.Count, 0, "Benchmark produced no scenario results.");
             Assert.AreEqual(0, report.FrameworkFailures,
                 "A scenario failed inside the harness (not the model). See artifact for details.");
@@ -442,6 +471,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             captured = null;
             return true;
+        }
+
+        private static bool ShouldCountCompletedRepetition(bool droppedForStop)
+        {
+            return !droppedForStop;
+        }
+
+        private static bool ShouldRequireScenarioResults(bool stopRequested, int resultCount)
+        {
+            return !stopRequested || resultCount > 0;
         }
 
         private static string ProgressLine(ScenarioResult r)

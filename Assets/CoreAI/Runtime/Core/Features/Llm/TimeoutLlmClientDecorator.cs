@@ -74,7 +74,17 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
-                return await _inner.CompleteAsync(request, timeoutCts.Token).ConfigureAwait(false);
+                LlmCompletionResult result =
+                    await _inner.CompleteAsync(request, timeoutCts.Token).ConfigureAwait(false);
+                // WHY: Some inner clients translate their cancelled linked token into a Cancelled result,
+                // so the decorator must restore timeout ownership before retry and fallback policies see it.
+                if (result != null && !result.Ok && result.ErrorCode == LlmErrorCode.Cancelled &&
+                    timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    result.ErrorCode = LlmErrorCode.Timeout;
+                }
+
+                return result;
             }
             // Genuine caller stop: propagate untouched so user-cancellation handling still runs.
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -150,6 +160,14 @@ namespace CoreAI.Infrastructure.Llm
                     if (!hasNext)
                     {
                         yield break;
+                    }
+
+                    // WHY: A terminal Cancelled chunk may be the inner client's translation of this
+                    // decorator's linked-token timeout, so preserve the chunk and correct only its code.
+                    if (current != null && current.IsDone && current.ErrorCode == LlmErrorCode.Cancelled &&
+                        timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    {
+                        current.ErrorCode = LlmErrorCode.Timeout;
                     }
 
                     yield return current;

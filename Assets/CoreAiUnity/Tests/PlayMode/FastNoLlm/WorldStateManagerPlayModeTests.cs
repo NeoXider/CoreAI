@@ -497,18 +497,72 @@ namespace CoreAI.Tests.PlayMode
             Object.DestroyImmediate(parentGo);
             yield return null;
 
-            WorldStateManager managerNoPrefab = new(
+            WorldStateManager managerB = new(
                 GameLoggerUnscopedFallback.Instance,
                 new StubPrefabRegistry(null, "no-such-key"));
-            Assert.IsTrue(managerNoPrefab.TryLoad());
+            Assert.IsTrue(managerB.TryLoad());
+            yield return null;
+
+            WorldStateManager managerA = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerA.TryLoad());
             yield return null;
             File.WriteAllText(_saveFilePath, "not-json");
-            Assert.IsFalse(managerNoPrefab.TryLoad());
+            Assert.IsFalse(managerB.TryLoad());
 
-            managerNoPrefab.Save();
+            managerB.Save();
             yield return null;
             Assert.AreEqual("", SavedParentFor("ParseChild"),
-                "A failed load must not retain the previous scene's pending-parent link.");
+                "A failed load must clear the failing manager's previous pending-parent link.");
+
+            CoreAiWorldCommandExecutor executor = new(GameLoggerUnscopedFallback.Instance);
+            ExecuteParent(executor, "ParseChild", "none");
+            managerA.Save();
+            yield return null;
+            Assert.AreEqual("", SavedParentFor("ParseChild"),
+                "A failed load must leave pending-parent ownership with the last successful manager.");
+        }
+
+        [UnityTest]
+        public IEnumerator TryLoad_DisposedManager_DoesNotRedirectForgetPendingParent()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab);
+
+            GameObject parentGo = Object.Instantiate(prefab);
+            parentGo.name = "DisposedOwnerParent";
+            Tag(parentGo, "enemy.basic");
+            GameObject childGo = CoreAiPrimitiveFactory.Create("cube");
+            childGo.name = "DisposedOwnerChild";
+            Tag(childGo, "cube");
+            childGo.transform.SetParent(parentGo.transform, true);
+
+            WorldStateManager snapshotManager = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(prefab, "enemy.basic"));
+            snapshotManager.Save();
+            Object.DestroyImmediate(childGo);
+            Object.DestroyImmediate(parentGo);
+            yield return null;
+
+            WorldStateManager managerA = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerA.TryLoad());
+            yield return null;
+
+            WorldStateManager managerB = new(GameLoggerUnscopedFallback.Instance);
+            managerB.Dispose();
+            Assert.IsFalse(managerB.TryLoad());
+
+            CoreAiWorldCommandExecutor executor = new(GameLoggerUnscopedFallback.Instance);
+            ExecuteParent(executor, "DisposedOwnerChild", "none");
+            managerA.Save();
+            yield return null;
+            Assert.AreEqual("", SavedParentFor("DisposedOwnerChild"),
+                "TryLoad on a disposed manager must not steal pending-parent ownership.");
         }
 
         [UnityTest]

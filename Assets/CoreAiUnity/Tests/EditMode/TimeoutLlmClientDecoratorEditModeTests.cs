@@ -75,6 +75,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_InnerCancelledResultFromDecoratorToken_RewritesOnlyErrorCode()
+        {
+            CancelledResultClient inner = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
+
+            LlmCompletionResult result = await sut.CompleteAsync(Req());
+
+            Assert.AreEqual(LlmErrorCode.Timeout, result.ErrorCode);
+            Assert.AreEqual("inner cancelled", result.Error);
+            Assert.AreEqual("partial", result.Content);
+            Assert.AreEqual("test-model", result.Model);
+            Assert.AreEqual(1, result.ExecutedToolCalls.Count);
+        }
+
+        [Test]
         public async Task Streaming_LibraryTimeout_YieldsTerminalTimeoutChunk()
         {
             SlowClient inner = new() { DelayMs = 2000 };
@@ -103,6 +118,22 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("streamed", sb.ToString());
             Assert.IsFalse(chunks.Exists(c => c.ErrorCode == LlmErrorCode.Timeout));
+        }
+
+        [Test]
+        public async Task Streaming_InnerCancelledTerminalFromDecoratorToken_RewritesOnlyErrorCode()
+        {
+            CancelledResultClient inner = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode);
+            Assert.AreEqual("inner cancelled", chunks[0].Error);
+            Assert.AreEqual("partial", chunks[0].Text);
+            Assert.AreEqual("test-model", chunks[0].Model);
+            Assert.AreEqual(1, chunks[0].ExecutedToolCalls.Count);
         }
 
         // ---- helpers ----
@@ -152,6 +183,61 @@ namespace CoreAI.Tests.EditMode
 
                 yield return new LlmStreamChunk { Text = StreamText };
                 yield return new LlmStreamChunk { IsDone = true };
+            }
+        }
+
+        private sealed class CancelledResultClient : ILlmClient
+        {
+            private static readonly LlmToolCallTrace[] Traces =
+            {
+                new LlmToolCallTrace("mutator", true, 1d, "native", "done")
+            };
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Content = "partial",
+                    Error = "inner cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled,
+                    Model = "test-model",
+                    ExecutedToolCalls = Traces
+                };
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                yield return new LlmStreamChunk
+                {
+                    Text = "partial",
+                    IsDone = true,
+                    Error = "inner cancelled",
+                    ErrorCode = LlmErrorCode.Cancelled,
+                    Model = "test-model",
+                    ExecutedToolCalls = Traces
+                };
             }
         }
     }

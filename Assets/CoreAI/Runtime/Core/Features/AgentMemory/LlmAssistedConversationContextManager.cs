@@ -159,6 +159,7 @@ namespace CoreAI.Ai
                     cleanStoredSummary, history, splitExclusive, foldStart);
             }
 
+            compactedSummary = ConversationFoldMarker.Strip(compactedSummary);
             if (string.IsNullOrWhiteSpace(compactedSummary))
             {
                 compactedSummary = ConversationBulletSummary.Format(

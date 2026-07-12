@@ -144,18 +144,15 @@ namespace CoreAI.Tests.EditMode
             }
 
             string[] priorGroupPrefs = { PrefG1, PrefG2, PrefG3, PrefG4, PrefG5, PrefG6, PrefG7 };
-            bool anySaved = false;
             bool allEnabled = true;
             foreach (string pref in priorGroupPrefs)
             {
-                bool saved = EditorPrefs.HasKey(pref);
-                anySaved |= saved;
-                allEnabled &= saved && EditorPrefs.GetBool(pref);
+                allEnabled &= EditorPrefs.GetBool(pref, true);
             }
 
-            // WHY: A brand-new configuration still means the full suite, while any explicit legacy
-            // WHY: subset stays unchanged unless all seven prior groups were explicitly enabled.
-            return !anySaved || allEnabled;
+            // WHY: Migration follows effective legacy values, including the consumers' enabled default
+            // WHY: for missing keys, so only an effective subset excludes the newly introduced G8.
+            return allEnabled;
         }
 
         /// <summary>All benchmark group ids the suite knows, in the launcher's toggle order.</summary>

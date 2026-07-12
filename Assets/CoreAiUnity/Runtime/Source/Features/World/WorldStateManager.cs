@@ -321,13 +321,12 @@ namespace CoreAI.Infrastructure.World
 
         public bool TryLoad(string sceneName = null)
         {
-            _pendingParentByChildId.Clear();
-            _pendingParentOwner = this;
-
             if (_disposed)
             {
                 return false;
             }
+
+            _pendingParentByChildId.Clear();
 
             if (!File.Exists(_saveFilePath))
             {
@@ -441,6 +440,7 @@ namespace CoreAI.Infrastructure.World
             }
 
             _pendingParentByChildId = pendingParents;
+            _pendingParentOwner = this;
 
             for (int i = 0; i < snapshotObjects.Length; i++)
             {

@@ -176,6 +176,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LoadSavedG8Preference_UnsetWithNoPriorKeys_IncludesG8()
+        {
+            Assert.IsTrue(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [Test]
         public void LoadSavedG8Preference_UnsetWithAllSevenEnabled_IncludesG8()
         {
             foreach (string pref in _groupPrefs)
@@ -198,6 +204,22 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.IsFalse(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [Test]
+        public void LoadSavedG8Preference_UnsetWithOnlyG6Disabled_ExcludesG8()
+        {
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG6, false);
+
+            Assert.IsFalse(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [Test]
+        public void LoadSavedG8Preference_UnsetWithOnlyG6Enabled_IncludesG8()
+        {
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG6, true);
+
+            Assert.IsTrue(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
         }
 
         [TestCase(true)]

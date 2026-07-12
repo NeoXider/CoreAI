@@ -105,6 +105,15 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ScopedKeys_PaddedAndUnpaddedLossyValues_MapToSameKey()
+        {
+            string padded = ScopedKeyFor(new AgentMemoryScope("", " user@x ", "", ""), "role");
+            string unpadded = ScopedKeyFor(new AgentMemoryScope("", "user@x", "", ""), "role");
+
+            Assert.AreEqual(unpadded, padded);
+        }
+
+        [Test]
         public void ScopedKeys_LosslessValues_PreserveLegacyMapping()
         {
             string key = ScopedKeyFor(new AgentMemoryScope("t", "user1", "s", ""), "role");

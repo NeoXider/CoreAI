@@ -457,11 +457,8 @@ namespace CoreAI.Infrastructure.Llm
             bool anyToolCallSucceededInStream = false;
             int streamedExecutedCallCount = 0;
             MEAI.UsageDetails turnUsage = null;
-            // WHY: turnUsage is cumulative across ALL tool roundtrips (usage/cost metrics), but the
-            // terminal chunk's PromptTokens must reflect only the LAST roundtrip's prompt size:
-            // AiOrchestrator feeds terminal PromptTokens into its prompt-token calibration EMA as
-            // "actual context width", and the cumulative sum inflated a 4-roundtrip turn ~4x,
-            // causing premature history compaction.
+            // WHY: PromptTokens remains cumulative across all tool roundtrips for usage and cost metrics;
+            // LastRoundtripPromptTokens carries the final prompt size used by calibration.
             MEAI.UsageDetails lastRoundtripUsage = null;
 
             // Set the moment the final tools-disabled summarization roundtrip starts, so that extra

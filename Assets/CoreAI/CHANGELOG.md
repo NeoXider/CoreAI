@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, core)
+
+- **`DelegateLlmTool` bodies can no longer be double-executed.** Host delegate exceptions are converted
+  to `"Error: …"` results at the wrapper (matching first-party tools), so the only exceptions escaping
+  `InvokeAsync` are MEAI argument-coercion failures — a mutate-then-throw host tool is correctly traced
+  as invoked and never replayed by retry/fallback; cancellation still propagates.
+- **Decorator-level timeouts are reported as `Timeout`, not `Cancelled`.** When the timeout decorator's
+  own linked token fires, an inner `Cancelled` result/terminal chunk is reclassified to `Timeout`
+  (caller-token cancellation untouched) — the typed-timeout contract works on the non-streaming path
+  again.
+- **Fold marker hardening:** strict grammar (only `[fold:v1:` + 12-hex groups + `]` counts), `Strip`
+  removes only the authentic final-line marker (marker-shaped user prose survives), LLM compaction
+  output is stripped before stamping, the session inspector strips the marker from display and token
+  estimates, and fold detection skips only *proven-folded* occurrences — a pruned watermark plus a
+  later verbatim duplicate (or recurring empty messages) can no longer silently drop unsummarized
+  history.
+- **Scoped lossy keys hash the trimmed id** (padded and unpadded ids map to the same key; affects only
+  unreleased hash-suffixed keys).
+
 ### Fixed (2026-07-12 audit wave 4 — adversarial review of wave 3, core)
 
 - **Argument-conversion rejections no longer block retries.** A tool call whose arguments MEAI could

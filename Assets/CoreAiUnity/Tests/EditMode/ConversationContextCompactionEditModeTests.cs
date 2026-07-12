@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Diagnostics;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -984,6 +985,129 @@ namespace CoreAI.Tests.EditMode
                 "The message between the real fold point and the live duplicate must be folded, not lost.");
             StringAssert.DoesNotContain("- assistant: watermark reply", foldLines,
                 "Already-folded messages must not be re-summarized.");
+        }
+
+        /// <summary>
+        /// A pruned watermark followed by a live verbatim duplicate must not move the fold point past
+        /// intervening messages that have never been summarized.
+        /// </summary>
+        [Test]
+        public async Task FoldMarker_PrunedWatermarkWithLaterDuplicate_FoldsInterveningMessages()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] firstHistory =
+            {
+                new() { Role = "user", Content = "m0" },
+                new() { Role = "assistant", Content = "m1" },
+                new() { Role = "user", Content = "watermark" },
+                new() { Role = "assistant", Content = "tail-a" },
+                new() { Role = "user", Content = "tail-b" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", firstHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            ChatMessage[] prunedHistory =
+            {
+                new() { Role = "user", Content = "m0" },
+                new() { Role = "assistant", Content = "m1" },
+                new() { Role = "assistant", Content = "never summarized" },
+                new() { Role = "user", Content = "watermark" },
+                new() { Role = "assistant", Content = "tail-1" },
+                new() { Role = "user", Content = "tail-2" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", prunedHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(2, llm.CompleteCallCount);
+            string foldLines = llm.LastRequest.UserPayload.Substring(
+                llm.LastRequest.UserPayload.IndexOf("## Dialogue lines to fold", StringComparison.Ordinal));
+            StringAssert.Contains("- assistant: never summarized", foldLines);
+            StringAssert.Contains("- user: watermark", foldLines,
+                "The later duplicate is live content and must be folded rather than skipped.");
+        }
+
+        /// <summary>
+        /// Marker parsing accepts only the persisted lowercase-hex grammar and leaves invalid marker-like
+        /// final lines untouched as summary prose.
+        /// </summary>
+        [Test]
+        public void FoldMarker_NonHexOrInvalidShape_IsRejectedAndPreserved()
+        {
+            string nonHex = "summary\n[fold:v1:not-a-hash]";
+            Assert.IsFalse(ConversationFoldMarker.TryParse(nonHex, out _));
+            Assert.AreEqual(nonHex, ConversationFoldMarker.Strip(nonHex));
+            Assert.IsFalse(ConversationFoldMarker.TryParse("[fold:v1:ABCDEF012345]", out _));
+            Assert.IsFalse(ConversationFoldMarker.TryParse("[fold:v1:0123456789ab,]", out _));
+            Assert.IsFalse(ConversationFoldMarker.TryParse(
+                "[fold:v1:000000000000,111111111111,222222222222,333333333333,444444444444," +
+                "555555555555,666666666666,777777777777,888888888888]", out _));
+        }
+
+        /// <summary>
+        /// A strict marker-shaped line in the middle of summary prose is quoted content, not persistence
+        /// metadata, and survives stripping unchanged.
+        /// </summary>
+        [Test]
+        public void FoldMarker_StrictMidTextMarkerLine_SurvivesStrip()
+        {
+            string summary = "before\n[fold:v1:0123456789ab]\nafter";
+            Assert.AreEqual(summary, ConversationFoldMarker.Strip(summary));
+            Assert.IsFalse(ConversationFoldMarker.TryParse(summary, out _));
+        }
+
+        /// <summary>
+        /// A trailing marker echoed by the compaction LLM is removed before the clean snapshot is produced
+        /// and before the authentic marker is stamped.
+        /// </summary>
+        [Test]
+        public async Task LlmAssisted_TrailingEchoedMarker_StrippedBeforeStamping()
+        {
+            const string echoedMarker = "[fold:v1:0123456789ab]";
+            InMemoryConversationSummaryStore store = new();
+            LongResultLlmClient llm = new("clean prose\n" + echoedMarker);
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ConversationContextSnapshot snapshot = await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(5), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual("clean prose", snapshot.Summary);
+            StringAssert.DoesNotContain(echoedMarker, store.LoadSummary("r"));
+            Assert.IsTrue(ConversationFoldMarker.TryParse(store.LoadSummary("r"), out _));
+        }
+
+        /// <summary>
+        /// Serialized inspector diagnostics expose and estimate only clean summary prose, never the
+        /// persistence marker.
+        /// </summary>
+        [Test]
+        public void AgentSessionInspector_StripsMarkerFromDisplayAndTokenEstimate()
+        {
+            const string roleId = BuiltInAgentRoleIds.PlainChat;
+            InMemoryConversationSummaryStore store = new();
+            CoreAISettingsOptions settings = new();
+            AgentMemoryPolicy policy = new();
+            store.SaveSummary(roleId, "clean prose\n[fold:v1:0123456789ab]");
+
+            AgentSessionSnapshot marked = AgentSessionInspector.InspectSerializedInputs(
+                roleId, settings, memoryPolicy: policy, summaryStore: store,
+                tokenEstimator: new HeuristicTokenEstimator());
+            store.SaveSummary(roleId, "clean prose");
+            AgentSessionSnapshot clean = AgentSessionInspector.InspectSerializedInputs(
+                roleId, settings, memoryPolicy: policy, summaryStore: store,
+                tokenEstimator: new HeuristicTokenEstimator());
+
+            Assert.AreEqual("clean prose", marked.ConversationSummary);
+            Assert.AreEqual(clean.Budget.EstimatedSystemTokens, marked.Budget.EstimatedSystemTokens);
+            Assert.IsFalse(marked.EstimatedRequestChatHistory.Any(
+                message => message.Content.Contains("[fold:v1:", StringComparison.Ordinal)));
         }
 
         /// <summary>

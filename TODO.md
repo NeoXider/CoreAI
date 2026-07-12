@@ -242,6 +242,29 @@
       disabled the overflow clamp partitions at raw budget with no trigger ratio and can split mid
       tool-call/answer exchange — no wire-contract violation, but consider a `ShouldPartition`-style
       hysteresis for coherence.
+- [ ] Pending-parent ownership in additive scenes (2026-07-12 wave-4 review #2, residual after the
+      claim-on-success fix): ownership is still last-successful-loader-wins — a detach of scene A's
+      child after scene B loaded routes `ForgetPendingParent` to B's map, and disposing B leaves the
+      owner null while A is alive (A reclaims only on its next `TryLoad`). Real fix = per-manager
+      routing (executor resolves its scene's manager via DI instead of the static owner). Multi-manager
+      additive topology is already broken more basically (Save/DestroyAll use global FindObjectsByType).
+- [ ] Persisted summary exceeds the token cap by the fold-marker line (~113 chars, 2026-07-12 wave-4
+      review #2): self-healing internally (managers strip+re-limit on load), but an external reader of
+      `FileConversationSummaryStore` sees over-cap text with the marker. Consider reserving marker
+      headroom inside the limiter.
+- [ ] `AgentMemoryPolicy.ConfigureChatHistory` lacks the null/whitespace roleId guard the other entry
+      points have (pre-existing; null throws from Dictionary.TryGetValue).
+- [ ] Router cross-generation clear theft (2026-07-12 wave-4 review, latent, pre-existing): a stale
+      pre-`ResetStatics` router disposing AFTER a new-generation router incremented the refcount can
+      take the count 1→0 and null `CommandReceived` mid-session. A generation token alongside the
+      counter would close it; only reachable with domain reload off + leaked routers.
+- [ ] Benchmark window/menu G8 divergence (2026-07-12 wave-4 review, cosmetic): until any run writes
+      `PrefG8`, the window's visible G8 toggle and what the one-click menu computes can diverge if
+      other group prefs changed in between (migration is re-evaluated per launch).
+- [ ] `LastRoundtripPromptTokens` producer coverage (2026-07-12 wave-4 review, latent): the field is
+      only set by the MEAI client when `response.Usage != null`; a future non-MEAI usage-reporting
+      client would silently calibrate on cumulative PromptTokens again. Add the field to any new
+      client's terminal path.
 - [ ] Multi-scope audit-writer design (2026-07-12 adversarial review of wave 2): two coexisting scopes
       (now officially supported by the additive-scene router fix) each own an `AuditLogWriter` on the SAME
       `audit.jsonl` with independent `_seq`/`_prevHash` — interleaved appends break the hash chain. Needs a

@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
+using MEAI = Microsoft.Extensions.AI;
+using Newtonsoft.Json;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -18,6 +21,31 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class RetryFallbackToolTraceSuppressionEditModeTests
     {
+        private sealed class StubSettings : ICoreAISettings
+        {
+            public int MaxLuaRepairRetries => 3;
+            public bool EnableMeaiDebugLogging => false;
+            public float LlmRequestTimeoutSeconds => 30f;
+            public int MaxLlmRequestRetries => 3;
+            public bool EnableHttpDebugLogging => false;
+            public bool LogTokenUsage => false;
+            public bool LogLlmLatency => false;
+            public bool LogLlmConnectionErrors => false;
+            public int ContextWindowTokens => 4096;
+            public string UniversalSystemPromptPrefix => "";
+            public float Temperature => 0.7f;
+            public int MaxToolCallRetries => 3;
+            public bool LogToolCalls => false;
+            public bool LogToolCallArguments => false;
+            public bool LogToolCallResults => false;
+            public bool LogMeaiToolCallingSteps => false;
+            public bool AllowDuplicateToolCalls => false;
+            public bool EnableStreaming => true;
+            public int MaxParallelToolCalls => 1;
+            public int MaxToolResultChars => 8000;
+            public ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;
+        }
+
         private static LlmToolCallTrace RejectedUnknownToolTrace()
         {
             return new LlmToolCallTrace("no_such_tool", false, 0d, "unknown-tool",
@@ -84,6 +112,69 @@ namespace CoreAI.Tests.EditMode
                 CompleteCallCount++;
                 return Task.FromResult(_result);
             }
+        }
+
+        [Test]
+        public async Task DelegateLlmTool_MutateThenThrow_ReturnsErrorAndRecordsNativeTrace()
+        {
+            int sideEffects = 0;
+            Func<string> body = () =>
+            {
+                sideEffects++;
+                throw new JsonReaderException("cannot convert mutated payload");
+            };
+            DelegateLlmTool tool = new("grant_item", "Grant an item.", body);
+            ToolExecutionPolicy policy = new(
+                NullLog.Instance,
+                new StubSettings(),
+                new ILlmTool[] { tool },
+                false,
+                "Tester");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+            MEAI.FunctionCallContent call = new(
+                "call_grant_item",
+                tool.Name,
+                new Dictionary<string, object>());
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
+
+            Assert.AreEqual(1, sideEffects);
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual("Error: cannot convert mutated payload", result.Result.Result.ToString());
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("native", policy.ExecutedTraces[0].Source);
+        }
+
+        [Test]
+        public async Task DelegateLlmTool_ArgumentCoercionFailure_RecordsArgConversionWithoutInvokingBody()
+        {
+            int sideEffects = 0;
+            Func<int, string> body = count =>
+            {
+                sideEffects += count;
+                return "ok";
+            };
+            DelegateLlmTool tool = new("grant_items", "Grant items.", body);
+            ToolExecutionPolicy policy = new(
+                NullLog.Instance,
+                new StubSettings(),
+                new ILlmTool[] { tool },
+                false,
+                "Tester");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+            MEAI.FunctionCallContent call = new(
+                "call_grant_items",
+                tool.Name,
+                new Dictionary<string, object> { ["count"] = "not-an-integer" });
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(call, options, CancellationToken.None);
+
+            Assert.AreEqual(0, sideEffects);
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
         }
 
         [Test]

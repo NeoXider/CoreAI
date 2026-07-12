@@ -123,7 +123,8 @@ namespace CoreAI.Diagnostics
                 inspectRequest,
                 _settings);
 
-            string conversationSummary = _summaryStore?.LoadSummary(resolvedRoleId) ?? "";
+            string conversationSummary = ConversationFoldMarker.Strip(
+                _summaryStore?.LoadSummary(resolvedRoleId) ?? "");
             string summaryTailBlock = "";
             string finalSystemEstimate = systemWithTools;
             if (roleConfig.WithChatHistory &&
@@ -245,7 +246,8 @@ namespace CoreAI.Diagnostics
                 inspectRequest,
                 settings);
 
-            string conversationSummary = summaryStore?.LoadSummary(resolvedRoleId) ?? "";
+            string conversationSummary = ConversationFoldMarker.Strip(
+                summaryStore?.LoadSummary(resolvedRoleId) ?? "");
             string summaryTailBlock = "";
             string finalSystemEstimate = systemWithTools;
             if (roleConfig.WithChatHistory &&

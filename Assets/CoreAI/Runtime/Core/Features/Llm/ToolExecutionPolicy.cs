@@ -618,11 +618,9 @@ namespace CoreAI.Infrastructure.Llm
 
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {errorMessage}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), errorMessage, 0d);
-                // WHY: MEAI coerces arguments inside InvokeAsync before the delegate body runs, so a
-                // conversion failure means nothing executed and the trace must not suppress a later
-                // retry/fallback of the turn. Residual assumption: a tool body that throws its own
-                // JSON/format exception mid-mutation would be misread as non-invoked; CoreAI tool
-                // bodies parse inputs before mutating, so retrying that class is acceptable.
+                // WHY: Tool bodies convert their own exceptions to error results; first-party tools and
+                // the DelegateLlmTool wrapper enforce this. Exceptions escaping InvokeAsync are therefore
+                // MEAI argument-coercion failures that occur before the body runs and remain retry-safe.
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d,
                     argConversion ? "arg-conversion" : "native", errorMessage));
                 LogCallLine(fc, false, 0d, $"threw: {errorMessage}");

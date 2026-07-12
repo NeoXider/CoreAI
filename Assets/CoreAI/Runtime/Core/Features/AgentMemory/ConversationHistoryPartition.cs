@@ -214,15 +214,35 @@ namespace CoreAI.Ai
         {
             anyHashMatched = false;
             int foldStart = 0;
-            HashSet<string> consumed = new(StringComparer.Ordinal);
+            HashSet<string> consumedHashes = new(StringComparer.Ordinal);
+            HashSet<ChatMessage> consumedMessages = new();
             int limit = Math.Min(splitExclusive, history.Length);
             for (int i = 0; i < limit; i++)
             {
                 string hash = ConversationFoldMarker.HashMessage(history[i]);
-                if (markerHashes.Contains(hash) && consumed.Add(hash))
+                if (markerHashes.Contains(hash) && consumedHashes.Add(hash))
                 {
                     anyHashMatched = true;
                     foldStart = i + 1;
+                    consumedMessages.Add(history[i]);
+                    continue;
+                }
+
+                if (anyHashMatched && markerHashes.Contains(hash) &&
+                    string.IsNullOrWhiteSpace(history[i].Content))
+                {
+                    // WHY: Whitespace-only duplicates emit no summary prose, so advancing across them is
+                    // safe and preserves convergence when the marker intentionally stores unique hashes.
+                    foldStart = i + 1;
+                    consumedMessages.Add(history[i]);
+                    continue;
+                }
+
+                if (anyHashMatched)
+                {
+                    // WHY: Once a retained marker anchor is followed by an unconsumed occurrence, later
+                    // marker matches may be live duplicates of pruned folded messages, not folded history.
+                    break;
                 }
             }
 
@@ -231,12 +251,9 @@ namespace CoreAI.Ai
                 return 0;
             }
 
-            // WHY: Duplicate content pins each hash to its OLDEST occurrence, so a repeated message inside
-            // the folded prefix (e.g. consecutive whitespace turns) would sit just past foldStart and get
-            // re-folded every turn (non-convergent). Skipping forward over messages whose hash is in the
-            // marker is safe: their exact role+content is provably already summarized.
-            while (foldStart < limit &&
-                   markerHashes.Contains(ConversationFoldMarker.HashMessage(history[foldStart])))
+            // WHY: Only consumed message occurrences prove folding; equal content in a different live
+            // message can share a marker hash after the original occurrence has been pruned.
+            while (foldStart < limit && consumedMessages.Contains(history[foldStart]))
             {
                 foldStart++;
             }
@@ -425,8 +442,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Removes every fold-marker line from <paramref name="summary"/> and trims the result; this is the
-        /// clean prose handed to the LLM and exposed as <see cref="ConversationContextSnapshot.Summary"/>.
+        /// Removes a strict fold marker only when it is the final line of <paramref name="summary"/> and
+        /// trims the result; marker-shaped lines elsewhere remain user-authored summary prose.
         /// </summary>
         public static string Strip(string summary)
         {
@@ -435,33 +452,15 @@ namespace CoreAI.Ai
                 return "";
             }
 
-            if (summary.IndexOf(MarkerPrefix, StringComparison.Ordinal) < 0)
+            string trimmed = summary.TrimEnd();
+            int lastNewline = trimmed.LastIndexOf('\n');
+            string lastLine = lastNewline >= 0 ? trimmed.Substring(lastNewline + 1) : trimmed;
+            if (!IsMarkerLine(lastLine))
             {
                 return summary.Trim();
             }
 
-            // WHY: Splitting on '\n' only (keeping any trailing '\r' on each line) preserves the summary's
-            // original CRLF/LF line endings byte-for-byte; IsMarkerLine trims, so it matches either ending.
-            string[] lines = summary.Split('\n');
-            StringBuilder sb = new(summary.Length);
-            bool first = true;
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (IsMarkerLine(lines[i]))
-                {
-                    continue;
-                }
-
-                if (!first)
-                {
-                    sb.Append('\n');
-                }
-
-                sb.Append(lines[i]);
-                first = false;
-            }
-
-            return sb.ToString().Trim();
+            return lastNewline < 0 ? "" : trimmed.Substring(0, lastNewline).Trim();
         }
 
         /// <summary>
@@ -477,7 +476,7 @@ namespace CoreAI.Ai
 
             string trimmed = summary.TrimEnd();
             int lastNewline = trimmed.LastIndexOf('\n');
-            string lastLine = (lastNewline >= 0 ? trimmed.Substring(lastNewline + 1) : trimmed).Trim();
+            string lastLine = lastNewline >= 0 ? trimmed.Substring(lastNewline + 1) : trimmed;
             if (!IsMarkerLine(lastLine))
             {
                 return false;
@@ -531,10 +530,34 @@ namespace CoreAI.Ai
 
         private static bool IsMarkerLine(string line)
         {
-            string t = line.Trim();
-            return t.StartsWith(MarkerPrefix, StringComparison.Ordinal) &&
-                   t.EndsWith(MarkerSuffix, StringComparison.Ordinal) &&
-                   t.Length > MarkerPrefix.Length + MarkerSuffix.Length;
+            if (line == null ||
+                !line.StartsWith(MarkerPrefix, StringComparison.Ordinal) ||
+                !line.EndsWith(MarkerSuffix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int payloadLength = line.Length - MarkerPrefix.Length - MarkerSuffix.Length;
+            if (payloadLength <= 0)
+            {
+                return false;
+            }
+
+            string[] parts = line.Substring(MarkerPrefix.Length, payloadLength).Split(',');
+            if (parts.Length == 0 || parts.Length > StoredHashCount)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (!IsHexHash(parts[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static bool IsHexHash(string value)

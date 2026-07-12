@@ -81,7 +81,7 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Keeps the legacy length-prefixed mapping for values containing only safe characters. Values
-        /// changed by sanitization gain a stable hash of the original raw text and use the raw length as
+        /// changed by sanitization gain a stable hash of the trimmed raw text and use the raw length as
         /// their prefix, so a literal hash-suffixed value cannot collide with them.
         /// </summary>
         private static void AppendPart(StringBuilder sb, string value)
@@ -93,13 +93,12 @@ namespace CoreAI.Ai
 
             string sanitized = Sanitize(value);
             string raw = value?.Trim() ?? "";
-            // WHY: An unset segment keeps the legacy "_" key. Lossy values already remapped when hashing
-            // was introduced; their raw-length prefix now disambiguates literal hash-suffixed values while
-            // every lossless value, including a lowercase GUID, keeps its legacy encoding.
+            // WHY: An unset segment keeps the legacy "_" key. Lossy hash-suffix schemes post-date 5.6.1,
+            // so hashing their canonical trimmed value changes only unreleased keys while making padding stable.
             bool lossless = string.Equals(raw, sanitized, System.StringComparison.Ordinal);
             string encoded = raw.Length == 0 || lossless
                 ? sanitized
-                : sanitized + "-" + StableHash(value ?? "");
+                : sanitized + "-" + StableHash(raw);
             int lengthPrefix = raw.Length == 0 ? encoded.Length : raw.Length;
             sb.Append(lengthPrefix).Append(':').Append(encoded);
         }

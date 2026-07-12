@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, host)
+
+- **World state: pending-parent ownership is claimed only on a successful load** — a failed/parse-error
+  `TryLoad` (or one on a disposed manager) no longer steals the static owner slot from the live
+  manager, so explicit detaches keep routing to the right pending map.
+- **Benchmark G8 migration compares effective values, not saved keys** — a legacy config where the
+  missing group keys default to "on" is correctly treated as a full run (G8 included); an effective
+  subset still excludes it; explicit `PrefG8` always wins.
+- **Benchmark stop polish:** a stop-dropped repetition no longer counts as completed in the progress
+  UI, and a user stop during the sole repetition saves its partial report instead of failing the
+  suite.
+
 ### Fixed (2026-07-12 audit wave 4 — adversarial review of wave 3, host)
 
 - **World state: explicit `parent: none` (or reparent) sticks.** A world command that detaches or
