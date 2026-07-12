@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
-> Known open item (tracked in TODO.md [A6]): mod-created RAW Lua coroutines (`coroutine.create/wrap/resume`)
-> run on a child `LuaState` that does not inherit the execution-guard hook, so step/time/allocation budgets
-> are not enforced inside them (DoS / budget escape). Pre-existing; the fix (arm the guard on coroutine
-> states) needs in-editor validation because `coroutine` is a supported mod feature (see the countdown demo).
+## 5.8.4 - Guard mod-created raw Lua coroutines (fifth re-audit finding) (2026-07-13)
+
+### Fixed
+
+- **Mod-created raw Lua coroutines are now step/time-guarded.** `coroutine.resume` and `coroutine.wrap` are
+  wrapped so every resume arms a per-resume step + wall-clock budget hook on the coroutine's own child
+  `LuaState` (mirroring `LuaCsCoroutineHandle.Resume`) and clears it afterwards. This closes a DoS where an
+  unbounded loop inside a coroutine (e.g. `coroutine.wrap(function() while true do end end)()`) escaped
+  every sandbox budget because the native library runs the body on a child state that never inherited the
+  `LuaCsExecutionGuard` hook. Fail-safe: if a Lua-CSharp build does not surface the coroutine state, the
+  wrappers still delegate `coroutine` semantics unchanged (no behaviour break). **Runtime behaviour needs
+  in-editor validation** — coroutine VM execution cannot be exercised by the `dotnet build` compile gate.
 
 ## 5.8.3 - Fourth adversarial re-audit: refine the allocation debounce and scope error redaction (2026-07-13)
 

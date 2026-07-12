@@ -37,6 +37,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        [Timeout(30000)]
+        public void Coroutine_RunawayLoop_IsCutByResumeBudget()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // A runaway loop inside a mod-created coroutine runs on a CHILD LuaState the native library does
+            // not guard; the per-resume coroutine guard must cut it. A finite-but-huge loop is used so a
+            // REGRESSION (guard not armed) fails the assert (no throw / timeout) instead of hanging forever.
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state,
+                    "local co = coroutine.wrap(function()\n" +
+                    "  for i = 1, 50000000 do end\n" +
+                    "end)\n" +
+                    "co()"));
+
+            Assert.IsTrue(
+                ex.Message.Contains("EXCEEDED_COROUTINE_STEP_BUDGET")
+                || ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS")
+                || ex.Message.Contains("exceeded"),
+                $"Expected the coroutine resume budget to cut the runaway loop, got: {ex.Message}");
+        }
+
+        [Test]
         public void AllocationBomb_ConcatDoubling_ThrowsMemoryBudgetError()
         {
             LuaCsSecureEnvironment env = new();

@@ -49,8 +49,161 @@ namespace CoreAI.Sandbox.LuaCs
             state.OpenBitwiseLibrary();
 
             StripRiskyGlobals(state);
+            HardenCoroutineLibrary(state);
             registry?.ApplyToEnvironment(state);
             return state;
+        }
+
+        /// <summary>Per-resume instruction-step budget for a mod-created raw Lua coroutine.</summary>
+        public const long CoroutineResumeStepBudget = 500_000;
+
+        /// <summary>Per-resume wall-clock budget (ms) for a mod-created raw Lua coroutine.</summary>
+        public const int CoroutineResumeTimeoutMs = 1000;
+
+        // WHY: The native coroutine library runs a coroutine body on a CHILD LuaState that does NOT inherit
+        // LuaCsExecutionGuard's step/time/alloc hook, so an unbounded loop inside coroutine.wrap/create/resume
+        // (e.g. `coroutine.wrap(function() while true do end end)()`) escapes every budget and hangs the game.
+        // Wrap `resume` and `wrap` so every resume arms a per-resume step+time guard hook on the coroutine's
+        // own state (mirroring LuaCsCoroutineHandle.Resume) and clears it afterwards. `create` stays native —
+        // the thread it returns is guarded at resume time. Best-effort: if this Lua-CSharp build does not
+        // surface the coroutine LuaState here, the wrappers still delegate correctly, they just cannot arm the
+        // hook (fail-open to today's behaviour, never breaking coroutine semantics).
+        private static void HardenCoroutineLibrary(LuaState state)
+        {
+            LuaValue coroValue = state.Environment["coroutine"];
+            if (coroValue.Type != LuaValueType.Table)
+            {
+                return;
+            }
+
+            LuaTable coro = coroValue.Read<LuaTable>();
+            LuaValue nativeResume = coro["resume"];
+            LuaValue nativeCreate = coro["create"];
+
+            if (nativeResume.Type == LuaValueType.Function)
+            {
+                coro["resume"] = new LuaFunction("resume",
+                    (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume));
+
+                if (nativeCreate.Type == LuaValueType.Function)
+                {
+                    coro["wrap"] = new LuaFunction("wrap",
+                        (ctx, ct) => GuardedCoroutineWrap(ctx, ct, nativeCreate, nativeResume));
+                }
+            }
+        }
+
+        private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineResume(
+            LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeResume)
+        {
+            LuaValue[] result = ResumeWithPerResumeGuard(ctx.State, nativeResume, ctx.Arguments.ToArray(), ct);
+            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(result));
+        }
+
+        private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineWrap(
+            LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeCreate, LuaValue nativeResume)
+        {
+            LuaValue[] created = ctx.State
+                .CallAsync(nativeCreate, ctx.Arguments.ToArray().AsSpan(), ct).GetAwaiter().GetResult();
+            LuaValue thread = created.Length > 0 ? created[0] : LuaValue.Nil;
+
+            // WHY: coroutine.wrap returns a function that resumes the hidden thread and RE-RAISES a coroutine
+            // error (unlike resume, which returns ok,err). Route it through the same per-resume guard.
+            LuaFunction resumer = new("coroutine_wrap_resumer", (rctx, rct) =>
+            {
+                LuaValue[] rargs = rctx.Arguments.ToArray();
+                LuaValue[] callArgs = new LuaValue[rargs.Length + 1];
+                callArgs[0] = thread;
+                Array.Copy(rargs, 0, callArgs, 1, rargs.Length);
+
+                LuaValue[] res = ResumeWithPerResumeGuard(rctx.State, nativeResume, callArgs, rct);
+                bool ok = res.Length > 0 && res[0].Type == LuaValueType.Boolean && res[0].Read<bool>();
+                if (!ok)
+                {
+                    LuaValue err = res.Length > 1 ? res[1] : LuaValue.Nil;
+                    throw new LuaRuntimeException(rctx.State, new InvalidOperationException(err.ToString()));
+                }
+
+                int extra = res.Length > 1 ? res.Length - 1 : 0;
+                LuaValue[] outValues = new LuaValue[extra];
+                for (int i = 0; i < extra; i++)
+                {
+                    outValues[i] = res[i + 1];
+                }
+
+                return new System.Threading.Tasks.ValueTask<int>(rctx.Return(outValues));
+            });
+
+            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(resumer));
+        }
+
+        private static LuaValue[] ResumeWithPerResumeGuard(
+            LuaState callerState, LuaValue nativeResume, LuaValue[] resumeArgs, CancellationToken ct)
+        {
+            LuaState coroutineState = null;
+            try
+            {
+                if (resumeArgs.Length > 0)
+                {
+                    coroutineState = resumeArgs[0].Read<LuaState>();
+                }
+            }
+            catch
+            {
+                coroutineState = null;
+            }
+
+            if (coroutineState != null)
+            {
+                long steps = 0;
+                System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
+                {
+                    steps++;
+                    if (steps > CoroutineResumeStepBudget)
+                    {
+                        throw new LuaRuntimeException(hctx.State,
+                            new InvalidOperationException(
+                                $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({CoroutineResumeStepBudget})"));
+                    }
+
+                    if (sw.ElapsedMilliseconds > CoroutineResumeTimeoutMs)
+                    {
+                        throw new LuaRuntimeException(hctx.State,
+                            new TimeoutException($"Lua coroutine resume exceeded {CoroutineResumeTimeoutMs} ms."));
+                    }
+
+                    return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
+                });
+
+                try
+                {
+                    coroutineState.SetHook(hook, string.Empty, 1);
+                }
+                catch
+                {
+                    coroutineState = null;
+                }
+            }
+
+            try
+            {
+                return callerState.CallAsync(nativeResume, resumeArgs.AsSpan(), ct).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                if (coroutineState != null)
+                {
+                    try
+                    {
+                        coroutineState.SetHook(null, string.Empty, 0);
+                    }
+                    catch
+                    {
+                        /* ignore */
+                    }
+                }
+            }
         }
 
         /// <summary>Loads and runs Lua code inside a secured state with the optional execution guard.</summary>
