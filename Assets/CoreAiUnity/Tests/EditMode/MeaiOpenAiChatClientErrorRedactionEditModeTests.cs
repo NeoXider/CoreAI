@@ -13,16 +13,18 @@ namespace CoreAI.Tests.EditMode
     public sealed class MeaiOpenAiChatClientErrorRedactionEditModeTests
     {
         [Test]
-        public void AuthError_BodyIsRedacted_NotLogged()
+        public void AuthError_401Body_IsBlanked_403Is_Not()
         {
             string body = "{\"error\":{\"message\":\"Invalid API key sk-secret-123\"}}";
             string log401 = MeaiOpenAiChatClient.FormatHttpErrorForLog(401, body);
             string log403 = MeaiOpenAiChatClient.FormatHttpErrorForLog(403, body);
 
+            // 401 (invalid credentials) can echo the key — fully blanked.
             StringAssert.DoesNotContain("sk-secret-123", log401);
-            StringAssert.DoesNotContain("sk-secret-123", log403);
             StringAssert.Contains("redacted", log401);
             StringAssert.Contains("401", log401);
+            // 403 (forbidden/permission/geo) is diagnostic, not a credential echo — kept (truncated), not blanked.
+            StringAssert.DoesNotContain("redacted", log403);
             StringAssert.Contains("403", log403);
         }
 
@@ -74,18 +76,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ThrownException_Message_RedactsAuthBody_EvenWhenJson()
+        public void ThrownException_Message_Redacts401AuthBody_EvenWhenJson_ButKeeps403()
         {
-            // The parsed provider error.message of a 401/403 can echo the submitted key — it must NOT reach
-            // the exception message (which is logged), even though the body is valid JSON.
+            // A 401 parsed provider error.message can echo the submitted key — it must NOT reach the exception
+            // message (which is logged), even for a valid-JSON body.
             string body = "{\"error\":{\"message\":\"Incorrect API key provided: sk-secret-JSON-123.\"}}";
             LlmClientException ex401 = MeaiOpenAiChatClient.BuildHttpExceptionForTests(401, body);
-            LlmClientException ex403 = MeaiOpenAiChatClient.BuildHttpExceptionForTests(403, body);
 
             StringAssert.DoesNotContain("sk-secret-JSON-123", ex401.Message);
-            StringAssert.DoesNotContain("sk-secret-JSON-123", ex403.Message);
             // WHY: raw body still retained for diagnostics/retry-window parsing, just not in the message.
             StringAssert.Contains("sk-secret-JSON-123", ex401.ProviderErrorBody);
+
+            // 403 is not a credential echo — its parsed provider message is preserved for diagnostics.
+            string body403 = "{\"error\":{\"message\":\"Your region is not supported for this model.\"}}";
+            LlmClientException ex403 = MeaiOpenAiChatClient.BuildHttpExceptionForTests(403, body403);
+            StringAssert.Contains("region is not supported", ex403.Message);
         }
 
         [Test]

@@ -228,7 +228,12 @@ namespace CoreAI.Sandbox.LuaCs
                         // further step) so a process heap that legitimately sits above budget for a while
                         // cannot induce a full GC on every instruction; a doubling bomb climbs past the step
                         // within one iteration and still trips promptly.
-                        allocAtLastForcedCheck = allocated;
+                        // WHY: Cap the watermark at the budget (not the inflated cheap reading). The cheap
+                        // reading counts dead/collectible garbage, so setting the watermark to it would let a
+                        // transient garbage spike ratchet the next-confirm threshold arbitrarily high and let a
+                        // mod retain LIVE memory above budget without re-confirmation (fail-open). Capping keeps
+                        // the confirmation window to at most budget + one step regardless of transient noise.
+                        allocAtLastForcedCheck = maxAllocatedBytes;
                         long live = GC.GetTotalMemory(true) - allocBaseline;
                         if (live > maxAllocatedBytes)
                         {

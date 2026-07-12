@@ -1187,10 +1187,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // WHY: The exception Message is surfaced up the stack and logged (result.Error). Redact it at the
-            // source, not just at the log call: for 401/403 the parsed provider error.message can echo the
-            // submitted key/token, so use the already-redacted detail instead of ExtractProviderMessage; for
-            // any other status, cap the parsed provider message so a huge body cannot dump content into logs.
-            string providerMessage = status == 401 || status == 403
+            // source, not just at the log call: a 401 (invalid-credentials) parsed error.message can echo the
+            // submitted key/token, so use the already-redacted detail instead of ExtractProviderMessage. Every
+            // other status (including 403 forbidden/permission/geo) keeps its parsed provider message, capped
+            // so a huge body cannot dump content into logs.
+            string providerMessage = status == 401
                 ? errorDetail
                 : TruncateMessageForException(ExtractProviderMessage(responseBody, errorDetail));
 
@@ -1356,7 +1357,10 @@ namespace CoreAI.Infrastructure.Llm
                 return $"HTTP {status}";
             }
 
-            if (status == 401 || status == 403)
+            // WHY: Only 401 (invalid-credentials) bodies routinely echo the submitted key/token, so only they
+            // are fully blanked. 403 (forbidden / permission / geo-block / model-access) carries useful,
+            // non-secret diagnostics, so it is truncated like any other status rather than blanked.
+            if (status == 401)
             {
                 return $"HTTP {status} | Body: [redacted auth error body]";
             }

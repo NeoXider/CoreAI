@@ -2,7 +2,7 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.2 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
+> Released: 5.8.3 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
 > EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
 > PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
@@ -33,6 +33,19 @@
 - [x] **Re-audit round (5.8.2):** third adversarial pass found 3 residual gaps in the 5.8.1 fixes, all
       fixed: sticky memory-trip flag → exact-instance match (closes pcall-swallow laundering); JSON 401/403
       error.message redaction completed (was only non-JSON); ImportMod already-loaded-tier comment corrected.
+- [x] **Re-audit round (5.8.3):** fourth adversarial pass found 3 (2 mine, 1 pre-existing). Fixed the two:
+      allocation-guard debounce watermark capped at budget (no transient-garbage ratchet); HTTP-error
+      redaction scoped to 401 only (403 kept, was over-blanked). See the open coroutine item below.
+- [ ] **[SECURITY, HIGH] Guard mod-created RAW Lua coroutines.** `LuaCsSecureEnvironment` opens the coroutine
+      library and does not strip it (the countdown demo mod relies on `coroutine.create/yield/resume`), but a
+      coroutine runs on a child `LuaState` that never inherits the `LuaCsExecutionGuard` hook, so step/time/
+      allocation budgets are NOT enforced inside a coroutine — `coroutine.wrap(function() while true do end end)()`
+      is an unbounded DoS. Fix options: (a) wrap `coroutine.create/wrap/resume` so each coroutine `LuaState`
+      gets the guard hook re-armed before resume (mirror `LuaCsCoroutineHandle.Resume`'s `SetHook`), routing
+      raw coroutines through the guarded path; or (b) replace the raw library with a `LuaCsCoroutineHandle`-
+      backed shim. Needs IN-EDITOR validation (coroutine VM behavior can't be exercised via `dotnet build`),
+      so it is deliberately NOT done blind in this session. Add a PlayMode/EditMode test that a runaway
+      coroutine is cut by the step/time budget.
 - [ ] **Verification gate on next editor start:** run the full EditMode + PlayMode suites (Unity holds the
       project lock during this session, so batchmode is unavailable; compile gate is green across Core /
       Source / Mods / Mods.Hub / Tests / Mods.Tests / ExampleGame.Tests). New/updated tests:

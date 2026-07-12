@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+> Known open item (tracked in TODO.md [A6]): mod-created RAW Lua coroutines (`coroutine.create/wrap/resume`)
+> run on a child `LuaState` that does not inherit the execution-guard hook, so step/time/allocation budgets
+> are not enforced inside them (DoS / budget escape). Pre-existing; the fix (arm the guard on coroutine
+> states) needs in-editor validation because `coroutine` is a supported mod feature (see the countdown demo).
+
+## 5.8.3 - Fourth adversarial re-audit: refine the allocation debounce and scope error redaction (2026-07-13)
+
+### Fixed
+
+- **Allocation-guard debounce no longer ratchets the ceiling.** The forced-GC confirmation watermark was set
+  to the garbage-inclusive cheap heap reading, so a transient collectible spike inflated the next-confirm
+  threshold and could let a mod retain live memory meaningfully above budget without re-confirmation
+  (fail-open). The watermark is now capped at the budget, bounding overshoot to a single step.
+- **HTTP-error redaction scoped to 401.** 403 (forbidden / permission / geo-block / model-access) responses
+  are diagnostic, not credential echoes, so their provider message and log body are kept (truncated) rather
+  than fully blanked and mislabeled; only 401 (invalid credentials, which can echo the key) is redacted.
+
 ## 5.8.2 - Third adversarial re-audit: close residual gaps in the 5.8.1 fixes (2026-07-13)
 
 ### Fixed
