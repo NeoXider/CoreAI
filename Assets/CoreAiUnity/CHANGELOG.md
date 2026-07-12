@@ -110,6 +110,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   active (same cooperative stop as the `CoreAI/Benchmarks/Stop Running Benchmark` menu item: finishes the
   current scenario, saves a partial report); shows "Stopping…" once requested.
 
+## [5.6.2] - 2026-07-12
+
+### Fixed
+
+- **`AuditLogWriter` DI-конструктор помечен `[Inject]`.** VContainer.SourceGenerator выбирал
+  конструктор с максимумом параметров — `internal AuditLogWriter(string folder)` (тестовый seam) — и
+  контейнер падал на старте хоста с `VContainerException: No such registration of type: System.String`
+  (ломался весь `LifetimeScope.Build()` в проектах, вызывающих `RegisterAuditLog()`).
+
+> Примечание: hotfix-версия вне lockstep (только `com.neoxider.coreaiunity`); фикс вошёл в 5.7.0.
+> Секция была потеряна при merge `2fc8cb94` и восстановлена задним числом.
+
 ## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
 
 - **`AgentBuilder.Build()` auto-registers with the global policy** when one exists (immediate routability);
