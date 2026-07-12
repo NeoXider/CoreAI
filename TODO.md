@@ -2,7 +2,7 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.0 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
+> Released: 5.8.1 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
 > EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
 > PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
@@ -25,10 +25,17 @@
 - [x] **Architecture:** CoreAI.Benchmarking un-Editor-locked (runs in players); `CoreAIFacade.cs` →
       `CoreAIAgent.cs`; example-game static hub → injected `IArenaKillXpService`; meta-save → JSON;
       `CoreAi` vs `CoreAI` naming convention documented in CONTRIBUTING (facade keeps `CoreAi` by design).
+- [x] **Re-audit round (5.8.1):** adversarial re-audit of the 5.8.0 diff found 9 confirmed
+      regressions/incomplete-fixes, all fixed: forgeable memory-trip marker → dedicated type; real bombs
+      still unload (capped memory-trip streak); forced-GC debounced; import persists host-masked caps (no
+      Full on restart); `Invalidate()` no longer wipes persistent event subscribers; error-body redacted at
+      source; tautological tool-call test now asserts real execution; audit-truncation docs qualified.
 - [ ] **Verification gate on next editor start:** run the full EditMode + PlayMode suites (Unity holds the
-      project lock during this session, so batchmode is unavailable; compile gate is green). New tests:
+      project lock during this session, so batchmode is unavailable; compile gate is green across Core /
+      Source / Mods / Mods.Hub / Tests / Mods.Tests / ExampleGame.Tests). New/updated tests:
       CoreAiEvents/EntryPoint/Facade/LifetimeScope guard, LLM content-gating + error-redaction, audit HMAC,
-      Lua nested-tx + memory-trip, hub Full-tier, WorldStateManager CTS, example-game save/killxp.
+      Lua nested-tx + memory-trip (forge + repeat-unload) + import/rehydrate Full-mask, hub Full-tier,
+      WorldStateManager CTS, example-game save/killxp, chat-service tool-call assertion.
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 

@@ -40,9 +40,17 @@ namespace CoreAI.Tests.PlayMode
                 new InventoryTool.InventoryItem { Name = "Magic Staff", Type = "weapon", Quantity = 1, Price = 100 }
             };
 
+            public bool WasInvoked { get; private set; }
+
+            public void ResetInvocation()
+            {
+                WasInvoked = false;
+            }
+
             public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
                 System.Threading.CancellationToken cancellationToken)
             {
+                WasInvoked = true;
                 return Task.FromResult(Inventory);
             }
         }
@@ -81,10 +89,12 @@ namespace CoreAI.Tests.PlayMode
                 DummyGameCommandSink sink = new();
 
                 // Setup tools for roles
+                TestInventoryProvider toolOnlyProvider = new();
+                TestInventoryProvider hybridProvider = new();
                 policy.SetToolsForRole("MerchantToolOnly",
-                    new List<ILlmTool> { new InventoryLlmTool(new TestInventoryProvider()) });
+                    new List<ILlmTool> { new InventoryLlmTool(toolOnlyProvider) });
                 policy.SetToolsForRole("MerchantHybrid",
-                    new List<ILlmTool> { new InventoryLlmTool(new TestInventoryProvider()) });
+                    new List<ILlmTool> { new InventoryLlmTool(hybridProvider) });
                 policy.SetToolsForRole("SimpleChatOnly", new List<ILlmTool>());
                 policy.SetStreamingEnabled("SimpleChatOnly", false);
 
@@ -131,6 +141,7 @@ namespace CoreAI.Tests.PlayMode
 
                 // --- 2. Tools Only (Implicitly, the prompt drives it to use tool) ---
                 Debug.Log("[ChatServiceIntegration] Mode: Tools Only");
+                toolOnlyProvider.ResetInvocation();
                 string toolOnlyResponse = null;
                 Task<string> t2 = chatService.SendMessageSmartAsync(
                     "What is in your inventory? Just use the tool, don't say anything else.", "MerchantToolOnly",
@@ -143,25 +154,19 @@ namespace CoreAI.Tests.PlayMode
                     });
                 yield return PlayModeTestAwait.WaitTask(t2, 240f, "Tools Only");
 
-                // It might still output some text, but the main thing is the tool should be called.
-                // We verify sink or the response
-                bool calledTool = false;
-                if (sink.Items.Count > 0)
-                {
-                    calledTool = true;
-                }
-                else if (toolOnlyResponse != null &&
-                         toolOnlyResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase))
-                {
-                    calledTool = true;
-                }
+                // WHY: assert on evidence the tool actually ran (provider invoked) or that its concrete
+                // result surfaced in the reply, not on envelope/reply publication which is true for any answer.
+                bool calledTool = toolOnlyProvider.WasInvoked ||
+                                  (toolOnlyResponse != null &&
+                                   toolOnlyResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
 
                 Assert.IsTrue(calledTool,
-                    "Tools-Only mode must invoke the inventory tool (sink command) or surface the tool result " +
-                    "(inventory item) in the reply.");
+                    "Tools-Only mode must actually invoke the inventory tool (provider GetInventoryAsync) or " +
+                    "surface the concrete tool result (inventory item 'Staff') in the reply.");
 
                 // --- 3. Hybrid (Chat + Tools) ---
                 Debug.Log("[ChatServiceIntegration] Mode: Hybrid");
+                hybridProvider.ResetInvocation();
                 string hybridResponse = null;
                 sink.Items.Clear();
                 Task<string> t3 = chatService.SendMessageSmartAsync(
@@ -174,7 +179,8 @@ namespace CoreAI.Tests.PlayMode
                         }
                     });
                 yield return PlayModeTestAwait.WaitTask(t3, 240f, "Hybrid");
-                bool hybridCalledTool = sink.Items.Count > 0 ||
+                // WHY: same as Tools-Only - require real tool invocation (or its concrete result), not reply publication.
+                bool hybridCalledTool = hybridProvider.WasInvoked ||
                                         (hybridResponse != null &&
                                          hybridResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
                 if (string.IsNullOrEmpty(hybridResponse))
@@ -184,8 +190,8 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsNotEmpty(hybridResponse, "Hybrid response should not be empty");
                 Assert.IsTrue(hybridCalledTool,
-                    "Hybrid mode must invoke the inventory tool (sink command) or surface the tool result " +
-                    "(inventory item) alongside the chat reply.");
+                    "Hybrid mode must actually invoke the inventory tool (provider GetInventoryAsync) or surface " +
+                    "the concrete tool result (inventory item 'Staff') alongside the chat reply.");
 
                 // --- 4. Agent Swapping ---
                 Debug.Log("[ChatServiceIntegration] Mode: Agent Swapping");

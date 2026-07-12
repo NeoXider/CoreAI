@@ -64,6 +64,15 @@ namespace CoreAI.Ai.LuaCs
 
         public const int MaxErrorsBeforeUnload = 8;
 
+        /// <summary>
+        /// Consecutive process-heap memory-budget trips (with no successful run in between) that unload a mod.
+        /// A single trip is not charged to the general error streak (an unrelated system's allocation can
+        /// trip a blameless mod), but a mod that trips on EVERY call and never completes is a genuine
+        /// repeat offender — a real allocation bomb never succeeds — so this separate, higher-tolerance
+        /// streak still eventually removes it. Reset to zero on any successful call.
+        /// </summary>
+        public const int MaxMemoryTripsBeforeUnload = 16;
+
         /// <summary>Maximum values/functions one mod may publish via <c>mods_export</c>.</summary>
         public const int DefaultMaxExportsPerMod = 64;
 
@@ -121,6 +130,7 @@ namespace CoreAI.Ai.LuaCs
             public readonly Dictionary<string, LuaValue> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;
+            public int MemoryTripCount;
             public DateTime LoadedAtUtc;
         }
 
@@ -750,6 +760,15 @@ namespace CoreAI.Ai.LuaCs
                     _log?.Warn(
                         $"[LuaCsModRuntime] Mod '{mod.Id}' unloaded after {mod.ErrorCount} handler errors.");
                 }
+                else if (mod.MemoryTripCount >= MaxMemoryTripsBeforeUnload)
+                {
+                    // WHY: A mod that trips the allocation budget on every call and never completes is a real
+                    // repeat offender (a genuine bomb never succeeds to reset the streak), so it is unloaded
+                    // even though single trips are not charged to the general error streak.
+                    UnloadMod(mod.Id);
+                    _log?.Warn(
+                        $"[LuaCsModRuntime] Mod '{mod.Id}' unloaded after {mod.MemoryTripCount} consecutive memory-budget trips.");
+                }
             }
         }
 
@@ -840,18 +859,25 @@ namespace CoreAI.Ai.LuaCs
                 _handlerGuard.Execute(mod.State, fn, CancellationToken.None, luaArgs);
 
                 // WHY: "MaxErrorsBeforeUnload failures in a row": a successful call forgives past errors, so
-                // rare sporadic failures over a long lifetime do not unload the mod.
+                // rare sporadic failures over a long lifetime do not unload the mod. A success also clears the
+                // separate memory-trip streak, so unrelated one-off trips never accumulate across good runs.
                 mod.ErrorCount = 0;
+                mod.MemoryTripCount = 0;
             }
             catch (Exception ex)
             {
                 // WHY: The allocation-budget check reads the WHOLE-process managed heap (Unity's Mono has no
                 // per-call counter), so an unrelated system's allocation can trip it for a blameless mod.
-                // Still cut the run (the exception already unwound it), but do NOT charge the consecutive-
-                // error streak: otherwise repeated blameless trips would auto-unload a healthy mod. The
-                // step/time budgets remain real guards and keep counting toward the streak.
+                // Still cut the run (the exception already unwound it), but do NOT charge a memory trip to the
+                // general consecutive-error streak: otherwise repeated blameless trips would auto-unload a
+                // healthy mod. A genuine repeat offender (a real bomb never completes) is instead caught by a
+                // SEPARATE capped memory-trip streak. The step/time budgets remain real guards on the streak.
                 bool memoryTrip = LuaCsExecutionGuard.IsMemoryBudgetTrip(ex);
-                if (!memoryTrip)
+                if (memoryTrip)
+                {
+                    mod.MemoryTripCount++;
+                }
+                else
                 {
                     mod.ErrorCount++;
                 }
@@ -1604,11 +1630,14 @@ namespace CoreAI.Ai.LuaCs
                 }
                 else
                 {
-                    // WHY: Run with the masked runtime tier, but persist the DECLARED capabilities from the
-                    // bundle (not the masked tier) so a later allowFull rehydrate can restore the full
-                    // request rather than the stripped-down version.
+                    // WHY: Persist the HOST-MASKED effective capabilities, NOT the bundle's declared request.
+                    // An untrusted shared bundle can DECLARE Full; if the store recorded that declared tier,
+                    // a later restart's RehydrateFromStore run under a host-wide allowFull=true would re-grant
+                    // Full to this specific mod that was imported WITHOUT it — defeating the import-time
+                    // decision across a restart. The store must never hold more than the host granted here; a
+                    // host that later wants Full for this mod re-imports it under allowFull=true.
                     LoadMod(modId, bundle.Source, effectiveCaps, false);
-                    PersistMod(modId, bundle.Source, ParseCaps(capsText));
+                    PersistMod(modId, bundle.Source, effectiveCaps);
                 }
 
                 return true;

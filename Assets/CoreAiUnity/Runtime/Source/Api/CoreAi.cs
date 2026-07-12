@@ -81,10 +81,11 @@ namespace CoreAI
                 _settings = null;
             }
 
-            // CoreAI.Core is UnityEngine-free, so its static facade state is reset here
-            // (this runs on SubsystemRegistration) to survive Enter Play Mode without Domain Reload.
+            // CoreAI.Core is UnityEngine-free, so its static facade state is reset here to survive
+            // Enter Play Mode without Domain Reload. The CoreAiEvents bus is NOT cleared here — a manual
+            // scene-change Invalidate() must not clobber persistent (cross-scene/bootstrap) subscribers;
+            // it is cleared only at play-mode entry from ResetForSubsystemRegistration().
             CoreAIAgent.Reset();
-            CoreAiEvents.ClearAll();
         }
 
         /// <summary>
@@ -919,10 +920,12 @@ namespace CoreAI
             Invalidate();
 
             // Invalidate() resets the CoreAIAgent facade; clear the entry-point guard it depends on
-            // from the same hook so a stale _isInitialized cannot block re-init on Enter Play Mode
-            // without Domain Reload. Kept out of Invalidate() so a manual scene-change Invalidate()
-            // does not clobber a live entry-point owner.
+            // AND the CoreAiEvents subscriber bus from the same hook so a stale _isInitialized cannot
+            // block re-init, and process-lifetime subscribers do not survive across play sessions with
+            // Domain Reload disabled. Both are kept out of Invalidate() so a manual scene-change
+            // Invalidate() does not clobber a live entry-point owner or persistent subscribers.
             CoreAIGameEntryPoint.ResetStaticState();
+            CoreAiEvents.ClearAll();
         }
     }
 }

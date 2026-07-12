@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## 5.8.1 - Adversarial re-audit of 5.8.0: fix regressions/incomplete-fixes the wave introduced (2026-07-13)
+
+### Fixed
+
+- **Memory-budget trips are classified by a dedicated `LuaMemoryBudgetException` TYPE, not a message
+  substring.** A mod could previously put `EXCEEDED_MEMORY_BUDGET` into its own `error("…")` text so its
+  real crashes were misclassified as blameless memory trips and never charged toward auto-unload. The
+  guard now raises a dedicated type the caller detects by `is`, so a forged message cannot dodge the guard.
+- **A genuine allocation-bomb mod is still unloaded.** Memory trips remain uncharged to the general error
+  streak (a process-heap false positive can trip a blameless mod), but a separate capped
+  consecutive-memory-trip streak (`MaxMemoryTripsBeforeUnload`, reset on any successful call) unloads a mod
+  that trips on every call and never completes.
+- **The confirming forced GC is debounced.** A process heap that legitimately sits above budget no longer
+  induces a full blocking GC on every instruction; the confirmation re-runs only once the cheap reading
+  climbs a further step (a doubling bomb still trips promptly).
+- **Imported mods persist HOST-MASKED capabilities.** A Full-declaring bundle imported without host Full no
+  longer records Full in the store, so a restart's `RehydrateFromStore` — even under a host-wide
+  `allowFull=true` — cannot re-grant Full to a mod that was imported without it.
+- **Provider HTTP error bodies are redacted at the source.** The raw body no longer leaks through the
+  thrown exception's message (and thus downstream `result.Error` logs); the full body stays available
+  programmatically (retry-window parsing) via `ProviderErrorBody`.
+- **Audit-log docs corrected:** a clean trailing truncation is caught by `Seq` / `ChainReset` /
+  `VerifyChainedSet`, not by single-file `AuditLogVerifier.Verify` — the threat model no longer implies it.
+
 ## 5.8.0 - Hardening wave: deep audit (runtime / architecture / tests / security), all findings fixed (2026-07-13)
 
 ### Fixed

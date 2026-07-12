@@ -559,5 +559,70 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("EXCEEDED_MEMORY_BUDGET", errors[errors.Count - 1].Error,
                 "The recorded error identifies the memory-budget trip.");
         }
+
+        [Test]
+        [Timeout(30000)]
+        public void LuaCs_ForgedMemoryMarker_IsChargedAndUnloads()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All
+            });
+
+            // SECURITY: a mod that forges the memory-trip marker in its own error() text must NOT dodge the
+            // consecutive-error auto-unload guard — trips are classified by TYPE, so this is a normal error.
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('boom', function()
+                    error('LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET forged by mod')
+                end)");
+
+            for (int i = 0; i < LuaCsModRuntime.MaxErrorsBeforeUnload + 1 && stack.Runtime.IsLoaded("m"); i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("m"),
+                "A mod forging the memory marker in its error text must still be auto-unloaded on the error streak.");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void LuaCs_RepeatedMemoryTrips_EventuallyUnloadRepeatOffender()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                HandlerMaxAllocatedBytes = 4 * 1024 * 1024
+            });
+
+            // A mod that trips the allocation budget on EVERY call and never completes is a genuine repeat
+            // offender; the separate capped memory-trip streak must eventually unload it, even though a single
+            // trip is not charged to the general error streak (a blameless process-heap false positive).
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('bomb', function()
+                    local s = string.rep('x', 1000000)
+                    s = s .. s
+                    s = s .. s
+                    s = s .. s
+                end)");
+
+            for (int i = 0; i < LuaCsModRuntime.MaxMemoryTripsBeforeUnload + 2 && stack.Runtime.IsLoaded("m"); i++)
+            {
+                stack.Runtime.EmitEvent("bomb", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("m"),
+                "A mod that trips the memory budget on every call must eventually be unloaded by the capped memory-trip streak.");
+        }
     }
 }

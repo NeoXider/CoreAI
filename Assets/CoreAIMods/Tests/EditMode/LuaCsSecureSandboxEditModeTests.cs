@@ -109,13 +109,20 @@ namespace CoreAI.Tests.EditMode
         public void IsMemoryBudgetTrip_ClassifiesProcessHeapTripsOnlyNotStepOrTimeOverruns()
         {
             // The runtime relies on this classification to keep a blameless mod loaded: a process-heap
-            // memory trip must be recognised (through the wrapping exception chain) while the real step and
-            // time guards must NOT be — those keep counting toward the consecutive-error auto-unload streak.
+            // memory trip must be recognised by its dedicated TYPE (through the wrapping exception chain)
+            // while the real step and time guards must NOT be — those keep counting toward the streak.
             System.Exception memoryTrip = new System.InvalidOperationException("wrapped",
-                new System.InvalidOperationException(
+                new LuaMemoryBudgetException(
                     $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)"));
             Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(memoryTrip),
-                "A memory-budget trip anywhere in the exception chain must be recognised.");
+                "A LuaMemoryBudgetException anywhere in the exception chain must be recognised.");
+
+            // SECURITY: a mod's own error() text is NOT a memory trip, even if it forges the marker string —
+            // classification is by type, so a mod cannot dodge the auto-unload guard by faking the message.
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
+                    new System.InvalidOperationException(
+                        $"boom {LuaCsExecutionGuard.MemoryBudgetTripMarker} forged by a mod")),
+                "A forged marker string in an ordinary exception message must NOT be classified as a memory trip.");
 
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
                     new System.InvalidOperationException("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (200000)")),

@@ -240,6 +240,36 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(runtime.ImportMod("", LuaCapabilities.All));
         }
 
+        [Test]
+        public void LuaCs_ImportUnderNoFull_ThenRehydrateWithHostFull_DoesNotReacquireFull()
+        {
+            // SECURITY: a Full-DECLARING bundle imported WITHOUT host Full must not persist Full, so a later
+            // restart's RehydrateFromStore — even under a host-wide allowFull=true — cannot re-grant Full to
+            // this specific mod that was imported without it.
+            FakeSourceStore sourceStore = new();
+            LuaCsModRuntime source = NewRuntime(sourceStore);
+            source.LoadMod("shared", "hooks_on('ping', function() end)",
+                LuaCapabilities.Read | LuaCapabilities.Full);
+            string bundle = source.ExportMod("shared");
+            Assert.IsNotNull(bundle);
+
+            FakeSourceStore store = new();
+            LuaCsModRuntime importRuntime = NewRuntime(store);
+            Assert.IsTrue(importRuntime.ImportMod(bundle, LuaCapabilities.All | LuaCapabilities.Full,
+                allowFull: false));
+            Assert.AreEqual(LuaCapabilities.None,
+                importRuntime.ListMods()[0].Capabilities & LuaCapabilities.Full,
+                "Imported mod must load without Full when the host did not opt in.");
+
+            // Restart: a fresh runtime rehydrates from the SAME store under a host-wide allowFull=TRUE.
+            LuaCsModRuntime restarted = NewRuntime(store);
+            restarted.RehydrateFromStore(LuaCapabilities.All | LuaCapabilities.Full, allowFull: true);
+            Assert.IsTrue(restarted.IsLoaded("shared"));
+            Assert.AreEqual(LuaCapabilities.None,
+                restarted.ListMods()[0].Capabilities & LuaCapabilities.Full,
+                "A mod imported without Full must NOT re-acquire Full on restart, even under host-wide allowFull.");
+        }
+
         // ==================== Capability masking (Full gate) ====================
 
         [Test]

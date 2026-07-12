@@ -305,7 +305,8 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    throw BuildHttpException(postResult.StatusCode, postResult.BodyText, errorDetail,
+                    throw BuildHttpException(postResult.StatusCode, postResult.BodyText,
+                        FormatHttpErrorForLog(postResult.StatusCode, postResult.BodyText),
                         postResult.ResponseHeaders);
                 }
                 catch (OperationCanceledException ex)
@@ -541,7 +542,8 @@ namespace CoreAI.Infrastructure.Llm
                             break;
                         }
 
-                        throw BuildHttpException(openResult.StatusCode, streamBody, streamErr,
+                        throw BuildHttpException(openResult.StatusCode, streamBody,
+                            FormatHttpErrorForLog(openResult.StatusCode, streamBody),
                             openResult.ResponseHeaders);
                     }
 
@@ -1311,6 +1313,13 @@ namespace CoreAI.Infrastructure.Llm
         internal static LlmErrorCode MapHttpStatusForTests(int status, string body, string fallback)
         {
             return MapHttpStatus(status, body, fallback);
+        }
+
+        // WHY: / <summary>EditMode tests: the typed HTTP exception built from a provider error response,
+        // / so tests can assert the exception message never carries the raw/untruncated body.</summary>
+        internal static LlmClientException BuildHttpExceptionForTests(int status, string body)
+        {
+            return BuildHttpException(status, body, FormatHttpErrorForLog(status, body), null);
         }
 
         private const int MaxErrorBodyLogChars = 500;

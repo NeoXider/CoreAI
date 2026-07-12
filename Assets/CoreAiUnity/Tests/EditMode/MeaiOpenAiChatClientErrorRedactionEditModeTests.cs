@@ -1,4 +1,5 @@
 #if !COREAI_NO_LLM
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 
@@ -49,6 +50,27 @@ namespace CoreAI.Tests.EditMode
         {
             string log = MeaiOpenAiChatClient.FormatHttpErrorForLog(429, "");
             Assert.AreEqual("HTTP 429", log);
+        }
+
+        [Test]
+        public void ThrownException_Message_DoesNotCarryRawNonJsonBody()
+        {
+            string body = "unexpected upstream failure " + new string('y', 3000);
+            LlmClientException ex = MeaiOpenAiChatClient.BuildHttpExceptionForTests(500, body);
+
+            Assert.Less(ex.Message.Length, 1000, "exception message must not carry the full untruncated body");
+            StringAssert.DoesNotContain(new string('y', 3000), ex.Message);
+            // WHY: the raw body is still available programmatically for retry-window parsing / diagnostics.
+            StringAssert.Contains(body, ex.ProviderErrorBody);
+        }
+
+        [Test]
+        public void ThrownException_Message_RedactsAuthBody()
+        {
+            string body = "sk-super-secret-key-leaked-in-401-body";
+            LlmClientException ex = MeaiOpenAiChatClient.BuildHttpExceptionForTests(401, body);
+
+            StringAssert.DoesNotContain("sk-super-secret-key-leaked-in-401-body", ex.Message);
         }
     }
 }

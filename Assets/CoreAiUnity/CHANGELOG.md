@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.8.1 - Adversarial re-audit of 5.8.0: fix regressions/incomplete-fixes the wave introduced (2026-07-13)
+
+### Fixed
+
+- **`CoreAiEvents` subscribers are cleared only at play-mode entry, not on a manual `Invalidate()`.** The
+  5.8.0 wave cleared the bus inside `CoreAi.Invalidate()`, but that is the documented post-scene-load call
+  ("safe to repeat"), so a game with persistent/cross-scene (bootstrap/DontDestroyOnLoad) event
+  subscriptions silently lost them after a scene change. `ClearAll()` moved to the SubsystemRegistration
+  hook alongside the entry-point guard reset, so only a play-session start clears subscribers.
+- **PlayMode chat-service integration test asserts the tool ACTUALLY ran** (a provider-invocation flag /
+  the concrete tool result), replacing a tautological envelope-count check that passed on any model reply.
+
 ## 5.8.0 - Hardening wave: deep audit (runtime / architecture / tests / security), all findings fixed (2026-07-13)
 
 ### Fixed

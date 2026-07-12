@@ -9,7 +9,7 @@ The audit log records every significant interaction in a single append-only JSON
 - **World mutations** (command type, payload, actor, success/failure)
 - **Policy decisions** (allowed/denied/repaired)
 
-All entries are written to one file (`persistentDataPath/CoreAI/Audit/audit.jsonl`) with a **SHA-256 hash chain**. The chain detects **accidental corruption, truncation and reordering** — it is an integrity checksum, **not** proof against a determined tamperer who owns the file (see [Threat model](#threat-model-what-the-chain-does-and-does-not-prove)).
+All entries are written to one file (`persistentDataPath/CoreAI/Audit/audit.jsonl`) with a **SHA-256 hash chain**. The chain detects **accidental corruption, partial writes and interior reordering/deletion** (a clean trailing truncation is caught by `Seq`/`ChainReset`/`VerifyChainedSet`, not single-file `Verify`) — it is an integrity checksum, **not** proof against a determined tamperer who owns the file (see [Threat model](#threat-model-what-the-chain-does-and-does-not-prove)).
 
 ## Architecture
 
@@ -108,13 +108,18 @@ The default chain is an **unkeyed** `SHA-256`. Its preimage is fully known, so a
 and rewrite the file can also recompute a valid chain over doctored contents — the recomputation is
 the same one `AuditLogVerifier` runs. Therefore the plain chain proves:
 
-- **Accidental corruption** — a flipped bit, a partial write, a truncated tail line.
-- **Reordering / deletion** — lines moved, dropped, or spliced from another file break `prevHash`
-  linkage.
+- **Accidental corruption** — a flipped bit, a partial write, or a partial/unparsable truncated tail
+  line (a half-written final record).
+- **Interior reordering / deletion** — lines moved, dropped, or spliced *from within the chain*, or
+  from another file, break `prevHash` linkage.
 - **Naive edits** — any change that does not also re-chain every following line.
 
 It does **not** prove:
 
+- **Detection of a clean trailing truncation by `Verify` alone.** Removing whole trailing lines leaves
+  the remaining prefix internally consistent, so `AuditLogVerifier.Verify` on that file alone returns
+  `Ok`. A dropped tail is surfaced instead by the per-entry `Seq` gap, the writer's `ChainReset`
+  resume marker, or a cross-file `VerifyChainedSet` — not by single-file chain verification.
 - **Tamper-resistance against the party that owns the file.** On a local, client-side log the
   client owns the bytes and the algorithm, so no purely local scheme is tamper-proof. Do not treat
   the plain chain as signed evidence or as anti-cheat proof against that party.
