@@ -15,6 +15,7 @@ namespace CoreAI.Hub.UI
         private Label _statusLabel;
         private Button _resetButton;
         private Button _saveButton;
+        private bool _subscribed;
 
         public WorldStateHubPage(IWorldStateManager manager,
             string pageId = DefaultPageId,
@@ -91,12 +92,25 @@ namespace CoreAI.Hub.UI
 
             panel.Add(actions);
 
-            if (_manager != null)
+            // WHY: Guarded subscribe + the OnDestroyed unsubscribe below: without them every page
+            // rebuild added another handler and the DI-singleton manager pinned dead VisualElement
+            // trees through the event delegate.
+            if (_manager != null && !_subscribed)
             {
                 _manager.StateReset += OnStateReset;
+                _subscribed = true;
             }
 
             return panel;
+        }
+
+        public override void OnDestroyed()
+        {
+            if (_subscribed && _manager != null)
+            {
+                _manager.StateReset -= OnStateReset;
+                _subscribed = false;
+            }
         }
 
         private void OnResetClicked()

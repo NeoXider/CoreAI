@@ -341,6 +341,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                                 break;
                             }
 
+                            // WHY: The stop flag is otherwise only read at the top of the reps loop, so
+                            // with retries a pressed Stop against a dead provider would still wait up to
+                            // maxAttempts full timeouts. Bail out at the attempt boundary instead — the
+                            // captured failed result is kept, so partial-report semantics are unchanged
+                            // and the reps-loop check above exits gracefully next.
+                            if (BenchmarkProgress.StopRequested)
+                            {
+                                Debug.LogWarning($"[Benchmark] {scenario.Name}: stop requested — skipping " +
+                                                 $"remaining retry attempt(s) after attempt {attempt}/{maxAttempts}.");
+                                break;
+                            }
+
                             Debug.LogWarning($"[Benchmark] {scenario.Name}: run failed " +
                                              $"({captured.Failure}); retry {attempt}/{maxAttempts - 1}.");
                         }

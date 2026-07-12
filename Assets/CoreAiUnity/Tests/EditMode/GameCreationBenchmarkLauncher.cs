@@ -55,6 +55,7 @@ namespace CoreAI.Tests.EditMode
         public const string PrefG5 = PrefPrefix + "g5";
         public const string PrefG6 = PrefPrefix + "g6";
         public const string PrefG7 = PrefPrefix + "g7";
+        public const string PrefG8 = PrefPrefix + "g8";
         public const string PrefReps = PrefPrefix + "reps";
         public const string PrefRetries = PrefPrefix + "retries";
         public const string PrefTimeout = PrefPrefix + "timeout";
@@ -104,10 +105,13 @@ namespace CoreAI.Tests.EditMode
             bool g5 = EditorPrefs.GetBool(PrefG5, true);
             bool g6 = EditorPrefs.GetBool(PrefG6, false);
             bool g7 = EditorPrefs.GetBool(PrefG7, false);
+            // WHY: default true — before G8 had a toggle, every "all groups" run (empty CSV) included
+            // it, so an unset pref must keep including it rather than silently shrinking the suite.
+            bool g8 = EditorPrefs.GetBool(PrefG8, true);
             int reps = EditorPrefs.GetInt(PrefReps, 1);
             int retries = EditorPrefs.GetInt(PrefRetries, 1);
             int timeout = EditorPrefs.GetInt(PrefTimeout, 0);
-            string groups = GroupsCsv(g1, g2, g3, g4, g5, g6, g7);
+            string groups = GroupsCsv(g1, g2, g3, g4, g5, g6, g7, g8);
 
             // Override on: empty fields fall back to the project asset (so "model only" works). Off: pass
             // null connection so Configure clears the env vars and the asset is used.
@@ -133,46 +137,42 @@ namespace CoreAI.Tests.EditMode
             return mode == 1 ? true : mode == 2 ? false : (bool?)null;
         }
 
+        /// <summary>All benchmark group ids the suite knows, in the launcher's toggle order.</summary>
+        private static readonly string[] AllGroupIds = { "G2", "G1", "G3", "G4", "G5", "G6", "G7", "G8" };
+
         /// <summary>CSV of the enabled benchmark groups; empty string means "all groups".</summary>
-        public static string GroupsCsv(bool g1, bool g2, bool g3, bool g4, bool g5, bool g6, bool g7)
+        public static string GroupsCsv(bool g1, bool g2, bool g3, bool g4, bool g5, bool g6, bool g7, bool g8)
         {
+            // WHY: G8 is part of this list on purpose — before it was included here, any subset run
+            // silently dropped G8 (and shrank the suite-score denominator) because only an EMPTY csv
+            // ("all groups") could reach it.
+            bool[] flags = { g2, g1, g3, g4, g5, g6, g7, g8 };
             List<string> on = new();
-            if (g2)
+            for (int i = 0; i < AllGroupIds.Length; i++)
             {
-                on.Add("G2");
+                if (flags[i])
+                {
+                    on.Add(AllGroupIds[i]);
+                }
             }
 
-            if (g1)
+            if (on.Count == 0 || on.Count == AllGroupIds.Length)
             {
-                on.Add("G1");
+                return "";
             }
 
-            if (g3)
+            List<string> off = new();
+            foreach (string id in AllGroupIds)
             {
-                on.Add("G3");
+                if (!on.Contains(id))
+                {
+                    off.Add(id);
+                }
             }
 
-            if (g4)
-            {
-                on.Add("G4");
-            }
-
-            if (g5)
-            {
-                on.Add("G5");
-            }
-
-            if (g6)
-            {
-                on.Add("G6");
-            }
-
-            if (g7)
-            {
-                on.Add("G7");
-            }
-
-            return on.Count is 0 or 7 ? "" : string.Join(",", on);
+            Debug.Log($"[Benchmark] Group subset: running {string.Join(",", on)}; " +
+                      $"excluded {string.Join(",", off)} (suite score is averaged over the selected groups only).");
+            return string.Join(",", on);
         }
 
         [MenuItem("CoreAI/Benchmarks/Open Latest Results", priority = 120)]

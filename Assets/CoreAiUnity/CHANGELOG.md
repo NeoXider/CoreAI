@@ -22,6 +22,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   on cancellation (was: every later read failed with "previous read has not completed").
 - **Buffered native-tool echo strips embedded tool JSON before display** (llama.cpp-style echo of the
   tool call no longer reaches the user as raw JSON).
+- **World state: a child of an unresolved-prefab parent keeps its parent link across autosaves.**
+  Previously the child sat at scene root while the parent's prefab was missing, and the next autosave
+  wrote `parent=""` — orphaning it forever once the prefab returned. The intended parent id is now
+  remembered and persisted until the parent resolves (live reparenting still wins).
+- **Benchmark Stop takes effect at retry boundaries** — with a dead provider and 3 retries, a pressed
+  Stop no longer waits out every timeout attempt; partial-report semantics unchanged.
+- **G8 is a real group in benchmark subsets.** The window gets a G8 toggle (default on), the launcher
+  treats all-8-checked as "all groups", and any excluded group is logged instead of silently changing
+  the suite-score denominator.
+- **Hub window survives disable/enable** — `OnEnable` re-subscribes to the page registry (after
+  hide/show, new tabs never appeared), and `WorldStateHubPage` unsubscribes `StateReset` on teardown
+  (every rebuild used to leak a handler pinning dead UI trees).
 
 ### Fixed (2026-07-11 audit wave)
 

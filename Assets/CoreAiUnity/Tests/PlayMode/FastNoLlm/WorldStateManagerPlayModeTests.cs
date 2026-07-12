@@ -324,6 +324,66 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Save_ChildOfUnresolvedParent_KeepsParentLinkUntilPrefabReturns()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab, "Demo enemy.basic prefab should exist.");
+
+            GameObject parentGo = Object.Instantiate(prefab, new Vector3(1, 0, 0), Quaternion.identity);
+            parentGo.name = "LinkParent";
+            WorldObjectComponent parentTag = Tag(parentGo, "enemy.basic");
+            string parentId = parentTag.persistentId;
+
+            GameObject childGo = CoreAiPrimitiveFactory.Create("cube");
+            childGo.name = "LinkChild";
+            Tag(childGo, "cube");
+            childGo.transform.SetParent(parentGo.transform, true);
+
+            StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            manager.Save();
+            Object.DestroyImmediate(childGo);
+            Object.DestroyImmediate(parentGo);
+            yield return null;
+
+            // WHY: With the parent's prefab unresolvable the child (a primitive) still spawns, but at
+            // the scene root — exactly the state a periodic auto-save would then snapshot.
+            WorldStateManager managerNoPrefab = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should succeed with the parent unresolved.");
+            yield return null;
+
+            GameObject orphan = GameObject.Find("LinkChild");
+            Assert.IsNotNull(orphan, "Child should spawn even while its parent is unresolved.");
+            Assert.IsNull(orphan.transform.parent, "Child sits at the scene root while the parent is unresolved.");
+
+            // WHY: This Save() is the regression trigger — before the fix it wrote parent="" from the
+            // live root transform and orphaned the child forever.
+            managerNoPrefab.Save();
+            yield return null;
+
+            string json = File.ReadAllText(_saveFilePath);
+            StringAssert.Contains($"\"parent\": \"{parentId}\"", json,
+                "A save taken while the parent is unresolved must keep the child's intended parent id.");
+
+            WorldStateManager managerRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            Assert.IsTrue(managerRestored.TryLoad(), "TryLoad should succeed once the parent prefab returns.");
+            yield return null;
+
+            GameObject restoredChild = GameObject.Find("LinkChild");
+            Assert.IsNotNull(restoredChild, "Child must be restored after the parent prefab returns.");
+            Assert.IsNotNull(restoredChild.transform.parent,
+                "Child must be reattached once the parent's prefab resolves again.");
+            WorldObjectComponent restoredParentTag =
+                restoredChild.transform.parent.GetComponent<WorldObjectComponent>();
+            Assert.IsNotNull(restoredParentTag, "Restored parent must be the tracked world object.");
+            Assert.AreEqual(parentId, restoredParentTag.persistentId,
+                "Child must be reattached to its original parent, not orphaned by the interim save.");
+        }
+
+        [UnityTest]
         public IEnumerator Reset_DeletesSaveFileAndDestroysObjects()
         {
             GameObject cube = CoreAiPrimitiveFactory.Create("cube");

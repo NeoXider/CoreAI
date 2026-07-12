@@ -105,6 +105,13 @@ namespace CoreAI.Hub.UI
 
         protected virtual void OnEnable()
         {
+            // WHY: OnDisable unsubscribes from the registry, but the Registry setter's
+            // ReferenceEquals guard skips re-wiring when the same registry stays assigned — so a
+            // hidden+re-shown window would never see later page (un)registrations. Re-subscribe
+            // symmetrically here (unsubscribe first so a handler is never added twice).
+            UnsubscribeRegistry();
+            SubscribeRegistry();
+
             _document = GetComponent<UIDocument>();
             VisualElement uiRoot = _document != null ? _document.rootVisualElement : null;
             if (uiRoot == null)

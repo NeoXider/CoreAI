@@ -69,6 +69,7 @@ namespace CoreAI.Tests.EditMode
         private bool _runG5 = true;
         private bool _runG6 = false; // castle bonus is off by default
         private bool _runG7 = false; // comprehensive integration is off by default (heavy, one-off)
+        private bool _runG8 = true; // on by default: full runs always included G8 before it had a toggle
         private int _reps = 1;
         private int _retries = 1;
         private int _timeoutSeconds;
@@ -264,6 +265,9 @@ namespace CoreAI.Tests.EditMode
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG7,
                 "G7 - comprehensive integration (world + Lua consistency; one-off)",
                 BenchmarkInfo.DifficultyFor("G7"), _runG7, v => _runG7 = v));
+            section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG8,
+                "G8 - observe described state, then act (director-AI)",
+                BenchmarkInfo.DifficultyFor("G8"), _runG8, v => _runG8 = v));
             _groupWarning = Muted("Select at least one group.");
             _groupWarning.style.color = new Color(0.95f, 0.68f, 0.32f);
             section.Add(_groupWarning);
@@ -640,7 +644,7 @@ namespace CoreAI.Tests.EditMode
 
         private void RunBenchmark()
         {
-            if (!_runG1 && !_runG2 && !_runG3 && !_runG4 && !_runG5 && !_runG6 && !_runG7)
+            if (!_runG1 && !_runG2 && !_runG3 && !_runG4 && !_runG5 && !_runG6 && !_runG7 && !_runG8)
             {
                 EditorUtility.DisplayDialog("CoreAI Benchmark", "Select at least one benchmark group.", "OK");
                 return;
@@ -1253,7 +1257,8 @@ namespace CoreAI.Tests.EditMode
 
         private string BuildGroups()
         {
-            return GameCreationBenchmarkLauncher.GroupsCsv(_runG1, _runG2, _runG3, _runG4, _runG5, _runG6, _runG7);
+            return GameCreationBenchmarkLauncher.GroupsCsv(
+                _runG1, _runG2, _runG3, _runG4, _runG5, _runG6, _runG7, _runG8);
         }
 
         private void LoadPrefs()
@@ -1270,6 +1275,7 @@ namespace CoreAI.Tests.EditMode
             _runG5 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG5, true);
             _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, false);
             _runG7 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG7, false);
+            _runG8 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG8, true);
             _reps = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefReps, 1), 1, 5);
             _retries = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefRetries, 1), 0, 3);
             _timeoutSeconds = Mathf.Max(0, EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefTimeout, 0));
@@ -1289,6 +1295,7 @@ namespace CoreAI.Tests.EditMode
             EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG5, _runG5);
             EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG6, _runG6);
             EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG7, _runG7);
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG8, _runG8);
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefReps, _reps);
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefRetries, _retries);
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefTimeout, _timeoutSeconds);
@@ -1298,9 +1305,10 @@ namespace CoreAI.Tests.EditMode
         {
             if (_groupWarning != null)
             {
-                _groupWarning.style.display = _runG1 || _runG2 || _runG3 || _runG4 || _runG5 || _runG6 || _runG7
-                    ? DisplayStyle.None
-                    : DisplayStyle.Flex;
+                _groupWarning.style.display =
+                    _runG1 || _runG2 || _runG3 || _runG4 || _runG5 || _runG6 || _runG7 || _runG8
+                        ? DisplayStyle.None
+                        : DisplayStyle.Flex;
             }
         }
 

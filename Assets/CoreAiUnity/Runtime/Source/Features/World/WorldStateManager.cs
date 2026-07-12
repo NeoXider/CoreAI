@@ -86,6 +86,13 @@ namespace CoreAI.Infrastructure.World
         // prefab never permanently deletes the object from the snapshot.
         private List<ObjectData> _unresolvedObjects = new();
 
+        // WHY: Children whose intended parent was unresolved on the last load get spawned at the
+        // scene root; a Save() reading only the live transform would then write parent="" and orphan
+        // them permanently, even after the parent's prefab returns — contradicting the retention
+        // guarantee above. Remember the intended parent id per child so saves keep the link until
+        // the parent resolves on a later load.
+        private Dictionary<string, string> _pendingParentByChildId = new();
+
         public bool HasSavedState => File.Exists(_saveFilePath);
 
         public event Action StateReset;
@@ -204,6 +211,17 @@ namespace CoreAI.Infrastructure.World
                 {
                     WorldObjectComponent parentTag = t.parent.GetComponent<WorldObjectComponent>();
                     parentValue = parentTag != null ? parentTag.persistentId : t.parent.gameObject.name;
+
+                    // WHY: The object gained a live parent (reattached or reparented by someone), so
+                    // the remembered unresolved-parent link is stale — the live one wins from now on.
+                    _pendingParentByChildId.Remove(tag.persistentId);
+                }
+                else if (_pendingParentByChildId.TryGetValue(tag.persistentId, out string pendingParent))
+                {
+                    // WHY: This child sits at the scene root only because its parent's prefab was
+                    // unresolved on the last load. Persist the intended parent id, not the live root,
+                    // so the link survives until the parent can be spawned again.
+                    parentValue = pendingParent;
                 }
 
                 objects.Add(new ObjectData
@@ -393,6 +411,30 @@ namespace CoreAI.Infrastructure.World
                     string.Join(", ", unresolved.ConvertAll(o => o.id)));
             }
 
+            // WHY: A spawned child whose snapshot parent is one of the unresolved objects cannot be
+            // reattached below (the parent does not exist in the scene). Remember the intended link
+            // so Save() re-writes it instead of the live scene-root, keeping the child reattachable
+            // once the parent's prefab resolves on a later load.
+            HashSet<string> unresolvedIds = new();
+            foreach (ObjectData u in unresolved)
+            {
+                unresolvedIds.Add(u.id);
+            }
+
+            Dictionary<string, string> pendingParents = new();
+            for (int i = 0; i < snapshotObjects.Length; i++)
+            {
+                ObjectData obj = snapshotObjects[i];
+                if (!string.IsNullOrEmpty(obj.parent) &&
+                    unresolvedIds.Contains(obj.parent) &&
+                    idToGo.ContainsKey(obj.id))
+                {
+                    pendingParents[obj.id] = obj.parent;
+                }
+            }
+
+            _pendingParentByChildId = pendingParents;
+
             for (int i = 0; i < snapshotObjects.Length; i++)
             {
                 ObjectData obj = snapshotObjects[i];
@@ -433,6 +475,10 @@ namespace CoreAI.Infrastructure.World
             // WHY: Otherwise a later Save() would re-append entries from a prefab that went missing
             // before this Reset, resurrecting them into the fresh snapshot.
             _unresolvedObjects.Clear();
+
+            // WHY: Reset is final — remembered child→unresolved-parent links must not leak into the
+            // fresh world's saves.
+            _pendingParentByChildId.Clear();
 
             try
             {
