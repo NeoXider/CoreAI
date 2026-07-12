@@ -8,18 +8,20 @@ namespace CoreAI.Audit
 {
     public readonly struct AuditVerifyResult
     {
-        public AuditVerifyResult(bool ok, long lineCount, long firstBrokenSeq, string error)
+        public AuditVerifyResult(bool ok, long lineCount, long firstBrokenSeq, string error, int chainResetCount = 0)
         {
             Ok = ok;
             LineCount = lineCount;
             FirstBrokenSeq = firstBrokenSeq;
             Error = error ?? "";
+            ChainResetCount = chainResetCount;
         }
 
         public bool Ok { get; }
         public long LineCount { get; }
         public long FirstBrokenSeq { get; }
         public string Error { get; }
+        public int ChainResetCount { get; }
     }
 
     /// <summary>
@@ -72,6 +74,7 @@ namespace CoreAI.Audit
 
             string prevHash = "";
             long lineCount = 0;
+            int chainResetCount = 0;
             bool first = true;
 
             foreach (string rawLine in File.ReadAllLines(filePath))
@@ -91,7 +94,7 @@ namespace CoreAI.Audit
                 catch (Exception ex)
                 {
                     return new AuditVerifyResult(false, lineCount, lineCount,
-                        $"line {lineCount}: unparsable ({ex.Message})");
+                        $"line {lineCount}: unparsable ({ex.Message})", chainResetCount);
                 }
 
                 long seq = obj["Seq"]?.Value<long>() ?? lineCount;
@@ -110,6 +113,14 @@ namespace CoreAI.Audit
 
                 if (chainReset)
                 {
+                    chainResetCount++;
+                    if (!first)
+                    {
+                        CoreAI.Logging.Log.Instance.Warn(
+                            $"[AuditLogVerifier] ChainReset encountered mid-file at line {lineCount} (seq {seq}) — possible tail truncation.",
+                            CoreAI.Logging.LogTag.Core);
+                    }
+
                     prevHash = "";
                 }
 
@@ -118,7 +129,7 @@ namespace CoreAI.Audit
                 if (storedPrevHash != prevHash)
                 {
                     return new AuditVerifyResult(false, lineCount, seq,
-                        $"seq {seq}: prevHash does not match chain head");
+                        $"seq {seq}: prevHash does not match chain head", chainResetCount);
                 }
 
                 obj["hash"] = "";
@@ -128,13 +139,13 @@ namespace CoreAI.Audit
                 if (computedHash != storedHash)
                 {
                     return new AuditVerifyResult(false, lineCount, seq,
-                        $"seq {seq}: hash does not match recomputed chain value");
+                        $"seq {seq}: hash does not match recomputed chain value", chainResetCount);
                 }
 
                 prevHash = computedHash;
             }
 
-            return new AuditVerifyResult(true, lineCount, -1, "");
+            return new AuditVerifyResult(true, lineCount, -1, "", chainResetCount);
         }
 
         /// <summary>
@@ -147,6 +158,7 @@ namespace CoreAI.Audit
         {
             string expectedAnchorHash = null;
             long totalLines = 0;
+            int totalChainResets = 0;
 
             for (int i = 0; i < filePathsInChronologicalOrder.Count; i++)
             {
@@ -155,8 +167,10 @@ namespace CoreAI.Audit
                 if (!standalone.Ok)
                 {
                     return new AuditVerifyResult(false, totalLines + standalone.LineCount, standalone.FirstBrokenSeq,
-                        $"{Path.GetFileName(path)}: {standalone.Error}");
+                        $"{Path.GetFileName(path)}: {standalone.Error}", totalChainResets + standalone.ChainResetCount);
                 }
+
+                totalChainResets += standalone.ChainResetCount;
 
                 List<AuditEntry> entries = ReadAll(path);
 
@@ -170,7 +184,8 @@ namespace CoreAI.Audit
                     {
                         return new AuditVerifyResult(false, totalLines + standalone.LineCount,
                             entries.Count > 0 ? entries[0].Seq : -1,
-                            $"{Path.GetFileName(path)}: rotation anchor does not link to previous file's final hash");
+                            $"{Path.GetFileName(path)}: rotation anchor does not link to previous file's final hash",
+                            totalChainResets);
                     }
                 }
 
@@ -178,7 +193,7 @@ namespace CoreAI.Audit
                 expectedAnchorHash = entries.Count > 0 ? entries[entries.Count - 1].Hash : "";
             }
 
-            return new AuditVerifyResult(true, totalLines, -1, "");
+            return new AuditVerifyResult(true, totalLines, -1, "", totalChainResets);
         }
 
         private static JObject ParseLine(string line)

@@ -127,12 +127,26 @@ namespace CoreAI.Ai
 
             for (int i = Math.Max(0, startInclusive); i < splitExclusive; i++)
             {
+                // WHY: A whitespace-only message would emit a bare "- role: " bullet; besides being noise,
+                // such a bullet as the persisted watermark line can never be re-matched by FindFoldStart
+                // (blank contents are skipped there), which would refold the whole prefix every turn.
+                if (string.IsNullOrWhiteSpace(history[i].Content))
+                {
+                    continue;
+                }
+
                 sb.AppendLine(FormatMessage(history[i]));
             }
 
             return sb.ToString().Trim();
         }
 
+        /// <summary>
+        /// Re-detects the already-folded prefix: the watermark bullet of the last folded non-empty message
+        /// is always stamped as the final line of the persisted summary, so only a whole-final-line match
+        /// counts. Substring matches (blank "- user: " bullets, prefix subsumption like "hel" inside
+        /// "hello", duplicate messages matching old mid-summary bullets) are rejected by design.
+        /// </summary>
         public static int FindFoldStart(string existingSummary, ChatMessage[] history, int splitExclusive)
         {
             if (string.IsNullOrWhiteSpace(existingSummary) || history == null || splitExclusive <= 0)
@@ -140,15 +154,59 @@ namespace CoreAI.Ai
                 return 0;
             }
 
-            for (int i = splitExclusive - 1; i >= 0; i--)
+            int foldStart = Math.Min(splitExclusive, history.Length);
+            for (int i = foldStart - 1; i >= 0; i--)
             {
-                if (existingSummary.IndexOf(FormatMessage(history[i]), StringComparison.Ordinal) >= 0)
+                // WHY: Blank contents format to "- role: ", a substring of every same-role bullet; they can
+                // never be a reliable watermark. Skipping them also keeps whitespace-only tails between the
+                // watermark and the live tail from triggering pointless refold passes (folding them is a no-op).
+                if (string.IsNullOrWhiteSpace(history[i].Content))
                 {
-                    return i + 1;
+                    continue;
                 }
+
+                if (IsFinalLine(existingSummary, FormatMessage(history[i])))
+                {
+                    return foldStart;
+                }
+
+                foldStart = i;
             }
 
             return 0;
+        }
+
+        /// <summary>
+        /// Returns the index of the newest message before <paramref name="splitExclusive"/> with
+        /// non-whitespace content (the message whose bullet serves as the persisted watermark), or -1.
+        /// </summary>
+        public static int FindWatermarkIndex(ChatMessage[] history, int splitExclusive)
+        {
+            if (history == null)
+            {
+                return -1;
+            }
+
+            for (int i = Math.Min(splitExclusive, history.Length) - 1; i >= 0; i--)
+            {
+                if (!string.IsNullOrWhiteSpace(history[i].Content))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsFinalLine(string summary, string bullet)
+        {
+            if (bullet.Length == 0 || !summary.EndsWith(bullet, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int lineStart = summary.Length - bullet.Length;
+            return lineStart == 0 || summary[lineStart - 1] == '\n';
         }
 
         private static string FormatMessage(ChatMessage message)

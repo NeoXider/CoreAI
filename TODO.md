@@ -218,12 +218,28 @@
       `IAgentMemoryStore.Revert` vs `MutateAsync` without a per-role lock; `FileSkillStore.Save/Delete`
       bypass the path-keyed `MutationLocks`; `FileDataOverlayVersionStore` lacks the cross-instance
       lock + reload-on-change the Lua store has; rolling-summary read-modify-write is non-atomic.
+- [ ] Test flake: `QueuedAiOrchestratorEditModeTests.Dispose_CompletesPendingTask_InsteadOfHangingForever`
+      intermittently gets `TaskCanceledException` instead of `ObjectDisposedException` (dispose race in
+      `QueuedAiOrchestrator` vs its pending task; observed 2026-07-12 in CLI NUnit, pre-existing).
 - [ ] Small confirmed-but-cheap items (2026-07-12 audit): case-insensitive role/skill file collisions
       ("Guard"/"guard"); `manage_skills update` with empty `tool_names` silently wipes the allowlist;
       `WorldStateManager` Save/Reset in the same frame snapshots pending-destroy ghosts;
-      transport-internal timeouts map to `Cancelled` (non-retryable → fallback never engages);
+      ~~transport-internal timeouts map to `Cancelled`~~ *(fixed 2026-07-12 wave 3: non-caller
+      cancellation now surfaces as typed `Timeout`, retry- and fallback-eligible)*;
       benchmark zombie scenario task past the 5 s grace leaks orphan primitives between reps;
       `WorldStateAutoSaveHook` interval=0 ("off") silently resurrects to 60 s.
+- [ ] Multi-scope audit-writer design (2026-07-12 adversarial review of wave 2): two coexisting scopes
+      (now officially supported by the additive-scene router fix) each own an `AuditLogWriter` on the SAME
+      `audit.jsonl` with independent `_seq`/`_prevHash` — interleaved appends break the hash chain. Needs a
+      design decision: per-scope audit files, or a process-wide shared writer singleton.
+- [ ] Extractor vs lax local models (2026-07-12 review, deliberate-tradeoff watch item): the hardened
+      `LlmToolCallTextExtractor` skips backtick/quote-cited spans (so quoted examples never execute) — but
+      Qwen-class local models sometimes wrap REAL tool JSON in backticks; those calls now render as text and
+      the tool loop stalls. Monitor G-benchmarks on LLMUnity models; if stalls appear, add a
+      trailing-lone-cited-block exception rather than reverting the citation guard.
+- [ ] Verify `File.Replace` on Unity WebGL (Emscripten VFS) at runtime — version stores + audit rotation now
+      depend on it; if unsupported there, every non-first save fails (caught + logged but not persisted).
+      Add a WebGL smoke check or a `File.Move`-based fallback on that platform.
 - [ ] Mods threading hardening (2026-07-12 adversarial review, both latent — no active bug on the current
       main-thread model): (a) the shared `ILuaTransactionScope` between the persistent Tick runtime and the
       one-off `LuaCsGameToolExecutor` means a cross-thread `ResetTransactions()` in one surface's `finally`

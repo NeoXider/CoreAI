@@ -63,6 +63,15 @@ namespace CoreAI.Infrastructure.Llm
         public IReadOnlyList<LlmToolCallTrace> LastExecutedToolCalls { get; private set; } =
             Array.Empty<LlmToolCallTrace>();
 
+        /// <summary>
+        /// Provider-reported usage of the LAST model roundtrip of the most recent
+        /// <see cref="GetResponseAsync"/> invocation. The returned response's
+        /// <c>Usage</c> is the whole-turn cumulative sum (usage/cost metrics); this exposes the
+        /// final roundtrip so callers can report the ACTUAL context width (prompt tokens) instead
+        /// of the roundtrip-inflated cumulative input count. Null when the provider sent no usage.
+        /// </summary>
+        public MEAI.UsageDetails LastRoundtripUsage { get; private set; }
+
         public async Task<MEAI.ChatResponse> GetResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
@@ -92,6 +101,7 @@ namespace CoreAI.Infrastructure.Llm
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
                 _eventPublisher, _notifier);
+            LastRoundtripUsage = null;
 
             try
             {
@@ -122,6 +132,10 @@ namespace CoreAI.Infrastructure.Llm
                         if (capSummary != null)
                         {
                             cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, capSummary.Usage);
+                            if (capSummary.Usage != null)
+                            {
+                                LastRoundtripUsage = capSummary.Usage;
+                            }
                             AttachCumulativeUsage(capSummary, cumulativeUsage);
                             return capSummary;
                         }
@@ -167,6 +181,10 @@ namespace CoreAI.Infrastructure.Llm
 #endif
 
                     cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, response.Usage);
+                    if (response.Usage != null)
+                    {
+                        LastRoundtripUsage = response.Usage;
+                    }
 
                     List<MEAI.AIContent> allContents = FlattenAssistantContents(response);
 
@@ -316,6 +334,10 @@ namespace CoreAI.Infrastructure.Llm
                         if (errorSummary != null)
                         {
                             cumulativeUsage = LlmUsageAccumulator.Accumulate(cumulativeUsage, errorSummary.Usage);
+                            if (errorSummary.Usage != null)
+                            {
+                                LastRoundtripUsage = errorSummary.Usage;
+                            }
                             AttachCumulativeUsage(errorSummary, cumulativeUsage);
                             return errorSummary;
                         }

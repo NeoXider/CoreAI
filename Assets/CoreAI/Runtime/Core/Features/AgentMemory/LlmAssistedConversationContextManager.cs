@@ -154,13 +154,16 @@ namespace CoreAI.Ai
 
             compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs);
 
-            // WHY: FindFoldStart re-detects the already-folded prefix by locating the last folded
-            // message's bullet inside the STORED summary. The watermark bullet is stamped only into the
-            // persisted text; the snapshot keeps the clean LLM summary (and honors MaxSummaryChars).
+            // WHY: FindFoldStart re-detects the already-folded prefix by requiring the last folded
+            // non-empty message's bullet as the FINAL line of the STORED summary. The watermark bullet is
+            // stamped only into the persisted text (skipping whitespace-only tail messages, whose bullets
+            // could never re-match); the snapshot keeps the clean LLM summary (and honors MaxSummaryChars).
+            int watermarkIndex = ConversationBulletSummary.FindWatermarkIndex(history, splitExclusive);
             string persistedSummary =
+                watermarkIndex < 0 ||
                 ConversationBulletSummary.FindFoldStart(compactedSummary, history, splitExclusive) >= splitExclusive
                     ? compactedSummary
-                    : ConversationBulletSummary.Format(compactedSummary, history, splitExclusive, splitExclusive - 1);
+                    : ConversationBulletSummary.Format(compactedSummary, history, splitExclusive, watermarkIndex);
 
             ConversationContextSnapshot snapshot = new()
             {

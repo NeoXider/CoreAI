@@ -4,6 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 3 — adversarial review of wave 2, host)
+
+- **`AiGameCommandRouter` statics reset on `SubsystemRegistration`** — with Enter-Play-Mode domain
+  reload disabled, a router constructed but never disposed (failed scope build, direct test
+  construction) could leave the active-router count pinned above zero forever, permanently disabling
+  stale-subscriber cleanup.
+- **Header-timeout classification fix applies to the host MEAI path too** (see core changelog: typed
+  `Timeout` instead of `Cancelled`, fallback-eligible; non-streaming `PromptTokens` reports the last
+  roundtrip via `SmartToolCallingChatClient.LastRoundtripUsage`).
+- **`FileAgentMemoryStore`**: `Clear` wipes versions + system-prompt snapshot and rewrites corrupt
+  files with a warning; write-side trim raised to a 500/2000 backstop (see core changelog).
+
 ### Fixed (2026-07-12 audit wave 2 — host)
 
 - **LLM request auditing actually works.** The audit interceptor used to resolve before

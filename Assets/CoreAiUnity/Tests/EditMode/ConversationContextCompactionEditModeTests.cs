@@ -643,6 +643,125 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void FindFoldStart_WhitespaceMessage_NeverMatchesStoredBullets()
+        {
+            // FINDING-4a: "- user: " (blank content) is a substring of every user bullet; the old
+            // IndexOf match treated everything before a blank message as already folded.
+            string summary = ConversationBulletSummary.Format(
+                "",
+                new[]
+                {
+                    new ChatMessage { Role = "user", Content = "hello" },
+                    new ChatMessage { Role = "assistant", Content = "sure" }
+                },
+                2);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "hello" },
+                new() { Role = "assistant", Content = "sure" },
+                new() { Role = "user", Content = "unfolded question" },
+                new() { Role = "user", Content = "   " }
+            };
+
+            Assert.AreEqual(2, ConversationBulletSummary.FindFoldStart(summary, history, 4),
+                "Blank message must not match; fold resumes at the first unfolded non-empty message.");
+        }
+
+        [Test]
+        public void FindFoldStart_PrefixMessage_DoesNotMatchInsideStoredBullet()
+        {
+            // FINDING-4b: message "hel" formats to "- user: hel", a substring of the stored bullet
+            // "- user: hello world"; only a whole-final-line watermark match may count.
+            string summary = ConversationBulletSummary.Format(
+                "",
+                new[] { new ChatMessage { Role = "user", Content = "hello world" } },
+                1);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "hello world" },
+                new() { Role = "user", Content = "hel" },
+                new() { Role = "user", Content = "tail" }
+            };
+
+            Assert.AreEqual(1, ConversationBulletSummary.FindFoldStart(summary, history, 3),
+                "Prefix message must not be treated as folded via substring subsumption.");
+        }
+
+        [Test]
+        public void FindFoldStart_DuplicateMessage_MatchesOnlyFinalWatermarkLine()
+        {
+            // FINDING-4c: a repeated "ok" matched the OLD folded "ok" bullet mid-summary; backward
+            // search then skipped folding everything between the real fold point and the duplicate.
+            string summary = ConversationBulletSummary.Format(
+                "",
+                new[]
+                {
+                    new ChatMessage { Role = "user", Content = "ok" },
+                    new ChatMessage { Role = "assistant", Content = "watermark reply" }
+                },
+                2);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "ok" },
+                new() { Role = "assistant", Content = "watermark reply" },
+                new() { Role = "user", Content = "ok" },
+                new() { Role = "user", Content = "newest" }
+            };
+
+            Assert.AreEqual(2, ConversationBulletSummary.FindFoldStart(summary, history, 4),
+                "Duplicate message must only match the summary's final watermark line.");
+        }
+
+        [Test]
+        public void FindFoldStart_WatermarkAsFinalLine_BackwardCompatibleWithPersistedSummaries()
+        {
+            // WHY-shaped guard: summaries persisted by the previous code already end with the last
+            // folded message's bullet; the stricter matcher must still recognize them fully folded.
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "first" },
+                new() { Role = "assistant", Content = "second" },
+                new() { Role = "user", Content = "third" }
+            };
+            string summary = ConversationBulletSummary.Format("", history, 3);
+
+            Assert.AreEqual(3, ConversationBulletSummary.FindFoldStart(summary, history, 3));
+        }
+
+        [Test]
+        public async Task LlmAssisted_PersistedWatermark_SkipsWhitespaceTailMessage()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "alpha" },
+                new() { Role = "assistant", Content = "beta" },
+                new() { Role = "user", Content = "gamma" },
+                new() { Role = "assistant", Content = "   " },
+                new() { Role = "user", Content = "tail-1" },
+                new() { Role = "assistant", Content = "tail-2" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", history,
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs { HistoryTokenBudget = 25, UseLlmContextCompaction = true },
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            string persisted = store.LoadSummary("r");
+            Assert.IsTrue(persisted.EndsWith("- user: gamma", StringComparison.Ordinal),
+                $"Watermark must be the last NON-EMPTY folded message's bullet; got: '{persisted}'");
+            Assert.AreEqual(4, ConversationBulletSummary.FindFoldStart(persisted, history, 4),
+                "Persisted watermark must mark the whole folded prefix (incl. the whitespace tail) as folded.");
+        }
+
+        [Test]
         public async Task LlmAssisted_LongPerMessageContent_TruncatedInPayload()
         {
             InMemoryConversationSummaryStore store = new();

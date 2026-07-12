@@ -152,13 +152,13 @@ namespace CoreAI.Ai
                 // (0.75^retryLevel). The unlimited and fixed-override branches above ignore that shrink,
                 // so without this clamp a retry would rebuild a byte-identical oversized request that
                 // overflows again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
-                // policy budget makes each retry actually reduce the prompt.
-                if (contextRetryPass > 0 && _settings.EnableConversationHistorySummarization)
+                // policy budget makes each retry actually reduce the prompt — also with summarization
+                // disabled, where the retry drops the oldest turns without generating a summary.
+                if (contextRetryPass > 0)
                 {
                     historyBudget = Math.Min(historyBudget, budget.HistoryTokenBudget);
                 }
 
-                int maxRolled = _settings.ConversationRolledSummaryMaxTokens;
                 float compactionTriggerRatio =
                     roleConfig.CompactionTriggerRatio ?? _settings.ConversationCompactionTriggerRatio;
                 ctxBuildArgs = new ConversationContextBuildArgs
@@ -167,9 +167,10 @@ namespace CoreAI.Ai
                     SourceBudget = budget,
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
-                    MaxRolledSummaryTokens = maxRolled > 0
-                        ? maxRolled
-                        : ICoreAISettings.DefaultConversationRolledSummaryMaxTokens,
+                    // WHY: 0 is the documented explicit opt-out (unlimited rolling summary); mapping 0 to
+                    // the 2048 default here silently truncated installs that chose 0. Fresh installs still
+                    // get the cap from the ICoreAISettings interface default (2048).
+                    MaxRolledSummaryTokens = _settings.ConversationRolledSummaryMaxTokens,
                     CompactionTriggerRatio = compactionTriggerRatio,
                     EnableContextPruning = _settings.EnableContextPruning,
                     MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages,
@@ -985,9 +986,26 @@ namespace CoreAI.Ai
             ConversationContextSnapshot snapshot;
             if (!_settings.EnableConversationHistorySummarization)
             {
+                // WHY: Summarization off only skips summary generation; roadmap §7 pruning and the
+                // overflow-retry budget clamp must still apply, otherwise pruning silently stops working
+                // and overflow retries rebuild the byte-identical oversized request.
+                ChatMessage[] retained = history;
+                if (buildArgs != null && buildArgs.EnableContextPruning)
+                {
+                    retained = ConversationHistoryPruner.Prune(retained, buildArgs.MaxRetainedToolResultMessages);
+                }
+
+                if (buildArgs != null && buildArgs.HistoryTokenBudget > 0 &&
+                    retained != null && retained.Length > 0)
+                {
+                    (_, List<ChatMessage> recentTail) = ConversationHistoryPartition.PartitionByBudget(
+                        retained, _tokenEstimator, buildArgs.HistoryTokenBudget);
+                    retained = recentTail.ToArray();
+                }
+
                 snapshot = new ConversationContextSnapshot
                 {
-                    RecentMessages = history,
+                    RecentMessages = retained,
                     WasCompacted = false
                 };
             }

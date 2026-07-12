@@ -25,6 +25,7 @@ namespace CoreAI.Ai
         /// </summary>
         public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
         {
+            roleId = roleId?.Trim();
             lock (_lock)
             {
                 List<ILlmTool> replacement = tools == null

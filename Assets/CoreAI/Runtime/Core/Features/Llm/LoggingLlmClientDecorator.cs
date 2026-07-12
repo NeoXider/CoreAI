@@ -390,9 +390,60 @@ namespace CoreAI.Infrastructure.Llm
             return true;
         }
 
+        /// <summary>
+        /// Whether a trace represents a tool call whose tool body was actually invoked - including
+        /// invoked-but-failed calls (timeouts, thrown exceptions), which may already have mutated
+        /// game state. Rejected/never-invoked traces (cross-turn duplicate, unparseable arguments,
+        /// unknown/missing/unbound tool, schema validation) executed nothing, so they must not
+        /// suppress retry or fallback of the surrounding request.
+        /// </summary>
+        public static bool TraceIndicatesInvocation(LlmToolCallTrace trace)
+        {
+            switch (trace.Source)
+            {
+                case "duplicate":
+                case "parse-error":
+                case "unknown-tool":
+                case "missing":
+                case "unbound-native":
+                case "schema-validation":
+                    return false;
+                default:
+                    // WHY: fail safe - any unknown/new trace source counts as an invocation so the
+                    // double-execution protection (never retry a turn whose tool body ran) holds
+                    // even if a new trace source is added without updating this list.
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Whether any trace in the list actually invoked a tool (see
+        /// <see cref="TraceIndicatesInvocation"/>). Used by the retry loop here and by
+        /// <see cref="FallbackLlmClientDecorator"/> to decide if replaying the request is safe:
+        /// a result carrying only rejected traces (e.g. the model hallucinated a nonexistent tool,
+        /// then the provider returned 429) executed nothing and stays retry/fallback eligible.
+        /// </summary>
+        public static bool HasInvokedToolCalls(IReadOnlyList<LlmToolCallTrace> traces)
+        {
+            if (traces == null || traces.Count == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < traces.Count; i++)
+            {
+                if (TraceIndicatesInvocation(traces[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool HasExecutedToolCalls(LlmCompletionResult result)
         {
-            return result?.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0;
+            return HasInvokedToolCalls(result?.ExecutedToolCalls);
         }
 
         /// <summary>

@@ -191,6 +191,16 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // WHY: An OCE with a live caller token is an INTERNAL provider/transport timeout
+                // (e.g. a transport that cancels a linked CTS when no response arrives), not a user
+                // stop. Mapping it to Cancelled made the failure non-retryable and non-fallback-
+                // eligible, so a dead primary backend blocked the secondary provider.
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"MeaiLlmClient: internal timeout surfaced as {ex.GetType().Name}: {ex.Message}");
+                return FromException(new TimeoutException(ex.Message), functionClient.LastExecutedToolCalls);
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
@@ -254,6 +264,15 @@ namespace CoreAI.Infrastructure.Llm
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
                 (result.CacheReadTokens, result.CacheWriteTokens) =
                     ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
+                // WHY: response.Usage is the whole-turn CUMULATIVE sum across tool roundtrips
+                // (kept for completion/total cost metrics), but PromptTokens is consumed by
+                // AiOrchestrator's prompt-token calibration as the ACTUAL context width - the
+                // cumulative input count inflates an N-roundtrip turn ~N times and triggers
+                // premature history compaction, so report the LAST roundtrip's prompt size.
+                if (functionClient.LastRoundtripUsage?.InputTokenCount != null)
+                {
+                    result.PromptTokens = (int)functionClient.LastRoundtripUsage.InputTokenCount.Value;
+                }
             }
 
             // Carry the tool-call diagnostic out of the smart-tool client so the logging
@@ -266,6 +285,20 @@ namespace CoreAI.Infrastructure.Llm
             Exception ex,
             IReadOnlyList<LlmToolCallTrace> executedToolCalls = null)
         {
+            // WHY: A TimeoutException is an internal transport/provider timeout, never a user stop:
+            // it must map to Timeout (retry/fallback eligible), not Cancelled or ProviderError.
+            if (ex is TimeoutException)
+            {
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = ex.Message,
+                    ErrorCode = LlmErrorCode.Timeout,
+                    Model = ResolveModelName(),
+                    ExecutedToolCalls = executedToolCalls ?? Array.Empty<LlmToolCallTrace>()
+                };
+            }
+
             if (ex is OperationCanceledException)
             {
                 return new LlmCompletionResult
@@ -435,6 +468,12 @@ namespace CoreAI.Infrastructure.Llm
             bool anyToolCallSucceededInStream = false;
             int streamedExecutedCallCount = 0;
             MEAI.UsageDetails turnUsage = null;
+            // WHY: turnUsage is cumulative across ALL tool roundtrips (usage/cost metrics), but the
+            // terminal chunk's PromptTokens must reflect only the LAST roundtrip's prompt size:
+            // AiOrchestrator feeds terminal PromptTokens into its prompt-token calibration EMA as
+            // "actual context width", and the cumulative sum inflated a 4-roundtrip turn ~4x,
+            // causing premature history compaction.
+            MEAI.UsageDetails lastRoundtripUsage = null;
 
             // Set the moment the final tools-disabled summarization roundtrip starts, so that extra
             // turn can never run twice (recursion/loop guard for RunFinalNoToolsSummaryTurnAsync).
@@ -456,6 +495,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (finalSummaryTurnRan)
                 {
                     ApplyStreamingUsageFields(fallbackTerminal, usageSoFar, model);
+                    OverrideTerminalPromptTokensWithLastRoundtrip(fallbackTerminal, lastRoundtripUsage);
                     yield return fallbackTerminal;
                     yield break;
                 }
@@ -524,6 +564,7 @@ namespace CoreAI.Infrastructure.Llm
                                 summaryUsageContent.Details != null)
                             {
                                 summaryUsage = AccumulateTurnUsage(summaryUsage, summaryUsageContent.Details);
+                                lastRoundtripUsage = summaryUsageContent.Details;
                             }
                         }
                     }
@@ -550,6 +591,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (string.IsNullOrWhiteSpace(summaryText))
                 {
                     ApplyStreamingUsageFields(fallbackTerminal, summaryUsage, model);
+                    OverrideTerminalPromptTokensWithLastRoundtrip(fallbackTerminal, lastRoundtripUsage);
                     yield return fallbackTerminal;
                     yield break;
                 }
@@ -570,6 +612,7 @@ namespace CoreAI.Infrastructure.Llm
                     ExecutedToolCalls = policy.ExecutedTraces.ToList()
                 };
                 ApplyStreamingUsageFields(summaryTerminal, summaryUsage, model);
+                OverrideTerminalPromptTokensWithLastRoundtrip(summaryTerminal, lastRoundtripUsage);
                 yield return summaryTerminal;
             }
 
@@ -846,6 +889,7 @@ namespace CoreAI.Infrastructure.Llm
                                 // stream_options.include_usage); sum across roundtrips so a multi-tool
                                 // turn reports the whole turn, not just the last roundtrip.
                                 turnUsage = AccumulateTurnUsage(turnUsage, usageContent.Details);
+                                lastRoundtripUsage = usageContent.Details;
                                 // Surface cumulative usage immediately: RoutingLlmClient keeps the last
                                 // usage-bearing chunk and publishes LlmUsageReported even when the turn
                                 // is later cancelled or times out mid-roundtrip, so token diagnostics
@@ -918,6 +962,7 @@ namespace CoreAI.Infrastructure.Llm
                         ExecutedToolCalls = policy.ExecutedTraces.ToList()
                     };
                     ApplyStreamingUsageFields(streamFailChunk, turnUsage, streamModel);
+                    OverrideTerminalPromptTokensWithLastRoundtrip(streamFailChunk, lastRoundtripUsage);
                     yield return streamFailChunk;
                     yield break;
                 }
@@ -1143,6 +1188,7 @@ namespace CoreAI.Infrastructure.Llm
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
                         ApplyStreamingUsageFields(doneStrip, turnUsage, streamModel);
+                        OverrideTerminalPromptTokensWithLastRoundtrip(doneStrip, lastRoundtripUsage);
                         yield return doneStrip;
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming completed (text-only, JSON stripped, length={cleanedText?.Length ?? 0})");
@@ -1273,6 +1319,7 @@ namespace CoreAI.Infrastructure.Llm
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
                         ApplyStreamingUsageFields(doneParseStrip, turnUsage, streamModel);
+                        OverrideTerminalPromptTokensWithLastRoundtrip(doneParseStrip, lastRoundtripUsage);
                         yield return doneParseStrip;
                         yield break;
                     }
@@ -1389,6 +1436,7 @@ namespace CoreAI.Infrastructure.Llm
                     ExecutedToolCalls = policy.ExecutedTraces.ToList()
                 };
                 ApplyStreamingUsageFields(terminal, turnUsage, streamModel);
+                OverrideTerminalPromptTokensWithLastRoundtrip(terminal, lastRoundtripUsage);
                 yield return terminal;
                 string sanitizedForLog = SanitizeAssistantVisibleText(visibleText, request);
                 int emittedLen = sanitizedForLog.Length;
@@ -1490,6 +1538,25 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: Trimmed {removed} old tool call message(s) from the streaming loop, keeping {chatMessages.Count} total.");
             }
+        }
+
+        /// <summary>
+        /// Rewrites a TERMINAL chunk's PromptTokens to the last roundtrip's provider-reported prompt
+        /// size. Cumulative turn usage (see <see cref="AccumulateTurnUsage"/>) is correct for
+        /// completion/total token cost metrics, but summed InputTokenCount across N tool roundtrips
+        /// is ~N times the real context width; AiOrchestrator calibrates its prompt-token estimator
+        /// from the terminal chunk's PromptTokens, so the inflated value caused premature history
+        /// compaction. Leaves the chunk untouched when no per-roundtrip usage was reported.
+        /// </summary>
+        private static void OverrideTerminalPromptTokensWithLastRoundtrip(
+            LlmStreamChunk chunk, MEAI.UsageDetails lastRoundtripUsage)
+        {
+            if (chunk == null || lastRoundtripUsage?.InputTokenCount == null)
+            {
+                return;
+            }
+
+            chunk.PromptTokens = ClampTokenCount(lastRoundtripUsage.InputTokenCount.Value);
         }
 
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)

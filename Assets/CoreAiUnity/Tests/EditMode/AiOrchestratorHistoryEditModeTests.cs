@@ -952,8 +952,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task RunTaskAsync_ContextOverflowRetry_WhenSummarizationDisabled_KeepsFullChatTail()
+        public async Task RunTaskAsync_ContextOverflowRetry_WhenSummarizationDisabled_ShrinksTailWithoutSummary()
         {
+            // FINDING-8a: with summarization off, an overflow retry used to rebuild the byte-identical
+            // oversized request; the clamp must apply regardless of the summarization flag while still
+            // never generating a summary block.
             ToolTraceLlmClient llm = new(
                 new LlmCompletionResult
                 {
@@ -988,10 +991,98 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
 
             Assert.AreEqual(2, llm.Requests.Count);
-            Assert.AreEqual(10, llm.Requests[0].ChatHistory.Count);
-            Assert.AreEqual(10, llm.Requests[1].ChatHistory.Count);
+            Assert.AreEqual(10, llm.Requests[0].ChatHistory.Count,
+                "First pass with summarization off keeps the full tail.");
+            Assert.Less(llm.Requests[1].ChatHistory.Count, 10,
+                "Overflow retry must shrink the tail even with summarization disabled.");
+            Assert.IsTrue(llm.Requests[1].ChatHistory.Any(m =>
+                    (m.Text ?? "").Contains("old-context-9")),
+                "Retry keeps the newest turns.");
+            Assert.IsFalse(llm.Requests[0].ChatHistory.Any(m =>
+                (m.Text ?? "").Contains("## Conversation Summary")));
             Assert.IsFalse(llm.Requests[1].ChatHistory.Any(m =>
                 (m.Text ?? "").Contains("## Conversation Summary")));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_WhenSummarizationDisabled_ContextPruningStillApplies()
+        {
+            // FINDING-8b: EnableContextPruning / MaxRetainedToolResultMessages silently stopped applying
+            // when summarization was off because the context manager was bypassed entirely.
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "question one" });
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "assistant", Content = "answer one" });
+            for (int i = 0; i < 5; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = "tool",
+                    Content = $"## Tool Results\n- tool_{i}: ok result-{i}"
+                });
+            }
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "prune" });
+
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            int toolMessages = llm.LastRequest.ChatHistory.Count(m =>
+                (m.Text ?? "").Contains("## Tool Results"));
+            Assert.AreEqual(3, toolMessages,
+                "Default MaxRetainedToolResultMessages (3) must prune stale tool results with summarization off.");
+            Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("question one")),
+                "Non-tool turns stay intact.");
+        }
+
+        private sealed class RecordingContextManager : IConversationContextManager
+        {
+            public ConversationContextBuildArgs LastBuildArgs { get; private set; }
+
+            public ConversationContextSnapshot BuildSnapshot(
+                string roleId,
+                Ai.ChatMessage[] history,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                ConversationContextBuildArgs buildArgs = null)
+            {
+                LastBuildArgs = buildArgs;
+                return new ConversationContextSnapshot { RecentMessages = history, WasCompacted = false };
+            }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_RolledSummaryMaxTokensZero_MeansUnlimited()
+        {
+            // FINDING-10: explicit 0 is the documented "unlimited" opt-out and must not be remapped to
+            // the 2048 default; a positive value passes through unchanged.
+            RecordingContextManager recorder = new();
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = "hi" });
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
+            TestSettings settings = new() { ConversationRolledSummaryMaxTokens = 0 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, recorder);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
+
+            Assert.IsNotNull(recorder.LastBuildArgs);
+            Assert.AreEqual(0, recorder.LastBuildArgs.MaxRolledSummaryTokens,
+                "Explicit 0 must reach the context manager as 0 (= unlimited), not the 2048 default.");
+
+            settings.ConversationRolledSummaryMaxTokens = 512;
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
+            Assert.AreEqual(512, recorder.LastBuildArgs.MaxRolledSummaryTokens);
         }
 
         [Test]

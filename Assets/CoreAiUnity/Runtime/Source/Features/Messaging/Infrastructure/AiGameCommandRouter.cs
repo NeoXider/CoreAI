@@ -6,6 +6,7 @@ using Cysharp.Threading.Tasks;
 using MessagePipe;
 using VContainer.Unity;
 using CoreAI.Infrastructure.World;
+using UnityEngine;
 
 namespace CoreAI.Infrastructure.Messaging
 {
@@ -18,6 +19,13 @@ namespace CoreAI.Infrastructure.Messaging
         public static event Action<ApplyAiGameCommand> CommandReceived;
 
         private static int _activeRouterCount;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        internal static void ResetStatics()
+        {
+            _activeRouterCount = 0;
+            CommandReceived = null;
+        }
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;

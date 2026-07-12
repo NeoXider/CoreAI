@@ -96,7 +96,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// agent-memory folder under <see cref="Application.persistentDataPath"/>.
         /// </param>
         public FileAgentMemoryStore(ILog log = null, string rootDirectory = null,
-            int maxChatHistoryMessages = 30, int maxTranscriptEntries = 120)
+            int maxChatHistoryMessages = 500, int maxTranscriptEntries = 2000)
         {
             _dir = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
@@ -371,13 +371,27 @@ namespace CoreAI.Infrastructure.AiMemory
                 if (File.Exists(path))
                 {
                     string existingJson = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+                    Persisted p;
+                    try
+                    {
+                        p = JsonUtility.FromJson<Persisted>(existingJson);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.Warn($"[FileAgentMemoryStore] Replacing corrupt memory for {roleId}: {ex.Message}");
+                        p = null;
+                    }
+
                     if (p == null)
                     {
-                        return;
+                        _log?.Warn($"[FileAgentMemoryStore] Replacing unparseable memory for {roleId}.");
+                        p = new Persisted();
                     }
 
                     p.memory = "";
+                    p.versionsJson = "";
+                    p.systemPromptMemorySnapshot = "";
+                    p.systemPromptMemoryVersion++;
                     AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
                     PersistFsForWebGl();
                 }

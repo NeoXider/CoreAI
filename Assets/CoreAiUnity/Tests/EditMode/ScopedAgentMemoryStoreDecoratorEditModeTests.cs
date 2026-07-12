@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CoreAI.Ai;
 using NUnit.Framework;
 
@@ -109,6 +110,40 @@ namespace CoreAI.Tests.EditMode
             string key = ScopedKeyFor(new AgentMemoryScope("t", "user1", "s", ""), "role");
 
             Assert.AreEqual("1:t__5:user1__1:s__1:___4:role", key);
+        }
+
+        [Test]
+        public void ScopedKeys_HashLikeLosslessValue_DoesNotCollideWithHashedLossyValue()
+        {
+            string victim = ScopedKeyFor(new AgentMemoryScope("", "userX!", "", ""), "role");
+            string attacker = ScopedKeyFor(new AgentMemoryScope("", "userX_-c4a7037cc0ec", "", ""), "role");
+
+            Assert.AreNotEqual(victim, attacker);
+        }
+
+        [Test]
+        public void ScopedKeys_EmptySegment_RemainsLegacyUnderscore()
+        {
+            string key = ScopedKeyFor(new AgentMemoryScope("tenant", "", "session", ""), "role");
+
+            Assert.That(key, Does.Contain("__1:___"));
+        }
+    }
+
+    /// <summary>Regression coverage for role-key normalization in <see cref="AgentMemoryPolicy"/>.</summary>
+    public sealed class AgentMemoryPolicyEditModeTests
+    {
+        [Test]
+        public void SetToolsForRole_PaddedRoleId_ReassertsRegisteredSkillMetaTools()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.AddSkillForRole(" trader ", SkillSet.FromTextContent("trade", "Trade", "instructions"));
+
+            policy.SetToolsForRole(" trader ", Array.Empty<ILlmTool>());
+
+            string[] names = policy.GetToolsForRole("trader").Select(tool => tool.Name).ToArray();
+            CollectionAssert.Contains(names, "read_skill");
+            CollectionAssert.Contains(names, "call_skill_tool");
         }
     }
 }

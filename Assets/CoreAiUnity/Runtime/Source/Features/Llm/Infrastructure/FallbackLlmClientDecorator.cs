@@ -230,9 +230,14 @@ namespace CoreAI.Infrastructure.Llm
                    code == LlmErrorCode.ContextLengthExceeded;
         }
 
+        /// <summary>
+        /// Fallback is suppressed only when a tool body actually ran (it may have mutated state).
+        /// Rejected/never-invoked traces (duplicate, parse error, unknown/missing tool) executed
+        /// nothing, so a retryable primary failure carrying only those must still fall back.
+        /// </summary>
         private static bool HasExecutedToolCalls(LlmCompletionResult result)
         {
-            return result?.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0;
+            return LoggingLlmClientDecorator.HasInvokedToolCalls(result?.ExecutedToolCalls);
         }
     }
 }

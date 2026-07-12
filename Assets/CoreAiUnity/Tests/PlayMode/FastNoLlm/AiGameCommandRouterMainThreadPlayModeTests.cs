@@ -140,6 +140,27 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        [Test]
+        public void ResetStatics_ClearsSubscribersAndActiveRouterCount()
+        {
+            CurrentThreadPublishBus bus = new();
+            _ = new AiGameCommandRouter(bus, new NoOpGameLogger(), new NullWorldExecutor());
+            AiGameCommandRouter.CommandReceived += _ => { };
+
+            AiGameCommandRouter.ResetStatics();
+
+            System.Reflection.FieldInfo countField = typeof(AiGameCommandRouter).GetField(
+                "_activeRouterCount",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            System.Reflection.FieldInfo eventField = typeof(AiGameCommandRouter).GetField(
+                "CommandReceived",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(countField);
+            Assert.NotNull(eventField);
+            Assert.AreEqual(0, countField.GetValue(null));
+            Assert.IsNull(eventField.GetValue(null));
+        }
+
         [UnityTest]
         public IEnumerator Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool()
         {

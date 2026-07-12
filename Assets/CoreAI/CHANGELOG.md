@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 3 — adversarial review of wave 2, core)
+
+- **Rejected tool calls no longer block retries.** The replay-safety guard now distinguishes traces of
+  tools that actually ran from rejected ones (duplicate-suppressed, parse errors, unknown tool names) —
+  a hallucinated tool name followed by a 429 is retried and can fall back to the secondary provider
+  again; anything that truly executed still suppresses replay.
+- **Transport-internal timeouts surface as `Timeout`, not `Cancelled`.** A backend that never sends
+  response headers used to be classified as user cancellation — non-retryable and never falling back.
+  Non-caller cancellation now throws a typed timeout (both streaming and non-streaming), and
+  `TimeoutException` maps to `LlmErrorCode.Timeout`.
+- **Terminal `PromptTokens` reports the last roundtrip, not the whole-turn sum.** The cumulative usage
+  fix in wave 2 inflated the prompt-size EMA by ~N× on N-roundtrip tool turns, causing premature
+  compaction; completion/total stay cumulative for cost metrics.
+- **Rolling-summary watermark matching is exact.** The fold-start probe requires a whole-final-line
+  match (empty messages never match, a short message no longer matches inside a longer stored bullet,
+  duplicated messages no longer fold to the wrong spot), and whitespace-only messages are never stamped
+  as the watermark.
+- **Summarization-off no longer disables overflow recovery or pruning.** With
+  `EnableConversationHistorySummarization=false`, context-overflow retries shrink the history budget
+  (was: byte-identical oversized retries) and `EnableContextPruning`/`MaxRetainedToolResultMessages`
+  still apply.
+- **`ConversationRolledSummaryMaxTokens = 0` means unlimited again** (the documented contract); the
+  2048 cap remains only as the interface's default value for fresh installs.
+- **Scoped memory keys are injective.** A raw scope id that itself ends in `-<12 hex>` (the hashed-key
+  shape) now gets its own hash suffix, so an attacker-chosen literal id can no longer collide with
+  another user's hashed key and share their memory bucket; plain ids and the empty-segment `_` are
+  unchanged (no key migration).
+- **`Clear` really clears agent memory**: version history and the system-prompt snapshot are wiped and
+  the snapshot version bumped (cleared memory can no longer be re-injected into system prompts), and a
+  corrupt memory file is rewritten with a warning instead of silently keeping its content.
+- **Write-side history trim is a backstop, not a window** — raised to 500 chat messages / 2000
+  transcript entries so roles configured above 30 no longer lose persisted history at append time.
+- **Audit verifier reports chain resets** (`ChainResetCount`, mid-file reset warning) so tail-truncation
+  forgery via a self-hashed `ChainReset` line is operator-visible instead of silent.
+- **`AgentMemoryPolicy.SetToolsForRole` trims the role id** (an untrimmed id silently skipped the skill
+  meta-tool re-assert).
+
 ### Fixed (2026-07-12 audit wave 2 — core)
 
 - **Retries can no longer double-execute tools.** A failed completion that carries executed-tool evidence

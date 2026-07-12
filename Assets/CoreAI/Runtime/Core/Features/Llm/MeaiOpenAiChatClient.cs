@@ -308,14 +308,23 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (OperationCanceledException ex)
                 {
-                    if (!cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
                     {
-                        _log.Warn(
-                            $"MeaiOpenAiChatClient: Request timeout or transport canceled ({ex.GetType().Name}): {ex.Message}",
-                            LogTag.Llm);
+                        throw;
                     }
 
-                    throw;
+                    // WHY: The transport's internal timeout CTS fired while the CALLER's token is still
+                    // live: this is a backend timeout, not a cancellation. Rethrowing the raw OCE made
+                    // MeaiLlmClient map it to LlmErrorCode.Cancelled, which is neither retryable in
+                    // LoggingLlmClientDecorator nor fallback-eligible in FallbackLlmClientDecorator -
+                    // a dead primary backend then blocked the secondary provider entirely. Surfacing a
+                    // typed Timeout keeps retry/fallback resilience working.
+                    _log.Warn(
+                        $"MeaiOpenAiChatClient: Request timed out at the transport after {transportTimeoutSec}s ({ex.GetType().Name}): {ex.Message}",
+                        LogTag.Llm);
+                    throw new LlmClientException(
+                        $"LLM request timed out after {transportTimeoutSec}s without a response.",
+                        LlmErrorCode.Timeout);
                 }
                 catch (LlmClientException)
                 {
@@ -425,14 +434,22 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (OperationCanceledException ex)
                 {
-                    if (!cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
                     {
-                        _log.Warn(
-                            $"MeaiOpenAiChatClient: stream open: Request timeout or transport canceled ({ex.GetType().Name}): {ex.Message}",
-                            LogTag.Llm);
+                        throw;
                     }
 
-                    throw;
+                    // WHY: The SSE header-phase timeout (HttpClientOpenAiTransport bounds only the
+                    // time-to-headers with TransportTimeoutSeconds) fired while the CALLER's token is
+                    // still live: a backend that accepts TCP but never sends headers is a TIMEOUT.
+                    // Rethrowing the raw OCE got mapped to LlmErrorCode.Cancelled downstream (not
+                    // retryable, not fallback-eligible), so the secondary provider was never tried.
+                    _log.Warn(
+                        $"MeaiOpenAiChatClient: stream open timed out at the transport after {streamTransportTimeoutSec}s ({ex.GetType().Name}): {ex.Message}",
+                        LogTag.Llm);
+                    throw new LlmClientException(
+                        $"LLM stream open timed out after {streamTransportTimeoutSec}s without response headers.",
+                        LlmErrorCode.Timeout);
                 }
                 catch (LlmClientException)
                 {

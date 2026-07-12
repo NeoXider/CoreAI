@@ -97,10 +97,31 @@ namespace CoreAI.Ai
             // keep the legacy "_" key, or upgrading orphans all previously saved memory. The legacy
             // empty-vs-literal-"_" overlap is retained knowingly; the hash suffix only has to separate
             // genuinely distinct raw values that sanitize to the same text (the cross-user leak).
-            string encoded = raw.Length == 0 || string.Equals(raw, sanitized, System.StringComparison.Ordinal)
+            bool lossless = string.Equals(raw, sanitized, System.StringComparison.Ordinal);
+            string encoded = raw.Length == 0 || lossless && !HasHashLikeSuffix(sanitized)
                 ? sanitized
                 : sanitized + "-" + StableHash(value ?? "");
             sb.Append(encoded.Length).Append(':').Append(encoded);
+        }
+
+        private static bool HasHashLikeSuffix(string value)
+        {
+            int suffixStart = value.Length - 12;
+            if (suffixStart <= 0 || value[suffixStart - 1] != '-')
+            {
+                return false;
+            }
+
+            for (int i = suffixStart; i < value.Length; i++)
+            {
+                char ch = value[i];
+                if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static string StableHash(string value)

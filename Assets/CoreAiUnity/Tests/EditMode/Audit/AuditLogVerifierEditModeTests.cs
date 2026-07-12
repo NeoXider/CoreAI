@@ -149,10 +149,23 @@ namespace CoreAI.Tests.EditMode.Audit
             string hash = AuditHash.Chain("", preimage);
             File.AppendAllText(writer.FilePath, JsonConvert.SerializeObject(reset.WithHash(hash)) + Environment.NewLine);
 
-            AuditVerifyResult result = AuditLogVerifier.Verify(writer.FilePath);
+            TextWriter originalError = Console.Error;
+            using StringWriter warningOutput = new();
+            AuditVerifyResult result;
+            try
+            {
+                Console.SetError(warningOutput);
+                result = AuditLogVerifier.Verify(writer.FilePath);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(3, result.LineCount);
+            Assert.AreEqual(1, result.ChainResetCount);
+            StringAssert.Contains("ChainReset encountered at line 3", warningOutput.ToString());
         }
 
         [Test]

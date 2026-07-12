@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode
     /// <summary>
     /// Disk layout: <see cref="FileAgentMemoryStore"/> keeps MemoryTool text in <c>memory</c> and chat in
     /// <c>chatHistoryJson</c>. Chat-history clear preserves long-term memory; memory clear preserves the
-    /// role's history, transcripts, and version snapshots.
+    /// role's history and transcripts.
     /// </summary>
     public sealed class FileAgentMemoryStoreEditModeTests
     {
@@ -118,13 +118,18 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Clear_OnDisk_WipesOnlyMemoryDocument()
+        public void Clear_OnDisk_WipesMemoryVersionsAndSnapshot_BumpsPromptVersion()
         {
             string root = CreateTempRoot();
             try
             {
                 FileAgentMemoryStore store = new(null, root);
-                AgentMemoryState state = new() { Memory = "clear_directly" };
+                AgentMemoryState state = new()
+                {
+                    Memory = "clear_directly",
+                    SystemPromptMemorySnapshot = "clear_directly",
+                    SystemPromptMemoryVersion = 4
+                };
                 state.RecordVersion("write", state.Memory);
                 store.Save(_roleId, state);
                 store.AppendChatMessage(_roleId, "user", "preserved", true);
@@ -134,8 +139,55 @@ namespace CoreAI.Tests.EditMode
                 FileAgentMemoryStore reloaded = new(null, root);
                 Assert.IsTrue(reloaded.TryLoad(_roleId, out AgentMemoryState loaded));
                 Assert.AreEqual("", loaded.Memory);
-                Assert.AreEqual(1, loaded.Versions.Length);
+                Assert.IsNull(loaded.Versions);
+                Assert.AreEqual("", loaded.SystemPromptMemorySnapshot);
+                Assert.AreEqual(5, loaded.SystemPromptMemoryVersion);
                 Assert.AreEqual("preserved", reloaded.GetChatHistory(_roleId).Single().Content);
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void Clear_CorruptFile_RewritesClearedState()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                string path = Path.Combine(root, _roleId + ".json");
+                File.WriteAllText(path, "{ definitely not json");
+
+                FileAgentMemoryStore store = new(null, root);
+                store.Clear(_roleId);
+
+                Assert.IsTrue(store.TryLoad(_roleId, out AgentMemoryState loaded));
+                Assert.AreEqual("", loaded.Memory);
+                Assert.AreEqual("", loaded.SystemPromptMemorySnapshot);
+                Assert.AreEqual(1, loaded.SystemPromptMemoryVersion);
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void DefaultWriteBackstop_RetainsHistoryBeyondRoleWindowDefaults()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                for (int i = 0; i < 130; i++)
+                {
+                    store.AppendChatMessage(_roleId, "user", $"chat_{i}", true);
+                }
+
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.AreEqual(130, reloaded.GetChatHistory(_roleId).Length);
+                Assert.GreaterOrEqual(reloaded.GetTranscriptEntries(_roleId, 0).Count, 130);
             }
             finally
             {

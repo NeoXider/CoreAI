@@ -163,6 +163,8 @@ namespace CoreAI
 
         /// <summary>
         /// When greater than zero, caps persisted rolling summary text to roughly this many estimated tokens after each rollup.
+        /// An explicit <c>0</c> means unlimited (no cap). Hosts that do not override this property inherit
+        /// <see cref="DefaultConversationRolledSummaryMaxTokens"/> (2048) so fresh installs get the cap.
         /// </summary>
         int ConversationRolledSummaryMaxTokens => DefaultConversationRolledSummaryMaxTokens;
 
