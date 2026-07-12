@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using CoreAI.Audit;
 using CoreAI.Features.Audit;
+using CoreAI.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -14,6 +15,16 @@ namespace CoreAI.Tests.EditMode.Audit
     public sealed class AuditLogVerifierEditModeTests
     {
         private string _testFolder;
+
+        private sealed class CapturingLog : ILog
+        {
+            private readonly System.Text.StringBuilder _warnings = new();
+            public string Warnings => _warnings.ToString();
+            public void Debug(string message, string tag = null) { }
+            public void Info(string message, string tag = null) { }
+            public void Warn(string message, string tag = null) => _warnings.AppendLine(message);
+            public void Error(string message, string tag = null) { }
+        }
 
         [SetUp]
         public void SetUp()
@@ -149,23 +160,25 @@ namespace CoreAI.Tests.EditMode.Audit
             string hash = AuditHash.Chain("", preimage);
             File.AppendAllText(writer.FilePath, JsonConvert.SerializeObject(reset.WithHash(hash)) + Environment.NewLine);
 
-            TextWriter originalError = Console.Error;
-            using StringWriter warningOutput = new();
+            ILog originalLog = Log.Instance;
+            CapturingLog capturingLog = new();
             AuditVerifyResult result;
             try
             {
-                Console.SetError(warningOutput);
+                Log.Instance = capturingLog;
                 result = AuditLogVerifier.Verify(writer.FilePath);
             }
             finally
             {
-                Console.SetError(originalError);
+                Log.Instance = originalLog;
             }
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(3, result.LineCount);
             Assert.AreEqual(1, result.ChainResetCount);
-            StringAssert.Contains("ChainReset encountered at line 3", warningOutput.ToString());
+            // WHY: the verifier warns via the portable Log abstraction (not Console.Error); a mid-file
+            // ChainReset must be operator-visible.
+            StringAssert.Contains("ChainReset encountered mid-file at line 3", capturingLog.Warnings);
         }
 
         [Test]

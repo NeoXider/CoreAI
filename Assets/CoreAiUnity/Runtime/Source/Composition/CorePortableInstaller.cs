@@ -41,8 +41,19 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton);
 
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();
-            builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
-            builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+            // WHY: portable Null defaults must not shadow a host-registered real version store (the host
+            // registers File*VersionStore before RegisterCorePortable). Guard like IGameConfigStore below —
+            // unconditional registration made the Null store win the single resolve (and hard-conflict when
+            // the host registered the same Null concrete type in a test).
+            if (!builder.Exists(typeof(ILuaScriptVersionStore), includeInterfaceTypes: true))
+            {
+                builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+            }
+
+            if (!builder.Exists(typeof(IDataOverlayVersionStore), includeInterfaceTypes: true))
+            {
+                builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+            }
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<AgentSessionInspector>(Lifetime.Singleton);
@@ -79,7 +90,11 @@ namespace CoreAI.Composition
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
             builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),
                 Lifetime.Singleton);
-            if (!builder.Exists(typeof(IGameConfigStore)))
+            // WHY: includeInterfaceTypes — the host registers the real store via .As<IGameConfigStore>(),
+            // so a registration's ImplementationType is UnityGameConfigStore, not the interface. Without
+            // this flag Exists always returned false and the Null default was registered unconditionally,
+            // shadowing the host store on resolve (the guard was a silent no-op).
+            if (!builder.Exists(typeof(IGameConfigStore), includeInterfaceTypes: true))
             {
                 builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
             }

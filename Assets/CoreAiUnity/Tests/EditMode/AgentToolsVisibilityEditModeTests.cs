@@ -60,7 +60,7 @@ namespace CoreAI.Tests.EditMode
             IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole("TestRole");
             Assert.IsTrue(tools.Any(tool => tool.Name == "read_skill"));
             Assert.IsTrue(tools.Any(tool => tool.Name == "call_skill_tool"));
-            Assert.IsTrue(tools.Any(tool => tool.Name == "inventory"));
+            Assert.IsTrue(tools.Any(tool => tool.Name == "get_inventory"));
         }
 
         [Test]

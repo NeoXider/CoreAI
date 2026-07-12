@@ -88,7 +88,7 @@ The window has four tabs, plus toolbar **Open folder** / **Open report** shortcu
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. While a run is active a **Stop (save partial)** button appears: it takes effect at retry boundaries (no waiting out every timeout attempt), saves a partial report, and stop-aborted attempts are never scored as model failures. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
 | Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
 | Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md` plus `COMPARISON.svg`. |

@@ -31,6 +31,8 @@ OpenAI-style servers may emit a **final** SSE object with an empty `choices` arr
 
 If the provider does not send `usage` while streaming, facts may exist only on the non-streaming path—or not at all, depending on the server.
 
+**Multi-roundtrip (tool-calling) turns:** usage on the terminal result is **cumulative across the whole turn** — streaming usage is summed over every tool roundtrip, and `PromptTokens + CompletionTokens == TotalTokens` holds for cost/usage consumers. The width of the context actually sent on the **final roundtrip** is reported separately as `LastRoundtripPromptTokens` (used for prompt-size calibration; providers that emit zero usage cannot pollute it).
+
 ---
 
 ## 3. Two timeouts: orchestrator and HTTP
@@ -51,7 +53,7 @@ so a single HTTP call **cannot outlive** the orchestrator cancel (important for 
 - If **only** the chat timeout token fires (`timeoutCts`) and the **outer** user `ct` is **not** cancelled, `CoreAiChatService` throws **`LlmOperationTimeoutException`** (subclass of `OperationCanceledException`) to distinguish library timeout from explicit user cancel.
 - **`RoutingLlmClient`** maps non-streaming failures to `LlmRequestCompleted` with **`LlmErrorCode.Timeout`** vs **`Cancelled`** based on exception type.
 
-**Streaming:** decorators such as `LoggingLlmClientDecorator` may normalize cancel/timeout into a **terminal** `LlmStreamChunk` with an error field like **`"cancelled"`**. Then **`LlmErrorCode.Timeout` on `LlmRequestCompleted` for streaming is not guaranteed** end-to-end unless `LlmOperationTimeoutException` propagates through every layer. For UI, see patterns like `ResolveTimeoutMessage` on `CoreAiChatPanel` (empty message = do not duplicate a system line).
+**Transport/internal timeouts are typed `Timeout`, never `Cancelled`:** a transport-internal timeout (e.g. a backend that never sends response headers) or the timeout decorator's own linked token firing surfaces as a typed timeout on **both** the streaming and non-streaming paths — an inner `Cancelled` result/terminal chunk caused by the decorator's timeout is reclassified to `Timeout`, and `TimeoutException` maps to `LlmErrorCode.Timeout`. `Cancelled` is reported **only when the caller's own token was cancelled**, so timeouts stay retry/fallback-eligible while explicit user cancels are never retried. For UI, see patterns like `ResolveTimeoutMessage` on `CoreAiChatPanel` (empty message = do not duplicate a system line).
 
 ---
 

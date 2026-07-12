@@ -257,7 +257,7 @@ These fields live in the **Advanced** inspector under **Chat history summarizati
 |------|-------------|----------|
 | **Enable history summarization** | ✅ | When off, the full loaded chat transcript is kept in the MEAI tail without rolling older turns into `## Conversation Summary` (may exceed the model context). |
 | **Recent history token budget override** | `0` | `0` = automatic from context window minus system/tools/user (via `DefaultContextBudgetPolicy`). When set to a positive value, caps the verbatim tail to that many **estimated** tokens; older lines fold into the rolling summary when summarization is on (minimum applied: 32). |
-| **Max rolled summary (tokens)** | `0` | `0` = no extra cap. When set, truncates the persisted rolling summary to roughly that many estimated tokens after each rollup (deterministic bullet path and LLM-assisted path). |
+| **Max rolled summary (tokens)** | `2048` | `0` = unlimited (no cap). When set, truncates the persisted rolling summary to roughly that many estimated tokens after each rollup (deterministic bullet path and LLM-assisted path), keeping the newest content and evicting the oldest. `2048` is the default only for fresh installs. |
 | **Compaction trigger ratio** | `0.8` | Roadmap §2. Compaction checks estimated history tokens against `historyBudget * ratio`; below the trigger, all turns stay verbatim and the stored summary is not rewritten. Invalid values fall back to the CoreAI default threshold. |
 | **Enable context pruning** | ✅ | Roadmap §7 context editing. Before summarization, prunes only the in-memory prompt history copy: exact consecutive duplicates are collapsed and stale `tool` / `## Tool Results` observations are omitted. Durable stored chat history is unchanged. |
 | **Max retained tool results** | `3` | Newest durable `tool` / `## Tool Results` messages retained in the prompt history copy before compaction. Older tool observations are treated as superseded by newer turns. |
@@ -421,6 +421,8 @@ settings.ConfigureHttpApi("http://localhost:1234/v1", "", "qwen3.5-4b");
 ## 📎 Chat history compaction (conversation summaries)
 
 Without extra setup, **`RegisterCorePortable()`** wires **`InMemoryConversationSummaryStore`**: older turns that no longer fit the token budget become a deterministic **`## Conversation Summary`** block, and summaries **accumulate in memory per role** for the app process.
+
+The **stored** summary's final line is a `[fold:v1:<hashes>]` fold marker (content hashes of the last folded messages) that records how far history has already been folded. It is internal bookkeeping: it is stamped after the token cap (so the limiter can never trim it) and stripped from every LLM- and UI-facing view of the summary.
 
 Unity scenes using **`CoreAILifetimeScope`** switch to **`FileConversationSummaryStore`** under **`%persistentDataPath%/CoreAI/ConversationSummaries`** so compaction survives restarts, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** (**v1.5.22** adds agent-memory suppression so **`IAgentMemoryStore`** is not double-registered).
 

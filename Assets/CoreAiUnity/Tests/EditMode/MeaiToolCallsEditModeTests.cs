@@ -102,7 +102,11 @@ namespace CoreAI.Tests.EditMode
             MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
-            Assert.IsFalse(store.TryLoad("TestRole", out _), "Clear removes the role memory row.");
+            // WHY: memory(action=clear) blanks the memory document (versioned/revertible) rather
+            // than deleting the row - store-level Clear(roleId) is the destructive variant.
+            Assert.IsTrue(store.TryLoad("TestRole", out AgentMemoryState cleared),
+                "Clear keeps the role row (blank document), it does not delete it.");
+            Assert.IsTrue(string.IsNullOrEmpty(cleared?.Memory), "Cleared memory document is empty.");
         }
 
         [Test]

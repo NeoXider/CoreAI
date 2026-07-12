@@ -72,6 +72,12 @@ transport retries:
 Example: `set_wave_modifier(id, value)` is easier to retry safely than
 `increase_wave_modifier(delta)`.
 
+CoreAI's resilience layer also guarantees retries never double-execute tools: a
+failed completion whose turn already **executed** a tool call is not replayed by
+the HTTP retry loop or the fallback provider chain. Rejected calls
+(duplicate-suppressed, parse errors, unknown tool names, argument-conversion
+failures) are treated as never-invoked and do not block retries.
+
 ## Result Envelope
 
 Use the same result vocabulary across tools where practical:
@@ -158,6 +164,14 @@ If you add a new state-mutating built-in, add its name to
 - Include only the fields needed for repair.
 - Do not return stack traces, secrets, local file paths, or provider responses.
 - Do not hide domain failures as successful prose.
+
+**Exceptions in `DelegateLlmTool` bodies never escape the pipeline.** If your
+delegate body throws, `DelegateLlmTool` converts the exception into an
+`"Error: ..."` tool result (matching first-party tools), so the model sees a
+repairable error message and the turn continues instead of the request faulting.
+Cancellation is the exception: `OperationCanceledException` from the caller's
+token propagates. Treat this as a safety net, not the primary error channel —
+still return structured `error` codes for expected domain failures.
 
 ## Roundtrip Limits
 

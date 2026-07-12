@@ -8,6 +8,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, host)
 
+- **Portable Null defaults no longer shadow host-registered stores in DI.** `RegisterCorePortable`'s
+  `Exists` guards passed the default `includeInterfaceTypes: false`, so they never matched a store the
+  host registered via `.As<IInterface>()` — the Null default was registered unconditionally and won the
+  single resolve. `IGameConfigStore` (the wave-4 guard was a silent no-op), `ILuaScriptVersionStore`,
+  and `IDataOverlayVersionStore` are now guarded with `includeInterfaceTypes: true`, so a host's real
+  config/version stores are honored (verified by the full EditMode suite, 1532 tests green).
 - **World state: pending-parent ownership is claimed only on a successful load** — a failed/parse-error
   `TryLoad` (or one on a disposed manager) no longer steals the static owner slot from the live
   manager, so explicit detaches keep routing to the right pending map.

@@ -207,7 +207,7 @@ Net effect: a mod that re-spawns "its" objects on load never races the snapshot 
 | `px, py, pz` | World position |
 | `rx, ry, rz` | Euler rotation |
 | `sx, sy, sz` | Local scale |
-| `parent` | Parent object name (empty if root) |
+| `parent` | Parent object name (empty if root). A child whose parent's prefab is currently unresolved keeps its remembered parent id across autosaves until the prefab returns (it is not re-saved as a root orphan); an explicit `parent: none` detach or reparent clears the remembered link, so the old parent is not resurrected. |
 | `active` | Whether the object is enabled |
 | `cr, cg, cb, ca` | **Optional** — only present if `set_color` was called on the object; otherwise `-1` (sentinel). Prefabs without explicit `set_color` keep their original material. |
 

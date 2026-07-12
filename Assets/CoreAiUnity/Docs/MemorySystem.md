@@ -44,6 +44,8 @@ Granular edits operate on the canonical `AgentMemoryState.Memory` document that 
 
 Every successful memory mutation records a bounded audit snapshot on `AgentMemoryState.Versions`: version number, UTC timestamp, action, full `contentAfter`, and a short size-delta note. Stores that preserve the full `AgentMemoryState` retain those snapshots; custom stores can persist them alongside `Memory`. Use `IAgentMemoryStore.ListVersions(roleId)` to inspect retained snapshots and `IAgentMemoryStore.Revert(roleId, version)` to restore one; revert itself creates a new version.
 
+Two levels of "clear": the model-facing `memory(action=clear)` wipes only the memory **document** — the wipe is versioned and revertible, and chat history/transcripts survive, so the model cannot erase the user's conversation record. The store-level `IAgentMemoryStore.Clear(roleId)` is a full reset: it also wipes the version history and the system-prompt snapshot, so cleared memory can never be re-injected into system prompts.
+
 **When to use:**
 - ✅ CoreMechanicAI — craft history
 - ✅ Creator — design decisions

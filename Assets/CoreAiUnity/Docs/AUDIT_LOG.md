@@ -90,9 +90,13 @@ that (modulo the `hash` field) end up on disk — there is nothing hidden from t
 To verify: use `AuditLogVerifier.Verify(filePath)`. It re-chains from genesis (`prevHash = ""`) by,
 for each line: parsing it, checking the stored `prevHash` equals the running chain head, blanking
 the `hash` field, recomputing `SHA256(runningPrevHash + preimage)`, and comparing against the
-stored `hash`. It returns `{ Ok, FirstBrokenSeq, LineCount, Error }` — `Ok` is false at the first
-line whose `prevHash` or `hash` doesn't match, or that fails to parse at all (e.g. a truncated
-tail line), and `FirstBrokenSeq` identifies it. `AuditLogVerifier.ReadAll(filePath)` returns the
+stored `hash`. It returns `{ Ok, FirstBrokenSeq, LineCount, ChainResetCount, Error }` — `Ok` is
+false at the first line whose `prevHash` or `hash` doesn't match, or that fails to parse at all
+(e.g. a truncated tail line), and `FirstBrokenSeq` identifies it. A legitimate `ChainReset` entry
+is accepted as the start of a new chain segment instead of failing verification, but every
+mid-file reset is counted in `ChainResetCount` and reported with a warning — a self-hashed
+`ChainReset` line could otherwise hide tail truncation, so resets are operator-visible, never
+silent. `AuditLogVerifier.ReadAll(filePath)` returns the
 parsed `AuditEntry` list for inspection without verifying the chain.
 
 Any modification to any entry (including its `ts`) breaks the chain for that entry and all
@@ -142,6 +146,9 @@ detects the existing trailing `RotationMarker` and reuses its hash instead of ap
   so the chain can never reference a record that isn't actually on disk.
 - `Dispose()` drains the entire queue (not just one batch), bounded by a ~2s deadline so a stuck
   disk can't hang shutdown forever.
+- The writer's lifetime is **scope-owned**: it is created and disposed with its DI lifetime scope,
+  so scene reloads cannot leak background flush loops writing the same file concurrently, and the
+  tail is flushed on scope teardown.
 - All flush entry points (the 500ms timer, `Dispose()`, and the test-only `FlushForTesting()`) share
   one lock so they can never interleave and corrupt the chain head.
 - Rotation at 50 MB → `audit_0001.jsonl`, `audit_0002.jsonl`, etc. (see above).
