@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaibenchmark",
-  "version": "5.8.5",
+  "version": "5.8.6",
   "displayName": "CoreAI Benchmark",
   "unity": "6000.0",
   "description": "LLM game-creation benchmark harness and scenarios for CoreAI: drives execute_lua and world_command through real PlayMode scenarios (G1-G8), grades tool correctness, reasoning, instruction adherence, and determinism, and reports suite/role fitness scores. Depends on com.neoxider.coreai / com.neoxider.coreaiunity / com.neoxider.coreaimods.",

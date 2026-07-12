@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## 5.8.6 - Sixth re-audit: coroutine guard arms only on a suspended coroutine (close re-entrant-ancestor disarm) (2026-07-13)
+
+### Fixed
+
+- **Coroutine guard no longer disarms a running ancestor coroutine (or the main thread).** 5.8.5's
+  self-resume guard only excluded the IMMEDIATE caller, so a mod could have coroutine B resume a distinct
+  ancestor A that was still executing higher in the call chain: the wrapper overwrote A's live guard hook,
+  native resume rejected A (non-suspended) without running, and the `finally` nulled A's hook — leaving A
+  unguarded when control unwound (an unbounded-loop/allocation DoS bypass). Arming is now gated on
+  `LuaState.CanResume` (suspended-and-resumable): any resume of a state already executing in the call chain
+  (self, ancestor, or the main thread) is non-suspended, so its existing guard hook is never touched.
+
 ## 5.8.5 - Fifth re-audit: complete the coroutine guard (allocation budget, self-resume, error fidelity) (2026-07-13)
 
 ### Fixed

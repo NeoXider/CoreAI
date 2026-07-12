@@ -155,12 +155,25 @@ namespace CoreAI.Sandbox.LuaCs
                 coroutineState = null;
             }
 
-            // WHY: Never arm/clear a hook on the CALLER's own running state (a self-resume, or a resume of the
-            // currently-running thread). Native resume rejects that with [false,...] anyway, but the finally's
-            // SetHook(null) would disarm the guard the OUTER guarded call installed on that same state,
-            // re-opening the unbounded-loop DoS. Only arm on a distinct (suspended) coroutine state.
+            // WHY: Arm/clear the hook ONLY on a genuinely SUSPENDED coroutine — the only state native resume
+            // will actually run. Any re-entrant resume of a state already executing higher in the call chain
+            // (a self-resume, a running ancestor coroutine, or the main thread) is NON-suspended: native resume
+            // rejects it with [false,...] without running an instruction, so arming would be pointless and the
+            // finally's SetHook(null) would strip the guard hook the OUTER guarded call (or LuaCsExecutionGuard
+            // on the main state) already installed there, re-opening the unbounded-loop/allocation DoS. The
+            // CanResume gate skips arming in exactly those cases, so a running state's guard is never clobbered.
             bool armed = false;
-            if (coroutineState != null && !ReferenceEquals(coroutineState, callerState))
+            bool canResume = false;
+            try
+            {
+                canResume = coroutineState != null && coroutineState.CanResume;
+            }
+            catch
+            {
+                canResume = false;
+            }
+
+            if (canResume)
             {
                 long steps = 0;
                 System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
