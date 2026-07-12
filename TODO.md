@@ -254,6 +254,13 @@
       headroom inside the limiter.
 - [ ] `AgentMemoryPolicy.ConfigureChatHistory` lacks the null/whitespace roleId guard the other entry
       points have (pre-existing; null throws from Dictionary.TryGetValue).
+- [ ] **5.7.0 editor verification gate (next Unity editor session)**: run the FULL EditMode suite
+      (1658 discovered; the CLI NUnit workaround can't execute ECall-dependent fixtures —
+      `Application.persistentDataPath`, `EditorPrefs`, `Debug.Log`, UI Toolkit) + PlayMode FastNoLlm
+      (incl. the new WorldStateManager pending-parent tests) + one live G1 scenario on the configured
+      `Qwen3.5-4B-Q4_K_M.gguf` to smoke the wave-3..5 LLM-path changes. Blocked on 2026-07-12: the
+      Unity MCP plugin rejects test-runner calls (`user cancelled MCP tool call`) — approve them in the
+      plugin window or run from Test Runner manually.
 - [ ] `DelegateLlmTool` boundary, IL2CPP verification (2026-07-12 wave-5 review): the sync-fault
       classification relies on exception stack frames + `AsyncStateMachineAttribute` reflection —
       under IL2CPP release builds frames can inline away and stripping can remove the attribute, so a

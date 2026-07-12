@@ -4,6 +4,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.7.0 - Hardening release: five adversarial audit waves (2026-07-12)
+
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, host)
 
 - **World state: pending-parent ownership is claimed only on a successful load** — a failed/parse-error

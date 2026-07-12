@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 5.7.0 - Hardening release: five adversarial audit waves (2026-07-12)
+
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, core)
 
 - **`DelegateLlmTool` bodies can no longer be double-executed.** Host delegate exceptions are converted
