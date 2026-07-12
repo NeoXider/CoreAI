@@ -1034,6 +1034,43 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
+        /// Convergence must not depend on ChatMessage struct equality (which includes Timestamp):
+        /// repeated identical replies with REAL distinct timestamps land in the folded prefix, and the
+        /// fold point must advance past them instead of re-summarizing a growing region every turn.
+        /// </summary>
+        [Test]
+        public async Task FoldMarker_DuplicateFoldedMessagesWithRealTimestamps_Converge()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "do it", Timestamp = 1000 },
+                new() { Role = "assistant", Content = "ok", Timestamp = 1001 },
+                new() { Role = "user", Content = "again", Timestamp = 1002 },
+                new() { Role = "assistant", Content = "ok", Timestamp = 1003 },
+                new() { Role = "user", Content = "tail-a", Timestamp = 1004 },
+                new() { Role = "assistant", Content = "tail-b", Timestamp = 1005 }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            int callsAfterFirst = llm.CompleteCallCount;
+
+            ConversationContextSnapshot second = await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(callsAfterFirst, llm.CompleteCallCount,
+                "An unchanged history must not trigger another compaction call - the fold point " +
+                "must advance past duplicate folded messages even with distinct timestamps.");
+            Assert.IsTrue(second.WasCompacted);
+        }
+
+        /// <summary>
         /// Marker parsing accepts only the persisted lowercase-hex grammar and leaves invalid marker-like
         /// final lines untouched as summary prose.
         /// </summary>

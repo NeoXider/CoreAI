@@ -5,9 +5,11 @@
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, core)
 
 - **`DelegateLlmTool` bodies can no longer be double-executed.** Host delegate exceptions are converted
-  to `"Error: …"` results at the wrapper (matching first-party tools), so the only exceptions escaping
-  `InvokeAsync` are MEAI argument-coercion failures — a mutate-then-throw host tool is correctly traced
-  as invoked and never replayed by retry/fallback; cancellation still propagates.
+  to `"Error: …"` results at the wrapper (matching first-party tools): any fault observed after the
+  invocation went async is provably a body error (MEAI argument binding is synchronous — this covers
+  non-async lambdas returning a `Task`), and synchronous faults are classified by delegate stack frame
+  plus the conversion-shape heuristic. Residual: a *synchronous* body throw of a conversion-shaped
+  exception with stripped frames (IL2CPP) may still escape as never-invoked. Cancellation propagates.
 - **Decorator-level timeouts are reported as `Timeout`, not `Cancelled`.** When the timeout decorator's
   own linked token fires, an inner `Cancelled` result/terminal chunk is reclassified to `Timeout`
   (caller-token cancellation untouched) — the typed-timeout contract works on the non-streaming path
@@ -17,7 +19,9 @@
   output is stripped before stamping, the session inspector strips the marker from display and token
   estimates, and fold detection skips only *proven-folded* occurrences — a pruned watermark plus a
   later verbatim duplicate (or recurring empty messages) can no longer silently drop unsummarized
-  history.
+  history. Duplicate skipping compares content hashes, not `ChatMessage` struct equality (which
+  includes the timestamp), so convergence holds with real timestamps — repeated short replies ("ok")
+  no longer pin the fold point and re-summarize a growing region every turn.
 - **Scoped lossy keys hash the trimmed id** (padded and unpadded ids map to the same key; affects only
   unreleased hash-suffixed keys).
 

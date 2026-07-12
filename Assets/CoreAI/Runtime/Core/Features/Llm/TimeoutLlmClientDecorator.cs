@@ -76,8 +76,10 @@ namespace CoreAI.Infrastructure.Llm
             {
                 LlmCompletionResult result =
                     await _inner.CompleteAsync(request, timeoutCts.Token).ConfigureAwait(false);
-                // WHY: Some inner clients translate their cancelled linked token into a Cancelled result,
-                // so the decorator must restore timeout ownership before retry and fallback policies see it.
+                // WHY: Some inner clients translate the cancelled linked token into a Cancelled result.
+                // This decorator is the OUTERMOST layer (retry/fallback run inside and have already seen
+                // the Cancelled result - retrying on the fired token is futile anyway); the rewrite fixes
+                // the CALLER-visible typing so a library timeout is not reported as user cancellation.
                 if (result != null && !result.Ok && result.ErrorCode == LlmErrorCode.Cancelled &&
                     timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {

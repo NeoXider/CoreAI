@@ -143,15 +143,19 @@ namespace CoreAI.Tests.EditMode
                 return EditorPrefs.GetBool(PrefG8);
             }
 
-            string[] priorGroupPrefs = { PrefG1, PrefG2, PrefG3, PrefG4, PrefG5, PrefG6, PrefG7 };
-            bool allEnabled = true;
-            foreach (string pref in priorGroupPrefs)
-            {
-                allEnabled &= EditorPrefs.GetBool(pref, true);
-            }
+            // WHY: Effective legacy values must use the same per-group defaults as the consumers
+            // (G1-G5 default on, G6/G7 default off) - only when ALL seven were effectively on did the
+            // pre-toggle launcher emit an empty CSV that implicitly included G8. A fresh config
+            // effectively ran G1-G5 (non-empty CSV, no G8), so it must not gain G8 on migration.
+            bool allEnabled =
+                EditorPrefs.GetBool(PrefG1, true) &&
+                EditorPrefs.GetBool(PrefG2, true) &&
+                EditorPrefs.GetBool(PrefG3, true) &&
+                EditorPrefs.GetBool(PrefG4, true) &&
+                EditorPrefs.GetBool(PrefG5, true) &&
+                EditorPrefs.GetBool(PrefG6, false) &&
+                EditorPrefs.GetBool(PrefG7, false);
 
-            // WHY: Migration follows effective legacy values, including the consumers' enabled default
-            // WHY: for missing keys, so only an effective subset excludes the newly introduced G8.
             return allEnabled;
         }
 

@@ -215,7 +215,6 @@ namespace CoreAI.Ai
             anyHashMatched = false;
             int foldStart = 0;
             HashSet<string> consumedHashes = new(StringComparer.Ordinal);
-            HashSet<ChatMessage> consumedMessages = new();
             int limit = Math.Min(splitExclusive, history.Length);
             for (int i = 0; i < limit; i++)
             {
@@ -224,24 +223,25 @@ namespace CoreAI.Ai
                 {
                     anyHashMatched = true;
                     foldStart = i + 1;
-                    consumedMessages.Add(history[i]);
                     continue;
                 }
 
-                if (anyHashMatched && markerHashes.Contains(hash) &&
-                    string.IsNullOrWhiteSpace(history[i].Content))
+                if (anyHashMatched && consumedHashes.Contains(hash))
                 {
-                    // WHY: Whitespace-only duplicates emit no summary prose, so advancing across them is
-                    // safe and preserves convergence when the marker intentionally stores unique hashes.
+                    // WHY: The hash covers role+content, so this occurrence duplicates content that is
+                    // provably in the summary already - skipping it loses only the occurrence count.
+                    // Comparing by content hash (not ChatMessage struct equality, which includes
+                    // Timestamp) keeps convergence with real timestamps: otherwise a repeated short
+                    // reply ("ok") would pin the fold point forever and re-summarize a growing region
+                    // every turn.
                     foldStart = i + 1;
-                    consumedMessages.Add(history[i]);
                     continue;
                 }
 
                 if (anyHashMatched)
                 {
-                    // WHY: Once a retained marker anchor is followed by an unconsumed occurrence, later
-                    // marker matches may be live duplicates of pruned folded messages, not folded history.
+                    // WHY: A message that is neither a fresh marker hash nor a duplicate of consumed
+                    // content is unsummarized live history - the fold cannot extend past it.
                     break;
                 }
             }
@@ -249,13 +249,6 @@ namespace CoreAI.Ai
             if (!anyHashMatched)
             {
                 return 0;
-            }
-
-            // WHY: Only consumed message occurrences prove folding; equal content in a different live
-            // message can share a marker hash after the original occurrence has been pruned.
-            while (foldStart < limit && consumedMessages.Contains(history[foldStart]))
-            {
-                foldStart++;
             }
 
             return foldStart;

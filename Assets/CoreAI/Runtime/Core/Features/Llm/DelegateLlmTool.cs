@@ -84,18 +84,57 @@ namespace CoreAI.Ai
                 AIFunctionArguments arguments,
                 CancellationToken cancellationToken)
             {
+                ValueTask<object> invocation;
                 try
                 {
-                    return await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+                    invocation = InnerFunction.InvokeAsync(arguments, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
                     throw;
                 }
-                catch (Exception ex) when (TryGetDelegateException(ex, out Exception delegateException))
+                catch (Exception ex) when (ShouldConvertSynchronousFault(ex))
                 {
-                    return $"Error: {delegateException.Message}";
+                    return $"Error: {ex.Message}";
                 }
+
+                bool completedSynchronously = invocation.IsCompleted;
+                try
+                {
+                    return await invocation.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (!completedSynchronously)
+                {
+                    // WHY: MEAI argument binding is synchronous — a fault observed only after the inner
+                    // ValueTask went async can only come from the delegate body (or its returned Task),
+                    // regardless of stack shape. This covers non-async lambdas returning a Task whose
+                    // frames never include the lambda itself.
+                    return $"Error: {(TryGetDelegateException(ex, out Exception inner) ? inner : ex).Message}";
+                }
+                catch (Exception ex) when (ShouldConvertSynchronousFault(ex))
+                {
+                    return $"Error: {(TryGetDelegateException(ex, out Exception inner) ? inner : ex).Message}";
+                }
+            }
+
+            /// <summary>
+            /// Classifies a synchronously-observed fault: delegate-body exceptions become error results,
+            /// MEAI argument-coercion failures escape so the policy traces them as never-invoked.
+            /// A conversion-shaped exception with no delegate frame is treated as coercion (the residual
+            /// ambiguity: a synchronous body throw whose frames were stripped, e.g. under IL2CPP).
+            /// </summary>
+            private bool ShouldConvertSynchronousFault(Exception ex)
+            {
+                if (TryGetDelegateException(ex, out _))
+                {
+                    return true;
+                }
+
+                return !CoreAI.Infrastructure.Llm.ToolExecutionPolicy.LooksLikeArgumentConversionError(ex);
             }
 
             private bool TryGetDelegateException(Exception exception, out Exception delegateException)

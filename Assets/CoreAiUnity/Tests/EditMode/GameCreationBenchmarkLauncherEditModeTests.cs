@@ -176,9 +176,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LoadSavedG8Preference_UnsetWithNoPriorKeys_IncludesG8()
+        public void LoadSavedG8Preference_UnsetWithNoPriorKeys_ExcludesG8()
         {
-            Assert.IsTrue(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+            // WHY: A fresh config effectively runs G1-G5 (G6/G7 consumer defaults are off) - the
+            // pre-toggle launcher emitted a non-empty CSV for it, so G8 never ran and must not
+            // appear after migration.
+            Assert.IsFalse(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
         }
 
         [Test]
@@ -215,11 +218,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LoadSavedG8Preference_UnsetWithOnlyG6Enabled_IncludesG8()
+        public void LoadSavedG8Preference_UnsetWithG6AndG7Enabled_IncludesG8()
         {
+            // WHY: G1-G5 default on; explicitly enabling G6+G7 makes all seven effectively on -
+            // the pre-toggle empty-CSV full run that implicitly included G8.
             EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG6, true);
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG7, true);
 
             Assert.IsTrue(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [Test]
+        public void LoadSavedG8Preference_UnsetWithOnlyG6Enabled_ExcludesG8()
+        {
+            // WHY: G7 stays effectively off (consumer default) - still a subset, no G8.
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG6, true);
+
+            Assert.IsFalse(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
         }
 
         [TestCase(true)]

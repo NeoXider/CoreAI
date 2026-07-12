@@ -254,6 +254,19 @@
       headroom inside the limiter.
 - [ ] `AgentMemoryPolicy.ConfigureChatHistory` lacks the null/whitespace roleId guard the other entry
       points have (pre-existing; null throws from Dictionary.TryGetValue).
+- [ ] `DelegateLlmTool` boundary, IL2CPP verification (2026-07-12 wave-5 review): the sync-fault
+      classification relies on exception stack frames + `AsyncStateMachineAttribute` reflection —
+      under IL2CPP release builds frames can inline away and stripping can remove the attribute, so a
+      SYNCHRONOUS conversion-shaped body throw could escape as never-invoked (async faults are safe by
+      construction). Verify in a built player per the RUNTIME-first rule.
+- [ ] `TryLoad` skipped-load edge (2026-07-12 wave-5 review, pre-existing): scene-mismatch/no-file
+      returns clear the pending-parent map but keep `_unresolvedObjects` — a later Save() re-appends
+      the unresolved parents while the children's links were wiped. Align the two lifetimes.
+- [ ] Benchmark: a user stop with zero results now passes green (could mask a stopped CI run) — the
+      partial report is written and a warning logged, but consider `Assert.Inconclusive` for CI.
+- [ ] Timeout decorator streaming rewrite mutates the inner client's chunk instance in place — safe
+      for in-repo clients (fresh instances per chunk), latent for third-party `ILlmClient`s that cache
+      chunks (2026-07-12 wave-5 review).
 - [ ] Router cross-generation clear theft (2026-07-12 wave-4 review, latent, pre-existing): a stale
       pre-`ResetStatics` router disposing AFTER a new-generation router incremented the refcount can
       take the count 1→0 and null `CommandReceived` mid-session. A generation token alongside the

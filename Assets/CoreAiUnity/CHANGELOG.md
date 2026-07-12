@@ -25,9 +25,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   pending-owner slot on dispose.
 - **Benchmark: Stop at a retry boundary no longer scores the aborted attempt as a model FAIL** (the
   unretried hard failure is dropped, matching "a crash never counts as a model failure").
-- **Benchmark: G8 pref migration respects saved subsets** — with no saved `PrefG8`, G8 defaults on
-  only for fresh configs or explicit full-seven selections; an existing subset is not silently
-  expanded.
+- **Benchmark: G8 pref migration follows effective legacy behavior** — with no saved `PrefG8`, G8 is
+  included only when all seven groups are effectively on under the consumers' own defaults (G1–G5 on,
+  G6/G7 off): exactly the configs whose pre-toggle runs emitted an empty CSV and therefore already ran
+  G8. Fresh configs and effective subsets stay G8-free; explicit `PrefG8` always wins.
 - **Hub window: assigning a registry while disabled no longer leaks a subscription on destroy**
   (setter subscribes only when enabled; defensive `OnDestroy` unsubscribe), and a page whose
   `OnDeactivated` throws still gets `OnDestroyed` (no orphaned `StateReset` handlers).
