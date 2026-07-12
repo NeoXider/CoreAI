@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 4 — adversarial review of wave 3, core)
+
+- **Argument-conversion rejections no longer block retries.** A tool call whose arguments MEAI could
+  not coerce into the delegate's parameter types (conversion fails before the tool body runs) is
+  traced as `arg-conversion` and treated as never-invoked by the retry/fallback replay guard.
+- **Scoped memory keys: GUID-shaped ids keep their legacy keys.** Injectivity now comes from using
+  the RAW id's length in the key prefix for lossy values (a literal hash-suffixed id has a different
+  raw length by construction) instead of remapping lossless ids that merely look hash-suffixed —
+  which would have orphaned every GUID-keyed scope's persisted memory on upgrade.
+- **Rolling-summary fold state is an explicit marker, not bullet-text inference.** The persisted
+  summary ends with a `[fold:v1:…]` line carrying content hashes of the last 8 folded messages; the
+  fold point survives pruning/write-side trimming of individual messages, whitespace-only prefixes
+  converge, verbatim duplicate messages cannot truncate the fold, and legacy wave-2/3 formats migrate
+  with at most one re-summarize. The marker is stripped from every snapshot/LLM-facing string and is
+  stamped after the token cap (the limiter can never trim it).
+- **Terminal `PromptTokens` is cumulative again** (`Prompt + Completion == Total` restored for every
+  usage/cost consumer); the prompt-size calibration reads a new dedicated
+  `LastRoundtripPromptTokens` field instead, and zero-emitting providers cannot pollute it.
+- **Removed the broad internal-cancellation→Timeout mapping** in the Unity MEAI client: both HTTP and
+  WebGL transports already surface their timeouts as typed `Timeout` exceptions, so teardown/marshaler
+  cancellations are no longer mislabeled retryable and replayed against the fallback provider.
+- **`AgentMemoryPolicy` trims role ids on every public entry point** (`AddToolForRole` etc. — a padded
+  id used to populate a different bucket than `SetToolsForRole` cleared).
+
 ### Fixed (2026-07-12 audit wave 3 — adversarial review of wave 2, core)
 
 - **Rejected tool calls no longer block retries.** The replay-safety guard now distinguishes traces of

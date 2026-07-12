@@ -5,6 +5,7 @@ using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.World;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
@@ -122,6 +123,33 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class ThrowingDeactivationPage : IHubPage
+        {
+            public string PageId => "throwing";
+
+            public string DisplayName => "Throwing";
+
+            public int Order => 0;
+
+            public Func<object> CreatePageContent => () => new VisualElement();
+
+            public bool Destroyed { get; private set; }
+
+            public void OnActivated()
+            {
+            }
+
+            public void OnDeactivated()
+            {
+                throw new InvalidOperationException("Expected deactivation failure.");
+            }
+
+            public void OnDestroyed()
+            {
+                Destroyed = true;
+            }
+        }
+
         [Test]
         public void HubWindow_OnEnableAfterOnDisable_ResubscribesToTheSameRegistry()
         {
@@ -136,7 +164,8 @@ namespace CoreAI.Tests.EditMode
                 HubPageRegistry registry = new();
 
                 window.Registry = registry;
-                Assert.IsTrue(IsSubscribed(registry, window), "Assigning Registry should subscribe.");
+                Assert.IsFalse(IsSubscribed(registry, window),
+                    "Assigning Registry while disabled must defer subscription until OnEnable.");
 
                 window.InvokeOnDisable();
                 Assert.IsFalse(IsSubscribed(registry, window), "OnDisable should unsubscribe.");
@@ -149,6 +178,70 @@ namespace CoreAI.Tests.EditMode
                 window.InvokeOnEnable();
                 Assert.AreEqual(1, SubscriptionCount(registry, window),
                     "A repeated OnEnable must not double-subscribe the same handler.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void HubWindow_RegistryAssignedWhileDisabled_DestroyLeavesNoRegistryHandler()
+        {
+            GameObject go = new("hub-window-disabled-destroy-test");
+            go.SetActive(false);
+            HubPageRegistry registry = new();
+            TestHubWindow window = null;
+            try
+            {
+                go.AddComponent<UIDocument>();
+                window = go.AddComponent<TestHubWindow>();
+                window.Registry = registry;
+
+                Assert.IsFalse(IsSubscribed(registry, window));
+                UnityEngine.Object.DestroyImmediate(go);
+                go = null;
+
+                Assert.IsFalse(IsSubscribed(registry, window),
+                    "Destroying a disabled window must not leave a registry event handler.");
+            }
+            finally
+            {
+                if (go != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(go);
+                }
+            }
+        }
+
+        [Test]
+        public void HubWindow_DestroyPage_WhenOnDeactivatedThrows_StillCallsOnDestroyed()
+        {
+            GameObject go = new("hub-window-page-teardown-test");
+            go.SetActive(false);
+            try
+            {
+                go.AddComponent<UIDocument>();
+                TestHubWindow window = go.AddComponent<TestHubWindow>();
+                ThrowingDeactivationPage page = new();
+                FieldInfo pagesField = typeof(CoreAiHubWindow).GetField(
+                    "_pages", BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo activePageField = typeof(CoreAiHubWindow).GetField(
+                    "_activePageId", BindingFlags.Instance | BindingFlags.NonPublic);
+                MethodInfo destroyPage = typeof(CoreAiHubWindow).GetMethod(
+                    "DestroyPage", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(pagesField);
+                Assert.IsNotNull(activePageField);
+                Assert.IsNotNull(destroyPage);
+                var pages = (System.Collections.Generic.Dictionary<string, IHubPage>)pagesField.GetValue(window);
+                pages.Add(page.PageId, page);
+                activePageField.SetValue(window, page.PageId);
+                LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
+                    "Expected deactivation failure\\."));
+
+                destroyPage.Invoke(window, new object[] { page.PageId });
+
+                Assert.IsTrue(page.Destroyed, "OnDestroyed must run even when OnDeactivated throws.");
             }
             finally
             {

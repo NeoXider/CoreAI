@@ -363,7 +363,11 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(snap.WasCompacted);
             Assert.AreEqual(1, store.SaveSummaryCalls);
-            Assert.AreEqual(store.LastSavedSummary, snap.Summary);
+            Assert.AreEqual(
+                snap.Summary,
+                ConversationFoldMarker.Strip(store.LastSavedSummary),
+                "Persisted text must be the snapshot summary plus only the fold marker.");
+            StringAssert.Contains("[fold:v1:", store.LastSavedSummary);
             StringAssert.Contains("msg0", snap.Summary);
             StringAssert.Contains("msg2", snap.Summary);
             Assert.AreEqual(2, snap.RecentMessages.Length);
@@ -412,7 +416,10 @@ namespace CoreAI.Tests.EditMode
                 });
 
             Assert.AreEqual(1, store.SaveSummaryCalls);
-            Assert.AreEqual(savedSummary, snap.Summary);
+            Assert.AreEqual(
+                ConversationFoldMarker.Strip(savedSummary),
+                snap.Summary,
+                "Below-trigger snapshot must expose the stored summary without the fold marker.");
             Assert.IsFalse(snap.WasCompacted);
             Assert.AreEqual(3, snap.RecentMessages.Length);
         }
@@ -464,7 +471,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", store.LoadSummary("r"));
             snapshot.Commit();
             Assert.AreEqual(1, store.SaveSummaryCalls);
-            Assert.AreEqual(snapshot.Summary, store.LoadSummary("r"));
+            Assert.AreEqual(snapshot.Summary, ConversationFoldMarker.Strip(store.LoadSummary("r")));
+            StringAssert.Contains("[fold:v1:", store.LoadSummary("r"));
         }
 
         private static int CountOccurrences(string text, string value)
@@ -611,9 +619,14 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(snap.WasCompacted);
             Assert.IsTrue(snap.Summary.StartsWith("…"), "Summary should evict oldest content when over MaxRolledSummaryTokens.");
             string persisted = store.LoadSummary("roleA");
-            Assert.AreEqual(snap.Summary, persisted,
-                "Store should receive the same truncated summary as the snapshot.");
-            Assert.LessOrEqual(est.EstimateText(persisted), 30, "Persisted summary should stay near the token cap.");
+            Assert.AreEqual(snap.Summary, ConversationFoldMarker.Strip(persisted),
+                "Store should receive the same truncated summary as the snapshot, plus only the fold marker.");
+            Assert.LessOrEqual(
+                est.EstimateText(ConversationFoldMarker.Strip(persisted)),
+                30,
+                "Persisted summary prose should stay near the token cap.");
+            StringAssert.Contains("[fold:v1:", persisted,
+                "Limiter runs before stamping, so the marker must survive truncation.");
         }
 
         [Test]
@@ -731,8 +744,12 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, ConversationBulletSummary.FindFoldStart(summary, history, 3));
         }
 
+        /// <summary>
+        /// The old design stamped the last non-empty bullet as watermark; the marker now covers the whole
+        /// folded prefix by content hash, including a whitespace-only message just before the tail.
+        /// </summary>
         [Test]
-        public async Task LlmAssisted_PersistedWatermark_SkipsWhitespaceTailMessage()
+        public async Task LlmAssisted_PersistedMarker_CoversWhitespaceTailMessage()
         {
             InMemoryConversationSummaryStore store = new();
             RecordingLlmClient llm = new();
@@ -755,10 +772,9 @@ namespace CoreAI.Tests.EditMode
                 "t", CancellationToken.None).ConfigureAwait(false);
 
             string persisted = store.LoadSummary("r");
-            Assert.IsTrue(persisted.EndsWith("- user: gamma", StringComparison.Ordinal),
-                $"Watermark must be the last NON-EMPTY folded message's bullet; got: '{persisted}'");
+            StringAssert.Contains("[fold:v1:", persisted, "Persisted summary must end with a fold marker.");
             Assert.AreEqual(4, ConversationBulletSummary.FindFoldStart(persisted, history, 4),
-                "Persisted watermark must mark the whole folded prefix (incl. the whitespace tail) as folded.");
+                "Persisted marker must mark the whole folded prefix (incl. the whitespace tail) as folded.");
         }
 
         [Test]
@@ -787,6 +803,356 @@ namespace CoreAI.Tests.EditMode
             string payload = llm.LastRequest.UserPayload;
             Assert.IsFalse(payload.Contains(new string('X', 3000)),
                 "Per-message content over 2000 chars should be truncated in the compaction payload.");
+        }
+
+        // --- Fold-marker redesign tests (F14-F17, marker stripping, limiter, migration) ---
+
+        private static AgentMemoryPolicy.RoleMemoryConfig DefaultRoleConfig()
+        {
+            return new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
+        }
+
+        private static ConversationContextBuildArgs LlmArgs(int budget = 25)
+        {
+            return new ConversationContextBuildArgs { HistoryTokenBudget = budget, UseLlmContextCompaction = true };
+        }
+
+        /// <summary>
+        /// F14: wave-2 code could persist a summary whose FINAL line is a blank bullet ("- user: ").
+        /// The final-line matcher never matches it; the substring fallback must recognize the prefix as
+        /// folded so the upgrade costs zero extra LLM calls.
+        /// </summary>
+        [Test]
+        public async Task F14_LegacyBlankBulletFinalLine_NoResummarizeOnUpgrade()
+        {
+            InMemoryConversationSummaryStore store = new();
+            store.SaveSummary(
+                "r",
+                "Previous conversation summary:\n- user: alpha\n- assistant: beta\n- user: ");
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "alpha" },
+                new() { Role = "assistant", Content = "beta" },
+                new() { Role = "user", Content = "tail-1" },
+                new() { Role = "assistant", Content = "tail-2" }
+            };
+
+            ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(0, llm.CompleteCallCount,
+                "Legacy blank-bullet watermark must migrate via substring fallback without a re-summarize.");
+            Assert.IsTrue(snap.WasCompacted);
+        }
+
+        /// <summary>
+        /// F15: the watermark message can be pruned/trimmed out of history before fold detection. The marker
+        /// stores hashes of the last 8 folded messages, so any survivor still anchors the fold; only genuinely
+        /// new messages are re-summarized, never the whole prefix, and it cannot recur.
+        /// </summary>
+        [Test]
+        public async Task F15_WatermarkMessagePruned_FoldsOnlyNewMessages()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] firstHistory =
+            {
+                new() { Role = "user", Content = "m0" },
+                new() { Role = "assistant", Content = "m1" },
+                new() { Role = "user", Content = "m2" },
+                new() { Role = "assistant", Content = "m3" },
+                new() { Role = "user", Content = "m4" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", firstHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            Assert.AreEqual(1, llm.CompleteCallCount, "First fold covers m0..m2.");
+
+            ChatMessage[] prunedHistory =
+            {
+                new() { Role = "user", Content = "m0" },
+                new() { Role = "assistant", Content = "m1" },
+                new() { Role = "assistant", Content = "m3" },
+                new() { Role = "user", Content = "m4" },
+                new() { Role = "user", Content = "m5" },
+                new() { Role = "assistant", Content = "m6" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", prunedHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(2, llm.CompleteCallCount);
+            string payload = llm.LastRequest.UserPayload;
+            int foldSection = payload.IndexOf("## Dialogue lines to fold", StringComparison.Ordinal);
+            string foldLines = payload.Substring(foldSection);
+            StringAssert.DoesNotContain("- user: m0", foldLines,
+                "Already-folded m0 must not be re-summarized when the m2 watermark was pruned away.");
+            StringAssert.DoesNotContain("- assistant: m1", foldLines,
+                "Already-folded m1 must not be re-summarized when the m2 watermark was pruned away.");
+            StringAssert.Contains("- assistant: m3", foldLines, "New message m3 must be folded.");
+        }
+
+        /// <summary>
+        /// F16: an all-whitespace foldable prefix previously produced no watermark at all, so every
+        /// BuildSnapshotAsync re-summarized forever. Hashing whitespace like any other content makes the
+        /// fold converge after a single LLM call.
+        /// </summary>
+        [Test]
+        public async Task F16_AllWhitespacePrefix_ConvergesAfterSingleFold()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "   " },
+                new() { Role = "assistant", Content = " " },
+                new() { Role = "user", Content = "\t" },
+                new() { Role = "assistant", Content = "tail-1" },
+                new() { Role = "user", Content = "tail-2" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            int callsAfterFirst = llm.CompleteCallCount;
+
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(callsAfterFirst, llm.CompleteCallCount,
+                "A whitespace-only fold must advance the persisted marker so later builds never re-summarize.");
+            Assert.LessOrEqual(callsAfterFirst, 1);
+        }
+
+        /// <summary>
+        /// F17: a live message repeating folded text verbatim ("ok") must not pull the fold point forward
+        /// past unique unfolded messages; the marker consumes each hash at its oldest occurrence.
+        /// </summary>
+        [Test]
+        public async Task F17_LiveDuplicateOfFoldedText_DoesNotLoseInterveningMessages()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] firstHistory =
+            {
+                new() { Role = "user", Content = "ok" },
+                new() { Role = "assistant", Content = "watermark reply" },
+                new() { Role = "user", Content = "tail-a" },
+                new() { Role = "assistant", Content = "tail-b" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", firstHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            Assert.AreEqual(1, llm.CompleteCallCount, "First fold covers ok + watermark reply.");
+
+            ChatMessage[] grownHistory =
+            {
+                new() { Role = "user", Content = "ok" },
+                new() { Role = "assistant", Content = "watermark reply" },
+                new() { Role = "user", Content = "unique-between" },
+                new() { Role = "user", Content = "ok" },
+                new() { Role = "assistant", Content = "tail-1" },
+                new() { Role = "user", Content = "tail-2" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", grownHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(2, llm.CompleteCallCount);
+            string payload = llm.LastRequest.UserPayload;
+            int foldSection = payload.IndexOf("## Dialogue lines to fold", StringComparison.Ordinal);
+            string foldLines = payload.Substring(foldSection);
+            StringAssert.Contains("- user: unique-between", foldLines,
+                "The message between the real fold point and the live duplicate must be folded, not lost.");
+            StringAssert.DoesNotContain("- assistant: watermark reply", foldLines,
+                "Already-folded messages must not be re-summarized.");
+        }
+
+        /// <summary>
+        /// Marker stripping: snapshot.Summary and the LLM payload's prior-summary section must contain
+        /// clean prose only; the marker lives exclusively in the persisted text as its final line.
+        /// </summary>
+        [Test]
+        public async Task FoldMarker_StrippedFromSnapshotAndLlmPayload_PresentOnlyInPersistedText()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ConversationContextSnapshot first = await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(5), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            StringAssert.DoesNotContain("[fold:v1:", first.Summary);
+            StringAssert.Contains("[fold:v1:", store.LoadSummary("r"));
+            Assert.IsTrue(store.LoadSummary("r").TrimEnd().EndsWith("]", StringComparison.Ordinal),
+                "Marker must be the final line of the persisted summary.");
+
+            ConversationContextSnapshot second = await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(7), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            StringAssert.DoesNotContain("[fold:v1:", second.Summary);
+            StringAssert.DoesNotContain("[fold:v1:", llm.LastRequest.UserPayload,
+                "The prior-summary section handed to the LLM must be stripped of the marker.");
+        }
+
+        /// <summary>
+        /// Limiter interaction: MaxRolledSummaryTokens truncates the prose BEFORE the marker is stamped,
+        /// so an aggressive cap can never delete or corrupt the marker and fold detection still works.
+        /// </summary>
+        [Test]
+        public void FoldMarker_SurvivesAggressiveSummaryTokenCap()
+        {
+            InMemoryConversationSummaryStore store = new();
+            HeuristicTokenEstimator est = new();
+            DeterministicConversationContextManager mgr = new(store, est);
+            ChatMessage[] history = new ChatMessage[10];
+            for (int i = 0; i < 10; i++)
+            {
+                history[i] = new ChatMessage { Role = "user", Content = $"m{i}-" + new string('z', 48) };
+            }
+
+            ConversationContextBuildArgs buildArgs = new()
+            {
+                HistoryTokenBudget = 28,
+                MaxRolledSummaryTokens = 4
+            };
+
+            mgr.BuildSnapshot("r", history, DefaultRoleConfig(), buildArgs);
+
+            string persisted = store.LoadSummary("r");
+            Assert.IsTrue(ConversationFoldMarker.TryParse(persisted, out _),
+                "Marker must parse intact from the persisted summary even under a tiny token cap.");
+            Assert.Greater(ConversationBulletSummary.FindFoldStart(persisted, history, 8), 0,
+                "Fold detection must still work after aggressive prose truncation.");
+        }
+
+        /// <summary>
+        /// Migration: a wave-3 summary (watermark bullet as final line, no marker) is recognized without
+        /// any re-summarize, and the first save writes a marker that takes over from then on.
+        /// </summary>
+        [Test]
+        public async Task Migration_Wave3FinalLineSummary_RecognizedThenMarkerTakesOver()
+        {
+            ChatMessage[] foldedPrefix =
+            {
+                new() { Role = "user", Content = "alpha" },
+                new() { Role = "assistant", Content = "beta" },
+                new() { Role = "user", Content = "gamma" }
+            };
+            string wave3Summary = ConversationBulletSummary.Format("", foldedPrefix, 3);
+            Assert.IsFalse(ConversationFoldMarker.TryParse(wave3Summary, out _),
+                "Sanity: legacy summary has no marker.");
+
+            InMemoryConversationSummaryStore store = new();
+            store.SaveSummary("r", wave3Summary);
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            ChatMessage[] history =
+            {
+                foldedPrefix[0],
+                foldedPrefix[1],
+                foldedPrefix[2],
+                new() { Role = "assistant", Content = "delta" },
+                new() { Role = "user", Content = "tail-1" },
+                new() { Role = "assistant", Content = "tail-2" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(1, llm.CompleteCallCount);
+            string foldLines = llm.LastRequest.UserPayload.Substring(
+                llm.LastRequest.UserPayload.IndexOf("## Dialogue lines to fold", StringComparison.Ordinal));
+            StringAssert.DoesNotContain("- user: alpha", foldLines,
+                "Wave-3 final-line watermark must be honored; only 'delta' is new.");
+            StringAssert.Contains("- assistant: delta", foldLines);
+            Assert.IsTrue(ConversationFoldMarker.TryParse(store.LoadSummary("r"), out _),
+                "First save after migration must stamp the structured marker.");
+        }
+
+        /// <summary>
+        /// Degradation: when every marker hash has vanished from history, the fold restarts from 0 exactly
+        /// once — the freshly stamped marker matches on the next build, so the re-fold cannot recur.
+        /// </summary>
+        [Test]
+        public async Task Degradation_AllMarkerHashesGone_RefoldsOnceThenConverges()
+        {
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+
+            await mgr.BuildSnapshotAsync(
+                "r", MakeHistory(5), DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            Assert.AreEqual(1, llm.CompleteCallCount);
+
+            ChatMessage[] disjointHistory =
+            {
+                new() { Role = "user", Content = "n0" },
+                new() { Role = "assistant", Content = "n1" },
+                new() { Role = "user", Content = "n2" },
+                new() { Role = "assistant", Content = "n3" },
+                new() { Role = "user", Content = "n4" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                "r", disjointHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            Assert.AreEqual(2, llm.CompleteCallCount, "Disjoint history triggers one graceful fold-from-0.");
+
+            await mgr.BuildSnapshotAsync(
+                "r", disjointHistory, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+            Assert.AreEqual(2, llm.CompleteCallCount,
+                "The new marker written by the degraded fold must prevent any recurrence.");
+        }
+
+        /// <summary>
+        /// Both managers stamp the same marker format, so a role can move between deterministic and
+        /// LLM-assisted compaction without re-summarizing.
+        /// </summary>
+        [Test]
+        public async Task DeterministicMarker_ReadableByLlmAssistedManager_NoRefold()
+        {
+            InMemoryConversationSummaryStore store = new();
+            FlatTokenEstimator est = new(10);
+            DeterministicConversationContextManager det = new(store, est);
+            ChatMessage[] history = MakeHistory(5);
+
+            det.BuildSnapshot(
+                "r", history, DefaultRoleConfig(),
+                new ConversationContextBuildArgs { HistoryTokenBudget = 25, CompactionTriggerRatio = 0.8f });
+            Assert.IsTrue(ConversationFoldMarker.TryParse(store.LoadSummary("r"), out _),
+                "Deterministic manager must stamp the marker too.");
+
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, est, llm);
+            await mgr.BuildSnapshotAsync(
+                "r", history, DefaultRoleConfig(), LlmArgs(),
+                "t", CancellationToken.None).ConfigureAwait(false);
+
+            Assert.AreEqual(0, llm.CompleteCallCount,
+                "The deterministic marker must be honored by the LLM-assisted manager.");
         }
     }
 }

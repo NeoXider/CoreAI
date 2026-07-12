@@ -63,6 +63,7 @@ namespace CoreAI.Ai
                 return;
             }
 
+            roleId = roleId.Trim();
             lock (_lock)
             {
                 if (!_customTools.TryGetValue(roleId, out List<ILlmTool> list))
@@ -248,6 +249,7 @@ namespace CoreAI.Ai
         public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist,
             int maxChatHistoryMessages = 30)
         {
+            roleId = roleId?.Trim();
             lock (_lock)
             {
                 if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
@@ -614,6 +616,7 @@ namespace CoreAI.Ai
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
+            roleId = roleId?.Trim();
             lock (_lock)
             {
                 List<ILlmTool> tools = new();

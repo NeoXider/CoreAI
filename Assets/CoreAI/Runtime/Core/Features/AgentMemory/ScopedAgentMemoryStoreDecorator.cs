@@ -81,8 +81,8 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Keeps the legacy length-prefixed mapping for values containing only safe characters. Values
-        /// changed by sanitization gain a stable hash of the original raw text, so their new keys cannot
-        /// collide; existing lossy keys are intentionally not reused and require host-managed migration.
+        /// changed by sanitization gain a stable hash of the original raw text and use the raw length as
+        /// their prefix, so a literal hash-suffixed value cannot collide with them.
         /// </summary>
         private static void AppendPart(StringBuilder sb, string value)
         {
@@ -93,35 +93,15 @@ namespace CoreAI.Ai
 
             string sanitized = Sanitize(value);
             string raw = value?.Trim() ?? "";
-            // WHY: an unset (null/whitespace) segment is the default in every existing install - it must
-            // keep the legacy "_" key, or upgrading orphans all previously saved memory. The legacy
-            // empty-vs-literal-"_" overlap is retained knowingly; the hash suffix only has to separate
-            // genuinely distinct raw values that sanitize to the same text (the cross-user leak).
+            // WHY: An unset segment keeps the legacy "_" key. Lossy values already remapped when hashing
+            // was introduced; their raw-length prefix now disambiguates literal hash-suffixed values while
+            // every lossless value, including a lowercase GUID, keeps its legacy encoding.
             bool lossless = string.Equals(raw, sanitized, System.StringComparison.Ordinal);
-            string encoded = raw.Length == 0 || lossless && !HasHashLikeSuffix(sanitized)
+            string encoded = raw.Length == 0 || lossless
                 ? sanitized
                 : sanitized + "-" + StableHash(value ?? "");
-            sb.Append(encoded.Length).Append(':').Append(encoded);
-        }
-
-        private static bool HasHashLikeSuffix(string value)
-        {
-            int suffixStart = value.Length - 12;
-            if (suffixStart <= 0 || value[suffixStart - 1] != '-')
-            {
-                return false;
-            }
-
-            for (int i = suffixStart; i < value.Length; i++)
-            {
-                char ch = value[i];
-                if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')))
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            int lengthPrefix = raw.Length == 0 ? encoded.Length : raw.Length;
+            sb.Append(lengthPrefix).Append(':').Append(encoded);
         }
 
         private static string StableHash(string value)

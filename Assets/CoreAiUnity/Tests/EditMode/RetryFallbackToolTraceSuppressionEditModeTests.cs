@@ -216,6 +216,8 @@ namespace CoreAI.Tests.EditMode
                 new LlmToolCallTrace("t", false, 0d, "unbound-native")));
             Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", false, 0d, "schema-validation")));
+            Assert.IsFalse(LoggingLlmClientDecorator.TraceIndicatesInvocation(
+                new LlmToolCallTrace("t", false, 0d, "arg-conversion")));
 
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(
                 new LlmToolCallTrace("t", true, 5d, "native")));
@@ -245,5 +247,49 @@ namespace CoreAI.Tests.EditMode
                 InvokedNativeTrace()
             }));
         }
+
+        private sealed class FixedResultClient : ILlmClient
+        {
+            public LlmCompletionResult Result;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(Result);
+            }
+        }
+
+        [Test]
+        public async Task DefaultStreamAdapter_TerminalChunk_KeepsCumulativePromptTokensAndCarriesLastRoundtrip()
+        {
+            ILlmClient client = new FixedResultClient
+            {
+                Result = new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = "hi",
+                    PromptTokens = 100,
+                    LastRoundtripPromptTokens = 25,
+                    CompletionTokens = 40,
+                    TotalTokens = 140
+                }
+            };
+
+            LlmStreamChunk terminal = null;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest()))
+            {
+                if (chunk.IsDone)
+                {
+                    terminal = chunk;
+                }
+            }
+
+            Assert.IsNotNull(terminal);
+            Assert.AreEqual(100, terminal.PromptTokens, "PromptTokens must stay the cumulative turn sum");
+            Assert.AreEqual(25, terminal.LastRoundtripPromptTokens,
+                "calibration field must carry the last roundtrip's prompt size");
+            Assert.AreEqual(terminal.PromptTokens + terminal.CompletionTokens, terminal.TotalTokens);
+        }
+
     }
 }

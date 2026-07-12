@@ -96,9 +96,23 @@ namespace CoreAI.Infrastructure.Messaging
             // would survive a scene reload and receive commands routed by the next scene's router —
             // duplicate world mutations against destroyed objects. Additive/overlapping scopes can own
             // live subscribers concurrently, so only the last router may clear the shared event.
-            if (System.Threading.Interlocked.Decrement(ref _activeRouterCount) == 0)
+            int observedCount = System.Threading.Volatile.Read(ref _activeRouterCount);
+            while (observedCount > 0)
             {
-                CommandReceived = null;
+                int nextCount = observedCount - 1;
+                int originalCount = System.Threading.Interlocked.CompareExchange(
+                    ref _activeRouterCount, nextCount, observedCount);
+                if (originalCount == observedCount)
+                {
+                    if (nextCount == 0)
+                    {
+                        CommandReceived = null;
+                    }
+
+                    break;
+                }
+
+                observedCount = originalCount;
             }
         }
     }

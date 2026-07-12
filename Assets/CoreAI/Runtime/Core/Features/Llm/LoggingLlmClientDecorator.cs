@@ -407,6 +407,7 @@ namespace CoreAI.Infrastructure.Llm
                 case "missing":
                 case "unbound-native":
                 case "schema-validation":
+                case "arg-conversion":
                     return false;
                 default:
                     // WHY: fail safe - any unknown/new trace source counts as an invocation so the

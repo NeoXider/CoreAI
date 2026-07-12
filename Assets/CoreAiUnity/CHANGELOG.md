@@ -4,6 +4,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed (2026-07-12 audit wave 4 — adversarial review of wave 3, host)
+
+- **World state: explicit `parent: none` (or reparent) sticks.** A world command that detaches or
+  reparents a child now clears the remembered unresolved-parent link, so the old parent is not
+  resurrected when its prefab returns; a transient non-persisted carrier no longer erases the
+  retained link; a failed load clears the stale pending map; the manager releases its static
+  pending-owner slot on dispose.
+- **Benchmark: Stop at a retry boundary no longer scores the aborted attempt as a model FAIL** (the
+  unretried hard failure is dropped, matching "a crash never counts as a model failure").
+- **Benchmark: G8 pref migration respects saved subsets** — with no saved `PrefG8`, G8 defaults on
+  only for fresh configs or explicit full-seven selections; an existing subset is not silently
+  expanded.
+- **Hub window: assigning a registry while disabled no longer leaks a subscription on destroy**
+  (setter subscribes only when enabled; defensive `OnDestroy` unsubscribe), and a page whose
+  `OnDeactivated` throws still gets `OnDestroyed` (no orphaned `StateReset` handlers).
+- **Router refcount can no longer underflow** after a `SubsystemRegistration` reset (zero-clamped
+  decrement), so the last-router cleanup keeps firing in edit-mode/test constructions.
+
 ### Fixed (2026-07-12 audit wave 3 — adversarial review of wave 2, host)
 
 - **`AiGameCommandRouter` statics reset on `SubsystemRegistration`** — with Enter-Play-Mode domain

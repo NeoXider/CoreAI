@@ -105,9 +105,7 @@ namespace CoreAI.Tests.EditMode
             bool g5 = EditorPrefs.GetBool(PrefG5, true);
             bool g6 = EditorPrefs.GetBool(PrefG6, false);
             bool g7 = EditorPrefs.GetBool(PrefG7, false);
-            // WHY: default true — before G8 had a toggle, every "all groups" run (empty CSV) included
-            // it, so an unset pref must keep including it rather than silently shrinking the suite.
-            bool g8 = EditorPrefs.GetBool(PrefG8, true);
+            bool g8 = LoadSavedG8Preference();
             int reps = EditorPrefs.GetInt(PrefReps, 1);
             int retries = EditorPrefs.GetInt(PrefRetries, 1);
             int timeout = EditorPrefs.GetInt(PrefTimeout, 0);
@@ -135,6 +133,29 @@ namespace CoreAI.Tests.EditMode
         public static bool? ConnectionMode(int mode)
         {
             return mode == 1 ? true : mode == 2 ? false : (bool?)null;
+        }
+
+        /// <summary>Loads G8 without expanding an existing saved subset created before the G8 toggle.</summary>
+        internal static bool LoadSavedG8Preference()
+        {
+            if (EditorPrefs.HasKey(PrefG8))
+            {
+                return EditorPrefs.GetBool(PrefG8);
+            }
+
+            string[] priorGroupPrefs = { PrefG1, PrefG2, PrefG3, PrefG4, PrefG5, PrefG6, PrefG7 };
+            bool anySaved = false;
+            bool allEnabled = true;
+            foreach (string pref in priorGroupPrefs)
+            {
+                bool saved = EditorPrefs.HasKey(pref);
+                anySaved |= saved;
+                allEnabled &= saved && EditorPrefs.GetBool(pref);
+            }
+
+            // WHY: A brand-new configuration still means the full suite, while any explicit legacy
+            // WHY: subset stays unchanged unless all seven prior groups were explicitly enabled.
+            return !anySaved || allEnabled;
         }
 
         /// <summary>All benchmark group ids the suite knows, in the launcher's toggle order.</summary>

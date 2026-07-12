@@ -96,7 +96,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ScopedKeys_ForbiddenCharacters_DoNotCollide()
+        public void ScopedKeys_DifferentLossyValuesWithSameSanitizedText_DoNotCollide()
         {
             string dotted = ScopedKeyFor(new AgentMemoryScope("", "a.b", "", ""), "role");
             string slashed = ScopedKeyFor(new AgentMemoryScope("", "a/b", "", ""), "role");
@@ -113,7 +113,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ScopedKeys_HashLikeLosslessValue_DoesNotCollideWithHashedLossyValue()
+        public void ScopedKeys_LowercaseGuid_PreservesLegacyMapping()
+        {
+            string key = ScopedKeyFor(
+                new AgentMemoryScope("", "01234567-89ab-cdef-0123-456789abcdef", "", ""),
+                "role");
+
+            Assert.AreEqual(
+                "1:___36:01234567-89ab-cdef-0123-456789abcdef__1:___1:___4:role",
+                key);
+        }
+
+        [Test]
+        public void ScopedKeys_LossyValueAndLiteralHashedValue_DoNotCollide()
         {
             string victim = ScopedKeyFor(new AgentMemoryScope("", "userX!", "", ""), "role");
             string attacker = ScopedKeyFor(new AgentMemoryScope("", "userX_-c4a7037cc0ec", "", ""), "role");
@@ -133,6 +145,17 @@ namespace CoreAI.Tests.EditMode
     /// <summary>Regression coverage for role-key normalization in <see cref="AgentMemoryPolicy"/>.</summary>
     public sealed class AgentMemoryPolicyEditModeTests
     {
+        [Test]
+        public void AddToolForRole_PaddedRoleId_AddsToTrimmedRole()
+        {
+            AgentMemoryPolicy policy = new();
+            CoreAI.AgentMemory.MemoryLlmTool tool = new();
+
+            policy.AddToolForRole(" trader ", tool);
+
+            CollectionAssert.Contains(policy.GetToolsForRole("trader"), tool);
+        }
+
         [Test]
         public void SetToolsForRole_PaddedRoleId_ReassertsRegisteredSkillMetaTools()
         {

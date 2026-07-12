@@ -187,6 +187,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return 1 + retries;
         }
 
+        [Test]
+        public void StopAtRetryBoundary_ClearsUnretriedHardFailureBeforeScoring()
+        {
+            ScenarioResult captured = new() { Failure = "timeout" };
+
+            Assert.IsTrue(AbortRetryForStop(true, ref captured));
+            Assert.IsNull(captured);
+
+            captured = new ScenarioResult { Failure = "timeout" };
+            Assert.IsFalse(AbortRetryForStop(false, ref captured));
+            Assert.IsNotNull(captured);
+        }
+
         [UnityTest]
         [Timeout(NUnitTimeoutMs)] // 110 min — last-resort NUnit backstop; the SOFT suite budget (which still
         // writes artifacts) is the real terminator, clamped in
@@ -342,11 +355,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             }
 
                             // WHY: The stop flag is otherwise only read at the top of the reps loop, so
-                            // with retries a pressed Stop against a dead provider would still wait up to
-                            // maxAttempts full timeouts. Bail out at the attempt boundary instead — the
-                            // captured failed result is kept, so partial-report semantics are unchanged
-                            // and the reps-loop check above exits gracefully next.
-                            if (BenchmarkProgress.StopRequested)
+                            // WHY: with retries a pressed Stop against a dead provider would still wait up to
+                            // WHY: maxAttempts full timeouts. This hard failure was never given its configured
+                            // WHY: retry, so exclude the stop-aborted scenario from model scoring.
+                            if (AbortRetryForStop(BenchmarkProgress.StopRequested, ref captured))
                             {
                                 Debug.LogWarning($"[Benchmark] {scenario.Name}: stop requested — skipping " +
                                                  $"remaining retry attempt(s) after attempt {attempt}/{maxAttempts}.");
@@ -419,6 +431,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int d = difficulty10 < 1 ? 1 : difficulty10 > 10 ? 10 : difficulty10;
             int half = d / 2;
             return $"{new string('●', half)}{new string('○', 5 - half)} {d}/10";
+        }
+
+        private static bool AbortRetryForStop(bool stopRequested, ref ScenarioResult captured)
+        {
+            if (!stopRequested)
+            {
+                return false;
+            }
+
+            captured = null;
+            return true;
         }
 
         private static string ProgressLine(ScenarioResult r)

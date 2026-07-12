@@ -92,6 +92,7 @@ namespace CoreAI.Infrastructure.World
         // guarantee above. Remember the intended parent id per child so saves keep the link until
         // the parent resolves on a later load.
         private Dictionary<string, string> _pendingParentByChildId = new();
+        private static WorldStateManager _pendingParentOwner;
 
         public bool HasSavedState => File.Exists(_saveFilePath);
 
@@ -212,9 +213,12 @@ namespace CoreAI.Infrastructure.World
                     WorldObjectComponent parentTag = t.parent.GetComponent<WorldObjectComponent>();
                     parentValue = parentTag != null ? parentTag.persistentId : t.parent.gameObject.name;
 
-                    // WHY: The object gained a live parent (reattached or reparented by someone), so
-                    // the remembered unresolved-parent link is stale — the live one wins from now on.
-                    _pendingParentByChildId.Remove(tag.persistentId);
+                    // WHY: Only a tracked persistent parent can replace the retained link. A transient
+                    // WHY: carrier must not erase it because that parent cannot survive a later restore.
+                    if (parentTag != null && !string.IsNullOrEmpty(parentTag.persistentId))
+                    {
+                        _pendingParentByChildId.Remove(tag.persistentId);
+                    }
                 }
                 else if (_pendingParentByChildId.TryGetValue(tag.persistentId, out string pendingParent))
                 {
@@ -317,6 +321,9 @@ namespace CoreAI.Infrastructure.World
 
         public bool TryLoad(string sceneName = null)
         {
+            _pendingParentByChildId.Clear();
+            _pendingParentOwner = this;
+
             if (_disposed)
             {
                 return false;
@@ -463,6 +470,16 @@ namespace CoreAI.Infrastructure.World
             return true;
         }
 
+        /// <summary>Forgets a retained unresolved-parent link after an explicit world command changes it.</summary>
+        internal static void ForgetPendingParent(GameObject child)
+        {
+            WorldObjectComponent tag = child != null ? child.GetComponent<WorldObjectComponent>() : null;
+            if (tag != null && !string.IsNullOrEmpty(tag.persistentId))
+            {
+                _pendingParentOwner?._pendingParentByChildId.Remove(tag.persistentId);
+            }
+        }
+
         public void Reset()
         {
             if (_disposed)
@@ -540,6 +557,12 @@ namespace CoreAI.Infrastructure.World
             Application.quitting -= OnApplicationQuitting;
             _autoSaveCts?.Cancel();
             _autoSaveCts = null;
+            // WHY: a stale owner would pin this disposed manager and swallow ForgetPendingParent calls
+            // meant for the next scene's manager.
+            if (ReferenceEquals(_pendingParentOwner, this))
+            {
+                _pendingParentOwner = null;
+            }
         }
 
         private static Color ReadColor(GameObject go)

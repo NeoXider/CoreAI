@@ -733,6 +733,7 @@ namespace CoreAI.Infrastructure.World
             if (parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
                 child.transform.SetParent(null, worldPositionStays);
+                WorldStateManager.ForgetPendingParent(child);
                 return true;
             }
 
@@ -744,6 +745,7 @@ namespace CoreAI.Infrastructure.World
             }
 
             child.transform.SetParent(parent.transform, worldPositionStays);
+            WorldStateManager.ForgetPendingParent(child);
             return true;
         }
 
@@ -846,6 +848,7 @@ namespace CoreAI.Infrastructure.World
                 parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
                 child.transform.SetParent(null, true);
+                WorldStateManager.ForgetPendingParent(child);
                 return true;
             }
 
@@ -857,6 +860,7 @@ namespace CoreAI.Infrastructure.World
             }
 
             child.transform.SetParent(parent.transform, true);
+            WorldStateManager.ForgetPendingParent(child);
             return true;
         }
 

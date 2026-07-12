@@ -606,7 +606,8 @@ namespace CoreAI.Infrastructure.Llm
                 // schema so the model can retry with correctly-shaped arguments instead of
                 // guessing from an opaque exception message.
                 string errorMessage = ex.Message;
-                if (LooksLikeArgumentConversionError(ex))
+                bool argConversion = LooksLikeArgumentConversionError(ex);
+                if (argConversion)
                 {
                     string schemaHint = BuildSchemaRetryHint(fc.Name);
                     if (!string.IsNullOrEmpty(schemaHint))
@@ -617,7 +618,13 @@ namespace CoreAI.Infrastructure.Llm
 
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {errorMessage}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), errorMessage, 0d);
-                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", errorMessage));
+                // WHY: MEAI coerces arguments inside InvokeAsync before the delegate body runs, so a
+                // conversion failure means nothing executed and the trace must not suppress a later
+                // retry/fallback of the turn. Residual assumption: a tool body that throws its own
+                // JSON/format exception mid-mutation would be misread as non-invoked; CoreAI tool
+                // bodies parse inputs before mutating, so retrying that class is acceptable.
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d,
+                    argConversion ? "arg-conversion" : "native", errorMessage));
                 LogCallLine(fc, false, 0d, $"threw: {errorMessage}");
                 return new ToolCallResult
                 {

@@ -82,6 +82,9 @@ namespace CoreAI.Ai
             }
 
             string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
+            // WHY: The persisted summary carries a machine-only fold marker as its final line; every
+            // snapshot/LLM-facing path must see only the clean prose.
+            string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
             int budget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
             if (!ConversationContextBudgetTokens.ShouldPartitionForCompaction(
                     history,
@@ -91,7 +94,7 @@ namespace CoreAI.Ai
             {
                 return new ConversationContextSnapshot
                 {
-                    Summary = LimitSummaryIfNeeded(storedSummary, buildArgs),
+                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
                     RecentMessages = history,
                     WasCompacted = false
                 };
@@ -102,7 +105,7 @@ namespace CoreAI.Ai
 
             if (splitExclusive <= 0)
             {
-                string summaryOut = LimitSummaryIfNeeded(storedSummary, buildArgs);
+                string summaryOut = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs);
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
@@ -111,12 +114,22 @@ namespace CoreAI.Ai
                 };
             }
 
-            int foldStart = ConversationBulletSummary.FindFoldStart(storedSummary, history, splitExclusive);
+            int foldStart = ConversationBulletSummary.FindFoldStart(
+                storedSummary, history, splitExclusive, out ConversationFoldProbeResult probe);
+            if (probe == ConversationFoldProbeResult.NoMatch)
+            {
+                // WHY: All persisted fold anchors vanished from history (heavy pruning/trimming); folding
+                // from 0 once is the graceful floor, and the marker written below prevents any recurrence.
+                Log.Instance.Warn(
+                    $"[LlmAssistedConversationContextManager] Fold watermark not found in history for role '{roleId}'; re-folding entire prefix once.",
+                    LogTag.Llm);
+            }
+
             if (foldStart >= splitExclusive)
             {
                 return new ConversationContextSnapshot
                 {
-                    Summary = LimitSummaryIfNeeded(storedSummary, buildArgs),
+                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
                     RecentMessages = recent.ToArray(),
                     WasCompacted = true
                 };
@@ -126,7 +139,7 @@ namespace CoreAI.Ai
             try
             {
                 compactedSummary = await SummarizeViaLlmAsync(
-                    storedSummary,
+                    cleanStoredSummary,
                     history,
                     splitExclusive,
                     foldStart,
@@ -143,27 +156,20 @@ namespace CoreAI.Ai
                     $"[LlmAssistedConversationContextManager] LLM compaction failed; using bullet fallback: {ex.Message}",
                     LogTag.Llm);
                 compactedSummary = ConversationBulletSummary.Format(
-                    storedSummary, history, splitExclusive, foldStart);
+                    cleanStoredSummary, history, splitExclusive, foldStart);
             }
 
             if (string.IsNullOrWhiteSpace(compactedSummary))
             {
                 compactedSummary = ConversationBulletSummary.Format(
-                    storedSummary, history, splitExclusive, foldStart);
+                    cleanStoredSummary, history, splitExclusive, foldStart);
             }
 
             compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs);
 
-            // WHY: FindFoldStart re-detects the already-folded prefix by requiring the last folded
-            // non-empty message's bullet as the FINAL line of the STORED summary. The watermark bullet is
-            // stamped only into the persisted text (skipping whitespace-only tail messages, whose bullets
-            // could never re-match); the snapshot keeps the clean LLM summary (and honors MaxSummaryChars).
-            int watermarkIndex = ConversationBulletSummary.FindWatermarkIndex(history, splitExclusive);
-            string persistedSummary =
-                watermarkIndex < 0 ||
-                ConversationBulletSummary.FindFoldStart(compactedSummary, history, splitExclusive) >= splitExclusive
-                    ? compactedSummary
-                    : ConversationBulletSummary.Format(compactedSummary, history, splitExclusive, watermarkIndex);
+            // WHY: The limiter runs BEFORE stamping so the fold marker (final line of the persisted text)
+            // can never be trimmed away; the snapshot keeps the clean summary without the marker.
+            string persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, splitExclusive);
 
             ConversationContextSnapshot snapshot = new()
             {

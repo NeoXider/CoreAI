@@ -3,6 +3,7 @@ using System.IO;
 using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
+using CoreAI.Messaging;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -41,6 +42,19 @@ namespace CoreAI.Tests.PlayMode
                 prefab = null;
                 return false;
             }
+        }
+
+        [System.Serializable]
+        private sealed class SavedObjectData
+        {
+            public string name;
+            public string parent;
+        }
+
+        [System.Serializable]
+        private sealed class SavedWorldData
+        {
+            public SavedObjectData[] objects;
         }
 
         [UnitySetUp]
@@ -112,6 +126,32 @@ namespace CoreAI.Tests.PlayMode
             r.GetPropertyBlock(mpb);
             mpb.SetColor("_Color", color);
             r.SetPropertyBlock(mpb);
+        }
+
+        private string SavedParentFor(string objectName)
+        {
+            SavedWorldData data = JsonUtility.FromJson<SavedWorldData>(File.ReadAllText(_saveFilePath));
+            foreach (SavedObjectData obj in data.objects)
+            {
+                if (obj.name == objectName)
+                {
+                    return obj.parent;
+                }
+            }
+
+            Assert.Fail($"Saved object '{objectName}' was not found.");
+            return null;
+        }
+
+        private static void ExecuteParent(CoreAiWorldCommandExecutor executor, string childName, string parentName)
+        {
+            string json = JsonUtility.ToJson(CoreAiWorldCommandEnvelope.Parent(childName, parentName));
+            Assert.IsTrue(executor.TryExecute(new ApplyAiGameCommand
+            {
+                CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                JsonPayload = json,
+                SourceTaskHint = "pending_parent_test"
+            }));
         }
 
         // GameObject.Find() skips inactive objects, so tests covering F-04A need to search
@@ -359,6 +399,16 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(orphan, "Child should spawn even while its parent is unresolved.");
             Assert.IsNull(orphan.transform.parent, "Child sits at the scene root while the parent is unresolved.");
 
+            GameObject transientCarrier = new("TransientCarrier");
+            orphan.transform.SetParent(transientCarrier.transform, true);
+            managerNoPrefab.Save();
+            yield return null;
+            Assert.AreEqual("TransientCarrier", SavedParentFor("LinkChild"),
+                "A transient live parent keeps the existing save representation for that save.");
+
+            orphan.transform.SetParent(null, true);
+            Object.DestroyImmediate(transientCarrier);
+
             // WHY: This Save() is the regression trigger — before the fix it wrote parent="" from the
             // live root transform and orphaned the child forever.
             managerNoPrefab.Save();
@@ -381,6 +431,84 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(restoredParentTag, "Restored parent must be the tracked world object.");
             Assert.AreEqual(parentId, restoredParentTag.persistentId,
                 "Child must be reattached to its original parent, not orphaned by the interim save.");
+        }
+
+        [UnityTest]
+        public IEnumerator ExplicitDetach_ClearsPendingParentAndDoesNotReattachWhenPrefabReturns()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab);
+
+            GameObject parentGo = Object.Instantiate(prefab);
+            parentGo.name = "DetachParent";
+            Tag(parentGo, "enemy.basic");
+            GameObject childGo = CoreAiPrimitiveFactory.Create("cube");
+            childGo.name = "DetachChild";
+            Tag(childGo, "cube");
+            childGo.transform.SetParent(parentGo.transform, true);
+
+            StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            manager.Save();
+            Object.DestroyImmediate(childGo);
+            Object.DestroyImmediate(parentGo);
+            yield return null;
+
+            WorldStateManager managerNoPrefab = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerNoPrefab.TryLoad());
+            yield return null;
+
+            CoreAiWorldCommandExecutor executor = new(GameLoggerUnscopedFallback.Instance);
+            ExecuteParent(executor, "DetachChild", "none");
+            managerNoPrefab.Save();
+            yield return null;
+            Assert.AreEqual("", SavedParentFor("DetachChild"));
+
+            WorldStateManager managerRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            Assert.IsTrue(managerRestored.TryLoad());
+            yield return null;
+            Assert.IsNull(GameObject.Find("DetachChild").transform.parent,
+                "An explicitly detached child must remain at the root after the prefab returns.");
+        }
+
+        [UnityTest]
+        public IEnumerator TryLoad_ParseFailure_ClearsPendingParentBeforeEarlyReturn()
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/CoreAI.Demos/Shared/EnemyBasic.prefab");
+            Assert.IsNotNull(prefab);
+
+            GameObject parentGo = Object.Instantiate(prefab);
+            parentGo.name = "ParseParent";
+            Tag(parentGo, "enemy.basic");
+            GameObject childGo = CoreAiPrimitiveFactory.Create("cube");
+            childGo.name = "ParseChild";
+            Tag(childGo, "cube");
+            childGo.transform.SetParent(parentGo.transform, true);
+
+            WorldStateManager manager = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(prefab, "enemy.basic"));
+            manager.Save();
+            Object.DestroyImmediate(childGo);
+            Object.DestroyImmediate(parentGo);
+            yield return null;
+
+            WorldStateManager managerNoPrefab = new(
+                GameLoggerUnscopedFallback.Instance,
+                new StubPrefabRegistry(null, "no-such-key"));
+            Assert.IsTrue(managerNoPrefab.TryLoad());
+            yield return null;
+            File.WriteAllText(_saveFilePath, "not-json");
+            Assert.IsFalse(managerNoPrefab.TryLoad());
+
+            managerNoPrefab.Save();
+            yield return null;
+            Assert.AreEqual("", SavedParentFor("ParseChild"),
+                "A failed load must not retain the previous scene's pending-parent link.");
         }
 
         [UnityTest]

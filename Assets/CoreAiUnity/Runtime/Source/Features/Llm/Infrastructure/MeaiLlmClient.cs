@@ -191,16 +191,6 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }
-            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                // WHY: An OCE with a live caller token is an INTERNAL provider/transport timeout
-                // (e.g. a transport that cancels a linked CTS when no response arrives), not a user
-                // stop. Mapping it to Cancelled made the failure non-retryable and non-fallback-
-                // eligible, so a dead primary backend blocked the secondary provider.
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"MeaiLlmClient: internal timeout surfaced as {ex.GetType().Name}: {ex.Message}");
-                return FromException(new TimeoutException(ex.Message), functionClient.LastExecutedToolCalls);
-            }
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
@@ -264,14 +254,13 @@ namespace CoreAI.Infrastructure.Llm
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
                 (result.CacheReadTokens, result.CacheWriteTokens) =
                     ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
-                // WHY: response.Usage is the whole-turn CUMULATIVE sum across tool roundtrips
-                // (kept for completion/total cost metrics), but PromptTokens is consumed by
-                // AiOrchestrator's prompt-token calibration as the ACTUAL context width - the
-                // cumulative input count inflates an N-roundtrip turn ~N times and triggers
-                // premature history compaction, so report the LAST roundtrip's prompt size.
-                if (functionClient.LastRoundtripUsage?.InputTokenCount != null)
+                // WHY: PromptTokens stays the whole-turn CUMULATIVE sum (Prompt + Completion == Total
+                // for cost telemetry); the prompt-size calibration reads the dedicated last-roundtrip
+                // field instead. Zero counts are ignored (zero-emitting providers must not pollute it).
+                if (functionClient.LastRoundtripUsage?.InputTokenCount > 0)
                 {
-                    result.PromptTokens = (int)functionClient.LastRoundtripUsage.InputTokenCount.Value;
+                    result.LastRoundtripPromptTokens =
+                        (int)functionClient.LastRoundtripUsage.InputTokenCount.Value;
                 }
             }
 
@@ -1540,23 +1529,22 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>
-        /// Rewrites a TERMINAL chunk's PromptTokens to the last roundtrip's provider-reported prompt
-        /// size. Cumulative turn usage (see <see cref="AccumulateTurnUsage"/>) is correct for
-        /// completion/total token cost metrics, but summed InputTokenCount across N tool roundtrips
-        /// is ~N times the real context width; AiOrchestrator calibrates its prompt-token estimator
-        /// from the terminal chunk's PromptTokens, so the inflated value caused premature history
-        /// compaction. Leaves the chunk untouched when no per-roundtrip usage was reported.
+/// <summary>
+        /// Stamps the terminal chunk's <see cref="LlmStreamChunk.LastRoundtripPromptTokens"/> from the
+        /// final roundtrip's usage. PromptTokens stays the whole-turn CUMULATIVE sum so
+        /// Prompt + Completion == Total holds for every LlmUsageReported consumer; the prompt-size
+        /// calibration (AiOrchestrator) reads this dedicated field instead. Zero/absent input counts
+        /// are ignored so a zero-emitting provider cannot pollute the calibration channel.
         /// </summary>
         private static void OverrideTerminalPromptTokensWithLastRoundtrip(
             LlmStreamChunk chunk, MEAI.UsageDetails lastRoundtripUsage)
         {
-            if (chunk == null || lastRoundtripUsage?.InputTokenCount == null)
+            if (chunk == null || !(lastRoundtripUsage?.InputTokenCount > 0))
             {
                 return;
             }
 
-            chunk.PromptTokens = ClampTokenCount(lastRoundtripUsage.InputTokenCount.Value);
+            chunk.LastRoundtripPromptTokens = ClampTokenCount(lastRoundtripUsage.InputTokenCount.Value);
         }
 
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)

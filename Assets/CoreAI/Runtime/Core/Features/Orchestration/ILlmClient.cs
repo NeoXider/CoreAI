@@ -244,6 +244,13 @@ namespace CoreAI.Ai
         /// <summary>Set from OpenAI-compatible HTTP when the payload includes <c>usage</c>.</summary>
         public int? PromptTokens { get; set; }
 
+        /// <summary>
+        /// Prompt tokens of the LAST tool roundtrip only (actual context width), for prompt-size
+        /// calibration. <see cref="PromptTokens"/> stays cumulative across the turn so
+        /// <c>Prompt + Completion == Total</c> holds for cost telemetry.
+        /// </summary>
+        public int? LastRoundtripPromptTokens { get; set; }
+
         /// <summary>Completion tokens from usage (HTTP).</summary>
         public int? CompletionTokens { get; set; }
 
@@ -290,6 +297,12 @@ namespace CoreAI.Ai
 
         /// <summary>Usage fields: populated on the final chunk when the backend reports usage.</summary>
         public int? PromptTokens { get; set; }
+
+        /// <summary>
+        /// Prompt tokens of the LAST tool roundtrip only (actual context width), for prompt-size
+        /// calibration; <see cref="PromptTokens"/> stays cumulative for cost telemetry.
+        /// </summary>
+        public int? LastRoundtripPromptTokens { get; set; }
 
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
@@ -393,6 +406,7 @@ namespace CoreAI.Ai
                 Text = result.Content ?? "",
                 IsDone = true,
                 PromptTokens = result.PromptTokens,
+                LastRoundtripPromptTokens = result.LastRoundtripPromptTokens,
                 CompletionTokens = result.CompletionTokens,
                 TotalTokens = result.TotalTokens,
                 CacheReadTokens = result.CacheReadTokens,

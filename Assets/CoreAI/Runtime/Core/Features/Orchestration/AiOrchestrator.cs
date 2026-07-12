@@ -449,6 +449,7 @@ namespace CoreAI.Ai
                 IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
                 LlmStreamChunk pendingToolOnlyTerminalChunk = null;
                 int? promptTokens = null;
+                int? lastRoundtripPromptTokens = null;
                 int? completionTokens = null;
                 int? totalTokens = null;
                 int cacheReadTokens = 0;
@@ -631,6 +632,11 @@ namespace CoreAI.Ai
                             promptTokens = current.PromptTokens;
                         }
 
+                        if (current?.LastRoundtripPromptTokens > 0)
+                        {
+                            lastRoundtripPromptTokens = current.LastRoundtripPromptTokens;
+                        }
+
                         if (current?.CompletionTokens > 0)
                         {
                             completionTokens = current.CompletionTokens;
@@ -744,6 +750,7 @@ namespace CoreAI.Ai
                         Ok = true,
                         Content = content,
                         PromptTokens = promptTokens,
+                        LastRoundtripPromptTokens = lastRoundtripPromptTokens,
                         CompletionTokens = completionTokens,
                         TotalTokens = totalTokens,
                         CacheReadTokens = cacheReadTokens,
@@ -806,6 +813,7 @@ namespace CoreAI.Ai
             int? terminalRetryAfterSeconds = null;
             IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
             int? promptTokens = null;
+            int? lastRoundtripPromptTokens = null;
             int? completionTokens = null;
             int? totalTokens = null;
             int cacheReadTokens = 0;
@@ -889,6 +897,11 @@ namespace CoreAI.Ai
                         promptTokens = current.PromptTokens;
                     }
 
+                    if (current.LastRoundtripPromptTokens > 0)
+                    {
+                        lastRoundtripPromptTokens = current.LastRoundtripPromptTokens;
+                    }
+
                     if (current.CompletionTokens > 0)
                     {
                         completionTokens = current.CompletionTokens;
@@ -935,6 +948,7 @@ namespace CoreAI.Ai
                 Ok = true,
                 Content = accumulated.ToString(),
                 PromptTokens = promptTokens,
+                LastRoundtripPromptTokens = lastRoundtripPromptTokens,
                 CompletionTokens = completionTokens,
                 TotalTokens = totalTokens,
                 CacheReadTokens = cacheReadTokens,
@@ -1157,7 +1171,9 @@ namespace CoreAI.Ai
                 return;
             }
 
-            RecordTokenObservation(bundle, result?.PromptTokens);
+            // WHY: the calibration wants the ACTUAL context width; PromptTokens is the whole-turn
+            // cumulative sum for cost telemetry and inflates ~N times on N-roundtrip tool turns.
+            RecordTokenObservation(bundle, result?.LastRoundtripPromptTokens ?? result?.PromptTokens);
         }
 
         private void RecordTokenObservation(RequestBundle bundle, int? promptTokens)

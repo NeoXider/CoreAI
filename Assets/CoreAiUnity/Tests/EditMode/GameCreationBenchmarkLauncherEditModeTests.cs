@@ -1,6 +1,7 @@
 using System.IO;
 using CoreAI.Tests.EditMode;
 using NUnit.Framework;
+using UnityEditor;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -8,12 +9,36 @@ namespace CoreAI.Tests.EditMode
     public sealed class GameCreationBenchmarkLauncherEditModeTests
     {
         private string _tempDir;
+        private readonly string[] _groupPrefs =
+        {
+            GameCreationBenchmarkLauncher.PrefG1,
+            GameCreationBenchmarkLauncher.PrefG2,
+            GameCreationBenchmarkLauncher.PrefG3,
+            GameCreationBenchmarkLauncher.PrefG4,
+            GameCreationBenchmarkLauncher.PrefG5,
+            GameCreationBenchmarkLauncher.PrefG6,
+            GameCreationBenchmarkLauncher.PrefG7,
+            GameCreationBenchmarkLauncher.PrefG8
+        };
+
+        private readonly System.Collections.Generic.Dictionary<string, bool> _savedValues = new();
+        private readonly System.Collections.Generic.HashSet<string> _existingPrefs = new();
 
         [SetUp]
         public void SetUp()
         {
             _tempDir = Path.Combine(Path.GetTempPath(), "CoreAiBenchmarkLauncherTests_" + Path.GetRandomFileName());
             Directory.CreateDirectory(_tempDir);
+            foreach (string pref in _groupPrefs)
+            {
+                if (EditorPrefs.HasKey(pref))
+                {
+                    _existingPrefs.Add(pref);
+                    _savedValues[pref] = EditorPrefs.GetBool(pref);
+                }
+
+                EditorPrefs.DeleteKey(pref);
+            }
         }
 
         [TearDown]
@@ -23,6 +48,18 @@ namespace CoreAI.Tests.EditMode
             {
                 Directory.Delete(_tempDir, true);
             }
+
+            foreach (string pref in _groupPrefs)
+            {
+                EditorPrefs.DeleteKey(pref);
+                if (_existingPrefs.Contains(pref))
+                {
+                    EditorPrefs.SetBool(pref, _savedValues[pref]);
+                }
+            }
+
+            _existingPrefs.Clear();
+            _savedValues.Clear();
         }
 
         [Test]
@@ -136,6 +173,41 @@ namespace CoreAI.Tests.EditMode
             Assert.AreNotEqual("", csv,
                 "Seven groups on with G8 off is a real subset, not the 'all groups' empty CSV.");
             StringAssert.DoesNotContain("G8", csv);
+        }
+
+        [Test]
+        public void LoadSavedG8Preference_UnsetWithAllSevenEnabled_IncludesG8()
+        {
+            foreach (string pref in _groupPrefs)
+            {
+                if (pref != GameCreationBenchmarkLauncher.PrefG8)
+                {
+                    EditorPrefs.SetBool(pref, true);
+                }
+            }
+
+            Assert.IsTrue(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [Test]
+        public void LoadSavedG8Preference_UnsetWithSubset_ExcludesG8()
+        {
+            for (int i = 0; i < 7; i++)
+            {
+                EditorPrefs.SetBool(_groupPrefs[i], i < 5);
+            }
+
+            Assert.IsFalse(GameCreationBenchmarkLauncher.LoadSavedG8Preference());
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void LoadSavedG8Preference_ExplicitValueAlwaysWins(bool expected)
+        {
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG1, !expected);
+            EditorPrefs.SetBool(GameCreationBenchmarkLauncher.PrefG8, expected);
+
+            Assert.AreEqual(expected, GameCreationBenchmarkLauncher.LoadSavedG8Preference());
         }
     }
 }

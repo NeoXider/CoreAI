@@ -1275,7 +1275,7 @@ namespace CoreAI.Tests.EditMode
             _runG5 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG5, true);
             _runG6 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG6, false);
             _runG7 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG7, false);
-            _runG8 = EditorPrefs.GetBool(GameCreationBenchmarkLauncher.PrefG8, true);
+            _runG8 = GameCreationBenchmarkLauncher.LoadSavedG8Preference();
             _reps = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefReps, 1), 1, 5);
             _retries = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefRetries, 1), 0, 3);
             _timeoutSeconds = Mathf.Max(0, EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefTimeout, 0));

@@ -228,6 +228,20 @@
       cancellation now surfaces as typed `Timeout`, retry- and fallback-eligible)*;
       benchmark zombie scenario task past the 5 s grace leaks orphan primitives between reps;
       `WorldStateAutoSaveHook` interval=0 ("off") silently resurrects to 60 s.
+- [ ] `SmartToolCallingChatClient` mutable per-request statics pattern (2026-07-12 wave-3 review, latent):
+      `LastExecutedToolCalls` / `LastRoundtripUsage` are unsynchronized instance properties reset per
+      request — two concurrent `CompleteAsync` calls through one shared client instance interleave.
+      Harmless on the current one-turn-at-a-time host; fails if the DI graph ever shares one client
+      across concurrent roles. Replace with per-call context (return alongside the response) when
+      concurrency arrives.
+- [ ] Audit `ChainReset` accounting limits (2026-07-12 wave-3 review, accepted design): a forged
+      self-hashed `ChainReset` after tail truncation still verifies `Ok=true` (chain is unkeyed by
+      design) — `ChainResetCount`/warn only make it operator-visible. A keyed HMAC chain would be the
+      real fix if tamper-evidence ever becomes a requirement.
+- [ ] Summarization-off hard truncation semantics (2026-07-12 wave-3 review, note): with summarization
+      disabled the overflow clamp partitions at raw budget with no trigger ratio and can split mid
+      tool-call/answer exchange — no wire-contract violation, but consider a `ShouldPartition`-style
+      hysteresis for coherence.
 - [ ] Multi-scope audit-writer design (2026-07-12 adversarial review of wave 2): two coexisting scopes
       (now officially supported by the additive-scene router fix) each own an `AuditLogWriter` on the SAME
       `audit.jsonl` with independent `_seq`/`_prevHash` — interleaved appends break the hash chain. Needs a

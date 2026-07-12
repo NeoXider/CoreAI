@@ -91,7 +91,10 @@ namespace CoreAI.Hub.UI
 
                 UnsubscribeRegistry();
                 _registry = value;
-                SubscribeRegistry();
+                if (isActiveAndEnabled)
+                {
+                    SubscribeRegistry();
+                }
 
                 if (_uiReady)
                 {
@@ -128,6 +131,11 @@ namespace CoreAI.Hub.UI
             UnsubscribeRegistry();
             DestroyAllPages();
             TeardownUi();
+        }
+
+        protected virtual void OnDestroy()
+        {
+            UnsubscribeRegistry();
         }
 
         private void Update()
@@ -650,18 +658,25 @@ namespace CoreAI.Hub.UI
         {
             if (_pages.TryGetValue(pageId, out IHubPage page) && page != null)
             {
-                try
+                if (string.Equals(pageId, _activePageId, StringComparison.Ordinal))
                 {
-                    if (string.Equals(pageId, _activePageId, StringComparison.Ordinal))
+                    try
                     {
                         page.OnDeactivated();
                     }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[CoreAiHubWindow] Page '{pageId}' deactivation threw: {ex}");
+                    }
+                }
 
+                try
+                {
                     page.OnDestroyed();
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[CoreAiHubWindow] Page '{pageId}' teardown threw: {ex}");
+                    Debug.LogError($"[CoreAiHubWindow] Page '{pageId}' destruction threw: {ex}");
                 }
             }
 

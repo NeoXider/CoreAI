@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -43,6 +44,9 @@ namespace CoreAI.Ai
             }
 
             string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
+            // WHY: The persisted summary carries a machine-only fold marker as its final line; every
+            // snapshot-facing path must see only the clean prose.
+            string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
             int historyBudget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
             if (!ConversationContextBudgetTokens.ShouldPartitionForCompaction(
                     history,
@@ -52,7 +56,7 @@ namespace CoreAI.Ai
             {
                 return new ConversationContextSnapshot
                 {
-                    Summary = LimitSummaryIfNeeded(storedSummary, buildArgs),
+                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs),
                     RecentMessages = history,
                     WasCompacted = false
                 };
@@ -63,7 +67,7 @@ namespace CoreAI.Ai
 
             if (splitExclusive <= 0)
             {
-                string summaryOut = LimitSummaryIfNeeded(storedSummary, buildArgs);
+                string summaryOut = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs);
                 return new ConversationContextSnapshot
                 {
                     Summary = summaryOut,
@@ -72,9 +76,19 @@ namespace CoreAI.Ai
                 };
             }
 
-            int foldStart = ConversationBulletSummary.FindFoldStart(storedSummary, history, splitExclusive);
+            int foldStart = ConversationBulletSummary.FindFoldStart(
+                storedSummary, history, splitExclusive, out ConversationFoldProbeResult probe);
+            if (probe == ConversationFoldProbeResult.NoMatch)
+            {
+                // WHY: All persisted fold anchors vanished from history (heavy pruning/trimming); folding
+                // from 0 once is the graceful floor, and the marker written below prevents any recurrence.
+                Log.Instance.Warn(
+                    $"[DeterministicConversationContextManager] Fold watermark not found in history for role '{roleId}'; re-folding entire prefix once.",
+                    LogTag.Llm);
+            }
+
             string compactedSummary = LimitSummaryIfNeeded(
-                ConversationBulletSummary.Format(storedSummary, history, splitExclusive, foldStart),
+                ConversationBulletSummary.Format(cleanStoredSummary, history, splitExclusive, foldStart),
                 buildArgs);
             ConversationContextSnapshot snapshot = new()
             {
@@ -85,13 +99,16 @@ namespace CoreAI.Ai
 
             if (foldStart < splitExclusive)
             {
+                // WHY: The limiter runs BEFORE stamping so the fold marker (final line of the persisted
+                // text) can never be trimmed away; the snapshot keeps the clean summary without the marker.
+                string persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, splitExclusive);
                 if (buildArgs?.DeferSummaryPersistence == true)
                 {
-                    snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, compactedSummary);
+                    snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
                 }
                 else
                 {
-                    _summaryStore.SaveSummary(roleId, compactedSummary);
+                    _summaryStore.SaveSummary(roleId, persistedSummary);
                 }
             }
 

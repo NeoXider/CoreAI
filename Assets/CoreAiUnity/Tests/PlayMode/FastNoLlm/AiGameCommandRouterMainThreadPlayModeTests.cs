@@ -161,6 +161,37 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNull(eventField.GetValue(null));
         }
 
+        [Test]
+        public void Dispose_AfterResetStatics_DoesNotUnderflowAndNextLastRouterClearsSubscribers()
+        {
+            AiGameCommandRouter.ResetStatics();
+            AiGameCommandRouter oldRouter = new(
+                new CurrentThreadPublishBus(), new NoOpGameLogger(), new NullWorldExecutor());
+            AiGameCommandRouter.ResetStatics();
+
+            oldRouter.Dispose();
+
+            System.Reflection.FieldInfo countField = typeof(AiGameCommandRouter).GetField(
+                "_activeRouterCount",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            System.Reflection.FieldInfo eventField = typeof(AiGameCommandRouter).GetField(
+                "CommandReceived",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(countField);
+            Assert.NotNull(eventField);
+            Assert.AreEqual(0, countField.GetValue(null),
+                "Disposing a router from before the static reset must not underflow the count.");
+
+            AiGameCommandRouter nextRouter = new(
+                new CurrentThreadPublishBus(), new NoOpGameLogger(), new NullWorldExecutor());
+            AiGameCommandRouter.CommandReceived += _ => { };
+            nextRouter.Dispose();
+
+            Assert.AreEqual(0, countField.GetValue(null));
+            Assert.IsNull(eventField.GetValue(null),
+                "The next real last router must still clear static subscribers.");
+        }
+
         [UnityTest]
         public IEnumerator Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool()
         {
