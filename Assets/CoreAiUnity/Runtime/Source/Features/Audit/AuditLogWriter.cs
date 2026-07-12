@@ -9,6 +9,7 @@ using CoreAI.Infrastructure;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using VContainer;
 
 namespace CoreAI.Features.Audit
 {
@@ -48,6 +49,9 @@ namespace CoreAI.Features.Audit
             RotateNow();
         }
 
+        // WHY [Inject]: без атрибута VContainer.SourceGenerator выбирает конструктор с максимумом
+        // параметров — internal AuditLogWriter(string) — и падает на резолве System.String.
+        [Inject]
         public AuditLogWriter()
             : this(Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, "Audit"))
         {

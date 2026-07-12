@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [5.6.2] - 2026-07-12
+
+### Fixed
+
+- **`AuditLogWriter` DI-конструктор помечен `[Inject]`.** VContainer.SourceGenerator выбирал
+  конструктор с максимумом параметров — `internal AuditLogWriter(string folder)` (тестовый seam) — и
+  контейнер падал на старте хоста с `VContainerException: No such registration of type: System.String`
+  (ломался весь `LifetimeScope.Build()` в проектах, вызывающих `RegisterAuditLog()`).
+
 ### Fixed (2026-07-12 audit wave 2 — host)
 
 - **LLM request auditing actually works.** The audit interceptor used to resolve before
