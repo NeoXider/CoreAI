@@ -1,4 +1,4 @@
-# Audit Log — Immutable, Append-Only, Tamper-Evident
+# Audit Log — Append-Only, Hash-Chained
 
 ## Overview
 
@@ -9,7 +9,7 @@ The audit log records every significant interaction in a single append-only JSON
 - **World mutations** (command type, payload, actor, success/failure)
 - **Policy decisions** (allowed/denied/repaired)
 
-All entries are written to one file (`persistentDataPath/CoreAI/Audit/audit.jsonl`) with a **SHA-256 hash chain** for tamper evidence.
+All entries are written to one file (`persistentDataPath/CoreAI/Audit/audit.jsonl`) with a **SHA-256 hash chain**. The chain detects **accidental corruption, truncation and reordering** — it is an integrity checksum, **not** proof against a determined tamperer who owns the file (see [Threat model](#threat-model-what-the-chain-does-and-does-not-prove)).
 
 ## Architecture
 
@@ -70,7 +70,7 @@ JSONL (one JSON object per line). Each entry includes:
 | `prevHash` | SHA-256 of the previous line — chain root is `""` |
 | `hash` | `SHA-256(prevHash + jsonLine)` |
 
-## Tamper Evidence
+## Chain Integrity
 
 Every line includes `prevHash` and `hash`. **Canonical preimage:** the preimage of a line's hash is
 that exact same line with the `hash` field set to `""` (every other field — including `ts` and
@@ -100,14 +100,42 @@ silent. `AuditLogVerifier.ReadAll(filePath)` returns the
 parsed `AuditEntry` list for inspection without verifying the chain.
 
 Any modification to any entry (including its `ts`) breaks the chain for that entry and all
-subsequent ones.
+subsequent ones **unless** the editor also recomputes every downstream `hash`.
+
+### Threat model: what the chain does and does not prove
+
+The default chain is an **unkeyed** `SHA-256`. Its preimage is fully known, so anyone who can read
+and rewrite the file can also recompute a valid chain over doctored contents — the recomputation is
+the same one `AuditLogVerifier` runs. Therefore the plain chain proves:
+
+- **Accidental corruption** — a flipped bit, a partial write, a truncated tail line.
+- **Reordering / deletion** — lines moved, dropped, or spliced from another file break `prevHash`
+  linkage.
+- **Naive edits** — any change that does not also re-chain every following line.
+
+It does **not** prove:
+
+- **Tamper-resistance against the party that owns the file.** On a local, client-side log the
+  client owns the bytes and the algorithm, so no purely local scheme is tamper-proof. Do not treat
+  the plain chain as signed evidence or as anti-cheat proof against that party.
+
+### Keyed (HMAC) chains for real tamper-evidence
+
+When tamper-evidence against the file owner is actually required, use the **opt-in** keyed path:
+`AuditHash.HmacChain(key, prevHash, jsonLine)` (HMAC-SHA256) and verify with
+`AuditLogVerifier.Verify(path, hmacKey)` / `VerifyChainedSet(paths, hmacKey)`. This is tamper-evident
+**only** to the extent the key is withheld from whoever owns the file — e.g. a host- or
+server-held session key in the host-authoritative pattern (see `DETERMINISM_AND_REPLAY.md`), where
+the untrusted client never sees the key. The default `AuditLogWriter` writes the **unkeyed** chain;
+wiring a keyed writer plus key custody is left to the integrator and is out of scope for the local
+client log. A wrong key (or verifying a keyed file as unkeyed, or vice versa) fails verification.
 
 ### Resuming after corruption
 
 If `AuditLogWriter` cannot resume the chain on startup — the tail line fails to parse, or the file
 can't be read — it does **not** silently reset the chain. It logs an error and appends a
 `ChainReset` entry (`AuditEntry.ForChainReset`) as the first entry of the new chain segment, so the
-reset itself is an audited, tamper-evident event rather than a hole that looks like a fresh log.
+reset itself is an audited, chain-linked event rather than a hole that looks like a fresh log.
 
 ### Rotation: linked, independently-verifiable files
 

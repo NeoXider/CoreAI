@@ -1,4 +1,3 @@
-using CoreAI.ExampleGame.ArenaProgression.Infrastructure;
 using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.ExampleGame.ArenaSurvival.Domain;
 using UnityEngine;
@@ -26,6 +25,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private float _nextContact;
         private bool _waveStatsApplied;
         private IArenaSessionAuthority _session;
+        private IArenaKillXpService _killXp;
         private NavMeshAgent _nav;
 
         private void Awake()
@@ -50,9 +50,10 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         }
 
         /// <summary>Call before <c>SetActive(true)</c> on enemies spawned from a template.</summary>
-        public void Configure(IArenaSessionAuthority session)
+        public void Configure(IArenaSessionAuthority session, IArenaKillXpService killXp)
         {
             _session = session;
+            _killXp = killXp;
         }
 
         public void ApplyWaveStats(float hpMult, float damageMult, float moveSpeedMult)
@@ -161,12 +162,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             if (_session is { IsAuthoritativeSimulation: true })
             {
                 _session.NotifyEnemyDied();
-                IAddSessionKillXpUseCase addXp = ArenaProgressionRuntimeHub.AddSessionKillXp;
-                if (addXp != null)
-                {
-                    addXp.Execute(ArenaProgressionRuntimeHub.BaseXpPerKill,
-                        ArenaProgressionRuntimeHub.AliveTeamMembersForXp);
-                }
+                _killXp?.AwardKill();
             }
 
             Destroy(gameObject);

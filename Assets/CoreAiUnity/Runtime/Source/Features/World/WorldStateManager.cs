@@ -151,8 +151,13 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         public void StartAutoSave(float intervalSeconds)
         {
-            _autoSaveCts?.Cancel();
+            // WHY: Cancel then dispose the previous source so a re-start (interval change) never
+            // leaks it; null it out first so the in-flight loop reading _autoSaveCts.Token can't race
+            // onto a disposed source.
+            var old = _autoSaveCts;
             _autoSaveCts = null;
+            old?.Cancel();
+            old?.Dispose();
 
             if (intervalSeconds <= 0f || _disposed)
             {
@@ -175,6 +180,12 @@ namespace CoreAI.Infrastructure.World
                 }
                 catch (OperationCanceledException)
                 {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // WHY: A re-start or Dispose can dispose the source this loop still holds a token
+                    // from; tolerate it and exit instead of surfacing the leak-fix as an exception.
                     break;
                 }
             }
@@ -555,8 +566,10 @@ namespace CoreAI.Infrastructure.World
 
             _disposed = true;
             Application.quitting -= OnApplicationQuitting;
-            _autoSaveCts?.Cancel();
+            var old = _autoSaveCts;
             _autoSaveCts = null;
+            old?.Cancel();
+            old?.Dispose();
             // WHY: a stale owner would pin this disposed manager and swallow ForgetPendingParent calls
             // meant for the next scene's manager.
             if (ReferenceEquals(_pendingParentOwner, this))

@@ -65,12 +65,21 @@ namespace CoreAI.Audit
             return entries;
         }
 
-        public static AuditVerifyResult Verify(string filePath)
+        /// <summary>
+        /// Verifies the chain. When <paramref name="hmacKey"/> is null or empty the plain SHA-256
+        /// chain is checked (detects accidental corruption, truncation and reordering, but not
+        /// adversarial tampering by whoever owns the file). Supply the non-empty key a keyed writer
+        /// used to check an HMAC-SHA256 chain, which additionally resists tampering by a party that
+        /// does not hold the key.
+        /// </summary>
+        public static AuditVerifyResult Verify(string filePath, string hmacKey = null)
         {
             if (!File.Exists(filePath))
             {
                 return new AuditVerifyResult(true, 0, -1, "");
             }
+
+            bool keyed = !string.IsNullOrEmpty(hmacKey);
 
             string prevHash = "";
             long lineCount = 0;
@@ -134,7 +143,9 @@ namespace CoreAI.Audit
 
                 obj["hash"] = "";
                 string preimage = obj.ToString(Formatting.None);
-                string computedHash = AuditHash.Chain(prevHash, preimage);
+                string computedHash = keyed
+                    ? AuditHash.HmacChain(hmacKey, prevHash, preimage)
+                    : AuditHash.Chain(prevHash, preimage);
 
                 if (computedHash != storedHash)
                 {
@@ -154,7 +165,7 @@ namespace CoreAI.Audit
         /// <see cref="AuditEntryKind.RotationAnchor"/> whose embedded <c>prevHash</c> equals the
         /// previous file's final line hash — i.e. the set is linked, not just individually valid.
         /// </summary>
-        public static AuditVerifyResult VerifyChainedSet(IReadOnlyList<string> filePathsInChronologicalOrder)
+        public static AuditVerifyResult VerifyChainedSet(IReadOnlyList<string> filePathsInChronologicalOrder, string hmacKey = null)
         {
             string expectedAnchorHash = null;
             long totalLines = 0;
@@ -163,7 +174,7 @@ namespace CoreAI.Audit
             for (int i = 0; i < filePathsInChronologicalOrder.Count; i++)
             {
                 string path = filePathsInChronologicalOrder[i];
-                AuditVerifyResult standalone = Verify(path);
+                AuditVerifyResult standalone = Verify(path, hmacKey);
                 if (!standalone.Ok)
                 {
                     return new AuditVerifyResult(false, totalLines + standalone.LineCount, standalone.FirstBrokenSeq,

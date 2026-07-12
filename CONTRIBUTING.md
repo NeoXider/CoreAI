@@ -59,6 +59,17 @@ prefix and delete everything else:
 Remove obvious "what" comments that merely restate the next line, step-number narration (`// 1. Create…`),
 and section-divider banners.
 
+### Naming: `CoreAI` vs `CoreAi`
+
+Both casings are intentional and must **not** be "unified":
+
+- **`CoreAI`** — the root namespace and every type/asset in it (`CoreAIAgent`, `CoreAISettingsAsset`, …).
+- **`CoreAi`** — the public Unity entry-point facade (`CoreAi.AskAsync(...)`). A type cannot share the
+  exact name of its enclosing namespace, so the facade uses the lowercase-`i` spelling deliberately.
+  It is the established public API; do not rename it.
+
+New public symbols follow `CoreAI…`; only the top-level facade keeps `CoreAi`.
+
 ## Before you commit (checklist)
 
 1. **Reformat** — Rider *Reformat & Cleanup Code* (applies `.editorconfig`, incl. attribute-per-line).

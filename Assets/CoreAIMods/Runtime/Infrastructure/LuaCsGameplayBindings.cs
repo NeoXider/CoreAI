@@ -127,5 +127,17 @@ namespace CoreAI.Ai.LuaCs
         {
             (_world as ILuaTransactionScope)?.ResetTransactions();
         }
+
+        /// <inheritdoc />
+        public void PushTransactionScope()
+        {
+            (_world as ILuaTransactionScope)?.PushTransactionScope();
+        }
+
+        /// <inheritdoc />
+        public void PopTransactionScope()
+        {
+            (_world as ILuaTransactionScope)?.PopTransactionScope();
+        }
     }
 }

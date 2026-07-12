@@ -466,5 +466,98 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(stack.Runtime.IsLoaded("r2"));
             Assert.AreEqual(0, sink.Commands.Count, "No command may reach the sink from a read-tier mod.");
         }
+
+        [Test]
+        public void LuaCs_NestedModsCall_WorldTransaction_DoesNotCorruptCallerBuffer()
+        {
+            MemoryStore store = new();
+            FakeCommandSink sink = new();
+            LuaCsModStack stack = BuildStack(store, sink);
+
+            // B opens and commits its OWN world transaction while A's is still open. Before the per-run
+            // transaction frames, B ran against the SAME shared buffer/flag as A: B's begin cleared A's
+            // buffered 'a1' and its commit reset A's active flag, so A's commit below threw
+            // "no active transaction" (or silently lost 'a1'). Each run must now own an isolated frame.
+            stack.Runtime.LoadMod("b", @"
+                mods_export('work', function()
+                    coreai_world_begin()
+                    coreai_world_destroy('b1')
+                    coreai_world_destroy('b2')
+                    return coreai_world_commit()
+                end)", LuaCapabilities.WorldEdit);
+
+            stack.Runtime.LoadMod("a", @"
+                hooks_on('go', function()
+                    coreai_world_begin()
+                    coreai_world_destroy('a1')
+                    local nb = mods_call('b', 'work')
+                    local na = coreai_world_commit()
+                    store_set('nb', tostring(nb))
+                    store_set('na', tostring(na))
+                end)", LuaCapabilities.WorldEdit);
+
+            stack.Runtime.EmitEvent("go", "");
+            stack.Runtime.Tick(0);
+
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("a"),
+                "A's commit must not throw: its transaction survives B's nested begin/commit.");
+            Assert.AreEqual("2", store.Get("a", "nb"), "B's nested commit flushes its own 2 buffered commands.");
+            Assert.AreEqual("1", store.Get("a", "na"),
+                "A's commit flushes ONLY its own single buffered command, proving isolation.");
+            Assert.AreEqual(3, sink.Commands.Count,
+                "b1 + b2 (nested commit) then a1 (outer commit) all reach the sink exactly once.");
+            StringAssert.Contains("a1", sink.Commands[2].JsonPayload,
+                "The outer transaction's buffered command commits last and is not lost or merged into B's.");
+        }
+
+        [Test]
+        [Timeout(30000)]
+        public void LuaCs_MemoryBudgetTrip_CutsRunButDoesNotUnloadHealthyMod()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                // A tiny per-call allocation budget so a modest live string trips the process-heap backstop.
+                HandlerMaxAllocatedBytes = 4 * 1024 * 1024
+            });
+
+            // The handler retains ~8MB (concat doubling), which survives the confirming forced GC and so
+            // trips the 4MB budget on every call. A memory trip must cut the run but NOT count toward the
+            // consecutive-error auto-unload streak: firing it well past MaxErrorsBeforeUnload (8) must leave
+            // the mod loaded, since the budget measures the whole process heap and cannot blame the mod.
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('bomb', function()
+                    local s = string.rep('x', 1000000)
+                    s = s .. s
+                    s = s .. s
+                    s = s .. s
+                    store_set('reached', 'yes')
+                end)");
+
+            for (int i = 0; i < LuaCsModRuntime.MaxErrorsBeforeUnload + 4; i++)
+            {
+                stack.Runtime.EmitEvent("bomb", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"),
+                "Repeated process-heap memory-budget trips must not auto-unload a blameless mod.");
+            Assert.AreEqual("", store.Get("m", "reached"),
+                "Each over-budget run must still be cut before completing (the guard stays real).");
+
+            IReadOnlyList<LuaModInfo> mods = stack.Runtime.ListMods();
+            Assert.AreEqual(1, mods.Count);
+            Assert.AreEqual(0, mods[0].ErrorCount,
+                "A memory-budget trip must not be charged to the consecutive-error streak.");
+
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.IsNotEmpty(errors, "The cut run is still surfaced as a handler error for observability.");
+            StringAssert.Contains("EXCEEDED_MEMORY_BUDGET", errors[errors.Count - 1].Error,
+                "The recorded error identifies the memory-budget trip.");
+        }
     }
 }

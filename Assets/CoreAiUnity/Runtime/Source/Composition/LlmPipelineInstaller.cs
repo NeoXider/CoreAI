@@ -67,7 +67,9 @@ namespace CoreAI.Composition
                             msg => c.Resolve<ILog>().Warn(msg, LogTag.Llm)),
                         c.Resolve<ILog>(),
                         llmTimeout,
-                        maxRetries),
+                        maxRetries,
+                        settings == null || settings.LogLlmInput,
+                        settings == null || settings.LogLlmOutput),
                     () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
 
             // WHY: Resolve and cache required local values.

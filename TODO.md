@@ -1,10 +1,34 @@
 # TODO
 
-> Updated 2026-07-11. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.6.1 (2026-07-11, all five packages in lockstep). Last full verification 2026-07-10:
+> Released: 5.8.0 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
 > EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
 > PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
+
+## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
+
+> Multi-agent audit across four dimensions with adversarial verification (22 confirmed, 9 refuted).
+> Each fix ships with a regression test; compile-gated via `dotnet build` on Core / Source / Mods /
+> Mods.Hub / Tests / Mods.Tests / ExampleGame.Tests (all green).
+
+- [x] **Security:** Hub Mods tab no longer self-escalates imported mods to Full (`allowFullTier` default
+      false; Full only via explicit host opt-in). LLM prompt/response content gated behind
+      `LogLlmInput`/`LogLlmOutput`; provider error bodies truncated in logs, 401/403 bodies never logged.
+      Audit hash de-overstated (docs) + opt-in HMAC-SHA256 keyed chain added.
+- [x] **Runtime:** CoreAiEvents reset on play-mode entry + per-handler try/catch + lock; `CoreAi.IsReady`
+      under `SyncRoot`; `CoreAIGameEntryPoint` guard reset on SubsystemRegistration; `CoreAILifetimeScope`
+      fail-fast on missing settings; nested `mods_call` world-transaction isolation (frame stack);
+      allocation-guard forced-GC confirm + no auto-unload of blameless mods; WorldStateManager CTS disposed.
+- [x] **Tests:** killed hollow PlayMode tests — Offline-stub now skips (not fake-pass), built-in-role sweep
+      asserts, `calledTool`/Tools-Only asserted, marshaler `WaitUntil`→timed `WaitTask`.
+- [x] **Architecture:** CoreAI.Benchmarking un-Editor-locked (runs in players); `CoreAIFacade.cs` →
+      `CoreAIAgent.cs`; example-game static hub → injected `IArenaKillXpService`; meta-save → JSON;
+      `CoreAi` vs `CoreAI` naming convention documented in CONTRIBUTING (facade keeps `CoreAi` by design).
+- [ ] **Verification gate on next editor start:** run the full EditMode + PlayMode suites (Unity holds the
+      project lock during this session, so batchmode is unavailable; compile gate is green). New tests:
+      CoreAiEvents/EntryPoint/Facade/LifetimeScope guard, LLM content-gating + error-redaction, audit HMAC,
+      Lua nested-tx + memory-trip, hub Full-tier, WorldStateManager CTS, example-game save/killxp.
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 

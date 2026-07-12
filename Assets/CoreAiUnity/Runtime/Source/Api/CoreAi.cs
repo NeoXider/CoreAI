@@ -56,7 +56,16 @@ namespace CoreAI
         }
 
         /// <summary>True when CoreAI services resolved successfully.</summary>
-        public static bool IsReady => TryResolve(out _, out _, out _);
+        public static bool IsReady
+        {
+            get
+            {
+                lock (SyncRoot)
+                {
+                    return TryResolve(out _, out _, out _);
+                }
+            }
+        }
 
         /// <summary>
         /// Clears cached service references. Call after scene loads, container rebuilds, or between test fixtures; safe to repeat.
@@ -75,6 +84,7 @@ namespace CoreAI
             // CoreAI.Core is UnityEngine-free, so its static facade state is reset here
             // (this runs on SubsystemRegistration) to survive Enter Play Mode without Domain Reload.
             CoreAIAgent.Reset();
+            CoreAiEvents.ClearAll();
         }
 
         /// <summary>
@@ -907,6 +917,12 @@ namespace CoreAI
         private static void ResetForSubsystemRegistration()
         {
             Invalidate();
+
+            // Invalidate() resets the CoreAIAgent facade; clear the entry-point guard it depends on
+            // from the same hook so a stale _isInitialized cannot block re-init on Enter Play Mode
+            // without Domain Reload. Kept out of Invalidate() so a manual scene-change Invalidate()
+            // does not clobber a live entry-point owner.
+            CoreAIGameEntryPoint.ResetStaticState();
         }
     }
 }

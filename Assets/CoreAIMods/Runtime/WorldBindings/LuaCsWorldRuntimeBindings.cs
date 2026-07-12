@@ -24,8 +24,21 @@ namespace CoreAI.Ai.LuaCs
 
         private readonly IAiGameCommandSink _sink;
         private readonly HashSet<string> _allowedScenes;
-        private readonly List<ApplyAiGameCommand> _txBuffer = new();
-        private bool _txActive;
+
+        /// <summary>One nesting level of world-transaction state (buffered commands + open flag).</summary>
+        private sealed class TransactionFrame
+        {
+            public readonly List<ApplyAiGameCommand> Buffer = new();
+            public bool Active;
+        }
+
+        // WHY: The world bindings are a single shared instance registered into EVERY mod's state, so a
+        // nested mods_call runs a DIFFERENT LuaState against this SAME instance. A single _txBuffer/_txActive
+        // would let the callee's coreai_world_begin/commit flush or clear the caller's still-open
+        // transaction. A stack of frames — one pushed per guarded execution / load chunk — isolates each
+        // run: begin/commit/rollback/Publish only ever touch the top frame. The base frame (index 0) is
+        // always present so direct use with no enclosing run scope (e.g. the one-off executor) still works.
+        private readonly List<TransactionFrame> _txStack = new() { new TransactionFrame() };
 
         public LuaCsWorldRuntimeBindings(
             IAiGameCommandSink sink,
@@ -308,38 +321,41 @@ namespace CoreAI.Ai.LuaCs
 
             registry.Register("coreai_world_begin", new Action(() =>
             {
-                _txActive = true;
-                _txBuffer.Clear();
+                TransactionFrame frame = CurrentFrame;
+                frame.Active = true;
+                frame.Buffer.Clear();
             }));
 
             registry.Register("coreai_world_commit", new Func<int>(() =>
             {
-                if (!_txActive)
+                TransactionFrame frame = CurrentFrame;
+                if (!frame.Active)
                 {
                     throw new InvalidOperationException("no active transaction.");
                 }
 
-                int count = _txBuffer.Count;
-                for (int i = 0; i < _txBuffer.Count; i++)
+                int count = frame.Buffer.Count;
+                for (int i = 0; i < frame.Buffer.Count; i++)
                 {
-                    _sink?.Publish(_txBuffer[i]);
+                    _sink?.Publish(frame.Buffer[i]);
                 }
 
-                _txBuffer.Clear();
-                _txActive = false;
+                frame.Buffer.Clear();
+                frame.Active = false;
                 return count;
             }));
 
             registry.Register("coreai_world_rollback", new Func<int>(() =>
             {
-                if (!_txActive)
+                TransactionFrame frame = CurrentFrame;
+                if (!frame.Active)
                 {
                     throw new InvalidOperationException("no active transaction.");
                 }
 
-                int count = _txBuffer.Count;
-                _txBuffer.Clear();
-                _txActive = false;
+                int count = frame.Buffer.Count;
+                frame.Buffer.Clear();
+                frame.Active = false;
                 return count;
             }));
 
@@ -370,15 +386,39 @@ namespace CoreAI.Ai.LuaCs
                 }));
         }
 
+        /// <summary>The active (top-of-stack) transaction frame; never null (the base frame is permanent).</summary>
+        private TransactionFrame CurrentFrame => _txStack[_txStack.Count - 1];
+
         public void AbortTransaction()
         {
-            _txBuffer.Clear();
-            _txActive = false;
+            TransactionFrame frame = CurrentFrame;
+            frame.Buffer.Clear();
+            frame.Active = false;
         }
 
         public void ResetTransactions()
         {
             AbortTransaction();
+        }
+
+        /// <inheritdoc />
+        public void PushTransactionScope()
+        {
+            _txStack.Add(new TransactionFrame());
+        }
+
+        /// <inheritdoc />
+        public void PopTransactionScope()
+        {
+            // WHY: Never remove the base frame; an unbalanced pop just clears it so a leaked transaction
+            // cannot bleed into later direct (non-nested) use.
+            if (_txStack.Count <= 1)
+            {
+                AbortTransaction();
+                return;
+            }
+
+            _txStack.RemoveAt(_txStack.Count - 1);
         }
 
         private static bool TryValidateCoordinate(double v, out float f)
@@ -540,13 +580,14 @@ namespace CoreAI.Ai.LuaCs
                 SourceTag = "lua:world_command"
             };
 
-            if (_txActive)
+            TransactionFrame frame = CurrentFrame;
+            if (frame.Active)
             {
-                _txBuffer.Add(command);
-                if (_txBuffer.Count > MaxTransactionBuffer)
+                frame.Buffer.Add(command);
+                if (frame.Buffer.Count > MaxTransactionBuffer)
                 {
-                    _txBuffer.Clear();
-                    _txActive = false;
+                    frame.Buffer.Clear();
+                    frame.Active = false;
                     throw new InvalidOperationException("transaction buffer overflow; rolled back");
                 }
 

@@ -86,6 +86,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Instruction budget per persistent handler/timer call.</summary>
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
+
+        /// <summary>
+        /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
+        /// cuts the offending call without charging the consecutive-error auto-unload streak. Defaults to
+        /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
+        /// </summary>
+        public long HandlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
     }
 
     /// <summary>
@@ -162,7 +169,8 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: The bindings are the shared transaction scope of both surfaces; handing them to the
                 // runtime lets it reset a leaked coreai_world_begin per guarded call, exactly as the
                 // one-off executor resets around every chunk.
-                transactionScope: bindings);
+                transactionScope: bindings,
+                handlerMaxAllocatedBytes: options.HandlerMaxAllocatedBytes);
 
             LuaCsGameToolExecutor executor = new(
                 new LuaCsSecureEnvironment(),
@@ -196,6 +204,16 @@ namespace CoreAI.Ai.LuaCs
             public void ResetTransactions()
             {
                 ((ILuaTransactionScope)_bindings).ResetTransactions();
+            }
+
+            public void PushTransactionScope()
+            {
+                ((ILuaTransactionScope)_bindings).PushTransactionScope();
+            }
+
+            public void PopTransactionScope()
+            {
+                ((ILuaTransactionScope)_bindings).PopTransactionScope();
             }
         }
     }

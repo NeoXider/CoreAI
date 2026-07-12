@@ -391,6 +391,57 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ContentLoggingDisabled_SuppressesPromptAndResponse_KeepsMetadata()
+        {
+            SpyLogger spy = new();
+            MockLlm inner = new(0, new LlmCompletionResult { Ok = true, Content = "SECRET_RESPONSE_BODY" });
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f, 0,
+                logPromptContent: false, logResponseContent: false);
+            LlmCompletionRequest req = new()
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                TraceId = "priv1",
+                SystemPrompt = "SECRET_SYSTEM_PROMPT",
+                UserPayload = "SECRET_USER_PII"
+            };
+
+            LlmCompletionResult r = await dec.CompleteAsync(req);
+            Assert.IsTrue(r.Ok);
+            string joined = string.Join("\n", spy.Lines);
+
+            StringAssert.DoesNotContain("SECRET_SYSTEM_PROMPT", joined);
+            StringAssert.DoesNotContain("SECRET_USER_PII", joined);
+            StringAssert.DoesNotContain("SECRET_RESPONSE_BODY", joined);
+            StringAssert.Contains("(content logging disabled)", joined);
+            // WHY: non-sensitive metadata (traceId, char counts, budget) must still be logged.
+            StringAssert.Contains("priv1", joined);
+            StringAssert.Contains("promptBudget", joined);
+            StringAssert.Contains($"system ({"SECRET_SYSTEM_PROMPT".Length} chars)", joined);
+        }
+
+        [Test]
+        public async Task ContentLoggingEnabledByDefault_LogsPromptAndResponse()
+        {
+            SpyLogger spy = new();
+            MockLlm inner = new(0, new LlmCompletionResult { Ok = true, Content = "VISIBLE_RESPONSE" });
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f);
+            LlmCompletionRequest req = new()
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                TraceId = "priv2",
+                SystemPrompt = "VISIBLE_SYSTEM",
+                UserPayload = "VISIBLE_USER"
+            };
+
+            LlmCompletionResult r = await dec.CompleteAsync(req);
+            Assert.IsTrue(r.Ok);
+            string joined = string.Join("\n", spy.Lines);
+            StringAssert.Contains("VISIBLE_SYSTEM", joined);
+            StringAssert.Contains("VISIBLE_USER", joined);
+            StringAssert.Contains("VISIBLE_RESPONSE", joined);
+        }
+
+        [Test]
         public void PromptBudget_ToolsDefNonZeroWhenToolsPresent()
         {
             IReadOnlyList<ILlmTool> tools = new[]

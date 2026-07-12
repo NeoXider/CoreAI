@@ -64,6 +64,12 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log($"[ChatServiceIntegration] Backend: {handle.ResolvedBackend}");
 
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
+                {
+                    Assert.Ignore(
+                        "Tools-Only / Hybrid tool-calling verification requires a live LLM backend (HTTP or LLMUnity).");
+                }
+
                 // Setup infrastructure
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
@@ -150,6 +156,10 @@ namespace CoreAI.Tests.PlayMode
                     calledTool = true;
                 }
 
+                Assert.IsTrue(calledTool,
+                    "Tools-Only mode must invoke the inventory tool (sink command) or surface the tool result " +
+                    "(inventory item) in the reply.");
+
                 // --- 3. Hybrid (Chat + Tools) ---
                 Debug.Log("[ChatServiceIntegration] Mode: Hybrid");
                 string hybridResponse = null;
@@ -164,12 +174,18 @@ namespace CoreAI.Tests.PlayMode
                         }
                     });
                 yield return PlayModeTestAwait.WaitTask(t3, 240f, "Hybrid");
+                bool hybridCalledTool = sink.Items.Count > 0 ||
+                                        (hybridResponse != null &&
+                                         hybridResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
                 if (string.IsNullOrEmpty(hybridResponse))
                 {
                     hybridResponse = t3.Result;
                 }
 
                 Assert.IsNotEmpty(hybridResponse, "Hybrid response should not be empty");
+                Assert.IsTrue(hybridCalledTool,
+                    "Hybrid mode must invoke the inventory tool (sink command) or surface the tool result " +
+                    "(inventory item) alongside the chat reply.");
 
                 // --- 4. Agent Swapping ---
                 Debug.Log("[ChatServiceIntegration] Mode: Agent Swapping");

@@ -275,7 +275,9 @@ namespace CoreAI.Infrastructure.Llm
                     string errorDetail = !string.IsNullOrEmpty(postResult.BodyText)
                         ? $"HTTP {postResult.StatusCode} | Body: {postResult.BodyText}"
                         : $"HTTP {postResult.StatusCode}";
-                    _log.Warn($"MeaiOpenAiChatClient: {errorDetail}", LogTag.Llm);
+                    _log.Warn(
+                        $"MeaiOpenAiChatClient: {FormatHttpErrorForLog(postResult.StatusCode, postResult.BodyText)}",
+                        LogTag.Llm);
 
                     bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
                                              && IsTransientLocalLlmReloadError(postResult.StatusCode,
@@ -497,7 +499,9 @@ namespace CoreAI.Infrastructure.Llm
                         string streamErr = !string.IsNullOrEmpty(streamBody)
                             ? $"HTTP {openResult.StatusCode} | Body: {streamBody}"
                             : $"HTTP {openResult.StatusCode}";
-                        _log.Warn($"MeaiOpenAiChatClient: stream error - {streamErr}", LogTag.Llm);
+                        _log.Warn(
+                            $"MeaiOpenAiChatClient: stream error - {FormatHttpErrorForLog(openResult.StatusCode, streamBody)}",
+                            LogTag.Llm);
 
                         bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
                                                  && IsTransientLocalLlmReloadError(openResult.StatusCode, streamBody,
@@ -1307,6 +1311,36 @@ namespace CoreAI.Infrastructure.Llm
         internal static LlmErrorCode MapHttpStatusForTests(int status, string body, string fallback)
         {
             return MapHttpStatus(status, body, fallback);
+        }
+
+        private const int MaxErrorBodyLogChars = 500;
+
+        /// <summary>
+        /// Redacts a provider HTTP error body for logging: auth-failure bodies (401/403) can echo the
+        /// submitted key/token, so their body is never logged; other bodies are truncated so a large
+        /// provider error can't dump prompt echoes or unbounded content into the log. The full body is
+        /// still used for retry/classification logic and the typed error, just not written verbatim to logs.
+        /// </summary>
+        internal static string FormatHttpErrorForLog(int status, string body)
+        {
+            if (string.IsNullOrEmpty(body))
+            {
+                return $"HTTP {status}";
+            }
+
+            if (status == 401 || status == 403)
+            {
+                return $"HTTP {status} | Body: [redacted auth error body]";
+            }
+
+            string trimmed = body.Trim();
+            if (trimmed.Length > MaxErrorBodyLogChars)
+            {
+                trimmed = trimmed.Substring(0, MaxErrorBodyLogChars) +
+                          $"... [+{trimmed.Length - MaxErrorBodyLogChars} chars]";
+            }
+
+            return $"HTTP {status} | Body: {trimmed}";
         }
 
         private static string ExtractProviderMessage(string responseBody, string fallback)

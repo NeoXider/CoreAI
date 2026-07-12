@@ -37,6 +37,15 @@ host grant and then strip `Full` unless the host explicitly passes `allowFull: t
 capability set is only ever a request; the receiving host decides. See
 [LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md) and [FIRST_MOD.md](FIRST_MOD.md).
 
+### Hub Mods tab
+
+The live **Mods** tab (`CoreAiModsHubBinder`) carries the same rule. Its `allowFullTier` flag
+**defaults to `false`** (safe): with it off, every mod loaded, imported, shared, or rehydrated through
+the tab has `Full` stripped, so an untrusted mod can never self-escalate to reflection from its own
+`@coreai` header. Granting `Full` is a deliberate host decision, never derived from the mod. To run
+trusted, first-party, or singleplayer content at Full tier, tick **Allow Full Tier** on the binder in
+the Inspector — this is the only way `Full` reaches a mod loaded through the Mods tab.
+
 ## Full Mode
 
 Full mode exposes public component fields and methods by default. Non-public members require the

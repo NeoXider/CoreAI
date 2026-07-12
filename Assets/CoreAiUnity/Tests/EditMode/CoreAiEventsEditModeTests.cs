@@ -56,6 +56,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Publish_NoPayload_ThrowingSubscriber_DoesNotBlockOthers()
+        {
+            bool secondTriggered = false;
+
+            CoreAiEvents.Subscribe("resilient_event", () => throw new InvalidOperationException("stale"));
+            CoreAiEvents.Subscribe("resilient_event", () => secondTriggered = true);
+
+            Assert.DoesNotThrow(() => CoreAiEvents.Publish("resilient_event"));
+            Assert.IsTrue(secondTriggered, "A throwing subscriber must not stop dispatch to the rest.");
+        }
+
+        [Test]
+        public void Publish_WithPayload_ThrowingSubscriber_DoesNotBlockOthers()
+        {
+            string received = null;
+
+            CoreAiEvents.Subscribe("resilient_payload", (_) => throw new InvalidOperationException("stale"));
+            CoreAiEvents.Subscribe("resilient_payload", (payload) => received = payload);
+
+            Assert.DoesNotThrow(() => CoreAiEvents.Publish("resilient_payload", "ok"));
+            Assert.AreEqual("ok", received, "A throwing payload subscriber must not stop dispatch to the rest.");
+        }
+
+        [Test]
         public void AgentBuilder_WithEventTool_StoresDelegateToolSuccessfully()
         {
             AgentConfig config = new AgentBuilder("tester")

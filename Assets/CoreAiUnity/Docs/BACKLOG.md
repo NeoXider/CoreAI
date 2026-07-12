@@ -60,7 +60,7 @@ Items here are intentionally not active TODO checkboxes.
 - **Director-AI demo scene** (beyond the chat box): a standalone `.unity` scene for the ambient/scheduled
   agent that observes game state and acts through the same tools with no chat UI. The controller recipe
   exists (`Assets/CoreAI.Demos/DirectorAi/`); a featured scene + PlayMode acceptance is the remaining step.
-- **Audit-log replay** → determinism / anti-cheat / debugging. The tamper-evident audit log + the
+- **Audit-log replay** → determinism / anti-cheat / debugging. The hash-chained audit log + the
   `DETERMINISM_AND_REPLAY.md` contract exist; the replayer itself is the next build.
 - **Public mod gallery** on top of the shared mod format (`MOD_SHARING.md`): a curated `.lua` repo with
   one-click import from the Hub — the one moat that grows through other people's hands (UGC loop).

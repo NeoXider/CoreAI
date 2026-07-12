@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+## 5.8.0 - Hardening wave: deep audit (runtime / architecture / tests / security), all findings fixed (2026-07-13)
+
+### Fixed
+
+- **CoreAiEvents dispatch hardened.** `Publish` now isolates each subscriber (per-handler try/catch) so
+  one stale/throwing handler can no longer break dispatch to the rest; all subscribe/unsubscribe/publish/
+  clear operations are guarded by a lock for off-main-thread raises. The Unity layer now clears the bus on
+  play-mode entry (see host changelog), fixing a cross-session leak with Domain Reload disabled.
+- **Nested `mods_call` can no longer corrupt a caller's open world transaction.** The shared Lua-CSharp
+  world bindings used one `_txBuffer`/`_txActive`, so a nested call's `coreai_world_begin`/`commit` flushed
+  or cleared the caller's still-open transaction. Transaction state is now a per-run frame stack
+  (`ILuaTransactionScope.Push/PopTransactionScope`), pushed around every guarded handler/timer call, nested
+  `mods_call`, and load chunk — begin/commit/rollback stay isolated with correct nesting.
+- **Process-heap allocation-bomb trips no longer auto-unload blameless mods.** The backstop reads the
+  whole-process managed heap, so unrelated allocations could trip a healthy mod and 8 trips unloaded it. A
+  trip now confirms with a forced GC (only live memory counts — real bombs still trip) and is no longer
+  charged toward the consecutive-error streak. Step and time guards stay real.
+- **Hub Mods tab can no longer self-escalate an imported mod to Full.** `CoreAiModsHubBinder.allowFullTier`
+  now defaults to false, and imported/shared/rehydrated mods never derive the Full (reflection) tier from
+  their own header — Full requires an explicit host opt-in. Documented in `LUA_ACCESS_MODES.md`.
+- **LLM prompt/response content is gated behind `LogLlmInput`/`LogLlmOutput` in the logging decorator**
+  (was logged unconditionally, ignoring the flags the HTTP client already honored); non-sensitive metadata
+  (traceId, role, char counts, tokens, budget) still logs. Provider HTTP error bodies are truncated in logs
+  and 401/403 bodies are never logged (an auth body can echo the submitted key).
+- **Audit hash chain no longer overstated as tamper-evident.** The default unkeyed SHA-256 chain is an
+  integrity checksum (accidental corruption / truncation / reordering), not proof against the party that
+  owns the local file; docs corrected. Added an opt-in HMAC-SHA256 keyed chain (`AuditHash.HmacChain`,
+  `AuditLogVerifier.Verify(path, hmacKey)`) for genuine tamper-evidence when a host holds a key the file
+  owner never sees. Additive; the default writer path is unchanged.
+
+### Changed
+
+- **CoreAI.Benchmarking is now a cross-platform runtime assembly** (removed the Editor-only platform lock);
+  the engine-agnostic benchmark scoring/reporting types run in built players, fixing a RUNTIME-first
+  layering gap where a PlayMode suite depended on an Editor-locked assembly.
+- **`CoreAIFacade.cs` renamed to `CoreAIAgent.cs`** to match the `CoreAIAgent` type it defines.
+
 ## 5.7.0 - Hardening release: five adversarial audit waves (2026-07-12)
 
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, core)

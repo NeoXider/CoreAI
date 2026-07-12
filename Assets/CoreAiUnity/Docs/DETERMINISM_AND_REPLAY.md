@@ -28,9 +28,11 @@ Combined with the serialized mutation chain (mutating tools execute strictly one
 order — see `TOOL_CALLING_BEST_PRACTICES.md`, "Policy-Enforced Mutation Ordering"), this yields
 the property that matters for multiplayer:
 
-> **Effect determinism:** the sequence of world mutations is totally ordered and tamper-evidently
-> recorded. Two observers replaying the same mutation sequence reach the same world state,
-> regardless of what the model "said".
+> **Effect determinism:** the sequence of world mutations is totally ordered and recorded in a
+> hash-chained log that detects accidental corruption and reordering. Two observers replaying the
+> same mutation sequence reach the same world state, regardless of what the model "said".
+> (The default chain is an unkeyed integrity checksum, not tamper-proof against the party that owns
+> the file — see `AUDIT_LOG.md`, "Threat model".)
 
 What is **not** guaranteed: token-level reproducibility of model output (temperature, provider
 drift, GPU nondeterminism), and mutations that bypass the command boundary (direct C# your own
@@ -56,7 +58,11 @@ would unlock, in order of value:
 
 1. **Bug reproduction** — attach a log to an issue; maintainer replays the exact session.
 2. **Determinism tests** — CI replays a recorded session twice and asserts identical world hashes.
-3. **Anti-cheat evidence** — a host's signed chain proves the sequence of AI-driven effects.
+3. **Anti-cheat evidence** — the host's log records the sequence of AI-driven effects. This is only
+   evidence against a client to the extent the client cannot rewrite it: keep the authoritative log
+   host-side, and/or use a **keyed HMAC chain** (`AuditHash.HmacChain` +
+   `AuditLogVerifier.Verify(path, hmacKey)`) with a host-held key the client never sees. The default
+   unkeyed chain is an integrity checksum, not proof against the party that owns the file.
 4. **Spectator/kill-cam style features** — replay as content, if a game wants it.
 
 Prerequisites already in place: chain verification (`AuditLogVerifier`, `VerifyChainedSet`),

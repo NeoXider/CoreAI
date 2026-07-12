@@ -107,10 +107,28 @@ namespace CoreAI.Composition
             }
         }
 
+        /// <summary>
+        /// Fails fast when no <see cref="CoreAISettingsAsset"/> resolves. The LLM DI graph
+        /// ctor-injects the concrete <see cref="CoreAISettingsAsset"/> (ConfigurableLlmAgentProvider),
+        /// so a missing asset must surface here with an actionable message instead of a generic
+        /// VContainer resolve error later. A synthesized default is deliberately avoided: it would
+        /// only mask the misconfiguration behind blank endpoints/keys. Internal for EditMode tests.
+        /// </summary>
+        internal static void EnsureSettingsPresent(CoreAISettingsAsset settings)
+        {
+            if (settings == null)
+            {
+                throw new System.InvalidOperationException(
+                    "CoreAISettings asset missing — add Resources/CoreAISettings or assign one on the CoreAILifetimeScope.");
+            }
+        }
+
         /// <summary>Registers CoreAI services into the VContainer lifetime scope.</summary>
         protected override void Configure(IContainerBuilder builder)
         {
             CoreAISettingsAsset settings = Settings;
+            EnsureSettingsPresent(settings);
+
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);

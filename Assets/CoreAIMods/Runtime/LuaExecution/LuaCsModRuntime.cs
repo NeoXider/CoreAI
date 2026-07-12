@@ -220,6 +220,13 @@ namespace CoreAI.Ai.LuaCs
         /// <c>coreai_world_begin</c> and commit cannot leave a stale transaction silently buffering the
         /// world commands of later handlers/timers.
         /// </param>
+        /// <param name="handlerMaxAllocatedBytes">
+        /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
+        /// still cuts the offending call but is NOT charged toward the consecutive-error auto-unload streak
+        /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>), since the budget measures the whole
+        /// process heap and unrelated allocations can trip a blameless mod. Defaults to
+        /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
+        /// </param>
         public LuaCsModRuntime(
             Action<LuaCsApiRegistry, LuaCapabilities> gameplayBindings = null,
             ILuaModStore store = null,
@@ -229,7 +236,8 @@ namespace CoreAI.Ai.LuaCs
             ILuaModSourceStore sourceStore = null,
             bool autoPersistMods = true,
             ILuaScriptVersionStore versionStore = null,
-            ILuaTransactionScope transactionScope = null)
+            ILuaTransactionScope transactionScope = null,
+            long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -238,7 +246,7 @@ namespace CoreAI.Ai.LuaCs
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
             _transactionScope = transactionScope;
-            _handlerGuard = new LuaCsExecutionGuard(handlerTimeoutMs, handlerMaxSteps);
+            _handlerGuard = new LuaCsExecutionGuard(handlerTimeoutMs, handlerMaxSteps, handlerMaxAllocatedBytes);
         }
 
         /// <summary>The <see cref="ILuaScriptVersionStore"/> key for a mod's revision history.</summary>
@@ -416,17 +424,18 @@ namespace CoreAI.Ai.LuaCs
             // during load resolve correctly.
             mod.State = _env.Create(registry);
 
-            // WHY: Reset the shared transaction scope before/after the load chunk (mirroring the MoonSharp
-            // runtime) so a transaction left open by a failing load cannot bleed into later scripts —
-            // and a transaction leaked elsewhere cannot swallow this chunk's world commands.
-            ResetTransactionScope();
+            // WHY: Run the load chunk on its own transaction frame (mirroring the MoonSharp runtime's
+            // per-run reset) so a transaction left open by a failing load is discarded with the frame and
+            // cannot bleed into later scripts — and a transaction leaked elsewhere cannot swallow this
+            // chunk's world commands.
+            PushTransactionScope();
             try
             {
                 _env.RunChunk(mod.State, luaCode);
             }
             finally
             {
-                ResetTransactionScope();
+                PopTransactionScope();
             }
 
             return mod;
@@ -815,6 +824,11 @@ namespace CoreAI.Ai.LuaCs
 
         private void InvokeGuarded(Mod mod, LuaFunction fn, params object[] args)
         {
+            // WHY: Push an isolated transaction frame around this call (mirroring the MoonSharp runtime and
+            // LuaCsGameToolExecutor) so a transaction opened inside one invocation is discarded with the
+            // frame on exit and cannot leak into the next handler/timer/tick — and a nested mods_call runs
+            // on its OWN frame instead of corrupting this call's still-open transaction.
+            PushTransactionScope();
             try
             {
                 LuaValue[] luaArgs = new LuaValue[args.Length];
@@ -831,8 +845,20 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                mod.ErrorCount++;
-                _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' handler failed ({mod.ErrorCount}): {ex}");
+                // WHY: The allocation-budget check reads the WHOLE-process managed heap (Unity's Mono has no
+                // per-call counter), so an unrelated system's allocation can trip it for a blameless mod.
+                // Still cut the run (the exception already unwound it), but do NOT charge the consecutive-
+                // error streak: otherwise repeated blameless trips would auto-unload a healthy mod. The
+                // step/time budgets remain real guards and keep counting toward the streak.
+                bool memoryTrip = LuaCsExecutionGuard.IsMemoryBudgetTrip(ex);
+                if (!memoryTrip)
+                {
+                    mod.ErrorCount++;
+                }
+
+                _log?.Error(
+                    $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed ({mod.ErrorCount}" +
+                    $"{(memoryTrip ? ", memory-budget trip not charged" : "")}): {ex}");
 
                 string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
                 if (message.Length == 0)
@@ -850,18 +876,15 @@ namespace CoreAI.Ai.LuaCs
             }
             finally
             {
-                // WHY: Reset the shared transaction scope per guarded call (mirroring the MoonSharp runtime
-                // and LuaCsGameToolExecutor) so a transaction opened inside one invocation cannot leak
-                // into the next handler/timer/tick and silently buffer its world commands.
-                ResetTransactionScope();
+                PopTransactionScope();
             }
         }
 
         /// <summary>
-        /// Discards any unfinished world/data transaction on the shared gameplay-binding scope. Best-effort:
-        /// it runs inside finally blocks on the tick path, so a throwing scope must not derail the tick.
+        /// Pushes an isolated world/data transaction frame on the shared gameplay-binding scope for one
+        /// guarded run. Best-effort: a throwing scope must not derail the load/tick path.
         /// </summary>
-        private void ResetTransactionScope()
+        private void PushTransactionScope()
         {
             if (_transactionScope == null)
             {
@@ -870,11 +893,33 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                _transactionScope.ResetTransactions();
+                _transactionScope.PushTransactionScope();
             }
             catch (Exception ex)
             {
-                _log?.Error($"[LuaCsModRuntime] ILuaTransactionScope.ResetTransactions() failed: {ex}");
+                _log?.Error($"[LuaCsModRuntime] ILuaTransactionScope.PushTransactionScope() failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Pops the transaction frame pushed by <see cref="PushTransactionScope"/>, discarding any
+        /// unfinished transaction it holds. Best-effort: it runs inside finally blocks on the load/tick
+        /// path, so a throwing scope must not derail them.
+        /// </summary>
+        private void PopTransactionScope()
+        {
+            if (_transactionScope == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _transactionScope.PopTransactionScope();
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] ILuaTransactionScope.PopTransactionScope() failed: {ex}");
             }
         }
 
@@ -1135,6 +1180,13 @@ namespace CoreAI.Ai.LuaCs
 
                 LuaFunction exportFn = export.Read<LuaFunction>();
                 _crossCallDepth++;
+
+                // WHY: The callee runs on a DIFFERENT LuaState but shares this runtime's single world
+                // binding instance. Push an isolated transaction frame so the callee's
+                // coreai_world_begin/commit operate on their OWN frame and cannot flush or clear the
+                // caller's still-open transaction (the buffer-corruption bug); popped in finally so a
+                // transaction the callee leaks is discarded rather than bleeding back into the caller.
+                PushTransactionScope();
                 try
                 {
                     LuaValue[] results =
@@ -1147,6 +1199,7 @@ namespace CoreAI.Ai.LuaCs
                 }
                 finally
                 {
+                    PopTransactionScope();
                     _crossCallDepth--;
                 }
             });

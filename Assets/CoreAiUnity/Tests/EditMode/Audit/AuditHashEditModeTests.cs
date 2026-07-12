@@ -58,5 +58,30 @@ namespace CoreAI.Tests.EditMode.Audit
             string h2 = AuditHash.Chain("prev2", "data");
             Assert.AreNotEqual(h1, h2);
         }
+
+        [Test]
+        public void HmacChain_SameKeyAndInputs_SameResult()
+        {
+            string h1 = AuditHash.HmacChain("secret", "p", "data");
+            string h2 = AuditHash.HmacChain("secret", "p", "data");
+            Assert.AreEqual(64, h1.Length);
+            Assert.AreEqual(h1, h2);
+        }
+
+        [Test]
+        public void HmacChain_DifferentKey_DifferentResult()
+        {
+            string h1 = AuditHash.HmacChain("key-a", "p", "data");
+            string h2 = AuditHash.HmacChain("key-b", "p", "data");
+            Assert.AreNotEqual(h1, h2);
+        }
+
+        [Test]
+        public void HmacChain_DiffersFromUnkeyedChain()
+        {
+            // WHY: the keyed chain must not be recomputable by a party that only knows the plain
+            // algorithm (which is what makes it tamper-evident against the file owner).
+            Assert.AreNotEqual(AuditHash.Chain("p", "data"), AuditHash.HmacChain("secret", "p", "data"));
+        }
     }
 }

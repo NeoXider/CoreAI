@@ -243,7 +243,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             dirGo.transform.SetParent(root.transform, false);
             ArenaSurvivalDirector director = dirGo.AddComponent<ArenaSurvivalDirector>();
             director.directorSettings = directorSettings;
-            director.Init(session, enemyTemplate, planner, orchestration);
+            director.Init(session, enemyTemplate, planner, orchestration, progressionHost?.KillXp);
 
             if (logOnStartRoles)
             {

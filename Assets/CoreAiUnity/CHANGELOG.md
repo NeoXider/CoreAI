@@ -4,6 +4,41 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 5.8.0 - Hardening wave: deep audit (runtime / architecture / tests / security), all findings fixed (2026-07-13)
+
+### Fixed
+
+- **PlayMode LLM-verification tests no longer pass green against the Offline stub.**
+  `PlayModeProductionLikeLlmFactory.TryCreate` (Auto/FromSettings) no longer silently falls back to the
+  Offline stub — it returns `false` with a clear `ignoreReason` unless the caller passes
+  `allowOfflineFallback: true`, so unconfigured runs `Assert.Ignore` instead of verifying nothing.
+- **Built-in-role LLM sweep fails on zero-output roles.** `AiOrchestratorBuiltInRolesPlayModeHarness`
+  now asserts every role published a command envelope (was: swallowed as a warning), so a role that
+  produces nothing fails the sweep.
+- **`ChatService` integration: 'Tools Only' / 'Hybrid' now actually assert the tool was called.** The
+  computed `calledTool` is asserted, hybrid mode asserts a tool command was produced, and the test
+  `Assert.Ignore`s when the resolved backend is Offline.
+- **Marshaler PlayMode test can't hang the run.** The un-timed `WaitUntil` was replaced with the timed
+  `PlayModeTestAwait.WaitTask`, so a marshaling deadlock fails fast with a diagnostic instead of hanging.
+- **World state: auto-save `CancellationTokenSource` no longer leaks.** `StartAutoSave` and `Dispose`
+  now dispose the previous source after cancelling it (was cancel-only), and the auto-save loop
+  tolerates a disposed source (`ObjectDisposedException`), so a re-start/dispose can't surface it.
+- **CoreAI facade lifecycle resets on Enter-Play-Mode-without-Domain-Reload.** `CoreAi.Invalidate()` now
+  also clears the portable `CoreAiEvents` bus, and the SubsystemRegistration hook resets
+  `CoreAIGameEntryPoint`'s `_isInitialized` guard/standby list, so the entry-point guard and the facade it
+  initializes are always cleared together at play-mode entry.
+- **`CoreAi.IsReady` is now thread-safe** — it acquires `SyncRoot` before resolving, matching the other
+  resolver entry points, so it can no longer race and corrupt cached service state.
+- **`CoreAILifetimeScope` fails fast on a missing settings asset** — `Configure()` throws an explicit
+  "CoreAISettings asset missing — add Resources/CoreAISettings or assign one on the scope" instead of
+  degrading to a generic VContainer resolve error.
+- **Example (RogueliteArena): replaced the `ArenaProgressionRuntimeHub` static-mutable global with an
+  injected `IArenaKillXpService`** (session-scoped, threaded through director/enemy/Lua bindings), so the
+  Neo↔CoreAI sample models dependency injection instead of a service-locator anti-pattern.
+- **Example (RogueliteArena): `ArenaMetaSaveGateway` persists JSON** (`JsonUtility`) instead of a
+  `|`/`,`-packed string, so upgrade ids containing those delimiters round-trip safely; legacy packed saves
+  still load.
+
 ## 5.7.0 - Hardening release: five adversarial audit waves (2026-07-12)
 
 ### Fixed (2026-07-12 audit wave 5 — adversarial review of wave 4, host)

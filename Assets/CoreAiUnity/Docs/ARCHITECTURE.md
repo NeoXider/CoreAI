@@ -126,7 +126,7 @@ Tests must measure whether the system under test works. They must not rescue the
 
 ## Audit Log
 
-The immutable append-only audit log records every LLM request/response, tool call, and world mutation event to a single SHA-256-chained JSONL file. Entries carry `prevHash`/`hash` for tamper evidence.
+The append-only audit log records every LLM request/response, tool call, and world mutation event to a single SHA-256-chained JSONL file. Entries carry `prevHash`/`hash` so the chain detects accidental corruption and reordering (an unkeyed integrity checksum, not tamper-proof against the file owner; an opt-in keyed HMAC chain is available — see `AUDIT_LOG.md`).
 
 - **Portable core** (`CoreAI`): `IAuditLog`, `AuditEntry` (struct with `AuditEntryKind` discriminator), `AuditHash`, `AuditContext` (traceId-keyed prompt hash + model cache).
 - **Unity layer** (`CoreAiUnity`): `AuditLogWriter` (background flush loop, rotation at 50 MB), three interceptors that subscribe existing event buses (`LlmAuditInterceptor`, `ToolCallAuditInterceptor`) and the `AuditedWorldCommandExecutor` decorator over `CoreAiWorldCommandExecutor`.

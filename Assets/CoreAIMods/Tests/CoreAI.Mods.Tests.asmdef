@@ -3,6 +3,8 @@
   "rootNamespace": "CoreAI.Tests",
   "references": [
     "CoreAI.Mods",
+    "CoreAI.Mods.Hub",
+    "CoreAI.Hub.UI",
     "CoreAI.Tests",
     "CoreAI.Benchmarking",
     "CoreAI.Core",
@@ -43,6 +45,11 @@
       "name": "ai.undream.llm",
       "expression": "1.0.0",
       "define": "COREAI_HAS_LLMUNITY"
+    },
+    {
+      "name": "com.neoxider.coreaihub",
+      "expression": "",
+      "define": "COREAI_HAS_HUB"
     }
   ],
   "noEngineReferences": false

@@ -329,15 +329,19 @@ namespace CoreAI.Tests.PlayMode
             float openAiTemperature,
             int openAiTimeoutSeconds,
             out PlayModeProductionLikeLlmHandle handle,
-            out string ignoreReason)
+            out string ignoreReason,
+            bool allowOfflineFallback = false)
         {
             return TryCreate(explicitPreference, openAiTemperature, openAiTimeoutSeconds, null, out handle,
-                out ignoreReason);
+                out ignoreReason, allowOfflineFallback);
         }
 
         /// <summary>
         ///   ,    per-test model override ( vision-).
         ///  <paramref name="modelOverride"/>      OpenAI-compatible HTTP.
+        /// WHY: <paramref name="allowOfflineFallback"/> gates the Auto/FromSettings Offline fallback. LLM-verification
+        /// tests leave it false so an unconfigured backend returns false + ignoreReason (caller Assert.Ignore),
+        /// instead of silently passing against the Offline stub.
         /// </summary>
         public static bool TryCreate(
             PlayModeProductionLikeLlmBackend? explicitPreference,
@@ -345,7 +349,8 @@ namespace CoreAI.Tests.PlayMode
             int openAiTimeoutSeconds,
             string modelOverride,
             out PlayModeProductionLikeLlmHandle handle,
-            out string ignoreReason)
+            out string ignoreReason,
+            bool allowOfflineFallback = false)
         {
             handle = null;
             ignoreReason = null;
@@ -390,13 +395,24 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
-                    // Fallback  Offline
-                    handle = new PlayModeProductionLikeLlmHandle(
-                        new OfflineLlmClient(settings),
-                        PlayModeProductionLikeLlmBackend.Offline,
-                        coreAiSettings: settings);
-                    ignoreReason = null;
-                    return true;
+                    // No live backend resolved. Only fall back to the Offline stub when the caller opted in;
+                    // otherwise fail with a clear reason so LLM-verification tests Assert.Ignore instead of
+                    // passing against the stub (green-by-fake-pass).
+                    if (allowOfflineFallback)
+                    {
+                        handle = new PlayModeProductionLikeLlmHandle(
+                            new OfflineLlmClient(settings),
+                            PlayModeProductionLikeLlmBackend.Offline,
+                            coreAiSettings: settings);
+                        ignoreReason = null;
+                        return true;
+                    }
+
+                    ignoreReason =
+                        "No live LLM backend resolved for Auto/FromSettings (HTTP and LLMUnity both unavailable). " +
+                        "Configure a backend via CoreAISettingsAsset, COREAI_PLAYMODE_LLM_BACKEND, or " +
+                        "COREAI_TEST_BASE_URL/COREAI_TEST_MODEL, or pass allowOfflineFallback: true to opt into the Offline stub.";
+                    return false;
 
                 case PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp:
                     return TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, modelOverride,

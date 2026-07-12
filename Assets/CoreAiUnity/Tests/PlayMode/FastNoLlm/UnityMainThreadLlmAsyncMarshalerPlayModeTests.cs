@@ -84,8 +84,10 @@ namespace CoreAI.Tests.PlayMode
                 }
             });
 
-            yield return new WaitUntil(() => tcs.Task.IsCompleted);
-            Assert.IsFalse(tcs.Task.IsFaulted, tcs.Task.IsFaulted ? tcs.Task.Exception?.ToString() : "");
+            // WHY: a timed wait so a marshaling deadlock fails fast with a diagnostic instead of hanging the run.
+            // WaitTask asserts on timeout/fault/cancel.
+            yield return PlayModeTestAwait.WaitTask(
+                tcs.Task, 30f, "marshaler bounce delegate back to Unity main thread");
             Assert.AreEqual(mainThreadId, tcs.Task.Result,
                 $"Final result should match main thread ({mainThreadId}).");
         }

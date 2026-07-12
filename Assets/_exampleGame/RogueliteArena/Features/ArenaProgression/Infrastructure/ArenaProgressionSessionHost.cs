@@ -27,12 +27,16 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         private ArenaProgressionLuaBindings _luaBindings;
         private SaveMetaProgressionUseCase _saveMeta;
         private LoadMetaProgressionUseCase _loadMeta;
+        private ArenaKillXpService _killXp;
 
         private ArenaPlayerHealth _playerHealth;
         private ArenaPlayerMelee _playerMelee;
         private ArenaCompanionBot _companion;
 
         public ArenaTeamProgressionState Team => _team;
+
+        /// <summary>Session-scoped kill-XP boundary; inject into enemy spawns instead of reaching for a global.</summary>
+        public IArenaKillXpService KillXp => _killXp;
 
         public LevelCurveDefinition SessionLevelCurve =>
             _content != null && _content.RunBalance != null ? _content.RunBalance.SessionLevelCurve : null;
@@ -75,9 +79,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 
             _combat = new ArenaRunCombatModel(_baseline, _playerHealth, _playerMelee, _companion);
             AddSessionKillXpUseCase addSessionXp = new(_team, balance);
-            ArenaProgressionRuntimeHub.AddSessionKillXp = addSessionXp;
-            ArenaProgressionRuntimeHub.BaseXpPerKill = balance.BaseXpPerKill;
-            ArenaProgressionRuntimeHub.AliveTeamMembersForXp = _teamMemberCount;
+            _killXp = new ArenaKillXpService(addSessionXp, balance.BaseXpPerKill, _teamMemberCount);
 
             ArenaUpgradeRollService rollService = new(_content);
             RollUpgradeOffersUseCase roll = new(_team, rollService);
@@ -88,7 +90,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             _presenter = new ArenaUpgradeDraftPresenter(_team, roll, apply, brain, draftView);
 
             _luaBindings = new ArenaProgressionLuaBindings(
-                addSessionXp,
+                _killXp,
                 addMetaXp,
                 _loadMeta,
                 _saveMeta,
@@ -112,8 +114,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         private void OnDestroy()
         {
             _luaBindings = null;
-
-            ArenaProgressionRuntimeHub.ClearSession();
+            _killXp = null;
             _saveMeta?.Execute();
         }
     }

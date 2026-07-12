@@ -106,6 +106,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void IsMemoryBudgetTrip_ClassifiesProcessHeapTripsOnlyNotStepOrTimeOverruns()
+        {
+            // The runtime relies on this classification to keep a blameless mod loaded: a process-heap
+            // memory trip must be recognised (through the wrapping exception chain) while the real step and
+            // time guards must NOT be — those keep counting toward the consecutive-error auto-unload streak.
+            System.Exception memoryTrip = new System.InvalidOperationException("wrapped",
+                new System.InvalidOperationException(
+                    $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)"));
+            Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(memoryTrip),
+                "A memory-budget trip anywhere in the exception chain must be recognised.");
+
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
+                    new System.InvalidOperationException("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (200000)")),
+                "A step overrun is a real guard and must not be classified as a memory trip.");
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
+                    new System.TimeoutException("Lua exceeded 500 ms.")),
+                "A timeout is a real guard and must not be classified as a memory trip.");
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(null),
+                "A null exception is not a memory trip.");
+        }
+
+        [Test]
         public void AllocationBomb_NormalHundredKbString_StillPasses()
         {
             LuaCsSecureEnvironment env = new();

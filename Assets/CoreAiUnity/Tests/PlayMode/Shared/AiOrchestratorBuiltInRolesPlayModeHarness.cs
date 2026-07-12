@@ -79,10 +79,12 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[Test] Role {role} passed, response: {sink.Commands[0].JsonPayload}");
             }
 
-            if (failedRoles.Count > 0)
-            {
-                Debug.LogWarning($"[Test] Failed roles: {string.Join(", ", failedRoles)}");
-            }
+            // WHY: a role that publishes no envelope is a real regression (LLM produced nothing usable),
+            // not a warning. Fail the sweep so zero-output roles cannot pass green.
+            Assert.AreEqual(
+                0,
+                failedRoles.Count,
+                $"Built-in roles produced no command envelope: {string.Join(", ", failedRoles)}");
         }
     }
 }

@@ -75,6 +75,34 @@ namespace CoreAI.Tests.EditMode
             second.Dispose();
         }
 
+        [Test]
+        public void ResetStaticState_ClearsGuard_SoAFreshEntryPointCanReinitialize()
+        {
+            TestLogger logger1 = new();
+            StubOrchestrator orchestrator1 = new();
+            CoreAIGameEntryPoint first = new(logger1, orchestrator1, new AgentMemoryPolicy(), new StubMemoryStore());
+            first.Start();
+            Assert.AreSame(orchestrator1, CoreAIAgent.Orchestrator);
+
+            // Simulates the SubsystemRegistration hook (Enter Play Mode without Domain Reload):
+            // the stale _isInitialized guard is cleared alongside the facade.
+            CoreAIGameEntryPoint.ResetStaticState();
+            CoreAIAgent.Reset();
+
+            TestLogger logger2 = new();
+            StubOrchestrator orchestrator2 = new();
+            CoreAIGameEntryPoint second = new(logger2, orchestrator2, new AgentMemoryPolicy(), new StubMemoryStore());
+            second.Start();
+
+            Assert.AreSame(orchestrator2, CoreAIAgent.Orchestrator,
+                "After the guard is reset a new entry point must become owner and re-initialize the facade.");
+            Assert.AreEqual(0, logger2.DebugCount,
+                "The fresh entry point must initialize as owner, not report a duplicate start.");
+
+            first.Dispose();
+            second.Dispose();
+        }
+
         private sealed class TestLogger : ILog
         {
             public int DebugCount { get; private set; }

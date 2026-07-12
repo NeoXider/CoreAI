@@ -161,13 +161,24 @@ namespace CoreAI.Composition
             }
         }
 
-        internal static void ResetInitializationGuardForTests()
+        /// <summary>
+        /// Clears the process-wide initialization guard and standby list. Called from
+        /// <see cref="CoreAi"/>'s SubsystemRegistration hook so the entry-point guard and the
+        /// <see cref="CoreAIAgent"/> facade it initializes are always reset together at play-mode
+        /// entry (Enter Play Mode without Domain Reload).
+        /// </summary>
+        internal static void ResetStaticState()
         {
             lock (StartGate)
             {
                 _isInitialized = false;
                 StandbyInstances.Clear();
             }
+        }
+
+        internal static void ResetInitializationGuardForTests()
+        {
+            ResetStaticState();
         }
 
         private async void FireBootstrapAiTask()

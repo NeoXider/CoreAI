@@ -23,22 +23,48 @@ namespace CoreAI.Infrastructure.Llm
 
         private const int MaxRetryCapSeconds = 30;
 
+        private const string ContentDisabledPlaceholder = "(content logging disabled)";
+
         private readonly ILlmClient _inner;
         private readonly ILog _logger;
         private readonly string _backendLabel;
         private readonly float _requestTimeoutSeconds;
         private readonly int _maxHttpRetryAttempts;
+        private readonly bool _logPromptContent;
+        private readonly bool _logResponseContent;
 
         /// <param name="requestTimeoutSeconds">The request timeout seconds value.</param>
         /// <param name="maxHttpRetryAttempts">The max http retry attempts value.</param>
+        /// <param name="logPromptContent">
+        /// When false, system/user prompt previews are suppressed from logs (non-sensitive metadata —
+        /// char counts, budget, tokens — is still logged). Mirrors <c>IOpenAiHttpSettings.LogLlmInput</c>
+        /// so a privacy-conscious deployment keeps prompt content out of logs end to end.
+        /// </param>
+        /// <param name="logResponseContent">
+        /// When false, the model response preview is suppressed from logs (metadata still logged).
+        /// Mirrors <c>IOpenAiHttpSettings.LogLlmOutput</c>.
+        /// </param>
         public LoggingLlmClientDecorator(ILlmClient inner, ILog logger,
-            float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0)
+            float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0,
+            bool logPromptContent = true, bool logResponseContent = true)
         {
             _inner = inner;
             _logger = logger ?? NullLog.Instance;
             _requestTimeoutSeconds = requestTimeoutSeconds < 0f ? 0f : requestTimeoutSeconds;
             _maxHttpRetryAttempts = maxHttpRetryAttempts < 0 ? 0 : maxHttpRetryAttempts;
+            _logPromptContent = logPromptContent;
+            _logResponseContent = logResponseContent;
             _backendLabel = inner?.GetType().Name ?? "?";
+        }
+
+        private string PromptPreview(string text, int maxChars)
+        {
+            return _logPromptContent ? Preview(text, maxChars) : ContentDisabledPlaceholder;
+        }
+
+        private string ResponseContentPreview(string text, int maxChars)
+        {
+            return _logResponseContent ? Preview(text, maxChars) : ContentDisabledPlaceholder;
         }
 
         /// <summary>Inner.</summary>
@@ -93,8 +119,8 @@ namespace CoreAI.Infrastructure.Llm
 
             _logger.Info(
                 $"LLM > traceId={trace} role={role} backend={backendLine}\n" +
-                $"  system ({system.Length} chars): {Preview(system, SystemPreviewChars)}\n" +
-                $"  user ({user.Length} chars): {Preview(user, UserPreviewChars)}\n" +
+                $"  system ({system.Length} chars): {PromptPreview(system, SystemPreviewChars)}\n" +
+                $"  user ({user.Length} chars): {PromptPreview(user, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -306,7 +332,7 @@ namespace CoreAI.Infrastructure.Llm
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
                 $"LLM < traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
-                $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
+                $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}", LogTag.Llm);
 
             return result;
         }
@@ -487,8 +513,8 @@ namespace CoreAI.Infrastructure.Llm
 
             _logger.Info(
                 $"LLM > (stream) traceId={trace} role={role} backend={backendLine}\n" +
-                $"  system ({streamSystem.Length} chars): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
-                $"  user ({streamUser.Length} chars): {Preview(request.UserPayload, UserPreviewChars)}\n" +
+                $"  system ({streamSystem.Length} chars): {PromptPreview(request.SystemPrompt, SystemPreviewChars)}\n" +
+                $"  user ({streamUser.Length} chars): {PromptPreview(request.UserPayload, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -662,7 +688,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _logger.Info(
                         $"LLM < (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
-                        $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
+                        $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}", LogTag.Llm);
                 }
             }
         }

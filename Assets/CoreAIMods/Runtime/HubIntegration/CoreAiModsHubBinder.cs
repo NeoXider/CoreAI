@@ -23,9 +23,18 @@ namespace CoreAI.Ai.Hub
         [SerializeField]
         private CoreAiHubWindow hubWindow;
 
-        [Tooltip("Grant Full tier to mods created/edited through the Mods tab (host/singleplayer only).")]
+        /// <summary>
+        /// Host opt-in to grant the <see cref="LuaCapabilities.Full"/> tier (which unlocks reflection) to
+        /// mods loaded through the Mods tab. Defaults to <c>false</c> (safe): imported/shared/rehydrated
+        /// mods can then never self-escalate to Full from their own <c>@coreai</c> header. Enable this ONLY
+        /// for trusted, first-party, or singleplayer content — it is a deliberate host decision, never
+        /// derived from an untrusted mod.
+        /// </summary>
+        [Tooltip("SECURITY: Grant Full tier (reflection) to mods loaded through the Mods tab. Leave OFF " +
+                 "unless the content is trusted/first-party/singleplayer — imported or shared mods can " +
+                 "never self-escalate to Full unless this host flag is explicitly enabled.")]
         [SerializeField]
-        private bool allowFullTier = true;
+        private bool allowFullTier;
 
         private void Start()
         {

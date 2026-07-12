@@ -28,6 +28,47 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void IsReady_ConcurrentWithResolverMutation_DoesNotThrowOrDeadlock()
+        {
+            // IsReady mutates shared resolver state via TryResolve; it must take SyncRoot like every
+            // other resolver entry point so it cannot race a concurrent SetResolver and corrupt the
+            // cached fields. A stub resolver keeps TryResolve off the Unity-main-thread scene lookup.
+            CoreAi.SetResolver(() => new TestStubOrchestrator());
+
+            Exception captured = null;
+            Task[] workers = new Task[8];
+            for (int i = 0; i < workers.Length; i++)
+            {
+                bool mutator = i % 2 == 0;
+                workers[i] = Task.Run(() =>
+                {
+                    try
+                    {
+                        for (int n = 0; n < 500; n++)
+                        {
+                            if (mutator)
+                            {
+                                CoreAi.SetResolver(() => new TestStubOrchestrator());
+                            }
+                            else
+                            {
+                                _ = CoreAi.IsReady;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.CompareExchange(ref captured, ex, null);
+                    }
+                });
+            }
+
+            Assert.IsTrue(Task.WaitAll(workers, TimeSpan.FromSeconds(10)),
+                "Concurrent IsReady/SetResolver workers should finish without deadlocking.");
+            Assert.IsNull(captured, $"IsReady must acquire SyncRoot so it is thread-safe: {captured}");
+        }
+
+        [Test]
         public void Invalidate_DoesNotThrow_WhenCalledMultipleTimes()
         {
             Assert.DoesNotThrow(() => CoreAi.Invalidate());

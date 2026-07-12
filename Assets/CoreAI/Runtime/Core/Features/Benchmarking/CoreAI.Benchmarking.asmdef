@@ -2,9 +2,7 @@
   "name": "CoreAI.Benchmarking",
   "rootNamespace": "CoreAI.Benchmarking",
   "references": [],
-  "includePlatforms": [
-    "Editor"
-  ],
+  "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": false,

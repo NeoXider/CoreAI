@@ -4,6 +4,7 @@ using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.ExampleGame.ArenaAi.Domain;
 using CoreAI.ExampleGame.ArenaCombat.Infrastructure;
+using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.ExampleGame.ArenaSurvival.Domain;
 using CoreAI.ExampleGame.ArenaWaves.Domain;
 using CoreAI.ExampleGame.ArenaWaves.Infrastructure;
@@ -27,6 +28,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
         public ArenaDirectorSettings directorSettings;
 
         private IArenaSessionAuthority _session;
+        private IArenaKillXpService _killXp;
         private GameObject _enemyTemplate;
         private IArenaWaveSchedule _waveSchedule;
         private ArenaCreatorWavePlanner _creatorPlanner;
@@ -39,12 +41,14 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
             IArenaSessionAuthority session,
             GameObject enemyTemplate,
             ArenaCreatorWavePlanner creatorPlanner,
-            IAiOrchestrationService aiOrchestration = null)
+            IAiOrchestrationService aiOrchestration = null,
+            IArenaKillXpService killXp = null)
         {
             _session = session;
             _enemyTemplate = enemyTemplate;
             _creatorPlanner = creatorPlanner;
             _aiOrchestration = aiOrchestration;
+            _killXp = killXp;
 
             if (directorSettings == null)
             {
@@ -317,7 +321,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
             ArenaEnemyBrain brain = e.GetComponent<ArenaEnemyBrain>();
             if (brain != null)
             {
-                brain.Configure(_session);
+                brain.Configure(_session, _killXp);
                 brain.ApplyWaveStats(hpMult, dmgMult, moveSpeedMult);
             }
 

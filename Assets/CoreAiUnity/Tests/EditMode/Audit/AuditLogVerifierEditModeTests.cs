@@ -116,6 +116,85 @@ namespace CoreAI.Tests.EditMode.Audit
         }
 
         [Test]
+        public void Verify_ReorderedLines_DetectsBreak()
+        {
+            // WHY: pins the guarantee the plain SHA-256 chain actually provides — accidental
+            // corruption AND ordering. Swapping two otherwise-valid lines must break verification.
+            AuditLogWriter writer = new(_testFolder);
+            WriteEntries(writer, 5);
+            string filePath = writer.FilePath;
+            writer.Dispose();
+
+            string[] lines = File.ReadAllLines(filePath);
+            (lines[1], lines[2]) = (lines[2], lines[1]);
+            File.WriteAllLines(filePath, lines);
+
+            AuditVerifyResult result = AuditLogVerifier.Verify(filePath);
+
+            Assert.IsFalse(result.Ok, "Reordered lines should break the chain.");
+        }
+
+        [Test]
+        public void Verify_HmacChain_PassesWithRightKey_FailsWithWrongKey()
+        {
+            const string key = "host-session-secret";
+            string filePath = Path.Combine(_testFolder, "keyed.jsonl");
+            WriteHmacChain(filePath, key, 4);
+
+            AuditVerifyResult right = AuditLogVerifier.Verify(filePath, key);
+            Assert.IsTrue(right.Ok, right.Error);
+            Assert.AreEqual(4, right.LineCount);
+
+            AuditVerifyResult wrong = AuditLogVerifier.Verify(filePath, "attacker-guess");
+            Assert.IsFalse(wrong.Ok, "A wrong HMAC key must fail verification.");
+
+            // WHY: the keyed file must NOT verify as a plain (unkeyed) chain either — otherwise the
+            // key would add nothing over the recomputable SHA-256 path.
+            AuditVerifyResult unkeyed = AuditLogVerifier.Verify(filePath);
+            Assert.IsFalse(unkeyed.Ok, "An HMAC chain must not verify as a plain SHA-256 chain.");
+        }
+
+        private static void WriteHmacChain(string filePath, string key, int count)
+        {
+            string prev = "";
+            List<string> lines = new();
+            DateTime ts = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            for (int i = 0; i < count; i++)
+            {
+                AuditEntry entry = new(
+                    i + 1,
+                    AuditEntryKind.ToolCall,
+                    $"trace-{i}",
+                    "creator",
+                    "gpt-4",
+                    "ph",
+                    "test_tool",
+                    $"{{\"i\":{i}}}",
+                    "allowed",
+                    "ok",
+                    "",
+                    i,
+                    "",
+                    "",
+                    prev,
+                    "",
+                    "",
+                    ts);
+
+                // Canonicalize exactly as AuditLogVerifier does (JObject round-trip, hash blanked).
+                JObject obj = JObject.Parse(JsonConvert.SerializeObject(entry));
+                obj["hash"] = "";
+                string preimage = obj.ToString(Formatting.None);
+                string hash = AuditHash.HmacChain(key, prev, preimage);
+                obj["hash"] = hash;
+                lines.Add(obj.ToString(Formatting.None));
+                prev = hash;
+            }
+
+            File.WriteAllLines(filePath, lines);
+        }
+
+        [Test]
         public void ResumeChain_TruncatedTailLine_AppendsChainResetMarker_AndVerifyDetectsBreak()
         {
             AuditLogWriter writer = new(_testFolder);

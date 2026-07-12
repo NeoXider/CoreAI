@@ -15,5 +15,21 @@ namespace CoreAI.Ai
         /// when no transaction is active.
         /// </summary>
         void ResetTransactions();
+
+        /// <summary>
+        /// Pushes a fresh, isolated transaction frame for one guarded execution (a handler/timer call, a
+        /// nested <c>mods_call</c>, or a load chunk). While the frame is on the stack every
+        /// <c>coreai_world_begin/commit/rollback</c> and buffered command targets THAT frame only, so a
+        /// nested call on a different mod's <see cref="Lua.LuaState"/> cannot flush or clear a caller's
+        /// still-open transaction on the shared binding instance. Balanced by <see cref="PopTransactionScope"/>.
+        /// </summary>
+        void PushTransactionScope();
+
+        /// <summary>
+        /// Pops the transaction frame pushed by <see cref="PushTransactionScope"/>, discarding any
+        /// unfinished transaction it still holds (rollback semantics). Safe to call unbalanced: the base
+        /// frame is never removed.
+        /// </summary>
+        void PopTransactionScope();
     }
 }

@@ -28,6 +28,34 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>Default per-execution GC allocation budget enforced between VM instructions.</summary>
         public const long DefaultMaxAllocatedBytesBudget = 256 * 1024 * 1024;
 
+        /// <summary>
+        /// Substring stamped into a memory-budget trip's message. Because the budget measures the
+        /// whole-process managed heap (see the note on <see cref="ExecuteGuarded"/>), a caller that unloads
+        /// mods on a consecutive-error streak must be able to tell such a trip apart from a real step/time
+        /// overrun and NOT charge it — an unrelated system's allocation can trip a blameless mod. Use
+        /// <see cref="IsMemoryBudgetTrip"/> rather than matching this literal at call sites.
+        /// </summary>
+        public const string MemoryBudgetTripMarker = "EXCEEDED_MEMORY_BUDGET";
+
+        /// <summary>
+        /// True when <paramref name="ex"/> (or any exception it wraps) is a process-heap memory-budget trip.
+        /// Such trips still cut the offending run, but must not count toward a mod's consecutive-error
+        /// auto-unload streak, since the process-wide heap can be pushed over budget by allocations the mod
+        /// never made. The step and time budgets are real per-call guards and are NOT reported here.
+        /// </summary>
+        public static bool IsMemoryBudgetTrip(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (e.Message != null && e.Message.Contains(MemoryBudgetTripMarker))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // WHY: Guarded execution can re-enter on the SAME LuaState (mods_call: a self-call, or A calls B
         // which calls back into A): a nested finally that simply cleared the hook would disarm the
         // limits the still-running outer call depends on, letting the rest of the outer chunk run
@@ -149,9 +177,20 @@ namespace CoreAI.Sandbox.LuaCs
                     long allocated = GC.GetTotalMemory(false) - allocBaseline;
                     if (allocated > maxAllocatedBytes)
                     {
-                        throw new LuaRuntimeException(ctx.State,
-                            new InvalidOperationException(
-                                $"LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET ({maxAllocatedBytes} bytes)"));
+                        // WHY: GC.GetTotalMemory(false) is process-wide and counts collectible garbage —
+                        // both this run's transient allocations and other systems' — so a raw trip has
+                        // false positives that would needlessly cut a blameless run. Confirm with a forced
+                        // collection: only LIVE managed memory that survives a full GC counts. A real
+                        // allocation bomb (s = s .. s / table.concat) RETAINS its doubled buffer, so it
+                        // still trips; unrelated transient growth is reclaimed and does not. The forced
+                        // collection only runs on the rare over-budget sample, never on the hot path.
+                        long live = GC.GetTotalMemory(true) - allocBaseline;
+                        if (live > maxAllocatedBytes)
+                        {
+                            throw new LuaRuntimeException(ctx.State,
+                                new InvalidOperationException(
+                                    $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
+                        }
                     }
                 }
 

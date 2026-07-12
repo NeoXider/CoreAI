@@ -3,14 +3,13 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.ExampleGame.ArenaProgression.Domain;
 using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.Sandbox.LuaCs;
-using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
     /// <summary>Lua API surface for arena progression; see <c>Docs/ARENA_PROGRESSION.md</c>.</summary>
     public sealed class ArenaProgressionLuaBindings : ILuaCsGameRuntimeBindings
     {
-        private readonly IAddSessionKillXpUseCase _addSessionKillXp;
+        private readonly IArenaKillXpService _killXp;
         private readonly IAddMetaXpUseCase _addMetaXp;
         private readonly ILoadMetaProgressionUseCase _loadMeta;
         private readonly ISaveMetaProgressionUseCase _saveMeta;
@@ -20,7 +19,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         private readonly Action _openDraftDebug;
 
         public ArenaProgressionLuaBindings(
-            IAddSessionKillXpUseCase addSessionKillXp,
+            IArenaKillXpService killXp,
             IAddMetaXpUseCase addMetaXp,
             ILoadMetaProgressionUseCase loadMeta,
             ISaveMetaProgressionUseCase saveMeta,
@@ -29,7 +28,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             ArenaRunBalanceConfig balance,
             Action openDraftDebug)
         {
-            _addSessionKillXp = addSessionKillXp;
+            _killXp = killXp;
             _addMetaXp = addMetaXp;
             _loadMeta = loadMeta;
             _saveMeta = saveMeta;
@@ -41,17 +40,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 
         public void RegisterGameplayApis(LuaCsApiRegistry registry)
         {
-            registry.Register("arena_add_session_xp", (Action<object>)(v =>
-            {
-                int n = ToInt(v);
-                if (n <= 0)
-                {
-                    return;
-                }
-
-                int alive = Mathf.Max(1, ArenaProgressionRuntimeHub.AliveTeamMembersForXp);
-                _addSessionKillXp?.Execute(n, alive);
-            }));
+            registry.Register("arena_add_session_xp", (Action<object>)(v => _killXp?.AwardXp(ToInt(v))));
 
             registry.Register("arena_add_meta_xp", (Action<object>)(v =>
             {
