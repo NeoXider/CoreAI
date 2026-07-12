@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## 5.8.5 - Fifth re-audit: complete the coroutine guard (allocation budget, self-resume, error fidelity) (2026-07-13)
+
+### Fixed
+
+- **Coroutine guard now enforces the ALLOCATION budget, not just step + time.** 5.8.4's per-resume hook
+  omitted the allocation backstop, so a doubling-concat bomb inside `coroutine.wrap/resume`
+  (`local s=string.rep('x',1e6); for i=1,30 do s=s..s end` — only ~30 VM steps, unbounded memory) still
+  OOM-crashed the player. The coroutine hook now samples the process heap between instructions with the same
+  debounced forced-GC confirmation and dedicated `LuaMemoryBudgetException` as the main guard.
+- **Coroutine guard no longer disarms itself on a self-resume.** The hook is armed/cleared only when the
+  resume target is a DISTINCT suspended coroutine state; resuming the caller's own running state (which
+  native resume rejects anyway) no longer strips the hook the outer guarded call installed, closing a
+  re-opened unbounded-loop DoS.
+- **`coroutine.wrap` preserves the original Lua error value/type on re-raise.** The reimplemented wrapper
+  re-raises the actual error `LuaValue` instead of stringifying it, so a mod that does `error({code=…})` and
+  inspects it via `pcall` sees the original object, matching the native library.
+
 ## 5.8.4 - Guard mod-created raw Lua coroutines (fifth re-audit finding) (2026-07-13)
 
 ### Fixed

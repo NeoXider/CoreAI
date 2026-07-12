@@ -120,8 +120,10 @@ namespace CoreAI.Sandbox.LuaCs
                 bool ok = res.Length > 0 && res[0].Type == LuaValueType.Boolean && res[0].Read<bool>();
                 if (!ok)
                 {
+                    // WHY: Re-raise the ORIGINAL Lua error value (preserving its type — a mod may `error({code=…})`
+                    // and read it back via pcall), matching native coroutine.wrap, instead of stringifying it.
                     LuaValue err = res.Length > 1 ? res[1] : LuaValue.Nil;
-                    throw new LuaRuntimeException(rctx.State, new InvalidOperationException(err.ToString()));
+                    throw new LuaRuntimeException(rctx.State, err);
                 }
 
                 int extra = res.Length > 1 ? res.Length - 1 : 0;
@@ -153,10 +155,25 @@ namespace CoreAI.Sandbox.LuaCs
                 coroutineState = null;
             }
 
-            if (coroutineState != null)
+            // WHY: Never arm/clear a hook on the CALLER's own running state (a self-resume, or a resume of the
+            // currently-running thread). Native resume rejects that with [false,...] anyway, but the finally's
+            // SetHook(null) would disarm the guard the OUTER guarded call installed on that same state,
+            // re-opening the unbounded-loop DoS. Only arm on a distinct (suspended) coroutine state.
+            bool armed = false;
+            if (coroutineState != null && !ReferenceEquals(coroutineState, callerState))
             {
                 long steps = 0;
                 System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                // WHY: Mirror LuaCsExecutionGuard's allocation backstop on the coroutine's child state. Step and
+                // time caps do NOT catch a doubling concat bomb (`s = s .. s`): it runs only a handful of VM
+                // opcodes yet allocates to OOM, and plain concatenation has no library call site to cap. Sample
+                // the process heap between instructions and confirm with a forced GC (debounced), exactly as the
+                // main guard does, tripping the same dedicated LuaMemoryBudgetException type.
+                long maxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
+                long allocBaseline = maxAllocatedBytes > 0 ? System.GC.GetTotalMemory(false) : 0;
+                long allocAtLastForcedCheck = long.MinValue;
+                long forcedCheckStep = maxAllocatedBytes > 0 ? Math.Max(1, maxAllocatedBytes / 8) : long.MaxValue;
+
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
                     steps++;
@@ -173,16 +190,34 @@ namespace CoreAI.Sandbox.LuaCs
                             new TimeoutException($"Lua coroutine resume exceeded {CoroutineResumeTimeoutMs} ms."));
                     }
 
+                    if (maxAllocatedBytes > 0)
+                    {
+                        long allocated = System.GC.GetTotalMemory(false) - allocBaseline;
+                        if (allocated > maxAllocatedBytes &&
+                            allocated >= allocAtLastForcedCheck + forcedCheckStep)
+                        {
+                            allocAtLastForcedCheck = maxAllocatedBytes;
+                            long live = System.GC.GetTotalMemory(true) - allocBaseline;
+                            if (live > maxAllocatedBytes)
+                            {
+                                throw new LuaRuntimeException(hctx.State,
+                                    new LuaMemoryBudgetException(
+                                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
+                            }
+                        }
+                    }
+
                     return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
                 });
 
                 try
                 {
                     coroutineState.SetHook(hook, string.Empty, 1);
+                    armed = true;
                 }
                 catch
                 {
-                    coroutineState = null;
+                    armed = false;
                 }
             }
 
@@ -192,7 +227,7 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
-                if (coroutineState != null)
+                if (armed)
                 {
                     try
                     {

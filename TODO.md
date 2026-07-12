@@ -2,7 +2,7 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.4 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
+> Released: 5.8.5 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
 > EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
 > PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
@@ -41,7 +41,7 @@
       resume arms a per-resume step + wall-clock hook on the coroutine's child `LuaState` (mirrors
       `LuaCsCoroutineHandle.Resume`). Compile-gated green; a regression test
       (`LuaCsSecureSandboxEditModeTests.Coroutine_RunawayLoop_IsCutByResumeBudget`) asserts a runaway
-      `coroutine.wrap` loop is cut. REMAINING (editor gate): run that test to confirm the child `LuaState` is
+      `coroutine.wrap` loop is cut. UPDATE (5.8.5): the per-resume hook now also enforces the ALLOCATION budget (a concat bomb inside a coroutine was still an OOM DoS), skips self-resume (would disarm the outer guard), and preserves the original Lua error value. REMAINING (editor gate): run the coroutine tests to confirm the child `LuaState` is
       surfaced by `LuaValue.Read<LuaState>()` and the hook fires during native resume at runtime; verify the
       `coroutine_countdown` demo still yields correctly; if `Read<LuaState>()` returns null on-device the
       wrappers fail-open (no guard) — fall back to option (b), a `LuaCsCoroutineHandle`-backed shim.

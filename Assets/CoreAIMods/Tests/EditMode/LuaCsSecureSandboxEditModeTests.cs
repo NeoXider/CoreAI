@@ -61,6 +61,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        [Timeout(30000)]
+        public void Coroutine_AllocationBomb_IsCutByMemoryBudget()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // A doubling-concat allocation bomb inside a coroutine runs on a child state the main guard does
+            // not cover; the coroutine guard's own allocation backstop must trip it (it is only ~9 VM steps, so
+            // step/time budgets cannot). Bounded to ~512MB peak so a REGRESSION (guard not armed) fails the
+            // assert (the loop just finishes) instead of OOM-ing the test machine.
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state,
+                    "local co = coroutine.wrap(function()\n" +
+                    "  local s = string.rep('x', 1000000)\n" +
+                    "  for i = 1, 9 do s = s .. s end\n" +
+                    "  return #s\n" +
+                    "end)\n" +
+                    "co()"));
+
+            Assert.IsTrue(ex.Message.Contains("EXCEEDED_MEMORY_BUDGET"),
+                $"Expected the coroutine allocation backstop to fire, got: {ex.Message}");
+        }
+
+        [Test]
         public void AllocationBomb_ConcatDoubling_ThrowsMemoryBudgetError()
         {
             LuaCsSecureEnvironment env = new();
