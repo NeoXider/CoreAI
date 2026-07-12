@@ -1186,12 +1186,31 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            // WHY: The exception Message is surfaced up the stack and logged (result.Error). Redact it at the
+            // source, not just at the log call: for 401/403 the parsed provider error.message can echo the
+            // submitted key/token, so use the already-redacted detail instead of ExtractProviderMessage; for
+            // any other status, cap the parsed provider message so a huge body cannot dump content into logs.
+            string providerMessage = status == 401 || status == 403
+                ? errorDetail
+                : TruncateMessageForException(ExtractProviderMessage(responseBody, errorDetail));
+
             return new LlmClientException(
-                $"HTTP error {status}: {ExtractProviderMessage(responseBody, errorDetail)}",
+                $"HTTP error {status}: {providerMessage}",
                 code,
                 status > 0 ? status : null,
                 retryAfter,
                 responseBody);
+        }
+
+        private static string TruncateMessageForException(string message)
+        {
+            if (string.IsNullOrEmpty(message) || message.Length <= MaxErrorBodyLogChars)
+            {
+                return message ?? "";
+            }
+
+            return message.Substring(0, MaxErrorBodyLogChars) +
+                   $"... [+{message.Length - MaxErrorBodyLogChars} chars]";
         }
 
         private static int? TryParseRetryAfterHeaders(IReadOnlyDictionary<string, IEnumerable<string>>? headers)

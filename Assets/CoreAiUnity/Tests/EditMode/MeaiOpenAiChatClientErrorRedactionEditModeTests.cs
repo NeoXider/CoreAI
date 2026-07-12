@@ -72,6 +72,32 @@ namespace CoreAI.Tests.EditMode
 
             StringAssert.DoesNotContain("sk-super-secret-key-leaked-in-401-body", ex.Message);
         }
+
+        [Test]
+        public void ThrownException_Message_RedactsAuthBody_EvenWhenJson()
+        {
+            // The parsed provider error.message of a 401/403 can echo the submitted key — it must NOT reach
+            // the exception message (which is logged), even though the body is valid JSON.
+            string body = "{\"error\":{\"message\":\"Incorrect API key provided: sk-secret-JSON-123.\"}}";
+            LlmClientException ex401 = MeaiOpenAiChatClient.BuildHttpExceptionForTests(401, body);
+            LlmClientException ex403 = MeaiOpenAiChatClient.BuildHttpExceptionForTests(403, body);
+
+            StringAssert.DoesNotContain("sk-secret-JSON-123", ex401.Message);
+            StringAssert.DoesNotContain("sk-secret-JSON-123", ex403.Message);
+            // WHY: raw body still retained for diagnostics/retry-window parsing, just not in the message.
+            StringAssert.Contains("sk-secret-JSON-123", ex401.ProviderErrorBody);
+        }
+
+        [Test]
+        public void ThrownException_Message_TruncatesHugeJsonProviderMessage()
+        {
+            string huge = new string('z', 3000);
+            string body = "{\"error\":{\"message\":\"" + huge + "\"}}";
+            LlmClientException ex = MeaiOpenAiChatClient.BuildHttpExceptionForTests(500, body);
+
+            Assert.Less(ex.Message.Length, 1000, "a huge provider error.message must be truncated in the exception message");
+            StringAssert.DoesNotContain(huge, ex.Message);
+        }
     }
 }
 #endif

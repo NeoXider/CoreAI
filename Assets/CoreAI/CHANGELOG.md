@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## 5.8.2 - Third adversarial re-audit: close residual gaps in the 5.8.1 fixes (2026-07-13)
+
+### Fixed
+
+- **Memory-trip laundering closed for real.** The 5.8.1 fix used a sticky per-run flag, so a mod could
+  trip the budget INSIDE `pcall` (which swallows the trip and arms the flag), then throw an unrelated
+  `error()` that the catch laundered into a blameless "memory trip" — re-opening the auto-unload evasion.
+  The trip is now matched by the EXACT exception instance (reference identity through any VM re-wrap), so a
+  swallowed trip can no longer reclassify a later real error; that error is charged to the error streak.
+- **Provider HTTP-error redaction completed for JSON bodies.** The 5.8.1 fix only redacted the non-JSON
+  fallback; a JSON 401/403 body's parsed `error.message` (which can echo the submitted key) still reached
+  `LlmClientException.Message` and the log. Now 401/403 messages use the redacted detail, and other statuses
+  truncate the parsed provider message. The raw body remains available via `ProviderErrorBody`.
+- **ImportMod capability-tier comment corrected:** re-importing an ALREADY-LOADED mod keeps its current
+  tier (a reload cannot escalate a live mod from an untrusted header); changing the tier requires
+  unload/forget then re-import under the desired grant.
+
 ## 5.8.1 - Adversarial re-audit of 5.8.0: fix regressions/incomplete-fixes the wave introduced (2026-07-13)
 
 ### Fixed

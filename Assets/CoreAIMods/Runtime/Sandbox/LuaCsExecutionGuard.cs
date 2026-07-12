@@ -73,6 +73,19 @@ namespace CoreAI.Sandbox.LuaCs
             return false;
         }
 
+        private static bool ExceptionChainContains(Exception ex, Exception target)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (ReferenceEquals(e, target))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // WHY: Guarded execution can re-enter on the SAME LuaState (mods_call: a self-call, or A calls B
         // which calls back into A): a nested finally that simply cleared the hook would disarm the
         // limits the still-running outer call depends on, letting the rest of the outer chunk run
@@ -170,10 +183,12 @@ namespace CoreAI.Sandbox.LuaCs
             long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
 
             // WHY: Captured locals, per THIS ExecuteGuarded invocation (re-entrancy-safe — a nested guarded
-            // call gets its own closure). `memoryBudgetExceeded` is the unforgeable signal that this run's
-            // own hook raised the memory trip; the catch converts it to the dedicated
-            // LuaMemoryBudgetException type. `allocAtLastForcedCheck` debounces the expensive confirmation.
-            bool memoryBudgetExceeded = false;
+            // call gets its own closure). `memoryTrip` holds the EXACT exception this run's hook raised for a
+            // budget trip; the catch converts to the dedicated type only when that exact instance surfaces
+            // (matched by reference), so a trip swallowed by a mod's pcall cannot launder a later error.
+            // `allocAtLastForcedCheck` debounces the expensive forced-GC confirmation so a persistently-high
+            // process heap cannot force a full GC on every instruction.
+            LuaRuntimeException memoryTrip = null;
             long allocAtLastForcedCheck = long.MinValue;
             long forcedCheckStep = maxAllocatedBytes > 0 ? Math.Max(1, maxAllocatedBytes / 8) : long.MaxValue;
 
@@ -217,10 +232,14 @@ namespace CoreAI.Sandbox.LuaCs
                         long live = GC.GetTotalMemory(true) - allocBaseline;
                         if (live > maxAllocatedBytes)
                         {
-                            memoryBudgetExceeded = true;
-                            throw new LuaRuntimeException(ctx.State,
-                                new InvalidOperationException(
+                            // WHY: Record the exact trip exception so the catch can match it by reference and
+                            // convert to the dedicated LuaMemoryBudgetException type. A trip swallowed by a
+                            // mod's pcall/coroutine is a different instance from any later error(), so it can
+                            // never launder a subsequent unrelated failure into a "memory trip".
+                            memoryTrip = new LuaRuntimeException(ctx.State,
+                                new LuaMemoryBudgetException(
                                     $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
+                            throw memoryTrip;
                         }
                     }
                 }
@@ -235,11 +254,12 @@ namespace CoreAI.Sandbox.LuaCs
                 state.SetHook(hook, string.Empty, 1);
                 return body(cancellationToken);
             }
-            catch (Exception ex) when (memoryBudgetExceeded)
+            catch (LuaRuntimeException ex) when (memoryTrip != null && ExceptionChainContains(ex, memoryTrip))
             {
-                // WHY: Re-raise this run's own memory trip as the dedicated, unforgeable CLR type so the
-                // caller can classify it by TYPE. The `when (memoryBudgetExceeded)` guard fires only for the
-                // invocation whose hook actually tripped, so a mod's forged error text can never reach here.
+                // WHY: This run's own budget trip surfaced unhandled (matched by reference through any VM
+                // re-wrap). Re-raise it as the dedicated, unforgeable type so callers classify it reliably by
+                // TYPE, with the marker in the message for observability. Only the exact trip instance reaches
+                // here, so a mod cannot forge it and a pcall-swallowed trip cannot launder a later error.
                 throw new LuaMemoryBudgetException(
                     $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)", ex);
             }

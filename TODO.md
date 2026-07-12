@@ -2,7 +2,7 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.1 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
+> Released: 5.8.2 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
 > EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
 > PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
 
@@ -30,6 +30,9 @@
       still unload (capped memory-trip streak); forced-GC debounced; import persists host-masked caps (no
       Full on restart); `Invalidate()` no longer wipes persistent event subscribers; error-body redacted at
       source; tautological tool-call test now asserts real execution; audit-truncation docs qualified.
+- [x] **Re-audit round (5.8.2):** third adversarial pass found 3 residual gaps in the 5.8.1 fixes, all
+      fixed: sticky memory-trip flag → exact-instance match (closes pcall-swallow laundering); JSON 401/403
+      error.message redaction completed (was only non-JSON); ImportMod already-loaded-tier comment corrected.
 - [ ] **Verification gate on next editor start:** run the full EditMode + PlayMode suites (Unity holds the
       project lock during this session, so batchmode is unavailable; compile gate is green across Core /
       Source / Mods / Mods.Hub / Tests / Mods.Tests / ExampleGame.Tests). New/updated tests:

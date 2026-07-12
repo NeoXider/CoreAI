@@ -1626,6 +1626,11 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (IsLoaded(modId))
                 {
+                    // WHY: Reloading an already-loaded mod only swaps its SOURCE; it deliberately KEEPS the
+                    // mod's current capability tier (ReloadMod reuses existing.Caps) and cannot escalate it —
+                    // an import can never raise a live mod's privileges from an untrusted bundle header. To
+                    // CHANGE a loaded mod's tier the host must unload/forget it first, then re-import under the
+                    // desired grant (the fresh-load branch below applies the host-masked tier).
                     ReloadMod(modId, bundle.Source);
                 }
                 else
@@ -1635,7 +1640,7 @@ namespace CoreAI.Ai.LuaCs
                     // a later restart's RehydrateFromStore run under a host-wide allowFull=true would re-grant
                     // Full to this specific mod that was imported WITHOUT it — defeating the import-time
                     // decision across a restart. The store must never hold more than the host granted here; a
-                    // host that later wants Full for this mod re-imports it under allowFull=true.
+                    // host that later wants Full for a not-yet-loaded mod re-imports it under allowFull=true.
                     LoadMod(modId, bundle.Source, effectiveCaps, false);
                     PersistMod(modId, bundle.Source, effectiveCaps);
                 }

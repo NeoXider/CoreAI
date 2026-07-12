@@ -624,5 +624,43 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(stack.Runtime.IsLoaded("m"),
                 "A mod that trips the memory budget on every call must eventually be unloaded by the capped memory-trip streak.");
         }
+
+        [Test]
+        [Timeout(30000)]
+        public void LuaCs_PcallSwallowedMemoryTrip_DoesNotLaunderLaterRealError()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                HandlerMaxAllocatedBytes = 4 * 1024 * 1024
+            });
+
+            // SECURITY: the mod arms a budget trip INSIDE pcall (which swallows it), then throws a REAL,
+            // unrelated error. That real error must be charged to the normal error streak and unload the mod —
+            // it must NOT be laundered into a blameless "memory trip" by a stale trip signal.
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('evade', function()
+                    pcall(function()
+                        local s = string.rep('x', 1000000)
+                        s = s .. s
+                        s = s .. s
+                        s = s .. s
+                    end)
+                    error('a real unrelated error')
+                end)");
+
+            for (int i = 0; i < LuaCsModRuntime.MaxErrorsBeforeUnload + 1 && stack.Runtime.IsLoaded("m"); i++)
+            {
+                stack.Runtime.EmitEvent("evade", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("m"),
+                "A real error after a pcall-swallowed memory trip must charge the error streak and unload the mod.");
+        }
     }
 }
