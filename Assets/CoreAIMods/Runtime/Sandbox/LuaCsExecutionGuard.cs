@@ -11,8 +11,8 @@ namespace CoreAI.Sandbox.LuaCs
     /// <summary>
     /// Raised (as the CLR cause) by <see cref="LuaCsExecutionGuard"/> when a guarded run exceeds the
     /// process-heap allocation budget. A dedicated type — never a message substring — so a mod's own
-    /// <c>error("…EXCEEDED_MEMORY_BUDGET…")</c> text cannot masquerade as a memory-budget trip and evade
-    /// the consecutive-error auto-unload guard. Only this guard can construct it.
+    /// <c>error("…EXCEEDED_MEMORY_BUDGET…")</c> text cannot masquerade as a memory-budget trip in logs or
+    /// telemetry. Only this guard can construct it.
     /// </summary>
     public sealed class LuaMemoryBudgetException : Exception
     {
@@ -54,11 +54,10 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// True when <paramref name="ex"/> (or any exception it wraps) is a process-heap memory-budget trip
         /// raised by this guard. Detection is by TYPE (<see cref="LuaMemoryBudgetException"/>), NOT by message
-        /// text, so a mod cannot forge the classification via its own error message and thereby dodge the
-        /// consecutive-error auto-unload guard. Such trips still cut the offending run, but a caller may
-        /// choose not to charge a single trip to the general error streak, since the process-wide heap can be
-        /// pushed over budget by allocations the mod never made. The step and time budgets are real per-call
-        /// guards and are NOT reported here.
+        /// text, so a mod cannot forge the classification via its own error message. Used only for the trip's
+        /// log label: the runtime charges a memory trip to the same consecutive-error streak as any other
+        /// failure, so classification does not change whether a mod is unloaded (a forged marker and a real trip
+        /// both charge alike). The step and time budgets are real per-call guards and are NOT reported here.
         /// </summary>
         public static bool IsMemoryBudgetTrip(Exception ex)
         {
@@ -195,12 +194,16 @@ namespace CoreAI.Sandbox.LuaCs
                     // GC.GetTotalMemory(true) measured against a garbage-inclusive baseline UNDER-counts (the
                     // baseline's own collectible garbage is freed by the forced GC), so the trip fired late and
                     // a doubling bomb reached true OutOfMemory before it was cut. The cheap reading grows
-                    // monotonically with a retained buffer, so it trips promptly and reliably. False positives
-                    // from unrelated process-heap growth are handled downstream: a memory trip is not charged
-                    // to the general error streak and only a mod that trips on EVERY call (never succeeding)
-                    // hits the separate capped memory-trip streak — so a blameless run is at most cut, never
-                    // auto-unloaded. Classify by TYPE (LuaMemoryBudgetException as the CLR cause) — unforgeable
-                    // and pcall-safe — while the outer type stays LuaRuntimeException for the error contract.
+                    // monotonically with a retained buffer, so it trips promptly. NOTE this is a PER-CALL,
+                    // first-growth backstop, not a cross-call cumulative limiter: GC.GetTotalMemory reports the
+                    // COMMITTED heap high-water mark, so the FIRST oversized call grows the heap and trips, but
+                    // later calls reuse that committed space and their per-call delta no longer crosses the
+                    // budget (empirically a mod bombing every call trips ~once, even with a forced GC between
+                    // calls). Downstream (LuaCsModRuntime) charges the trip to the ordinary consecutive-error
+                    // streak, which a success resets — so the lone trip is forgiven, and a mod that keeps
+                    // allocating within the committed envelope is bounded by the step/time budgets instead.
+                    // Classify by TYPE (LuaMemoryBudgetException as the CLR cause) — unforgeable and pcall-safe —
+                    // for the trip's log label, while the outer type stays LuaRuntimeException for the contract.
                     long allocated = GC.GetTotalMemory(false) - allocBaseline;
                     if (allocated > maxAllocatedBytes)
                     {

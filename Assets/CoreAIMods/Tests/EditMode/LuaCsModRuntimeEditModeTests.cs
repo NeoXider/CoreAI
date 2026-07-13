@@ -586,6 +586,55 @@ namespace CoreAI.Tests.EditMode
         // coarsely for a body-less/tight loop, so the sub-second step/time budgets are not enforced promptly),
         // so 8 consecutive cuts take ~60s and freeze the interactive editor. See TODO(guard-tight-loop-latency).
 
+        // NOTE: there is intentionally NO "a mod that allocation-bombs every call is unloaded via a memory-trip
+        // streak" test. The allocation guard reads GC.GetTotalMemory, which reports the COMMITTED heap high-water
+        // mark, so a repeated fixed-size bomb trips only ONCE — the first call grows the committed heap and trips;
+        // every later call reuses that committed space and its per-call delta no longer crosses the budget (this
+        // was verified empirically: a mod bombing every tick under an 8MB budget recorded ~1 trip across 36 ticks
+        // even with a forced GC.Collect() between ticks — Mono does not return the committed segment). The memory
+        // guard is therefore a per-call FIRST-GROWTH backstop, not a cross-call cumulative limiter (Unity's Mono
+        // exposes no per-call/per-thread allocation counter to build one). A mod that keeps allocating within the
+        // committed envelope is bounded by the per-call step/time budgets, not by unloading. The single memory
+        // trip IS charged to the ordinary error streak and forgiven by the next success — see the test below.
+
+        [Test]
+        [Timeout(30000)]
+        public void LuaCs_SingleMemoryTrip_ChargedButForgivenByNextSuccess_DoesNotUnload()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                HandlerMaxAllocatedBytes = 8 * 1024 * 1024
+            });
+
+            // A memory trip is charged to the ordinary consecutive-error streak (a success resets it), so a mod
+            // that trips once — on its own first oversized allocation or on unrelated shared-heap growth — and
+            // then runs cleanly is forgiven and never unloaded. This mod bombs on its FIRST invocation only and
+            // succeeds on every later call, so it must stay loaded well past MaxErrorsBeforeUnload ticks.
+            stack.Runtime.LoadMod("occasional", @"
+                local n = 0
+                hooks_on('poke', function()
+                    n = n + 1
+                    if n == 1 then
+                        local s = string.rep('x', 1000000)
+                        for i = 1, 6 do s = s .. s end
+                    end
+                end)");
+
+            for (int i = 0; i < (LuaCsModRuntime.MaxErrorsBeforeUnload * 2) + 2; i++)
+            {
+                stack.Runtime.EmitEvent("poke", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("occasional"),
+                "A single memory trip followed by successful calls must be forgiven (streak reset) and keep the mod loaded.");
+        }
+
         [Test]
         [Timeout(30000)]
         public void LuaCs_PcallSwallowedMemoryTrip_DoesNotLaunderLaterRealError()

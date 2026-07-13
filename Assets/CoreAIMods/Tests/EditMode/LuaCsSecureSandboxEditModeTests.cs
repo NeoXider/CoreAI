@@ -62,6 +62,27 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        [Timeout(30000)]
+        public void Coroutine_Wrap_IsRemoved_UnguardablePrimitiveCannotHang()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // SECURITY: coroutine.wrap drives a hidden CHILD LuaState through the library's OWN resume, bypassing
+            // the guarded coroutine.resume, so a wrap body (`while true do end`) would run with no step/time/alloc
+            // hook and hang the host forever. It is therefore stripped (set nil). First, assert it is gone.
+            LuaValue[] isNil = env.RunChunk(state, "return coroutine.wrap == nil");
+            Assert.IsTrue(isNil.Length > 0 && isNil[0].Read<bool>(),
+                "coroutine.wrap must be removed from the sandbox — it cannot be guarded on this Lua-CSharp build.");
+
+            // And reaching for it must raise a clean nil-call error PROMPTLY, not hang. If a regression re-natives
+            // wrap, the unguarded child-state loop below runs forever and this [Timeout] test fails — the signal.
+            Assert.Throws<LuaRuntimeException>(
+                () => env.RunChunk(state, "coroutine.wrap(function() while true do end end)()"),
+                "Calling the removed coroutine.wrap must raise a nil-call error, never hang.");
+        }
+
+        [Test]
         public void AllocationBomb_ConcatDoubling_ThrowsMemoryBudgetError()
         {
             LuaCsSecureEnvironment env = new();

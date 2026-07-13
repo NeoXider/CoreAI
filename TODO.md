@@ -2,11 +2,10 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.7 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
-> EditMode 1,570 passed / 0 failed / 4 optional third-party ignored; PlayMode `FastNoLlm` 56 passed / 0
-> failed (with graphics — `-nographics` fails 5 GPU/RenderTexture camera tests, environment artifact).
-> LLM-API PlayMode tests (`AgentMemoryOpenAiApiPlayModeTests`, LlmVerification) need a live OpenAI-compatible
-> backend (spark/opencode) — tracked below.
+> Released: 5.8.8 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
+> mods EditMode 118 passed / 0 failed; full EditMode green; PlayMode `FastNoLlm` 56 passed / 0 failed (with
+> graphics — `-nographics` fails 5 GPU/RenderTexture camera tests, environment artifact). LLM-API PlayMode
+> tests run against a local LM Studio OpenAI endpoint (`qwen3.5-4b-mtp`) — see the LLM-API gate below.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -66,11 +65,16 @@
       only after ~8 s: the Lua-CSharp instruction hook fires coarsely for body-less loops, so the sub-second
       step/time budgets aren't enforced promptly (bounded but noticeable freeze; not a bypass — it IS cut).
       Consider a wall-clock watchdog thread or finer hook granularity. Bombs WITH a loop body are cut promptly.
-- [ ] **`TODO(coroutine-wrap)`** — `coroutine.wrap` is left native (only `coroutine.resume` is wrapped) to
-      avoid the removed `Create()` domain-reload deadlock. A `wrap`-created coroutine is still guarded when
-      driven through the guarded `resume` path, but a mod could in principle iterate a native `wrap` closure
-      directly; add a non-deadlocking `wrap` shim (e.g. a `LuaCsCoroutineHandle`-backed wrapper) so `wrap`
-      arms the per-resume guard on its own.
+- [x] **`coroutine.wrap` RESOLVED (5.8.8):** was left native/unguarded in 5.8.7 (a host-hang vector). It
+      cannot be safely guarded on this Lua-CSharp build, so it is now stripped (`coroutine.wrap = nil`); mods
+      use the guarded `create` + `resume` pair. If a future Lua-CSharp version round-trips a C# wrap shim,
+      restore a guarded `wrap` that routes through `ResumeWithPerResumeGuard`.
+- [ ] **Allocation guard is a per-call first-growth backstop (documented limitation, 5.8.8).** `GC.GetTotalMemory`
+      reports the committed-heap high-water mark, so a repeated fixed-size allocation bomb trips only ONCE (later
+      calls reuse committed space); Unity's Mono exposes no per-call/per-thread allocation counter to build a
+      cross-call cumulative limiter. Sustained bounded allocation is bounded by the per-call step/time budgets,
+      not by unloading. A finer control (e.g. a per-mod wall-clock allocation-rate watchdog) is possible future
+      work but not currently feasible on Mono.
 - [ ] **LLM-API PlayMode gate (spark/opencode):** `AgentMemoryOpenAiApiPlayModeTests` and the LlmVerification
       assembly need a live OpenAI-compatible endpoint; the full PlayMode run aborts on them without one (the
       Offline path skips the deterministic-stub tests but the API-integration tests genuinely hit HTTP). Stand

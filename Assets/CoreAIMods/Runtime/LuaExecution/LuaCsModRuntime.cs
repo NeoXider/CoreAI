@@ -222,9 +222,13 @@ namespace CoreAI.Ai.LuaCs
         /// </param>
         /// <param name="handlerMaxAllocatedBytes">
         /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
-        /// still cuts the offending call but is NOT charged toward the consecutive-error auto-unload streak
-        /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>), since the budget measures the whole
-        /// process heap and unrelated allocations can trip a blameless mod. Defaults to
+        /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>) cuts the offending call and is charged to the
+        /// same consecutive-error streak as any failure (<see cref="MaxErrorsBeforeUnload"/>, reset on success).
+        /// This is a PER-CALL first-growth backstop, not a cross-call cumulative limiter: because
+        /// GC.GetTotalMemory reports the committed-heap high-water mark, only the first oversized allocation
+        /// trips — later calls reuse that committed space and no longer cross the budget — so a lone trip is
+        /// forgiven by the next success and a mod that keeps allocating within the committed envelope is bounded
+        /// by the per-call step/time budgets instead. Defaults to
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </param>
         public LuaCsModRuntime(
@@ -845,22 +849,24 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                // WHY: The allocation-budget check reads the WHOLE-process managed heap (Unity's Mono has no
-                // per-call counter and GC.GetTotalMemory reflects allocations only coarsely), so it is a
-                // best-effort backstop that can also trip for a blameless mod on unrelated process-heap growth.
-                // A memory trip therefore CUTS the run (the exception already unwound it) but is NOT charged to
-                // the consecutive-error streak, so it can never auto-unload a healthy mod. A genuine allocation
-                // bomb never completes, so it is reliably caught and unloaded by the step and time budgets (real
-                // per-call guards) which DO charge the streak.
+                // WHY: An allocation-budget trip is charged to the same consecutive-error streak as any other
+                // failure — a success resets it, so a mod is only unloaded after MaxErrorsBeforeUnload failures
+                // IN A ROW. This is safe despite the budget reading the shared process heap (which can trip a
+                // blameless mod on unrelated growth) because a memory trip is effectively a ONCE-PER-LIFETIME
+                // event: GC.GetTotalMemory reports the COMMITTED heap high-water mark, so the FIRST oversized
+                // allocation grows the heap and trips, but every later call reuses that committed space and its
+                // per-call delta no longer crosses the budget (verified empirically — a mod bombing every tick
+                // trips ~once, not repeatedly, even with a forced GC between calls). So a lone noise trip is
+                // forgiven by the next success and never unloads a healthy mod, while the per-call step/time
+                // budgets — not this streak — are what bound a mod that keeps allocating within the committed
+                // envelope. Classified by TYPE (see IsMemoryBudgetTrip) for the log label only; a mod cannot
+                // forge the marker in its own error text to change how it is charged (all failures charge alike).
                 bool memoryTrip = LuaCsExecutionGuard.IsMemoryBudgetTrip(ex);
-                if (!memoryTrip)
-                {
-                    mod.ErrorCount++;
-                }
+                mod.ErrorCount++;
 
                 _log?.Error(
-                    $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed ({mod.ErrorCount}" +
-                    $"{(memoryTrip ? ", memory-budget trip not charged" : "")}): {ex}");
+                    $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed " +
+                    $"({(memoryTrip ? "memory-budget trip" : "error")} {mod.ErrorCount}/{MaxErrorsBeforeUnload}): {ex}");
 
                 string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
                 if (message.Length == 0)

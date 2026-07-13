@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## 5.8.8 - Eighth re-audit: close a coroutine.wrap host-hang; correct the allocation-guard model (2026-07-13)
+
+### Fixed
+
+- **`coroutine.wrap` was an unguarded host-hang / allocation-bomb vector — now removed (CRITICAL).** 5.8.7
+  left `coroutine.wrap` native while only wrapping `coroutine.resume`. `wrap`'s returned resumer drives a
+  hidden CHILD `LuaState` through the library's OWN internal resume, bypassing the guarded `coroutine.resume`,
+  so a wrap body ran with NO step/time/alloc hook: `coroutine.wrap(function() while true do end end)()` hung
+  the game thread forever, no cut, no unload. It cannot be safely re-armed on this Lua-CSharp build (a C#
+  reimplementation's returned function did not round-trip as callable; a Lua redefinition needs a
+  sync-over-async `Load` in `Create()` that deadlocks during domain reload — the 5.8.7 deadlock). It is now
+  stripped (`coroutine.wrap = nil`): mods use the guarded `create` + `resume` pair, and calling the absent
+  `wrap` raises a clean nil-call error instead of hanging. No mod/demo in the repo used `wrap`.
+
+### Changed
+
+- **Corrected the allocation-guard model to match how it actually behaves, and simplified the charging path.**
+  The 5.8.1–5.8.6 design tracked memory trips on a separate "capped streak" meant to unload a mod that
+  allocation-bombs on every call. Runtime measurement showed that premise is false: `GC.GetTotalMemory`
+  reports the COMMITTED-heap high-water mark, so a repeated fixed-size bomb trips only ONCE — the first call
+  grows the heap and trips; every later call reuses that committed space and its per-call delta no longer
+  crosses the budget (a mod bombing every tick under an 8 MB budget tripped ~once across 36 ticks, even with a
+  forced `GC.Collect()` between ticks). The allocation guard is therefore a per-call FIRST-GROWTH backstop,
+  not a cross-call cumulative limiter (Unity's Mono exposes no per-call/per-thread allocation counter to build
+  one). A memory trip is now charged to the ordinary consecutive-error streak (reset on success) like any
+  failure — the once-per-lifetime trip is forgiven by the next success, so a blameless mod is never unloaded
+  by shared-heap noise, and a mod that keeps allocating within the committed envelope is bounded by the
+  per-call step/time budgets. The unreachable separate memory-trip counter/streak and its unload branch are
+  removed; `LuaMemoryBudgetException`/`IsMemoryBudgetTrip` remain (unforgeable, type-based) for the trip's log
+  label. Guard/runtime comments rewritten to state this behaviour honestly.
+
+### Tests
+
+- Added `Coroutine_Wrap_IsRemoved_UnguardablePrimitiveCannotHang` (asserts `coroutine.wrap` is nil and that
+  reaching for it raises promptly rather than hanging — a re-native regression would time the test out) and
+  `LuaCs_SingleMemoryTrip_ChargedButForgivenByNextSuccess_DoesNotUnload`. Documented (with the empirical
+  evidence) why an "every-call bomb is unloaded via a memory streak" test is intentionally absent.
+- Verified via batchmode: mods EditMode 118 passed / 0 failed; full EditMode green.
+
 ## 5.8.7 - Seventh re-audit: runtime-validate the sandbox guards under batchmode; remove a domain-reload deadlock (2026-07-13)
 
 ### Fixed

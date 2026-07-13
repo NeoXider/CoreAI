@@ -66,13 +66,16 @@ namespace CoreAI.Sandbox.LuaCs
         // escape every budget and hang the game. Wrapping `coroutine.resume` arms a per-resume step+time+alloc
         // guard hook on the coroutine's own child state (mirroring LuaCsCoroutineHandle.Resume) and clears it
         // afterwards, so the coroutine body is cut like any other guarded execution.
-        // TODO(coroutine-wrap): `coroutine.wrap` is left native and therefore UNGUARDED — its returned function
-        // resumes a hidden thread through the library's own resume, bypassing this wrapper. Guarding it needs
-        // either a C# reimplementation (returning a Lua function value did not round-trip as callable on this
-        // Lua-CSharp build) or a Lua redefinition (which cannot be installed here without a sync-over-async
-        // Load/Execute in Create() that DEADLOCKS on a thread carrying a SynchronizationContext, e.g. the editor
-        // main thread during domain reload). Until resolved, mods should use create+resume for guarded
-        // coroutines; wrap-based ones rely on the caller's own guarded execution frame as a backstop.
+        //
+        // coroutine.wrap is REMOVED (set nil), not left native: its returned resumer drives a hidden child
+        // thread through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
+        // wrap-created body would run on a child state with NO guard hook — an unbounded-loop / allocation-bomb
+        // host-hang vector (`coroutine.wrap(function() while true do end end)()` hangs the game thread forever,
+        // no cut, no unload). It cannot be safely re-armed on this Lua-CSharp build: a C# reimplementation's
+        // returned Lua function did not round-trip as callable, and a Lua redefinition needs a sync-over-async
+        // Load/Execute in Create() that DEADLOCKS on a SynchronizationContext-bearing thread (the editor main
+        // thread during domain reload). Removing it is fail-safe: mods use the guarded create + resume pair, and
+        // calling the absent wrap raises a clean "attempt to call a nil value" error instead of hanging.
         private static void HardenCoroutineLibrary(LuaState state)
         {
             LuaValue coroValue = state.Environment["coroutine"];
@@ -82,6 +85,10 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             LuaTable coro = coroValue.Read<LuaTable>();
+
+            // WHY: strip the unguardable wrap primitive (see the note above) before any mod can reach it.
+            coro["wrap"] = LuaValue.Nil;
+
             LuaValue nativeResume = coro["resume"];
             if (nativeResume.Type != LuaValueType.Function)
             {
