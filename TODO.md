@@ -2,9 +2,11 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.6 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-10:
-> EditMode 1,613 total / 1,609 passed / 0 failed / 4 optional third-party ignored; deterministic G8
-> PlayMode 3/3; full local `qwen3.5-4b-mtp` G1-G8 benchmark 88.1/100 (G8 3/3); PlayMode `FastNoLlm` 67/67.
+> Released: 5.8.7 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
+> EditMode 1,570 passed / 0 failed / 4 optional third-party ignored; PlayMode `FastNoLlm` 56 passed / 0
+> failed (with graphics — `-nographics` fails 5 GPU/RenderTexture camera tests, environment artifact).
+> LLM-API PlayMode tests (`AgentMemoryOpenAiApiPlayModeTests`, LlmVerification) need a live OpenAI-compatible
+> backend (spark/opencode) — tracked below.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -36,6 +38,11 @@
 - [x] **Re-audit round (5.8.3):** fourth adversarial pass found 3 (2 mine, 1 pre-existing). Fixed the two:
       allocation-guard debounce watermark capped at budget (no transient-garbage ratchet); HTTP-error
       redaction scoped to 401 only (403 kept, was over-blanked). See the open coroutine item below.
+- [x] **[SECURITY, HIGH] Guard mod-created RAW Lua coroutines — VALIDATED under batchmode (5.8.7).** The
+      per-resume step/time/alloc hook fires during native resume; `Coroutine_RunawayLoop_IsCutByResumeBudget`
+      passes. 5.8.7 also removed a `Create()` sync-over-async domain-reload deadlock (see CHANGELOG 5.8.7),
+      gated arming on `LuaState.CanResume`, and left `coroutine.wrap` native (see `TODO(coroutine-wrap)`).
+      Original 5.8.4 implementation note retained below for history.
 - [~] **[SECURITY, HIGH] Guard mod-created RAW Lua coroutines — IMPLEMENTED (5.8.4), NEEDS EDITOR VALIDATION.**
       `LuaCsSecureEnvironment.HardenCoroutineLibrary` now wraps `coroutine.resume`/`wrap` (option a): every
       resume arms a per-resume step + wall-clock hook on the coroutine's child `LuaState` (mirrors
@@ -45,12 +52,30 @@
       surfaced by `LuaValue.Read<LuaState>()` and the hook fires during native resume at runtime; verify the
       `coroutine_countdown` demo still yields correctly; if `Read<LuaState>()` returns null on-device the
       wrappers fail-open (no guard) — fall back to option (b), a `LuaCsCoroutineHandle`-backed shim.
-- [ ] **Verification gate on next editor start:** run the full EditMode + PlayMode suites (Unity holds the
-      project lock during this session, so batchmode is unavailable; compile gate is green across Core /
-      Source / Mods / Mods.Hub / Tests / Mods.Tests / ExampleGame.Tests). New/updated tests:
-      CoreAiEvents/EntryPoint/Facade/LifetimeScope guard, LLM content-gating + error-redaction, audit HMAC,
-      Lua nested-tx + memory-trip (forge + repeat-unload) + import/rehydrate Full-mask, hub Full-tier,
-      WorldStateManager CTS, example-game save/killxp, chat-service tool-call assertion.
+- [x] **Verification gate — DONE via batchmode (5.8.7).** Full EditMode 1,570 passed / 0 failed and PlayMode
+      `FastNoLlm` 56/56 (with graphics). The interactive Unity Test Runner freezes on the sync-over-async Lua
+      guard fixtures by design, so `Unity.exe -runTests -batchmode` is the reliable runner (helper scripts:
+      `unity_ctl.py`, `hunt_spy.py`). New/updated tests all green: CoreAiEvents/EntryPoint/Facade/LifetimeScope
+      guard, LLM content-gating + error-redaction, audit HMAC, Lua nested-tx + memory-trip (forge +
+      repeat-unload) + import/rehydrate Full-mask, hub Full-tier, WorldStateManager CTS, example-game
+      save/killxp, chat-service tool-call assertion.
+
+### Open engineering TODOs (tracked in source as `TODO(...)`)
+
+- [ ] **`TODO(guard-tight-loop-latency)`** — a tight, body-less infinite loop (`while true do end`) is cut
+      only after ~8 s: the Lua-CSharp instruction hook fires coarsely for body-less loops, so the sub-second
+      step/time budgets aren't enforced promptly (bounded but noticeable freeze; not a bypass — it IS cut).
+      Consider a wall-clock watchdog thread or finer hook granularity. Bombs WITH a loop body are cut promptly.
+- [ ] **`TODO(coroutine-wrap)`** — `coroutine.wrap` is left native (only `coroutine.resume` is wrapped) to
+      avoid the removed `Create()` domain-reload deadlock. A `wrap`-created coroutine is still guarded when
+      driven through the guarded `resume` path, but a mod could in principle iterate a native `wrap` closure
+      directly; add a non-deadlocking `wrap` shim (e.g. a `LuaCsCoroutineHandle`-backed wrapper) so `wrap`
+      arms the per-resume guard on its own.
+- [ ] **LLM-API PlayMode gate (spark/opencode):** `AgentMemoryOpenAiApiPlayModeTests` and the LlmVerification
+      assembly need a live OpenAI-compatible endpoint; the full PlayMode run aborts on them without one (the
+      Offline path skips the deterministic-stub tests but the API-integration tests genuinely hit HTTP). Stand
+      up a local OpenAI-compatible server (spark/opencode) and run these + the Lua-mod authoring pipeline +
+      model-behavior audit (tool-call/skill quality).
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 

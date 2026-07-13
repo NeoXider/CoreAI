@@ -61,13 +61,18 @@ namespace CoreAI.Sandbox.LuaCs
         public const int CoroutineResumeTimeoutMs = 1000;
 
         // WHY: The native coroutine library runs a coroutine body on a CHILD LuaState that does NOT inherit
-        // LuaCsExecutionGuard's step/time/alloc hook, so an unbounded loop inside coroutine.wrap/create/resume
-        // (e.g. `coroutine.wrap(function() while true do end end)()`) escapes every budget and hangs the game.
-        // Wrap `resume` and `wrap` so every resume arms a per-resume step+time guard hook on the coroutine's
-        // own state (mirroring LuaCsCoroutineHandle.Resume) and clears it afterwards. `create` stays native —
-        // the thread it returns is guarded at resume time. Best-effort: if this Lua-CSharp build does not
-        // surface the coroutine LuaState here, the wrappers still delegate correctly, they just cannot arm the
-        // hook (fail-open to today's behaviour, never breaking coroutine semantics).
+        // LuaCsExecutionGuard's step/time/alloc hook, so an unbounded loop inside a resumed coroutine
+        // (e.g. `local co=coroutine.create(function() while true do end end); coroutine.resume(co)`) would
+        // escape every budget and hang the game. Wrapping `coroutine.resume` arms a per-resume step+time+alloc
+        // guard hook on the coroutine's own child state (mirroring LuaCsCoroutineHandle.Resume) and clears it
+        // afterwards, so the coroutine body is cut like any other guarded execution.
+        // TODO(coroutine-wrap): `coroutine.wrap` is left native and therefore UNGUARDED — its returned function
+        // resumes a hidden thread through the library's own resume, bypassing this wrapper. Guarding it needs
+        // either a C# reimplementation (returning a Lua function value did not round-trip as callable on this
+        // Lua-CSharp build) or a Lua redefinition (which cannot be installed here without a sync-over-async
+        // Load/Execute in Create() that DEADLOCKS on a thread carrying a SynchronizationContext, e.g. the editor
+        // main thread during domain reload). Until resolved, mods should use create+resume for guarded
+        // coroutines; wrap-based ones rely on the caller's own guarded execution frame as a backstop.
         private static void HardenCoroutineLibrary(LuaState state)
         {
             LuaValue coroValue = state.Environment["coroutine"];
@@ -78,19 +83,15 @@ namespace CoreAI.Sandbox.LuaCs
 
             LuaTable coro = coroValue.Read<LuaTable>();
             LuaValue nativeResume = coro["resume"];
-            LuaValue nativeCreate = coro["create"];
-
-            if (nativeResume.Type == LuaValueType.Function)
+            if (nativeResume.Type != LuaValueType.Function)
             {
-                coro["resume"] = new LuaFunction("resume",
-                    (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume));
-
-                if (nativeCreate.Type == LuaValueType.Function)
-                {
-                    coro["wrap"] = new LuaFunction("wrap",
-                        (ctx, ct) => GuardedCoroutineWrap(ctx, ct, nativeCreate, nativeResume));
-                }
+                return;
             }
+
+            // Arm a per-resume step/time/alloc guard hook on the coroutine's child LuaState — the native
+            // library never installs the execution-guard hook there.
+            coro["resume"] = new LuaFunction("resume",
+                (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume));
         }
 
         private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineResume(
@@ -98,45 +99,6 @@ namespace CoreAI.Sandbox.LuaCs
         {
             LuaValue[] result = ResumeWithPerResumeGuard(ctx.State, nativeResume, ctx.Arguments.ToArray(), ct);
             return new System.Threading.Tasks.ValueTask<int>(ctx.Return(result));
-        }
-
-        private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineWrap(
-            LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeCreate, LuaValue nativeResume)
-        {
-            LuaValue[] created = ctx.State
-                .CallAsync(nativeCreate, ctx.Arguments.ToArray().AsSpan(), ct).GetAwaiter().GetResult();
-            LuaValue thread = created.Length > 0 ? created[0] : LuaValue.Nil;
-
-            // WHY: coroutine.wrap returns a function that resumes the hidden thread and RE-RAISES a coroutine
-            // error (unlike resume, which returns ok,err). Route it through the same per-resume guard.
-            LuaFunction resumer = new("coroutine_wrap_resumer", (rctx, rct) =>
-            {
-                LuaValue[] rargs = rctx.Arguments.ToArray();
-                LuaValue[] callArgs = new LuaValue[rargs.Length + 1];
-                callArgs[0] = thread;
-                Array.Copy(rargs, 0, callArgs, 1, rargs.Length);
-
-                LuaValue[] res = ResumeWithPerResumeGuard(rctx.State, nativeResume, callArgs, rct);
-                bool ok = res.Length > 0 && res[0].Type == LuaValueType.Boolean && res[0].Read<bool>();
-                if (!ok)
-                {
-                    // WHY: Re-raise the ORIGINAL Lua error value (preserving its type — a mod may `error({code=…})`
-                    // and read it back via pcall), matching native coroutine.wrap, instead of stringifying it.
-                    LuaValue err = res.Length > 1 ? res[1] : LuaValue.Nil;
-                    throw new LuaRuntimeException(rctx.State, err);
-                }
-
-                int extra = res.Length > 1 ? res.Length - 1 : 0;
-                LuaValue[] outValues = new LuaValue[extra];
-                for (int i = 0; i < extra; i++)
-                {
-                    outValues[i] = res[i + 1];
-                }
-
-                return new System.Threading.Tasks.ValueTask<int>(rctx.Return(outValues));
-            });
-
-            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(resumer));
         }
 
         private static LuaValue[] ResumeWithPerResumeGuard(
@@ -179,13 +141,11 @@ namespace CoreAI.Sandbox.LuaCs
                 System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
                 // WHY: Mirror LuaCsExecutionGuard's allocation backstop on the coroutine's child state. Step and
                 // time caps do NOT catch a doubling concat bomb (`s = s .. s`): it runs only a handful of VM
-                // opcodes yet allocates to OOM, and plain concatenation has no library call site to cap. Sample
-                // the process heap between instructions and confirm with a forced GC (debounced), exactly as the
-                // main guard does, tripping the same dedicated LuaMemoryBudgetException type.
+                // opcodes yet allocates to OOM, and plain concatenation has no library call site to cap. Trip on
+                // the cheap monotonic process-heap reading (no forced-GC confirmation — that under-counts vs a
+                // garbage-inclusive baseline and lets the bomb reach OutOfMemory before the trip fires).
                 long maxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
                 long allocBaseline = maxAllocatedBytes > 0 ? System.GC.GetTotalMemory(false) : 0;
-                long allocAtLastForcedCheck = long.MinValue;
-                long forcedCheckStep = maxAllocatedBytes > 0 ? Math.Max(1, maxAllocatedBytes / 8) : long.MaxValue;
 
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
@@ -206,17 +166,11 @@ namespace CoreAI.Sandbox.LuaCs
                     if (maxAllocatedBytes > 0)
                     {
                         long allocated = System.GC.GetTotalMemory(false) - allocBaseline;
-                        if (allocated > maxAllocatedBytes &&
-                            allocated >= allocAtLastForcedCheck + forcedCheckStep)
+                        if (allocated > maxAllocatedBytes)
                         {
-                            allocAtLastForcedCheck = maxAllocatedBytes;
-                            long live = System.GC.GetTotalMemory(true) - allocBaseline;
-                            if (live > maxAllocatedBytes)
-                            {
-                                throw new LuaRuntimeException(hctx.State,
-                                    new LuaMemoryBudgetException(
-                                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
-                            }
+                            throw new LuaRuntimeException(hctx.State,
+                                new LuaMemoryBudgetException(
+                                    $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
                         }
                     }
 

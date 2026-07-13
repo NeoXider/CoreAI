@@ -73,19 +73,6 @@ namespace CoreAI.Sandbox.LuaCs
             return false;
         }
 
-        private static bool ExceptionChainContains(Exception ex, Exception target)
-        {
-            for (Exception e = ex; e != null; e = e.InnerException)
-            {
-                if (ReferenceEquals(e, target))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         // WHY: Guarded execution can re-enter on the SAME LuaState (mods_call: a self-call, or A calls B
         // which calls back into A): a nested finally that simply cleared the hook would disarm the
         // limits the still-running outer call depends on, letting the rest of the outer chunk run
@@ -182,16 +169,6 @@ namespace CoreAI.Sandbox.LuaCs
             // It is also thread-agnostic, so the async VM migrating between pool threads is harmless.
             long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
 
-            // WHY: Captured locals, per THIS ExecuteGuarded invocation (re-entrancy-safe — a nested guarded
-            // call gets its own closure). `memoryTrip` holds the EXACT exception this run's hook raised for a
-            // budget trip; the catch converts to the dedicated type only when that exact instance surfaces
-            // (matched by reference), so a trip swallowed by a mod's pcall cannot launder a later error.
-            // `allocAtLastForcedCheck` debounces the expensive forced-GC confirmation so a persistently-high
-            // process heap cannot force a full GC on every instruction.
-            LuaRuntimeException memoryTrip = null;
-            long allocAtLastForcedCheck = long.MinValue;
-            long forcedCheckStep = maxAllocatedBytes > 0 ? Math.Max(1, maxAllocatedBytes / 8) : long.MaxValue;
-
             LuaFunction hook = new("coreai_instruction_guard", (ctx, ct) =>
             {
                 steps++;
@@ -214,38 +191,22 @@ namespace CoreAI.Sandbox.LuaCs
                 // instructions is the only place this hook can catch that pattern.
                 if (maxAllocatedBytes > 0)
                 {
+                    // WHY: Trip on the CHEAP process-heap reading, with NO forced-GC "confirmation". A forced
+                    // GC.GetTotalMemory(true) measured against a garbage-inclusive baseline UNDER-counts (the
+                    // baseline's own collectible garbage is freed by the forced GC), so the trip fired late and
+                    // a doubling bomb reached true OutOfMemory before it was cut. The cheap reading grows
+                    // monotonically with a retained buffer, so it trips promptly and reliably. False positives
+                    // from unrelated process-heap growth are handled downstream: a memory trip is not charged
+                    // to the general error streak and only a mod that trips on EVERY call (never succeeding)
+                    // hits the separate capped memory-trip streak — so a blameless run is at most cut, never
+                    // auto-unloaded. Classify by TYPE (LuaMemoryBudgetException as the CLR cause) — unforgeable
+                    // and pcall-safe — while the outer type stays LuaRuntimeException for the error contract.
                     long allocated = GC.GetTotalMemory(false) - allocBaseline;
-                    if (allocated > maxAllocatedBytes &&
-                        allocated >= allocAtLastForcedCheck + forcedCheckStep)
+                    if (allocated > maxAllocatedBytes)
                     {
-                        // WHY: GC.GetTotalMemory(false) is process-wide and counts collectible garbage —
-                        // both this run's transient allocations and other systems' — so a raw trip has
-                        // false positives that would needlessly cut a blameless run. Confirm with a forced
-                        // collection: only LIVE managed memory that survives a full GC counts. A real
-                        // allocation bomb (s = s .. s / table.concat) RETAINS its doubled buffer, so it
-                        // still trips; unrelated transient growth is reclaimed and does not.
-                        // The forced collection is DEBOUNCED (only re-run once the cheap reading climbs a
-                        // further step) so a process heap that legitimately sits above budget for a while
-                        // cannot induce a full GC on every instruction; a doubling bomb climbs past the step
-                        // within one iteration and still trips promptly.
-                        // WHY: Cap the watermark at the budget (not the inflated cheap reading). The cheap
-                        // reading counts dead/collectible garbage, so setting the watermark to it would let a
-                        // transient garbage spike ratchet the next-confirm threshold arbitrarily high and let a
-                        // mod retain LIVE memory above budget without re-confirmation (fail-open). Capping keeps
-                        // the confirmation window to at most budget + one step regardless of transient noise.
-                        allocAtLastForcedCheck = maxAllocatedBytes;
-                        long live = GC.GetTotalMemory(true) - allocBaseline;
-                        if (live > maxAllocatedBytes)
-                        {
-                            // WHY: Record the exact trip exception so the catch can match it by reference and
-                            // convert to the dedicated LuaMemoryBudgetException type. A trip swallowed by a
-                            // mod's pcall/coroutine is a different instance from any later error(), so it can
-                            // never launder a subsequent unrelated failure into a "memory trip".
-                            memoryTrip = new LuaRuntimeException(ctx.State,
-                                new LuaMemoryBudgetException(
-                                    $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
-                            throw memoryTrip;
-                        }
+                        throw new LuaRuntimeException(ctx.State,
+                            new LuaMemoryBudgetException(
+                                $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
                     }
                 }
 
@@ -258,15 +219,6 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 state.SetHook(hook, string.Empty, 1);
                 return body(cancellationToken);
-            }
-            catch (LuaRuntimeException ex) when (memoryTrip != null && ExceptionChainContains(ex, memoryTrip))
-            {
-                // WHY: This run's own budget trip surfaced unhandled (matched by reference through any VM
-                // re-wrap). Re-raise it as the dedicated, unforgeable type so callers classify it reliably by
-                // TYPE, with the marker in the message for observability. Only the exact trip instance reaches
-                // here, so a mod cannot forge it and a pcall-swallowed trip cannot launder a later error.
-                throw new LuaMemoryBudgetException(
-                    $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)", ex);
             }
             catch (LuaRuntimeException)
             {

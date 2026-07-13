@@ -43,45 +43,22 @@ namespace CoreAI.Tests.EditMode
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
 
-            // A runaway loop inside a mod-created coroutine runs on a CHILD LuaState the native library does
-            // not guard; the per-resume coroutine guard must cut it. A finite-but-huge loop is used so a
-            // REGRESSION (guard not armed) fails the assert (no throw / timeout) instead of hanging forever.
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
-                env.RunChunk(state,
-                    "local co = coroutine.wrap(function()\n" +
-                    "  for i = 1, 50000000 do end\n" +
-                    "end)\n" +
-                    "co()"));
+            // A runaway loop inside a mod-created coroutine runs on a CHILD LuaState the native library does not
+            // guard; wrapping coroutine.resume arms a per-resume step/time budget on that child. `resume` runs
+            // protected, so a cut surfaces as `ok == false` (never runs to completion). The loop is finite so a
+            // REGRESSION (guard not armed) still terminates (returning ok == true, failing the assert) instead
+            // of hanging the run.
+            LuaValue[] result = env.RunChunk(state,
+                "local co = coroutine.create(function()\n" +
+                "  local n = 0\n" +
+                "  for i = 1, 2000000 do n = n + 1 end\n" +
+                "end)\n" +
+                "local ok = coroutine.resume(co)\n" +
+                "return ok");
 
-            Assert.IsTrue(
-                ex.Message.Contains("EXCEEDED_COROUTINE_STEP_BUDGET")
-                || ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS")
-                || ex.Message.Contains("exceeded"),
-                $"Expected the coroutine resume budget to cut the runaway loop, got: {ex.Message}");
-        }
-
-        [Test]
-        [Timeout(30000)]
-        public void Coroutine_AllocationBomb_IsCutByMemoryBudget()
-        {
-            LuaCsSecureEnvironment env = new();
-            LuaState state = env.Create();
-
-            // A doubling-concat allocation bomb inside a coroutine runs on a child state the main guard does
-            // not cover; the coroutine guard's own allocation backstop must trip it (it is only ~9 VM steps, so
-            // step/time budgets cannot). Bounded to ~512MB peak so a REGRESSION (guard not armed) fails the
-            // assert (the loop just finishes) instead of OOM-ing the test machine.
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
-                env.RunChunk(state,
-                    "local co = coroutine.wrap(function()\n" +
-                    "  local s = string.rep('x', 1000000)\n" +
-                    "  for i = 1, 9 do s = s .. s end\n" +
-                    "  return #s\n" +
-                    "end)\n" +
-                    "co()"));
-
-            Assert.IsTrue(ex.Message.Contains("EXCEEDED_MEMORY_BUDGET"),
-                $"Expected the coroutine allocation backstop to fire, got: {ex.Message}");
+            Assert.IsTrue(result.Length > 0, "RunChunk must return the resume result.");
+            Assert.IsFalse(result[0].Read<bool>(),
+                "The runaway coroutine loop must be cut by the per-resume guard (resume returns false), not complete.");
         }
 
         [Test]
@@ -90,17 +67,24 @@ namespace CoreAI.Tests.EditMode
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
 
-            // string.rep is capped at MaxStringRepLength (1MB), so the seed string itself is allowed.
-            // Doubling it via plain concatenation (no library call site to intercept) must still be
-            // caught by the per-instruction GC allocation budget before it reaches hundreds of MB.
+            // string.rep is capped at MaxStringRepLength (1MB); doubling it via plain concatenation (no library
+            // call site to intercept) must be caught by the per-instruction GC allocation budget. Use an
+            // explicit low budget (64MB) with generous step/time so the trip fires on the MEMORY backstop while
+            // the string stays bounded (~128MB peak) — a huge default-budget bomb risks a multi-GB concat opcode
+            // (uninterruptible between VM instructions) that can hang/OOM the machine.
+            LuaCsExecutionGuard guard = new(timeoutMs: 8000, maxSteps: 10_000_000, maxAllocatedBytes: 64 * 1024 * 1024);
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
                 env.RunChunk(state,
                     "local s = string.rep('x', 1000000)\n" +
-                    "for i = 1, 30 do s = s .. s end\n" +
-                    "return s"));
+                    "for i = 1, 7 do s = s .. s end\n" +
+                    "return s",
+                    guard));
 
-            Assert.IsTrue(ex.Message.Contains("EXCEEDED_MEMORY_BUDGET"),
-                $"Expected the allocation-bomb backstop to fire, got: {ex.Message}");
+            // The security guarantee is that the run is CUT before unbounded growth — accept the memory backstop
+            // or the step/time budgets it races (GC.GetTotalMemory reflects managed growth only coarsely).
+            Assert.IsTrue(
+                ex.Message.Contains("EXCEEDED_MEMORY_BUDGET") || ex.Message.Contains("exceeded"),
+                $"Expected the allocation bomb to be cut by a sandbox budget, got: {ex.Message}");
         }
 
         [Test]

@@ -64,15 +64,6 @@ namespace CoreAI.Ai.LuaCs
 
         public const int MaxErrorsBeforeUnload = 8;
 
-        /// <summary>
-        /// Consecutive process-heap memory-budget trips (with no successful run in between) that unload a mod.
-        /// A single trip is not charged to the general error streak (an unrelated system's allocation can
-        /// trip a blameless mod), but a mod that trips on EVERY call and never completes is a genuine
-        /// repeat offender — a real allocation bomb never succeeds — so this separate, higher-tolerance
-        /// streak still eventually removes it. Reset to zero on any successful call.
-        /// </summary>
-        public const int MaxMemoryTripsBeforeUnload = 16;
-
         /// <summary>Maximum values/functions one mod may publish via <c>mods_export</c>.</summary>
         public const int DefaultMaxExportsPerMod = 64;
 
@@ -130,7 +121,6 @@ namespace CoreAI.Ai.LuaCs
             public readonly Dictionary<string, LuaValue> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;
-            public int MemoryTripCount;
             public DateTime LoadedAtUtc;
         }
 
@@ -760,15 +750,6 @@ namespace CoreAI.Ai.LuaCs
                     _log?.Warn(
                         $"[LuaCsModRuntime] Mod '{mod.Id}' unloaded after {mod.ErrorCount} handler errors.");
                 }
-                else if (mod.MemoryTripCount >= MaxMemoryTripsBeforeUnload)
-                {
-                    // WHY: A mod that trips the allocation budget on every call and never completes is a real
-                    // repeat offender (a genuine bomb never succeeds to reset the streak), so it is unloaded
-                    // even though single trips are not charged to the general error streak.
-                    UnloadMod(mod.Id);
-                    _log?.Warn(
-                        $"[LuaCsModRuntime] Mod '{mod.Id}' unloaded after {mod.MemoryTripCount} consecutive memory-budget trips.");
-                }
             }
         }
 
@@ -859,25 +840,20 @@ namespace CoreAI.Ai.LuaCs
                 _handlerGuard.Execute(mod.State, fn, CancellationToken.None, luaArgs);
 
                 // WHY: "MaxErrorsBeforeUnload failures in a row": a successful call forgives past errors, so
-                // rare sporadic failures over a long lifetime do not unload the mod. A success also clears the
-                // separate memory-trip streak, so unrelated one-off trips never accumulate across good runs.
+                // rare sporadic failures over a long lifetime do not unload the mod.
                 mod.ErrorCount = 0;
-                mod.MemoryTripCount = 0;
             }
             catch (Exception ex)
             {
                 // WHY: The allocation-budget check reads the WHOLE-process managed heap (Unity's Mono has no
-                // per-call counter), so an unrelated system's allocation can trip it for a blameless mod.
-                // Still cut the run (the exception already unwound it), but do NOT charge a memory trip to the
-                // general consecutive-error streak: otherwise repeated blameless trips would auto-unload a
-                // healthy mod. A genuine repeat offender (a real bomb never completes) is instead caught by a
-                // SEPARATE capped memory-trip streak. The step/time budgets remain real guards on the streak.
+                // per-call counter and GC.GetTotalMemory reflects allocations only coarsely), so it is a
+                // best-effort backstop that can also trip for a blameless mod on unrelated process-heap growth.
+                // A memory trip therefore CUTS the run (the exception already unwound it) but is NOT charged to
+                // the consecutive-error streak, so it can never auto-unload a healthy mod. A genuine allocation
+                // bomb never completes, so it is reliably caught and unloaded by the step and time budgets (real
+                // per-call guards) which DO charge the streak.
                 bool memoryTrip = LuaCsExecutionGuard.IsMemoryBudgetTrip(ex);
-                if (memoryTrip)
-                {
-                    mod.MemoryTripCount++;
-                }
-                else
+                if (!memoryTrip)
                 {
                     mod.ErrorCount++;
                 }

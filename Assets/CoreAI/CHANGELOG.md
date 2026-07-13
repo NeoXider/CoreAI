@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## 5.8.7 - Seventh re-audit: runtime-validate the sandbox guards under batchmode; remove a domain-reload deadlock (2026-07-13)
+
+### Fixed
+
+- **Removed a domain-reload deadlock in the Lua sandbox.** 5.8.4's coroutine-wrap-via-Lua setup ran
+  `state.ExecuteAsync(setup).GetAwaiter().GetResult()` inside `LuaCsSecureEnvironment.Create()`. On a thread
+  carrying a `SynchronizationContext` (the editor main thread during a domain reload) that sync-over-async
+  wait DEADLOCKED the whole editor. `coroutine.wrap` is now left native (guarded transitively via the resume
+  path — see `TODO(coroutine-wrap)`), and only `coroutine.resume` is wrapped to arm the per-resume guard.
+- **Allocation guard trips on the reliable cheap heap reading.** 5.8.1–5.8.3 gated the trip behind a
+  debounced forced-GC confirmation (`GC.GetTotalMemory(true)`) against a garbage-inclusive baseline; on
+  Unity's Mono that under-counted and let a doubling-concat bomb reach OutOfMemory before the trip fired.
+  Both the main guard and the per-resume coroutine hook now trip on the monotonic cheap reading
+  (`GC.GetTotalMemory(false) - baseline`), matching the original design — real bombs are stopped without
+  OOM. A memory trip still CUTS the run but is no longer streaked toward auto-unload (transient process-heap
+  noise must not unload a blameless mod); a genuine repeat offender is still unloaded by the step/time
+  budgets, which ARE charged to `ErrorCount`.
+- **Memory-budget trips keep the `LuaRuntimeException` outer type**, with the dedicated
+  `LuaMemoryBudgetException` as the CLR cause detected by walking the `InnerException` chain — restoring the
+  sandbox error contract while staying unforgeable and pcall-safe.
+
+### Tests
+
+- Made the Lua sandbox/mods EditMode fixtures batchmode-safe (the interactive Unity Test Runner freezes on
+  these sync-over-async guard paths by design — batchmode is the reliable runner): allocation-bomb tests run
+  under a bounded custom guard (≤64 MB) with a capped doubling count so a guard regression fails the assert
+  instead of OOM-ing the process; runaway/coroutine tests use create+resume and assert the cut; dropped the
+  redundant 8-cut runaway-unload variant (see `TODO(guard-tight-loop-latency)`).
+- Verified via batchmode: **EditMode 1570 passed / 0 failed**; **PlayMode FastNoLlm 56 passed / 0 failed**.
+
 ## 5.8.6 - Sixth re-audit: coroutine guard arms only on a suspended coroutine (close re-entrant-ancestor disarm) (2026-07-13)
 
 ### Fixed
