@@ -306,16 +306,19 @@ namespace CoreAI.Tests.PlayMode
                             "Runtime clear/tool-result behavior is covered by deterministic tests; this is model/backend compliance.");
                     }
 
-                    //  :      tool call'
-                    bool memoryCleared = !store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out _);
+                    // WHY: the memory tool's `clear` action EMPTIES the document (MemoryMutationPlan.Change(""))
+                    // — it deliberately keeps the store record with Memory == "", it does not delete the entry.
+                    // So "cleared" means "no entry OR empty content", not "entry absent" (the old check wrongly
+                    // failed the run even though HasCompletedMemoryAction("clear") above already proved the model
+                    // emitted and completed the real tool call).
+                    bool memoryCleared =
+                        !store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState clearedState)
+                        || string.IsNullOrEmpty(clearedState?.Memory);
 
                     if (!memoryCleared)
                     {
-                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState s)
-                            ? s.Memory
-                            : "(none)";
-                        Debug.LogWarning($"[AllToolCalls]  CLEAR FAILED: Memory NOT cleared by tool call. " +
-                                         $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                        Debug.LogWarning($"[AllToolCalls]  CLEAR FAILED: memory(action=clear) completed but the " +
+                                         $"document is not empty. Current memory: '{clearedState?.Memory}'.");
                     }
                     else
                     {
@@ -323,7 +326,7 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     Assert.IsTrue(memoryCleared,
-                        "Memory must be cleared by actual tool call. Memory store should be empty.");
+                        "Memory must be emptied by the clear tool call (empty document, entry may remain).");
                 }
 
                 Debug.Log("[AllToolCalls]  MEMORY TOOL TEST PASSED ");

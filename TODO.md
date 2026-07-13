@@ -2,10 +2,11 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.9 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
-> mods EditMode 119 passed / 0 failed; full EditMode green; PlayMode `FastNoLlm` 56 passed / 0 failed (with
-> graphics — `-nographics` fails 5 GPU/RenderTexture camera tests, environment artifact). LLM-API PlayMode
-> tests run against a local LM Studio OpenAI endpoint (`qwen3.5-4b-mtp`) — see the LLM-API gate below.
+> Released: 5.8.10 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
+> full EditMode 1573 passed / 0 failed; PlayMode `FastNoLlm` 56 passed / 0 failed (with graphics —
+> `-nographics` fails 5 GPU/RenderTexture camera tests, an environment artifact); a live LlmVerification
+> subset is green on the LM Studio `qwen3.5-4b-mtp` OpenAI endpoint (tools / skills / agents / memory /
+> execute_lua) — see the LLM-API gate below.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -109,6 +110,14 @@
       reflection that can no-op under IL2CPP stripping (degrades gracefully).
 - [x] Representative local 4B live checks: memory write and real `world_command` spawn pass on
       `qwen3.5-4b-mtp`.
+- [x] **Model-behavior verification (5.8.10, LM Studio `qwen3.5-4b-mtp` OpenAI endpoint).** Ran a
+      representative LlmVerification PlayMode subset live: tool-calling, custom agents (all 4 modes), skill
+      self-service (read-then-use), skill-tool proxy, skill tool discovery, memory write/append/clear, and the
+      `execute_lua` Lua-authoring pipeline (model writes correct sandbox-scoped Lua) — all pass. Verdict: the
+      tool-call/skill design is sound (a 4B model handles the whole surface); the tool contract explicitly
+      guards narration-instead-of-action. Found + fixed one false-failing test (memory-clear asserted entry
+      removal vs the documented empty-document semantics). Path A LLM tests need the asset's `qwopus3.5-9b`
+      model loaded; running 4B+9B + Unity PlayMode together OOMs this machine (env resource limit, not a bug).
 - [ ] Verify the AI writes mods through the Hub chat in each kept Hub-enabled demo with local 4B/9B/27B
       (LM Studio) and Opus 4.8 via the bundled preset (`Assets/Resources/CoreAIPresets/`,
       bridge: `agent.sh openai-server -e claude -m opus`). *(API models are already proven through the

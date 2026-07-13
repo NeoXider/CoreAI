@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## 5.8.10 - Live model-behavior verification; fix a false-failing memory-clear test (2026-07-13)
+
+### Fixed
+
+- **`AllToolCalls_MemoryTool_WriteAppendClear` no longer fails when the model clears memory correctly.** The
+  test asserted the `clear` tool REMOVED the store entry (`!store.TryLoad(...)`), but the memory tool's
+  `clear` action EMPTIES the document (`MemoryMutationPlan.Change("")`) and keeps the record by design
+  ("clear empties memory"). So the run failed even though `HasCompletedMemoryAction("clear")` already proved
+  the model emitted and completed the real `memory(action=clear)` call and the document was empty. It now
+  asserts "no entry OR empty content", matching the documented clear semantics; the misleading "model
+  responded with text instead" warning is corrected (the model DID call the tool).
+
+### Verified (live model behavior — LM Studio, reference model `qwen3.5-4b-mtp`)
+
+- Ran a representative subset of the LlmVerification PlayMode suite against a live OpenAI-compatible endpoint:
+  tool-calling, custom agents (ToolsOnly / ToolsAndChat / ChatOnly / WithAction), skill self-service
+  (read-then-use), skill-tool proxy, skill tool discovery, memory write/append/clear, and the `execute_lua`
+  Lua-authoring pipeline (the model writes correct sandbox-scoped Lua) — all pass. The tool-call/skill design
+  is sound: a 4B model handles the full surface correctly, and the tool contract explicitly guards against
+  narration-instead-of-action. (Z.AI had no balance and no spark/opencode OpenAI endpoint was available, so
+  the documented local benchmark reference model was used.)
+
 ## 5.8.9 - Demo/benchmark review wave: per-scene gameplay-binding seam + honest fixes (2026-07-13)
 
 ### Added
