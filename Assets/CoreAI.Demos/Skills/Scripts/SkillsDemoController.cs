@@ -61,6 +61,16 @@ namespace CoreAI.Demos
                 .WithMode(AgentMode.ToolsAndChat)
                 .Build();
 
+            // WHY: ApplyToPolicy dereferences CoreAIAgent.Policy; if the LLM module is uninitialized (no scene
+            // scope / backend) it is null, so guard and disable gracefully instead of throwing an NRE in Start.
+            if (CoreAIAgent.Policy == null)
+            {
+                _response = "LLM module is not initialized (CoreAIAgent facade is empty); demo is inactive.";
+                Debug.LogWarning("[SkillsDemo] " + _response);
+                enabled = false;
+                return;
+            }
+
             _agent.ApplyToPolicy(CoreAIAgent.Policy);
         }
 

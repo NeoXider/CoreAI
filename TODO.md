@@ -2,8 +2,8 @@
 
 > Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.8 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
-> mods EditMode 118 passed / 0 failed; full EditMode green; PlayMode `FastNoLlm` 56 passed / 0 failed (with
+> Released: 5.8.9 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
+> mods EditMode 119 passed / 0 failed; full EditMode green; PlayMode `FastNoLlm` 56 passed / 0 failed (with
 > graphics — `-nographics` fails 5 GPU/RenderTexture camera tests, environment artifact). LLM-API PlayMode
 > tests run against a local LM Studio OpenAI endpoint (`qwen3.5-4b-mtp`) — see the LLM-API gate below.
 
@@ -88,6 +88,25 @@
       unexpected startup errors. Fixed missing Mods scopes, Mirror remnants, Hub wiring, and Wave URP color.
 - [ ] Complete manual interaction drivers for every demo (buttons, input, battle loops, F9/F10,
       mod load/unload/restart persistence) with screenshots; startup smoke is not full UX acceptance.
+- [~] **Demo review wave (5.8.9, from a multi-agent demo/benchmark audit).** Fixed: Skills demo now guards
+      `CoreAIAgent.Policy == null` before `ApplyToPolicy` (no NRE when the LLM module is uninitialized);
+      LiveMechanicsModsChat `ActivateSavedMod` now grants the SAME Full-aware capability as the autoload path
+      (a panel-activated Full-tier mod no longer silently loses `unity_*`); benchmark G6 `clean_tools` now
+      requires `ToolCalls >= 1` so a do-nothing run cannot bank the points vacuously.
+- [ ] **`TODO(moddableunits-binding-seam)`** — make the ModdableUnits demo actually functional. The mod
+      runtime seam now exists (`LuaCsModStackOptions.AdditionalGameplayBindings`, added 5.8.9, with an EditMode
+      test proving an injected API reaches a loaded mod). REMAINING (demo composition, ~a dozen lines + a
+      lifetime decision): thread that option through `CoreAiModsInstaller.RegisterCoreAiMods` and
+      `CoreAiModsLifetimeScope`, and register `UnitForgeLuaBindings` with a LAZY `IUnitForge` lookup (the scene
+      forge is only available at controller `Start`, after the mods scope builds and rehydrates mods). Then
+      PlayMode-validate the scene and restore the README claim (currently relabelled aspirational).
+- [ ] **Demo hygiene (low):** untrack `Assets/Scenes/AutoSaves/` (11 Hub crash-protection autosave scenes,
+      committed before `.gitignore:107`); do not commit the local-LLM wiring in the working-tree
+      `MiniRpgModsDemo.unity` (machine-specific `localhost:13333` + a gguf not in the repo); optionally register
+      all 10 demo scenes in build settings (currently only Hub + FullAccess; the CoreAI menu auto-inserts on
+      open, which is editor-only). Also non-blocking: `CoreAiDemoScope.ResolveModsContainer` throws on a
+      mis-wired scope (unreachable in shipped scenes); `ChatPromptButtonsController` input-insert uses
+      reflection that can no-op under IL2CPP stripping (degrades gracefully).
 - [x] Representative local 4B live checks: memory write and real `world_command` spawn pass on
       `qwen3.5-4b-mtp`.
 - [ ] Verify the AI writes mods through the Hub chat in each kept Hub-enabled demo with local 4B/9B/27B

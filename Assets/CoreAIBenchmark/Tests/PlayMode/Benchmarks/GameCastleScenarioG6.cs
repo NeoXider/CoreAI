@@ -120,11 +120,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 g.Add("used_tools", "issued at least one tool call", 10, run.ToolCalls >= 1,
                     true,
                     dimension: BenchmarkDimension.ToolCorrectness);
+                // WHY: require at least one tool call so a DO-NOTHING run cannot bank these points vacuously
+                // (zero calls trivially has zero failures/invalid commands). "Clean" must mean "acted cleanly".
                 g.Add("clean_tools", "no failed tool calls or invalid world commands", 10,
-                    run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
+                    run.ToolCalls >= 1 && run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
                     true,
                     dimension: BenchmarkDimension.ToolCorrectness,
-                    detail: $"{run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
+                    detail: $"{run.ToolCalls} calls, {run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
             }
         }
 

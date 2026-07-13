@@ -636,7 +636,13 @@ namespace CoreAI.Demos
                 }
                 else
                 {
-                    _mods.LoadMod(descriptor.Id, descriptor.Source, LuaCapabilities.All);
+                    // WHY: Grant the SAME tier the autoload path grants (see LoadSavedMods). A Full-tier mod
+                    // (unity_* APIs) loaded with a hardcoded All silently no-ops here, so a mod activated from
+                    // the panel button would lose the unity_* calls it has when autoloaded at scene start.
+                    LuaCapabilities activateCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
+                        ? LuaCapabilities.All | LuaCapabilities.Full
+                        : LuaCapabilities.All;
+                    _mods.LoadMod(descriptor.Id, descriptor.Source, activateCaps);
                 }
 
                 _status = $"Activated mod '{descriptor.Id}'.";

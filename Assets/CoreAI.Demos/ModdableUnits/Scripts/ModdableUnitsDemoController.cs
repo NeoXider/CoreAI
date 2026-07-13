@@ -86,11 +86,13 @@ namespace CoreAI.Demos
             _mods.ModEventEmitted += OnModEvent;
             _mods.ModSourceLoaded += OnModLoaded;
 
-            // The forge API (forge_define / forge_spawn / ...) is authored as a Lua-CSharp gameplay
-            // binding set. NOTE: the active Lua-CSharp mod runtime does not yet expose a host seam for
-            // injecting per-scene extension bindings, so these bindings cannot currently be surfaced to
-            // running mods from the demo layer alone. The instance is kept ready so the forge can be
-            // wired the moment CoreAI.Mods adds such an extension point.
+            // The forge API (forge_define / forge_spawn / ...) is authored as a Lua-CSharp gameplay binding
+            // set. The runtime seam now exists: LuaCsModStackOptions.AdditionalGameplayBindings feeds a
+            // per-scene Action<LuaCsApiRegistry, LuaCapabilities> into both the persistent runtime and the
+            // one-off executor. What remains to surface it here is composition plumbing — threading that option
+            // through CoreAiModsInstaller.RegisterCoreAiMods / CoreAiModsLifetimeScope and resolving this
+            // forge LAZILY (it is a scene ref available only at Start, after the mods scope builds/rehydrates).
+            // See TODO(moddableunits-binding-seam). The instance is kept ready for that wiring.
             _bindings = new UnitForgeLuaBindings(this);
 
             EnsureUnitRoot();

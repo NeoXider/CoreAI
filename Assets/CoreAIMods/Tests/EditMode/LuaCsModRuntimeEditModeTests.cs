@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
@@ -633,6 +634,34 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(stack.Runtime.IsLoaded("occasional"),
                 "A single memory trip followed by successful calls must be forgiven (streak reset) and keep the mod loaded.");
+        }
+
+        [Test]
+        public void LuaCs_AdditionalGameplayBindings_ReachLoadedMods()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                // A host/per-scene binding injected alongside the built-in surface (the seam a demo uses to add
+                // e.g. forge_define). It must reach a persistently-loaded mod's handler.
+                AdditionalGameplayBindings = (registry, caps) =>
+                    registry.Register("extra_double", new Func<double, double>(x => x * 2))
+            });
+
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('go', function()
+                    store_set('r', tostring(extra_double(21)))
+                end)");
+
+            stack.Runtime.EmitEvent("go", "");
+            stack.Runtime.Tick(0);
+
+            StringAssert.StartsWith("42", store.Get("m", "r"),
+                "An injected AdditionalGameplayBindings API must be callable from a loaded mod's handler.");
         }
 
         [Test]

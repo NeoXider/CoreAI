@@ -17,10 +17,11 @@ as a Lua-CSharp `ILuaCsGameRuntimeBindings` set intended for the **WorldEdit** c
 When wired into the mod runtime, a mod granted WorldEdit (the default tier) gets these extra
 Lua functions:
 
-> NOTE: the active Lua-CSharp mod runtime does not yet expose a host seam for injecting per-scene
-> extension bindings, so the forge functions below are authored and ready but are not currently
-> surfaced to running mods from the demo layer alone. They become live once CoreAI.Mods adds such
-> an extension point.
+> NOTE: the mod runtime now exposes the seam (`LuaCsModStackOptions.AdditionalGameplayBindings`), but the
+> demo's composition layer does not yet thread it through, so the forge functions below are authored and
+> ready but not currently surfaced to running mods. They become live once the demo wires that option through
+> `CoreAiModsInstaller.RegisterCoreAiMods` / `CoreAiModsLifetimeScope` with a lazy forge lookup — tracked as
+> `TODO(moddableunits-binding-seam)`.
 
 | Function | Effect |
 |---|---|
@@ -39,8 +40,9 @@ spawns and team wipes are emitted back to mods as events:
 | `unit_died` | `name:team` |
 | `team_wiped` | `team` |
 
-So a mod can react to its own world with `hooks_on(...)` and drive it over time with
-`hooks_every(...)` — a complete game emerges from mods alone.
+The intended design lets a mod react to its own world with `hooks_on(...)` and drive it over time with
+`hooks_every(...)`, so a complete game emerges from mods alone. See the NOTE below: the `forge_*` scene
+bindings are authored but not yet threaded into the mod runtime, so this demo is currently aspirational.
 
 ## Requirements
 

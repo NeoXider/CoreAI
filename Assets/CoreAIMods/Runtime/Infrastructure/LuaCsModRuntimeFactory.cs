@@ -93,6 +93,16 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </summary>
         public long HandlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
+
+        /// <summary>
+        /// Optional per-scene/host gameplay bindings registered IN ADDITION to the built-in world/data/prefab
+        /// surface, on BOTH the persistent runtime and the one-off executor. Lets a scene inject its own Lua
+        /// APIs (e.g. a demo's <c>forge_define</c>/<c>forge_spawn</c>) through the same
+        /// <c>Action&lt;LuaCsApiRegistry, LuaCapabilities&gt;</c> seam without replacing the core surface. It runs
+        /// AFTER the built-in bindings, so it may add to or override them. Register your names against a value
+        /// resolved LAZILY (at call time) if the backing scene object is not ready at scope-build. Null = none.
+        /// </summary>
+        public Action<LuaCsApiRegistry, LuaCapabilities> AdditionalGameplayBindings;
     }
 
     /// <summary>
@@ -155,8 +165,18 @@ namespace CoreAI.Ai.LuaCs
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
                 capabilities: options.Capabilities);
 
+            // WHY: Register the built-in surface first, then any host/per-scene additions, through the SAME
+            // seam, so an injected demo API (forge_define/...) reaches every loaded mod alongside the core APIs.
+            Action<LuaCsApiRegistry, LuaCapabilities> registerAll = options.AdditionalGameplayBindings == null
+                ? bindings.Register
+                : (registry, caps) =>
+                {
+                    bindings.Register(registry, caps);
+                    options.AdditionalGameplayBindings(registry, caps);
+                };
+
             LuaCsModRuntime runtime = new(
-                bindings.Register,
+                registerAll,
                 options.ModStore,
                 options.Log,
                 options.HandlerTimeoutMs,
@@ -174,7 +194,8 @@ namespace CoreAI.Ai.LuaCs
 
             LuaCsGameToolExecutor executor = new(
                 new LuaCsSecureEnvironment(),
-                new CapabilityScopedGameRuntimeBindings(bindings, options.OneOffCapabilities),
+                new CapabilityScopedGameRuntimeBindings(
+                    bindings, options.OneOffCapabilities, options.AdditionalGameplayBindings),
                 options.ExecutionObserver ?? new NullLuaExecutionObserver());
 
             return new LuaCsModStack(runtime, executor, bindings);
@@ -189,16 +210,22 @@ namespace CoreAI.Ai.LuaCs
         {
             private readonly LuaCsGameplayBindings _bindings;
             private readonly LuaCapabilities _capabilities;
+            private readonly Action<LuaCsApiRegistry, LuaCapabilities> _additional;
 
-            public CapabilityScopedGameRuntimeBindings(LuaCsGameplayBindings bindings, LuaCapabilities capabilities)
+            public CapabilityScopedGameRuntimeBindings(
+                LuaCsGameplayBindings bindings,
+                LuaCapabilities capabilities,
+                Action<LuaCsApiRegistry, LuaCapabilities> additional = null)
             {
                 _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
                 _capabilities = capabilities;
+                _additional = additional;
             }
 
             public void RegisterGameplayApis(LuaCsApiRegistry registry)
             {
                 _bindings.Register(registry, _capabilities);
+                _additional?.Invoke(registry, _capabilities);
             }
 
             public void ResetTransactions()

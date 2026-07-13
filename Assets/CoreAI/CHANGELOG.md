@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## 5.8.9 - Demo/benchmark review wave: per-scene gameplay-binding seam + honest fixes (2026-07-13)
+
+### Added
+
+- **`LuaCsModStackOptions.AdditionalGameplayBindings`** — an optional per-scene/host
+  `Action<LuaCsApiRegistry, LuaCapabilities>` fed, alongside the built-in world/data/prefab surface, into BOTH
+  the persistent runtime and the one-off `execute_lua` executor. Lets a scene inject its own Lua APIs (e.g. a
+  demo's `forge_define`/`forge_spawn`) through the existing runtime seam without replacing the core surface;
+  it runs AFTER the built-ins so it can add to or override them. Covered by
+  `LuaCs_AdditionalGameplayBindings_ReachLoadedMods` (an injected API is callable from a loaded mod's handler).
+
+### Fixed
+
+- **Skills demo no longer throws an NRE when the LLM module is uninitialized.** `SkillsDemoController.Start`
+  now guards `CoreAIAgent.Policy == null` before `ApplyToPolicy` and disables gracefully (mirroring the
+  DirectorAi demo), instead of an uncaught `NullReferenceException` in `Start`.
+- **LiveMechanicsModsChat: a mod activated from the panel button keeps its Full tier.** `ActivateSavedMod`
+  hardcoded `LuaCapabilities.All`, so a Full-tier mod (using `unity_*`) silently lost those calls when
+  activated from the panel, while the same mod worked when autoloaded at scene start. It now computes the same
+  Full-aware capability as the autoload path (`All | Full` when the scope has Full Lua access enabled).
+- **Benchmark G6 `clean_tools` no longer passes vacuously for a do-nothing run.** The "no failed tool calls /
+  invalid commands" checkpoint trivially held for a run that issued zero tool calls; it now also requires
+  `ToolCalls >= 1`, so "clean" means "acted cleanly" rather than "did nothing".
+
+### Docs
+
+- ModdableUnits demo relabelled honestly as aspirational: the `forge_*` scene bindings are authored but not
+  yet threaded through the demo's composition layer to running mods (the runtime seam now exists — see Added).
+  Tracked as `TODO(moddableunits-binding-seam)` with the exact remaining wiring.
+
 ## 5.8.8 - Eighth re-audit: close a coroutine.wrap host-hang; correct the allocation-guard model (2026-07-13)
 
 ### Fixed
