@@ -6,6 +6,29 @@
 
 Related docs: [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (core data flow), [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) (roles and model sizes), `CoreAILifetimeScope` (LLM backend selection).
 
+Since 5.9, a local model is a named runtime endpoint rather than a global exclusive backend. CoreAI waits
+for both the LLMUnity native `started/failed` state and its OpenAI-compatible HTTP socket before publishing
+it as Ready. External HTTP endpoints prefer `GET {BaseUrl}/models`; when that optional route returns
+`404`/`405`, CoreAI falls back to a minimal `POST {BaseUrl}/chat/completions` and requires a handler-level
+response. Authentication, missing completion routes, server errors, and network failures still fail
+readiness. LLMUnity does not implement
+`/v1/models`, so after native startup CoreAI probes `POST /v1/chat/completions`; an HTTP response proves the
+socket and route accept connections, except `401`/`403`, which remain failures when authentication is
+configured. A request that arrives during startup awaits the shared activation rather than bypassing
+readiness. This permits an LLMUnity agent and one or more HTTP agents to work concurrently.
+
+CoreAI writes structured `[CoreAI.LLMUnity]` lifecycle logs for both runtime endpoints and the legacy
+autostart path. `phase=native_startup` measures the llama.cpp/GGUF warmup itself; `phase=http_readiness`
+measures the following OpenAI-compatible route probe. Completed phases include `durationMs` plus endpoint
+id/display name, model filename, LLMAgent name, and port. Failures include the exception type and a
+single-line message. API keys and full local model paths are never included.
+
+For more than one local endpoint, create a distinct, named `LLMAgent`/`LLM` host for each endpoint and give
+each host a unique port. Point `LlmEndpointDescriptor.UnityAgentName` at the corresponding GameObject.
+Changing a running host's model or port in place is intentionally rejected: it would tear down the host used
+by the currently published generation and violate zero-downtime switching. Stage the replacement on a
+separate host, wait for Ready, then change the agent/profile assignment.
+
 ### Official LLMUnity documentation (Undream AI)
 
 - Overview and API: [undream.ai/LLMUnity](https://undream.ai/LLMUnity)  

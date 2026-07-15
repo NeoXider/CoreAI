@@ -17,6 +17,10 @@ WorldCommandsDemoController
 The OnGUI buttons publish `CoreAiWorldCommandEnvelope` envelopes (spawn an enemy from
 `CoreAiPrefabRegistryAsset`, move and recolor `Boss`, destroy).
 
+The scene demonstrates the modular composition layout: `CoreAILifetimeScope` has a child
+`Lua and World Commands` object whose `CoreAiLuaWorldModule` owns the prefab whitelist and scene-access
+configuration. The root scope contains no primary Lua/world settings.
+
 ## Why It Exists
 
 - Quickly verify that the scene router/executor/prefab registry are configured correctly before

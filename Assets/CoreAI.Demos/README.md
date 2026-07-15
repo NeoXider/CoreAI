@@ -11,6 +11,8 @@ minimal scripts, and a README.
 | [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua mods (`ILuaModRuntime`): hooks, timers, events, store, capability tiers; `LuaCsLogicSlots` — overriding the damage formula from Lua | No |
 | [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | AI command pipeline: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (the same path used by LLM agents and Lua bindings) | No |
 | [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: skill catalog, `read_skill` / `call_skill_tool`, a "game master" agent with crafting and combat | Yes |
+| [Qwen Genie](QwenDemo/README.md) | `QwenDemo/QwenGenieDemo.unity` | Qwen 0.8B maps a free-form wish to one guarded native tool call | Yes |
+| [Qwen Spellcraft](QwenDemo/README.md) | `QwenDemo/QwenSpellcraftDemo.unity` | Qwen 0.8B maps free-form spell text to element/power; C# owns mana and determinism self-test | Yes |
 | [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **A real LLM changes mechanics live through chat**: the Programmer role writes Lua → `execute_lua` pipeline → logic slots / `LuaModRuntime` / world commands | Yes |
 | [FullAccess](FullAccess/README.md) | `FullAccess/FullAccessDemo.unity` | Full-tier `unity_*` access (opt-in): Programmer can inspect scene objects, components, transforms, and hierarchy, then move/rotate/parent objects from Lua | Yes |
 | [ModdableUnits](ModdableUnits/README.md) | `ModdableUnits/ModdableUnitsDemo.unity` | _Aspirational — the `forge_*` scene bindings are not yet wired to the mod runtime (see the demo README); the intended design has mods build armies via `forge_define`/`forge_spawn` with `hooks_every`/`hooks_on` driving an auto-battle_ | Yes |
@@ -31,6 +33,12 @@ minimal scripts, and a README.
   a live model, so without one you can load the scene but the AI-driven part stays idle.
   The remaining demos (LuaMods, WorldCommands) exercise the Lua/command pipeline directly and
   run fully offline.
+
+The two Qwen scenes are stricter live-model verification demos: their controls stay disabled until native
+LLMUnity startup completes and its `/v1/chat/completions` route accepts connections. Each turn is
+`ToolsOnly` and succeeds only when the
+0.8B model executes exactly one expected native tool call; text-only, missing, failed, unexpected, and
+multiple calls are rejected.
 
 > Demo scenes and assets were assembled through MCP for Unity (see `Assets/CoreAiUnity/Docs/DGF_SPEC.md`, §11) —
 > the same editor-automation channel the agent uses to run this repository's tests.

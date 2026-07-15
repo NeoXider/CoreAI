@@ -153,6 +153,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task RunTaskAsync_PropagatesExplicitRoutingProfile()
+        {
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "route this",
+                RoutingProfileId = "request-profile"
+            });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.AreEqual("request-profile", llm.LastRequest.RoutingProfileId);
+        }
+
+        [Test]
         public async Task RunTaskAsync_PropagatesRequiredToolName_RequireSpecific()
         {
             CapturingLlmClient llm = new();

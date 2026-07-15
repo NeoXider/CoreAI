@@ -28,43 +28,51 @@ namespace CoreAI.Infrastructure.Llm
         /// enforced via a linked <see cref="CancellationTokenSource"/> instead of mutating
         /// <see cref="HttpClient.Timeout"/> (which is not thread-safe to change after first use).
         /// </summary>
-        private static readonly Lazy<HttpClient> s_boundedClient = new(CreateSharedHttpClient);
+        private static readonly Lazy<HttpClient> s_boundedLoopbackClient =
+            new(() => CreateSharedHttpClient(bypassProxy: true));
+
+        private static readonly Lazy<HttpClient> s_boundedExternalClient =
+            new(() => CreateSharedHttpClient(bypassProxy: false));
 
         /// <summary>
         /// Shared <see cref="HttpClient"/> for SSE streaming requests. Streams are typically long-lived, so
         /// the client timeout is disabled and stall detection is left to the caller via cancellation.
         /// </summary>
-        private static readonly Lazy<HttpClient> s_streamingClient = new(CreateSharedHttpClient);
+        private static readonly Lazy<HttpClient> s_streamingLoopbackClient =
+            new(() => CreateSharedHttpClient(bypassProxy: true));
 
-        private static HttpClient CreateSharedHttpClient()
+        private static readonly Lazy<HttpClient> s_streamingExternalClient =
+            new(() => CreateSharedHttpClient(bypassProxy: false));
+
+        private static HttpClient CreateSharedHttpClient(bool bypassProxy)
         {
-            // WHY: HttpClientHandler is available on .NET Standard 2.0 (Unity's default Mono/IL2CPP profile).
-            // Bypass any system/WinINET proxy: Mono's HttpClient uses the system proxy by default, which
-            // can route even 127.0.0.1 / localhost requests through a proxy or VPN filter driver. A local
-            // LLM endpoint must never go through a proxy. (SocketsHttpHandler is not exposed by Unity's
-            // Mono profile, so it cannot be used here.)
-            // IMPORTANT: do NOT also assign handler.Proxy = null. Mono's HttpClientHandler defers
-            // property writes to an inner MonoWebRequestHandler, and set_Proxy after UseProxy=false
-            // throws InvalidOperationException lazily on the FIRST REQUEST (not in the setter), which
-            // would poison every request through this client.
             HttpClientHandler handler = new();
-            try
+            if (bypassProxy)
             {
-                handler.UseProxy = false;
-            }
-            catch
-            {
-                // WHY: some profiles may not support the setter; fall back to default proxy behavior
+                try
+                {
+                    // WHY: local LLM sockets must not be routed through a system proxy or VPN filter.
+                    handler.UseProxy = false;
+                }
+                catch
+                {
+                    // WHY: profiles without a writable UseProxy property retain their platform default.
+                }
             }
 
             return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        }
+
+        internal static bool ShouldBypassProxy(string url)
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out Uri uri) && uri.IsLoopback;
         }
 
         public async Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
             int sec = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
-            HttpClient client = GetBoundedHttpClient();
+            HttpClient client = GetBoundedHttpClient(request.Url);
 
             using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(sec));
             using CancellationTokenSource linkedCts =
@@ -89,7 +97,7 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
-            HttpClient client = GetStreamingHttpClient();
+            HttpClient client = GetStreamingHttpClient(request.Url);
 
             using HttpRequestMessage httpRequest = new(HttpMethod.Post, request.Url);
             httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
@@ -199,7 +207,7 @@ namespace CoreAI.Infrastructure.Llm
             return d;
         }
 
-        private static HttpClient GetBoundedHttpClient()
+        private static HttpClient GetBoundedHttpClient(string url)
         {
 #if UNITY_EDITOR
             if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
@@ -207,10 +215,10 @@ namespace CoreAI.Infrastructure.Llm
                 return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
             }
 #endif
-            return s_boundedClient.Value;
+            return ShouldBypassProxy(url) ? s_boundedLoopbackClient.Value : s_boundedExternalClient.Value;
         }
 
-        private static HttpClient GetStreamingHttpClient()
+        private static HttpClient GetStreamingHttpClient(string url)
         {
 #if UNITY_EDITOR
             if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
@@ -218,7 +226,7 @@ namespace CoreAI.Infrastructure.Llm
                 return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
             }
 #endif
-            return s_streamingClient.Value;
+            return ShouldBypassProxy(url) ? s_streamingLoopbackClient.Value : s_streamingExternalClient.Value;
         }
     }
 }

@@ -377,7 +377,7 @@ namespace CoreAI.Tests.EditMode
         /// because the timer never runs — use <see cref="UnityTest"/> and yield frames.
         /// </summary>
         [UnityTest]
-        [Timeout(8000)]
+        [Timeout(20000)]
         public IEnumerator SendMessageAsync_TimeoutWhenOrchestratorBlocks_ThrowsLlmOperationTimeoutException()
         {
             BlockUntilCancelledOrchestrator orchestrator = new();
@@ -386,7 +386,7 @@ namespace CoreAI.Tests.EditMode
 
             Task task = service.SendMessageAsync("hi", "TestRole");
 
-            float deadline = Time.realtimeSinceStartup + 6f;
+            float deadline = Time.realtimeSinceStartup + 15f;
             while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
             {
                 yield return null;

@@ -1,8 +1,8 @@
 # CoreAI Lua Access Modes
 
-Date: 2026-06-18. Related implementation: `LuaCapabilities`,
+Date: 2026-07-15. Related implementation: `LuaCapabilities`,
 `AggregatingGameLuaRuntimeBindings`, `CoreAiFullUnityLuaRuntimeBindings`,
-`CoreAILifetimeScope.enableFullLuaAccess`.
+`CoreAiLuaWorldModule`.
 
 ## Concept
 
@@ -27,7 +27,8 @@ APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and t
 
 `LuaCapabilities.All` includes standard tiers except `Full`. Full mode is enabled explicitly through:
 
-- the **Enable Full Lua Access** checkbox on `CoreAILifetimeScope`;
+- the **Enable Full Access** checkbox on the optional `CoreAiLuaWorldModule` child of
+  `CoreAILifetimeScope`;
 - `LoadMod(..., caps | Full)` or `manage_mods` with host-granted capabilities.
 
 **Persisted and shared mods are non-Full by default.** A mod that is rehydrated from the source store
@@ -91,7 +92,7 @@ file APIs that a host game exposes through components.
 - `CoreAiFullUnityLuaRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
   sandbox limits.
 - Mod error budget and auto-unload still apply to persistent mods.
-- `luaAllowedScenes` on `CoreAILifetimeScope` constrains scene-loading commands.
+- `Allowed Scenes` on `CoreAiLuaWorldModule` constrains scene-loading commands.
 
 ## Mod LLM Tools
 

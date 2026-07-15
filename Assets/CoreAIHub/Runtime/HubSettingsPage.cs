@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
@@ -30,6 +31,7 @@ namespace CoreAI.Hub.UI
 
         private readonly ICoreAISettings _settings;
         private readonly CoreAiChatConfig _chatConfig;
+        private readonly ICoreAiRoutingUiController _routingControllerOverride;
 
         private DropdownField _mode;
         private VisualElement _httpGroup;
@@ -52,6 +54,40 @@ namespace CoreAI.Hub.UI
         private Button _testButton;
         private bool _busy;
         private bool _subscribed;
+        private ICoreAiRoutingUiController _routingController;
+        private DropdownField _endpointPicker;
+        private TextField _endpointId;
+        private TextField _endpointName;
+        private DropdownField _endpointKind;
+        private TextField _endpointBaseUrl;
+        private TextField _endpointModel;
+        private TextField _endpointUnityAgentName;
+        private TextField _endpointSecretReference;
+        private TextField _endpointSessionKey;
+        private Button _endpointClearSessionKeyButton;
+        private IntegerField _endpointContextWindow;
+        private IntegerField _endpointPort;
+        private IntegerField _endpointGpuLayers;
+        private IntegerField _endpointParallelSlots;
+        private Toggle _endpointFlashAttention;
+        private Toggle _endpointActive;
+        private Toggle _endpointKeepWarm;
+        private Label _endpointInventoryStatus;
+        private Label _endpointOperationStatus;
+        private Button _endpointSaveButton;
+        private Button _endpointRemoveButton;
+        private DropdownField _routingRole;
+        private TextField _routingCustomRole;
+        private DropdownField _routingProfile;
+        private Label _routingStatus;
+        private readonly Dictionary<string, string> _endpointIdByLabel = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
+        private CancellationTokenSource _routingCts;
+        private string _editingEndpointId = "";
+        private bool _clearSessionKey;
+        private bool _removeConfirmationPending;
+        private const string AutomaticProfileLabel = "Automatic / agent default";
+        private const string SelectEndpointLabel = "Select an endpoint…";
 
         /// <summary>Creates the Settings page from optional live config sources (null-tolerant).</summary>
         public HubSettingsPage(
@@ -59,7 +95,8 @@ namespace CoreAI.Hub.UI
             CoreAiChatConfig chatConfig = null,
             string pageId = DefaultPageId,
             string displayName = "AI Settings",
-            int order = 100)
+            int order = 100,
+            ICoreAiRoutingUiController routingController = null)
             : base(
                 string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
                 string.IsNullOrWhiteSpace(displayName) ? "AI Settings" : displayName,
@@ -67,6 +104,7 @@ namespace CoreAI.Hub.UI
         {
             _settings = settings;
             _chatConfig = chatConfig;
+            _routingControllerOverride = routingController;
         }
 
         /// <inheritdoc />
@@ -81,6 +119,11 @@ namespace CoreAI.Hub.UI
         /// <inheritdoc />
         public override void OnDestroyed()
         {
+            CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
+            AttachRoutingController(null);
+            _routingCts?.Cancel();
+            _routingCts?.Dispose();
+            _routingCts = null;
             if (_subscribed)
             {
                 CoreAiBackend.OnBackendChanged -= HandleBackendChanged;
@@ -100,9 +143,14 @@ namespace CoreAI.Hub.UI
                 _subscribed = true;
             }
 
+            CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
+            CoreAiRoutingUi.ControllerChanged += HandleRoutingControllerChanged;
+            AttachRoutingController(_routingControllerOverride ?? CoreAiRoutingUi.Controller);
+
             CoreAISettingsAsset asset = ResolveSettingsAsset();
             if (_settings == null && asset == null)
             {
+                BuildEndpointManagement(body);
                 body.Add(HubPageWidgets.MakeNote(
                     "No CoreAI settings asset is wired. Add a Resources/CoreAISettings asset or pass " +
                     "ICoreAISettings to HubBuiltInPages.RegisterAll."));
@@ -183,8 +231,709 @@ namespace CoreAI.Hub.UI
             body.Add(_health);
 
             AddReadOnlySummary(body);
+            BuildEndpointManagement(body);
             RefreshFromStatus();
             return scroll;
+        }
+
+        private void BuildEndpointManagement(VisualElement body)
+        {
+            body.Add(HubPageWidgets.MakeSection("API profiles"));
+            body.Add(HubPageWidgets.MakeNote(
+                "Create multiple API endpoints and select the profile used by each agent. " +
+                "Session keys are write-only and are never saved by this screen."));
+
+            VisualElement endpointGroup = MakeGroup("Endpoints");
+            _endpointPicker = new DropdownField("Edit endpoint");
+            StyleField(_endpointPicker);
+            _endpointPicker.RegisterValueChangedCallback(_ => LoadSelectedEndpoint());
+            endpointGroup.Add(_endpointPicker);
+
+            VisualElement endpointActions = new();
+            endpointActions.AddToClassList("coreai-hub-actions");
+            endpointActions.Add(MakeButton("New endpoint", ClearEndpointEditor));
+            endpointGroup.Add(endpointActions);
+
+            _endpointName = new TextField("Name");
+            StyleField(_endpointName);
+            endpointGroup.Add(_endpointName);
+
+            _endpointId = new TextField("Endpoint ID")
+            {
+                tooltip = "Stable id used by profiles. Leave empty to derive it from the name."
+            };
+            StyleField(_endpointId);
+            endpointGroup.Add(_endpointId);
+
+            _endpointKind = new DropdownField(
+                "Type",
+                new List<string> { "HTTP API", "LLMUnity", "Offline" },
+                0);
+            StyleField(_endpointKind);
+            _endpointKind.RegisterValueChangedCallback(_ => RefreshEndpointEditorVisibility());
+            endpointGroup.Add(_endpointKind);
+
+            _endpointBaseUrl = new TextField("Base URL");
+            StyleField(_endpointBaseUrl);
+            endpointGroup.Add(_endpointBaseUrl);
+
+            _endpointModel = new TextField("Model / GGUF");
+            StyleField(_endpointModel);
+            endpointGroup.Add(_endpointModel);
+
+            _endpointUnityAgentName = new TextField("LLMUnity agent name")
+            {
+                tooltip = "Optional LLMAgent GameObject name. Leave empty to use the configured default agent."
+            };
+            StyleField(_endpointUnityAgentName);
+            endpointGroup.Add(_endpointUnityAgentName);
+
+            _endpointContextWindow = new IntegerField("Context window") { value = 4096 };
+            StyleField(_endpointContextWindow);
+            endpointGroup.Add(_endpointContextWindow);
+
+            _endpointPort = new IntegerField("Local server port") { value = 13333 };
+            StyleField(_endpointPort);
+            endpointGroup.Add(_endpointPort);
+
+            _endpointGpuLayers = new IntegerField("GPU layers");
+            StyleField(_endpointGpuLayers);
+            endpointGroup.Add(_endpointGpuLayers);
+
+            _endpointParallelSlots = new IntegerField("Parallel slots") { value = 1 };
+            StyleField(_endpointParallelSlots);
+            endpointGroup.Add(_endpointParallelSlots);
+
+            _endpointFlashAttention = new Toggle("Flash attention")
+            {
+                tooltip = "Enable llama.cpp flash attention for this local endpoint when supported."
+            };
+            StyleField(_endpointFlashAttention);
+            endpointGroup.Add(_endpointFlashAttention);
+
+            _endpointSecretReference = new TextField("Secret reference")
+            {
+                tooltip = "Name resolved by the host secret provider. The secret value is not stored."
+            };
+            StyleField(_endpointSecretReference);
+            endpointGroup.Add(_endpointSecretReference);
+
+            _endpointSessionKey = new TextField("Session API key")
+            {
+                isPasswordField = true,
+                maskChar = '*',
+                tooltip = "Optional write-only key kept for this running session only."
+            };
+            StyleField(_endpointSessionKey);
+            endpointGroup.Add(_endpointSessionKey);
+
+            _endpointClearSessionKeyButton = MakeButton("Clear saved session key", ClearSessionKey);
+            _endpointClearSessionKeyButton.tooltip = "Explicitly forget the in-memory key for this endpoint. Leaving the field blank preserves it.";
+            endpointGroup.Add(_endpointClearSessionKeyButton);
+
+            _endpointActive = new Toggle("Active") { value = true };
+            StyleField(_endpointActive);
+            endpointGroup.Add(_endpointActive);
+
+            _endpointKeepWarm = new Toggle("Keep warm")
+            {
+                tooltip = "Keep the endpoint ready even when no agent is currently assigned."
+            };
+            StyleField(_endpointKeepWarm);
+            endpointGroup.Add(_endpointKeepWarm);
+
+            VisualElement saveActions = new();
+            saveActions.AddToClassList("coreai-hub-actions");
+            _endpointSaveButton = MakeButton("Save endpoint", SaveEndpoint);
+            _endpointRemoveButton = MakeButton("Remove", RemoveEndpoint);
+            saveActions.Add(_endpointSaveButton);
+            saveActions.Add(_endpointRemoveButton);
+            endpointGroup.Add(saveActions);
+
+            _endpointInventoryStatus = HubPageWidgets.MakeNote("");
+            _endpointInventoryStatus.name = "coreai-endpoint-inventory-status";
+            endpointGroup.Add(_endpointInventoryStatus);
+            _endpointOperationStatus = HubPageWidgets.MakeNote("");
+            _endpointOperationStatus.name = "coreai-endpoint-operation-status";
+            endpointGroup.Add(_endpointOperationStatus);
+            body.Add(endpointGroup);
+
+            VisualElement routingGroup = MakeGroup("Agent routing");
+            _routingRole = new DropdownField(
+                "Agent",
+                new List<string>(BuiltInAgentRoleIds.AllBuiltInRoles),
+                0);
+            StyleField(_routingRole);
+            _routingRole.RegisterValueChangedCallback(_ =>
+            {
+                _routingCustomRole?.SetValueWithoutNotify("");
+                RefreshRoutingSelection();
+            });
+            routingGroup.Add(_routingRole);
+
+            _routingCustomRole = new TextField("Custom agent role")
+            {
+                tooltip = "Optional runtime role id. When set, it overrides the built-in Agent selection."
+            };
+            StyleField(_routingCustomRole);
+            _routingCustomRole.RegisterValueChangedCallback(_ => RefreshRoutingSelection());
+            routingGroup.Add(_routingCustomRole);
+
+            _routingProfile = new DropdownField("API profile");
+            StyleField(_routingProfile);
+            routingGroup.Add(_routingProfile);
+            routingGroup.Add(MakeButton("Assign to agent", AssignProfileToAgent));
+            _routingStatus = HubPageWidgets.MakeNote("");
+            routingGroup.Add(_routingStatus);
+            body.Add(routingGroup);
+
+            RefreshEndpointManagement();
+        }
+
+        private void HandleRoutingControllerChanged()
+        {
+            if (_routingControllerOverride == null)
+            {
+                AttachRoutingController(CoreAiRoutingUi.Controller);
+                RefreshEndpointManagement();
+            }
+        }
+
+        private void AttachRoutingController(ICoreAiRoutingUiController controller)
+        {
+            if (ReferenceEquals(_routingController, controller))
+            {
+                return;
+            }
+
+            if (_routingController != null)
+            {
+                _routingController.Changed -= RefreshEndpointManagement;
+            }
+
+            _routingController = controller;
+            if (_routingController != null)
+            {
+                _routingController.Changed += RefreshEndpointManagement;
+            }
+        }
+
+        private void RefreshEndpointManagement()
+        {
+            if (_endpointPicker == null)
+            {
+                return;
+            }
+
+            _endpointIdByLabel.Clear();
+            _endpointIdByLabel[SelectEndpointLabel] = "";
+            List<string> endpointLabels = new() { SelectEndpointLabel };
+            IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingController?.GetEndpoints();
+            if (endpoints != null)
+            {
+                foreach (LlmEndpointSnapshot snapshot in endpoints)
+                {
+                    LlmEndpointDescriptor endpoint = snapshot?.Descriptor;
+                    if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.EndpointId))
+                    {
+                        continue;
+                    }
+
+                    string label = UniqueLabel(
+                        (string.IsNullOrWhiteSpace(endpoint.DisplayName) ? endpoint.EndpointId : endpoint.DisplayName) +
+                        " — " + snapshot.State,
+                        _endpointIdByLabel);
+                    _endpointIdByLabel[label] = endpoint.EndpointId;
+                    endpointLabels.Add(label);
+                }
+            }
+
+            string selectedEndpointId = ResolveSelectedEndpointId();
+            _endpointPicker.choices = endpointLabels;
+            _endpointPicker.SetValueWithoutNotify(FindLabel(_endpointIdByLabel, selectedEndpointId));
+
+            _profileIdByLabel.Clear();
+            _profileIdByLabel[AutomaticProfileLabel] = "";
+            List<string> profileLabels = new() { AutomaticProfileLabel };
+            IReadOnlyList<LlmRuntimeProfile> profiles = _routingController?.GetProfiles();
+            if (profiles != null)
+            {
+                foreach (LlmRuntimeProfile profile in profiles)
+                {
+                    if (profile == null || string.IsNullOrWhiteSpace(profile.ProfileId))
+                    {
+                        continue;
+                    }
+
+                    string label = UniqueLabel(
+                        (string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.ProfileId : profile.DisplayName) +
+                        " — " + EndpointStateLabel(profile.EndpointId, endpoints),
+                        _profileIdByLabel);
+                    _profileIdByLabel[label] = profile.ProfileId;
+                    profileLabels.Add(label);
+                }
+            }
+
+            _routingProfile.choices = profileLabels;
+            bool available = _routingController != null;
+            _endpointSaveButton?.SetEnabled(available);
+            _endpointRemoveButton?.SetEnabled(available && !string.IsNullOrEmpty(ResolveSelectedEndpointId()));
+            _routingProfile.SetEnabled(available);
+            _endpointInventoryStatus.text = available
+                ? endpoints == null || endpoints.Count == 0
+                    ? "No API endpoints yet. Create one below; agents will use Automatic/default routing meanwhile."
+                    : endpoints.Count + " endpoint(s) available. Select one to inspect its live state."
+                : "Endpoint registry is not available in the current CoreAI scope.";
+            RefreshRoutingSelection();
+        }
+
+        private void RefreshRoutingSelection()
+        {
+            if (_routingProfile == null || _routingRole == null)
+            {
+                return;
+            }
+
+            string profileId = _routingController?.GetProfileForRole(SelectedRoutingRole()) ?? "";
+            _routingProfile.SetValueWithoutNotify(FindLabel(_profileIdByLabel, profileId, AutomaticProfileLabel));
+        }
+
+        private void LoadSelectedEndpoint()
+        {
+            string id = ResolveSelectedEndpointId();
+            IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingController?.GetEndpoints();
+            if (endpoints == null)
+            {
+                return;
+            }
+
+            foreach (LlmEndpointSnapshot snapshot in endpoints)
+            {
+                LlmEndpointDescriptor endpoint = snapshot?.Descriptor;
+                if (endpoint != null && string.Equals(endpoint.EndpointId, id, StringComparison.Ordinal))
+                {
+                    _editingEndpointId = endpoint.EndpointId;
+                    _removeConfirmationPending = false;
+                    _endpointId.SetValueWithoutNotify(endpoint.EndpointId);
+                    _endpointId.SetEnabled(false);
+                    _endpointName.SetValueWithoutNotify(endpoint.DisplayName);
+                    _endpointKind.SetValueWithoutNotify(KindLabel(endpoint.Kind));
+                    _endpointBaseUrl.SetValueWithoutNotify(endpoint.BaseUrl);
+                    _endpointModel.SetValueWithoutNotify(
+                        endpoint.Kind == LlmEndpointKind.LlmUnity && !string.IsNullOrWhiteSpace(endpoint.LocalModelPath)
+                            ? endpoint.LocalModelPath
+                            : endpoint.Model);
+                    _endpointContextWindow.SetValueWithoutNotify(endpoint.ContextWindowTokens);
+                    _endpointPort.SetValueWithoutNotify(endpoint.Port);
+                    _endpointGpuLayers.SetValueWithoutNotify(endpoint.GpuLayers);
+                    _endpointParallelSlots.SetValueWithoutNotify(endpoint.ParallelSlots);
+                    _endpointUnityAgentName.SetValueWithoutNotify(endpoint.UnityAgentName);
+                    _endpointFlashAttention.SetValueWithoutNotify(endpoint.FlashAttention);
+                    _endpointSecretReference.SetValueWithoutNotify(endpoint.SecretReference);
+                    _endpointSessionKey.SetValueWithoutNotify("");
+                    _clearSessionKey = false;
+                    _endpointActive.SetValueWithoutNotify(endpoint.Active);
+                    _endpointKeepWarm.SetValueWithoutNotify(endpoint.KeepWarm);
+                    _endpointOperationStatus.text = "State: " + snapshot.State +
+                                                    (string.IsNullOrWhiteSpace(snapshot.Error) ? "" : " — " + snapshot.Error);
+                    _endpointRemoveButton.text = "Remove";
+                    RefreshEndpointEditorVisibility();
+                    return;
+                }
+            }
+        }
+
+        private void ClearEndpointEditor()
+        {
+            _editingEndpointId = "";
+            _removeConfirmationPending = false;
+            _endpointPicker.SetValueWithoutNotify("");
+            _endpointId.SetValueWithoutNotify("");
+            _endpointId.SetEnabled(true);
+            _endpointName.SetValueWithoutNotify("");
+            _endpointKind.SetValueWithoutNotify("HTTP API");
+            _endpointBaseUrl.SetValueWithoutNotify("");
+            _endpointModel.SetValueWithoutNotify("");
+            _endpointContextWindow.SetValueWithoutNotify(4096);
+            _endpointPort.SetValueWithoutNotify(13333);
+            _endpointGpuLayers.SetValueWithoutNotify(0);
+            _endpointParallelSlots.SetValueWithoutNotify(1);
+            _endpointUnityAgentName.SetValueWithoutNotify("");
+            _endpointFlashAttention.SetValueWithoutNotify(false);
+            _endpointSecretReference.SetValueWithoutNotify("");
+            _endpointSessionKey.SetValueWithoutNotify("");
+            _clearSessionKey = false;
+            _endpointActive.SetValueWithoutNotify(true);
+            _endpointKeepWarm.SetValueWithoutNotify(false);
+            _endpointOperationStatus.text = "New endpoint. Its stable ID is generated from the name unless provided.";
+            _endpointRemoveButton.text = "Remove";
+            RefreshEndpointEditorVisibility();
+        }
+
+        private async void SaveEndpoint()
+        {
+            if (_routingController == null)
+            {
+                return;
+            }
+
+            LlmEndpointDescriptor endpoint = ReadEndpointEditor();
+            string validation = ValidateEndpoint(endpoint);
+            if (string.IsNullOrEmpty(validation) && string.IsNullOrEmpty(_editingEndpointId) &&
+                EndpointIdExists(endpoint.EndpointId))
+            {
+                validation = "Endpoint ID already exists. Select it to edit, or choose a different ID.";
+            }
+            if (!string.IsNullOrEmpty(validation))
+            {
+                _endpointOperationStatus.text = validation;
+                return;
+            }
+
+            SetEndpointBusy(true);
+            _endpointOperationStatus.text = endpoint.Active || endpoint.KeepWarm
+                ? "Saving and waiting for readiness…"
+                : "Saving endpoint…";
+            try
+            {
+                _routingCts?.Cancel();
+                _routingCts?.Dispose();
+                _routingCts = new CancellationTokenSource();
+                string enteredKey = _endpointSessionKey.value ?? "";
+                string sessionKey = string.IsNullOrEmpty(_editingEndpointId)
+                    ? enteredKey
+                    : _clearSessionKey
+                        ? ""
+                        : string.IsNullOrEmpty(enteredKey) ? null : enteredKey;
+                CoreAiRoutingUiResult result = await _routingController.SaveEndpointAsync(
+                    endpoint,
+                    sessionKey,
+                    _routingCts.Token);
+                _endpointSessionKey.SetValueWithoutNotify("");
+                _clearSessionKey = false;
+                _editingEndpointId = endpoint.EndpointId;
+                RefreshEndpointManagement();
+                _endpointPicker.SetValueWithoutNotify(FindLabel(_endpointIdByLabel, endpoint.EndpointId));
+                LoadSelectedEndpoint();
+                _endpointOperationStatus.text = result.Ok
+                    ? result.Endpoint == null
+                        ? "Endpoint saved."
+                        : "Endpoint saved — " + result.Endpoint.State + "."
+                    : result.Message;
+            }
+            catch (OperationCanceledException)
+            {
+                _endpointOperationStatus.text = "Endpoint operation cancelled.";
+            }
+            finally
+            {
+                SetEndpointBusy(false);
+            }
+        }
+
+        private async void RemoveEndpoint()
+        {
+            string endpointId = ResolveSelectedEndpointId();
+            if (_routingController == null || string.IsNullOrEmpty(endpointId))
+            {
+                return;
+            }
+
+            if (!_removeConfirmationPending)
+            {
+                _removeConfirmationPending = true;
+                _endpointRemoveButton.text = "Confirm remove";
+                List<string> affected = AffectedBuiltInRoles(endpointId);
+                _endpointOperationStatus.text = affected.Count == 0
+                    ? "Press Confirm remove again to permanently remove this endpoint."
+                    : "Assigned agents: " + string.Join(", ", affected) +
+                      ". Press Confirm remove again; their routing will return to Automatic/default.";
+                return;
+            }
+
+            SetEndpointBusy(true);
+            try
+            {
+                CoreAiRoutingUiResult result = await _routingController.RemoveEndpointAsync(endpointId);
+                if (result.Ok)
+                {
+                    ClearEndpointEditor();
+                }
+
+                RefreshEndpointManagement();
+                _endpointOperationStatus.text = result.Ok ? "Endpoint removed." : result.Message;
+            }
+            finally
+            {
+                _removeConfirmationPending = false;
+                SetEndpointBusy(false);
+            }
+        }
+
+        private void AssignProfileToAgent()
+        {
+            if (_routingController == null ||
+                !_profileIdByLabel.TryGetValue(_routingProfile.value ?? "", out string profileId))
+            {
+                return;
+            }
+
+            string roleId = SelectedRoutingRole();
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                _routingStatus.text = "Agent role is required.";
+                return;
+            }
+
+            CoreAiRoutingUiResult result = _routingController.AssignProfileToRole(roleId, profileId);
+            _routingStatus.text = result.Ok
+                ? string.IsNullOrEmpty(profileId)
+                    ? "Agent API override cleared; Automatic/default routing is active."
+                    : "Agent API profile updated."
+                : result.Message;
+        }
+
+        private string SelectedRoutingRole()
+        {
+            string custom = _routingCustomRole?.value?.Trim() ?? "";
+            return string.IsNullOrEmpty(custom) ? _routingRole?.value?.Trim() ?? "" : custom;
+        }
+
+        private LlmEndpointDescriptor ReadEndpointEditor()
+        {
+            string name = (_endpointName.value ?? "").Trim();
+            string id = (_endpointId.value ?? "").Trim();
+            if (string.IsNullOrEmpty(id))
+            {
+                id = UniqueEndpointId(Slug(name));
+                _endpointId.SetValueWithoutNotify(id);
+            }
+
+            return new LlmEndpointDescriptor
+            {
+                EndpointId = id,
+                DisplayName = name,
+                Kind = LabelKind(_endpointKind.value),
+                BaseUrl = (_endpointBaseUrl.value ?? "").Trim(),
+                Model = (_endpointModel.value ?? "").Trim(),
+                SecretReference = (_endpointSecretReference.value ?? "").Trim(),
+                Active = _endpointActive.value,
+                KeepWarm = _endpointKeepWarm.value,
+                ContextWindowTokens = Mathf.Max(256, _endpointContextWindow.value),
+                LocalModelPath = LabelKind(_endpointKind.value) == LlmEndpointKind.LlmUnity
+                    ? (_endpointModel.value ?? "").Trim()
+                    : "",
+                UnityAgentName = (_endpointUnityAgentName.value ?? "").Trim(),
+                Port = Mathf.Clamp(_endpointPort.value, 0, 65535),
+                GpuLayers = Mathf.Max(0, _endpointGpuLayers.value),
+                ParallelSlots = Mathf.Max(1, _endpointParallelSlots.value),
+                FlashAttention = _endpointFlashAttention.value
+            };
+        }
+
+        internal static string ValidateEndpoint(LlmEndpointDescriptor endpoint)
+        {
+            if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.DisplayName))
+            {
+                return "Name is required.";
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint.EndpointId))
+            {
+                return "Endpoint ID is required.";
+            }
+
+            if (endpoint.Kind == LlmEndpointKind.HttpOpenAi &&
+                (!Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out Uri uri) ||
+                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+            {
+                return "HTTP API requires an absolute http(s) base URL.";
+            }
+
+            return "";
+        }
+
+        private void RefreshEndpointEditorVisibility()
+        {
+            LlmEndpointKind kind = LabelKind(_endpointKind?.value);
+            SetVisible(_endpointBaseUrl, kind == LlmEndpointKind.HttpOpenAi);
+            SetVisible(_endpointSecretReference, kind == LlmEndpointKind.HttpOpenAi);
+            SetVisible(_endpointSessionKey, kind == LlmEndpointKind.HttpOpenAi);
+            SetVisible(_endpointClearSessionKeyButton, kind == LlmEndpointKind.HttpOpenAi);
+            SetVisible(_endpointModel, kind != LlmEndpointKind.Offline);
+            SetVisible(_endpointPort, kind == LlmEndpointKind.LlmUnity);
+            SetVisible(_endpointGpuLayers, kind == LlmEndpointKind.LlmUnity);
+            SetVisible(_endpointUnityAgentName, kind == LlmEndpointKind.LlmUnity);
+            SetVisible(_endpointFlashAttention, kind == LlmEndpointKind.LlmUnity);
+            SetVisible(_endpointParallelSlots, kind != LlmEndpointKind.Offline);
+            _endpointKeepWarm?.SetEnabled(kind != LlmEndpointKind.Offline);
+        }
+
+        private void SetEndpointBusy(bool busy)
+        {
+            _endpointSaveButton?.SetEnabled(!busy && _routingController != null);
+            _endpointRemoveButton?.SetEnabled(!busy && _routingController != null &&
+                                               !string.IsNullOrEmpty(ResolveSelectedEndpointId()));
+        }
+
+        private void ClearSessionKey()
+        {
+            _endpointSessionKey.SetValueWithoutNotify("");
+            _clearSessionKey = true;
+            _endpointOperationStatus.text = "Session key will be cleared when this endpoint is saved.";
+        }
+
+        private bool EndpointIdExists(string endpointId)
+        {
+            IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingController?.GetEndpoints();
+            if (endpoints == null)
+            {
+                return false;
+            }
+
+            foreach (LlmEndpointSnapshot snapshot in endpoints)
+            {
+                if (string.Equals(snapshot?.Descriptor?.EndpointId, endpointId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string UniqueEndpointId(string baseId)
+        {
+            if (string.IsNullOrEmpty(baseId) || !EndpointIdExists(baseId))
+            {
+                return baseId;
+            }
+
+            int suffix = 2;
+            while (EndpointIdExists(baseId + "-" + suffix))
+            {
+                suffix++;
+            }
+
+            return baseId + "-" + suffix;
+        }
+
+        private List<string> AffectedBuiltInRoles(string endpointId)
+        {
+            HashSet<string> endpointProfiles = new(StringComparer.Ordinal);
+            foreach (LlmRuntimeProfile profile in _routingController?.GetProfiles() ?? Array.Empty<LlmRuntimeProfile>())
+            {
+                if (profile != null && string.Equals(profile.EndpointId, endpointId, StringComparison.Ordinal))
+                {
+                    endpointProfiles.Add(profile.ProfileId);
+                }
+            }
+
+            List<string> roles = new();
+            foreach (string role in BuiltInAgentRoleIds.AllBuiltInRoles)
+            {
+                if (endpointProfiles.Contains(_routingController?.GetProfileForRole(role) ?? ""))
+                {
+                    roles.Add(role);
+                }
+            }
+
+            return roles;
+        }
+
+        private static string EndpointStateLabel(
+            string endpointId,
+            IReadOnlyList<LlmEndpointSnapshot> endpoints)
+        {
+            if (endpoints != null)
+            {
+                foreach (LlmEndpointSnapshot snapshot in endpoints)
+                {
+                    if (string.Equals(snapshot?.Descriptor?.EndpointId, endpointId, StringComparison.Ordinal))
+                    {
+                        return snapshot.State.ToString();
+                    }
+                }
+            }
+
+            return "Unavailable";
+        }
+
+        private string ResolveSelectedEndpointId()
+        {
+            return _endpointPicker != null &&
+                   _endpointIdByLabel.TryGetValue(_endpointPicker.value ?? "", out string endpointId)
+                ? endpointId
+                : "";
+        }
+
+        private static string UniqueLabel(string label, IReadOnlyDictionary<string, string> existing)
+        {
+            string candidate = label;
+            int suffix = 2;
+            while (existing.ContainsKey(candidate))
+            {
+                candidate = label + " (" + suffix++ + ")";
+            }
+
+            return candidate;
+        }
+
+        private static string FindLabel(
+            IReadOnlyDictionary<string, string> labels,
+            string id,
+            string fallback = "")
+        {
+            foreach (KeyValuePair<string, string> pair in labels)
+            {
+                if (string.Equals(pair.Value, id, StringComparison.Ordinal))
+                {
+                    return pair.Key;
+                }
+            }
+
+            return fallback;
+        }
+
+        private static string Slug(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "";
+            }
+
+            System.Text.StringBuilder builder = new();
+            foreach (char c in value.Trim().ToLowerInvariant())
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    builder.Append(c);
+                }
+                else if (builder.Length > 0 && builder[builder.Length - 1] != '-')
+                {
+                    builder.Append('-');
+                }
+            }
+
+            return builder.ToString().Trim('-');
+        }
+
+        private static string KindLabel(LlmEndpointKind kind)
+        {
+            return kind == LlmEndpointKind.LlmUnity
+                ? "LLMUnity"
+                : kind == LlmEndpointKind.Offline
+                    ? "Offline"
+                    : "HTTP API";
+        }
+
+        private static LlmEndpointKind LabelKind(string label)
+        {
+            return string.Equals(label, "LLMUnity", StringComparison.Ordinal)
+                ? LlmEndpointKind.LlmUnity
+                : string.Equals(label, "Offline", StringComparison.Ordinal)
+                    ? LlmEndpointKind.Offline
+                    : LlmEndpointKind.HttpOpenAi;
         }
 
         private void AddReadOnlySummary(VisualElement body)

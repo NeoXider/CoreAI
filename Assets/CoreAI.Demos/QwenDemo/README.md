@@ -1,0 +1,41 @@
+# Qwen 0.8B gameplay demos
+
+These scenes run through CoreAI's normal LLMUnity bootstrap path with a dedicated
+`QwenDemoSettings.asset` configured for `Qwen3.5-0.8B-Q4_K_M.gguf`:
+
+- `QwenGenieDemo.unity` — a free-form wish is mapped to one guarded world action.
+- `QwenSpellcraftDemo.unity` — a spell description is mapped to an element and power, while C# owns mana and vetoes invalid casts.
+
+Both scenes contain their own `CoreAILifetimeScope`, camera, light, and demo controller. They intentionally do not contain a scene-placed `LLM` or `LLMAgent`: CoreAI creates the LLMUnity runtime host inactive, configures the model/server first, then lets LLMUnity start. This avoids the scene-order race where `LLM.Awake` can launch before CoreAI applies local-server settings.
+
+## Run
+
+1. In LLMUnity Model Manager, make sure `Qwen3.5-0.8B-Q4_K_M.gguf` is downloaded.
+2. Open exactly one of the two scenes and enter Play Mode.
+3. Wait for the status to report Ready. The demo disables casting while CoreAI waits for LLMUnity native
+   startup and verifies that its `POST /v1/chat/completions` route accepts connections. LLMUnity does not
+   expose `/v1/models`.
+4. Use the preset buttons or enter Russian/English text.
+5. In Spellcraft, use `детерм. ×5` to repeat the same prompt with temperature `0` and inspect the decision distribution.
+
+The HUD reports first-token latency, total latency, token usage, and executed tool calls. The model chooses an action; C# remains authoritative over wish charges, mana, value clamps, and Unity object access.
+Both agents use `AgentMode.ToolsOnly`, disable chat history, and send
+`LlmToolChoiceMode.RequireAny` on every turn so a text-only response cannot count as a successful action.
+The demo accepts exactly one successful expected tool call per turn. Zero calls, multiple calls, an
+unexpected tool, or a failed tool is rejected instead of being displayed as a successful cast. The
+determinism button repeats this same real tool-call path; it does not infer a decision from assistant text.
+
+## Verification
+
+- `QwenDemoScenesEditModeTests` checks scene composition, the `ToolsOnly`/`RequireAny` contract, the
+  exact-one validator, and compact HUD layout.
+- `QwenDemoSafetyPlayModeTests` checks that parallel native tool callbacks can apply exactly one side
+  effect per model turn and that the guard resets for the next turn. EditMode tests cover the readiness
+  lock fields and invalid tool-call outcomes without loading a model.
+- A release smoke in each scene must still use the real `Qwen3.5-0.8B-Q4_K_M.gguf`, wait for Ready, and
+  confirm the HUD records the expected native tool call. Static and no-model tests cannot replace that gate.
+
+Verified release captures:
+
+- [Genie native tool call](Screenshots/QwenGenieToolsOnlyVerified.png)
+- [Spellcraft native tool call](Screenshots/QwenSpellcraftToolsOnlyVerified.png)

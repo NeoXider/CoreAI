@@ -161,7 +161,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 246dc9124f4d62b408c1b063ef72d69b, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Composition.CoreAiModsLifetimeScope
   parentReference:
     TypeName: CoreAI.Composition.CoreAILifetimeScope
@@ -171,6 +171,54 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+--- !u!1 &439269026
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 439269028}
+  - component: {fileID: 439269027}
+  m_Layer: 0
+  m_Name: Lua and World Commands
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &439269027
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 439269026}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 37e0bb673a6c4874a9f11c08b6592ed6, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAiLuaWorldModule
+  worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
+  allowedScenes: []
+  enableFullAccess: 1
+  enableFullPrivateAccess: 0
+--- !u!4 &439269028
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 439269026}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2106438250}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &573228319
 GameObject:
   m_ObjectHideFlags: 0
@@ -199,7 +247,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4f231c4fb786f3946a6b90b886c48677, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.StandaloneInputModule
   m_SendPointerHoverToParent: 1
   m_HorizontalAxis: Horizontal
@@ -219,7 +267,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 76c392e42b5098c458856cdf6ecaaaa1, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventSystem
   m_FirstSelected: {fileID: 0}
   m_sendNavigationEvents: 1
@@ -314,7 +362,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f9af0a6b05e76364097c882227ac6b69, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Ai.Hub.CoreAiModsHubBinder
   hubWindow: {fileID: 0}
   allowFullTier: 1
@@ -436,7 +484,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.UniversalAdditionalLightData
   m_UsePipelineSettings: 1
   m_AdditionalLightsShadowResolutionTier: 2
@@ -647,7 +695,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.UniversalAdditionalCameraData
   m_RenderShadows: 1
   m_RequiresDepthTextureOption: 2
@@ -1016,8 +1064,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4ef82c39ed5974e439ae13efc7c88e75, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   _animator: {fileID: 0}
   _controller: {fileID: 1698359787}
   _rigidbody: {fileID: 1698359788}
@@ -1048,8 +1096,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 66c209b338895c54aa8e4fd52c8b9c34, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   _rigidbody: {fileID: 1698359788}
   _cameraPivot: {fileID: 1304673769}
   _groundCheck: {fileID: 1611653841}
@@ -1202,20 +1250,21 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fc5be6cfa146e9741b21d50f89fc7125, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAILifetimeScope
   parentReference:
-    TypeName: 
+    TypeName:
   autoRun: 1
   autoInjectGameObjects: []
   coreAiSettings: {fileID: 11400000, guid: 6668d56b353f2d74889a4d595a256951, type: 2}
   gameLogSettings: {fileID: 11400000, guid: a5ec9172eaa0cec4188a764046d7b73c, type: 2}
   agentPromptsManifest: {fileID: 11400000, guid: 76ac5bc3577a387409a9559c4de4a341, type: 2}
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}
-  worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
-  luaAllowedScenes: []
-  enableFullLuaAccess: 1
-  enableFullLuaPrivateAccess: 0
+  luaWorldModule: {fileID: 439269027}
+  worldPrefabRegistry: {fileID: 0}
+  legacyLuaAllowedScenes: []
+  legacyEnableFullLuaAccess: 0
+  legacyEnableFullLuaPrivateAccess: 0
   roleSkills: []
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
@@ -1233,6 +1282,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 406190035}
+  - {fileID: 439269028}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807

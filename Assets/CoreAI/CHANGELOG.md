@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Runtime-first multi-endpoint LLM contracts: dynamic HTTP, LLMUnity, and Offline endpoint descriptors,
+  named routing profiles, role assignments, lifecycle snapshots, and safe add/update/activate/remove APIs.
+- `AgentBuilder.WithLlmProfile(...)` and per-request `AiTaskRequest.RoutingProfileId`; an explicit request
+  profile takes precedence over agent, role, default, and legacy routing.
+- `ILlmEndpointSecretProvider` keeps credential resolution behind a portable host boundary; persisted
+  descriptors contain a `SecretReference`, never the session credential.
+
+### Changed
+
+- Lua/world-command composition is now owned by an optional child module instead of being presented as
+  root CoreAI settings; legacy serialized scenes remain compatible during migration.
+- Endpoint configuration now explicitly supports zero, one, or many providers, independent `Active` and
+  `KeepWarm` policy, and tri-state session-key updates (`null` preserves, empty clears, non-empty replaces).
+
+### Fixed
+
+- `HttpClientOpenAiTransport` now bypasses the system proxy only for loopback URLs; external OpenAI-compatible
+  APIs retain the host platform's proxy policy for both non-streaming and SSE requests.
+- Full-Lua composition tests now forget their persisted probe mod before disposing the container, so running
+  EditMode tests cannot poison a later Hub/Chat startup with a test-only rehydration error.
+
 ## 5.8.10 - Live model-behavior verification; fix a false-failing memory-clear test (2026-07-13)
 
 ### Fixed

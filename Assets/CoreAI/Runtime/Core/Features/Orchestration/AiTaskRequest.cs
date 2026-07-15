@@ -9,6 +9,12 @@ namespace CoreAI.Ai
         public string RoleId { get; set; } = BuiltInAgentRoleIds.Creator;
 
         /// <summary>
+        /// Optional explicit LLM routing profile. A non-empty value takes precedence over agent,
+        /// role-rule, default-profile, and legacy fallback selection.
+        /// </summary>
+        public string RoutingProfileId { get; set; } = "";
+
+        /// <summary>
         /// Optional per-request system-prompt override. When non-empty, the composer uses it as the role base
         /// prompt (the UniversalSystemPromptPrefix is still prepended). Empty = use the registered role prompt
         /// (default).

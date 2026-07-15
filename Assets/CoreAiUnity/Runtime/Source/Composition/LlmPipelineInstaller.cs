@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Chat;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -38,14 +39,25 @@ namespace CoreAI.Composition
 
             builder.Register(c =>
             {
-                LlmClientRegistry reg = new(c.Resolve<IGameLogger>(), settings);
+                LlmClientRegistry reg = new(
+                    c.Resolve<IGameLogger>(),
+                    settings,
+                    c.Resolve<IAgentMemoryStore>(),
+                    new FileLlmEndpointRegistryStore());
                 ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
                     c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
 
                 reg.SetLegacyFallback(primaryClient);
                 reg.ApplyManifest(routingManifest);
                 return reg;
-            }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
+            }, Lifetime.Singleton)
+                .As<ILlmClientRegistry>()
+                .As<ILlmRoutingController>()
+                .As<ILlmEndpointRegistry>()
+                .AsSelf();
+
+            builder.Register<CoreAiRoutingUiAttachment>(Lifetime.Singleton).AsSelf();
+            builder.RegisterBuildCallback(container => container.Resolve<CoreAiRoutingUiAttachment>());
 
             int maxRetries = settings != null ? settings.MaxLlmRequestRetries : 0;
             builder.Register<ILlmClient>(c =>

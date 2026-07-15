@@ -35,6 +35,19 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("CoreAI.Core", typeof(MeaiOpenAiChatClient).Assembly.GetName().Name);
         }
 
+        [TestCase("http://localhost:8080/v1/chat/completions", true)]
+        [TestCase("https://LOCALHOST/v1/chat/completions", true)]
+        [TestCase("http://127.0.0.1:8080/v1/chat/completions", true)]
+        [TestCase("http://127.42.7.9/v1/chat/completions", true)]
+        [TestCase("http://[::1]:8080/v1/chat/completions", true)]
+        [TestCase("https://api.openai.com/v1/chat/completions", false)]
+        [TestCase("https://llm.internal.example/v1/chat/completions", false)]
+        [TestCase("not-a-url", false)]
+        public void HttpTransport_BypassesProxyOnlyForLoopback(string url, bool expected)
+        {
+            Assert.AreEqual(expected, HttpClientOpenAiTransport.ShouldBypassProxy(url));
+        }
+
         [Test]
         public async Task GetResponseAsync_Success_ReturnsAssistantText()
         {

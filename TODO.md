@@ -1,12 +1,12 @@
 # TODO
 
-> Updated 2026-07-13. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-07-15. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.10 (2026-07-13, all five packages in lockstep). Last full verification 2026-07-13 (batchmode):
-> full EditMode 1573 passed / 0 failed; PlayMode `FastNoLlm` 56 passed / 0 failed (with graphics —
-> `-nographics` fails 5 GPU/RenderTexture camera tests, an environment artifact); a live LlmVerification
-> subset is green on the LM Studio `qwen3.5-4b-mtp` OpenAI endpoint (tools / skills / agents / memory /
-> execute_lua) — see the LLM-API gate below.
+> Released: 5.8.10 (2026-07-13, all five packages in lockstep). Unreleased packages are aligned at 5.9.0.
+> Last full verification 2026-07-15 in the interactive editor: CoreAI EditMode 1651 passed / 0 failed,
+> PlayMode `FastNoLlm` 71 passed / 0 failed, and six Unity-generated `dotnet build` compile gates completed
+> with 0 errors. Live Qwen3.5-0.8B LLMUnity smoke called `cast_spell` as `storm|1` in 5714 ms; Hub/Chat
+> started with 0 warnings/errors after the persistent-mod isolation regression was fixed.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -84,6 +84,34 @@
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 
+- [x] Runtime multi-endpoint LLM routing: dynamic endpoint/profile CRUD, built-in/custom-agent selection,
+      hidden-by-default Chat API selector, Hub endpoint editor, two-phase LLMUnity readiness, zero-downtime
+      candidate replacement, redacted persistence, and EditMode/PlayMode regression tests.
+- [x] Endpoint lifecycle covers zero/one/many APIs, independent Active/KeepWarm state, restart restoration,
+      shared first-request readiness, external-API `/models` probing with a guarded
+      `/chat/completions` fallback for APIs without that optional route, LLMUnity native +
+      `/v1/chat/completions` probing, tri-state session-key updates, injectable secret resolution,
+      Automatic chat routing, and removal cleanup for persisted role assignments.
+- [x] Parallel local routing documents and enforces separate named LLMAgent hosts with unique ports; unsafe
+      same-host mutation is rejected instead of interrupting the currently published generation.
+- [x] Native LLMUnity startup diagnostics report llama.cpp model-load and HTTP-readiness durations as
+      separate structured phases for both runtime endpoints and legacy autostart, with deterministic
+      format/redaction regression tests.
+- [x] Native endpoint lifecycle uses prompt-free cancellable readiness, exact inactive-agent resolution,
+      pre-activation fingerprints, and reference-counted ownership leases. Deactivate/remove/dispose drain
+      tracked calls before unloading only CoreAI-activated llama.cpp hosts; external active hosts stay owned
+      by their scene/application.
+- [x] Lua/world-command settings extracted from the root CoreAI inspector into an optional child module with
+      backwards-compatible serialized migration and updated demos/editor creation paths.
+
+- [x] Added standalone Qwen3.5-0.8B scenes for the Genie and Spellcraft demos under
+      `Assets/CoreAI.Demos/QwenDemo`; each uses a dedicated LocalModel settings asset and CoreAI-created
+      LLMUnity runtime host, with EditMode composition regression coverage.
+- [x] Qwen Genie and Spellcraft now run as `ToolsOnly` and require a native tool call per request;
+      compact Game views use non-overlapping responsive HUD panels, wait for native startup plus the
+      `/v1/chat/completions` connection probe, and
+      reject any result other than exactly one successful expected tool call. EditMode and no-model PlayMode
+      regressions cover the contract.
 - [x] Deterministic startup smoke for all ten published scenes (including Skills and
       LiveMechanicsModsChat): no missing scripts, scope/camera present, supported shaders, no
       unexpected startup errors. Fixed missing Mods scopes, Mirror remnants, Hub wiring, and Wave URP color.

@@ -200,6 +200,8 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject probe = new("FullManageModsProbe");
+            LuaModsLlmTool modsTool = null;
+            IObjectResolver container = null;
             try
             {
                 ContainerBuilder builder = new();
@@ -215,9 +217,8 @@ namespace CoreAI.Tests.EditMode
                 builder.RegisterWorldCommands(registry, enableFullLuaAccess: true);
                 builder.RegisterCoreAiMods(enableFullLuaAccess: true);
 
-                using IObjectResolver container = builder.Build();
+                container = builder.Build();
                 AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
-                LuaModsLlmTool modsTool = null;
                 foreach (ILlmTool tool in policy.GetToolsForRole(BuiltInAgentRoleIds.Programmer))
                 {
                     if (tool is LuaModsLlmTool luaMods)
@@ -237,6 +238,13 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
+                if (modsTool != null)
+                {
+                    JObject cleanup = await ExecuteAsync(modsTool, "forget", "full_probe");
+                    Assert.IsTrue(cleanup.Value<bool>("success"), cleanup.ToString());
+                }
+
+                container?.Dispose();
                 Object.DestroyImmediate(registry);
                 Object.DestroyImmediate(probe);
             }

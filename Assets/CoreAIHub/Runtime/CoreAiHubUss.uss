@@ -9,6 +9,8 @@
   left: 24px;
   width: 720px;
   height: 640px;
+  max-width: 94%;
+  max-height: 92%;
   background-color: rgba(6, 14, 30, 0.93);
   border-radius: 16px;
   border-width: 2px;

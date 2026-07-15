@@ -2,7 +2,6 @@
 using System.Collections;
 using CoreAI.Composition;
 using NUnit.Framework;
-using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -27,10 +26,12 @@ namespace CoreAI.Tests.PlayMode
             CoreAILifetimeScope scope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
             Assert.IsNotNull(scope, "FullAccessDemo must contain a CoreAILifetimeScope.");
 
-            SerializedObject scopeSo = new(scope);
-            Assert.IsTrue(scopeSo.FindProperty("enableFullLuaAccess").boolValue,
+            CoreAiLuaWorldModule luaModule = scope.GetComponentInChildren<CoreAiLuaWorldModule>(true);
+            Assert.IsNotNull(luaModule,
+                "FullAccessDemo must own Lua configuration in a child module.");
+            Assert.IsTrue(luaModule.FullAccessEnabled,
                 "FullAccessDemo must grant Full Lua so Programmer can inspect and modify scene objects.");
-            Assert.IsFalse(scopeSo.FindProperty("enableFullLuaPrivateAccess").boolValue,
+            Assert.IsFalse(luaModule.FullPrivateAccessEnabled,
                 "FullAccessDemo should keep private reflection access off by default.");
 
             Assert.IsNotNull(FindBehaviour("CoreAI.Demos.FullAccessDemoController"),

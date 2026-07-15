@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using CoreAI.Composition;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -20,8 +21,9 @@ namespace CoreAI.Tests.EditMode
                 MonoBehaviour scope = FindBehaviour("CoreAI.Composition.CoreAILifetimeScope");
                 Assert.IsNotNull(scope, "Scene must include CoreAILifetimeScope.");
 
-                SerializedObject scopeSo = new(scope);
-                Assert.IsTrue(scopeSo.FindProperty("enableFullLuaAccess").boolValue,
+                CoreAiLuaWorldModule module = scope.GetComponentInChildren<CoreAiLuaWorldModule>(true);
+                Assert.IsNotNull(module, "Scene must own Lua configuration in a child module.");
+                Assert.IsTrue(module.FullAccessEnabled,
                     "Wave auto-battler demo must grant Full Lua for scene-object mod tasks.");
             }
             finally

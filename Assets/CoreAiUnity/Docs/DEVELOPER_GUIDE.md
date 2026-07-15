@@ -2,6 +2,26 @@
 
 For teams who **wire the core into their own game** or **extend this repository**. Normative contracts and the roadmap live in **[DGF_SPEC.md](DGF_SPEC.md)**; this document is a practical map of the codebase and common tasks.
 
+CoreAI 5.9 uses endpoint/profile/role separation for runtime LLM routing. Prefer
+`ILlmEndpointRegistry` plus `AgentBuilder.WithLlmProfile(...)` over mutating one global backend. Legacy
+`CoreAiBackend.Apply*` remains available as the `legacy/default` compatibility path.
+
+Runtime routing is deliberately not a singleton-provider design. A project may persist zero, one, or many
+endpoint descriptors and independently assign profiles to built-in or custom agent roles. **Automatic**
+routing means “no per-request override”: request profile, agent default, role assignment, route default, and
+legacy fallback keep their normal precedence. `Active` endpoints accept new work; `KeepWarm` endpoints may
+stay initialized without being routable.
+
+The Unity registry persists endpoint descriptors, profiles, and role assignments under persistent data, but
+never session API keys. Passing `null` as the update key preserves the in-memory credential; passing `""`
+clears it. A `SecretReference` is resolved by `ILlmEndpointSecretProvider` during activation (the default
+uses the reference as an environment-variable name). External HTTP activation prefers a successful
+`GET {BaseUrl}/models`; `404`/`405` falls back to a minimal `POST {BaseUrl}/chat/completions` probe, while
+authentication, missing-route, server, and network failures remain failures. LLMUnity has no `/v1/models`: activation waits for native startup, then verifies that
+`POST /v1/chat/completions` accepts a connection (`401`/`403` remain authentication failures). Use separate
+named `LLMAgent` objects and unique ports for parallel local endpoints; same-host model/port mutation is
+rejected so an active generation is never torn down beneath in-flight requests.
+
 ---
 
 ## 1. Where to start (reading order)

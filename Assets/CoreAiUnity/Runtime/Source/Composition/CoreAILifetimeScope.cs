@@ -13,6 +13,7 @@ using CoreAI.Infrastructure;
 using CoreAI.Unity;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Serialization;
 using VContainer;
 using VContainer.Unity;
 
@@ -39,29 +40,42 @@ namespace CoreAI.Composition
         [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
 
-        [Header("World Commands (Lua -> MessagePipe -> main thread)")]
-        [Tooltip("Prefab whitelist that Lua world commands are allowed to spawn.")]
+        [Header("Optional Modules")]
+        [Tooltip("Optional child module that owns Lua and world-command configuration. A child component is auto-discovered when this reference is empty.")]
+        [SerializeField]
+        private CoreAiLuaWorldModule luaWorldModule;
+
+        [HideInInspector]
+        [FormerlySerializedAs("legacyWorldPrefabRegistry")]
         [SerializeField]
         private CoreAiPrefabRegistryAsset worldPrefabRegistry;
 
-        [Tooltip("Scene names Lua may load via coreai_world_load_scene. Empty = any Build Settings scene (legacy).")]
+        [HideInInspector]
+        [FormerlySerializedAs("luaAllowedScenes")]
         [SerializeField]
-        private string[] luaAllowedScenes = System.Array.Empty<string>();
+        private string[] legacyLuaAllowedScenes = System.Array.Empty<string>();
 
-        [Tooltip("When enabled, Lua with Full capability can access arbitrary GameObjects/components via reflection.")]
+        [HideInInspector]
+        [FormerlySerializedAs("enableFullLuaAccess")]
         [SerializeField]
-        private bool enableFullLuaAccess;
+        private bool legacyEnableFullLuaAccess;
 
         /// <summary>
         /// Whether this composition grants the Full Lua tier (unity_* reflection). Exposed so
         /// scene helpers that autoload persisted mods (e.g. the mods-chat persistence demo)
         /// can grant the SAME tier the host does instead of hardcoding a lower one.
         /// </summary>
-        public bool FullLuaAccessEnabled => enableFullLuaAccess;
+        public bool FullLuaAccessEnabled => ResolveLuaWorldModule() != null
+            ? ResolveLuaWorldModule().FullAccessEnabled
+            : legacyEnableFullLuaAccess;
 
-        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
+        [HideInInspector]
+        [FormerlySerializedAs("enableFullLuaPrivateAccess")]
         [SerializeField]
-        private bool enableFullLuaPrivateAccess;
+        private bool legacyEnableFullLuaPrivateAccess;
+
+        /// <summary>The explicit or auto-discovered Lua/world-command child module.</summary>
+        public CoreAiLuaWorldModule LuaWorldModule => ResolveLuaWorldModule();
 
         [Header("Skills")]
         [Tooltip("On-demand skills per agent role: the role gets a read_skill catalog with these " +
@@ -149,14 +163,21 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // WHY: Full tier works on WebGL/IL2CPP too: the Lua-CSharp runtime is a managed, AOT-safe VM, so
-            // there is no wasm "null function" trap to gate around. link.xml preserves the Lua assemblies
-            // plus the Resources/TextAsset members CoreAI loads prompts/skills/bundled mods through.
-            builder.RegisterWorldCommands(
-                worldPrefabRegistry,
-                luaAllowedScenes,
-                enableFullLuaAccess,
-                enableFullLuaPrivateAccess);
+            CoreAiLuaWorldModule module = ResolveLuaWorldModule();
+            if (module != null)
+            {
+                module.Register(builder);
+            }
+            else
+            {
+                // WHY: Existing scenes keep their behavior until migrated to the child module.
+                // WHY: New scopes without the optional module retain the safe legacy defaults.
+                builder.RegisterWorldCommands(
+                    worldPrefabRegistry,
+                    legacyLuaAllowedScenes,
+                    legacyEnableFullLuaAccess,
+                    legacyEnableFullLuaPrivateAccess);
+            }
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 
@@ -216,6 +237,42 @@ namespace CoreAI.Composition
                 builder.RegisterEntryPoint<LlmUnityAutostartEntryPoint>();
             }
 #endif
+        }
+
+        private CoreAiLuaWorldModule ResolveLuaWorldModule()
+        {
+            if (luaWorldModule == null)
+            {
+                luaWorldModule = GetComponentInChildren<CoreAiLuaWorldModule>(true);
+            }
+
+            return luaWorldModule;
+        }
+
+        internal void SetLuaWorldModuleForMigration(CoreAiLuaWorldModule module)
+        {
+            luaWorldModule = module;
+            if (module != null)
+            {
+                worldPrefabRegistry = null;
+                legacyLuaAllowedScenes = System.Array.Empty<string>();
+                legacyEnableFullLuaAccess = false;
+                legacyEnableFullLuaPrivateAccess = false;
+            }
+        }
+
+        internal void CopyLegacyLuaWorldConfigurationTo(CoreAiLuaWorldModule module)
+        {
+            if (module == null)
+            {
+                throw new System.ArgumentNullException(nameof(module));
+            }
+
+            module.ConfigureForMigration(
+                worldPrefabRegistry,
+                legacyLuaAllowedScenes,
+                legacyEnableFullLuaAccess,
+                legacyEnableFullLuaPrivateAccess);
         }
 
 #if UNITY_WEBGL

@@ -3,6 +3,8 @@
 .coreai-chat-container {
   width: 650px;
   height: 910px;
+  max-width: 94%;
+  max-height: 94%;
   background-color: rgba(6, 14, 30, 0.93);
   border-radius: 16px;
   border-width: 2px;
@@ -129,6 +131,79 @@
 
 .coreai-chat-agent-dropdown .unity-base-popup-field__arrow {
   -unity-background-image-tint-color: rgb(77, 208, 225);
+}
+
+.coreai-chat-api-toggle {
+    min-width: 42px;
+    height: 30px;
+    margin-left: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+    color: rgba(184, 214, 224, 0.88);
+    background-color: rgba(24, 42, 54, 0.86);
+    border-color: rgba(77, 208, 225, 0.35);
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.coreai-chat-api-toggle:hover,
+.coreai-chat-api-toggle-active {
+    color: rgb(230, 249, 252);
+    background-color: rgba(41, 82, 92, 0.95);
+    border-color: rgba(77, 208, 225, 0.82);
+}
+
+.coreai-chat-api-dropdown {
+    position: absolute;
+    top: 48px;
+    right: 72px;
+    width: 190px;
+    min-width: 120px;
+    max-width: 45%;
+    padding: 4px;
+    background-color: rgba(10, 22, 45, 0.98);
+    border-color: rgba(77, 208, 225, 0.45);
+    border-radius: 8px;
+}
+
+.coreai-chat-api-status {
+    position: absolute;
+    top: 86px;
+    right: 72px;
+    width: 190px;
+    max-width: 45%;
+    padding: 5px 8px;
+    color: rgba(184, 214, 224, 0.92);
+    background-color: rgba(10, 22, 45, 0.98);
+    border-color: rgba(77, 208, 225, 0.28);
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: normal;
+}
+
+.coreai-chat-container.coreai-mobile .coreai-chat-agent-dropdown {
+    min-width: 88px;
+}
+
+.coreai-chat-container.coreai-mobile .coreai-chat-header-title,
+.coreai-chat-container.coreai-mobile .coreai-chat-header-icon {
+    display: none;
+}
+
+.coreai-chat-container.coreai-mobile .coreai-chat-api-dropdown,
+.coreai-chat-container.coreai-mobile .coreai-chat-api-status {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+}
+
+.coreai-chat-api-dropdown .unity-base-popup-field__input {
+    height: 30px;
+    color: rgb(221, 241, 245);
+    background-color: rgba(21, 35, 45, 0.95);
+    border-color: rgba(77, 208, 225, 0.45);
+    border-radius: 6px;
 }
 
 /* Collapsed state — container hidden, FAB shown instead */

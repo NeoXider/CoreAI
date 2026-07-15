@@ -12,6 +12,43 @@
 
 ## Portable Contracts
 
+### Runtime endpoints and agent profiles (5.9)
+
+`ILlmEndpointRegistry` separates three concepts that were previously conflated:
+
+- an **endpoint** is a concrete HTTP, LLMUnity, or Offline provider;
+- a **profile** names an endpoint and its fallback policy;
+- a **role assignment** selects the profile used by an agent.
+
+Endpoints can be added, updated, activated, kept warm, or removed while other endpoints remain active.
+Use `AgentBuilder.WithLlmProfile("profile-id")` for an agent default or
+`AiTaskRequest.RoutingProfileId` for a single call. Explicit request selection wins over the agent and
+role assignment. Leaving the Chat selector on **Automatic** sends no explicit profile override, so this
+normal resolver order remains intact.
+
+The registry is valid with any endpoint count:
+
+- **0 endpoints:** routing continues through the configured legacy/default client (including Offline);
+- **1 endpoint:** assign its generated/named profile to a role, or select it explicitly;
+- **many endpoints:** different roles and concurrent requests may use different HTTP APIs and LLMUnity hosts.
+
+`Active` controls whether new requests may route to an endpoint. `KeepWarm` may keep an inactive endpoint
+loaded and Ready for a later switch, but does not make it routable. Activating a persisted endpoint starts
+its readiness sequence again after process restart. HTTP endpoints prefer a successful OpenAI-compatible
+`GET {BaseUrl}/models` probe. If that optional route returns `404` or `405`, CoreAI falls back to a minimal
+`POST {BaseUrl}/chat/completions` probe and accepts a handler-level response; authentication failures,
+missing completion routes, server errors, and network failures still fail readiness. LLMUnity does not expose `/v1/models`: its endpoints first
+complete native warmup, then probe `POST /v1/chat/completions`. An HTTP response proves that the local socket
+and route accept connections; `401`/`403` remain readiness failures when authentication is configured. A
+first request resolved during activation awaits that shared readiness task instead of racing model startup.
+
+Endpoint descriptors, profiles, and role assignments are persisted by the Unity host. Session credentials
+are deliberately excluded. For `AddOrUpdateEndpointAsync`, a `null` `sessionApiKey` preserves the existing
+in-memory key, an explicit empty string clears it, and a non-empty value replaces it. Persisted
+`SecretReference` is resolved through `ILlmEndpointSecretProvider`; the Unity default treats the reference
+as an environment-variable name. Applications may inject another provider for a platform keychain or
+authenticated backend.
+
 - `LlmRouteProfile` describes a profile id, execution mode, model alias, context window, response cap, and capabilities.
 - `LlmRouteRule` maps role patterns to profile ids. Exact role ids, prefix patterns ending with `*`, and `*` wildcard are supported.
 - `LlmRouteTable` stores profiles and rules and validates duplicate/missing profile references.
@@ -35,7 +72,15 @@ Lesson and practice orchestrators can keep routing portable while adding per-tur
 
 ## Host Boundary
 
-`CoreAI.Core` does not create HTTP clients, read Unity assets, or know about VContainer. `CoreAiUnity` converts `LlmRoutingManifest` into `LlmRouteTable`, then uses the portable resolver while still building Unity-specific clients such as LLMUnity, OpenAI-compatible HTTP, client-limited decorators, and server-managed proxy clients.
+`CoreAI.Core` ships the portable OpenAI-compatible HTTP path: `IOpenAiHttpTransport`,
+`HttpClientOpenAiTransport`, and `MeaiOpenAiChatClient`. A plain .NET host can construct that client directly
+without Unity. Loopback URLs bypass the system proxy so local model sockets remain local; external URLs retain
+the platform proxy policy.
+
+`CoreAiUnity` owns Unity runtime integration: endpoint registry lifecycle and persistence, `CoreAISettingsAsset`,
+LLMUnity native model startup/readiness, WebGL `UnityWebRequest`/Fetch transports, Hub/Chat UI, and VContainer
+registration. It selects the Unity/WebGL transport adapter where required; it does not own the portable HTTP
+client contract or implementation.
 
 Production games such as RedoSchool should put provider keys and quota enforcement behind `ServerManagedApi`. The Unity client sends a user/session token to the backend; the backend performs entitlement, calls the provider, records usage, and returns stable provider errors.
 

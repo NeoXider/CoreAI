@@ -542,6 +542,8 @@ namespace CoreAI.Chat
 
         protected virtual void OnDestroy()
         {
+            CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
+            AttachRoutingController(null);
             _cts?.Cancel();
             _cts?.Dispose();
             _activeRequestCts?.Cancel();
@@ -549,8 +551,16 @@ namespace CoreAI.Chat
         }
 
         private DropdownField _agentDropdown;
+        private DropdownField _apiProfileDropdown;
+        private Button _apiProfileToggle;
+        private Label _apiProfileStatus;
         private string _activeRoleId;
         private bool _agentSwitchingEnabled;
+        private bool _apiSwitchingEnabled;
+        private bool _apiSelectorExpanded;
+        private ICoreAiRoutingUiController _routingUiController;
+        private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
+        private const string AutomaticApiProfileLabel = "Automatic / agent default";
 
         /// <summary>The role currently driving the chat — the runtime-switched role when agent switching is
         /// active, otherwise the configured role. Used for history hydration, tool-call display, and stop/clear
@@ -566,6 +576,210 @@ namespace CoreAI.Chat
             _agentSwitchingEnabled = true;
             _activeRoleId ??= Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat;
             TryBuildAgentDropdown();
+        }
+
+        /// <summary>
+        /// Enables the optional API profile control. The selector stays collapsed until the user opens it.
+        /// </summary>
+        public void EnableApiSwitching(bool expanded = false)
+        {
+            _apiSwitchingEnabled = true;
+            _apiSelectorExpanded = expanded;
+            CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
+            CoreAiRoutingUi.ControllerChanged += HandleRoutingControllerChanged;
+            AttachRoutingController(CoreAiRoutingUi.Controller);
+            TryBuildApiProfileControls();
+        }
+
+        /// <summary>Whether the optional API profile selector is currently expanded.</summary>
+        public bool IsApiSelectorExpanded => _apiSelectorExpanded;
+
+        /// <summary>Selected routing profile id for the active agent role.</summary>
+        public string SelectedRoutingProfileId => ResolveSelectedProfileId();
+
+        private void TryBuildApiProfileControls()
+        {
+            if (!_apiSwitchingEnabled || _apiProfileToggle != null || HeaderTitle == null)
+            {
+                return;
+            }
+
+            VisualElement header = HeaderTitle.parent;
+            if (header == null)
+            {
+                return;
+            }
+
+            int insertIndex = _agentDropdown != null
+                ? header.IndexOf(_agentDropdown) + 1
+                : header.IndexOf(HeaderTitle) + 1;
+
+            _apiProfileToggle = new Button(ToggleApiProfileSelector)
+            {
+                text = "API",
+                tooltip = "Choose an API profile for the active agent"
+            };
+            _apiProfileToggle.AddToClassList("coreai-chat-api-toggle");
+
+            _apiProfileDropdown = new DropdownField();
+            _apiProfileDropdown.AddToClassList("coreai-chat-api-dropdown");
+            _apiProfileDropdown.RegisterValueChangedCallback(OnApiProfileChanged);
+
+            _apiProfileStatus = new Label();
+            _apiProfileStatus.AddToClassList("coreai-chat-api-status");
+
+            header.Insert(insertIndex, _apiProfileToggle);
+            header.Insert(insertIndex + 1, _apiProfileDropdown);
+            header.Insert(insertIndex + 2, _apiProfileStatus);
+            RefreshApiProfileControls();
+        }
+
+        private void ToggleApiProfileSelector()
+        {
+            _apiSelectorExpanded = !_apiSelectorExpanded;
+            RefreshApiProfileControls();
+        }
+
+        private void OnApiProfileChanged(ChangeEvent<string> evt)
+        {
+            if (_routingUiController == null || string.IsNullOrWhiteSpace(evt.newValue) ||
+                !_profileIdByLabel.TryGetValue(evt.newValue, out string profileId))
+            {
+                return;
+            }
+
+            CoreAiRoutingUiResult result = _routingUiController.AssignProfileToRole(ActiveRoleId, profileId);
+            if (!result.Ok)
+            {
+                Debug.LogWarning("[CoreAiChatPanel] API profile assignment failed: " + result.Message);
+                RefreshApiProfileControls();
+            }
+            else if (string.IsNullOrEmpty(profileId))
+            {
+                _apiProfileStatus.text = "Automatic routing uses the active agent's configured default.";
+            }
+        }
+
+        private void HandleRoutingControllerChanged()
+        {
+            AttachRoutingController(CoreAiRoutingUi.Controller);
+            RefreshApiProfileControls();
+        }
+
+        private void AttachRoutingController(ICoreAiRoutingUiController controller)
+        {
+            if (ReferenceEquals(_routingUiController, controller))
+            {
+                return;
+            }
+
+            if (_routingUiController != null)
+            {
+                _routingUiController.Changed -= RefreshApiProfileControls;
+            }
+
+            _routingUiController = controller;
+            if (_routingUiController != null)
+            {
+                _routingUiController.Changed += RefreshApiProfileControls;
+            }
+        }
+
+        private void RefreshApiProfileControls()
+        {
+            if (_apiProfileToggle == null || _apiProfileDropdown == null)
+            {
+                return;
+            }
+
+            _profileIdByLabel.Clear();
+            _profileIdByLabel[AutomaticApiProfileLabel] = "";
+            List<string> labels = new() { AutomaticApiProfileLabel };
+            IReadOnlyList<LlmRuntimeProfile> profiles = _routingUiController?.GetProfiles();
+            IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingUiController?.GetEndpoints();
+            if (profiles != null)
+            {
+                foreach (LlmRuntimeProfile profile in profiles)
+                {
+                    if (profile == null || string.IsNullOrWhiteSpace(profile.ProfileId))
+                    {
+                        continue;
+                    }
+
+                    string baseLabel = string.IsNullOrWhiteSpace(profile.DisplayName)
+                        ? profile.ProfileId
+                        : profile.DisplayName;
+                    baseLabel += " — " + EndpointStateLabel(profile.EndpointId, endpoints);
+                    string label = baseLabel;
+                    int suffix = 2;
+                    while (_profileIdByLabel.ContainsKey(label))
+                    {
+                        label = baseLabel + " (" + suffix++ + ")";
+                    }
+
+                    _profileIdByLabel[label] = profile.ProfileId;
+                    labels.Add(label);
+                }
+            }
+
+            _apiProfileDropdown.choices = labels;
+            string selectedId = _routingUiController?.GetProfileForRole(ActiveRoleId) ?? "";
+            string selectedLabel = FindProfileLabel(selectedId);
+            _apiProfileDropdown.SetValueWithoutNotify(selectedLabel);
+            _apiProfileDropdown.style.display = _apiSelectorExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _apiProfileDropdown.SetEnabled(_routingUiController != null);
+            _apiProfileToggle.SetEnabled(_routingUiController != null);
+            _apiProfileToggle.EnableInClassList("coreai-chat-api-toggle-active", _apiSelectorExpanded);
+            _apiProfileToggle.text = profiles == null || profiles.Count == 0 ? "API · Auto" : "API";
+            _apiProfileToggle.tooltip = profiles == null || profiles.Count == 0
+                ? "No API profiles. Create one in Hub Settings; Automatic/default routing is active."
+                : "Choose an API profile for the active agent";
+            if (_apiProfileStatus != null)
+            {
+                _apiProfileStatus.text = profiles == null || profiles.Count == 0
+                    ? "No API profiles yet. Create one in Settings."
+                    : selectedLabel;
+                _apiProfileStatus.style.display = _apiSelectorExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        private string ResolveSelectedProfileId()
+        {
+            return _apiProfileDropdown != null &&
+                   _profileIdByLabel.TryGetValue(_apiProfileDropdown.value ?? "", out string profileId)
+                ? profileId
+                : "";
+        }
+
+        private string FindProfileLabel(string profileId)
+        {
+            foreach (KeyValuePair<string, string> pair in _profileIdByLabel)
+            {
+                if (string.Equals(pair.Value, profileId, StringComparison.Ordinal))
+                {
+                    return pair.Key;
+                }
+            }
+
+            return AutomaticApiProfileLabel;
+        }
+
+        private static string EndpointStateLabel(
+            string endpointId,
+            IReadOnlyList<LlmEndpointSnapshot> endpoints)
+        {
+            if (endpoints != null)
+            {
+                foreach (LlmEndpointSnapshot snapshot in endpoints)
+                {
+                    if (string.Equals(snapshot?.Descriptor?.EndpointId, endpointId, StringComparison.Ordinal))
+                    {
+                        return snapshot.State.ToString();
+                    }
+                }
+            }
+
+            return "Unavailable";
         }
 
         private void TryBuildAgentDropdown()
@@ -628,6 +842,8 @@ namespace CoreAI.Chat
                 StopActiveGeneration();
                 HydrateStartupMessagesFromStore();
             }
+
+            RefreshApiProfileControls();
         }
 
         protected virtual void BindUI()
@@ -653,6 +869,7 @@ namespace CoreAI.Chat
             }
 
             TryBuildAgentDropdown();
+            TryBuildApiProfileControls();
 
             if (_longRequestHint != null)
             {
@@ -777,6 +994,9 @@ namespace CoreAI.Chat
             TypingLabel = null;
             HeaderTitle = null;
             HeaderIcon = null;
+            _agentDropdown = null;
+            _apiProfileDropdown = null;
+            _apiProfileToggle = null;
             _longRequestHint = null;
             _streamingLabel = null;
         }
@@ -1874,6 +2094,7 @@ namespace CoreAI.Chat
             return new AiTaskRequest
             {
                 RoleId = roleId,
+                RoutingProfileId = ResolveSelectedProfileId(),
                 Hint = userText,
                 SourceTag = "Chat",
                 CancellationScope = roleId

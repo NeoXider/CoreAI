@@ -211,8 +211,10 @@ namespace CoreAI.Editor
                 CoreAIEditorLog.LogWarning("Validate Scene: Game Log Settings not assigned.");
             }
 
+            CoreAiLuaWorldModule luaWorldModule = scope.LuaWorldModule;
             SerializedProperty world = so.FindProperty("worldPrefabRegistry");
-            if (world == null || world.objectReferenceValue == null)
+            if ((luaWorldModule == null || luaWorldModule.WorldPrefabRegistry == null) &&
+                (world == null || world.objectReferenceValue == null))
             {
                 issues++;
                 CoreAIEditorLog.LogWarning("Validate Scene: World Prefab Registry not assigned.");
@@ -279,9 +281,9 @@ namespace CoreAI.Editor
             SetPropertyIfExists(so, "gameLogSettings", logSettings);
             SetPropertyIfExists(so, "coreAiSettings", coreAiSettings);
             SetPropertyIfExists(so, "agentPromptsManifest", prompts);
-            SetPropertyIfExists(so, "worldPrefabRegistry", prefabs);
             SetPropertyIfExists(so, "llmRoutingManifest", routing);
             so.ApplyModifiedPropertiesWithoutUndo();
+            EnsureLuaWorldModule(scope, prefabs);
 
             bool needsLlmUnity = NeedsLlmUnity(coreAiSettings);
             if (needsLlmUnity)
@@ -547,7 +549,7 @@ namespace CoreAI.Editor
             SerializedObject so = new(scope);
             so.FindProperty("gameLogSettings").objectReferenceValue = logSettings;
 
-            // Note: openAiHttpLlmSettings might still be the property name if not updated, but we don't strictly need to assign it since CoreAI prefers the singleton now.
+            // WHY: Older settings assets may still expose the retired HTTP settings reference.
             SerializedProperty legacyOpenAiProp = so.FindProperty("openAiHttpLlmSettings");
             if (legacyOpenAiProp != null)
             {
@@ -555,13 +557,35 @@ namespace CoreAI.Editor
             }
 
             so.FindProperty("agentPromptsManifest").objectReferenceValue = prompts;
-            so.FindProperty("worldPrefabRegistry").objectReferenceValue = prefabs;
             so.ApplyModifiedPropertiesWithoutUndo();
+            EnsureLuaWorldModule(scope, prefabs);
             EditorUtility.SetDirty(scope);
             if (scope.gameObject.scene.IsValid())
             {
                 EditorSceneManager.MarkSceneDirty(scope.gameObject.scene);
             }
+        }
+
+        private static CoreAiLuaWorldModule EnsureLuaWorldModule(
+            CoreAILifetimeScope scope,
+            CoreAiPrefabRegistryAsset prefabs)
+        {
+            CoreAiLuaWorldModule module = scope.LuaWorldModule;
+            if (module == null)
+            {
+                GameObject child = new("Lua and World Commands");
+                Undo.RegisterCreatedObjectUndo(child, "Add CoreAI Lua module");
+                child.transform.SetParent(scope.transform, false);
+                module = Undo.AddComponent<CoreAiLuaWorldModule>(child);
+                scope.CopyLegacyLuaWorldConfigurationTo(module);
+            }
+
+            SerializedObject moduleSo = new(module);
+            moduleSo.FindProperty("worldPrefabRegistry").objectReferenceValue = prefabs;
+            moduleSo.ApplyModifiedPropertiesWithoutUndo();
+            scope.SetLuaWorldModuleForMigration(module);
+            EditorUtility.SetDirty(module);
+            return module;
         }
     }
 }

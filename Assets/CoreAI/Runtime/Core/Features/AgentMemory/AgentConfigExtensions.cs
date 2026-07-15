@@ -55,6 +55,7 @@ namespace CoreAI.Ai
             return orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = config.RoleId,
+                RoutingProfileId = config.LlmProfileId ?? "",
                 Hint = message,
                 Priority = priority,
                 CancellationScope =

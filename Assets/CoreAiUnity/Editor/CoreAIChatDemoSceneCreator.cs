@@ -153,11 +153,19 @@ namespace CoreAI.Editor
             SetProp(so, "gameLogSettings", logSettings);
             SetProp(so, "coreAiSettings", coreAiSettings);
             SetProp(so, "agentPromptsManifest", prompts);
-            SetProp(so, "worldPrefabRegistry", prefabs);
             SetProp(so, "llmRoutingManifest", routing);
             so.ApplyModifiedPropertiesWithoutUndo();
 
+            GameObject luaModuleGo = new("Lua and World Commands");
+            luaModuleGo.transform.SetParent(scopeGo.transform, false);
+            CoreAiLuaWorldModule luaModule = luaModuleGo.AddComponent<CoreAiLuaWorldModule>();
+            SerializedObject moduleSo = new(luaModule);
+            SetProp(moduleSo, "worldPrefabRegistry", prefabs);
+            moduleSo.ApplyModifiedPropertiesWithoutUndo();
+            scope.SetLuaWorldModuleForMigration(luaModule);
+
             EditorUtility.SetDirty(scope);
+            EditorUtility.SetDirty(luaModule);
             return scopeGo;
         }
 

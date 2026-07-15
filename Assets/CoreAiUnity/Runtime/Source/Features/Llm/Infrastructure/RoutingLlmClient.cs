@@ -43,9 +43,10 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId);
-            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId);
-            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
+            string requestedProfile = request.RoutingProfileId;
+            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId, requestedProfile);
+            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId, requestedProfile);
+            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId, requestedProfile);
         }
 
         /// <inheritdoc />
@@ -70,28 +71,28 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            ILlmClient inner = Prepare(request, false);
+            ILlmClient inner = Prepare(request, false, out LlmExecutionMode capturedMode);
             try
             {
                 LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
-                PublishCompleted(request, false, result != null && result.Ok, result?.Error ?? "",
+                PublishCompleted(request, capturedMode, false, result != null && result.Ok, result?.Error ?? "",
                     result?.ErrorCode ?? LlmErrorCode.None);
-                PublishUsage(request, false, result);
+                PublishUsage(request, capturedMode, false, result);
                 return result;
             }
             catch (LlmOperationTimeoutException)
             {
-                PublishCompleted(request, false, false, "timeout", LlmErrorCode.Timeout);
+                PublishCompleted(request, capturedMode, false, false, "timeout", LlmErrorCode.Timeout);
                 throw;
             }
             catch (OperationCanceledException)
             {
-                PublishCompleted(request, false, false, "cancelled", LlmErrorCode.Cancelled);
+                PublishCompleted(request, capturedMode, false, false, "cancelled", LlmErrorCode.Cancelled);
                 throw;
             }
             catch (Exception ex)
             {
-                PublishCompleted(request, false, false, ex.Message, LlmErrorCode.ProviderError);
+                PublishCompleted(request, capturedMode, false, false, ex.Message, LlmErrorCode.ProviderError);
                 throw;
             }
         }
@@ -115,7 +116,7 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            ILlmClient inner = Prepare(request, true);
+            ILlmClient inner = Prepare(request, true, out LlmExecutionMode capturedMode);
             bool ok = true;
             string error = "";
             LlmErrorCode errorCode = LlmErrorCode.None;
@@ -134,14 +135,14 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (LlmOperationTimeoutException)
                     {
-                        PublishCompleted(request, true, false, "timeout", LlmErrorCode.Timeout);
-                        PublishUsage(request, true, lastUsageChunk, false);
+                        PublishCompleted(request, capturedMode, true, false, "timeout", LlmErrorCode.Timeout);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
                         throw;
                     }
                     catch (OperationCanceledException)
                     {
-                        PublishCompleted(request, true, false, "cancelled", LlmErrorCode.Cancelled);
-                        PublishUsage(request, true, lastUsageChunk, false);
+                        PublishCompleted(request, capturedMode, true, false, "cancelled", LlmErrorCode.Cancelled);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
                         throw;
                     }
 
@@ -170,8 +171,8 @@ namespace CoreAI.Infrastructure.Llm
                     yield return chunk;
                 }
 
-                PublishCompleted(request, true, ok, error, errorCode);
-                PublishUsage(request, true, lastUsageChunk, ok);
+                PublishCompleted(request, capturedMode, true, ok, error, errorCode);
+                PublishUsage(request, capturedMode, true, lastUsageChunk, ok);
             }
             finally
             {
@@ -179,29 +180,34 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private ILlmClient Prepare(LlmCompletionRequest request, bool streaming)
+        private ILlmClient Prepare(
+            LlmCompletionRequest request,
+            bool streaming,
+            out LlmExecutionMode capturedMode)
         {
-            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId);
-            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId);
-            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
-            LlmExecutionMode mode = _registry.ResolveExecutionModeForRole(request.AgentRoleId);
+            string requestedProfile = request.RoutingProfileId;
+            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId, requestedProfile);
+            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId, requestedProfile);
+            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId, requestedProfile);
+            capturedMode = _registry.ResolveExecutionModeForRole(request.AgentRoleId, requestedProfile);
             _backendSelectedPublisher?.Publish(new LlmBackendSelected(
                 request.TraceId,
                 request.AgentRoleId,
                 request.RoutingProfileId,
-                mode,
+                capturedMode,
                 DescribeInner(inner)));
             _requestStartedPublisher?.Publish(new LlmRequestStarted(
                 request.TraceId,
                 request.AgentRoleId,
                 request.RoutingProfileId,
-                mode,
+                capturedMode,
                 streaming));
             return inner;
         }
 
         private void PublishCompleted(
             LlmCompletionRequest request,
+            LlmExecutionMode capturedMode,
             bool streaming,
             bool success,
             string error,
@@ -211,14 +217,18 @@ namespace CoreAI.Infrastructure.Llm
                 request?.TraceId,
                 request?.AgentRoleId,
                 request?.RoutingProfileId,
-                request != null ? _registry.ResolveExecutionModeForRole(request.AgentRoleId) : LlmExecutionMode.Auto,
+                capturedMode,
                 streaming,
                 success,
                 error,
                 errorCode));
         }
 
-        private void PublishUsage(LlmCompletionRequest request, bool streaming, LlmCompletionResult result)
+        private void PublishUsage(
+            LlmCompletionRequest request,
+            LlmExecutionMode capturedMode,
+            bool streaming,
+            LlmCompletionResult result)
         {
             if (result == null ||
                 (!result.PromptTokens.HasValue &&
@@ -234,7 +244,7 @@ namespace CoreAI.Infrastructure.Llm
                 request?.TraceId,
                 request?.AgentRoleId,
                 request?.RoutingProfileId,
-                request != null ? _registry.ResolveExecutionModeForRole(request.AgentRoleId) : LlmExecutionMode.Auto,
+                capturedMode,
                 result.Model,
                 result.PromptTokens,
                 result.CompletionTokens,
@@ -245,7 +255,12 @@ namespace CoreAI.Infrastructure.Llm
                 result.CacheWriteTokens));
         }
 
-        private void PublishUsage(LlmCompletionRequest request, bool streaming, LlmStreamChunk chunk, bool success)
+        private void PublishUsage(
+            LlmCompletionRequest request,
+            LlmExecutionMode capturedMode,
+            bool streaming,
+            LlmStreamChunk chunk,
+            bool success)
         {
             if (chunk == null)
             {
@@ -256,7 +271,7 @@ namespace CoreAI.Infrastructure.Llm
                 request?.TraceId,
                 request?.AgentRoleId,
                 request?.RoutingProfileId,
-                request != null ? _registry.ResolveExecutionModeForRole(request.AgentRoleId) : LlmExecutionMode.Auto,
+                capturedMode,
                 chunk.Model,
                 chunk.PromptTokens,
                 chunk.CompletionTokens,

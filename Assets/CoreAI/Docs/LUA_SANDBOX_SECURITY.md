@@ -49,6 +49,14 @@ When `COREAI_NO_LUA` is set:
 
 Default builds (symbol unset) keep Lua enabled and behave exactly as before.
 
+### Unity scene module
+
+Runtime Lua/world-command scene permissions are owned by an optional `CoreAiLuaWorldModule` child of
+`CoreAILifetimeScope`. The module contains the prefab whitelist, scene whitelist, Full-tier grant, and
+private-member grant. This keeps security-sensitive Lua configuration out of the root CoreAI Inspector
+unless the host deliberately adds the module. Existing scenes with the former flat fields migrate without
+losing serialized values; new scenes should configure only the child module.
+
 ### CI matrix
 
 `.github/workflows/ci.yml` runs EditMode tests in both configurations on every

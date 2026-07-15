@@ -90,6 +90,7 @@ namespace CoreAI.Hub.UI
             if (_panel != null)
             {
                 _panel.EnableAgentSwitching();
+                _panel.EnableApiSwitching();
 
                 // The Hub chat always surfaces tool-call progress so the player can see mod/tool actions
                 // execute inline. This overrides the shared chat config for the embedded panel only — the

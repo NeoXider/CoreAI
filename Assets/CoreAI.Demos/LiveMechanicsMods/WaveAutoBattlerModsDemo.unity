@@ -119,6 +119,54 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &104913043
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 104913045}
+  - component: {fileID: 104913044}
+  m_Layer: 0
+  m_Name: Lua and World Commands
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &104913044
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 104913043}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 37e0bb673a6c4874a9f11c08b6592ed6, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAiLuaWorldModule
+  worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
+  allowedScenes: []
+  enableFullAccess: 1
+  enableFullPrivateAccess: 0
+--- !u!4 &104913045
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 104913043}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2106438250}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &406190034
 GameObject:
   m_ObjectHideFlags: 0
@@ -902,10 +950,11 @@ MonoBehaviour:
   gameLogSettings: {fileID: 11400000, guid: a5ec9172eaa0cec4188a764046d7b73c, type: 2}
   agentPromptsManifest: {fileID: 11400000, guid: 76ac5bc3577a387409a9559c4de4a341, type: 2}
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}
-  worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
-  luaAllowedScenes: []
-  enableFullLuaAccess: 1
-  enableFullLuaPrivateAccess: 0
+  luaWorldModule: {fileID: 104913044}
+  legacyWorldPrefabRegistry: {fileID: 0}
+  legacyLuaAllowedScenes: []
+  legacyEnableFullLuaAccess: 0
+  legacyEnableFullLuaPrivateAccess: 0
   roleSkills: []
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
@@ -923,6 +972,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 406190035}
+  - {fileID: 104913045}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807

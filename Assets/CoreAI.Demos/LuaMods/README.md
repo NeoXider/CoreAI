@@ -13,6 +13,8 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 - **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
   `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every
   frame and shows which formula is active: Lua override or C# default.
+- **`Lua and World Commands` child module** owns the scene's prefab whitelist and Lua access tier;
+  `CoreAILifetimeScope` only composes the optional module into the runtime container.
 
 ## How to Use It
 

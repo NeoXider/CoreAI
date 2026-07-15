@@ -64,6 +64,14 @@ namespace CoreAI.Composition
                 return;
             }
 
+            LlmUnityActivationLogContext logContext = new(
+                "legacy-autostart",
+                "LLMUnity autostart",
+                llm.model,
+                agent.gameObject.name,
+                llm.port);
+            long nativeStart = LlmUnityActivationLog.StartTimer();
+            _logger.LogInfo(GameLogFeature.Llm, LlmUnityActivationLog.NativeStarted(logContext));
             try
             {
                 agent.Start();
@@ -74,10 +82,13 @@ namespace CoreAI.Composition
                     $"LLMUnity autostart: agent.Start() threw - {ex}");
             }
 
-            WarmupAsync(llm).Forget();
+            WarmupAsync(llm, logContext, nativeStart).Forget();
         }
 
-        private async UniTaskVoid WarmupAsync(LLM llm)
+        private async UniTaskVoid WarmupAsync(
+            LLM llm,
+            LlmUnityActivationLogContext logContext,
+            long nativeStart)
         {
             float timeout = _settings.LlmUnityStartupTimeoutSeconds;
             float start = Time.realtimeSinceStartup;
@@ -86,7 +97,11 @@ namespace CoreAI.Composition
                 if (Time.realtimeSinceStartup - start > timeout)
                 {
                     _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLMUnity autostart: warmup timed out after {timeout:0.#}s (server not started yet).");
+                        LlmUnityActivationLog.NativeFailed(
+                            logContext,
+                            LlmUnityActivationLog.ElapsedMilliseconds(nativeStart),
+                            new TimeoutException(
+                                $"Warmup timed out after {timeout:0.#}s; native server did not start.")));
                     return;
                 }
 
@@ -95,27 +110,35 @@ namespace CoreAI.Composition
 
             if (llm.failed)
             {
-                _logger.LogWarning(GameLogFeature.Llm, "LLMUnity autostart: server reported failure during startup.");
+                _logger.LogWarning(
+                    GameLogFeature.Llm,
+                    LlmUnityActivationLog.NativeFailed(
+                        logContext,
+                        LlmUnityActivationLog.ElapsedMilliseconds(nativeStart),
+                        new InvalidOperationException("Native server reported startup failure.")));
                 return;
             }
 
-            _logger.LogInfo(GameLogFeature.Llm, "LLMUnity autostart: server started successfully.");
+            _logger.LogInfo(
+                GameLogFeature.Llm,
+                LlmUnityActivationLog.NativeSucceeded(
+                    logContext,
+                    LlmUnityActivationLog.ElapsedMilliseconds(nativeStart)));
 
-            await WaitForOpenAiServerReadyAsync();
+            await WaitForOpenAiServerReadyAsync(logContext);
         }
 
-        // WHY: llm.started only means the native process launched - CoreAI talks to it over HTTP, so we
-        // additionally poll the OpenAI-compatible endpoint until it accepts a request. Any HTTP
-        // response (including an error status) proves the socket is bound and serving; a connection
-        // failure means the server isn't listening yet. HttpClient's async calls never block the
-        // calling thread, so this stays off the main thread and cannot deadlock Unity's sync context.
-        private async UniTask WaitForOpenAiServerReadyAsync()
+        // WHY: llm.started only means the native process launched, so CoreAI also probes its HTTP route.
+        // WHY: Only a handler-level response proves readiness; auth, missing-route, and server failures do not.
+        private async UniTask WaitForOpenAiServerReadyAsync(LlmUnityActivationLogContext logContext)
         {
             int port = _settings.LlmUnityServerPort;
             string url = $"http://localhost:{port}/v1/chat/completions";
 
             float timeout = _settings.LlmUnityStartupTimeoutSeconds;
             float start = Time.realtimeSinceStartup;
+            long readinessStart = LlmUnityActivationLog.StartTimer();
+            _logger.LogInfo(GameLogFeature.Llm, LlmUnityActivationLog.ReadinessStarted(logContext));
 
             using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
 
@@ -125,8 +148,25 @@ namespace CoreAI.Composition
                 {
                     using HttpContent content = new StringContent("{}", Encoding.UTF8, "application/json");
                     using HttpResponseMessage response = await client.PostAsync(url, content);
-                    _logger.LogInfo(GameLogFeature.Llm,
-                        $"LLMUnity OpenAI server ready on port {port} (HTTP {(int)response.StatusCode}).");
+                    long status = (long)response.StatusCode;
+                        if (!LlmEndpointReadinessPolicy.IsLlmUnityHandlerReached(status))
+                    {
+                        _logger.LogWarning(
+                            GameLogFeature.Llm,
+                            LlmUnityActivationLog.ReadinessFailed(
+                                logContext,
+                                LlmUnityActivationLog.ElapsedMilliseconds(readinessStart),
+                                new InvalidOperationException(
+                                    $"LLMUnity readiness probe failed ({status}).")));
+                        return;
+                    }
+
+                    _logger.LogInfo(
+                        GameLogFeature.Llm,
+                        LlmUnityActivationLog.ReadinessSucceeded(
+                            logContext,
+                            LlmUnityActivationLog.ElapsedMilliseconds(readinessStart)) +
+                        $" httpStatus={status}");
                     return;
                 }
                 catch (HttpRequestException)
@@ -141,10 +181,15 @@ namespace CoreAI.Composition
                 await UniTask.Delay(TimeSpan.FromMilliseconds(200), DelayType.Realtime, PlayerLoopTiming.Update);
             }
 
-            _logger.LogWarning(GameLogFeature.Llm,
-                $"LLMUnity autostart: OpenAI server readiness check timed out after {timeout:0.#}s " +
-                $"(port {port} not responding).");
+            _logger.LogWarning(
+                GameLogFeature.Llm,
+                LlmUnityActivationLog.ReadinessFailed(
+                    logContext,
+                    LlmUnityActivationLog.ElapsedMilliseconds(readinessStart),
+                    new TimeoutException(
+                        $"OpenAI server readiness timed out after {timeout:0.#}s; port {port} did not respond.")));
         }
+
     }
 }
 #endif

@@ -258,6 +258,16 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Builder_WithLlmProfile_TrimsAndStoresProfile()
+        {
+            AgentConfig config = new AgentBuilder("RoutedAgent")
+                .WithLlmProfile("  local-magic  ")
+                .BuildDetached();
+
+            Assert.AreEqual("local-magic", config.LlmProfileId);
+        }
+
+        [Test]
         public void ApplyToPolicy_ToolsAndChat_DefaultsStreamingOverrideToTrue()
         {
             AgentMemoryPolicy policy = new();

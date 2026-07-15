@@ -4,6 +4,48 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Added
+
+- Runtime endpoint management for multiple simultaneously active OpenAI-compatible APIs and LLMUnity,
+  including per-agent routing, endpoint lifecycle state, hot switching, persistence with secret redaction,
+  and deterministic EditMode/PlayMode coverage. External APIs prefer `/models`, with a handler-level
+  `/chat/completions` fallback when the optional models route returns `404`/`405`. LLMUnity
+  instead waits for native readiness without sending a warmup prompt and probes its `/v1/chat/completions`
+  route; an active replacement is
+  staged while the previous ready generation remains routable, then swapped atomically only after readiness
+  succeeds.
+- Hub endpoint editor and built-in/custom agent-to-API assignment UI. Chat exposes the same per-agent
+  selector behind a compact `API` control, keeps it collapsed by default, and offers Automatic routing
+  without forcing a per-request profile.
+- Versioned runtime persistence restores endpoint descriptors, profiles, role assignments, `Active`, and
+  `KeepWarm` state after restart. Session keys remain write-only; null preserves the current key, explicit
+  clear removes it, and `SecretReference` resolves through `ILlmEndpointSecretProvider` (environment-variable
+  name by default).
+- Standalone Qwen3.5-0.8B Genie and Spellcraft scenes with readiness-locked controls and strict
+  `ToolsOnly`/`RequireAny` exact-one native-tool validation, plus EditMode and no-model PlayMode regressions.
+- Structured LLMUnity diagnostics now time native llama.cpp model loading separately from HTTP readiness.
+  Start, success, timeout, cancellation, and failure logs identify the endpoint, model filename, LLMAgent,
+  port, and completed-phase duration in milliseconds without recording credentials or full model paths.
+
+### Changed
+
+- Lua/world-command settings moved to an optional child composition module with legacy scene migration;
+  demos and editor creation paths now author the child module explicitly.
+- Parallel LLMUnity endpoints now require distinct named `LLMAgent` hosts and unique ports. Mutating an
+  already-running shared host is rejected so the published generation and its in-flight requests are not
+  interrupted.
+- Runtime LLMUnity activation now resolves exact named inactive agents, applies the full native fingerprint
+  before activation, and uses cancellable `LLM.WaitUntilReady()`. CoreAI-owned host leases are reference
+  counted and released after tracked requests drain; the last release waits out native startup, unloads the
+  model with `LLM.Destroy()`, and restores the host inactive. Externally active hosts are never destroyed.
+
+### Fixed
+
+- Per-caller activation cancellation is event-driven and no longer polls with `Task.Yield()`, preventing an
+  EditMode synchronization-context deadlock while leaving the shared endpoint activation running.
+- FullAccess PlayMode coverage now reads Full Lua policy from `CoreAiLuaWorldModule` instead of removed
+  root-scope fields.
+
 ## 5.8.1 - Adversarial re-audit of 5.8.0: fix regressions/incomplete-fixes the wave introduced (2026-07-13)
 
 ### Fixed

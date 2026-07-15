@@ -1311,6 +1311,7 @@ namespace CoreAI.Ai
             return new AiTaskRequest
             {
                 RoleId = task.RoleId,
+                RoutingProfileId = task.RoutingProfileId ?? "",
                 Hint = hint,
                 LuaRepairGeneration = task.LuaRepairGeneration,
                 LuaRepairPreviousCode = task.LuaRepairPreviousCode,
@@ -1750,6 +1751,7 @@ namespace CoreAI.Ai
             return new LlmCompletionRequest
             {
                 AgentRoleId = bundle.RoleId,
+                RoutingProfileId = task.RoutingProfileId ?? "",
                 SystemPrompt = bundle.SystemPrompt,
                 UserPayload = userPayload,
                 ChatHistory = bundle.ChatHistory,

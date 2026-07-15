@@ -4,6 +4,25 @@
 
 Lua and LLM tools do not touch Unity directly. They publish a typed world command; the Unity layer executes it on the main thread through `ICoreAiWorldCommandExecutor`.
 
+## Scene composition
+
+`CoreAILifetimeScope` owns the CoreAI container. Lua and world-command settings live in the optional
+child `CoreAiLuaWorldModule` component:
+
+1. Select the `CoreAILifetimeScope` object.
+2. Click **Add Lua / World Commands Module** in its Inspector.
+3. Configure the prefab registry, allowed scenes, Full access, and private-member access on the child.
+
+The root automatically discovers a child module at runtime, so the serialized reference may be left
+empty. The explicit reference wins when more than one hierarchy is being authored. Existing scenes that
+still contain the former flat root fields continue to load through `FormerlySerializedAs`; the Inspector
+button copies those values to the child module and clears the legacy storage. This path works in a built
+player and does not depend on `AssetDatabase` or editor-only migration code.
+
+Omitting the child module keeps the legacy-safe defaults: an empty prefab registry, unrestricted Build
+Settings scene list, and Full/private reflection disabled. Compile-time `COREAI_NO_LUA` remains the way to
+remove Lua itself from a build.
+
 ## 1. Data flow
 
 1. LLM or Lua emits a world command.

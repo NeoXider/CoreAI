@@ -52,6 +52,7 @@ namespace CoreAI.Ai
         private float? _temperature;
         private int? _maxOutputTokens;
         private int? _maxToolCallRoundtrips;
+        private string _llmProfileId = "";
         private ToolResultMemoryPolicy _toolResultMemory = ToolResultMemoryPolicy.CompactSummary;
         private float? _compactionTriggerRatio;
         private bool? _allowDuplicateToolCalls;
@@ -243,6 +244,16 @@ namespace CoreAI.Ai
         public AgentBuilder WithMode(AgentMode mode)
         {
             _mode = mode;
+            return this;
+        }
+
+        /// <summary>
+        /// Selects the runtime LLM routing profile used by this agent. A per-request profile still wins.
+        /// Pass an empty value to clear the selection and return to role/default routing.
+        /// </summary>
+        public AgentBuilder WithLlmProfile(string profileId)
+        {
+            _llmProfileId = profileId?.Trim() ?? "";
             return this;
         }
 
@@ -511,6 +522,7 @@ namespace CoreAI.Ai
                 Temperature = _temperature,
                 MaxOutputTokens = _maxOutputTokens,
                 MaxToolCallRoundtrips = _maxToolCallRoundtrips,
+                LlmProfileId = _llmProfileId,
                 ToolResultMemory = _toolResultMemory,
                 CompactionTriggerRatio = _compactionTriggerRatio,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
@@ -650,6 +662,9 @@ namespace CoreAI.Ai
         public int MaxChatHistoryMessages { get; internal set; }
         public float? Temperature { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
+
+        /// <summary>Preferred runtime LLM routing profile for this agent.</summary>
+        public string LlmProfileId { get; internal set; } = "";
 
         /// <summary>
         /// Per-agent tool-call roundtrip cap. <c>null</c> = inherit per-call/global; <c>0</c> = UNLIMITED;

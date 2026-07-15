@@ -10,6 +10,37 @@ Switch the active LLM backend **at runtime** — between an OpenAI-compatible HT
 
 ## 1. Quick start
 
+### Multiple active APIs and per-agent routing (5.9)
+
+The legacy `Apply*` methods continue to update `legacy/default`. New code should resolve
+`ILlmEndpointRegistry` from the running scope and register named endpoints/profiles. Multiple HTTP APIs and
+LLMUnity may stay active simultaneously; assigning a different profile changes only subsequent requests for
+that role. In-flight requests retain the endpoint generation they started with.
+
+The Hub Settings page provides endpoint creation/editing and assignment for built-in or custom runtime agent
+role ids. The embedded Chat page has an `API` control, collapsed by default. **Automatic** is the normal
+choice: it does not pin a request and therefore respects the agent/role assignment. Selecting a named API is
+an explicit per-chat override.
+
+The registry supports zero, one, or many configured endpoints. With zero endpoints, legacy/default routing
+(including Offline) remains usable. With one endpoint, it can be assigned to any number of agents. With
+many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve different agents concurrently.
+
+`Active = true` allows new routing. `KeepWarm = true` keeps an inactive endpoint initialized for a later
+switch without routing new work to it. Active and keep-warm endpoints repeat readiness on restart. HTTP
+readiness prefers `GET {BaseUrl}/models` (normally `/v1/models`); a `404`/`405` falls back to a minimal
+`POST {BaseUrl}/chat/completions`, where a handler-level response proves readiness. Authentication,
+missing-route, server, and network failures remain failures. LLMUnity has no models route, so
+CoreAI waits for native startup and then probes `POST /v1/chat/completions`; an HTTP response proves the
+socket/route is accepting connections, while `401`/`403` remain failures when authentication is configured.
+The native phase uses cancellable `LLM.WaitUntilReady()` and does not send a warmup prompt. An exact named
+inactive `LLMAgent` is configured before CoreAI activates it. CoreAI records an ownership lease only for a
+host it activated itself; deactivation/removal/disposal drains tracked calls, waits for any native startup to
+finish, calls `LLM.Destroy()` to unload llama.cpp, and restores that host to inactive. Already-active scene
+hosts remain externally owned and are never destroyed by endpoint lifecycle operations.
+Endpoint descriptors, profiles, and role assignments persist to
+`Application.persistentDataPath/CoreAI/llm-endpoints.json` and WebGL writes call the persistence sync bridge.
+
 ### Switch to another OpenAI-compatible server mid-game
 
 ```csharp
@@ -72,6 +103,13 @@ CoreAiBackend.SetApiKey(newKey);
 CoreAiBackend.SetApiBaseUrl("http://localhost:1234/v1");
 ```
 
+For `ILlmEndpointRegistry.AddOrUpdateEndpointAsync`, credential updates are intentionally tri-state:
+`sessionApiKey: null` preserves the current session key, `sessionApiKey: ""` explicitly clears it, and a
+non-empty value replaces it. Session keys are write-only and never enter the JSON snapshot. To restore a
+credential after restart, persist only `LlmEndpointDescriptor.SecretReference`; the default
+`ILlmEndpointSecretProvider` interprets it as an environment-variable name. Inject a host-specific provider
+when environment variables are not an appropriate secret store.
+
 ### Health check with latency
 
 `VerifyAsync` sends a tiny completion through the active backend (`SmartChat` role) and never throws — safe to call from UI:
@@ -133,6 +171,10 @@ After changing the builder (`Assets/CoreAiUnity/Editor/CoreAiBackendPanelBuilder
 - **Per-role routing manifest profiles are NOT touched.** Only the **legacy-fallback primary client** is swapped. Roles pinned to explicit `LlmRoutingManifest` profiles keep resolving to those profiles; if you use per-role routing, `CoreAiBackend` changes what the fallback path uses, not your manifest mapping.
 - **Pre-bootstrap: returns `false`.** When no live `CoreAILifetimeScope` (with a built container) exists yet, `Apply*` / `Set*` mutate the settings only and return `false`; the normal bootstrap then builds the pipeline from the updated settings. `false` is *not* an error — check `CoreAiBackend.Status.IsLive` to distinguish "no scope yet" from a live scene.
 - **LLMUnity requirements.** `ApplyLlmUnity` needs the LLMUnity package installed (**`COREAI_HAS_LLMUNITY`**, set automatically via `versionDefines`) and a resolvable `LLMAgent` (scene-provided or auto-created — see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)). Without them the switch degrades to a stub client — the `Apply` call still succeeds, but `VerifyAsync` reports the stub/failure, so always probe after switching to LLMUnity.
+- **LLMUnity zero-downtime boundary.** Do not mutate the model/port of the same already-running `LLMAgent`.
+  CoreAI rejects that replacement because stopping the shared llama.cpp host would interrupt requests on the
+  published generation. Configure a separate named `LLMAgent` on a unique port, wait until the candidate is
+  Ready, then reassign the profile. Multiple local endpoints therefore require multiple named hosts.
 - **`VerifyAsync` needs a live scope.** Without a running `CoreAILifetimeScope` it returns `Ok = false` with an explanatory error instead of throwing. On timeout it returns `Ok = false` with `"Probe timed out after Ns."`.
 - **Thread-safety:** switch/mutate calls are serialized behind an internal lock; `VerifyAsync` is safe to call from UI handlers.
 - **Secrets:** keys set at runtime land on the `CoreAISettingsAsset` instance. In the Editor that asset lives in `Assets/Resources` — do not commit real keys ([DEVELOPER_GUIDE.md §10](DEVELOPER_GUIDE.md)).
