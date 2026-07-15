@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
-using UnityEngine.Networking;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 using UnityEngine;
@@ -44,16 +43,19 @@ namespace CoreAI.Infrastructure.Llm
         private readonly CoreAISettingsAsset _unitySettings;
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
+        private readonly ILlmEndpointReadinessProbe _readinessProbe;
 
         public LlmEndpointClientFactory(
             ICoreAISettings settings,
             IGameLogger logger,
-            IAgentMemoryStore memoryStore = null)
+            IAgentMemoryStore memoryStore = null,
+            ILlmEndpointReadinessProbe readinessProbe = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _unitySettings = settings as CoreAISettingsAsset;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _memoryStore = memoryStore;
+            _readinessProbe = readinessProbe ?? new UnityWebRequestOpenAiReadinessProbe();
         }
 
         public async Task<LlmEndpointClientActivation> ActivateAsync(
@@ -65,7 +67,11 @@ namespace CoreAI.Infrastructure.Llm
             switch (descriptor.Kind)
             {
                 case LlmEndpointKind.HttpOpenAi:
-                    await ProbeHttpAsync(descriptor.BaseUrl, sessionApiKey, cancellationToken);
+                    await EnsureReadyAsync(
+                        descriptor.BaseUrl,
+                        sessionApiKey,
+                        LlmEndpointReadinessMode.ModelsThenCompletions,
+                        cancellationToken);
                     return BuildHttp(descriptor, sessionApiKey);
                 case LlmEndpointKind.Offline:
                     return new LlmEndpointClientActivation
@@ -249,7 +255,11 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm, LlmUnityActivationLog.ReadinessStarted(logContext));
                 try
                 {
-                    await ProbeLlmUnityHttpAsync(http.ApiBaseUrl, sessionApiKey, cancellationToken);
+                    await EnsureReadyAsync(
+                        http.ApiBaseUrl,
+                        sessionApiKey,
+                        LlmEndpointReadinessMode.CompletionsOnly,
+                        cancellationToken);
                     _logger.LogInfo(
                         GameLogFeature.Llm,
                         LlmUnityActivationLog.ReadinessSucceeded(
@@ -368,106 +378,29 @@ namespace CoreAI.Infrastructure.Llm
         }
 #endif
 
-        private static async Task ProbeHttpAsync(
+        private async Task EnsureReadyAsync(
             string baseUrl,
             string apiKey,
+            LlmEndpointReadinessMode mode,
             CancellationToken cancellationToken)
         {
-            string normalizedBaseUrl = (baseUrl ?? "").TrimEnd('/');
-            using UnityWebRequest modelsRequest = UnityWebRequest.Get(normalizedBaseUrl + "/models");
-            ConfigureReadinessRequest(modelsRequest, apiKey);
-            await SendReadinessRequestAsync(modelsRequest, cancellationToken);
-
-            long modelsStatus = modelsRequest.responseCode;
-            if (modelsRequest.result == UnityWebRequest.Result.Success)
-            {
-                return;
-            }
-
-            if (modelsStatus is not 404 and not 405)
+            LlmEndpointReadinessResult result = await _readinessProbe.ProbeAsync(
+                new LlmEndpointReadinessRequest
+                {
+                    BaseUrl = baseUrl,
+                    ApiKey = apiKey ?? "",
+                    TimeoutSeconds = 5,
+                    Mode = mode
+                },
+                cancellationToken);
+            if (!result.IsReady)
             {
                 throw new InvalidOperationException(
-                    $"Endpoint readiness probe failed ({modelsStatus}): {modelsRequest.error}");
-            }
-
-            using UnityWebRequest completionsRequest = new(
-                normalizedBaseUrl + "/chat/completions", UnityWebRequest.kHttpVerbPOST);
-            completionsRequest.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes("{}"));
-            completionsRequest.downloadHandler = new DownloadHandlerBuffer();
-            completionsRequest.SetRequestHeader("Content-Type", "application/json");
-            ConfigureReadinessRequest(completionsRequest, apiKey);
-            await SendReadinessRequestAsync(completionsRequest, cancellationToken);
-
-            long completionsStatus = completionsRequest.responseCode;
-            if (!LlmEndpointReadinessPolicy.IsHandlerReached(completionsStatus))
-            {
-                throw new InvalidOperationException(
-                    $"Endpoint readiness fallback failed ({completionsStatus}): {completionsRequest.error}");
+                    string.IsNullOrWhiteSpace(result.Error)
+                        ? $"Endpoint readiness probe failed ({result.StatusCode})."
+                        : result.Error);
             }
         }
-
-        private static void ConfigureReadinessRequest(UnityWebRequest request, string apiKey)
-        {
-            request.timeout = 5;
-            if (!string.IsNullOrWhiteSpace(apiKey))
-            {
-                request.SetRequestHeader("Authorization", "Bearer " + apiKey.Trim());
-            }
-        }
-
-        private static async Task SendReadinessRequestAsync(
-            UnityWebRequest request,
-            CancellationToken cancellationToken)
-        {
-            UnityWebRequestAsyncOperation operation = request.SendWebRequest();
-            while (!operation.isDone)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-        }
-
-        private static async Task ProbeLlmUnityHttpAsync(
-            string baseUrl,
-            string apiKey,
-            CancellationToken cancellationToken)
-        {
-            string completionsUrl = (baseUrl ?? "").TrimEnd('/') + "/chat/completions";
-            using UnityWebRequest request = new(completionsUrl, UnityWebRequest.kHttpVerbPOST);
-            request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes("{}"));
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = 5;
-            if (!string.IsNullOrWhiteSpace(apiKey))
-            {
-                request.SetRequestHeader("Authorization", "Bearer " + apiKey.Trim());
-            }
-
-            UnityWebRequestAsyncOperation operation = request.SendWebRequest();
-            while (!operation.isDone)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            long status = request.responseCode;
-            if (!LlmEndpointReadinessPolicy.IsHandlerReached(status))
-            {
-                throw new InvalidOperationException(
-                    $"LLMUnity readiness probe failed ({status}): {request.error}");
-            }
-        }
-    }
-
-    internal static class LlmEndpointReadinessPolicy
-    {
-        public static bool IsHandlerReached(long status) =>
-            status is >= 200 and < 500 && status is not 401 and not 403 and not 404;
-
-        public static bool IsLlmUnityHandlerReached(long status) => IsHandlerReached(status);
     }
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL

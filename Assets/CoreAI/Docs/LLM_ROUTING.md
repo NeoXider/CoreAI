@@ -73,14 +73,21 @@ Lesson and practice orchestrators can keep routing portable while adding per-tur
 ## Host Boundary
 
 `CoreAI.Core` ships the portable OpenAI-compatible HTTP path: `IOpenAiHttpTransport`,
-`HttpClientOpenAiTransport`, and `MeaiOpenAiChatClient`. A plain .NET host can construct that client directly
-without Unity. Loopback URLs bypass the system proxy so local model sockets remain local; external URLs retain
-the platform proxy policy.
+`HttpClientOpenAiTransport`, and `MeaiOpenAiChatClient`. It also ships
+`ILlmEndpointReadinessProbe`, `LlmEndpointReadinessRequest`, the shared status policy, and
+`HttpClientOpenAiReadinessProbe`. A plain .NET host can therefore construct both the chat client and endpoint
+readiness pipeline directly without Unity. `ModelsThenCompletions` checks `/models` first and falls back to
+the completion handler only when `/models` is unsupported (`404`/`405`); `CompletionsOnly` is available for
+embedded servers that expose no models route. Loopback URLs bypass the system proxy so local model sockets
+remain local; external URLs retain the platform proxy policy.
+Readiness probes do not follow redirects and never treat `3xx` as a ready handler, preventing credentials
+from crossing origins during endpoint activation.
 
 `CoreAiUnity` owns Unity runtime integration: endpoint registry lifecycle and persistence, `CoreAISettingsAsset`,
 LLMUnity native model startup/readiness, WebGL `UnityWebRequest`/Fetch transports, Hub/Chat UI, and VContainer
-registration. It selects the Unity/WebGL transport adapter where required; it does not own the portable HTTP
-client contract or implementation.
+registration. It supplies `UnityWebRequestOpenAiReadinessProbe` for Unity/WebGL and injects it into endpoint
+activation. Search/configuration of `LLMAgent`, `LLM.WaitUntilReady()`, host leases, and llama.cpp unload stay
+strictly Unity-owned; the HTTP readiness contract and policy do not depend on Unity.
 
 Production games such as RedoSchool should put provider keys and quota enforcement behind `ServerManagedApi`. The Unity client sends a user/session token to the backend; the backend performs entitlement, calls the provider, records usage, and returns stable provider errors.
 

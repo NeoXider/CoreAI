@@ -33,6 +33,7 @@ readiness prefers `GET {BaseUrl}/models` (normally `/v1/models`); a `404`/`405` 
 missing-route, server, and network failures remain failures. LLMUnity has no models route, so
 CoreAI waits for native startup and then probes `POST /v1/chat/completions`; an HTTP response proves the
 socket/route is accepting connections, while `401`/`403` remain failures when authentication is configured.
+Redirects are terminal readiness failures and are not followed with endpoint credentials.
 The native phase uses cancellable `LLM.WaitUntilReady()` and does not send a warmup prompt. An exact named
 inactive `LLMAgent` is configured before CoreAI activates it. CoreAI records an ownership lease only for a
 host it activated itself; deactivation/removal/disposal drains tracked calls, waits for any native startup to
@@ -40,6 +41,12 @@ finish, calls `LLM.Destroy()` to unload llama.cpp, and restores that host to ina
 hosts remain externally owned and are never destroyed by endpoint lifecycle operations.
 Endpoint descriptors, profiles, and role assignments persist to
 `Application.persistentDataPath/CoreAI/llm-endpoints.json` and WebGL writes call the persistence sync bridge.
+
+Readiness has an explicit host boundary. CoreAI defines `ILlmEndpointReadinessProbe` and provides the
+`HttpClientOpenAiReadinessProbe` implementation for ordinary .NET applications. CoreAiUnity registers
+`UnityWebRequestOpenAiReadinessProbe` and uses that same instance for runtime endpoint activation and normal
+LLMUnity autostart. Only the HTTP probe is portable: finding/configuring `LLMAgent`, waiting for native
+`LLM.WaitUntilReady()`, ownership leases, and unloading llama.cpp remain in CoreAiUnity.
 
 ### Switch to another OpenAI-compatible server mid-game
 

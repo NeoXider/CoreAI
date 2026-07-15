@@ -17,6 +17,11 @@ socket and route accept connections, except `401`/`403`, which remain failures w
 configured. A request that arrives during startup awaits the shared activation rather than bypassing
 readiness. This permits an LLMUnity agent and one or more HTTP agents to work concurrently.
 
+Both normal autostart and hot endpoint activation use the same injected
+`UnityWebRequestOpenAiReadinessProbe`. Its contract and status policy live in portable CoreAI; non-Unity .NET
+hosts can use `HttpClientOpenAiReadinessProbe`. Only the HTTP check is shared—LLMUnity model lifecycle stays
+inside CoreAiUnity.
+
 CoreAI writes structured `[CoreAI.LLMUnity]` lifecycle logs for both runtime endpoints and the legacy
 autostart path. `phase=native_startup` measures the llama.cpp/GGUF warmup itself; `phase=http_readiness`
 measures the following OpenAI-compatible route probe. Completed phases include `durationMs` plus endpoint

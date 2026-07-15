@@ -1,8 +1,8 @@
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
-using System.Net.Http;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using Cysharp.Threading.Tasks;
@@ -15,25 +15,34 @@ namespace CoreAI.Composition
     /// <summary>
     /// Starts LLMUnity models during application startup when configured.
     /// </summary>
-    public sealed class LlmUnityAutostartEntryPoint : IStartable
+    public sealed class LlmUnityAutostartEntryPoint : IStartable, IDisposable
     {
         private readonly CoreAISettingsAsset _settings;
         private readonly IGameLogger _logger;
         private readonly ILlmAgentProvider _agentProvider;
+        private readonly ILlmEndpointReadinessProbe _readinessProbe;
+        private readonly CancellationTokenSource _lifetime = new();
 
         public LlmUnityAutostartEntryPoint(
             CoreAISettingsAsset settings,
             IGameLogger logger,
-            ILlmAgentProvider agentProvider)
+            ILlmAgentProvider agentProvider,
+            ILlmEndpointReadinessProbe readinessProbe)
         {
             _settings = settings;
             _logger = logger ?? GameLoggerUnscopedFallback.Instance;
             _agentProvider = agentProvider ?? throw new ArgumentNullException(nameof(agentProvider));
+            _readinessProbe = readinessProbe ?? throw new ArgumentNullException(nameof(readinessProbe));
         }
 
         /// <inheritdoc />
         public void Start()
         {
+            if (_lifetime.IsCancellationRequested)
+            {
+                return;
+            }
+
             if (_settings == null || !_settings.LlmUnityAutostartLocalServer || !_settings.UseLlmUnity)
             {
                 return;
@@ -105,7 +114,18 @@ namespace CoreAI.Composition
                     return;
                 }
 
-                await UniTask.Delay(TimeSpan.FromMilliseconds(200), DelayType.Realtime, PlayerLoopTiming.Update);
+                try
+                {
+                    await UniTask.Delay(
+                        TimeSpan.FromMilliseconds(200),
+                        DelayType.Realtime,
+                        PlayerLoopTiming.Update,
+                        _lifetime.Token);
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    return;
+                }
             }
 
             if (llm.failed)
@@ -125,7 +145,10 @@ namespace CoreAI.Composition
                     logContext,
                     LlmUnityActivationLog.ElapsedMilliseconds(nativeStart)));
 
-            await WaitForOpenAiServerReadyAsync(logContext);
+            if (!_lifetime.IsCancellationRequested)
+            {
+                await WaitForOpenAiServerReadyAsync(logContext);
+            }
         }
 
         // WHY: llm.started only means the native process launched, so CoreAI also probes its HTTP route.
@@ -133,52 +156,74 @@ namespace CoreAI.Composition
         private async UniTask WaitForOpenAiServerReadyAsync(LlmUnityActivationLogContext logContext)
         {
             int port = _settings.LlmUnityServerPort;
-            string url = $"http://localhost:{port}/v1/chat/completions";
+            string baseUrl = $"http://localhost:{port}/v1";
 
             float timeout = _settings.LlmUnityStartupTimeoutSeconds;
             float start = Time.realtimeSinceStartup;
             long readinessStart = LlmUnityActivationLog.StartTimer();
             _logger.LogInfo(GameLogFeature.Llm, LlmUnityActivationLog.ReadinessStarted(logContext));
 
-            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
-
             while (Time.realtimeSinceStartup - start < timeout)
             {
+                LlmEndpointReadinessResult result;
                 try
                 {
-                    using HttpContent content = new StringContent("{}", Encoding.UTF8, "application/json");
-                    using HttpResponseMessage response = await client.PostAsync(url, content);
-                    long status = (long)response.StatusCode;
-                        if (!LlmEndpointReadinessPolicy.IsLlmUnityHandlerReached(status))
+                    result = await _readinessProbe.ProbeAsync(
+                        new LlmEndpointReadinessRequest
+                        {
+                            BaseUrl = baseUrl,
+                            TimeoutSeconds = 5,
+                            Mode = LlmEndpointReadinessMode.CompletionsOnly
+                        },
+                        _lifetime.Token);
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception)
+                {
+                    result = new LlmEndpointReadinessResult
                     {
-                        _logger.LogWarning(
-                            GameLogFeature.Llm,
-                            LlmUnityActivationLog.ReadinessFailed(
-                                logContext,
-                                LlmUnityActivationLog.ElapsedMilliseconds(readinessStart),
-                                new InvalidOperationException(
-                                    $"LLMUnity readiness probe failed ({status}).")));
-                        return;
-                    }
-
+                        IsReady = false,
+                        StatusCode = 0,
+                        Error = "Endpoint readiness probe threw a transport exception."
+                    };
+                }
+                if (result.IsReady)
+                {
                     _logger.LogInfo(
                         GameLogFeature.Llm,
                         LlmUnityActivationLog.ReadinessSucceeded(
                             logContext,
                             LlmUnityActivationLog.ElapsedMilliseconds(readinessStart)) +
-                        $" httpStatus={status}");
+                        $" httpStatus={result.StatusCode}");
                     return;
                 }
-                catch (HttpRequestException)
+
+                if (result.StatusCode > 0)
                 {
-                    // WHY: Connection refused/reset - server socket isn't bound yet, keep polling.
-                }
-                catch (TaskCanceledException)
-                {
-                    // WHY: Per-request timeout - server may be slow to respond, keep polling.
+                    _logger.LogWarning(
+                        GameLogFeature.Llm,
+                        LlmUnityActivationLog.ReadinessFailed(
+                            logContext,
+                            LlmUnityActivationLog.ElapsedMilliseconds(readinessStart),
+                            new InvalidOperationException(result.Error)));
+                    return;
                 }
 
-                await UniTask.Delay(TimeSpan.FromMilliseconds(200), DelayType.Realtime, PlayerLoopTiming.Update);
+                try
+                {
+                    await UniTask.Delay(
+                        TimeSpan.FromMilliseconds(200),
+                        DelayType.Realtime,
+                        PlayerLoopTiming.Update,
+                        _lifetime.Token);
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    return;
+                }
             }
 
             _logger.LogWarning(
@@ -188,6 +233,17 @@ namespace CoreAI.Composition
                     LlmUnityActivationLog.ElapsedMilliseconds(readinessStart),
                     new TimeoutException(
                         $"OpenAI server readiness timed out after {timeout:0.#}s; port {port} did not respond.")));
+        }
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            if (!_lifetime.IsCancellationRequested)
+            {
+                _lifetime.Cancel();
+            }
+
+            _lifetime.Dispose();
         }
 
     }

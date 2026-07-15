@@ -29,6 +29,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Changed
 
+- Endpoint activation and legacy LLMUnity autostart now share the injected
+  `UnityWebRequestOpenAiReadinessProbe`; the native `LLMAgent`/llama.cpp lifecycle remains Unity-owned while
+  generic readiness semantics come from the portable CoreAI contract.
 - Lua/world-command settings moved to an optional child composition module with legacy scene migration;
   demos and editor creation paths now author the child module explicitly.
 - Parallel LLMUnity endpoints now require distinct named `LLMAgent` hosts and unique ports. Mutating an
@@ -41,6 +44,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
+- Removed hard-coded readiness requests from the endpoint factory and the unreachable direct-`HttpClient`
+  registry fallback, preventing normal startup and hot switching from applying different route policies.
+- Readiness rejects unsafe base URIs and redirects instead of accepting an unrelated handler or forwarding
+  endpoint credentials across origins.
 - Per-caller activation cancellation is event-driven and no longer polls with `Task.Yield()`, preventing an
   EditMode synchronization-context deadlock while leaving the shared endpoint activation running.
 - FullAccess PlayMode coverage now reads Full Lua policy from `CoreAiLuaWorldModule` instead of removed

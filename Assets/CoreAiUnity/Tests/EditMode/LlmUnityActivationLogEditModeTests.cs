@@ -3,10 +3,11 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 #if COREAI_HAS_LLMUNITY
-using CoreAI.Ai;
 using LLMUnity;
 using UnityEngine;
 #endif
@@ -15,6 +16,23 @@ namespace CoreAI.Tests.EditMode
 {
     public sealed class LlmUnityActivationLogEditModeTests
     {
+        private sealed class RecordingReadinessProbe : ILlmEndpointReadinessProbe
+        {
+            public LlmEndpointReadinessRequest Request { get; private set; }
+
+            public Task<LlmEndpointReadinessResult> ProbeAsync(
+                LlmEndpointReadinessRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Request = request;
+                return Task.FromResult(new LlmEndpointReadinessResult
+                {
+                    IsReady = true,
+                    StatusCode = 200
+                });
+            }
+        }
+
         [Test]
         public void NativeStartup_ReportsStableContextAndDuration()
         {
@@ -62,6 +80,7 @@ namespace CoreAI.Tests.EditMode
 
         [TestCase(200, true)]
         [TestCase(204, true)]
+        [TestCase(302, false)]
         [TestCase(400, true)]
         [TestCase(401, false)]
         [TestCase(403, false)]
@@ -72,7 +91,43 @@ namespace CoreAI.Tests.EditMode
             long status,
             bool expected)
         {
-            Assert.AreEqual(expected, LlmEndpointReadinessPolicy.IsLlmUnityHandlerReached(status));
+            Assert.AreEqual(expected, LlmEndpointReadinessPolicy.IsHandlerReached(status));
+        }
+
+        [Test]
+        public async Task HttpEndpointFactory_DelegatesPortableModelsThenCompletionsProbe()
+        {
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            RecordingReadinessProbe probe = new();
+            try
+            {
+                LlmEndpointClientFactory factory = new(
+                    settings,
+                    GameLoggerUnscopedFallback.Instance,
+                    readinessProbe: probe);
+
+                LlmEndpointClientActivation activation = await factory.ActivateAsync(
+                    new LlmEndpointDescriptor
+                    {
+                        EndpointId = "external",
+                        Kind = LlmEndpointKind.HttpOpenAi,
+                        BaseUrl = "https://example.test/v1",
+                        Model = "test"
+                    },
+                    "session-key",
+                    CancellationToken.None);
+
+                Assert.NotNull(activation.Client);
+                Assert.NotNull(probe.Request);
+                Assert.AreEqual(
+                    LlmEndpointReadinessMode.ModelsThenCompletions,
+                    probe.Request.Mode);
+                Assert.AreEqual("session-key", probe.Request.ApiKey);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
         }
 
 #if COREAI_HAS_LLMUNITY

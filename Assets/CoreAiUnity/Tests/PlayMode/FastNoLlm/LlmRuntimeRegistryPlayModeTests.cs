@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -146,6 +147,78 @@ namespace CoreAI.Tests.PlayMode
                     $"HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                 await stream.WriteAsync(response, 0, response.Length);
                 await stream.WriteAsync(body, 0, body.Length);
+            }
+
+            public void Dispose()
+            {
+                _listener.Stop();
+            }
+        }
+
+        private sealed class CompletionHttpServer : System.IDisposable
+        {
+            private readonly TcpListener _listener;
+            private readonly int _statusCode;
+            private readonly bool _respond;
+
+            public CompletionHttpServer(int statusCode, bool respond = true)
+            {
+                _statusCode = statusCode;
+                _respond = respond;
+                _listener = new TcpListener(IPAddress.Loopback, 0);
+                _listener.Start();
+                Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+                _ = ServeAsync();
+            }
+
+            public int Port { get; }
+            public TaskCompletionSource<bool> Disconnected { get; } = new();
+
+            private async Task ServeAsync()
+            {
+                try
+                {
+                    using TcpClient client = await _listener.AcceptTcpClientAsync();
+                    using NetworkStream stream = client.GetStream();
+                    byte[] requestBytes = new byte[8192];
+                    int read = await stream.ReadAsync(requestBytes, 0, requestBytes.Length);
+                    if (!_respond)
+                    {
+                        try
+                        {
+                            byte[] closeProbe = new byte[1];
+                            int closeRead = await stream.ReadAsync(closeProbe, 0, closeProbe.Length);
+                            Disconnected.TrySetResult(closeRead == 0);
+                        }
+                        catch (IOException)
+                        {
+                            Disconnected.TrySetResult(true);
+                        }
+                        catch (SocketException)
+                        {
+                            Disconnected.TrySetResult(true);
+                        }
+                        return;
+                    }
+
+                    string request = Encoding.ASCII.GetString(requestBytes, 0, read);
+                    bool validPath = request.StartsWith(
+                        "POST /v1/chat/completions ",
+                        System.StringComparison.Ordinal);
+                    int code = validPath ? _statusCode : 404;
+                    byte[] body = Encoding.UTF8.GetBytes("{}");
+                    byte[] response = Encoding.ASCII.GetBytes(
+                        $"HTTP/1.1 {code} Result\r\nContent-Type: application/json\r\n" +
+                        $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+                    await stream.WriteAsync(response, 0, response.Length);
+                    await stream.WriteAsync(body, 0, body.Length);
+                }
+                catch (System.ObjectDisposedException)
+                {
+                }
+                catch (SocketException)
+                {
+                }
             }
 
             public void Dispose()
@@ -443,6 +516,63 @@ namespace CoreAI.Tests.PlayMode
 
             Assert.IsTrue(failed.IsFaulted);
             Object.Destroy(settings);
+        }
+
+        [UnityTest]
+        public IEnumerator UnityReadinessProbe_CompletionsOnlyUsesSharedStatusPolicy()
+        {
+            UnityWebRequestOpenAiReadinessProbe probe = new();
+            foreach (int status in new[] { 200, 204, 400, 405, 422, 429, 302, 401, 403, 404, 500 })
+            {
+                using CompletionHttpServer server = new(status);
+                Task<LlmEndpointReadinessResult> task = probe.ProbeAsync(
+                    new LlmEndpointReadinessRequest
+                    {
+                        BaseUrl = $"http://127.0.0.1:{server.Port}/v1",
+                        Mode = LlmEndpointReadinessMode.CompletionsOnly
+                    });
+                while (!task.IsCompleted)
+                {
+                    yield return null;
+                }
+
+                Assert.IsFalse(task.IsFaulted, task.Exception?.ToString());
+                Assert.AreEqual(
+                    LlmEndpointReadinessPolicy.IsHandlerReached(status),
+                    task.Result.IsReady,
+                    $"HTTP {status}");
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator UnityReadinessProbe_CancellationAbortsInFlightRequest()
+        {
+            UnityWebRequestOpenAiReadinessProbe probe = new();
+            using CompletionHttpServer server = new(0, respond: false);
+            using CancellationTokenSource cancellation = new();
+            Task<LlmEndpointReadinessResult> task = probe.ProbeAsync(
+                new LlmEndpointReadinessRequest
+                {
+                    BaseUrl = $"http://127.0.0.1:{server.Port}/v1",
+                    Mode = LlmEndpointReadinessMode.CompletionsOnly,
+                    TimeoutSeconds = 10
+                },
+                cancellation.Token);
+            cancellation.CancelAfter(50);
+            while (!task.IsCompleted)
+            {
+                yield return null;
+            }
+
+            Assert.IsTrue(task.IsCanceled, task.Exception?.ToString());
+            float disconnectDeadline = Time.realtimeSinceStartup + 2f;
+            while (!server.Disconnected.Task.IsCompleted && Time.realtimeSinceStartup < disconnectDeadline)
+            {
+                yield return null;
+            }
+
+            Assert.IsTrue(server.Disconnected.Task.IsCompleted, "Abort must close the native HTTP connection.");
+            Assert.IsTrue(server.Disconnected.Task.Result);
         }
 
         [UnityTest]

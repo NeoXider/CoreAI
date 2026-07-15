@@ -8,8 +8,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using UnityEngine;
-using UnityEngine.Networking;
 using Debug = UnityEngine.Debug;
 
 namespace CoreAI.ExampleGame.QwenDemo
@@ -373,21 +373,16 @@ namespace CoreAI.ExampleGame.QwenDemo
 
         private static async Task<bool> ProbeHttpAsync(int port, CancellationToken cancellationToken)
         {
-            using UnityWebRequest request = new(
-                $"http://localhost:{port}/v1/chat/completions", UnityWebRequest.kHttpVerbPOST);
-            request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes("{}"));
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = 2;
-            UnityWebRequestAsyncOperation operation = request.SendWebRequest();
-            while (!operation.isDone)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
-            }
-
-            long status = request.responseCode;
-            return status is >= 200 and < 500 && status is not 401 and not 403 and not 404;
+            ILlmEndpointReadinessProbe probe = new UnityWebRequestOpenAiReadinessProbe();
+            LlmEndpointReadinessResult result = await probe.ProbeAsync(
+                new LlmEndpointReadinessRequest
+                {
+                    BaseUrl = $"http://localhost:{port}/v1",
+                    TimeoutSeconds = 2,
+                    Mode = LlmEndpointReadinessMode.CompletionsOnly
+                },
+                cancellationToken);
+            return result.IsReady;
         }
     }
 

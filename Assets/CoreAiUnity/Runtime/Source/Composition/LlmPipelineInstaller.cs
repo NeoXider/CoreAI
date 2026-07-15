@@ -37,13 +37,22 @@ namespace CoreAI.Composition
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
 #endif
 
+            builder.Register<UnityWebRequestOpenAiReadinessProbe>(Lifetime.Singleton)
+                .As<ILlmEndpointReadinessProbe>();
+
             builder.Register(c =>
             {
+                ILlmEndpointReadinessProbe readinessProbe = c.Resolve<ILlmEndpointReadinessProbe>();
                 LlmClientRegistry reg = new(
                     c.Resolve<IGameLogger>(),
                     settings,
                     c.Resolve<IAgentMemoryStore>(),
-                    new FileLlmEndpointRegistryStore());
+                    new FileLlmEndpointRegistryStore(),
+                    new LlmEndpointClientFactory(
+                        settings,
+                        c.Resolve<IGameLogger>(),
+                        c.Resolve<IAgentMemoryStore>(),
+                        readinessProbe));
                 ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
                     c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
 

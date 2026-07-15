@@ -1174,64 +1174,13 @@ namespace CoreAI.Infrastructure.Llm
             string sessionApiKey,
             CancellationToken cancellationToken)
         {
-            if (_endpointClientFactory != null)
-            {
-                LlmEndpointClientActivation activation = await _endpointClientFactory.ActivateAsync(
-                    descriptor, sessionApiKey, cancellationToken);
-                return activation ?? new LlmEndpointClientActivation
-                {
-                    Client = new StubLlmClient(),
-                    Mode = EndpointMode(descriptor.Kind)
-                };
-            }
-
-            if (descriptor.Kind == LlmEndpointKind.Offline)
-            {
-                return new LlmEndpointClientActivation
-                {
-                    Client = new StubLlmClient(),
-                    Mode = LlmExecutionMode.Offline
-                };
-            }
-
-            string baseUrl = descriptor.Kind == LlmEndpointKind.LlmUnity
-                ? $"http://127.0.0.1:{(descriptor.Port > 0 ? descriptor.Port : 13333)}/v1"
-                : descriptor.BaseUrl;
-            OpenAiHttpOptions options = new()
-            {
-                UseOpenAiCompatibleHttp = true,
-                ApiBaseUrl = baseUrl,
-                ApiKey = sessionApiKey ?? "",
-                Model = string.IsNullOrWhiteSpace(descriptor.Model) ? "local" : descriptor.Model,
-                RequestTimeoutSeconds = Mathf.Max(5, Mathf.RoundToInt(_settings.LlmRequestTimeoutSeconds)),
-                MaxTokens = _settings.MaxTokens,
-                Temperature = _settings.Temperature
-            };
-
-            if (descriptor.Kind == LlmEndpointKind.LlmUnity)
-            {
-#if UNITY_WEBGL
-                throw new PlatformNotSupportedException("LLMUnity endpoints are not supported on WebGL.");
-#else
-                using HttpClient probe = new() { Timeout = TimeSpan.FromSeconds(2) };
-                using HttpRequestMessage request = new(HttpMethod.Get, baseUrl + "/models");
-                using HttpResponseMessage response = await probe.SendAsync(request, cancellationToken);
-#endif
-            }
-
-#if COREAI_NO_LLM
-            return new LlmEndpointClientActivation
+            LlmEndpointClientActivation activation = await _endpointClientFactory.ActivateAsync(
+                descriptor, sessionApiKey, cancellationToken);
+            return activation ?? new LlmEndpointClientActivation
             {
                 Client = new StubLlmClient(),
                 Mode = EndpointMode(descriptor.Kind)
             };
-#else
-            return new LlmEndpointClientActivation
-            {
-                Client = new OpenAiChatLlmClient(options, _settings, _logger, _memoryStore),
-                Mode = EndpointMode(descriptor.Kind)
-            };
-#endif
         }
 
         private static LlmExecutionMode EndpointMode(LlmEndpointKind kind)

@@ -3,10 +3,11 @@
 > Updated 2026-07-15. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
 > Released: 5.8.10 (2026-07-13, all five packages in lockstep). Unreleased packages are aligned at 5.9.0.
-> Last full verification 2026-07-15 in the interactive editor: CoreAI EditMode 1651 passed / 0 failed,
-> PlayMode `FastNoLlm` 71 passed / 0 failed, and six Unity-generated `dotnet build` compile gates completed
-> with 0 errors. Live Qwen3.5-0.8B LLMUnity smoke called `cast_spell` as `storm|1` in 5714 ms; Hub/Chat
-> started with 0 warnings/errors after the persistent-mod isolation regression was fixed.
+> Last full verification 2026-07-15 in the interactive editor: CoreAI EditMode 1675 passed / 0 failed
+> (1645 host + 30 core/example), PlayMode `FastNoLlm` 73 passed / 0 failed, and six Unity-generated
+> `dotnet build` compile gates completed with 0 errors. Live Qwen3.5-0.8B LLMUnity smokes called
+> Genie `grant_gold` in 6481 ms and Spellcraft `cast_spell` in 6112 ms. Spellcraft determinism passed 5/5
+> as `storm|1` (0 errors, 6379 ms average); Hub/Chat started with 0 warnings/errors.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -84,6 +85,9 @@
 
 ## [R0.5] Demo pass (owner request: "показательны и корректны")
 
+- [x] Portable endpoint readiness boundary: CoreAI contract/shared policy plus `HttpClient` adapter for .NET;
+      CoreAiUnity injects the `UnityWebRequest` adapter into both hot activation and normal LLMUnity autostart.
+      The dead registry probe path was removed; native llama.cpp lifecycle stays Unity-only.
 - [x] Runtime multi-endpoint LLM routing: dynamic endpoint/profile CRUD, built-in/custom-agent selection,
       hidden-by-default Chat API selector, Hub endpoint editor, two-phase LLMUnity readiness, zero-downtime
       candidate replacement, redacted persistence, and EditMode/PlayMode regression tests.

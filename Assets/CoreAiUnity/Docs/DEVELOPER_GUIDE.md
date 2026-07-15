@@ -22,6 +22,12 @@ authentication, missing-route, server, and network failures remain failures. LLM
 named `LLMAgent` objects and unique ports for parallel local endpoints; same-host model/port mutation is
 rejected so an active generation is never torn down beneath in-flight requests.
 
+The HTTP readiness boundary is portable. `CoreAI.Core` defines `ILlmEndpointReadinessProbe`, its request,
+result, and status policy, and provides `HttpClientOpenAiReadinessProbe` for ordinary .NET hosts.
+CoreAiUnity registers `UnityWebRequestOpenAiReadinessProbe` for players and WebGL and injects it into both
+runtime endpoint activation and normal LLMUnity autostart. Native `LLMAgent` lookup, `LLM.WaitUntilReady()`,
+ownership leases, and llama.cpp unload remain Unity-only.
+
 ---
 
 ## 1. Where to start (reading order)

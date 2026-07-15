@@ -10,6 +10,8 @@
   profile takes precedence over agent, role, default, and legacy routing.
 - `ILlmEndpointSecretProvider` keeps credential resolution behind a portable host boundary; persisted
   descriptors contain a `SecretReference`, never the session credential.
+- Portable `ILlmEndpointReadinessProbe` request/result contracts, shared OpenAI status policy, and
+  `HttpClientOpenAiReadinessProbe` let ordinary .NET hosts validate endpoints without referencing Unity.
 
 ### Changed
 
