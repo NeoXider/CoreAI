@@ -23,10 +23,17 @@ namespace CoreAI.ExampleGame.QwenDemo
         private const string RoleId = "DemoMage";
 
         private const string SystemPrompt =
-            "You interpret spells for a wizard. The player describes a spell in their own words (any " +
-            "language, including Russian). Call cast_spell EXACTLY ONCE with the closest element " +
-            "(one of: fire, frost, storm, poison, arcane) and an integer power from 1 to 3 reflecting how " +
-            "strong the description sounds. After the call, reply with ONE short line naming the spell.";
+            "You classify a wizard's spell description and MUST call cast_spell exactly once. " +
+            "Never answer with element/power as text. Use these exact semantic mappings: " +
+            "fire = fire, flame, burn, огонь, пламя; " +
+            "frost = ice, freeze, cold, лёд, лед, мороз, заморозить; " +
+            "storm = lightning, thunder, storm, молния, гром, гроза; " +
+            "poison = poison, toxic, venom, яд, ядовитый, токсичный; " +
+            "arcane = arcane, magic, mana, магия, мана. " +
+            "Power is an integer: 1 weak, 2 strong, 3 huge or mega. " +
+            "Examples: 'мега молния' => cast_spell(element='storm', power=3); " +
+            "'стена огня' => cast_spell(element='fire', power=2); " +
+            "'заморозь их до костей' => cast_spell(element='frost', power=2).";
 
         private static readonly string[] Presets =
         {
@@ -91,8 +98,10 @@ namespace CoreAI.ExampleGame.QwenDemo
                 .WithoutChatHistory()
                 .WithTemperature(0f)
                 .WithTool(new DelegateLlmTool("cast_spell",
-                    "Cast a spell. element is one of fire, frost, storm, poison, arcane. power is 1 (weak) " +
-                    "to 3 (mighty). Choose the element and power that best fit the player's description.",
+                    "Required action. Call exactly once. element must be fire, frost, storm, poison, or " +
+                    "arcane. Russian молния/гром/гроза means storm; огонь/пламя means fire; " +
+                    "лёд/лед/мороз means frost; яд/ядовитый means poison; магия/мана means arcane. " +
+                    "power is 1 weak, 2 strong, or 3 huge/mega.",
                     new Func<string, int, string>(CastSpell)))
                 .Build();
 

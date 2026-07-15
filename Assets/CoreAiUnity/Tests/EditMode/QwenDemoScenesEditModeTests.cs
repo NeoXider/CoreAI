@@ -24,6 +24,31 @@ namespace CoreAI.Tests.EditMode
             Type meter = Type.GetType("CoreAI.ExampleGame.QwenDemo.LlmMeter, CoreAI.Demos", true);
             object mode = meter.GetProperty("ToolChoiceMode")?.GetValue(null);
             Assert.AreEqual(LlmToolChoiceMode.RequireAny, mode);
+
+            MethodInfo build = meter.GetMethod("BuildTaskRequest");
+            AiTaskRequest request = (AiTaskRequest)build.Invoke(null,
+                new object[] { "DemoMage", "мега молния", 160, new[] { "cast_spell" } });
+            Assert.AreEqual(LlmToolChoiceMode.RequireSpecific, request.ForcedToolMode);
+            Assert.AreEqual("cast_spell", request.RequiredToolName);
+
+            AiTaskRequest multiToolRequest = (AiTaskRequest)build.Invoke(null,
+                new object[] { "Demo", "choose", 160, new[] { "first", "second" } });
+            Assert.AreEqual(LlmToolChoiceMode.RequireAny, multiToolRequest.ForcedToolMode);
+            Assert.AreEqual(string.Empty, multiToolRequest.RequiredToolName);
+        }
+
+        [Test]
+        public void SpellcraftPrompt_MapsRussianLightningToStorm()
+        {
+            Type spellcraft = Type.GetType(
+                "CoreAI.ExampleGame.QwenDemo.SpellcraftDemo, CoreAI.Demos", true);
+            FieldInfo promptField = spellcraft.GetField("SystemPrompt",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            string prompt = (string)promptField.GetRawConstantValue();
+
+            StringAssert.Contains("молния, гром, гроза", prompt);
+            StringAssert.Contains("'мега молния' => cast_spell(element='storm', power=3)", prompt);
+            StringAssert.Contains("Never answer with element/power as text", prompt);
         }
 
         [TestCase(null, false)]

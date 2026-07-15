@@ -170,7 +170,8 @@ namespace CoreAI.Chat
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    timerHandle = timeoutCts.CancelAfterSlim(
+                        TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
                     effectiveCt = timeoutCts.Token;
                 }
 
@@ -239,7 +240,8 @@ namespace CoreAI.Chat
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    timerHandle = timeoutCts.CancelAfterSlim(
+                        TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
                     effectiveCt = timeoutCts.Token;
                 }
 
@@ -672,7 +674,8 @@ namespace CoreAI.Chat
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    timerHandle = timeoutCts.CancelAfterSlim(
+                        TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
                     effectiveCt = timeoutCts.Token;
                 }
 

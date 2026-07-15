@@ -74,7 +74,14 @@ namespace CoreAI.Tests
 
                 panel.EnableApiSwitching();
                 DropdownField dropdown = header.Q<DropdownField>(className: "coreai-chat-api-dropdown");
-                dropdown.value = dropdown.choices[0];
+                string automaticLabel = dropdown.choices[0];
+                using (ChangeEvent<string> evt = ChangeEvent<string>.GetPooled(dropdown.value, automaticLabel))
+                {
+                    dropdown.SetValueWithoutNotify(automaticLabel);
+                    typeof(CoreAiChatPanel).GetMethod("OnApiProfileChanged",
+                            BindingFlags.Instance | BindingFlags.NonPublic)
+                        ?.Invoke(panel, new object[] { evt });
+                }
 
                 Assert.AreEqual(string.Empty, _controller.GetProfileForRole("SmartChat"));
                 Assert.AreEqual(string.Empty, panel.SelectedRoutingProfileId);
@@ -167,11 +174,14 @@ namespace CoreAI.Tests
             Button clearKey = FindButton(root, "Clear saved session key");
 
             Assert.AreEqual(DisplayStyle.Flex, clearKey.style.display.value);
-            kind.value = "LLMUnity";
+            kind.SetValueWithoutNotify("LLMUnity");
+            InvokePage(page, "RefreshEndpointEditorVisibility");
             Assert.AreEqual(DisplayStyle.None, clearKey.style.display.value);
-            kind.value = "Offline";
+            kind.SetValueWithoutNotify("Offline");
+            InvokePage(page, "RefreshEndpointEditorVisibility");
             Assert.AreEqual(DisplayStyle.None, clearKey.style.display.value);
-            kind.value = "HTTP API";
+            kind.SetValueWithoutNotify("HTTP API");
+            InvokePage(page, "RefreshEndpointEditorVisibility");
             Assert.AreEqual(DisplayStyle.Flex, clearKey.style.display.value);
             page.OnDestroyed();
         }

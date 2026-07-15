@@ -78,8 +78,35 @@ namespace CoreAI.ExampleGame.QwenDemo
     /// </summary>
     public static class LlmMeter
     {
-        /// <summary>Both Qwen demos require a native tool call instead of accepting a text-only answer.</summary>
+        /// <summary>Fallback used when a demo turn permits more than one tool.</summary>
         public static LlmToolChoiceMode ToolChoiceMode => LlmToolChoiceMode.RequireAny;
+
+        /// <summary>Builds the strict native-tool request used by the Qwen demos.</summary>
+        public static AiTaskRequest BuildTaskRequest(
+            string roleId,
+            string hint,
+            int maxOutputTokens,
+            IReadOnlyList<string> allowedToolNames)
+        {
+            string[] validToolNames = allowedToolNames?
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray() ?? Array.Empty<string>();
+            string requiredTool = validToolNames.Length == 1 ? validToolNames[0] : null;
+
+            return new AiTaskRequest
+            {
+                RoleId = roleId,
+                Hint = hint,
+                MaxOutputTokens = maxOutputTokens,
+                CancellationScope = roleId,
+                ForcedToolMode = string.IsNullOrEmpty(requiredTool)
+                    ? ToolChoiceMode
+                    : LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = requiredTool ?? ""
+            };
+        }
 
         public static async Task<LlmRunResult> RunAsync(
             string roleId,
@@ -102,14 +129,7 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             try
             {
-                AiTaskRequest task = new()
-                {
-                    RoleId = roleId,
-                    Hint = hint,
-                    MaxOutputTokens = maxOutputTokens,
-                    CancellationScope = roleId,
-                    ForcedToolMode = ToolChoiceMode
-                };
+                AiTaskRequest task = BuildTaskRequest(roleId, hint, maxOutputTokens, allowedToolNames);
 
                 await foreach (LlmStreamChunk ch in orchestrator.RunStreamingAsync(task, CancellationToken.None))
                 {

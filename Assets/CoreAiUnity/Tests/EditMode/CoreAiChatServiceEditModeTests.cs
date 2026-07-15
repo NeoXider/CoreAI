@@ -380,33 +380,41 @@ namespace CoreAI.Tests.EditMode
         [Timeout(20000)]
         public IEnumerator SendMessageAsync_TimeoutWhenOrchestratorBlocks_ThrowsLlmOperationTimeoutException()
         {
-            BlockUntilCancelledOrchestrator orchestrator = new();
-            StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.2f };
-            CoreAiChatService service = new(orchestrator, settings: settings);
-
-            Task task = service.SendMessageAsync("hi", "TestRole");
-
-            float deadline = Time.realtimeSinceStartup + 15f;
-            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
-            {
-                yield return null;
-            }
-
-            Assert.IsTrue(task.IsCompleted, "SendMessageAsync should complete once the timeout token fires.");
-            // LlmOperationTimeoutException inherits OperationCanceledException — async Task reports
-            // TaskStatus.Canceled (not Faulted) and task.Exception is null; unwrap via GetResult().
+            float previousTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
             try
             {
-                task.GetAwaiter().GetResult();
-                Assert.Fail("Expected LlmOperationTimeoutException after timeout.");
+                BlockUntilCancelledOrchestrator orchestrator = new();
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.2f };
+                CoreAiChatService service = new(orchestrator, settings: settings);
+
+                Task task = service.SendMessageAsync("hi", "TestRole");
+
+                float deadline = Time.realtimeSinceStartup + 15f;
+                while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(task.IsCompleted,
+                    "SendMessageAsync should complete in real time while the game is paused.");
+                try
+                {
+                    task.GetAwaiter().GetResult();
+                    Assert.Fail("Expected LlmOperationTimeoutException after timeout.");
+                }
+                catch (LlmOperationTimeoutException ex)
+                {
+                    Assert.That(ex.Message, Does.Contain("timed out"));
+                }
+                catch (Exception ex)
+                {
+                    Assert.Fail($"Expected LlmOperationTimeoutException, got {ex.GetType().Name}: {ex.Message}");
+                }
             }
-            catch (LlmOperationTimeoutException ex)
+            finally
             {
-                Assert.That(ex.Message, Does.Contain("timed out"));
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail($"Expected LlmOperationTimeoutException, got {ex.GetType().Name}: {ex.Message}");
+                Time.timeScale = previousTimeScale;
             }
         }
 

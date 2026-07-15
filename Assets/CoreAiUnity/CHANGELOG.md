@@ -44,6 +44,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
+- Qwen Spellcraft now requires its single `cast_spell` tool by name and gives the 0.8B model explicit
+  bilingual element aliases and examples, preventing Russian lightning prompts such as `мега молния`
+  from being classified as frost or returned as plain text.
+- Chat request and streaming timeouts now use real time, so pausing the game with `Time.timeScale = 0`
+  cannot leave an LLM request waiting forever.
 - Removed hard-coded readiness requests from the endpoint factory and the unreachable direct-`HttpClient`
   registry fallback, preventing normal startup and hot switching from applying different route policies.
 - Readiness rejects unsafe base URIs and redirects instead of accepting an unrelated handler or forwarding

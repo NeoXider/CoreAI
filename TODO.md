@@ -3,11 +3,12 @@
 > Updated 2026-07-15. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
 > Released: 5.8.10 (2026-07-13, all five packages in lockstep). Unreleased packages are aligned at 5.9.0.
-> Last full verification 2026-07-15 in the interactive editor: CoreAI EditMode 1675 passed / 0 failed
-> (1645 host + 30 core/example), PlayMode `FastNoLlm` 73 passed / 0 failed, and six Unity-generated
-> `dotnet build` compile gates completed with 0 errors. Live Qwen3.5-0.8B LLMUnity smokes called
-> Genie `grant_gold` in 6481 ms and Spellcraft `cast_spell` in 6112 ms. Spellcraft determinism passed 5/5
-> as `storm|1` (0 errors, 6379 ms average); Hub/Chat started with 0 warnings/errors.
+> Last full verification 2026-07-15 in the interactive editor: EditMode 1691 passed / 0 failed /
+> 4 ignored optional Neoxider Pages tests, PlayMode `FastNoLlm` 73 passed / 0 failed, and six
+> Unity-generated `dotnet build` compile gates completed with 0 errors. Live Qwen3.5-0.8B LLMUnity
+> smokes called Genie `grant_gold`; Spellcraft classified `мега молния` as `storm|3`, `стена огня`
+> as `fire|2`, `ядовитый туман` as `poison|1`, and `заморозь их до костей` as `frost|2`, each through
+> native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
@@ -116,6 +117,9 @@
       `/v1/chat/completions` connection probe, and
       reject any result other than exactly one successful expected tool call. EditMode and no-model PlayMode
       regressions cover the contract.
+- [x] Qwen Spellcraft single-tool turns use `RequireSpecific(cast_spell)` and an explicit bilingual
+      element contract; all four Russian element presets have regression coverage and passed live-model
+      smoke on the compact 0.8B model.
 - [x] Deterministic startup smoke for all ten published scenes (including Skills and
       LiveMechanicsModsChat): no missing scripts, scope/camera present, supported shaders, no
       unexpected startup errors. Fixed missing Mods scopes, Mirror remnants, Hub wiring, and Wave URP color.
