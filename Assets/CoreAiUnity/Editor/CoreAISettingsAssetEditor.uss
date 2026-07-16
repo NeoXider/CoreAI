@@ -232,26 +232,38 @@
     background-color: rgba(57, 197, 207, 0.30);
 }
 
-/* ---------- Advanced tabs ---------- */
+/* ---------- Advanced tabs (chip style: wraps to extra rows on narrow inspectors) ---------- */
 
 .coreai-tabs {
     margin-top: 4px;
 }
 
 .coreai-tabs > .unity-tab-view__header-container {
+    flex-direction: row;
+    flex-wrap: wrap;
     border-bottom-width: 1px;
-    border-bottom-color: rgba(240, 136, 62, 0.45);
-    margin-bottom: 4px;
+    border-bottom-color: rgba(240, 136, 62, 0.35);
+    margin-bottom: 6px;
+    padding-bottom: 3px;
 }
 
 .coreai-tabs .unity-tab__header {
-    padding: 3px 8px 2px 8px;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
+    padding: 2px 9px;
+    margin: 2px 3px 2px 0;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: rgba(240, 136, 62, 0.35);
+    background-color: rgba(128, 128, 128, 0.08);
 }
 
 .coreai-tabs .unity-tab__header:hover {
-    background-color: rgba(240, 136, 62, 0.12);
+    background-color: rgba(240, 136, 62, 0.18);
+}
+
+.coreai-tabs .unity-tab__header--selected,
+.coreai-tabs .unity-tab--selected > .unity-tab__header {
+    background-color: rgba(240, 136, 62, 0.30);
+    border-color: rgb(240, 136, 62);
 }
 
 .coreai-tabs .unity-tab__header-label {
@@ -259,9 +271,10 @@
     font-size: 11px;
 }
 
+/* The stock active-tab underline clashes with the chip look. */
 .coreai-tabs .unity-tab__header-underline {
-    background-color: rgb(240, 136, 62);
-    height: 2px;
+    display: none;
+    height: 0;
 }
 
 .coreai-tab-content {
