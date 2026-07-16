@@ -29,11 +29,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Changed
 
-- `CoreAISettingsAsset` inspector rewritten in UI Toolkit. Connection fields no longer repeat between
-  Essentials and the advanced sections (Base URL / API Key / Model and the GGUF picker appear once, in
-  Essentials); the unlabeled button next to Browse is now an explicit "Rescan" with a tooltip
-  (it re-scans GGUF models known to the LLMUnity Model Manager); foldout states, the connection test,
-  the model preset dropdown, and all conditional warnings are preserved.
+- `CoreAISettingsAsset` inspector rewritten in UI Toolkit with layout and styling as separate assets
+  (`CoreAISettingsAssetEditor.uxml` / `.uss`; the editor class only loads the tree and wires behavior).
+  Advanced sections are switchable color-accented tabs (HTTP / Fallback / WebGL / LLMUnity / Memory /
+  General / Offline / Debug) with the active tab persisted; Essentials, the connection test, and the
+  header are color-coded cards. Connection fields no longer repeat between Essentials and the advanced
+  sections (Base URL / API Key / Model and the GGUF picker appear once, in Essentials); the unlabeled
+  button next to Browse is now an explicit "Rescan" with a tooltip (it re-scans GGUF models known to the
+  LLMUnity Model Manager); the connection test, model presets, and all conditional warnings are preserved.
 - Endpoint activation and legacy LLMUnity autostart now share the injected
   `UnityWebRequestOpenAiReadinessProbe`; the native `LLMAgent`/llama.cpp lifecycle remains Unity-owned while
   generic readiness semantics come from the portable CoreAI contract.

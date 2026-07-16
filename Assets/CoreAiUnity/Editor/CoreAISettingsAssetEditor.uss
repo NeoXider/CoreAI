@@ -1,0 +1,269 @@
+/* ---------- Header banner ---------- */
+
+.coreai-header {
+    margin-top: 6px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: rgba(88, 134, 255, 0.55);
+    background-color: rgba(72, 110, 240, 0.14);
+    border-left-width: 4px;
+    border-left-color: rgb(88, 134, 255);
+}
+
+.coreai-title {
+    -unity-font-style: bold;
+    font-size: 15px;
+    color: rgb(120, 160, 255);
+}
+
+.coreai-subtitle {
+    font-size: 10px;
+    opacity: 0.8;
+    margin-top: 1px;
+}
+
+/* ---------- Cards ---------- */
+
+.coreai-card {
+    margin-top: 5px;
+    margin-bottom: 5px;
+    padding: 7px 9px;
+    border-width: 1px;
+    border-color: rgba(110, 110, 110, 0.45);
+    border-radius: 5px;
+    border-left-width: 3px;
+    background-color: rgba(128, 128, 128, 0.06);
+}
+
+.coreai-card--essentials {
+    border-left-color: rgb(88, 134, 255);
+}
+
+.coreai-card--test {
+    border-left-color: rgb(63, 185, 80);
+}
+
+.coreai-card--advanced {
+    border-left-color: rgb(240, 136, 62);
+}
+
+.coreai-card--status {
+    border-left-color: rgb(163, 113, 247);
+    margin-left: 0;
+}
+
+.coreai-section-label {
+    -unity-font-style: bold;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.coreai-section-label--essentials {
+    color: rgb(120, 160, 255);
+}
+
+.coreai-section-label--test {
+    color: rgb(87, 199, 106);
+}
+
+.coreai-section-label--status {
+    color: rgb(180, 140, 255);
+}
+
+.coreai-mini-label {
+    -unity-font-style: bold;
+    font-size: 10px;
+    margin-top: 7px;
+    margin-bottom: 2px;
+    color: rgb(96, 176, 255);
+}
+
+/* ---------- Foldouts (each advanced section gets its own accent) ---------- */
+
+.coreai-foldout {
+    margin-top: 2px;
+}
+
+.coreai-foldout > .unity-foldout__toggle {
+    border-radius: 3px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+}
+
+.coreai-foldout .unity-foldout__text {
+    -unity-font-style: bold;
+}
+
+.coreai-foldout--advanced > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(240, 150, 84);
+    font-size: 12px;
+}
+
+.coreai-foldout--http > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(57, 197, 207);
+}
+
+.coreai-foldout--fallback > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(210, 153, 34);
+}
+
+.coreai-foldout--webgl > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(163, 113, 247);
+}
+
+.coreai-foldout--llmunity > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(240, 136, 62);
+}
+
+.coreai-foldout--summarization > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(86, 182, 194);
+}
+
+.coreai-foldout--general > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(126, 160, 200);
+}
+
+.coreai-foldout--offline > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(139, 148, 158);
+}
+
+.coreai-foldout--debug > .unity-foldout__toggle .unity-foldout__text {
+    color: rgb(248, 113, 113);
+}
+
+/* ---------- Layout helpers ---------- */
+
+.coreai-row {
+    flex-direction: row;
+}
+
+.coreai-grow {
+    flex-grow: 1;
+}
+
+.coreai-indent {
+    margin-left: 12px;
+}
+
+/* Conditional rows/warnings start hidden; the editor toggles inline display. */
+.coreai-dynamic {
+    display: none;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* ---------- Buttons ---------- */
+
+.coreai-button {
+    height: 24px;
+    border-radius: 4px;
+}
+
+.coreai-test-button {
+    height: 28px;
+    border-radius: 5px;
+    -unity-font-style: bold;
+    border-width: 1px;
+    border-color: rgba(63, 185, 80, 0.8);
+    background-color: rgba(46, 160, 67, 0.30);
+}
+
+.coreai-test-button:hover:enabled {
+    background-color: rgba(46, 160, 67, 0.50);
+}
+
+.coreai-test-button:active:enabled {
+    background-color: rgba(46, 160, 67, 0.65);
+}
+
+.coreai-route-hint {
+    font-size: 10px;
+    opacity: 0.75;
+    margin-top: 3px;
+    -unity-font-style: italic;
+}
+
+.coreai-footer {
+    flex-direction: row;
+    margin-top: 6px;
+    margin-bottom: 4px;
+}
+
+.coreai-footer > .coreai-button {
+    flex-grow: 1;
+}
+
+.coreai-button--copy {
+    border-width: 1px;
+    border-color: rgba(88, 134, 255, 0.6);
+    background-color: rgba(72, 110, 240, 0.18);
+}
+
+.coreai-button--copy:hover {
+    background-color: rgba(72, 110, 240, 0.34);
+}
+
+.coreai-button--reset {
+    border-width: 1px;
+    border-color: rgba(248, 81, 73, 0.55);
+    background-color: rgba(218, 54, 51, 0.16);
+}
+
+.coreai-button--reset:hover {
+    background-color: rgba(218, 54, 51, 0.32);
+}
+
+.coreai-gguf-browse {
+    width: 64px;
+    border-radius: 4px;
+}
+
+.coreai-gguf-rescan {
+    width: 58px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(57, 197, 207, 0.55);
+    background-color: rgba(57, 197, 207, 0.14);
+}
+
+.coreai-gguf-rescan:hover {
+    background-color: rgba(57, 197, 207, 0.30);
+}
+
+/* ---------- Advanced tabs ---------- */
+
+.coreai-tabs {
+    margin-top: 4px;
+}
+
+.coreai-tabs > .unity-tab-view__header-container {
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(240, 136, 62, 0.45);
+    margin-bottom: 4px;
+}
+
+.coreai-tabs .unity-tab__header {
+    padding: 3px 8px 2px 8px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+.coreai-tabs .unity-tab__header:hover {
+    background-color: rgba(240, 136, 62, 0.12);
+}
+
+.coreai-tabs .unity-tab__header-label {
+    -unity-font-style: bold;
+    font-size: 11px;
+}
+
+.coreai-tabs .unity-tab__header-underline {
+    background-color: rgb(240, 136, 62);
+    height: 2px;
+}
+
+.coreai-tab-content {
+    padding: 6px 4px 4px 4px;
+}

@@ -1,0 +1,293 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <Style src="CoreAISettingsAssetEditor.uss" />
+    <ui:VisualElement name="coreai-settings-root">
+
+        <ui:VisualElement class="coreai-header">
+            <ui:Label text="CoreAI Settings" class="coreai-title" />
+            <ui:Label text="Project-wide LLM configuration" class="coreai-subtitle" />
+        </ui:VisualElement>
+
+        <!-- ======================= Essentials ======================= -->
+        <ui:VisualElement class="coreai-card coreai-card--essentials">
+            <ui:Label text="Essentials" class="coreai-section-label coreai-section-label--essentials" />
+
+            <uie:PropertyField binding-path="backendType" label="LLM Backend"
+                tooltip="Auto = pick the best available; HTTP API = LM Studio / OpenAI / etc.; LLMUnity = local GGUF; Offline = stub" />
+            <uie:PropertyField binding-path="executionMode" label="LLM Mode"
+                tooltip="Public runtime mode. Use Auto to preserve legacy backend selection." />
+            <ui:HelpBox name="production-warning" message-type="Warning" class="coreai-dynamic" />
+
+            <ui:Label text="Streaming" class="coreai-mini-label" />
+            <uie:PropertyField binding-path="enableStreaming" label="Global streaming"
+                tooltip="Token-by-token replies when backends support it. Overridden if the chat panel turns streaming off (CoreAiChatConfig) or a role sets AgentBuilder.WithStreaming(false). Default: on." />
+            <ui:HelpBox name="webgl-streaming-hint" message-type="Warning" class="coreai-dynamic"
+                text="WebGL build target: incremental SSE in the player needs WebGL: native SSE (fetch) enabled under Advanced Settings &gt; WebGL tab." />
+
+            <ui:VisualElement name="auto-priority-row">
+                <uie:PropertyField binding-path="autoPriority" label="Auto Priority"
+                    tooltip="Which backend to try first when in Auto mode" />
+            </ui:VisualElement>
+
+            <ui:VisualElement name="http-essentials">
+                <ui:Label text="HTTP API connection" class="coreai-mini-label" />
+                <uie:PropertyField binding-path="apiBaseUrl" label="Base URL"
+                    tooltip="https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)" />
+                <uie:PropertyField binding-path="apiKey" label="API Key"
+                    tooltip="Bearer token. Leave empty for LM Studio." />
+                <uie:PropertyField binding-path="modelName" label="Model"
+                    tooltip="Provider model id. Type a custom value or choose a common preset below." />
+                <ui:DropdownField name="model-preset" label="Model Preset"
+                    tooltip="Quickly fill the Model field with a common OpenAI-compatible model id." />
+            </ui:VisualElement>
+
+            <ui:VisualElement name="llmunity-essentials">
+                <ui:Label text="LLMUnity (local model)" class="coreai-mini-label" />
+                <ui:VisualElement name="gguf-row" class="coreai-row">
+                    <ui:DropdownField name="gguf-dropdown" label="GGUF Model" class="coreai-grow"
+                        tooltip="Model known to LLMUnity Model Manager. Empty = auto/fallback. Use Browse or Manual override for a specific .gguf file." />
+                    <ui:Button name="gguf-browse" text="Browse" class="coreai-gguf-browse" />
+                    <ui:Button name="gguf-rescan" text="Rescan" class="coreai-gguf-rescan"
+                        tooltip="Re-scan the GGUF models known to the LLMUnity Model Manager." />
+                </ui:VisualElement>
+                <ui:TextField name="gguf-manual" label="Manual override" binding-path="ggufModelPath"
+                    class="coreai-indent"
+                    tooltip="Type a .gguf filename when it is not listed in the dropdown." />
+                <ui:HelpBox name="gguf-empty-hint" message-type="None" class="coreai-dynamic"
+                    text="LLMUnity Model Manager did not report any GGUF models. Open the LLMUnity Model Manager or choose a file with Browse / Manual override." />
+                <ui:VisualElement name="gguf-fallback-group" class="coreai-dynamic">
+                    <uie:PropertyField binding-path="ggufModelPath" label="GGUF Path"
+                        tooltip="Relative .gguf model path. Empty = auto/fallback." />
+                    <ui:HelpBox message-type="None"
+                        text="LLMUnity package is not active, so the model dropdown is unavailable. If package ai.undream.llm is installed, use the LLMUnity status helper on the LLMUnity tab to fix CoreAI asmdef versionDefines." />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- ======================= Connection test ======================= -->
+        <ui:VisualElement class="coreai-card coreai-card--test">
+            <ui:Label text="Connection test" class="coreai-section-label coreai-section-label--test" />
+            <ui:Button name="test-button" text="Test Connection" class="coreai-test-button" />
+            <ui:Label name="route-hint" class="coreai-route-hint" />
+            <ui:HelpBox name="test-result" message-type="Info" class="coreai-dynamic" />
+        </ui:VisualElement>
+
+        <!-- ======================= Advanced (tabs) ======================= -->
+        <ui:VisualElement class="coreai-card coreai-card--advanced">
+            <ui:Foldout name="advanced-foldout" text="Advanced Settings"
+                class="coreai-foldout coreai-foldout--advanced">
+                <ui:HelpBox message-type="None"
+                    text="Beginners can leave these alone. Touch only when you need per-role routing, prompt prefixes, retry tuning, or debug logs." />
+
+                <ui:TabView name="advanced-tabs" class="coreai-tabs">
+
+                    <ui:Tab label="HTTP">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <ui:HelpBox message-type="None"
+                                text="Connection fields (Base URL, API Key, Model) live in Essentials above." />
+                            <ui:VisualElement name="http-advanced-group">
+                                <uie:PropertyField binding-path="requestTimeoutSeconds" label="Timeout (sec)"
+                                    tooltip="HTTP request timeout in seconds." />
+                                <uie:PropertyField binding-path="maxClientLimitedRequestsPerSession"
+                                    label="ClientLimited Max Requests" tooltip="0 = no local request limit" />
+                                <uie:PropertyField binding-path="maxClientLimitedPromptChars"
+                                    label="ClientLimited Max Prompt Chars" tooltip="0 = no local prompt-size limit" />
+                            </ui:VisualElement>
+                            <ui:HelpBox name="servermanaged-warning" message-type="Warning" class="coreai-dynamic"
+                                text="ServerManagedApi should point to your backend proxy. Leave provider keys on the server, not in the client asset." />
+                            <ui:HelpBox name="http-auto-hint" message-type="Info" class="coreai-dynamic" />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="Fallback">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <ui:HelpBox message-type="None"
+                                text="When enabled and secondary URL/model are set, retryable primary backend failures are retried on this secondary HTTP backend. Auth, invalid request, quota and user cancellation do not fall back." />
+                            <uie:PropertyField binding-path="enableFallbackBackend" label="Enable Fallback Backend"
+                                tooltip="Retry supported primary backend failures on the secondary OpenAI-compatible HTTP backend." />
+                            <uie:PropertyField binding-path="secondaryApiBaseUrl" label="Secondary Base URL"
+                                tooltip="OpenAI-compatible /v1 base URL for fallback requests." />
+                            <uie:PropertyField binding-path="secondaryApiKey" label="Secondary API Key"
+                                tooltip="Bearer token for the secondary provider. Leave empty for local servers that do not require auth." />
+                            <uie:PropertyField binding-path="secondaryModelName" label="Secondary Model"
+                                tooltip="Model id used by the secondary provider." />
+                            <ui:HelpBox name="fallback-incomplete-warning" message-type="Warning" class="coreai-dynamic"
+                                text="Fallback is enabled, but Secondary Base URL and Secondary Model must both be set before the runtime can use it." />
+                            <ui:HelpBox name="fallback-active-info" message-type="Info" class="coreai-dynamic"
+                                text="Fallback backend is configured. Runtime fallback is active for retryable primary failures." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="WebGL">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <ui:HelpBox message-type="None"
+                                text="Built WebGL player only (Editor / Standalone ignore these). Problem pattern: global streaming on but native SSE off -&gt; one block reply, no live tokens. Enable native SSE. LM Studio and most local OpenAI-compatible hosts: keep fetch credentials off." />
+                            <uie:PropertyField binding-path="webGlNativeStreaming" label="Native SSE (fetch)"
+                                tooltip="Default: on. CoreAiSseFetch.jslib + fetch ReadableStream for incremental SSE. Off = buffered non-streaming HTTP in the player." />
+                            <uie:PropertyField binding-path="sameOriginCredentials" label="Fetch credentials (same-origin)"
+                                tooltip="Default off -&gt; fetch credentials: omit (Bearer still sent; works with CORS ACAO: * e.g. OpenRouter). On -&gt; same-origin. Rarely needed for LM Studio / local APIs." />
+                            <ui:HelpBox name="webgl-no-native-warning" message-type="Warning" class="coreai-dynamic"
+                                text="Active build target is WebGL and global streaming is on, but native SSE is off. The player will not stream incrementally." />
+                            <ui:HelpBox name="webgl-credentials-info" message-type="Info" class="coreai-dynamic"
+                                text="Fetch credentials is on. For LM Studio and many setups this is unnecessary and can worsen cross-origin behavior. Turn off unless you know you need same-origin cookie mode." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="LLMUnity">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <ui:HelpBox message-type="None"
+                                text="The GGUF model picker lives in Essentials above." />
+                            <ui:VisualElement name="llmunity-advanced-group">
+                                <uie:PropertyField binding-path="llmUnityAgentName" label="Agent Name"
+                                    tooltip="GameObject name that hosts LLMAgent. Empty = auto-detect." />
+                                <uie:PropertyField binding-path="llmUnityAutoCreateRuntimeHost" label="Auto-create LLM host"
+                                    tooltip="When no LLMAgent exists in loaded scenes, create a runtime GameObject with LLM + LLMAgent and apply the GGUF model hint." />
+                                <uie:PropertyField binding-path="llmUnityRuntimeHostObjectName" label="Runtime host name"
+                                    tooltip="Name for the auto-created runtime host GameObject. Empty = CoreAI_LLMUnity_Runtime." />
+                                <uie:PropertyField binding-path="llmUnityAutostartLocalServer" label="Autostart local server"
+                                    tooltip="Warm up the local llama.cpp server after startup. Uses Startup Timeout." />
+                                <uie:PropertyField binding-path="llmUnityDontDestroyOnLoad" label="Dont Destroy On Load"
+                                    tooltip="Keep the runtime host alive across scene loads." />
+                                <ui:SliderInt binding-path="llmUnityNumGPULayers" label="GPU Layers"
+                                    low-value="0" high-value="99" show-input-field="true"
+                                    tooltip="Number of layers to offload to GPU. 0 = CPU only, 99 = maximum offload." />
+                                <uie:PropertyField binding-path="llmUnityStartupTimeoutSeconds" label="Startup Timeout (sec)"
+                                    tooltip="Seconds to wait for local model startup." />
+                                <uie:PropertyField binding-path="llmUnityStartupDelaySeconds" label="Startup Delay (sec)"
+                                    tooltip="Delay after the local model server reports ready." />
+                                <uie:PropertyField binding-path="llmUnityKeepAlive" label="Keep Alive"
+                                    tooltip="Keep the local server warm between prompts." />
+                                <uie:PropertyField binding-path="llmUnityMaxConcurrentChats" label="Max Concurrent Chats"
+                                    tooltip="1 = serial chats; greater values allow parallel chat sessions." />
+                            </ui:VisualElement>
+                            <ui:VisualElement name="llmunity-status-container" />
+                            <ui:HelpBox name="llmunity-auto-hint" message-type="Info" class="coreai-dynamic" />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="Memory">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <uie:PropertyField binding-path="enableConversationHistorySummarization"
+                                label="Enable history summarization"
+                                tooltip="When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)." />
+                            <uie:PropertyField binding-path="conversationHistoryRecentTokenBudgetOverride"
+                                label="Recent history token budget override"
+                                tooltip="0 = automatic from context window. When set, caps the verbatim tail to this many estimated tokens; older lines roll into the summary when summarization is on." />
+                            <uie:PropertyField binding-path="conversationRolledSummaryMaxTokens"
+                                label="Max rolled summary (tokens)"
+                                tooltip="0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup." />
+                            <uie:PropertyField binding-path="conversationCompactionTriggerRatio"
+                                label="Compaction trigger ratio"
+                                tooltip="Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. Invalid values fall back to the CoreAI default." />
+                            <uie:PropertyField binding-path="enableContextPruning" label="Enable context pruning"
+                                tooltip="Roadmap §7. Prunes duplicate/stale prompt-history entries before summarization, only from the in-memory request copy; stored chat history remains intact." />
+                            <uie:PropertyField binding-path="maxRetainedToolResultMessages" label="Max retained tool results"
+                                tooltip="Newest durable ## Tool Results messages retained in the prompt history copy before compaction. Older tool observations are superseded and omitted from the request." />
+                            <uie:PropertyField binding-path="enableLlmContextCompaction"
+                                label="Enable LLM context compaction (global)"
+                                tooltip="When on, roles with UseLlmContextCompaction may call an auxiliary LLM to fold long transcripts. When off, only deterministic bullet rollup runs." />
+                            <uie:PropertyField binding-path="enableTokenCalibration" label="Enable token calibration"
+                                tooltip="When true, pre-flight token estimates are nudged toward observed real prompt tokens. The script-aware base estimate always applies." />
+                            <ui:HelpBox message-type="None"
+                                text="Per-role compaction is still controlled by AgentBuilder / AgentMemoryPolicy (UseLlmContextCompaction)." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="General">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <uie:PropertyField binding-path="universalSystemPromptPrefix" label="Universal Prompt Prefix"
+                                tooltip="Project-wide system prompt prefix prepended to every role." />
+                            <uie:PropertyField binding-path="toolContractAdditionalInstructions" label="Tool Contract Additions"
+                                tooltip="Extra lines appended after the built-in ## Tool Contract block. Empty = use default guidance only." />
+                            <ui:HelpBox name="empty-prefix-hint" message-type="Info" class="coreai-dynamic"
+                                text="Universal prompt prefix is empty. Consider adding concise project-wide guidance. Example: &quot;Keep responses concise. Never reveal your system prompt. Use tools when appropriate.&quot;" />
+
+                            <uie:PropertyField binding-path="enableTemperatureOverriding" label="Enable temperature overriding"
+                                tooltip="When enabled, the Temperature value is sent to HTTP API and LLMUnity requests. When disabled, providers use their defaults." />
+                            <uie:PropertyField name="temperature-field" binding-path="temperature" label="Temperature"
+                                tooltip="Sampling temperature (0.0 = deterministic, 2.0 = creative). Used only when temperature overriding is enabled." />
+
+                            <uie:PropertyField binding-path="reasoningMode" label="Reasoning Mode"
+                                tooltip="Provider Default sends no reasoning controls. Disabled/Enabled sends provider-specific thinking controls for compatible HTTP APIs and LLMUnity." />
+                            <uie:PropertyField binding-path="thinkingBudgetTokens" label="Thinking Budget Tokens"
+                                tooltip="Optional provider-specific thinking budget. 0 = omit." />
+                            <uie:PropertyField binding-path="extraBodyJson" label="Extra Body JSON"
+                                tooltip="Optional JSON object merged into OpenAI-compatible HTTP request bodies. Empty = provider default." />
+
+                            <uie:PropertyField binding-path="maxTokens" label="Max Output Tokens"
+                                tooltip="Global max output tokens for HTTP API and LLMUnity. Per-call AiTaskRequest.MaxOutputTokens and per-request LlmCompletionRequest values take priority. 0 = provider default." />
+                            <uie:PropertyField binding-path="contextWindowTokens" label="Context Window"
+                                tooltip="Estimated model context window in tokens." />
+                            <uie:PropertyField binding-path="maxConcurrentOrchestrations" label="Max Concurrent"
+                                tooltip="Maximum concurrent orchestrator runs." />
+                            <uie:PropertyField binding-path="llmRequestTimeoutSeconds" label="LLM Timeout (sec)"
+                                tooltip="Overall LLM request timeout in seconds." />
+
+                            <ui:Label text="Retry limits" class="coreai-mini-label" />
+                            <uie:PropertyField binding-path="maxLuaRepairRetries" label="Lua Repair Retries"
+                                tooltip="Maximum Lua repair attempts for the Programmer role." />
+                            <uie:PropertyField binding-path="maxToolCallRetries" label="Tool Call Retries"
+                                tooltip="Maximum consecutive failed tool calls before stopping." />
+                            <uie:PropertyField binding-path="maxContextOverflowRetries" label="Context Overflow Retries"
+                                tooltip="Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history. 0 disables overflow recovery." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="Offline">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <uie:PropertyField binding-path="offlineUseCustomResponse" label="Custom Response"
+                                tooltip="Return a fixed response instead of role-specific offline stubs." />
+                            <ui:VisualElement name="offline-custom-group" class="coreai-indent coreai-dynamic">
+                                <uie:PropertyField binding-path="offlineCustomResponse" label="Response Text"
+                                    tooltip="Assistant text returned for matched offline roles." />
+                                <uie:PropertyField binding-path="offlineCustomResponseRoles" label="Roles"
+                                    tooltip="Comma-separated role ids. * = all roles. Example: Creator,Programmer." />
+                            </ui:VisualElement>
+                            <ui:HelpBox name="offline-default-info" message-type="Info" class="coreai-dynamic"
+                                text="Default offline mode returns role-specific stubs (ProgrammerLua, CreatorJSON, Chat echo)." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                    <ui:Tab label="Debug">
+                        <ui:VisualElement class="coreai-tab-content">
+                            <ui:Label text="LLM logging" class="coreai-mini-label" />
+                            <uie:PropertyField binding-path="logLlmInput" label="Log LLM Input"
+                                tooltip="Log composed system and user prompts." />
+                            <uie:PropertyField binding-path="logLlmOutput" label="Log LLM Output"
+                                tooltip="Log assistant completions and aggregated tool-call summaries." />
+
+                            <ui:Label text="Tool call logging" class="coreai-mini-label" />
+                            <uie:PropertyField binding-path="logToolCalls" label="Log Tool Calls"
+                                tooltip="Log whenever a native tool executes." />
+                            <uie:PropertyField binding-path="logToolCallArguments" label="Log Arguments"
+                                tooltip="Serialize tool-call arguments into logs." />
+                            <uie:PropertyField binding-path="logToolCallResults" label="Log Results"
+                                tooltip="Serialize tool-call results into logs." />
+                            <uie:PropertyField binding-path="logMeaiToolCallingSteps" label="Log MEAI Steps"
+                                tooltip="Trace FunctionInvokingChatClient tool-calling iterations and retries." />
+
+                            <ui:Label text="Transport / orchestration" class="coreai-mini-label" />
+                            <uie:PropertyField binding-path="enableHttpDebugLogging" label="HTTP Debug Logging"
+                                tooltip="Log HTTP request/response JSON." />
+                            <uie:PropertyField binding-path="enableMeaiDebugLogging" label="MEAI Debug Logging" />
+                            <uie:PropertyField binding-path="logOrchestrationMetrics" label="Log Orchestration Metrics" />
+
+                            <ui:Label text="Token budget overlay" class="coreai-mini-label" />
+                            <uie:PropertyField binding-path="inputTokenPricePer1KUsd" label="Input $ / 1K Tokens"
+                                tooltip="USD price per 1K prompt tokens for the token-budget overlay. 0 = unset (tokens only)." />
+                            <uie:PropertyField binding-path="outputTokenPricePer1KUsd" label="Output $ / 1K Tokens"
+                                tooltip="USD price per 1K completion tokens for the token-budget overlay. 0 = unset (tokens only)." />
+                        </ui:VisualElement>
+                    </ui:Tab>
+
+                </ui:TabView>
+            </ui:Foldout>
+        </ui:VisualElement>
+
+        <!-- ======================= Footer ======================= -->
+        <ui:VisualElement class="coreai-footer">
+            <ui:Button name="copy-key-button" text="Copy API Key" class="coreai-button coreai-button--copy" />
+            <ui:Button name="reset-button" text="Reset" class="coreai-button coreai-button--reset" />
+        </ui:VisualElement>
+
+    </ui:VisualElement>
+</ui:UXML>

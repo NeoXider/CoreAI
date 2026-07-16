@@ -18,22 +18,17 @@ using LLMUnity;
 namespace CoreAI.Infrastructure.Llm.Editor
 {
     /// <summary>
-    /// UI Toolkit inspector for CoreAISettingsAsset: guided essentials, connection test, and
-    /// collapsed advanced sections. Connection fields (URL/key/model, GGUF) appear once, in
-    /// Essentials; advanced sections hold only their own extra settings.
+    /// UI Toolkit inspector for CoreAISettingsAsset. Layout lives in
+    /// CoreAISettingsAssetEditor.uxml (styles in the .uss next to it); this class loads the
+    /// tree, binds it, and wires the dynamic behavior: conditional rows, the advanced tabs,
+    /// the GGUF picker, and the connection test.
     /// </summary>
     [CustomEditor(typeof(CoreAISettingsAsset))]
     public sealed class CoreAISettingsAssetEditor : UnityEditor.Editor
     {
+        private const string UxmlPath = "Assets/CoreAiUnity/Editor/CoreAISettingsAssetEditor.uxml";
         private const string PrefAdvancedOpen = "CoreAI.SettingsEditor.AdvancedOpen";
-        private const string PrefHttpOpen = "CoreAI.SettingsEditor.HttpOpen";
-        private const string PrefLlmUnityOpen = "CoreAI.SettingsEditor.LlmUnityOpen";
-        private const string PrefGeneralOpen = "CoreAI.SettingsEditor.GeneralOpen";
-        private const string PrefOfflineOpen = "CoreAI.SettingsEditor.OfflineOpen";
-        private const string PrefDebugOpen = "CoreAI.SettingsEditor.DebugOpen";
-        private const string PrefSummarizationOpen = "CoreAI.SettingsEditor.SummarizationOpen";
-        private const string PrefWebGlPlayerOpen = "CoreAI.SettingsEditor.WebGlPlayerOpen";
-        private const string PrefFallbackBackendOpen = "CoreAI.SettingsEditor.FallbackBackendOpen";
+        private const string PrefActiveTab = "CoreAI.SettingsEditor.ActiveTab";
 
         private static readonly string[] HttpModelPresets =
         {
@@ -56,7 +51,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private string _testResultMessage;
         private MessageType _testResultType;
 
-        // Dynamic elements updated by RefreshDynamicState.
+        // Dynamic elements resolved from the UXML tree.
         private VisualElement _autoPriorityRow;
         private VisualElement _httpEssentials;
         private VisualElement _llmUnityEssentials;
@@ -68,7 +63,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private HelpBox _httpAutoHint;
         private HelpBox _fallbackIncompleteWarning;
         private HelpBox _fallbackActiveInfo;
-        private HelpBox _webGlNoNativeSseWarning;
+        private HelpBox _webGlNoNativeWarning;
         private HelpBox _webGlCredentialsInfo;
         private VisualElement _llmUnityAdvancedGroup;
         private HelpBox _llmUnityAutoHint;
@@ -79,22 +74,33 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private Button _testButton;
         private Label _routeHint;
         private HelpBox _testResultBox;
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
         private DropdownField _ggufDropdown;
         private HelpBox _ggufEmptyHint;
         private readonly List<string> _ggufFileNames = new();
-#endif
 
         public override VisualElement CreateInspectorGUI()
         {
             serializedObject.Update();
-            VisualElement root = new();
 
-            BuildHeader(root);
-            root.Add(BuildEssentialsCard());
-            root.Add(BuildConnectionTestCard());
-            root.Add(BuildAdvancedCard());
-            root.Add(BuildFooterButtons());
+            VisualTreeAsset tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UxmlPath);
+            if (tree == null)
+            {
+                VisualElement fallback = new();
+                fallback.Add(new HelpBox(
+                    $"CoreAI settings inspector layout is missing: {UxmlPath}. Showing the default inspector.",
+                    HelpBoxMessageType.Error));
+                InspectorElement.FillDefaultInspector(fallback, serializedObject, this);
+                return fallback;
+            }
+
+            VisualElement root = tree.Instantiate();
+            QueryDynamicElements(root);
+            WireAdvancedTabs(root);
+            WireModelPreset();
+            WireGgufPicker(root);
+            WireConnectionTest();
+            WireFooter(root);
+            BuildLlmUnityStatus(root.Q<VisualElement>("llmunity-status-container"));
 
             // One tracker refreshes every conditional row/warning; cheaper and simpler than
             // wiring a callback per field.
@@ -105,73 +111,62 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
         private CoreAISettingsAsset Settings => (CoreAISettingsAsset)target;
 
-        private static void BuildHeader(VisualElement root)
+        private void QueryDynamicElements(VisualElement root)
         {
-            Label title = new("CoreAI Settings");
-            title.style.unityFontStyleAndWeight = FontStyle.Bold;
-            title.style.fontSize = 14;
-            title.style.marginTop = 6;
-            root.Add(title);
-
-            Label subtitle = new("Project-wide LLM configuration");
-            subtitle.style.fontSize = 10;
-            subtitle.style.opacity = 0.7f;
-            subtitle.style.marginBottom = 6;
-            root.Add(subtitle);
+            _autoPriorityRow = root.Q<VisualElement>("auto-priority-row");
+            _httpEssentials = root.Q<VisualElement>("http-essentials");
+            _llmUnityEssentials = root.Q<VisualElement>("llmunity-essentials");
+            _productionWarning = root.Q<HelpBox>("production-warning");
+            _webGlStreamingHint = root.Q<HelpBox>("webgl-streaming-hint");
+            _modelPreset = root.Q<DropdownField>("model-preset");
+            _httpAdvancedGroup = root.Q<VisualElement>("http-advanced-group");
+            _serverManagedWarning = root.Q<HelpBox>("servermanaged-warning");
+            _httpAutoHint = root.Q<HelpBox>("http-auto-hint");
+            _fallbackIncompleteWarning = root.Q<HelpBox>("fallback-incomplete-warning");
+            _fallbackActiveInfo = root.Q<HelpBox>("fallback-active-info");
+            _webGlNoNativeWarning = root.Q<HelpBox>("webgl-no-native-warning");
+            _webGlCredentialsInfo = root.Q<HelpBox>("webgl-credentials-info");
+            _llmUnityAdvancedGroup = root.Q<VisualElement>("llmunity-advanced-group");
+            _llmUnityAutoHint = root.Q<HelpBox>("llmunity-auto-hint");
+            _temperatureField = root.Q<PropertyField>("temperature-field");
+            _emptyPrefixHint = root.Q<HelpBox>("empty-prefix-hint");
+            _offlineCustomGroup = root.Q<VisualElement>("offline-custom-group");
+            _offlineDefaultInfo = root.Q<HelpBox>("offline-default-info");
+            _testButton = root.Q<Button>("test-button");
+            _routeHint = root.Q<Label>("route-hint");
+            _testResultBox = root.Q<HelpBox>("test-result");
+            _ggufDropdown = root.Q<DropdownField>("gguf-dropdown");
+            _ggufEmptyHint = root.Q<HelpBox>("gguf-empty-hint");
         }
 
-        private VisualElement BuildEssentialsCard()
+        private void WireAdvancedTabs(VisualElement root)
         {
-            VisualElement card = MakeCard();
-            card.Add(MakeSectionLabel("Essentials"));
+            Foldout advanced = root.Q<Foldout>("advanced-foldout");
+            advanced.value = EditorPrefs.GetBool(PrefAdvancedOpen, false);
+            advanced.RegisterValueChangedCallback(evt =>
+            {
+                if (ReferenceEquals(evt.target, advanced))
+                {
+                    EditorPrefs.SetBool(PrefAdvancedOpen, evt.newValue);
+                }
+            });
 
-            card.Add(Field("backendType", "LLM Backend",
-                "Auto = pick the best available; HTTP API = LM Studio / OpenAI / etc.; LLMUnity = local GGUF; Offline = stub"));
-            card.Add(Field("executionMode", "LLM Mode",
-                "Public runtime mode. Use Auto to preserve legacy backend selection."));
+            TabView tabs = root.Q<TabView>("advanced-tabs");
+            int savedTab = EditorPrefs.GetInt(PrefActiveTab, 0);
+            if (savedTab >= 0 && savedTab < tabs.childCount)
+            {
+                tabs.selectedTabIndex = savedTab;
+            }
 
-            _productionWarning = MakeDynamicHelpBox(HelpBoxMessageType.Warning);
-            card.Add(_productionWarning);
-
-            card.Add(MakeMiniLabel("Streaming"));
-            card.Add(Field("enableStreaming", "Global streaming",
-                "Token-by-token replies when backends support it. Overridden if the chat panel turns streaming off (CoreAiChatConfig) or a role sets AgentBuilder.WithStreaming(false). Default: on."));
-            _webGlStreamingHint = MakeDynamicHelpBox(HelpBoxMessageType.Warning);
-            _webGlStreamingHint.text =
-                "WebGL build target: incremental SSE in the player needs WebGL: native SSE (fetch) enabled under Advanced Settings > WebGL player (browser build).";
-            card.Add(_webGlStreamingHint);
-
-            _autoPriorityRow = new VisualElement();
-            _autoPriorityRow.Add(Field("autoPriority", "Auto Priority",
-                "Which backend to try first when in Auto mode"));
-            card.Add(_autoPriorityRow);
-
-            _httpEssentials = new VisualElement();
-            _httpEssentials.Add(MakeMiniLabel("HTTP API connection"));
-            _httpEssentials.Add(Field("apiBaseUrl", "Base URL",
-                "https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)"));
-            _httpEssentials.Add(Field("apiKey", "API Key", "Bearer token. Leave empty for LM Studio."));
-            _httpEssentials.Add(Field("modelName", "Model",
-                "Provider model id. Type a custom value or choose a common preset below."));
-            _httpEssentials.Add(BuildModelPresetDropdown());
-            card.Add(_httpEssentials);
-
-            _llmUnityEssentials = new VisualElement();
-            _llmUnityEssentials.Add(MakeMiniLabel("LLMUnity (local model)"));
-            BuildGgufModelControl(_llmUnityEssentials);
-            card.Add(_llmUnityEssentials);
-
-            return card;
+            tabs.activeTabChanged += (_, _) => EditorPrefs.SetInt(PrefActiveTab, tabs.selectedTabIndex);
         }
 
-        private DropdownField BuildModelPresetDropdown()
+        private void WireModelPreset()
         {
             List<string> choices = new() { CustomPresetLabel };
             choices.AddRange(HttpModelPresets);
-            _modelPreset = new DropdownField("Model Preset", choices, 0)
-            {
-                tooltip = "Quickly fill the Model field with a common OpenAI-compatible model id."
-            };
+            _modelPreset.choices = choices;
+            _modelPreset.SetValueWithoutNotify(CustomPresetLabel);
             _modelPreset.RegisterValueChangedCallback(evt =>
             {
                 if (evt.newValue == CustomPresetLabel)
@@ -182,315 +177,77 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 serializedObject.FindProperty("modelName").stringValue = evt.newValue;
                 serializedObject.ApplyModifiedProperties();
             });
-            return _modelPreset;
         }
 
-        private VisualElement BuildConnectionTestCard()
+        private void WireGgufPicker(VisualElement root)
         {
-            VisualElement card = MakeCard();
-            card.Add(MakeSectionLabel("Connection test"));
+            VisualElement ggufRow = root.Q<VisualElement>("gguf-row");
+            TextField manual = root.Q<TextField>("gguf-manual");
+            VisualElement fallbackGroup = root.Q<VisualElement>("gguf-fallback-group");
 
-            _testButton = new Button(() => TestConnection(Settings)) { text = "Test Connection" };
-            _testButton.style.height = 28;
-            card.Add(_testButton);
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            Show(fallbackGroup, false);
+            manual.isDelayed = true;
 
-            _routeHint = new Label("");
-            _routeHint.style.fontSize = 10;
-            _routeHint.style.opacity = 0.7f;
-            _routeHint.style.marginTop = 2;
-            card.Add(_routeHint);
-
-            _testResultBox = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            card.Add(_testResultBox);
-            return card;
-        }
-
-        private VisualElement BuildAdvancedCard()
-        {
-            VisualElement card = MakeCard();
-            Foldout advanced = MakePersistentFoldout(
-                "Advanced Settings (routing, prompts, retry, debug)", PrefAdvancedOpen, false);
-            advanced.Add(new HelpBox(
-                "Beginners can leave these alone. Touch only when you need per-role routing, prompt prefixes, retry tuning, or debug logs.",
-                HelpBoxMessageType.None));
-
-            advanced.Add(BuildHttpAdvancedFoldout());
-            advanced.Add(BuildFallbackBackendFoldout());
-            advanced.Add(BuildWebGlPlayerFoldout());
-            advanced.Add(BuildLlmUnityFoldout());
-            advanced.Add(BuildSummarizationFoldout());
-            advanced.Add(BuildGeneralFoldout());
-            advanced.Add(BuildOfflineFoldout());
-            advanced.Add(BuildDebugFoldout());
-
-            card.Add(advanced);
-            return card;
-        }
-
-        private Foldout BuildHttpAdvancedFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("HTTP API (advanced)", PrefHttpOpen, true);
-            foldout.Add(new HelpBox(
-                "Connection fields (Base URL, API Key, Model) live in Essentials above.",
-                HelpBoxMessageType.None));
-
-            _httpAdvancedGroup = new VisualElement();
-            _httpAdvancedGroup.Add(Field("requestTimeoutSeconds", "Timeout (sec)",
-                "HTTP request timeout in seconds."));
-            _httpAdvancedGroup.Add(Field("maxClientLimitedRequestsPerSession", "ClientLimited Max Requests",
-                "0 = no local request limit"));
-            _httpAdvancedGroup.Add(Field("maxClientLimitedPromptChars", "ClientLimited Max Prompt Chars",
-                "0 = no local prompt-size limit"));
-            foldout.Add(_httpAdvancedGroup);
-
-            _serverManagedWarning = MakeDynamicHelpBox(HelpBoxMessageType.Warning);
-            _serverManagedWarning.text =
-                "ServerManagedApi should point to your backend proxy. Leave provider keys on the server, not in the client asset.";
-            foldout.Add(_serverManagedWarning);
-
-            _httpAutoHint = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            foldout.Add(_httpAutoHint);
-            return foldout;
-        }
-
-        private Foldout BuildFallbackBackendFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("Fallback Backend (secondary)", PrefFallbackBackendOpen, false);
-            foldout.Add(new HelpBox(
-                "When enabled and secondary URL/model are set, retryable primary backend failures are retried on this secondary HTTP backend. Auth, invalid request, quota and user cancellation do not fall back.",
-                HelpBoxMessageType.None));
-
-            foldout.Add(Field("enableFallbackBackend", "Enable Fallback Backend",
-                "Retry supported primary backend failures on the secondary OpenAI-compatible HTTP backend."));
-            foldout.Add(Field("secondaryApiBaseUrl", "Secondary Base URL",
-                "OpenAI-compatible /v1 base URL for fallback requests."));
-            foldout.Add(Field("secondaryApiKey", "Secondary API Key",
-                "Bearer token for the secondary provider. Leave empty for local servers that do not require auth."));
-            foldout.Add(Field("secondaryModelName", "Secondary Model",
-                "Model id used by the secondary provider."));
-
-            _fallbackIncompleteWarning = MakeDynamicHelpBox(HelpBoxMessageType.Warning);
-            _fallbackIncompleteWarning.text =
-                "Fallback is enabled, but Secondary Base URL and Secondary Model must both be set before the runtime can use it.";
-            foldout.Add(_fallbackIncompleteWarning);
-
-            _fallbackActiveInfo = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            _fallbackActiveInfo.text =
-                "Fallback backend is configured. Runtime fallback is active for retryable primary failures.";
-            foldout.Add(_fallbackActiveInfo);
-            return foldout;
-        }
-
-        private Foldout BuildWebGlPlayerFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("WebGL player (browser build)", PrefWebGlPlayerOpen, false);
-            foldout.Add(new HelpBox(
-                "Built WebGL player only (Editor / Standalone ignore these). " +
-                "Problem pattern: global streaming on but native SSE off -> one block reply, no live tokens. Enable native SSE. " +
-                "LM Studio and most local OpenAI-compatible hosts: keep fetch credentials off.",
-                HelpBoxMessageType.None));
-
-            foldout.Add(Field("webGlNativeStreaming", "WebGL: native SSE (fetch)",
-                "Default: on. CoreAiSseFetch.jslib + fetch ReadableStream for incremental SSE. Off = buffered non-streaming HTTP in the player."));
-            foldout.Add(Field("sameOriginCredentials", "WebGL: fetch credentials (same-origin)",
-                "Default off -> fetch credentials: omit (Bearer still sent; works with CORS ACAO: * e.g. OpenRouter). On -> same-origin. Rarely needed for LM Studio / local APIs."));
-
-            _webGlNoNativeSseWarning = MakeDynamicHelpBox(HelpBoxMessageType.Warning);
-            _webGlNoNativeSseWarning.text =
-                "Active build target is WebGL and global streaming is on, but native SSE is off. The player will not stream incrementally.";
-            foldout.Add(_webGlNoNativeSseWarning);
-
-            _webGlCredentialsInfo = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            _webGlCredentialsInfo.text =
-                "Fetch credentials is on. For LM Studio and many setups this is unnecessary and can worsen cross-origin behavior. Turn off unless you know you need same-origin cookie mode.";
-            foldout.Add(_webGlCredentialsInfo);
-            return foldout;
-        }
-
-        private Foldout BuildLlmUnityFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("LLMUnity (local model)", PrefLlmUnityOpen, true);
-            foldout.Add(new HelpBox(
-                "The GGUF model picker lives in Essentials above.",
-                HelpBoxMessageType.None));
-
-            _llmUnityAdvancedGroup = new VisualElement();
-            _llmUnityAdvancedGroup.Add(Field("llmUnityAgentName", "Agent Name",
-                "GameObject name that hosts LLMAgent. Empty = auto-detect."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityAutoCreateRuntimeHost", "Auto-create LLM host",
-                "When no LLMAgent exists in loaded scenes, create a runtime GameObject with LLM + LLMAgent and apply the GGUF model hint."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityRuntimeHostObjectName", "Runtime host name",
-                "Name for the auto-created runtime host GameObject. Empty = CoreAI_LLMUnity_Runtime."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityAutostartLocalServer", "Autostart local server",
-                "Warm up the local llama.cpp server after startup. Uses Startup Timeout."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityDontDestroyOnLoad", "Dont Destroy On Load",
-                "Keep the runtime host alive across scene loads."));
-
-            SliderInt gpuLayers = new("GPU Layers", 0, 99)
+            _ggufDropdown.RegisterValueChangedCallback(evt =>
             {
-                showInputField = true,
-                bindingPath = "llmUnityNumGPULayers",
-                tooltip = "Number of layers to offload to GPU. 0 = CPU only, 99 = maximum offload."
+                int index = _ggufDropdown.choices.IndexOf(evt.newValue);
+                if (index >= 0 && index < _ggufFileNames.Count)
+                {
+                    serializedObject.FindProperty("ggufModelPath").stringValue = _ggufFileNames[index];
+                    serializedObject.ApplyModifiedProperties();
+                }
+            });
+
+            root.Q<Button>("gguf-browse").clicked += () =>
+            {
+                string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
+                if (!string.IsNullOrEmpty(path))
+                {
+                    serializedObject.FindProperty("ggufModelPath").stringValue = Path.GetFileName(path);
+                    serializedObject.ApplyModifiedProperties();
+                }
             };
-            _llmUnityAdvancedGroup.Add(gpuLayers);
 
-            _llmUnityAdvancedGroup.Add(Field("llmUnityStartupTimeoutSeconds", "Startup Timeout (sec)",
-                "Seconds to wait for local model startup."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityStartupDelaySeconds", "Startup Delay (sec)",
-                "Delay after the local model server reports ready."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityKeepAlive", "Keep Alive",
-                "Keep the local server warm between prompts."));
-            _llmUnityAdvancedGroup.Add(Field("llmUnityMaxConcurrentChats", "Max Concurrent Chats",
-                "1 = serial chats; greater values allow parallel chat sessions."));
-            foldout.Add(_llmUnityAdvancedGroup);
+            root.Q<Button>("gguf-rescan").clicked += () =>
+            {
+                try
+                {
+                    LLMManager.LoadFromDisk();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAI] GGUF rescan: LLMManager.LoadFromDisk failed: {ex.Message}");
+                }
 
-            foldout.Add(BuildLlmUnityWiringStatus());
+                RefreshGgufChoices();
+            };
 
-            _llmUnityAutoHint = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            foldout.Add(_llmUnityAutoHint);
-            return foldout;
+            RefreshGgufChoices();
+#else
+            // Without the LLMUnity package the dropdown/browse/rescan row is meaningless:
+            // show the plain path field instead.
+            Show(ggufRow, false);
+            Show(manual, false);
+            Show(_ggufEmptyHint, false);
+            Show(fallbackGroup, true);
+#endif
         }
 
-        private Foldout BuildSummarizationFoldout()
+        private void WireConnectionTest()
         {
-            Foldout foldout = MakePersistentFoldout("Chat history summarization", PrefSummarizationOpen, true);
-            foldout.Add(Field("enableConversationHistorySummarization", "Enable history summarization",
-                "When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)."));
-            foldout.Add(Field("conversationHistoryRecentTokenBudgetOverride", "Recent history token budget override",
-                "0 = automatic from context window. When set, caps the verbatim tail to this many estimated tokens; older lines roll into the summary when summarization is on."));
-            foldout.Add(Field("conversationRolledSummaryMaxTokens", "Max rolled summary (tokens)",
-                "0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup."));
-            foldout.Add(Field("conversationCompactionTriggerRatio", "Compaction trigger ratio",
-                "Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. Invalid values fall back to the CoreAI default."));
-            foldout.Add(Field("enableContextPruning", "Enable context pruning",
-                "Roadmap §7. Prunes duplicate/stale prompt-history entries before summarization, only from the in-memory request copy; stored chat history remains intact."));
-            foldout.Add(Field("maxRetainedToolResultMessages", "Max retained tool results",
-                "Newest durable ## Tool Results messages retained in the prompt history copy before compaction. Older tool observations are superseded and omitted from the request."));
-            foldout.Add(Field("enableLlmContextCompaction", "Enable LLM context compaction (global)",
-                "When on, roles with UseLlmContextCompaction may call an auxiliary LLM to fold long transcripts. When off, only deterministic bullet rollup runs."));
-            foldout.Add(Field("enableTokenCalibration", "Enable token calibration",
-                "When true, pre-flight token estimates are nudged toward observed real prompt tokens. The script-aware base estimate always applies."));
-            foldout.Add(new HelpBox(
-                "Per-role compaction is still controlled by AgentBuilder / AgentMemoryPolicy (UseLlmContextCompaction).",
-                HelpBoxMessageType.None));
-            return foldout;
+            _testButton.clicked += () => TestConnection(Settings);
         }
 
-        private Foldout BuildGeneralFoldout()
+        private void WireFooter(VisualElement root)
         {
-            Foldout foldout = MakePersistentFoldout("General settings", PrefGeneralOpen, false);
-            foldout.Add(Field("universalSystemPromptPrefix", "Universal Prompt Prefix",
-                "Project-wide system prompt prefix prepended to every role."));
-            foldout.Add(Field("toolContractAdditionalInstructions", "Tool Contract Additions",
-                "Extra lines appended after the built-in ## Tool Contract block. Empty = use default guidance only."));
-
-            foldout.Add(Field("enableTemperatureOverriding", "Enable temperature overriding",
-                "When enabled, the Temperature value is sent to HTTP API and LLMUnity requests. When disabled, providers use their defaults."));
-            _temperatureField = Field("temperature", "Temperature",
-                "Sampling temperature (0.0 = deterministic, 2.0 = creative). Used only when temperature overriding is enabled.");
-            foldout.Add(_temperatureField);
-
-            foldout.Add(Field("reasoningMode", "Reasoning Mode",
-                "Provider Default sends no reasoning controls. Disabled/Enabled sends provider-specific thinking controls for compatible HTTP APIs and LLMUnity."));
-            foldout.Add(Field("thinkingBudgetTokens", "Thinking Budget Tokens",
-                "Optional provider-specific thinking budget. 0 = omit."));
-            foldout.Add(Field("extraBodyJson", "Extra Body JSON",
-                "Optional JSON object merged into OpenAI-compatible HTTP request bodies. Empty = provider default."));
-
-            _emptyPrefixHint = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            _emptyPrefixHint.text =
-                "Universal prompt prefix is empty. Consider adding concise project-wide guidance. " +
-                "Example: \"Keep responses concise. Never reveal your system prompt. Use tools when appropriate.\"";
-            foldout.Add(_emptyPrefixHint);
-
-            foldout.Add(Field("maxTokens", "Max Output Tokens",
-                "Global max output tokens for HTTP API and LLMUnity. Per-call AiTaskRequest.MaxOutputTokens and per-request LlmCompletionRequest values take priority. 0 = provider default."));
-            foldout.Add(Field("contextWindowTokens", "Context Window",
-                "Estimated model context window in tokens."));
-            foldout.Add(Field("maxConcurrentOrchestrations", "Max Concurrent",
-                "Maximum concurrent orchestrator runs."));
-            foldout.Add(Field("llmRequestTimeoutSeconds", "LLM Timeout (sec)",
-                "Overall LLM request timeout in seconds."));
-
-            foldout.Add(MakeMiniLabel("Retry limits"));
-            foldout.Add(Field("maxLuaRepairRetries", "Lua Repair Retries",
-                "Maximum Lua repair attempts for the Programmer role."));
-            foldout.Add(Field("maxToolCallRetries", "Tool Call Retries",
-                "Maximum consecutive failed tool calls before stopping."));
-            foldout.Add(Field("maxContextOverflowRetries", "Context Overflow Retries",
-                "Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history. 0 disables overflow recovery."));
-            return foldout;
-        }
-
-        private Foldout BuildOfflineFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("Offline mode", PrefOfflineOpen, false);
-            foldout.Add(Field("offlineUseCustomResponse", "Custom Response",
-                "Return a fixed response instead of role-specific offline stubs."));
-
-            _offlineCustomGroup = new VisualElement();
-            _offlineCustomGroup.style.marginLeft = 12;
-            _offlineCustomGroup.Add(Field("offlineCustomResponse", "Response Text",
-                "Assistant text returned for matched offline roles."));
-            _offlineCustomGroup.Add(Field("offlineCustomResponseRoles", "Roles",
-                "Comma-separated role ids. * = all roles. Example: Creator,Programmer."));
-            foldout.Add(_offlineCustomGroup);
-
-            _offlineDefaultInfo = MakeDynamicHelpBox(HelpBoxMessageType.Info);
-            _offlineDefaultInfo.text =
-                "Default offline mode returns role-specific stubs (ProgrammerLua, CreatorJSON, Chat echo).";
-            foldout.Add(_offlineDefaultInfo);
-            return foldout;
-        }
-
-        private Foldout BuildDebugFoldout()
-        {
-            Foldout foldout = MakePersistentFoldout("Debug logging", PrefDebugOpen, false);
-            foldout.Add(MakeMiniLabel("LLM logging"));
-            foldout.Add(Field("logLlmInput", "Log LLM Input", "Log composed system and user prompts."));
-            foldout.Add(Field("logLlmOutput", "Log LLM Output",
-                "Log assistant completions and aggregated tool-call summaries."));
-
-            foldout.Add(MakeMiniLabel("Tool call logging"));
-            foldout.Add(Field("logToolCalls", "Log Tool Calls", "Log whenever a native tool executes."));
-            foldout.Add(Field("logToolCallArguments", "Log Arguments", "Serialize tool-call arguments into logs."));
-            foldout.Add(Field("logToolCallResults", "Log Results", "Serialize tool-call results into logs."));
-            foldout.Add(Field("logMeaiToolCallingSteps", "Log MEAI Steps",
-                "Trace FunctionInvokingChatClient tool-calling iterations and retries."));
-
-            foldout.Add(MakeMiniLabel("Transport / orchestration"));
-            foldout.Add(Field("enableHttpDebugLogging", "HTTP Debug Logging",
-                "Log HTTP request/response JSON."));
-            foldout.Add(Field("enableMeaiDebugLogging", "MEAI Debug Logging", ""));
-            foldout.Add(Field("logOrchestrationMetrics", "Log Orchestration Metrics", ""));
-
-            foldout.Add(MakeMiniLabel("Token budget overlay"));
-            foldout.Add(Field("inputTokenPricePer1KUsd", "Input $ / 1K Tokens",
-                "USD price per 1K prompt tokens for the token-budget overlay. 0 = unset (tokens only)."));
-            foldout.Add(Field("outputTokenPricePer1KUsd", "Output $ / 1K Tokens",
-                "USD price per 1K completion tokens for the token-budget overlay. 0 = unset (tokens only)."));
-            return foldout;
-        }
-
-        private VisualElement BuildFooterButtons()
-        {
-            VisualElement row = new();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginTop = 6;
-
-            Button copyKey = new(() =>
+            root.Q<Button>("copy-key-button").clicked += () =>
             {
                 EditorGUIUtility.systemCopyBuffer = Settings.ApiKey;
                 Debug.Log("[CoreAI] API Key copied to clipboard");
-            })
-            {
-                text = "Copy API Key"
             };
-            copyKey.style.height = 24;
-            copyKey.style.flexGrow = 1;
-            row.Add(copyKey);
 
-            Button reset = new(() =>
+            root.Q<Button>("reset-button").clicked += () =>
             {
                 if (EditorUtility.DisplayDialog("Reset Settings",
                         "Reset all settings to default values?",
@@ -503,144 +260,55 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     serializedObject.Update();
                     RefreshDynamicState();
                 }
-            })
-            {
-                text = "Reset"
             };
-            reset.style.height = 24;
-            reset.style.flexGrow = 1;
-            row.Add(reset);
-            return row;
         }
 
-        private VisualElement BuildLlmUnityWiringStatus()
+        private static void BuildLlmUnityStatus(VisualElement container)
         {
-            VisualElement card = MakeCard();
-            card.Add(MakeSectionLabel("LLMUnity status"));
+            if (container == null)
+            {
+                return;
+            }
+
+            container.AddToClassList("coreai-card");
+            container.AddToClassList("coreai-card--status");
+
+            Label title = new("LLMUnity status");
+            title.AddToClassList("coreai-section-label");
+            title.AddToClassList("coreai-section-label--status");
+            container.Add(title);
 
             bool packageInstalled = IsLlmUnityPackageInstalled();
             bool defineActive = IsLlmUnityDefineActive();
 
             if (!packageInstalled)
             {
-                card.Add(new HelpBox(
+                container.Add(new HelpBox(
                     "LLMUnity package is not installed. Add package `ai.undream.llm` from Package Manager to enable local GGUF models.",
                     HelpBoxMessageType.Warning));
                 Button open = new(() => EditorApplication.ExecuteMenuItem("Window/Package Manager"))
                 {
                     text = "Open Package Manager"
                 };
-                open.style.height = 24;
-                card.Add(open);
+                open.AddToClassList("coreai-button");
+                container.Add(open);
             }
             else if (!defineActive)
             {
-                card.Add(new HelpBox(
+                container.Add(new HelpBox(
                     "LLMUnity package is installed, but COREAI_HAS_LLMUNITY is not active for CoreAI assemblies. " +
                     "This usually means asmdef versionDefines point to the old package name.",
                     HelpBoxMessageType.Warning));
                 Button fix = new(FixLlmUnityAsmdefWiring) { text = "Auto-fix asmdef wiring" };
-                fix.style.height = 24;
-                card.Add(fix);
+                fix.AddToClassList("coreai-button");
+                container.Add(fix);
             }
             else
             {
-                card.Add(new HelpBox(
+                container.Add(new HelpBox(
                     "LLMUnity package is installed and CoreAI assemblies see COREAI_HAS_LLMUNITY.",
                     HelpBoxMessageType.Info));
             }
-
-            return card;
-        }
-
-        /// <summary>
-        /// GGUF model picker. With LLMUnity present: dropdown of Model Manager entries +
-        /// Browse + Rescan + manual override. Without LLMUnity: plain path field.
-        /// </summary>
-        private void BuildGgufModelControl(VisualElement parent)
-        {
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            VisualElement row = new();
-            row.style.flexDirection = FlexDirection.Row;
-
-            _ggufDropdown = new DropdownField("GGUF Model", new List<string> { "[ Auto / Fallback ]" }, 0)
-            {
-                tooltip =
-                    "Model known to LLMUnity Model Manager. Empty = auto/fallback. Use Browse or Manual override for a specific .gguf file."
-            };
-            _ggufDropdown.style.flexGrow = 1;
-            _ggufDropdown.RegisterValueChangedCallback(evt =>
-            {
-                int index = _ggufDropdown.choices.IndexOf(evt.newValue);
-                if (index >= 0 && index < _ggufFileNames.Count)
-                {
-                    serializedObject.FindProperty("ggufModelPath").stringValue = _ggufFileNames[index];
-                    serializedObject.ApplyModifiedProperties();
-                }
-            });
-            row.Add(_ggufDropdown);
-
-            Button browse = new(() =>
-            {
-                string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
-                if (!string.IsNullOrEmpty(path))
-                {
-                    serializedObject.FindProperty("ggufModelPath").stringValue = Path.GetFileName(path);
-                    serializedObject.ApplyModifiedProperties();
-                }
-            })
-            {
-                text = "Browse"
-            };
-            browse.style.width = 64;
-            row.Add(browse);
-
-            Button rescan = new(() =>
-            {
-                try
-                {
-                    LLMManager.LoadFromDisk();
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[CoreAI] GGUF rescan: LLMManager.LoadFromDisk failed: {ex.Message}");
-                }
-
-                RefreshGgufChoices();
-            })
-            {
-                text = "Rescan",
-                tooltip = "Re-scan the GGUF models known to the LLMUnity Model Manager."
-            };
-            rescan.style.width = 58;
-            row.Add(rescan);
-            parent.Add(row);
-
-            TextField manual = new("Manual override")
-            {
-                isDelayed = true,
-                bindingPath = "ggufModelPath",
-                tooltip = "Type a .gguf filename when it is not listed in the dropdown."
-            };
-            manual.style.marginLeft = 12;
-            parent.Add(manual);
-
-            _ggufEmptyHint = MakeDynamicHelpBox(HelpBoxMessageType.None);
-            _ggufEmptyHint.text =
-                "LLMUnity Model Manager did not report any GGUF models.\n" +
-                "Open the LLMUnity Model Manager or choose a file with Browse / Manual override.";
-            parent.Add(_ggufEmptyHint);
-
-            RefreshGgufChoices();
-#else
-            PropertyField path = Field("ggufModelPath", "GGUF Path",
-                "Relative .gguf model path. Empty = auto/fallback.");
-            parent.Add(path);
-            parent.Add(new HelpBox(
-                "LLMUnity package is not active, so the model dropdown is unavailable. " +
-                "If package ai.undream.llm is installed, use the LLMUnity status helper under Advanced Settings to fix CoreAI asmdef versionDefines.",
-                HelpBoxMessageType.None));
-#endif
         }
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -695,10 +363,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
             _ggufDropdown.choices = options;
             _ggufDropdown.SetValueWithoutNotify(options[currentIndex]);
-            if (_ggufEmptyHint != null)
-            {
-                _ggufEmptyHint.style.display = discovered == 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            }
+            Show(_ggufEmptyHint, discovered == 0);
         }
 #endif
 
@@ -728,11 +393,11 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _productionWarning.text = productionWarning ?? "";
             Show(_productionWarning, !string.IsNullOrEmpty(productionWarning));
 
-            SerializedProperty streaming = serializedObject.FindProperty("enableStreaming");
-            SerializedProperty nativeSse = serializedObject.FindProperty("webGlNativeStreaming");
-            bool missingNativeSse = isWebGlTarget && streaming.boolValue && !nativeSse.boolValue;
+            bool streaming = serializedObject.FindProperty("enableStreaming").boolValue;
+            bool nativeSse = serializedObject.FindProperty("webGlNativeStreaming").boolValue;
+            bool missingNativeSse = isWebGlTarget && streaming && !nativeSse;
             Show(_webGlStreamingHint, missingNativeSse);
-            Show(_webGlNoNativeSseWarning, missingNativeSse);
+            Show(_webGlNoNativeWarning, missingNativeSse);
             Show(_webGlCredentialsInfo,
                 isWebGlTarget && serializedObject.FindProperty("sameOriginCredentials").boolValue);
 
@@ -806,7 +471,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             bool hasMessage = !string.IsNullOrEmpty(_testResultMessage);
-            _testResultBox.style.display = hasMessage ? DisplayStyle.Flex : DisplayStyle.None;
+            Show(_testResultBox, hasMessage);
             if (hasMessage)
             {
                 _testResultBox.text = _testResultMessage;
@@ -823,90 +488,6 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 case MessageType.Info: return HelpBoxMessageType.Info;
                 default: return HelpBoxMessageType.None;
             }
-        }
-
-        // ---------- UI helpers ----------
-
-        private static VisualElement MakeCard()
-        {
-            VisualElement card = new();
-            card.style.marginTop = 4;
-            card.style.marginBottom = 4;
-            card.style.paddingTop = 6;
-            card.style.paddingBottom = 6;
-            card.style.paddingLeft = 8;
-            card.style.paddingRight = 8;
-            card.style.borderTopWidth = 1;
-            card.style.borderBottomWidth = 1;
-            card.style.borderLeftWidth = 1;
-            card.style.borderRightWidth = 1;
-            Color border = new(0.35f, 0.35f, 0.35f, 0.6f);
-            card.style.borderTopColor = border;
-            card.style.borderBottomColor = border;
-            card.style.borderLeftColor = border;
-            card.style.borderRightColor = border;
-            card.style.borderTopLeftRadius = 4;
-            card.style.borderTopRightRadius = 4;
-            card.style.borderBottomLeftRadius = 4;
-            card.style.borderBottomRightRadius = 4;
-            return card;
-        }
-
-        private static Label MakeSectionLabel(string text)
-        {
-            Label label = new(text);
-            label.style.unityFontStyleAndWeight = FontStyle.Bold;
-            label.style.marginBottom = 4;
-            return label;
-        }
-
-        private static Label MakeMiniLabel(string text)
-        {
-            Label label = new(text);
-            label.style.unityFontStyleAndWeight = FontStyle.Bold;
-            label.style.fontSize = 10;
-            label.style.marginTop = 6;
-            label.style.marginBottom = 2;
-            return label;
-        }
-
-        private static HelpBox MakeDynamicHelpBox(HelpBoxMessageType type)
-        {
-            HelpBox box = new("", type);
-            box.style.display = DisplayStyle.None;
-            box.style.marginTop = 2;
-            box.style.marginBottom = 2;
-            return box;
-        }
-
-        private PropertyField Field(string propertyPath, string label, string tooltip)
-        {
-            PropertyField field = new(serializedObject.FindProperty(propertyPath), label);
-            if (!string.IsNullOrEmpty(tooltip))
-            {
-                field.tooltip = tooltip;
-            }
-
-            return field;
-        }
-
-        private static Foldout MakePersistentFoldout(string title, string prefKey, bool defaultOpen)
-        {
-            Foldout foldout = new()
-            {
-                text = title,
-                value = EditorPrefs.GetBool(prefKey, defaultOpen)
-            };
-            foldout.style.marginTop = 2;
-            foldout.RegisterValueChangedCallback(evt =>
-            {
-                // Child foldout toggles bubble ChangeEvent<bool>; persist only this foldout's own state.
-                if (ReferenceEquals(evt.target, foldout))
-                {
-                    EditorPrefs.SetBool(prefKey, evt.newValue);
-                }
-            });
-            return foldout;
         }
 
         private static void Show(VisualElement element, bool visible)
