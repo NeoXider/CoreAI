@@ -26,6 +26,14 @@ The registry supports zero, one, or many configured endpoints. With zero endpoin
 (including Offline) remains usable. With one endpoint, it can be assigned to any number of agents. With
 many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve different agents concurrently.
 
+### Switching keeps the conversation
+
+Endpoint/profile selection is independent of role-keyed agent state. Switching a role to another endpoint
+or provider changes only where its subsequent LLM requests run; it does not recreate the agent or clear its
+conversation history, long-term memory, registered tools, or policy configuration. The agent continues the
+same conversation through the new backend, while an in-flight request finishes on the endpoint generation
+where it started.
+
 `Active = true` allows new routing. `KeepWarm = true` keeps an inactive endpoint initialized for a later
 switch without routing new work to it. Active and keep-warm endpoints repeat readiness on restart. HTTP
 readiness prefers `GET {BaseUrl}/models` (normally `/v1/models`); a `404`/`405` falls back to a minimal

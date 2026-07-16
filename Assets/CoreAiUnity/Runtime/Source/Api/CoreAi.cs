@@ -926,6 +926,7 @@ namespace CoreAI
             // Invalidate() does not clobber a live entry-point owner or persistent subscribers.
             CoreAIGameEntryPoint.ResetStaticState();
             CoreAiEvents.ClearAll();
+            CoreAiRoutingUi.Controller = null;
         }
     }
 }

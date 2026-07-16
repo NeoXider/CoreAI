@@ -6,8 +6,9 @@
 > Last full verification 2026-07-15 in the interactive editor: EditMode 1691 passed / 0 failed /
 > 4 ignored optional Neoxider Pages tests, PlayMode `FastNoLlm` 73 passed / 0 failed, and six
 > Unity-generated `dotnet build` compile gates completed with 0 errors. Live Qwen3.5-0.8B LLMUnity
-> smokes called Genie `grant_gold`; Spellcraft classified `мега молния` as `storm|3`, `стена огня`
-> as `fire|2`, `ядовитый туман` as `poison|1`, and `заморозь их до костей` as `frost|2`, each through
+> smokes called Genie `grant_gold`; Spellcraft classified the Russian equivalents of "mega lightning" as
+> `storm|3`, "wall of fire" as `fire|2`, "poisonous fog" as `poison|1`, and "freeze them to the bone" as
+> `frost|2`, each through
 > native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
@@ -84,7 +85,7 @@
       up a local OpenAI-compatible server (spark/opencode) and run these + the Lua-mod authoring pipeline +
       model-behavior audit (tool-call/skill quality).
 
-## [R0.5] Demo pass (owner request: "показательны и корректны")
+## [R0.5] Demo pass (owner request: "representative and correct")
 
 - [x] Portable endpoint readiness boundary: CoreAI contract/shared policy plus `HttpClient` adapter for .NET;
       CoreAiUnity injects the `UnityWebRequest` adapter into both hot activation and normal LLMUnity autostart.
@@ -316,21 +317,19 @@
 
 ### [R7.5] Multi-API — per-agent LLM provider configuration (owner request 2026-07-11)
 
-> Per-ROLE provider routing already ships: `LlmRoutingManifest` (role pattern → profile →
-> `OpenAiHttpLlmSettings` with its own URL/key/model) resolved per request by `RoutingLlmClient` via
-> `ILlmClientRegistry`. What's missing is the code-first/dev-facing layer (est. M, ~5 files).
-- [ ] `AgentBuilder.WithLlmProfile(profileId)` / `WithLlmBackend(OpenAiHttpOptions)` → `AgentConfig` →
-      policy (`SetLlmProfileForRole`, pattern of existing `SetTemperature`).
-- [ ] Explicit profile on the request: make `LlmCompletionRequest.RoutingProfileId` an input hint
-      (today write-only diagnostics); `RoutingLlmClient.Prepare` prefers it over role-pattern match.
-- [ ] Runtime profile registration: `RegisterProfile(profileId, OpenAiHttpOptions)` on the registry
-      (build `OpenAiChatLlmClient` without an SO asset — `IOpenAiHttpSettings` ctor already exists).
+> The 5.9 runtime endpoint registry now ships the code-first/dev-facing layer on top of per-role routing.
+- [x] `AgentBuilder.WithLlmProfile(profileId)` applies an agent-default profile through `AgentConfig` and
+      `AgentMemoryPolicy`. Shipped and verified in 5.9.
+- [x] `AiTaskRequest.RoutingProfileId` is an explicit per-request input hint; `RoutingLlmClient.Prepare`
+      prefers it over agent, role-pattern, and default selection. Shipped and verified in 5.9.
+- [x] Runtime endpoint/profile registration ships through `ILlmEndpointRegistry` endpoint CRUD and
+      `AddOrUpdateProfile`, without requiring ScriptableObject assets. Shipped and verified in 5.9.
 - [ ] Per-profile fallback + limits: `FallbackLlmClientDecorator` and timeout/retry settings currently
       apply only to the legacy-fallback client / global settings — decide per-profile story.
 - [ ] Hot-swap consistency: `CoreAiBackend.SetApiKey/SetApiBaseUrl` rebuilds only the legacy fallback;
       profile clients need re-`ApplyManifest`/`ApplyRouteTable` on change.
-- [ ] Key hygiene: N providers = N plaintext `apiKey` fields in `.asset` files; provide an out-of-asset
-      key source (env var / `IServerManagedAuthProvider`-style) before promoting multi-API.
+- [x] Key hygiene ships via write-only session keys plus `SecretReference` and
+      `ILlmEndpointSecretProvider`; secrets are excluded from persisted endpoint snapshots. Verified in 5.9.
 - [ ] Docs: "per-agent providers" recipe (inspector-only path needs zero code: N × `OpenAiHttpLlmSettings`
       + manifest on `CoreAILifetimeScope`).
 

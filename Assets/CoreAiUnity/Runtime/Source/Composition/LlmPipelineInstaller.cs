@@ -37,12 +37,20 @@ namespace CoreAI.Composition
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
 #endif
 
+#if !COREAI_NO_LLM
             builder.Register<UnityWebRequestOpenAiReadinessProbe>(Lifetime.Singleton)
                 .As<ILlmEndpointReadinessProbe>();
+#endif
 
             builder.Register(c =>
             {
+#if COREAI_NO_LLM
+                // WHY: the probe implementations are stripped with the LLM module; the endpoint
+                // factory rejects HTTP/LLMUnity activation before any probe would be consulted.
+                ILlmEndpointReadinessProbe readinessProbe = null;
+#else
                 ILlmEndpointReadinessProbe readinessProbe = c.Resolve<ILlmEndpointReadinessProbe>();
+#endif
                 LlmClientRegistry reg = new(
                     c.Resolve<IGameLogger>(),
                     settings,
@@ -69,6 +77,23 @@ namespace CoreAI.Composition
             builder.RegisterBuildCallback(container => container.Resolve<CoreAiRoutingUiAttachment>());
 
             int maxRetries = settings != null ? settings.MaxLlmRequestRetries : 0;
+#if COREAI_NO_LLM
+            // WHY: the timeout/streaming-retry decorators are stripped with the LLM module; routing
+            // still resolves (to stubs/offline clients), so keep logging + routing only.
+            builder.Register<ILlmClient>(c =>
+                new LoggingLlmClientDecorator(
+                    new RoutingLlmClient(
+                        c.Resolve<ILlmClientRegistry>(),
+                        c.Resolve<IPublisher<LlmBackendSelected>>(),
+                        c.Resolve<IPublisher<LlmRequestStarted>>(),
+                        c.Resolve<IPublisher<LlmRequestCompleted>>(),
+                        c.Resolve<IPublisher<LlmUsageReported>>()),
+                    c.Resolve<ILog>(),
+                    llmTimeout,
+                    maxRetries,
+                    settings == null || settings.LogLlmInput,
+                    settings == null || settings.LogLlmOutput), Lifetime.Singleton);
+#else
             builder.Register<ILlmClient>(c =>
                 // WHY: Portable-core request timeout (works headless/standalone; Unity CoreAiChatService keeps
                 // its PlayerLoop timer for WebGL — both target LlmRequestTimeoutSeconds and are additive).
@@ -92,6 +117,7 @@ namespace CoreAI.Composition
                         settings == null || settings.LogLlmInput,
                         settings == null || settings.LogLlmOutput),
                     () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
+#endif
 
             // WHY: Resolve and cache required local values.
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
@@ -351,7 +377,7 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
-#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || COREAI_NO_LLM
             return null;
 #else
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);

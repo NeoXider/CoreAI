@@ -122,6 +122,17 @@ namespace CoreAI.Ai
             int contextWindowTokens = roleConfig.ContextTokens > 0
                 ? roleConfig.ContextTokens
                 : _settings.ContextWindowTokens;
+            int? routedWindowTokens =
+                _llm?.ResolveContextWindowTokensForRole(roleId, task?.RoutingProfileId ?? "");
+            if (routedWindowTokens > 0)
+            {
+                // WHY: budgets must follow the routed endpoint's real window — after a 128K→8K
+                // switch the configured budget would overflow every turn. An explicit per-role
+                // budget still applies when it is stricter than the endpoint.
+                contextWindowTokens = roleConfig.ContextTokens > 0
+                    ? Math.Min(contextWindowTokens, routedWindowTokens.Value)
+                    : routedWindowTokens.Value;
+            }
 
             ConversationContextBuildArgs ctxBuildArgs = null;
             int? resolvedMaxOutput = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
@@ -1407,7 +1418,10 @@ namespace CoreAI.Ai
             AiTaskRequest task,
             string roleId)
         {
-            bool supportsNativeToolCalling = _llm?.SupportsNativeToolCallingForRole(roleId) == true;
+            // WHY: resolve against the endpoint the request will actually reach (explicit profile or
+            // runtime re-route), so the tool contract follows an endpoint switch mid-session.
+            bool supportsNativeToolCalling =
+                _llm?.SupportsNativeToolCallingForRole(roleId, task?.RoutingProfileId ?? "") == true;
             return AiToolContractPromptFormatter.AppendToolContract(
                 system,
                 tools,

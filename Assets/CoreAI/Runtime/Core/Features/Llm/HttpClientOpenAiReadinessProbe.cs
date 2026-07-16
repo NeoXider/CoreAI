@@ -1,3 +1,4 @@
+#if !COREAI_NO_LLM
 using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -162,3 +163,4 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 }
+#endif

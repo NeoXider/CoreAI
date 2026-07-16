@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -20,6 +20,9 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class LlmClientRegistry : ILlmClientRegistry, ILlmRoutingController, ILlmEndpointRegistry, IDisposable
     {
+        /// <summary>Reserved diagnostic profile id reported when no routing rule matched.</summary>
+        internal const string LegacyFallbackProfileId = "fallback";
+
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
         private readonly ICoreAISettings _settings;
@@ -143,10 +146,17 @@ namespace CoreAI.Infrastructure.Llm
                 Task activation,
                 CancellationToken cancellationToken)
             {
-                while (!activation.IsCompleted)
+                // WHY: an await-based wait instead of a Task.Yield poll — polling hot-spins a
+                // thread-pool worker for the entire activation when resumed off the Unity main thread.
+                if (cancellationToken.CanBeCanceled && !activation.IsCompleted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Yield();
+                    TaskCompletionSource<bool> cancelled = new(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using CancellationTokenRegistration registration = cancellationToken.Register(
+                        () => cancelled.TrySetResult(true));
+                    await Task.WhenAny(activation, cancelled.Task);
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
 
                 await activation;
@@ -469,6 +479,65 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <inheritdoc />
+        public LlmRoleRouteSnapshot ResolveRouteForRole(string roleId, string explicitProfileId)
+        {
+            // WHY: one _gate acquisition (Monitor is re-entrant) so a concurrent endpoint switch
+            // cannot pair endpoint A's client with endpoint B's profile/context-window/mode.
+            lock (_gate)
+            {
+                string profileId = ResolveProfileIdForRole(roleId, explicitProfileId);
+                return new LlmRoleRouteSnapshot
+                {
+                    Client = ResolveClientForRole(roleId, explicitProfileId),
+                    ProfileId = profileId,
+                    ContextWindowTokens = ResolveContextWindowForRole(roleId, explicitProfileId),
+                    Mode = ResolveExecutionModeForRole(roleId, explicitProfileId),
+                    IsRouted = !string.IsNullOrEmpty(profileId) &&
+                               (_runtimeProfiles.ContainsKey(profileId) ||
+                                _byProfileId.ContainsKey(profileId))
+                };
+            }
+        }
+
+        /// <inheritdoc />
+        public void ReportRouteFailure(string profileId, LlmErrorCode errorCode, string error)
+        {
+            string profile = profileId?.Trim() ?? "";
+            if (profile.Length == 0 || string.Equals(profile, LegacyFallbackProfileId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            bool changed = false;
+            lock (_gate)
+            {
+                if (_runtimeProfiles.TryGetValue(profile, out LlmRuntimeProfile runtimeProfile) &&
+                    _runtimeEndpoints.TryGetValue(runtimeProfile.EndpointId, out RuntimeEndpoint runtime) &&
+                    runtime.State == LlmEndpointLifecycleState.Ready)
+                {
+                    // WHY: the endpoint stays Ready so traffic still flows and a transient outage
+                    // needs no manual re-activation, but the failure must be visible on the snapshot —
+                    // otherwise the UI keeps reporting a healthy endpoint whose key expired mid-session.
+                    string note = errorCode == LlmErrorCode.None
+                        ? ""
+                        : string.IsNullOrWhiteSpace(error)
+                            ? $"Degraded: {errorCode}."
+                            : $"Degraded: {errorCode}: {error.Trim()}";
+                    if (!string.Equals(runtime.Error, note, StringComparison.Ordinal))
+                    {
+                        runtime.Error = note;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                Changed?.Invoke();
+            }
+        }
+
         public string ResolveProfileIdForRole(string roleId)
         {
             return ResolveProfileIdForRole(roleId, "");
@@ -493,7 +562,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!_useManifestRouting || _byProfileId.Count == 0)
                 {
-                    return "fallback";
+                    return LegacyFallbackProfileId;
                 }
 
                 LlmRouteResolution resolution = _routeResolver.Resolve(role);
@@ -502,7 +571,7 @@ namespace CoreAI.Infrastructure.Llm
                     return resolution.Profile.ProfileId;
                 }
 
-                return "fallback";
+                return LegacyFallbackProfileId;
             }
         }
 
@@ -545,6 +614,7 @@ namespace CoreAI.Infrastructure.Llm
             string id = descriptor.EndpointId.Trim();
             LlmEndpointDescriptor copy = FileLlmEndpointRegistryStore.CloneDescriptor(descriptor);
             RuntimeEndpoint runtime;
+            RuntimeEndpoint replacedRuntime = null;
             lock (_gate)
             {
                 string effectiveSessionApiKey = sessionApiKey;
@@ -614,6 +684,15 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
+                    // WHY: publishing directly can evict a Ready endpoint whose activation already
+                    // completed; nothing else observes that instance again, so its owned llama.cpp
+                    // host (server/VRAM/GameObject) must be released here or it leaks.
+                    if (_runtimeEndpoints.TryGetValue(id, out RuntimeEndpoint evicted) &&
+                        !ReferenceEquals(evicted, runtime))
+                    {
+                        replacedRuntime = evicted;
+                    }
+
                     _runtimeEndpoints[id] = runtime;
                     _pendingEndpoints.Remove(id);
                 }
@@ -637,6 +716,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            RequestOwnedHostRelease(replacedRuntime);
             SaveRuntimeState();
             Changed?.Invoke();
             return runtime.ActivationTask != null
@@ -710,13 +790,18 @@ namespace CoreAI.Infrastructure.Llm
             bool removed;
             RuntimeEndpoint release = null;
             RuntimeEndpoint pendingRelease = null;
+            if (mode == LlmEndpointRemovalMode.CancelInFlight)
+            {
+                // WHY: this registry cannot prove cancellation of tracked in-flight calls; the
+                // contract requires an unambiguous rejection instead of a false-success or a
+                // "false" that is indistinguishable from "endpoint not found".
+                throw new NotSupportedException(
+                    "LlmClientRegistry cannot cancel tracked in-flight requests. " +
+                    "Use LlmEndpointRemovalMode.Drain instead.");
+            }
+
             lock (_gate)
             {
-                if (mode == LlmEndpointRemovalMode.CancelInFlight)
-                {
-                    return Task.FromResult(false);
-                }
-
                 string id = endpointId?.Trim() ?? "";
                 string replacementId = replacementEndpointId?.Trim() ?? "";
                 if (!string.IsNullOrEmpty(replacementId) &&
@@ -885,17 +970,47 @@ namespace CoreAI.Infrastructure.Llm
             string explicitId = explicitProfileId?.Trim() ?? "";
             if (!string.IsNullOrEmpty(explicitId))
             {
-                return explicitId;
+                // WHY: "fallback" is the reserved diagnostic id reported when no route matched.
+                // Retry decorators echo the annotated request back with it as an explicit profile;
+                // unless a real profile with that name exists it must re-resolve like "no explicit
+                // profile" instead of routing every retry to RoutingUnavailableClient.
+                if (!string.Equals(explicitId, LegacyFallbackProfileId, StringComparison.Ordinal) ||
+                    _runtimeProfiles.ContainsKey(explicitId) ||
+                    _byProfileId.ContainsKey(explicitId))
+                {
+                    return explicitId;
+                }
             }
 
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
-            if (_runtimeRoleProfiles.TryGetValue(role, out string profile) ||
-                _runtimeRoleProfiles.TryGetValue("*", out profile))
+            if (_runtimeRoleProfiles.TryGetValue(role, out string profile))
             {
                 return profile;
             }
 
-            return "";
+            // WHY: AssignRoleProfile documents pattern keys; "npc.*" must match "npc.guard".
+            // Exact match wins above; here the longest wildcard prefix wins, with bare "*" as the
+            // zero-length prefix that matches every role.
+            string bestProfile = "";
+            int bestPrefixLength = -1;
+            foreach (KeyValuePair<string, string> assignment in _runtimeRoleProfiles)
+            {
+                string pattern = assignment.Key;
+                if (!pattern.EndsWith("*", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string prefix = pattern.Substring(0, pattern.Length - 1);
+                if (prefix.Length > bestPrefixLength &&
+                    role.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    bestProfile = assignment.Value;
+                    bestPrefixLength = prefix.Length;
+                }
+            }
+
+            return bestPrefixLength >= 0 ? bestProfile : "";
         }
 
         private bool TryResolveReadyRuntimeEndpointLocked(
@@ -1028,6 +1143,15 @@ namespace CoreAI.Infrastructure.Llm
                 failure = ex;
             }
 
+            if (Monitor.IsEntered(_gate))
+            {
+                // WHY: a synchronously-completing factory keeps this method inline inside
+                // BeginActivationLocked's caller, which holds _gate; yielding here keeps the publish
+                // epilogue (persistence write and the Changed event into UI subscribers) out of that
+                // lock so subscribers can never observe or re-enter the registry mid-mutation.
+                await Task.Yield();
+            }
+
             RuntimeEndpoint replacedGeneration = null;
             bool releaseActivation = false;
             LlmEndpointSnapshot snapshot;
@@ -1128,7 +1252,9 @@ namespace CoreAI.Infrastructure.Llm
 
             while (Volatile.Read(ref runtime.InFlightRequests) > 0)
             {
-                await Task.Yield();
+                // WHY: paced poll instead of Task.Yield — there is no completion source for the
+                // in-flight counter, and a yield loop hot-spins a worker for long SSE streams.
+                await Task.Delay(10);
             }
 
             Func<Task> release = Interlocked.Exchange(ref runtime.ReleaseOwnedHostAsync, null);
@@ -1166,7 +1292,11 @@ namespace CoreAI.Infrastructure.Llm
                 descriptor.ParallelSlots,
                 descriptor.ContextWindowTokens,
                 descriptor.Active,
-                descriptor.KeepWarm);
+                descriptor.KeepWarm,
+                descriptor.MaxTokens,
+                descriptor.ReasoningMode,
+                descriptor.ThinkingBudgetTokens,
+                descriptor.ExtraBodyJson);
         }
 
         private async Task<LlmEndpointClientActivation> BuildRuntimeClientAsync(
@@ -1237,6 +1367,16 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
+            // WHY: BeginActivationLocked requires _gate; the constructor is the only caller and an
+            // activation continuation can re-enter registry state on another thread immediately.
+            lock (_gate)
+            {
+                RestoreRuntimeStateLocked(state);
+            }
+        }
+
+        private void RestoreRuntimeStateLocked(LlmEndpointRegistryState state)
+        {
             foreach (LlmEndpointDescriptor descriptor in state.Endpoints ?? Array.Empty<LlmEndpointDescriptor>())
             {
                 if (descriptor == null || descriptor.Validate().Count > 0)
@@ -1280,10 +1420,25 @@ namespace CoreAI.Infrastructure.Llm
 
             foreach (RuntimeEndpoint endpoint in _runtimeEndpoints.Values)
             {
-                if (endpoint.Descriptor.Active || endpoint.Descriptor.KeepWarm)
+                if (!endpoint.Descriptor.Active && !endpoint.Descriptor.KeepWarm)
                 {
-                    endpoint.ActivationTask = BeginActivationLocked(endpoint, CancellationToken.None);
+                    continue;
                 }
+
+                string secretReference = endpoint.Descriptor.SecretReference?.Trim() ?? "";
+                if (secretReference.Length > 0 &&
+                    (!_secretProvider.TryResolve(secretReference, out string secret) ||
+                     string.IsNullOrEmpty(secret)))
+                {
+                    // WHY: session keys are never persisted; auto-activating a key-auth endpoint
+                    // whose secret does not resolve would deterministically fail with an empty key
+                    // on every launch. Wait for a session key (Hub or AddOrUpdateEndpointAsync).
+                    endpoint.Error =
+                        $"Session API key required: secret '{secretReference}' did not resolve.";
+                    continue;
+                }
+
+                endpoint.ActivationTask = BeginActivationLocked(endpoint, CancellationToken.None);
             }
         }
 
@@ -1371,7 +1526,7 @@ namespace CoreAI.Infrastructure.Llm
                     return new ClientLimitedLlmClientDecorator(http, maxRequests, maxPromptChars);
 #endif
                 case LlmExecutionMode.LocalModel:
-#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || COREAI_NO_LLM
                     return new StubLlmClient();
 #else
                     LLMAgent agent = null;

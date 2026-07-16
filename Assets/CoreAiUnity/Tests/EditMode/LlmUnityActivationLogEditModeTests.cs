@@ -244,7 +244,17 @@ namespace CoreAI.Tests.EditMode
 
                 cancellation.Cancel();
 
-                Assert.CatchAsync<OperationCanceledException>(async () => await queued);
+                OperationCanceledException caught = null;
+                try
+                {
+                    await queued;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    caught = ex;
+                }
+
+                Assert.IsNotNull(caught, "The canceled queued waiter must observe cancellation.");
             }
             finally
             {

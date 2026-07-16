@@ -6,11 +6,11 @@ using System.Threading;
 using CoreAI.Ai;
 using UnityEngine;
 
-namespace CoreAI.ExampleGame.QwenDemo
+namespace CoreAI.Demos.QwenDemo
 {
     /// <summary>
-    /// Demo 2 — "Магия из описания". The player describes a spell in their OWN words (RU or EN):
-    /// «стена огня», «заморозь их», «ядовитый туман», «призови молнию с неба». Qwen3.5-0.8B, via CoreAI's
+    /// Demo 2 — "Spellcraft from Description". The player describes a spell in their own words (RU or EN).
+    /// Qwen3.5-0.8B, via CoreAI's
     /// native tool-calling, maps that free description to cast_spell(element, power). Justification: the
     /// description space is open — there is no rune table or switch that covers "wall of thorns that burns";
     /// only language understanding does. Guardrail (the mana question, answered live): mana lives in C#; if a
@@ -85,9 +85,9 @@ namespace CoreAI.ExampleGame.QwenDemo
             _pump = gameObject.AddComponent<MainThreadPump>();
 
             _caster = QwenFx.Prim(PrimitiveType.Capsule, _root, new Vector3(-3.5f, 1f, 0),
-                new Vector3(0.8f, 1.1f, 0.8f), new Color(0.6f, 0.5f, 0.9f), "маг");
+                new Vector3(0.8f, 1.1f, 0.8f), new Color(0.6f, 0.5f, 0.9f), "mage");
             _dummy = QwenFx.Prim(PrimitiveType.Cube, _root, new Vector3(TargetWorldX, 1f, 0),
-                new Vector3(1.4f, 2f, 1.4f), new Color(0.5f, 0.5f, 0.55f), "мишень");
+                new Vector3(1.4f, 2f, 1.4f), new Color(0.5f, 0.5f, 0.55f), "target");
             _dummyBaseColor = new Color(0.5f, 0.5f, 0.55f);
             _dummyBaseScale = _dummy.transform.localScale;
             _dummyBasePos = _dummy.transform.localPosition;
@@ -108,13 +108,13 @@ namespace CoreAI.ExampleGame.QwenDemo
             if (CoreAIAgent.Policy == null)
             {
                 _disabledReason =
-                    "CoreAI не инициализирован (нет CoreAILifetimeScope в сцене или не выбран бэкенд LLM).";
+                    "CoreAI is not initialized (CoreAILifetimeScope is missing from the scene or no LLM backend is selected).";
                 Log(_disabledReason);
                 return;
             }
 
             _agent.ApplyToPolicy(CoreAIAgent.Policy);
-            Log("⏳ Загружаем Qwen и ждём HTTP-сервер llama.cpp…");
+            Log("⏳ Loading Qwen and waiting for the llama.cpp HTTP server…");
             string readinessError;
             try
             {
@@ -138,7 +138,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             }
 
             _ready = true;
-            Log("✅ Опиши заклинание словами (RU/EN) — модель выберет стихию и силу, код проверит ману.");
+            Log("✅ Describe a spell in your own words (RU/EN); the model chooses element and power, while code checks mana.");
         }
 
         private void OnDestroy()
@@ -187,15 +187,21 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             if (!ok)
             {
-                _pump.Enqueue(() =>
+                if (_pump != null)
                 {
-                    QwenFx.Sparks(this, _root, _caster.transform.localPosition + Vector3.up, Color.gray, 6, 2f);
-                    QwenFx.Label(_caster.transform, "маны нет!", new Color(1f, 0.5f, 0.5f), 1.6f);
-                });
+                    _pump.Enqueue(() =>
+                    {
+                        QwenFx.Sparks(this, _root, _caster.transform.localPosition + Vector3.up, Color.gray, 6, 2f);
+                        QwenFx.Label(_caster.transform, "not enough mana!", new Color(1f, 0.5f, 0.5f), 1.6f);
+                    });
+                }
                 return $"Not enough mana for {el} (need {cost}, have {(int)manaNow}). The spell fizzles.";
             }
 
-            _pump.Enqueue(() => StartCoroutine(Effect(el, pow)));
+            if (_pump != null)
+            {
+                _pump.Enqueue(() => StartCoroutine(Effect(el, pow)));
+            }
             return $"Cast {el} at power {pow} (spent {cost} mana).";
         }
 
@@ -448,7 +454,7 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             _busy = true;
             string desc = _input;
-            Log("📝 описание: " + desc);
+            Log("📝 description: " + desc);
             _ = RunAsync(desc);
         }
 
@@ -466,15 +472,22 @@ namespace CoreAI.ExampleGame.QwenDemo
             }
 
             _busy = true;
-            Log($"🔁 тест детерминизма: «{desc}» ×{n}");
+            Log($"🔁 determinism test: \"{desc}\" ×{n}");
             Dictionary<string, int> tally = new();
             double sumMs = 0;
             int successful = 0;
             int failures = 0;
+            CancellationToken cancellationToken = _lifetimeCancellation.Token;
             try
             {
                 for (int i = 0; i < n; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (this == null)
+                    {
+                        return;
+                    }
+
                     lock (_gate)
                     {
                         _mana = MaxMana;
@@ -489,11 +502,18 @@ namespace CoreAI.ExampleGame.QwenDemo
                     LlmRunResult r;
                     try
                     {
-                        r = await LlmMeter.RunAsync(RoleId, desc, 160, "cast_spell");
+                        r = await LlmMeter.RunAsync(RoleId, desc, 160, cancellationToken, "cast_spell");
+                        if (cancellationToken.IsCancellationRequested || this == null)
+                        {
+                            return;
+                        }
                     }
                     finally
                     {
-                        _toolTurnGuard.EndTurn(turn);
+                        if (!cancellationToken.IsCancellationRequested && this != null)
+                        {
+                            _toolTurnGuard.EndTurn(turn);
+                        }
                     }
 
                     _last = r;
@@ -506,19 +526,31 @@ namespace CoreAI.ExampleGame.QwenDemo
                     if (!string.IsNullOrEmpty(r.Error) || string.IsNullOrEmpty(dec))
                     {
                         failures++;
-                        Log($"  #{i + 1}: ОШИБКА — {r.Error ?? "решение отсутствует"}  ({r.TotalMs:0} мс)");
+                        Log($"  #{i + 1}: ERROR — {r.Error ?? "no decision"}  ({r.TotalMs:0} ms)");
                         continue;
                     }
 
                     tally[dec] = tally.TryGetValue(dec, out int c) ? c + 1 : 1;
                     sumMs += r.TotalMs;
                     successful++;
-                    Log($"  #{i + 1}: {dec}  ({r.TotalMs:0} мс)");
+                    Log($"  #{i + 1}: {dec}  ({r.TotalMs:0} ms)");
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
             finally
             {
-                _busy = false;
+                if (!cancellationToken.IsCancellationRequested && this != null)
+                {
+                    _busy = false;
+                }
+            }
+
+            if (cancellationToken.IsCancellationRequested || this == null)
+            {
+                return;
             }
 
             string dist = string.Join(", ",
@@ -526,33 +558,43 @@ namespace CoreAI.ExampleGame.QwenDemo
             bool deterministic = QwenDeterminismVerdict.Passed(n, successful, failures, tally.Count);
             double avg = successful > 0 ? sumMs / successful : 0;
             string verdict = deterministic
-                ? "✅ ДЕТЕРМИНИРОВАНО"
+                ? "✅ DETERMINISTIC"
                 : failures > 0
-                    ? "❌ ТЕСТ НЕ ПРОЙДЕН"
-                    : "⚠ РАЗБРОС";
-            Log($"{verdict}: {dist} · успешно {successful}/{n} · ошибок {failures} · среднее {avg:0} мс");
+                    ? "❌ TEST FAILED"
+                    : "⚠ VARIANCE";
+            Log($"{verdict}: {dist} · successful {successful}/{n} · errors {failures} · average {avg:0} ms");
         }
 
         private async System.Threading.Tasks.Task RunAsync(string desc)
         {
+            CancellationToken cancellationToken = _lifetimeCancellation.Token;
             int turn = _toolTurnGuard.BeginTurn();
             try
             {
-                _last = await LlmMeter.RunAsync(RoleId, desc, 160, "cast_spell");
+                LlmRunResult result = await LlmMeter.RunAsync(RoleId, desc, 160, cancellationToken, "cast_spell");
+                if (cancellationToken.IsCancellationRequested || this == null)
+                {
+                    return;
+                }
+
+                _last = result;
                 if (!string.IsNullOrEmpty(_last.Error))
                 {
                     Log("✘ " + _last.Error);
                 }
                 else
                 {
-                    Log("🪄 " + (_last.Text.Length == 0 ? "(маг промолчал)" : _last.Text.Trim()));
+                    Log("🪄 " + (_last.Text.Length == 0 ? "(the mage was silent)" : _last.Text.Trim()));
                     Log(_last.HudLine());
                 }
             }
             finally
             {
-                _toolTurnGuard.EndTurn(turn);
-                _busy = false;
+                if (!cancellationToken.IsCancellationRequested && this != null)
+                {
+                    _toolTurnGuard.EndTurn(turn);
+                    _busy = false;
+                }
             }
         }
 
@@ -577,13 +619,13 @@ namespace CoreAI.ExampleGame.QwenDemo
             QwenDemoLayout.Calculate(Screen.width, Screen.height, out Rect topPanel, out Rect logPanel);
             GUILayout.BeginArea(topPanel, GUI.skin.box);
             _controlsScroll = GUILayout.BeginScrollView(_controlsScroll);
-            GUILayout.Label("<b>МАГИЯ ИЗ ОПИСАНИЯ — Qwen3.5-0.8B (нативные tool-calls)</b>",
+            GUILayout.Label("<b>SPELLCRAFT FROM DESCRIPTION — Qwen3.5-0.8B (native tool calls)</b>",
                 new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
             GUILayout.Label(
-                _last == null ? "<b>⏱ ждём первое заклинание…</b>" : "<b>" + _last.HudLine() + "</b>",
+                _last == null ? "<b>⏱ waiting for the first spell…</b>" : "<b>" + _last.HudLine() + "</b>",
                 new GUIStyle(GUI.skin.label)
                     { richText = true, fontSize = 12, normal = { textColor = new Color(0.7f, 0.85f, 1f) } });
-            GUILayout.Label($"🔷 мана (guard в коде): <b>{mana}/100</b>  — спелл 1/2/3 стоит 20/40/60", rich);
+            GUILayout.Label($"🔷 mana (code-enforced guard): <b>{mana}/100</b> — spell 1/2/3 costs 20/40/60", rich);
 
             if (QwenDemoState.HasBlockingError(_disabledReason))
             {
@@ -595,7 +637,7 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             if (!_ready)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp загружается; действия станут доступны после readiness.</color>", rich);
+                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>", rich);
             }
 
             GUILayout.Space(4);
@@ -607,7 +649,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             }
 
             GUI.enabled = !_busy && _ready;
-            if (GUILayout.Button(_busy ? "⏳ маг творит…" : "🪄 КОЛДОВАТЬ", GUILayout.Height(28)))
+            if (GUILayout.Button(_busy ? "⏳ the mage is casting…" : "🪄 CAST", GUILayout.Height(28)))
             {
                 Submit();
             }
@@ -615,7 +657,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             GUILayoutOption[] determinismOptions = stackedButtons
                 ? new[] { GUILayout.Height(28) }
                 : new[] { GUILayout.Width(120), GUILayout.Height(28) };
-            if (GUILayout.Button("🔁 детерм. ×5", determinismOptions))
+            if (GUILayout.Button("🔁 determinism ×5", determinismOptions))
             {
                 RunDeterminism(_input, 5);
             }
@@ -623,7 +665,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             GUILayoutOption[] manaOptions = stackedButtons
                 ? new[] { GUILayout.Height(28) }
                 : new[] { GUILayout.Width(60), GUILayout.Height(28) };
-            if (GUILayout.Button("мана", manaOptions))
+            if (GUILayout.Button("mana", manaOptions))
             {
                 lock (_gate)
                 {
@@ -637,7 +679,7 @@ namespace CoreAI.ExampleGame.QwenDemo
                 GUILayout.EndHorizontal();
             }
 
-            GUILayout.Label("Примеры (RU/EN):", rich);
+            GUILayout.Label("Examples (RU/EN):", rich);
             GUI.enabled = !_busy && _ready;
             foreach (string p in Presets)
             {
@@ -653,7 +695,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             GUILayout.EndArea();
 
             GUILayout.BeginArea(logPanel, GUI.skin.box);
-            GUILayout.Label("Журнал (стихия/сила + скорость/токены):");
+            GUILayout.Label("Log (element/power + speed/tokens):");
             _scroll = GUILayout.BeginScrollView(_scroll);
             for (int i = _log.Count - 1; i >= 0; i--)
             {

@@ -43,17 +43,40 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            string requestedProfile = request.RoutingProfileId;
-            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId, requestedProfile);
-            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId, requestedProfile);
-            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId, requestedProfile);
+            LlmRoleRouteSnapshot route = _registry.ResolveRouteForRole(
+                request.AgentRoleId, request.RoutingProfileId);
+            request.RoutingProfileId = route.ProfileId;
+            request.ContextWindowTokens = route.ContextWindowTokens;
         }
 
         /// <inheritdoc />
         public bool SupportsNativeToolCallingForRole(string agentRoleId)
         {
-            ILlmClient inner = _registry.ResolveClientForRole(agentRoleId);
+            return SupportsNativeToolCallingForRole(agentRoleId, "");
+        }
+
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            // WHY: the tool contract must follow the endpoint the request will actually reach —
+            // an agent pinned via WithLlmProfile or re-routed at runtime otherwise keeps the old
+            // endpoint's native/text tool strategy and tools silently stop working.
+            ILlmClient inner = _registry.ResolveRouteForRole(agentRoleId, routingProfileId)?.Client;
             return inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
+        }
+
+        /// <inheritdoc />
+        public int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            LlmRoleRouteSnapshot route = _registry.ResolveRouteForRole(agentRoleId, routingProfileId);
+            if (route == null || !route.IsRouted || route.ContextWindowTokens <= 0)
+            {
+                // WHY: an unrouted request is served by the legacy backend, whose window is owned by
+                // settings-based budgets — report "no routing knowledge" instead of a constant.
+                return null;
+            }
+
+            return route.ContextWindowTokens;
         }
 
         /// <inheritdoc />
@@ -185,11 +208,14 @@ namespace CoreAI.Infrastructure.Llm
             bool streaming,
             out LlmExecutionMode capturedMode)
         {
-            string requestedProfile = request.RoutingProfileId;
-            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId, requestedProfile);
-            request.RoutingProfileId = _registry.ResolveProfileIdForRole(request.AgentRoleId, requestedProfile);
-            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId, requestedProfile);
-            capturedMode = _registry.ResolveExecutionModeForRole(request.AgentRoleId, requestedProfile);
+            // WHY: one atomic route observation — resolving client/profile/context/mode separately
+            // lets a concurrent endpoint switch pair endpoint A's client with endpoint B's metadata.
+            LlmRoleRouteSnapshot route = _registry.ResolveRouteForRole(
+                request.AgentRoleId, request.RoutingProfileId);
+            ILlmClient inner = route.Client;
+            request.RoutingProfileId = route.ProfileId;
+            request.ContextWindowTokens = route.ContextWindowTokens;
+            capturedMode = route.Mode;
             _backendSelectedPublisher?.Publish(new LlmBackendSelected(
                 request.TraceId,
                 request.AgentRoleId,
@@ -213,6 +239,18 @@ namespace CoreAI.Infrastructure.Llm
             string error,
             LlmErrorCode errorCode)
         {
+            if (!success && IsEndpointLevelFailure(errorCode))
+            {
+                // WHY: a Ready endpoint whose key expired or whose backend died mid-conversation must
+                // surface degraded health on its snapshot; otherwise the UI keeps reporting Ready
+                // until restart while every request fails.
+                _registry.ReportRouteFailure(request?.RoutingProfileId ?? "", errorCode, error);
+            }
+            else if (success)
+            {
+                _registry.ReportRouteFailure(request?.RoutingProfileId ?? "", LlmErrorCode.None, "");
+            }
+
             _requestCompletedPublisher?.Publish(new LlmRequestCompleted(
                 request?.TraceId,
                 request?.AgentRoleId,
@@ -280,6 +318,12 @@ namespace CoreAI.Infrastructure.Llm
                 success,
                 chunk.CacheReadTokens,
                 chunk.CacheWriteTokens));
+        }
+
+        private static bool IsEndpointLevelFailure(LlmErrorCode errorCode)
+        {
+            return errorCode == LlmErrorCode.AuthExpired ||
+                   errorCode == LlmErrorCode.BackendUnavailable;
         }
 
         private static string DescribeInner(ILlmClient inner)

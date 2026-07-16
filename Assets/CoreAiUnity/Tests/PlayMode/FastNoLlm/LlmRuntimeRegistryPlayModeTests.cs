@@ -17,6 +17,10 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class LlmRuntimeRegistryPlayModeTests
     {
+        private const float AsyncTimeoutSeconds = 10f;
+        private readonly List<LlmClientRegistry> _registries = new();
+        private readonly List<CoreAISettingsAsset> _settingsAssets = new();
+
         private sealed class NamedClient : ILlmClient
         {
             private readonly string _name;
@@ -292,6 +296,7 @@ namespace CoreAI.Tests.PlayMode
         private sealed class HotSwapFactory : ILlmEndpointClientFactory
         {
             public TaskCompletionSource<bool> OldGate { get; } = new();
+            public TaskCompletionSource<bool> NewEntered { get; } = new();
             public TaskCompletionSource<bool> NewReady { get; } = new();
 
             public Task<LlmEndpointClientActivation> ActivateAsync(
@@ -312,6 +317,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 if (descriptor.Model == "new")
                 {
+                    NewEntered.TrySetResult(true);
                     await NewReady.Task;
                 }
 
@@ -324,19 +330,35 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        [TearDown]
+        public void TearDown()
+        {
+            for (int i = _registries.Count - 1; i >= 0; i--)
+            {
+                _registries[i]?.Dispose();
+            }
+
+            _registries.Clear();
+            for (int i = _settingsAssets.Count - 1; i >= 0; i--)
+            {
+                if (_settingsAssets[i] != null)
+                {
+                    Object.DestroyImmediate(_settingsAssets[i]);
+                }
+            }
+
+            _settingsAssets.Clear();
+        }
+
         [UnityTest]
         public IEnumerator TwoAgents_RunConcurrentlyOnDifferentActiveEndpoints()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             ConcurrentFactory factory = new();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, factory);
+            LlmClientRegistry registry = CreateRegistry(settings, factory);
             RoutingLlmClient routing = new(registry);
             Task setup = SetupAsync(registry);
-            while (!setup.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(setup, AsyncTimeoutSeconds, "registry setup");
 
             Assert.IsFalse(setup.IsFaulted, setup.Exception?.ToString());
             Task<LlmCompletionResult> api = routing.CompleteAsync(new LlmCompletionRequest
@@ -347,86 +369,66 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "LocalAgent"
             });
-            while (!factory.BothEntered.Task.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                factory.BothEntered.Task, AsyncTimeoutSeconds, "both endpoint requests to start");
 
             Assert.IsFalse(api.IsCompleted);
             Assert.IsFalse(local.IsCompleted);
             factory.Release.SetResult(true);
             Task all = Task.WhenAll(api, local);
-            while (!all.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(all, AsyncTimeoutSeconds, "both endpoint requests");
 
             Assert.AreEqual("api", api.Result.Content);
             Assert.AreEqual("local", local.Result.Content);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator RouteSwitch_AffectsNextRequestWithoutRecreatingRegistry()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, new NamedFactory());
+            CoreAISettingsAsset settings = CreateSettings();
+            LlmClientRegistry registry = CreateRegistry(settings, new NamedFactory());
             RoutingLlmClient routing = new(registry);
             Task setup = SetupAsync(registry);
-            while (!setup.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(setup, AsyncTimeoutSeconds, "registry setup");
 
             registry.AssignRoleProfile("CloudAgent", "local");
             Task<LlmCompletionResult> switched = routing.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "CloudAgent"
             });
-            while (!switched.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(switched, AsyncTimeoutSeconds, "switched route request");
 
             Assert.AreEqual("local", switched.Result.Content);
             Assert.AreEqual("local", registry.GetRoleProfile("CloudAgent"));
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator ZeroEndpoints_AutomaticRouteUsesLegacyFallback()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, new NamedFactory());
+            CoreAISettingsAsset settings = CreateSettings();
+            LlmClientRegistry registry = CreateRegistry(settings, new NamedFactory());
             registry.SetLegacyFallback(new NamedClient("legacy"));
 
             Task<LlmCompletionResult> completion = registry.ResolveClientForRole("Chat")
                 .CompleteAsync(new LlmCompletionRequest());
-            while (!completion.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                completion, AsyncTimeoutSeconds, "legacy fallback request");
 
             Assert.AreEqual("legacy", completion.Result.Content);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator HttpFactory_ModelsProbeRequiresSuccessAndForwardsCredential()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
             using (LocalHttpServer server = new(200, "Bearer session-key"))
             {
                 Task<LlmEndpointClientActivation> success = factory.ActivateAsync(
                     HttpDescriptor(server.Port), "session-key", CancellationToken.None);
-                while (!success.IsCompleted)
-                {
-                    yield return null;
-                }
+                yield return PlayModeTestAwait.WaitTask(
+                    success, AsyncTimeoutSeconds, "successful HTTP endpoint activation");
 
                 Assert.IsFalse(success.IsFaulted, success.Exception?.ToString());
                 Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, success.Result.Mode);
@@ -437,21 +439,20 @@ namespace CoreAI.Tests.PlayMode
                 using LocalHttpServer server = new(status);
                 Task<LlmEndpointClientActivation> failed = factory.ActivateAsync(
                     HttpDescriptor(server.Port), "", CancellationToken.None);
-                while (!failed.IsCompleted)
-                {
-                    yield return null;
-                }
+                yield return PlayModeTestAwait.WaitUntil(
+                    () => failed.IsCompleted,
+                    AsyncTimeoutSeconds,
+                    $"failed HTTP {status} endpoint activation");
 
                 Assert.IsTrue(failed.IsFaulted, $"HTTP {status} must fail readiness.");
             }
 
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator HttpFactory_FallsBackToCompletionsWhenModelsRouteIsUnavailable()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
 
@@ -461,22 +462,21 @@ namespace CoreAI.Tests.PlayMode
                     modelsStatus, 400, "Bearer session-key");
                 Task<LlmEndpointClientActivation> success = factory.ActivateAsync(
                     HttpDescriptor(server.Port), "session-key", CancellationToken.None);
-                while (!success.IsCompleted)
-                {
-                    yield return null;
-                }
+                yield return PlayModeTestAwait.WaitTask(
+                    success,
+                    AsyncTimeoutSeconds,
+                    $"HTTP {modelsStatus} completions fallback activation");
 
                 Assert.IsFalse(success.IsFaulted, success.Exception?.ToString());
                 Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, success.Result.Mode);
             }
 
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator HttpFactory_CompletionsFallbackRejectsAuthAndServerFailures()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
 
@@ -485,15 +485,14 @@ namespace CoreAI.Tests.PlayMode
                 using FallbackHttpServer server = new(404, status);
                 Task<LlmEndpointClientActivation> failed = factory.ActivateAsync(
                     HttpDescriptor(server.Port), "", CancellationToken.None);
-                while (!failed.IsCompleted)
-                {
-                    yield return null;
-                }
+                yield return PlayModeTestAwait.WaitUntil(
+                    () => failed.IsCompleted,
+                    AsyncTimeoutSeconds,
+                    $"failed fallback HTTP {status} endpoint activation");
 
                 Assert.IsTrue(failed.IsFaulted, $"Fallback HTTP {status} must fail readiness.");
             }
 
-            Object.Destroy(settings);
         }
 
         [UnityTest]
@@ -503,19 +502,18 @@ namespace CoreAI.Tests.PlayMode
             reservation.Start();
             int closedPort = ((IPEndPoint)reservation.LocalEndpoint).Port;
             reservation.Stop();
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             LlmEndpointClientFactory factory = new(
                 settings, GameLoggerUnscopedFallback.Instance);
 
             Task<LlmEndpointClientActivation> failed = factory.ActivateAsync(
                 HttpDescriptor(closedPort), "", CancellationToken.None);
-            while (!failed.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitUntil(
+                () => failed.IsCompleted,
+                AsyncTimeoutSeconds,
+                "connection-failed HTTP endpoint activation");
 
             Assert.IsTrue(failed.IsFaulted);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
@@ -531,10 +529,10 @@ namespace CoreAI.Tests.PlayMode
                         BaseUrl = $"http://127.0.0.1:{server.Port}/v1",
                         Mode = LlmEndpointReadinessMode.CompletionsOnly
                     });
-                while (!task.IsCompleted)
-                {
-                    yield return null;
-                }
+                yield return PlayModeTestAwait.WaitTask(
+                    task,
+                    AsyncTimeoutSeconds,
+                    $"HTTP {status} readiness probe");
 
                 Assert.IsFalse(task.IsFaulted, task.Exception?.ToString());
                 Assert.AreEqual(
@@ -559,17 +557,16 @@ namespace CoreAI.Tests.PlayMode
                 },
                 cancellation.Token);
             cancellation.CancelAfter(50);
-            while (!task.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitUntil(
+                () => task.IsCompleted,
+                AsyncTimeoutSeconds,
+                "canceled readiness probe");
 
             Assert.IsTrue(task.IsCanceled, task.Exception?.ToString());
-            float disconnectDeadline = Time.realtimeSinceStartup + 2f;
-            while (!server.Disconnected.Task.IsCompleted && Time.realtimeSinceStartup < disconnectDeadline)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                server.Disconnected.Task,
+                2f,
+                "readiness probe connection abort");
 
             Assert.IsTrue(server.Disconnected.Task.IsCompleted, "Abort must close the native HTTP connection.");
             Assert.IsTrue(server.Disconnected.Task.Result);
@@ -578,41 +575,30 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator DisabledEndpointWithoutAssignment_DoesNotBreakLegacyFallback()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, new NamedFactory());
+            CoreAISettingsAsset settings = CreateSettings();
+            LlmClientRegistry registry = CreateRegistry(settings, new NamedFactory());
             registry.SetLegacyFallback(new NamedClient("legacy"));
             LlmEndpointDescriptor disabled = Descriptor("disabled");
             disabled.Active = false;
             Task<LlmEndpointSnapshot> add = registry.AddOrUpdateEndpointAsync(disabled);
-            while (!add.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(add, AsyncTimeoutSeconds, "disabled endpoint add");
 
             Task<LlmCompletionResult> completion = registry.ResolveClientForRole("Chat")
                 .CompleteAsync(new LlmCompletionRequest());
-            while (!completion.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                completion, AsyncTimeoutSeconds, "disabled-endpoint legacy fallback request");
 
             Assert.AreEqual("legacy", completion.Result.Content);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator ExplicitRequestProfile_WinsRoleAssignment()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, new NamedFactory());
+            CoreAISettingsAsset settings = CreateSettings();
+            LlmClientRegistry registry = CreateRegistry(settings, new NamedFactory());
             RoutingLlmClient routing = new(registry);
             Task setup = SetupAsync(registry);
-            while (!setup.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(setup, AsyncTimeoutSeconds, "registry setup");
 
             LlmCompletionRequest request = new()
             {
@@ -620,103 +606,83 @@ namespace CoreAI.Tests.PlayMode
                 RoutingProfileId = "local"
             };
             Task<LlmCompletionResult> completion = routing.CompleteAsync(request);
-            while (!completion.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                completion, AsyncTimeoutSeconds, "explicit profile request");
 
             Assert.AreEqual("local", completion.Result.Content);
             Assert.AreEqual("local", request.RoutingProfileId);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator HotReplacement_KeepsResolvedInFlightClientAndRoutesNewCallsToNewGeneration()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             HotSwapFactory factory = new();
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, factory);
+            LlmClientRegistry registry = CreateRegistry(settings, factory);
             LlmEndpointDescriptor oldDescriptor = Descriptor("shared");
             oldDescriptor.Model = "old";
             Task<LlmEndpointSnapshot> initial = registry.AddOrUpdateEndpointAsync(oldDescriptor);
-            while (!initial.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                initial, AsyncTimeoutSeconds, "initial endpoint activation");
 
             ILlmClient oldClient = registry.ResolveClientForRole("Agent", "shared");
             Task<LlmCompletionResult> oldCall = oldClient.CompleteAsync(new LlmCompletionRequest());
             LlmEndpointDescriptor replacement = Descriptor("shared");
             replacement.Model = "new";
             Task<LlmEndpointSnapshot> update = registry.AddOrUpdateEndpointAsync(replacement);
-            yield return null;
+            yield return PlayModeTestAwait.WaitTask(
+                factory.NewEntered.Task, AsyncTimeoutSeconds, "replacement endpoint activation to start");
 
             Task<LlmCompletionResult> duringWarmup = registry.ResolveClientForRole("Agent", "shared")
                 .CompleteAsync(new LlmCompletionRequest());
             Assert.IsFalse(update.IsCompleted);
             Assert.IsFalse(duringWarmup.IsCompleted);
             factory.NewReady.SetResult(true);
-            while (!update.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                update, AsyncTimeoutSeconds, "replacement endpoint activation");
 
             Task<LlmCompletionResult> newCall = registry.ResolveClientForRole("Agent", "shared")
                 .CompleteAsync(new LlmCompletionRequest());
-            while (!newCall.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                newCall, AsyncTimeoutSeconds, "new-generation request");
 
             Assert.AreEqual("new", newCall.Result.Content);
             Assert.IsFalse(oldCall.IsCompleted);
             factory.OldGate.SetResult(true);
-            while (!oldCall.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                oldCall, AsyncTimeoutSeconds, "old-generation in-flight request");
 
             Assert.AreEqual("old", oldCall.Result.Content);
             Assert.Greater(update.Result.Generation, initial.Result.Generation);
-            Object.Destroy(settings);
         }
 
         [UnityTest]
         public IEnumerator FailedHotReplacement_LeavesOldReadyGenerationRoutable()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = CreateSettings();
             HotSwapFactory factory = new();
             factory.OldGate.SetResult(true);
-            LlmClientRegistry registry = new(
-                GameLoggerUnscopedFallback.Instance, settings, null, null, factory);
+            LlmClientRegistry registry = CreateRegistry(settings, factory);
             LlmEndpointDescriptor oldDescriptor = Descriptor("shared");
             oldDescriptor.Model = "old";
             Task<LlmEndpointSnapshot> initial = registry.AddOrUpdateEndpointAsync(oldDescriptor);
-            while (!initial.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                initial, AsyncTimeoutSeconds, "initial endpoint activation");
 
             LlmEndpointDescriptor failed = Descriptor("shared");
             failed.Model = "bad";
             Task<LlmEndpointSnapshot> update = registry.AddOrUpdateEndpointAsync(failed);
-            while (!update.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                update, AsyncTimeoutSeconds, "failed replacement endpoint activation");
 
             Assert.AreEqual(LlmEndpointLifecycleState.Failed, update.Result.State);
             Task<LlmCompletionResult> afterFailure = registry.ResolveClientForRole("Agent", "shared")
                 .CompleteAsync(new LlmCompletionRequest());
-            while (!afterFailure.IsCompleted)
-            {
-                yield return null;
-            }
+            yield return PlayModeTestAwait.WaitTask(
+                afterFailure, AsyncTimeoutSeconds, "request after failed replacement");
 
             Assert.AreEqual("old", afterFailure.Result.Content);
             Assert.AreEqual(initial.Result.Generation, registry.GetEndpoints()[0].Generation);
-            Object.Destroy(settings);
         }
 
         private static async Task SetupAsync(LlmClientRegistry registry)
@@ -725,6 +691,23 @@ namespace CoreAI.Tests.PlayMode
             await registry.AddOrUpdateEndpointAsync(Descriptor("local"));
             registry.AssignRoleProfile("CloudAgent", "api");
             registry.AssignRoleProfile("LocalAgent", "local");
+        }
+
+        private CoreAISettingsAsset CreateSettings()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settingsAssets.Add(settings);
+            return settings;
+        }
+
+        private LlmClientRegistry CreateRegistry(
+            CoreAISettingsAsset settings,
+            ILlmEndpointClientFactory factory)
+        {
+            LlmClientRegistry registry = new(
+                GameLoggerUnscopedFallback.Instance, settings, null, null, factory);
+            _registries.Add(registry);
+            return registry;
         }
 
         private static LlmEndpointDescriptor Descriptor(string id)

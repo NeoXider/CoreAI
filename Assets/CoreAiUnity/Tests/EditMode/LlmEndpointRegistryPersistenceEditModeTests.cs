@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.IO;
 using System.Threading;
@@ -34,6 +35,7 @@ namespace CoreAI.Tests.EditMode
             public string LastSessionApiKey { get; private set; }
             public int Calls { get; private set; }
             public TaskCompletionSource<LlmEndpointClientActivation> Pending { get; set; }
+            public TaskCompletionSource<bool> Activated { get; } = new();
             public Exception Failure { get; set; }
             public ILlmClient Client { get; set; } = new StubLlmClient();
             public LlmExecutionMode? ActivationMode { get; set; }
@@ -46,6 +48,7 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken)
             {
                 Calls++;
+                Activated.TrySetResult(true);
                 LastSessionApiKey = sessionApiKey;
                 LastCancellationToken = cancellationToken;
                 if (Failure != null)
@@ -372,7 +375,7 @@ namespace CoreAI.Tests.EditMode
 
             LlmClientRegistry registry = BuildRegistry(
                 store, factory, new FakeSecretProvider { Secret = "resolved-secret" });
-            await Task.Yield();
+            await factory.Activated.Task;
 
             Assert.AreEqual("resolved-secret", factory.LastSessionApiKey);
         }
@@ -396,8 +399,17 @@ namespace CoreAI.Tests.EditMode
             LlmClientRegistry registry = BuildRegistry(new MemoryStore(), new FakeFactory());
             await registry.AddOrUpdateEndpointAsync(Descriptor("cloud", "https://example.test/v1"));
 
-            Assert.ThrowsAsync<KeyNotFoundException>(async () =>
-                await registry.RemoveEndpointAsync("cloud", replacementEndpointId: "missing"));
+            KeyNotFoundException caught = null;
+            try
+            {
+                await registry.RemoveEndpointAsync("cloud", replacementEndpointId: "missing");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "An unknown replacement endpoint must be rejected.");
             Assert.AreEqual("cloud", registry.GetEndpoints().Single().Descriptor.EndpointId);
         }
 
@@ -489,6 +501,7 @@ namespace CoreAI.Tests.EditMode
         public async Task DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes()
         {
             int releases = 0;
+            TaskCompletionSource<bool> released = new();
             BlockingClient client = new();
             FakeFactory factory = new()
             {
@@ -496,6 +509,7 @@ namespace CoreAI.Tests.EditMode
                 ReleaseOwnedHostAsync = () =>
                 {
                     releases++;
+                    released.TrySetResult(true);
                     return Task.CompletedTask;
                 }
             };
@@ -509,10 +523,7 @@ namespace CoreAI.Tests.EditMode
 
             client.Completion.SetResult(new LlmCompletionResult { Ok = true });
             await request;
-            for (int i = 0; i < 20 && releases == 0; i++)
-            {
-                await Task.Yield();
-            }
+            await released.Task;
 
             Assert.AreEqual(1, releases);
         }
@@ -579,7 +590,17 @@ namespace CoreAI.Tests.EditMode
                 Descriptor("cloud", "https://example.test/v1"));
             cancelledCaller.Cancel();
 
-            Assert.CatchAsync<OperationCanceledException>(async () => await first);
+            OperationCanceledException caught = null;
+            try
+            {
+                await first;
+            }
+            catch (OperationCanceledException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "The canceled caller must observe cancellation.");
             Assert.IsFalse(factory.LastCancellationToken.IsCancellationRequested);
             factory.Pending.SetResult(new LlmEndpointClientActivation
             {
@@ -618,7 +639,10 @@ namespace CoreAI.Tests.EditMode
             second.Active = false;
             second.DisplayName = "second";
             Task secondSave = Task.Run(async () => await registry.AddOrUpdateEndpointAsync(second));
-            await Task.Delay(50);
+            bool concurrentSaveEntered = await WaitForConditionAsync(
+                () => store.Calls > 1,
+                TimeSpan.FromMilliseconds(250));
+            Assert.IsFalse(concurrentSaveEntered, "The second save must wait for the first save to finish.");
             Assert.AreEqual(1, store.Calls);
 
             store.ReleaseFirst.Set();
@@ -738,6 +762,17 @@ namespace CoreAI.Tests.EditMode
                 Active = true,
                 ContextWindowTokens = 4096
             };
+        }
+
+        private static async Task<bool> WaitForConditionAsync(Func<bool> condition, TimeSpan timeout)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            while (!condition() && stopwatch.Elapsed < timeout)
+            {
+                await Task.Yield();
+            }
+
+            return condition();
         }
     }
 }

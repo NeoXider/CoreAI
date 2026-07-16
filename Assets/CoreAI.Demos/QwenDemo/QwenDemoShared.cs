@@ -12,7 +12,7 @@ using CoreAI.Infrastructure.Llm;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace CoreAI.ExampleGame.QwenDemo
+namespace CoreAI.Demos.QwenDemo
 {
     /// <summary>Shared hot-reload-safe demo state predicates.</summary>
     public static class QwenDemoState
@@ -23,7 +23,7 @@ namespace CoreAI.ExampleGame.QwenDemo
 
     /// <summary>
     /// One measured LLM turn: text, latency split (TTFT / total), token usage and which tools fired.
-    /// Populated from the streaming orchestrator so the HUD can show "за сколько и сколько токенов".
+    /// Populated from the streaming orchestrator so the HUD can show latency and token usage.
     /// </summary>
     public sealed class LlmRunResult
     {
@@ -57,16 +57,16 @@ namespace CoreAI.ExampleGame.QwenDemo
         {
             if (!string.IsNullOrEmpty(Error))
             {
-                return $"<color=#ff6666>ошибка: {Error}</color>";
+                return $"<color=#ff6666>error: {Error}</color>";
             }
 
             string tok = CompletionTokens.HasValue
-                ? $"{(CompletionTokensExact ? "" : "~")}{CompletionTokens} вых" +
-                  (PromptTokens.HasValue ? $" · {PromptTokens} вх" : "")
-                : "токены n/a";
-            string tps = TokensPerSecond > 0 ? $" · {TokensPerSecond:0} ток/с" : "";
-            string toolStr = Tools.Count > 0 ? $" · тулы: {string.Join(", ", Tools)}" : " · тулов нет";
-            return $"⏱ первый токен {TtftMs:0} мс · ответ {TotalMs:0} мс · {tok}{tps}{toolStr}";
+                ? $"{(CompletionTokensExact ? "" : "~")}{CompletionTokens} out" +
+                  (PromptTokens.HasValue ? $" · {PromptTokens} in" : "")
+                : "tokens n/a";
+            string tps = TokensPerSecond > 0 ? $" · {TokensPerSecond:0} tok/s" : "";
+            string toolStr = Tools.Count > 0 ? $" · tools: {string.Join(", ", Tools)}" : " · no tools";
+            return $"⏱ first token {TtftMs:0} ms · response {TotalMs:0} ms · {tok}{tps}{toolStr}";
         }
     }
 
@@ -111,7 +111,8 @@ namespace CoreAI.ExampleGame.QwenDemo
         public static async Task<LlmRunResult> RunAsync(
             string roleId,
             string hint,
-            int maxOutputTokens = 256,
+            int maxOutputTokens,
+            CancellationToken cancellationToken,
             params string[] allowedToolNames)
         {
             LlmRunResult r = new();
@@ -131,7 +132,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             {
                 AiTaskRequest task = BuildTaskRequest(roleId, hint, maxOutputTokens, allowedToolNames);
 
-                await foreach (LlmStreamChunk ch in orchestrator.RunStreamingAsync(task, CancellationToken.None))
+                await foreach (LlmStreamChunk ch in orchestrator.RunStreamingAsync(task, cancellationToken))
                 {
                     if (!string.IsNullOrEmpty(ch.Error))
                     {
@@ -160,6 +161,10 @@ namespace CoreAI.ExampleGame.QwenDemo
                     }
                 }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 r.Error = ex.Message;
@@ -183,7 +188,7 @@ namespace CoreAI.ExampleGame.QwenDemo
                     foreach (LlmToolCallTrace t in lastToolCalls)
                     {
                         r.ToolCalls.Add(t);
-                        r.Tools.Add($"{t.Name}({t.DurationMs:0}мс)");
+                        r.Tools.Add($"{t.Name}({t.DurationMs:0}ms)");
                     }
                 }
             }

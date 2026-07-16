@@ -58,7 +58,7 @@ survives.** Caching is not the priority — but this placement costs nothing ext
 (we stop rewriting the prefix and keep recent turns verbatim). Cache *tiers* help too: a `system` change
 invalidates system+messages but **not** tools; a tail-only `messages` change invalidates neither tools nor system.
 
-### 1a caching вЂ” verification & provider notes
+### 1a caching — verification & provider notes
 - Status: **verification implemented.** Provider cache token counts now flow from
   `UsageDetails.AdditionalCounts` into `LlmCompletionResult` / `LlmStreamChunk`,
   `LlmUsageRecord`, `LlmUsageReported`, and turn diagnostics as `CacheReadTokens` /
@@ -150,7 +150,7 @@ the system prompt when the session summarizes/restarts" — yes, the boundary is
   - `global / persona` — rarely changes → canonical **prefix**.
   - `per-user` (e.g. the student profile) and `per-session` — change often → tail deltas, consolidated at boundaries.
 - Durable across sessions (survives WebGL restart). Game-side requirement: RedoSchool `MVP_TODO.md`
-  → *2.2 Персональная память ученика*.
+  → *2.2 Personal student memory*.
 - **Inspector:** extend the Agent Session Inspector to show memory deltas + version history.
 
 ### 6a. Conditional tool contract (native vs text-shaped backends)

@@ -45,8 +45,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 ### Fixed
 
 - Qwen Spellcraft now requires its single `cast_spell` tool by name and gives the 0.8B model explicit
-  bilingual element aliases and examples, preventing Russian lightning prompts such as `мега молния`
-  from being classified as frost or returned as plain text.
+  bilingual element aliases and examples, preventing Russian prompts meaning "mega lightning" from being
+  classified as frost or returned as plain text.
 - Chat request and streaming timeouts now use real time, so pausing the game with `Time.timeScale = 0`
   cannot leave an LLM request waiting forever.
 - Removed hard-coded readiness requests from the endpoint factory and the unreachable direct-`HttpClient`
@@ -57,6 +57,122 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   EditMode synchronization-context deadlock while leaving the shared endpoint activation running.
 - FullAccess PlayMode coverage now reads Full Lua policy from `CoreAiLuaWorldModule` instead of removed
   root-scope fields.
+- Re-saving a Ready LLMUnity endpoint with `Active = false` now releases the evicted runtime's owned
+  llama.cpp host instead of leaking a loaded model that nothing routes to.
+- Registry construction restores persisted state under the registry lock, and key-auth endpoints whose
+  `SecretReference` does not resolve wait for a session key (with an explicit error message) instead of
+  activating with an empty credential and failing opaquely.
+- The activation epilogue (persistence write + `Changed` event) never runs inline under a caller-held
+  registry lock, so subscribers can safely call back into the registry.
+- Role assignment patterns like `npc.*` now actually match by prefix; an exact role assignment always wins
+  over a wildcard, and the longest wildcard prefix wins over `*`.
+- Endpoint behavior fields (`MaxTokens`, `ReasoningMode`, `ThinkingBudgetTokens`, `ExtraBodyJson`) survive
+  persistence cloning and are part of the descriptor fingerprint, so editing them recreates the client
+  instead of being silently coalesced with a stale in-flight activation.
+- `RoutingLlmClient` resolves the client, effective profile id, context window, and execution mode as one
+  atomic route snapshot, eliminating torn reads during a concurrent endpoint switch.
+- `RemoveEndpointAsync(..., CancelInFlight)` throws `NotSupportedException` without mutating the registry,
+  instead of pretending the tracked in-flight calls were cancelled.
+- Owned-host release waits for tracked requests to drain with a bounded delay poll and shared-activation
+  awaiting uses `Task.WhenAny` instead of busy-wait spinning.
+- `COREAI_NO_LLM` builds compile again: the pipeline installer strips the readiness probe, the timeout and
+  retrying-streaming decorators, and the LLMUnity client resolution when the LLM module is compiled out.
+- Hub settings page: endpoint validation delegates to the portable `LlmEndpointDescriptor.Validate()`
+  instead of silently clamping out-of-range values; saving reports a tri-state outcome (saved and ready /
+  saved but activation failed / not saved); the routing `CancellationTokenSource` replacement no longer
+  races cancel-then-dispose; controller `Changed` and backend-changed notifications marshal to the UI
+  thread; and the backend status line explains when a runtime routing profile overrides backend settings
+  instead of claiming "Applied live".
+- `CoreAiRoutingUi.Controller` static state is cleared on domain reload (`ResetForSubsystemRegistration`),
+  so a stale controller from a previous play session can no longer be observed.
+- Qwen demo scenes wire `CancellationToken` through their request paths, guard missing scene references,
+  and use English UI strings under the `CoreAI.Demos.QwenDemo` namespace.
+- Ready-endpoint health is no longer sticky: when a routed request fails with `AuthExpired` or
+  `BackendUnavailable` mid-conversation, the endpoint snapshot reports a `Degraded: …` error and `Changed`
+  fires for the UI; the endpoint stays routable and the next successful request clears the note.
+
+### Tests
+
+- Flagship regression `LlmEndpointSwitchFlagshipEditModeTests`: a real registry + routing client +
+  orchestrator conversation switches endpoints mid-dialogue and proves history survives while profile id,
+  context window, and tool strategy follow the new endpoint.
+- `LlmRoutingRegressionEditModeTests` — thirteen regressions covering the fallback sentinel echo, wildcard
+  role patterns, the inactive re-save host leak, `CancelInFlight` semantics, restore with an unresolvable
+  secret, behavior-field round-trips, activation coalescing on edits, routed tool strategy and context
+  window, `KeepWarm`-only activation, `Changed` event delivery, and mid-conversation health degradation
+  with recovery.
+- `HubRoutingUiRegressionEditModeTests` — slug/unique-id helpers, descriptor-based Hub validation, and the
+  tri-state save outcome.
+- Test-suite hygiene: replaced every `Assert.ThrowsAsync`/`CatchAsync` with try/await/catch (interactive
+  Test Runner freeze), added bounded waits to PlayMode polling loops, and TearDown cleanup for leaked
+  ScriptableObjects.
+
+## 5.8.10 - Live model-behavior verification; fix a false-failing memory-clear test (2026-07-13)
+
+### Fixed
+
+- **`AllToolCalls_MemoryTool_WriteAppendClear` now accepts the documented clear semantics.** The PlayMode
+  test accepts either a missing store entry or an existing entry with empty content after
+  `memory(action=clear)`, instead of falsely requiring record deletion and reporting that the model had not
+  called the tool.
+
+## 5.8.9 - Demo/benchmark review wave: per-scene gameplay-binding seam + honest fixes (2026-07-13)
+
+### Fixed
+
+- **Skills demo no longer throws when the LLM module is uninitialized.** It now guards a missing
+  `CoreAIAgent.Policy` and disables gracefully.
+- **LiveMechanicsModsChat preserves Full-tier access for panel-activated mods.** The panel activation path
+  now grants the same Full-aware capabilities as scene-start autoloading.
+
+## 5.8.8 - Coroutine sandbox hardening release alignment (2026-07-13)
+
+### Changed
+
+- Version aligned with the lockstep 5.8.8 release. Functional changes were confined to the portable core
+  and Mods packages; see [`CoreAI/CHANGELOG.md`](../CoreAI/CHANGELOG.md).
+
+## 5.8.7 - Coroutine sandbox validation release alignment (2026-07-13)
+
+### Changed
+
+- Version aligned with the lockstep 5.8.7 release. Functional changes were confined to the portable core
+  and Mods packages; see [`CoreAI/CHANGELOG.md`](../CoreAI/CHANGELOG.md).
+
+## 5.8.6 - Coroutine guard release alignment (2026-07-13)
+
+### Changed
+
+- Version aligned with the lockstep 5.8.6 release. Functional changes were confined to the portable core
+  and Mods packages; see [`CoreAI/CHANGELOG.md`](../CoreAI/CHANGELOG.md).
+
+## 5.8.5 - Coroutine guard completion release alignment (2026-07-13)
+
+### Changed
+
+- Version aligned with the lockstep 5.8.5 release. Functional changes were confined to the portable core
+  and Mods packages; see [`CoreAI/CHANGELOG.md`](../CoreAI/CHANGELOG.md).
+
+## 5.8.4 - Raw Lua coroutine guard release alignment (2026-07-13)
+
+### Changed
+
+- Version aligned with the lockstep 5.8.4 release. Functional changes were confined to the portable core
+  and Mods packages; see [`CoreAI/CHANGELOG.md`](../CoreAI/CHANGELOG.md).
+
+## 5.8.3 - Allocation debounce and HTTP-error diagnostics refinements (2026-07-13)
+
+### Tests
+
+- Updated Unity EditMode coverage to verify that only credential-bearing `401` responses are redacted while
+  diagnostic `403` provider messages remain available and truncated.
+
+## 5.8.2 - Residual security-gap fixes and regression coverage (2026-07-13)
+
+### Tests
+
+- Added Unity EditMode regressions proving that JSON `401` provider messages cannot leak credentials through
+  exception text and that oversized parsed provider messages are truncated.
 
 ## 5.8.1 - Adversarial re-audit of 5.8.0: fix regressions/incomplete-fixes the wave introduced (2026-07-13)
 
@@ -215,13 +331,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
-- **`AuditLogWriter` DI-конструктор помечен `[Inject]`.** VContainer.SourceGenerator выбирал
-  конструктор с максимумом параметров — `internal AuditLogWriter(string folder)` (тестовый seam) — и
-  контейнер падал на старте хоста с `VContainerException: No such registration of type: System.String`
-  (ломался весь `LifetimeScope.Build()` в проектах, вызывающих `RegisterAuditLog()`).
+- **The `AuditLogWriter` DI constructor is marked `[Inject]`.** VContainer.SourceGenerator selected the
+  constructor with the most parameters — `internal AuditLogWriter(string folder)` (the test seam) — and the
+  container failed during host startup with `VContainerException: No such registration of type: System.String`
+  (breaking the entire `LifetimeScope.Build()` in projects that call `RegisterAuditLog()`).
 
-> Примечание: hotfix-версия вне lockstep (только `com.neoxider.coreaiunity`); фикс вошёл в 5.7.0.
-> Секция была потеряна при merge `2fc8cb94` и восстановлена задним числом.
+> Note: this hotfix version was outside lockstep (only `com.neoxider.coreaiunity`); the fix was included in 5.7.0.
+> The section was lost during merge `2fc8cb94` and restored retroactively.
 
 ## 5.6.1 - Build-time policy registration + code-style pass (2026-07-11)
 

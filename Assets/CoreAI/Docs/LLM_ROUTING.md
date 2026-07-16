@@ -32,6 +32,14 @@ The registry is valid with any endpoint count:
 - **1 endpoint:** assign its generated/named profile to a role, or select it explicitly;
 - **many endpoints:** different roles and concurrent requests may use different HTTP APIs and LLMUnity hosts.
 
+#### Switching preserves the conversation
+
+Routing is separate from role-keyed agent state. Reassigning a role to another profile, or selecting an
+endpoint for one request, changes only the client used by subsequent requests. It does not recreate the
+agent or clear its conversation history, long-term memory, registered tools, or policy configuration. The
+same role therefore continues the same conversation after an endpoint/provider switch; only the response
+backend changes. In-flight requests retain the endpoint generation on which they started.
+
 `Active` controls whether new requests may route to an endpoint. `KeepWarm` may keep an inactive endpoint
 loaded and Ready for a later switch, but does not make it routable. Activating a persisted endpoint starts
 its readiness sequence again after process restart. HTTP endpoints prefer a successful OpenAI-compatible
@@ -88,6 +96,8 @@ LLMUnity native model startup/readiness, WebGL `UnityWebRequest`/Fetch transport
 registration. It supplies `UnityWebRequestOpenAiReadinessProbe` for Unity/WebGL and injects it into endpoint
 activation. Search/configuration of `LLMAgent`, `LLM.WaitUntilReady()`, host leases, and llama.cpp unload stay
 strictly Unity-owned; the HTTP readiness contract and policy do not depend on Unity.
+For endpoint setup, runtime switching, and the Hub Settings editor, see
+[`RUNTIME_BACKEND_SWITCHING.md`](../../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md).
 
 Production games such as RedoSchool should put provider keys and quota enforcement behind `ServerManagedApi`. The Unity client sends a user/session token to the backend; the backend performs entitlement, calls the provider, records usage, and returns stable provider errors.
 

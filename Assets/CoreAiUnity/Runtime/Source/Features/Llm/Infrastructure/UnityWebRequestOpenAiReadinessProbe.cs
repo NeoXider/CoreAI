@@ -1,3 +1,4 @@
+#if !COREAI_NO_LLM
 using System;
 using System.Text;
 using System.Threading;
@@ -120,3 +121,4 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 }
+#endif

@@ -79,6 +79,18 @@ namespace CoreAI.Infrastructure.Llm
             return _inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
         }
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner?.SupportsNativeToolCallingForRole(agentRoleId, routingProfileId) == true;
+        }
+
+        /// <inheritdoc />
+        public int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner?.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
+        }
+
         /// <summary>Peels all <see cref="LoggingLlmClientDecorator"/> from the top of the chain.</summary>
         public static ILlmClient Unwrap(ILlmClient client)
         {

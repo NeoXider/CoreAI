@@ -146,7 +146,11 @@ namespace CoreAI.Infrastructure.Llm
                 GpuLayers = source.GpuLayers,
                 Remote = source.Remote,
                 FlashAttention = source.FlashAttention,
-                ParallelSlots = source.ParallelSlots
+                ParallelSlots = source.ParallelSlots,
+                MaxTokens = source.MaxTokens,
+                ReasoningMode = source.ReasoningMode,
+                ThinkingBudgetTokens = source.ThinkingBudgetTokens,
+                ExtraBodyJson = source.ExtraBodyJson ?? ""
             };
         }
 

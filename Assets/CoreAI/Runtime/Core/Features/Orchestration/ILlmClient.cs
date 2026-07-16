@@ -352,6 +352,25 @@ namespace CoreAI.Ai
             return SupportsNativeToolCalling;
         }
 
+        /// <summary>
+        /// Route-aware native tool capability: resolves against the endpoint the request would
+        /// actually reach (explicit profile, runtime role assignment, or fallback), so the tool
+        /// contract follows an endpoint switch. Non-routing clients ignore the profile.
+        /// </summary>
+        virtual bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            return SupportsNativeToolCallingForRole(agentRoleId);
+        }
+
+        /// <summary>
+        /// Context window of the endpoint the request would actually reach, or null when this
+        /// client has no routing knowledge (the caller then falls back to configured budgets).
+        /// </summary>
+        virtual int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            return null;
+        }
+
         /// <summary>Single completion; cancellation and timeouts are applied by outer decorators.</summary>
         Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default);

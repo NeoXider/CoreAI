@@ -15,6 +15,7 @@ Package manifests:
 | Goal | Start Here | Then Read |
 |---|---|---|
 | Get a working scene | [QUICK_START.md](QUICK_START.md) | [COREAI_SETTINGS.md](COREAI_SETTINGS.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) |
+| Configure or switch LLM endpoints | [RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md) | [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md), [COREAI_SETTINGS.md](COREAI_SETTINGS.md) |
 | Use CoreAI from code | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) |
 | Add tools or agents | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md), [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) |
 | Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) |
@@ -33,6 +34,7 @@ Package manifests:
 | [QUICK_START_FULL.md](QUICK_START_FULL.md) | Longer walkthrough with LM Studio and first command. |
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
+| [RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md) | Runtime multi-endpoint registry, provider switching, Hub endpoint editor, and agent assignments. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
 | [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable Lua (Lua-CSharp) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
@@ -68,7 +70,7 @@ Package manifests:
 | [CoreAI portable docs](../../CoreAI/Docs/README.md) | Index for host-agnostic CoreAI documentation. |
 | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) | Fluent agent configuration, tools, modes, memory, and skills. |
 | [ENGINE_AGNOSTIC_TOOLS](../../CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md) | How to keep tool logic portable and free of Unity dependencies. |
-| [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md) | Portable routing modes, policy hooks, usage sinks, and timeouts. |
+| [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md) | Portable runtime endpoint registry, profiles, role/request routing, readiness, and fallback policy. |
 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline from `ILlmTool` to `AIFunction` and forced tool modes. |
 | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |

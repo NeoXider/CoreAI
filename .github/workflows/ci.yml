@@ -106,7 +106,12 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
-            echo "::notice::Skipping EditMode tests because UNITY_LICENSE is unavailable (forked PRs do not receive repository secrets)."
+            echo "::warning title=Unity EditMode tests skipped::UNITY_LICENSE is unavailable; EditMode (${{ matrix.name }}) tests were SKIPPED."
+            echo "- ⚠️ EditMode (${{ matrix.name }}) tests: **SKIPPED** due to missing \`UNITY_LICENSE\`." >> "$GITHUB_STEP_SUMMARY"
+            if [ "$GITHUB_REPOSITORY" = "NeoXider/CoreAI" ]; then
+              echo "::error::UNITY_LICENSE is required for Unity tests in NeoXider/CoreAI."
+              exit 1
+            fi
             echo "run_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "run_tests=true" >> "$GITHUB_OUTPUT"
@@ -184,7 +189,12 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
-            echo "::notice::Skipping PlayMode tests because UNITY_LICENSE is unavailable (forked PRs do not receive repository secrets)."
+            echo "::warning title=Unity PlayMode tests skipped::UNITY_LICENSE is unavailable; PlayMode (FastNoLlm) tests were SKIPPED."
+            echo "- ⚠️ PlayMode (FastNoLlm) tests: **SKIPPED** due to missing \`UNITY_LICENSE\`." >> "$GITHUB_STEP_SUMMARY"
+            if [ "$GITHUB_REPOSITORY" = "NeoXider/CoreAI" ]; then
+              echo "::error::UNITY_LICENSE is required for Unity tests in NeoXider/CoreAI."
+              exit 1
+            fi
             echo "run_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "run_tests=true" >> "$GITHUB_OUTPUT"

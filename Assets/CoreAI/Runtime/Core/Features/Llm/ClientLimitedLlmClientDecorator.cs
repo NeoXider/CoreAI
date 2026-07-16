@@ -40,6 +40,18 @@ namespace CoreAI.Infrastructure.Llm
             return _inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
         }
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner?.SupportsNativeToolCallingForRole(agentRoleId, routingProfileId) == true;
+        }
+
+        /// <inheritdoc />
+        public int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner?.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
+        }
+
         /// <summary>
         /// Checks local limits and delegates a non-streaming request.
         /// </summary>

@@ -86,6 +86,7 @@ namespace CoreAI.Hub.UI
         private string _editingEndpointId = "";
         private bool _clearSessionKey;
         private bool _removeConfirmationPending;
+        private SynchronizationContext _uiSynchronizationContext;
         private const string AutomaticProfileLabel = "Automatic / agent default";
         private const string SelectEndpointLabel = "Select an endpoint…";
 
@@ -121,8 +122,21 @@ namespace CoreAI.Hub.UI
         {
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
             AttachRoutingController(null);
-            _routingCts?.Cancel();
-            _routingCts?.Dispose();
+            try
+            {
+                _routingCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            try
+            {
+                _routingCts?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
             _routingCts = null;
             if (_subscribed)
             {
@@ -133,6 +147,7 @@ namespace CoreAI.Hub.UI
 
         private object BuildContent()
         {
+            _uiSynchronizationContext = SynchronizationContext.Current;
             ScrollView scroll = HubPageWidgets.CreatePage(DisplayName, out VisualElement body);
             scroll.AddToClassList("coreai-hub-page");
             body.AddToClassList("coreai-hub-page-body");
@@ -392,11 +407,14 @@ namespace CoreAI.Hub.UI
 
         private void HandleRoutingControllerChanged()
         {
-            if (_routingControllerOverride == null)
+            DispatchToUi(() =>
             {
-                AttachRoutingController(CoreAiRoutingUi.Controller);
-                RefreshEndpointManagement();
-            }
+                if (_routingControllerOverride == null)
+                {
+                    AttachRoutingController(CoreAiRoutingUi.Controller);
+                    RefreshEndpointManagement();
+                }
+            });
         }
 
         private void AttachRoutingController(ICoreAiRoutingUiController controller)
@@ -408,14 +426,36 @@ namespace CoreAI.Hub.UI
 
             if (_routingController != null)
             {
-                _routingController.Changed -= RefreshEndpointManagement;
+                _routingController.Changed -= HandleRoutingChanged;
             }
 
             _routingController = controller;
             if (_routingController != null)
             {
-                _routingController.Changed += RefreshEndpointManagement;
+                _routingController.Changed += HandleRoutingChanged;
             }
+        }
+
+        private void HandleRoutingChanged()
+        {
+            DispatchToUi(RefreshEndpointManagement);
+        }
+
+        private void DispatchToUi(Action action)
+        {
+            SynchronizationContext context = _uiSynchronizationContext;
+            if (context == null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(context, SynchronizationContext.Current))
+            {
+                action();
+                return;
+            }
+
+            context.Post(_ => action(), null);
         }
 
         private void RefreshEndpointManagement()
@@ -596,9 +636,25 @@ namespace CoreAI.Hub.UI
                 : "Saving endpoint…";
             try
             {
-                _routingCts?.Cancel();
-                _routingCts?.Dispose();
+                CancellationTokenSource previousCts = _routingCts;
+                try
+                {
+                    previousCts?.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
                 _routingCts = new CancellationTokenSource();
+                try
+                {
+                    previousCts?.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
+                CancellationToken cancellationToken = _routingCts.Token;
                 string enteredKey = _endpointSessionKey.value ?? "";
                 string sessionKey = string.IsNullOrEmpty(_editingEndpointId)
                     ? enteredKey
@@ -608,14 +664,14 @@ namespace CoreAI.Hub.UI
                 CoreAiRoutingUiResult result = await _routingController.SaveEndpointAsync(
                     endpoint,
                     sessionKey,
-                    _routingCts.Token);
+                    cancellationToken);
                 _endpointSessionKey.SetValueWithoutNotify("");
                 _clearSessionKey = false;
                 _editingEndpointId = endpoint.EndpointId;
                 RefreshEndpointManagement();
                 _endpointPicker.SetValueWithoutNotify(FindLabel(_endpointIdByLabel, endpoint.EndpointId));
                 LoadSelectedEndpoint();
-                _endpointOperationStatus.text = result.Ok
+                _endpointOperationStatus.text = string.IsNullOrEmpty(result.Message)
                     ? result.Endpoint == null
                         ? "Endpoint saved."
                         : "Endpoint saved — " + result.Endpoint.State + "."
@@ -705,7 +761,9 @@ namespace CoreAI.Hub.UI
             string id = (_endpointId.value ?? "").Trim();
             if (string.IsNullOrEmpty(id))
             {
-                id = UniqueEndpointId(Slug(name));
+                id = LlmEndpointDescriptor.EnsureUniqueEndpointId(
+                    LlmEndpointDescriptor.DeriveEndpointSlug(name),
+                    ExistingEndpointIds());
                 _endpointId.SetValueWithoutNotify(id);
             }
 
@@ -719,38 +777,44 @@ namespace CoreAI.Hub.UI
                 SecretReference = (_endpointSecretReference.value ?? "").Trim(),
                 Active = _endpointActive.value,
                 KeepWarm = _endpointKeepWarm.value,
-                ContextWindowTokens = Mathf.Max(256, _endpointContextWindow.value),
+                ContextWindowTokens = _endpointContextWindow.value,
                 LocalModelPath = LabelKind(_endpointKind.value) == LlmEndpointKind.LlmUnity
                     ? (_endpointModel.value ?? "").Trim()
                     : "",
                 UnityAgentName = (_endpointUnityAgentName.value ?? "").Trim(),
-                Port = Mathf.Clamp(_endpointPort.value, 0, 65535),
+                Port = _endpointPort.value,
                 GpuLayers = Mathf.Max(0, _endpointGpuLayers.value),
-                ParallelSlots = Mathf.Max(1, _endpointParallelSlots.value),
+                ParallelSlots = _endpointParallelSlots.value,
                 FlashAttention = _endpointFlashAttention.value
             };
         }
 
         internal static string ValidateEndpoint(LlmEndpointDescriptor endpoint)
         {
-            if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.DisplayName))
+            if (endpoint == null)
+            {
+                return "Endpoint is required.";
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint.DisplayName))
             {
                 return "Name is required.";
             }
 
-            if (string.IsNullOrWhiteSpace(endpoint.EndpointId))
-            {
-                return "Endpoint ID is required.";
-            }
+            IReadOnlyList<string> errors = endpoint.Validate();
+            return errors.Count == 0 ? "" : string.Join(" ", errors);
+        }
 
-            if (endpoint.Kind == LlmEndpointKind.HttpOpenAi &&
-                (!Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out Uri uri) ||
-                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+        private IEnumerable<string> ExistingEndpointIds()
+        {
+            foreach (LlmEndpointSnapshot snapshot in _routingController?.GetEndpoints() ??
+                     Array.Empty<LlmEndpointSnapshot>())
             {
-                return "HTTP API requires an absolute http(s) base URL.";
+                if (!string.IsNullOrWhiteSpace(snapshot?.Descriptor?.EndpointId))
+                {
+                    yield return snapshot.Descriptor.EndpointId;
+                }
             }
-
-            return "";
         }
 
         private void RefreshEndpointEditorVisibility()
@@ -800,22 +864,6 @@ namespace CoreAI.Hub.UI
             }
 
             return false;
-        }
-
-        private string UniqueEndpointId(string baseId)
-        {
-            if (string.IsNullOrEmpty(baseId) || !EndpointIdExists(baseId))
-            {
-                return baseId;
-            }
-
-            int suffix = 2;
-            while (EndpointIdExists(baseId + "-" + suffix))
-            {
-                suffix++;
-            }
-
-            return baseId + "-" + suffix;
         }
 
         private List<string> AffectedBuiltInRoles(string endpointId)
@@ -893,29 +941,6 @@ namespace CoreAI.Hub.UI
             }
 
             return fallback;
-        }
-
-        private static string Slug(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "";
-            }
-
-            System.Text.StringBuilder builder = new();
-            foreach (char c in value.Trim().ToLowerInvariant())
-            {
-                if (char.IsLetterOrDigit(c))
-                {
-                    builder.Append(c);
-                }
-                else if (builder.Length > 0 && builder[builder.Length - 1] != '-')
-                {
-                    builder.Append('-');
-                }
-            }
-
-            return builder.ToString().Trim('-');
         }
 
         private static string KindLabel(LlmEndpointKind kind)
@@ -1003,9 +1028,7 @@ namespace CoreAI.Hub.UI
 
             CoreAiBackendStatus status = CoreAiBackend.Status;
             RefreshFromStatus();
-            _status.text = live
-                ? "Applied live: " + status
-                : "Saved to settings; no live CoreAI scope is running: " + status;
+            _status.text = EffectiveRoutingStatus(live, status);
             _health.text = "";
         }
 
@@ -1104,7 +1127,32 @@ namespace CoreAI.Hub.UI
 
         private void HandleBackendChanged(CoreAiBackendStatus status)
         {
-            Task.Yield().GetAwaiter().OnCompleted(RefreshFromStatus);
+            DispatchToUi(RefreshFromStatus);
+        }
+
+        private string EffectiveRoutingStatus(bool live, CoreAiBackendStatus status)
+        {
+            string profileId = _routingController?.GetProfileForRole(BuiltInAgentRoleIds.SmartChat) ?? "";
+            if (!string.IsNullOrWhiteSpace(profileId))
+            {
+                string profileName = profileId;
+                foreach (LlmRuntimeProfile profile in _routingController.GetProfiles() ??
+                         Array.Empty<LlmRuntimeProfile>())
+                {
+                    if (string.Equals(profile?.ProfileId, profileId, StringComparison.Ordinal))
+                    {
+                        profileName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profileId : profile.DisplayName;
+                        break;
+                    }
+                }
+
+                return "Saved backend settings; SmartChat currently routes to runtime profile '" +
+                       profileName + "'. Backend settings apply only to Automatic/default roles.";
+            }
+
+            return live
+                ? "Applied live: " + status
+                : "Saved to settings; no live CoreAI scope is running: " + status;
         }
 
         private LlmExecutionMode SelectedMode()

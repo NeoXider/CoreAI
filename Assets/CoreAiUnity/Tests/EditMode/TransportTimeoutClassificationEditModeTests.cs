@@ -69,14 +69,22 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(20_000)]
-        public void NonStreaming_TransportTimeoutWithLiveCallerToken_SurfacesAsTypedTimeout()
+        public async Task NonStreaming_TransportTimeoutWithLiveCallerToken_SurfacesAsTypedTimeout()
         {
             CancellationThrowingTransport transport = new();
             MeaiOpenAiChatClient client = new(new StubHttpSettings(), transport, NullLog.Instance);
 
-            LlmClientException ex = Assert.ThrowsAsync<LlmClientException>(async () =>
-                await client.GetResponseAsync(Messages()));
+            LlmClientException ex = null;
+            try
+            {
+                await client.GetResponseAsync(Messages());
+            }
+            catch (LlmClientException caught)
+            {
+                ex = caught;
+            }
 
+            Assert.IsNotNull(ex, "An internal transport cancellation must surface as LlmClientException.");
             Assert.AreEqual(LlmErrorCode.Timeout, ex.ErrorCode,
                 "An internal transport cancellation with a live caller token is a timeout");
             Assert.AreEqual(1, transport.PostCalls);
@@ -84,19 +92,25 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(20_000)]
-        public void Streaming_HeaderTimeoutWithLiveCallerToken_SurfacesAsTypedTimeout()
+        public async Task Streaming_HeaderTimeoutWithLiveCallerToken_SurfacesAsTypedTimeout()
         {
             CancellationThrowingTransport transport = new();
             MeaiOpenAiChatClient client = new(new StubHttpSettings(), transport, NullLog.Instance);
 
-            LlmClientException ex = Assert.ThrowsAsync<LlmClientException>(async () =>
+            LlmClientException ex = null;
+            try
             {
                 await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(Messages()))
                 {
                     _ = update;
                 }
-            });
+            }
+            catch (LlmClientException caught)
+            {
+                ex = caught;
+            }
 
+            Assert.IsNotNull(ex, "A header timeout must surface as LlmClientException.");
             Assert.AreEqual(LlmErrorCode.Timeout, ex.ErrorCode,
                 "A headerless backend must fail as Timeout so the fallback decorator can try the secondary");
             Assert.AreEqual(1, transport.OpenCalls);
@@ -104,36 +118,51 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(20_000)]
-        public void NonStreaming_CallerCancellation_StillPropagatesAsOperationCanceled()
+        public async Task NonStreaming_CallerCancellation_StillPropagatesAsOperationCanceled()
         {
             CancellationThrowingTransport transport = new();
             MeaiOpenAiChatClient client = new(new StubHttpSettings(), transport, NullLog.Instance);
             using CancellationTokenSource cts = new();
             cts.Cancel();
 
-            // WHY: CatchAsync (not ThrowsAsync): TaskCanceledException derives from
-            // OperationCanceledException and both shapes are valid caller-cancellation surfaces.
-            Assert.CatchAsync<OperationCanceledException>(async () =>
-                await client.GetResponseAsync(Messages(), null, cts.Token));
+            // WHY: TaskCanceledException derives from OperationCanceledException, and both are valid here.
+            OperationCanceledException exception = null;
+            try
+            {
+                await client.GetResponseAsync(Messages(), null, cts.Token);
+            }
+            catch (OperationCanceledException caught)
+            {
+                exception = caught;
+            }
+
+            Assert.IsNotNull(exception, "Caller cancellation must remain an OperationCanceledException.");
         }
 
         [Test]
         [Timeout(20_000)]
-        public void Streaming_CallerCancellation_StillPropagatesAsOperationCanceled()
+        public async Task Streaming_CallerCancellation_StillPropagatesAsOperationCanceled()
         {
             CancellationThrowingTransport transport = new();
             MeaiOpenAiChatClient client = new(new StubHttpSettings(), transport, NullLog.Instance);
             using CancellationTokenSource cts = new();
             cts.Cancel();
 
-            Assert.CatchAsync<OperationCanceledException>(async () =>
+            OperationCanceledException exception = null;
+            try
             {
                 await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
                                    Messages(), null, cts.Token))
                 {
                     _ = update;
                 }
-            });
+            }
+            catch (OperationCanceledException caught)
+            {
+                exception = caught;
+            }
+
+            Assert.IsNotNull(exception, "Caller cancellation must remain an OperationCanceledException.");
         }
     }
 }

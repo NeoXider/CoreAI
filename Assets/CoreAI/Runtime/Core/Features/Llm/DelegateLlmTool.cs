@@ -134,7 +134,14 @@ namespace CoreAI.Ai
                     return true;
                 }
 
+#if COREAI_NO_LLM
+                // WHY: ToolExecutionPolicy is stripped with the LLM module and no policy traces
+                // coercion failures; converting every synchronous fault to an error result is the
+                // safe standalone behavior.
+                return true;
+#else
                 return !CoreAI.Infrastructure.Llm.ToolExecutionPolicy.LooksLikeArgumentConversionError(ex);
+#endif
             }
 
             private bool TryGetDelegateException(Exception exception, out Exception delegateException)

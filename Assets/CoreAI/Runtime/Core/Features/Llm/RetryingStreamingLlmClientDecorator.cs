@@ -64,6 +64,18 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner.SupportsNativeToolCallingForRole(agentRoleId, routingProfileId);
+        }
+
+        /// <inheritdoc />
+        public int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
+        }
+
+        /// <inheritdoc />
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {
             _inner.SetTools(tools);

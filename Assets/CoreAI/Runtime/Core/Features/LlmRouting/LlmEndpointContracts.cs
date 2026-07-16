@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Infrastructure.Llm;
 
 namespace CoreAI.Ai
 {
@@ -39,7 +40,8 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Requests cancellation of tracked in-flight calls. Registries that cannot prove cancellation
-        /// must reject removal instead of reporting a false success.
+        /// must reject removal by throwing <see cref="NotSupportedException"/> instead of reporting a
+        /// false success or an ambiguous <c>false</c> ("endpoint not found").
         /// </summary>
         CancelInFlight = 1
     }
@@ -66,6 +68,60 @@ namespace CoreAI.Ai
         public bool Remote { get; set; }
         public bool FlashAttention { get; set; }
         public int ParallelSlots { get; set; } = 1;
+
+        /// <summary>Max completion tokens for HTTP endpoints; 0 leaves the provider default.</summary>
+        public int MaxTokens { get; set; }
+
+        /// <summary>Provider reasoning/thinking request mode for HTTP endpoints.</summary>
+        public LlmReasoningMode ReasoningMode { get; set; } = LlmReasoningMode.ProviderDefault;
+
+        /// <summary>Thinking token budget forwarded to compatible providers; 0 leaves the default.</summary>
+        public int ThinkingBudgetTokens { get; set; }
+
+        /// <summary>Raw JSON merged into the request body for provider-specific switches.</summary>
+        public string ExtraBodyJson { get; set; } = "";
+
+        /// <summary>Derives a portable endpoint-id slug from a display name.</summary>
+        public static string DeriveEndpointSlug(string displayName)
+        {
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                return "";
+            }
+
+            System.Text.StringBuilder builder = new();
+            foreach (char character in displayName.Trim().ToLowerInvariant())
+            {
+                if (char.IsLetterOrDigit(character))
+                {
+                    builder.Append(character);
+                }
+                else if (builder.Length > 0 && builder[builder.Length - 1] != '-')
+                {
+                    builder.Append('-');
+                }
+            }
+
+            return builder.ToString().Trim('-');
+        }
+
+        /// <summary>Returns a unique endpoint id by appending a numeric suffix when needed.</summary>
+        public static string EnsureUniqueEndpointId(string slug, IEnumerable<string> existingIds)
+        {
+            HashSet<string> ids = new(existingIds ?? Array.Empty<string>(), StringComparer.Ordinal);
+            if (string.IsNullOrEmpty(slug) || !ids.Contains(slug))
+            {
+                return slug;
+            }
+
+            int suffix = 2;
+            while (ids.Contains(slug + "-" + suffix))
+            {
+                suffix++;
+            }
+
+            return slug + "-" + suffix;
+        }
 
         /// <summary>Returns portable validation errors without contacting the endpoint.</summary>
         public IReadOnlyList<string> Validate()
@@ -102,6 +158,16 @@ namespace CoreAI.Ai
             if (ParallelSlots < 1)
             {
                 errors.Add("Parallel slots must be positive.");
+            }
+
+            if (MaxTokens < 0)
+            {
+                errors.Add("Max tokens must not be negative.");
+            }
+
+            if (ThinkingBudgetTokens < 0)
+            {
+                errors.Add("Thinking budget must not be negative.");
             }
 
             return errors;
@@ -184,6 +250,11 @@ namespace CoreAI.Ai
             bool keepWarm = false,
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Removes an endpoint. Returns <c>false</c> only when the endpoint id is unknown.
+        /// Throws <see cref="NotSupportedException"/> when <paramref name="mode"/> requests
+        /// semantics the registry cannot honor (see <see cref="LlmEndpointRemovalMode.CancelInFlight"/>).
+        /// </summary>
         Task<bool> RemoveEndpointAsync(
             string endpointId,
             LlmEndpointRemovalMode mode = LlmEndpointRemovalMode.Drain,

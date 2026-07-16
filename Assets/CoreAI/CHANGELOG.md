@@ -12,6 +12,20 @@
   descriptors contain a `SecretReference`, never the session credential.
 - Portable `ILlmEndpointReadinessProbe` request/result contracts, shared OpenAI status policy, and
   `HttpClientOpenAiReadinessProbe` let ordinary .NET hosts validate endpoints without referencing Unity.
+- `LlmEndpointDescriptor` behavior fields for HTTP endpoints — `MaxTokens`, `ReasoningMode`,
+  `ThinkingBudgetTokens`, `ExtraBodyJson` — with portable `Validate()` rules, so per-endpoint request
+  shaping is part of the persisted descriptor instead of a UI-only concern.
+- `LlmRoleRouteSnapshot` — one atomic route observation (client, effective profile id, context window,
+  execution mode, `IsRouted`) exposed via `ILlmClientRegistry.ResolveRouteForRole`, so callers can no
+  longer pair one endpoint's client with another endpoint's metadata during a concurrent switch.
+- Profile-aware `ILlmClient` capability queries: `SupportsNativeToolCallingForRole(roleId, profileId)` and
+  `ResolveContextWindowTokensForRole(roleId, profileId)`, forwarded through the timeout, logging, retrying,
+  and client-limited decorators.
+- `LlmEndpointDescriptor.DeriveEndpointSlug` / `EnsureUniqueEndpointId` — the endpoint-id derivation used by
+  the Hub editor now lives in the portable contract and is unit-testable.
+- `ILlmClientRegistry.ReportRouteFailure(profileId, errorCode, error)` — routing clients report
+  endpoint-level request failures (expired credentials, unreachable backend) so registries can surface
+  degraded health instead of keeping a stale Ready state; default no-op for legacy registries.
 
 ### Changed
 
@@ -26,6 +40,19 @@
   APIs retain the host platform's proxy policy for both non-streaming and SSE requests.
 - Full-Lua composition tests now forget their persisted probe mod before disposing the container, so running
   EditMode tests cannot poison a later Hub/Chat startup with a test-only rehydration error.
+- The `"fallback"` routing sentinel echoed back by retry decorators as an explicit request profile no longer
+  fails resolution as "routing unavailable"; the registry re-resolves it as "no explicit profile" unless a
+  real profile or endpoint literally named `fallback` exists.
+- The orchestrator's tool strategy (native vs text tool-calling) now follows the endpoint the request is
+  actually routed to — an agent pinned via `WithLlmProfile` or re-routed at runtime no longer keeps the old
+  endpoint's tool contract.
+- Context budgeting follows the routed endpoint: the orchestrator asks the routing client for the effective
+  endpoint's context window and takes the minimum with the role's configured budget, instead of always using
+  the global settings window.
+- `COREAI_NO_LLM` builds compile again: `DelegateLlmTool` no longer references the stripped
+  `ToolExecutionPolicy` when the LLM module is compiled out.
+- `LlmEndpointRemovalMode.CancelInFlight` semantics documented and enforced: registries that cannot prove
+  cancellation throw `NotSupportedException` instead of reporting a false success or an ambiguous `false`.
 
 ## 5.8.10 - Live model-behavior verification; fix a false-failing memory-clear test (2026-07-13)
 
@@ -1155,7 +1182,7 @@ orchestration/context, memory/skills, and Lua-execution clusters; the items belo
 
 ## 4.10.2 - 2026-06-21
 
-- Версия приведена в соответствие с `com.neoxider.coreaiunity` (пакеты держим в lockstep — одинаковые версии). Функциональных изменений в core нет; правки этого релиза — в Unity-слое (см. `CoreAiUnity/CHANGELOG.md`: фикс отображения tool-call уведомлений в чате + тест-фиксы EditMode).
+- Version aligned with `com.neoxider.coreaiunity` (the packages are kept in lockstep with identical versions). There were no functional core changes; this release's changes were in the Unity layer (see `CoreAiUnity/CHANGELOG.md`: chat tool-call notification display fix and EditMode test fixes).
 
 ## 4.10.0 - 2026-06-20
 

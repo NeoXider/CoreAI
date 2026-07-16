@@ -93,7 +93,7 @@ namespace CoreAI.Core.Tests.EditMode
         }
 
         [Test]
-        public void HttpClientProbe_CallerCancellationRemainsCancellation()
+        public async Task HttpClientProbe_CallerCancellationRemainsCancellation()
         {
             using HttpClient client = new(new AsyncDelegateHandler(
                 (_, token) => Task.Delay(TimeSpan.FromMinutes(1), token)
@@ -102,13 +102,22 @@ namespace CoreAI.Core.Tests.EditMode
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
 
-            Assert.CatchAsync<OperationCanceledException>(() => probe.ProbeAsync(
-                new LlmEndpointReadinessRequest
+            OperationCanceledException caught = null;
+            try
+            {
+                await probe.ProbeAsync(new LlmEndpointReadinessRequest
                 {
                     BaseUrl = "https://example.test/v1",
                     Mode = LlmEndpointReadinessMode.CompletionsOnly
                 },
-                cancellation.Token));
+                cancellation.Token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                caught = ex;
+            }
+
+            Assert.IsNotNull(caught, "Caller cancellation must remain an OperationCanceledException.");
         }
 
         [Test]

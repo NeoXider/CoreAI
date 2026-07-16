@@ -4,15 +4,15 @@ using System.Threading;
 using CoreAI.Ai;
 using UnityEngine;
 
-namespace CoreAI.ExampleGame.QwenDemo
+namespace CoreAI.Demos.QwenDemo
 {
     /// <summary>
-    /// Demo 1 — "Джинн желаний". The player makes a free-form wish (RU or EN). Qwen3.5-0.8B, through the
+    /// Demo 1 — "Wish Genie". The player makes a free-form wish (RU or EN). Qwen3.5-0.8B, through the
     /// existing CoreAI LLM-for-Unity native tool-calling path, interprets the wish and calls exactly one
     /// world tool. Justification: the input is unbounded natural language — no switch/state-machine can map
-    /// "хочу гору золота" / "make it rain frogs" / "накажи вора" to an action; understanding + a mischievous
+    /// wishes such as "make it rain frogs" to an action; understanding and a mischievous
     /// reading is the whole mechanic. Guardrail: a wish-charge budget lives in C# — when it hits zero the
-    /// tools VETO the model's call ("модель предлагает — код распоряжается"). HUD shows time + tokens.
+    /// tools VETO the model's call. HUD shows time and tokens.
     /// </summary>
     public sealed class GenieDemo : MonoBehaviour
     {
@@ -59,9 +59,9 @@ namespace CoreAI.ExampleGame.QwenDemo
             _pump = gameObject.AddComponent<MainThreadPump>();
 
             _lamp = QwenFx.Prim(PrimitiveType.Cylinder, _root, new Vector3(0, 0.5f, 0),
-                new Vector3(1.4f, 0.5f, 1.4f), new Color(0.8f, 0.7f, 0.3f), "🪔 ЛАМПА");
+                new Vector3(1.4f, 0.5f, 1.4f), new Color(0.8f, 0.7f, 0.3f), "🪔 LAMP");
             QwenFx.Prim(PrimitiveType.Capsule, _root, new Vector3(-3f, 1f, -1.5f),
-                new Vector3(0.7f, 1f, 0.7f), new Color(0.4f, 0.7f, 1f), "ты");
+                new Vector3(0.7f, 1f, 0.7f), new Color(0.4f, 0.7f, 1f), "you");
 
             _agent = new AgentBuilder(RoleId)
                 .WithSystemPrompt(SystemPrompt)
@@ -84,13 +84,13 @@ namespace CoreAI.ExampleGame.QwenDemo
             if (CoreAIAgent.Policy == null)
             {
                 _disabledReason =
-                    "CoreAI не инициализирован (нет CoreAILifetimeScope в сцене или не выбран бэкенд LLM).";
+                    "CoreAI is not initialized (CoreAILifetimeScope is missing from the scene or no LLM backend is selected).";
                 Log(_disabledReason);
                 return;
             }
 
             _agent.ApplyToPolicy(CoreAIAgent.Policy);
-            Log("⏳ Загружаем Qwen и ждём HTTP-сервер llama.cpp…");
+            Log("⏳ Loading Qwen and waiting for the llama.cpp HTTP server…");
             string readinessError;
             try
             {
@@ -114,7 +114,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             }
 
             _ready = true;
-            Log("✅ Джинн готов. Загадай желание словами — он сам решит, какой tool вызвать.");
+            Log("✅ The genie is ready. Make a wish in your own words and it will choose the tool.");
         }
 
         private void OnDestroy()
@@ -155,20 +155,23 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             // WHY: The model supplies a hint while authoritative game code owns the reward cap.
             int coins = Mathf.Clamp(amount <= 0 ? 20 : amount, 3, 40);
-            _pump.Enqueue(() =>
+            if (_pump != null)
             {
-                for (int i = 0; i < coins; i++)
+                _pump.Enqueue(() =>
                 {
-                    Vector3 p = new(UnityEngine.Random.Range(-2.5f, 2.5f), 6f + i * 0.15f,
-                        UnityEngine.Random.Range(-1f, 2.5f));
-                    GameObject c = QwenFx.Prim(PrimitiveType.Sphere, _root, p, Vector3.one * 0.28f,
-                        new Color(1f, 0.84f, 0.2f), null, true);
-                    StartCoroutine(QwenFx.MoveTo(c.transform, new Vector3(p.x, 0.3f, p.z), 9f));
-                    UnityEngine.Object.Destroy(c, 4f);
-                }
+                    for (int i = 0; i < coins; i++)
+                    {
+                        Vector3 p = new(UnityEngine.Random.Range(-2.5f, 2.5f), 6f + i * 0.15f,
+                            UnityEngine.Random.Range(-1f, 2.5f));
+                        GameObject c = QwenFx.Prim(PrimitiveType.Sphere, _root, p, Vector3.one * 0.28f,
+                            new Color(1f, 0.84f, 0.2f), null, true);
+                        StartCoroutine(QwenFx.MoveTo(c.transform, new Vector3(p.x, 0.3f, p.z), 9f));
+                        UnityEngine.Object.Destroy(c, 4f);
+                    }
 
-                QwenFx.Ring(this, _root, Vector3.zero, new Color(1f, 0.84f, 0.2f), 3f, 0.5f);
-            });
+                    QwenFx.Ring(this, _root, Vector3.zero, new Color(1f, 0.84f, 0.2f), 3f, 0.5f);
+                });
+            }
             return $"Granted {coins} gold coins raining down. Wishes left: {left}.";
         }
 
@@ -179,7 +182,7 @@ namespace CoreAI.ExampleGame.QwenDemo
                 return "This turn already used its single world action.";
             }
 
-            string name = string.IsNullOrWhiteSpace(creature) ? "существо" : creature.Trim();
+            string name = string.IsNullOrWhiteSpace(creature) ? "creature" : creature.Trim();
             if (name.Length > 22)
             {
                 name = name.Substring(0, 22);
@@ -190,13 +193,16 @@ namespace CoreAI.ExampleGame.QwenDemo
                 return "The lamp has gone cold — no wishes left. Refuse politely.";
             }
 
-            _pump.Enqueue(() =>
+            if (_pump != null)
             {
-                Vector3 p = new(UnityEngine.Random.Range(-2f, 2f), 0.9f, 2.5f);
-                QwenFx.Sparks(this, _root, p, new Color(0.6f, 0.3f, 0.9f), 16, 5f);
-                QwenFx.Prim(PrimitiveType.Cube, _root, p, new Vector3(1.1f, 1.6f, 1.1f),
-                    new Color(0.55f, 0.35f, 0.8f), "✨ " + name);
-            });
+                _pump.Enqueue(() =>
+                {
+                    Vector3 p = new(UnityEngine.Random.Range(-2f, 2f), 0.9f, 2.5f);
+                    QwenFx.Sparks(this, _root, p, new Color(0.6f, 0.3f, 0.9f), 16, 5f);
+                    QwenFx.Prim(PrimitiveType.Cube, _root, p, new Vector3(1.1f, 1.6f, 1.1f),
+                        new Color(0.55f, 0.35f, 0.8f), "✨ " + name);
+                });
+            }
             return $"Summoned '{name}'. Wishes left: {left}.";
         }
 
@@ -207,7 +213,7 @@ namespace CoreAI.ExampleGame.QwenDemo
                 return "This turn already used its single world action.";
             }
 
-            string name = string.IsNullOrWhiteSpace(target) ? "цель" : target.Trim();
+            string name = string.IsNullOrWhiteSpace(target) ? "target" : target.Trim();
             if (name.Length > 22)
             {
                 name = name.Substring(0, 22);
@@ -218,16 +224,19 @@ namespace CoreAI.ExampleGame.QwenDemo
                 return "The lamp has gone cold — no wishes left. Refuse politely.";
             }
 
-            _pump.Enqueue(() =>
+            if (_pump != null)
             {
-                Vector3 p = new(UnityEngine.Random.Range(-2f, 2f), 1f, 2.5f);
-                GameObject victim = QwenFx.Prim(PrimitiveType.Capsule, _root, p, new Vector3(0.7f, 1f, 0.7f),
-                    new Color(0.8f, 0.3f, 0.3f), "☄ " + name);
-                QwenFx.Beam(this, _root, p + Vector3.up * 6f, p + Vector3.up, new Color(1f, 0.4f, 0.2f), 0.25f, 3);
-                QwenFx.Sparks(this, _root, p, new Color(1f, 0.4f, 0.2f), 14, 5f);
-                StartCoroutine(QwenFx.Shake(victim.transform, 0.2f, 0.5f));
-                UnityEngine.Object.Destroy(victim, 3.5f);
-            });
+                _pump.Enqueue(() =>
+                {
+                    Vector3 p = new(UnityEngine.Random.Range(-2f, 2f), 1f, 2.5f);
+                    GameObject victim = QwenFx.Prim(PrimitiveType.Capsule, _root, p, new Vector3(0.7f, 1f, 0.7f),
+                        new Color(0.8f, 0.3f, 0.3f), "☄ " + name);
+                    QwenFx.Beam(this, _root, p + Vector3.up * 6f, p + Vector3.up, new Color(1f, 0.4f, 0.2f), 0.25f, 3);
+                    QwenFx.Sparks(this, _root, p, new Color(1f, 0.4f, 0.2f), 14, 5f);
+                    StartCoroutine(QwenFx.Shake(victim.transform, 0.2f, 0.5f));
+                    UnityEngine.Object.Destroy(victim, 3.5f);
+                });
+            }
             return $"Smote '{name}' with a bolt. Wishes left: {left}.";
         }
 
@@ -238,8 +247,11 @@ namespace CoreAI.ExampleGame.QwenDemo
                 return "This turn already used its single world action.";
             }
 
-            string r = string.IsNullOrWhiteSpace(reason) ? "это не в моей власти" : reason.Trim();
-            _pump.Enqueue(() => QwenFx.Label(_lamp.transform, "🚫", new Color(1f, 0.5f, 0.5f), 1.6f));
+            string r = string.IsNullOrWhiteSpace(reason) ? "that is beyond my power" : reason.Trim();
+            if (_pump != null)
+            {
+                _pump.Enqueue(() => QwenFx.Label(_lamp.transform, "🚫", new Color(1f, 0.5f, 0.5f), 1.6f));
+            }
             return $"Wish refused: {r}";
         }
 
@@ -253,31 +265,41 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             _busy = true;
             string wish = _input;
-            Log("🙏 желание: " + wish);
+            Log("🙏 wish: " + wish);
             _ = RunAsync(wish);
         }
 
         private async System.Threading.Tasks.Task RunAsync(string wish)
         {
+            CancellationToken cancellationToken = _lifetimeCancellation.Token;
             int turn = _toolTurnGuard.BeginTurn();
             try
             {
-                _last = await LlmMeter.RunAsync(RoleId, wish, 200,
+                LlmRunResult result = await LlmMeter.RunAsync(RoleId, wish, 200, cancellationToken,
                     "grant_gold", "summon", "smite", "deny");
+                if (cancellationToken.IsCancellationRequested || this == null)
+                {
+                    return;
+                }
+
+                _last = result;
                 if (!string.IsNullOrEmpty(_last.Error))
                 {
                     Log("✘ " + _last.Error);
                 }
                 else
                 {
-                    Log("🧞 " + (_last.Text.Length == 0 ? "(джинн промолчал)" : _last.Text.Trim()));
+                    Log("🧞 " + (_last.Text.Length == 0 ? "(the genie was silent)" : _last.Text.Trim()));
                     Log(_last.HudLine());
                 }
             }
             finally
             {
-                _toolTurnGuard.EndTurn(turn);
-                _busy = false;
+                if (!cancellationToken.IsCancellationRequested && this != null)
+                {
+                    _toolTurnGuard.EndTurn(turn);
+                    _busy = false;
+                }
             }
         }
 
@@ -297,13 +319,13 @@ namespace CoreAI.ExampleGame.QwenDemo
             QwenDemoLayout.Calculate(Screen.width, Screen.height, out Rect topPanel, out Rect logPanel);
             GUILayout.BeginArea(topPanel, GUI.skin.box);
             _controlsScroll = GUILayout.BeginScrollView(_controlsScroll);
-            GUILayout.Label("<b>ДЖИНН ЖЕЛАНИЙ — Qwen3.5-0.8B (нативные tool-calls)</b>",
+            GUILayout.Label("<b>WISH GENIE — Qwen3.5-0.8B (native tool calls)</b>",
                 new GUIStyle(GUI.skin.label) { richText = true, fontSize = 14 });
             GUILayout.Label(
-                _last == null ? "<b>⏱ ждём первое желание…</b>" : "<b>" + _last.HudLine() + "</b>",
+                _last == null ? "<b>⏱ waiting for the first wish…</b>" : "<b>" + _last.HudLine() + "</b>",
                 new GUIStyle(GUI.skin.label)
                     { richText = true, fontSize = 12, normal = { textColor = new Color(0.6f, 0.9f, 1f) } });
-            GUILayout.Label($"🪔 осталось желаний (лимит в коде): <b>{_charges}</b>", rich);
+            GUILayout.Label($"🪔 wishes left (code-enforced limit): <b>{_charges}</b>", rich);
 
             if (QwenDemoState.HasBlockingError(_disabledReason))
             {
@@ -315,7 +337,7 @@ namespace CoreAI.ExampleGame.QwenDemo
 
             if (!_ready)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp загружается; действия станут доступны после readiness.</color>", rich);
+                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>", rich);
             }
 
             GUILayout.Space(4);
@@ -327,7 +349,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             }
 
             GUI.enabled = !_busy && _ready;
-            if (GUILayout.Button(_busy ? "⏳ джинн думает…" : "🙏 ЗАГАДАТЬ", GUILayout.Height(28)))
+            if (GUILayout.Button(_busy ? "⏳ the genie is thinking…" : "🙏 MAKE A WISH", GUILayout.Height(28)))
             {
                 Submit();
             }
@@ -335,7 +357,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             GUILayoutOption[] resetOptions = stackedButtons
                 ? new[] { GUILayout.Height(28) }
                 : new[] { GUILayout.Width(130), GUILayout.Height(28) };
-            if (GUILayout.Button("сброс лампы (+3)", resetOptions))
+            if (GUILayout.Button("reset lamp (+3)", resetOptions))
             {
                 lock (_gate)
                 {
@@ -349,7 +371,7 @@ namespace CoreAI.ExampleGame.QwenDemo
                 GUILayout.EndHorizontal();
             }
 
-            GUILayout.Label("Примеры (RU/EN):", rich);
+            GUILayout.Label("Examples (RU/EN):", rich);
             GUI.enabled = !_busy && _ready;
             foreach (string p in Presets)
             {
@@ -365,7 +387,7 @@ namespace CoreAI.ExampleGame.QwenDemo
             GUILayout.EndArea();
 
             GUILayout.BeginArea(logPanel, GUI.skin.box);
-            GUILayout.Label("Журнал (что решила модель + скорость/токены):");
+            GUILayout.Label("Log (model decision + speed/tokens):");
             _scroll = GUILayout.BeginScrollView(_scroll);
             for (int i = _log.Count - 1; i >= 0; i--)
             {

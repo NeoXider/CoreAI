@@ -52,6 +52,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 - 🗜️ **Long chats that don't explode** — token budget, rolling summaries, optional smart compaction
 - 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, Lua generation rate limit, rate-limit metrics + F10 token-budget overlay
 - 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
+- 🔀 **Runtime multi-endpoint routing** — keep multiple local/cloud providers active and switch agents in Hub Settings without losing conversation state
 - 🧩 **Optional modules** — no Mods package? No LLMUnity? Still compiles; features light up when packages appear
 - 🌍 **Unity world control** — spawn primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`), move/rotate/scale objects, and add configured components through the reflection-free `component_command` tool
 
@@ -688,7 +689,8 @@ Start from the index and pick the level that matches your goal:
 | 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Normative spec: DI, threads, authority |
 | 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
 | 🧰 [TOOL_CALLING_BEST_PRACTICES.md](Assets/CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | Tool schema, idempotency, duplicate calls, SkillSet organization |
-| 🔀 [LLM_ROUTING.md](Assets/CoreAI/Docs/LLM_ROUTING.md) | Portable routing: modes, policy, usage sinks, timeouts |
+| 🔀 [LLM_ROUTING.md](Assets/CoreAI/Docs/LLM_ROUTING.md) | Runtime endpoint registry, profiles, role/request routing, readiness, and fallback policy |
+| 🎛️ [RUNTIME_BACKEND_SWITCHING.md](Assets/CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md) | Unity runtime switching, Hub endpoint editor, agent assignments, persistence, and secrets |
 | 📑 [CoreAI/Docs/README.md](Assets/CoreAI/Docs/README.md) | Index of all portable CoreAI markdown guides |
 | 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) · [CHANGELOG (Unity)](Assets/CoreAiUnity/CHANGELOG.md) | Version history |
 

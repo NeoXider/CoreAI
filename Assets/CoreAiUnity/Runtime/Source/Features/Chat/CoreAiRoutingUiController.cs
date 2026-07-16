@@ -6,19 +6,35 @@ using CoreAI.Ai;
 
 namespace CoreAI.Chat
 {
+    /// <summary>Persistence and activation outcome of an endpoint save operation.</summary>
+    public enum CoreAiRoutingUiSaveStatus
+    {
+        NotSaved = 0,
+        SavedAndReady = 1,
+        SavedActivationFailed = 2
+    }
+
     /// <summary>Result returned by an endpoint-management UI operation.</summary>
     public readonly struct CoreAiRoutingUiResult
     {
-        public CoreAiRoutingUiResult(bool ok, string message = "", LlmEndpointSnapshot endpoint = null)
+        public CoreAiRoutingUiResult(
+            bool ok,
+            string message = "",
+            LlmEndpointSnapshot endpoint = null,
+            CoreAiRoutingUiSaveStatus? saveStatus = null)
         {
             Ok = ok;
             Message = message ?? "";
             Endpoint = endpoint;
+            SaveStatus = saveStatus ?? (ok
+                ? CoreAiRoutingUiSaveStatus.SavedAndReady
+                : CoreAiRoutingUiSaveStatus.NotSaved);
         }
 
         public bool Ok { get; }
         public string Message { get; }
         public LlmEndpointSnapshot Endpoint { get; }
+        public CoreAiRoutingUiSaveStatus SaveStatus { get; }
     }
 
     /// <summary>
@@ -95,15 +111,27 @@ namespace CoreAI.Chat
                              snapshot.State == LlmEndpointLifecycleState.Ready ||
                              snapshot.State == LlmEndpointLifecycleState.Inactive;
                 string message = ready
-                    ? ""
+                    ? snapshot?.State == LlmEndpointLifecycleState.Inactive
+                        ? "Saved; activation is inactive."
+                        : "Saved and ready."
                     : string.IsNullOrWhiteSpace(snapshot.Error)
-                        ? "Endpoint saved, but activation state is " + snapshot.State + "."
-                        : "Endpoint saved, but activation failed: " + snapshot.Error;
-                return new CoreAiRoutingUiResult(ready, message, snapshot);
+                        ? "Saved; activation failed with state " + snapshot.State + "."
+                        : "Saved; activation failed: " + snapshot.Error;
+                return new CoreAiRoutingUiResult(
+                    true,
+                    message,
+                    snapshot,
+                    ready
+                        ? CoreAiRoutingUiSaveStatus.SavedAndReady
+                        : CoreAiRoutingUiSaveStatus.SavedActivationFailed);
             }
             catch (Exception ex)
             {
-                return new CoreAiRoutingUiResult(false, ex.Message);
+                return new CoreAiRoutingUiResult(
+                    false,
+                    ex.Message,
+                    null,
+                    CoreAiRoutingUiSaveStatus.NotSaved);
             }
         }
 

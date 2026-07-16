@@ -72,7 +72,7 @@ namespace CoreAI.Tests.EditMode
             // Network failure or timeout: UnityWebRequest text, HttpClient SendAsync, or TaskCanceledException.
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(
-                    @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error|SendAsync failed:|Send failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
+                    @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Request timed out at the transport|Network error|SendAsync failed:|Send failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(@".*\[Llm\] MeaiLlmClient:.*"));
 
