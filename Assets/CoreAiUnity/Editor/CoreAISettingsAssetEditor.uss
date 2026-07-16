@@ -232,49 +232,46 @@
     background-color: rgba(57, 197, 207, 0.30);
 }
 
-/* ---------- Advanced tabs (chip style: wraps to extra rows on narrow inspectors) ---------- */
+/* ---------- Advanced tabs ----------
+   The TabView's built-in header is a horizontal ScrollView and cannot wrap, so it is
+   hidden; a custom chip bar (built in code) selects the tabs and wraps freely. */
 
 .coreai-tabs {
-    margin-top: 4px;
+    margin-top: 0;
 }
 
-.coreai-tabs > .unity-tab-view__header-container {
+.coreai-tabs .unity-tab-view__header-container {
+    display: none;
+}
+
+.coreai-chip-bar {
     flex-direction: row;
     flex-wrap: wrap;
-    border-bottom-width: 1px;
-    border-bottom-color: rgba(240, 136, 62, 0.35);
+    margin-top: 4px;
     margin-bottom: 6px;
     padding-bottom: 3px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(240, 136, 62, 0.35);
 }
 
-.coreai-tabs .unity-tab__header {
+.coreai-tab-chip {
     padding: 2px 9px;
     margin: 2px 3px 2px 0;
     border-radius: 10px;
     border-width: 1px;
     border-color: rgba(240, 136, 62, 0.35);
     background-color: rgba(128, 128, 128, 0.08);
-}
-
-.coreai-tabs .unity-tab__header:hover {
-    background-color: rgba(240, 136, 62, 0.18);
-}
-
-.coreai-tabs .unity-tab__header--selected,
-.coreai-tabs .unity-tab--selected > .unity-tab__header {
-    background-color: rgba(240, 136, 62, 0.30);
-    border-color: rgb(240, 136, 62);
-}
-
-.coreai-tabs .unity-tab__header-label {
     -unity-font-style: bold;
     font-size: 11px;
 }
 
-/* The stock active-tab underline clashes with the chip look. */
-.coreai-tabs .unity-tab__header-underline {
-    display: none;
-    height: 0;
+.coreai-tab-chip:hover {
+    background-color: rgba(240, 136, 62, 0.18);
+}
+
+.coreai-tab-chip--selected {
+    background-color: rgba(240, 136, 62, 0.30);
+    border-color: rgb(240, 136, 62);
 }
 
 .coreai-tab-content {

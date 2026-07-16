@@ -152,13 +152,38 @@ namespace CoreAI.Infrastructure.Llm.Editor
             });
 
             TabView tabs = root.Q<TabView>("advanced-tabs");
+            VisualElement chipBar = root.Q<VisualElement>("tab-chip-bar");
+            List<Tab> tabList = tabs.Query<Tab>().ToList();
+            List<Button> chips = new(tabList.Count);
+            for (int i = 0; i < tabList.Count; i++)
+            {
+                int index = i;
+                Button chip = new(() => tabs.selectedTabIndex = index) { text = tabList[i].label };
+                chip.AddToClassList("coreai-tab-chip");
+                chipBar.Add(chip);
+                chips.Add(chip);
+            }
+
+            void SyncChips()
+            {
+                for (int i = 0; i < chips.Count; i++)
+                {
+                    chips[i].EnableInClassList("coreai-tab-chip--selected", i == tabs.selectedTabIndex);
+                }
+            }
+
             int savedTab = EditorPrefs.GetInt(PrefActiveTab, 0);
-            if (savedTab >= 0 && savedTab < tabs.childCount)
+            if (savedTab >= 0 && savedTab < tabList.Count)
             {
                 tabs.selectedTabIndex = savedTab;
             }
 
-            tabs.activeTabChanged += (_, _) => EditorPrefs.SetInt(PrefActiveTab, tabs.selectedTabIndex);
+            tabs.activeTabChanged += (_, _) =>
+            {
+                EditorPrefs.SetInt(PrefActiveTab, tabs.selectedTabIndex);
+                SyncChips();
+            };
+            SyncChips();
         }
 
         private void WireModelPreset()

@@ -78,6 +78,10 @@
                 <ui:HelpBox message-type="None"
                     text="Beginners can leave these alone. Touch only when you need per-role routing, prompt prefixes, retry tuning, or debug logs." />
 
+                <!-- Custom wrapping chip bar; the TabView's built-in header (a horizontal
+                     ScrollView that cannot wrap) is hidden and driven from these chips. -->
+                <ui:VisualElement name="tab-chip-bar" class="coreai-chip-bar" />
+
                 <ui:TabView name="advanced-tabs" class="coreai-tabs">
 
                     <ui:Tab label="HTTP">
