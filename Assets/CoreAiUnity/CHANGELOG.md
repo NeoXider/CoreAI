@@ -116,6 +116,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Test-suite hygiene: replaced every `Assert.ThrowsAsync`/`CatchAsync` with try/await/catch (interactive
   Test Runner freeze), added bounded waits to PlayMode polling loops, and TearDown cleanup for leaked
   ScriptableObjects.
+- `QwenDemoScenesEditModeTests` reflection type names updated to the renamed `CoreAI.Demos.QwenDemo`
+  namespace (all 17 tests failed fast on `Type.GetType(..., throwOnError: true)` after the demo rename).
 
 ## 5.8.10 - Live model-behavior verification; fix a false-failing memory-clear test (2026-07-13)
 

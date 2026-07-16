@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void QwenDemos_RequireNativeToolCalls()
         {
-            Type meter = Type.GetType("CoreAI.ExampleGame.QwenDemo.LlmMeter, CoreAI.Demos", true);
+            Type meter = Type.GetType("CoreAI.Demos.QwenDemo.LlmMeter, CoreAI.Demos", true);
             object mode = meter.GetProperty("ToolChoiceMode")?.GetValue(null);
             Assert.AreEqual(LlmToolChoiceMode.RequireAny, mode);
 
@@ -41,7 +41,7 @@ namespace CoreAI.Tests.EditMode
         public void SpellcraftPrompt_MapsRussianLightningToStorm()
         {
             Type spellcraft = Type.GetType(
-                "CoreAI.ExampleGame.QwenDemo.SpellcraftDemo, CoreAI.Demos", true);
+                "CoreAI.Demos.QwenDemo.SpellcraftDemo, CoreAI.Demos", true);
             FieldInfo promptField = spellcraft.GetField("SystemPrompt",
                 BindingFlags.Static | BindingFlags.NonPublic);
             string prompt = (string)promptField.GetRawConstantValue();
@@ -57,7 +57,7 @@ namespace CoreAI.Tests.EditMode
         [TestCase("native startup failed", true)]
         public void HotReload_EmptyRestoredError_DoesNotDisableDemo(string error, bool expected)
         {
-            Type state = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenDemoState, CoreAI.Demos", true);
+            Type state = Type.GetType("CoreAI.Demos.QwenDemo.QwenDemoState, CoreAI.Demos", true);
             MethodInfo predicate = state.GetMethod("HasBlockingError");
 
             Assert.AreEqual(expected, predicate.Invoke(null, new object[] { error }));
@@ -66,7 +66,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CompactGameView_UsesNonOverlappingHudPanels()
         {
-            Type layout = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
+            Type layout = Type.GetType("CoreAI.Demos.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
             object[] args = { 745f, 524f, null, null };
             layout.GetMethod("Calculate")?.Invoke(null, args);
             Rect top = (Rect)args[2];
@@ -84,7 +84,7 @@ namespace CoreAI.Tests.EditMode
         [TestCase(1920f, 1080f)]
         public void EverySupportedGameView_UsesBoundedNonOverlappingHudPanels(float width, float height)
         {
-            Type layout = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
+            Type layout = Type.GetType("CoreAI.Demos.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
             object[] args = { width, height, null, null };
             layout.GetMethod("Calculate")?.Invoke(null, args);
             Rect top = (Rect)args[2];
@@ -101,7 +101,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void NarrowPanel_StacksActionButtons()
         {
-            Type layout = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
+            Type layout = Type.GetType("CoreAI.Demos.QwenDemo.QwenDemoLayout, CoreAI.Demos", true);
             MethodInfo method = layout.GetMethod("StackActionButtons");
 
             Assert.IsTrue((bool)method.Invoke(null, new object[] { 320f }));
@@ -112,7 +112,7 @@ namespace CoreAI.Tests.EditMode
         public void SpellcraftTarget_RemainsInTheWorldLaneBeyondTheCompactHud()
         {
             Type spellcraft = Type.GetType(
-                "CoreAI.ExampleGame.QwenDemo.SpellcraftDemo, CoreAI.Demos", true);
+                "CoreAI.Demos.QwenDemo.SpellcraftDemo, CoreAI.Demos", true);
             FieldInfo targetX = spellcraft.GetField("TargetWorldX",
                 BindingFlags.Static | BindingFlags.NonPublic);
 
@@ -123,7 +123,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ToolsOnlyContract_RejectsMissingFailedUnexpectedAndMultipleCalls()
         {
-            Type contract = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenToolContract, CoreAI.Demos", true);
+            Type contract = Type.GetType("CoreAI.Demos.QwenDemo.QwenToolContract, CoreAI.Demos", true);
             MethodInfo validate = contract.GetMethod("ValidateExactlyOne");
             string[] allowed = { "cast_spell" };
 
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void DeterminismVerdict_RejectsConsistentToolFailure()
         {
-            Type verdict = Type.GetType("CoreAI.ExampleGame.QwenDemo.QwenDeterminismVerdict, CoreAI.Demos", true);
+            Type verdict = Type.GetType("CoreAI.Demos.QwenDemo.QwenDeterminismVerdict, CoreAI.Demos", true);
             MethodInfo passed = verdict.GetMethod("Passed");
 
             Assert.IsFalse((bool)passed.Invoke(null, new object[] { 5, 0, 5, 0 }));
@@ -163,8 +163,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue((bool)passed.Invoke(null, new object[] { 5, 5, 0, 1 }));
         }
 
-        [TestCase(GenieScenePath, "CoreAI.ExampleGame.QwenDemo.GenieDemo")]
-        [TestCase(SpellcraftScenePath, "CoreAI.ExampleGame.QwenDemo.SpellcraftDemo")]
+        [TestCase(GenieScenePath, "CoreAI.Demos.QwenDemo.GenieDemo")]
+        [TestCase(SpellcraftScenePath, "CoreAI.Demos.QwenDemo.SpellcraftDemo")]
         public void Scene_HasStandaloneLocalModelComposition(string scenePath, string controllerType)
         {
             Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
