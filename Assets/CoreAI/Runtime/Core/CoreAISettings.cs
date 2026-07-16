@@ -84,6 +84,14 @@
         /// <summary>Default model context window in tokens (128K = 131072).</summary>
         public const int DefaultContextWindowTokens = 131072;
 
+        /// <summary>
+        /// Effectively-unlimited context window sentinel (16M tokens) used when no explicit window
+        /// override is configured: client-side history budgeting/compaction never binds and the
+        /// provider enforces its own real limit. Large enough for any model, small enough that
+        /// downstream token/char arithmetic (e.g. tokens*4 chars) stays far from int overflow.
+        /// </summary>
+        public const int UnlimitedContextWindowTokens = 16_777_216;
+
         private const float DefaultTemperature = 0.1f;
         private const bool DefaultOverrideTemperature = false;
         private const int DefaultMaxToolCallRetries = 3;

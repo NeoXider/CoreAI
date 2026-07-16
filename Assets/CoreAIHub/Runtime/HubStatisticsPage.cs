@@ -134,8 +134,10 @@ namespace CoreAI.Hub.UI
             {
                 _capacity.text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0:N0} context / {1}",
-                    _settings.ContextWindowTokens,
+                    "{0} context / {1}",
+                    _settings.ContextWindowTokens >= CoreAISettings.UnlimitedContextWindowTokens
+                        ? "unlimited"
+                        : _settings.ContextWindowTokens.ToString("N0", CultureInfo.InvariantCulture),
                     _settings.MaxTokens > 0
                         ? _settings.MaxTokens.ToString("N0", CultureInfo.InvariantCulture) + " max output"
                         : "provider output default");

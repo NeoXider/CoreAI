@@ -29,6 +29,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Changed
 
+- Max output tokens and context window are now explicit overrides on `CoreAISettingsAsset` (mirroring the
+  temperature toggle) and are OFF by default: without the override no `max_tokens` is sent (the provider
+  decides) and no client-side context window is assumed (`CoreAISettings.UnlimitedContextWindowTokens`;
+  routed endpoints with explicit window knowledge still win, and context-overflow retries keep recovering
+  from provider errors). `ConfigureHttpApi(maxTokens: 0)` and portable options roundtrip the disabled
+  state; the inspector greys out both value fields until the override is enabled, and Hub pages render the
+  unlimited window as "unlimited" instead of the raw sentinel.
 - `CoreAISettingsAsset` inspector rewritten in UI Toolkit with layout and styling as separate assets
   (`CoreAISettingsAssetEditor.uxml` / `.uss`; the editor class only loads the tree and wires behavior).
   Advanced sections are switchable color-accented tabs (HTTP / Fallback / WebGL / LLMUnity / Memory /

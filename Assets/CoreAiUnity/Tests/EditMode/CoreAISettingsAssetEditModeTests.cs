@@ -26,7 +26,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("gpt-4o-mini", settings.ModelName);
             Assert.AreEqual(0.1f, settings.Temperature);
             Assert.IsFalse(settings.OverrideTemperature);
-            Assert.AreEqual(2048, settings.MaxTokens);
+            Assert.IsFalse(settings.OverrideMaxTokens, "No output cap by default: the provider decides.");
+            Assert.AreEqual(0, settings.MaxTokens, "0 = no max_tokens sent when overriding is disabled.");
             Assert.AreEqual(120, settings.RequestTimeoutSeconds);
             Assert.AreEqual("", settings.LlmUnityAgentName);
             Assert.AreEqual("Qwen3.5-2B-Q4_K_M.gguf", settings.GgufModelPath);
@@ -38,7 +39,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, settings.MaxLuaRepairRetries);
             Assert.AreEqual(3, settings.MaxToolCallRetries);
             Assert.AreEqual(1, settings.MaxLlmRequestRetries);
-            Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, settings.ContextWindowTokens);
+            Assert.IsFalse(settings.OverrideContextWindow, "No client-side window assumed by default.");
+            Assert.AreEqual(CoreAISettings.UnlimitedContextWindowTokens, settings.ContextWindowTokens,
+                "Unlimited sentinel when context window overriding is disabled.");
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
             Assert.AreEqual(true, settings.EnableStreaming, "Streaming is enabled by default");
@@ -218,9 +221,60 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0.5f, settings.Temperature);
             Assert.IsTrue(settings.OverrideTemperature);
             Assert.AreEqual(60, settings.RequestTimeoutSeconds);
+            Assert.IsTrue(settings.OverrideMaxTokens, "Explicit positive maxTokens enables the output cap.");
             Assert.AreEqual(2048, settings.MaxTokens);
 
             Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ConfigureHttpApi_WithZeroMaxTokens_DisablesTheOutputCap()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureHttpApi("https://api.test.com/v1", "sk-123", "test-model", maxTokens: 0);
+
+            Assert.IsFalse(settings.OverrideMaxTokens);
+            Assert.AreEqual(0, settings.MaxTokens, "No max_tokens is sent; the provider decides.");
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ApplyOptions_ResolvedLimits_RoundtripTheOverrideToggles()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                settings.ApplyOptions(new CoreAISettingsOptions
+                {
+                    MaxTokens = 4096,
+                    ContextWindowTokens = 32768
+                });
+                Assert.IsTrue(settings.OverrideMaxTokens);
+                Assert.AreEqual(4096, settings.MaxTokens);
+                Assert.IsTrue(settings.OverrideContextWindow);
+                Assert.AreEqual(32768, settings.ContextWindowTokens);
+
+                settings.ApplyOptions(new CoreAISettingsOptions
+                {
+                    MaxTokens = 0,
+                    ContextWindowTokens = CoreAISettings.UnlimitedContextWindowTokens
+                });
+                Assert.IsFalse(settings.OverrideMaxTokens, "Resolved MaxTokens 0 maps back to override off.");
+                Assert.AreEqual(0, settings.MaxTokens);
+                Assert.IsFalse(settings.OverrideContextWindow,
+                    "The unlimited sentinel maps back to override off.");
+                Assert.AreEqual(CoreAISettings.UnlimitedContextWindowTokens, settings.ContextWindowTokens);
+
+                // ToOptions -> ApplyOptions roundtrip is stable for the disabled state.
+                CoreAISettingsOptions snapshot = settings.ToOptions();
+                Assert.AreEqual(0, snapshot.MaxTokens);
+                Assert.AreEqual(CoreAISettings.UnlimitedContextWindowTokens, snapshot.ContextWindowTokens);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
         }
 
         [Test]

@@ -1339,7 +1339,9 @@ namespace CoreAI.Hub.UI
 
         private static string Tokens(int tokens)
         {
-            return tokens.ToString("N0", CultureInfo.InvariantCulture) + " tok";
+            return tokens >= CoreAISettings.UnlimitedContextWindowTokens
+                ? "unlimited (provider decides)"
+                : tokens.ToString("N0", CultureInfo.InvariantCulture) + " tok";
         }
     }
 }

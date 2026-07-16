@@ -217,10 +217,14 @@
                             <uie:PropertyField binding-path="extraBodyJson" label="Extra Body JSON"
                                 tooltip="Optional JSON object merged into OpenAI-compatible HTTP request bodies. Empty = provider default." />
 
-                            <uie:PropertyField binding-path="maxTokens" label="Max Output Tokens"
-                                tooltip="Global max output tokens for HTTP API and LLMUnity. Per-call AiTaskRequest.MaxOutputTokens and per-request LlmCompletionRequest values take priority. 0 = provider default." />
-                            <uie:PropertyField binding-path="contextWindowTokens" label="Context Window"
-                                tooltip="Estimated model context window in tokens." />
+                            <uie:PropertyField binding-path="enableMaxTokensOverriding" label="Override Max Output Tokens"
+                                tooltip="When enabled, the Max Output Tokens value below caps completions (max_tokens on HTTP, numPredict on LLMUnity). When disabled, no output cap is sent and the provider decides." />
+                            <uie:PropertyField name="max-tokens-field" binding-path="maxTokens" label="Max Output Tokens"
+                                tooltip="Global max output tokens for HTTP API and LLMUnity. Per-call AiTaskRequest.MaxOutputTokens and per-request LlmCompletionRequest values take priority. Used only when the override is enabled." />
+                            <uie:PropertyField binding-path="enableContextWindowOverriding" label="Override Context Window"
+                                tooltip="When enabled, the Context Window value below bounds client-side history budgeting/compaction. When disabled, no client-side window is assumed and the provider enforces its own real limit." />
+                            <uie:PropertyField name="context-window-field" binding-path="contextWindowTokens" label="Context Window"
+                                tooltip="Estimated model context window in tokens. Used only when the override is enabled." />
                             <uie:PropertyField binding-path="maxConcurrentOrchestrations" label="Max Concurrent"
                                 tooltip="Maximum concurrent orchestrator runs." />
                             <uie:PropertyField binding-path="llmRequestTimeoutSeconds" label="LLM Timeout (sec)"

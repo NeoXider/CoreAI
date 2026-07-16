@@ -135,8 +135,17 @@ namespace CoreAI.Infrastructure.Llm
         [Range(0f, 2f)]
         private float temperature = 0.1f;
 
-        [Tooltip("Max tokens per completion across HTTP + LLMUnity when no per-call override. 0 = provider default.")]
+        [Tooltip(
+            "When enabled, the Max Tokens value below caps completions (max_tokens on HTTP, numPredict on LLMUnity). " +
+            "When disabled, no output cap is sent and the provider decides.")]
         [SerializeField]
+        private bool enableMaxTokensOverriding;
+
+        [Tooltip(
+            "Max tokens per completion across HTTP + LLMUnity when no per-call override. " +
+            "Used only when max tokens overriding is enabled.")]
+        [SerializeField]
+        [Min(0)]
         private int maxTokens = 2048;
 
         [Header("Client limits")]
@@ -290,7 +299,14 @@ namespace CoreAI.Infrastructure.Llm
         [Min(0)]
         private int maxContextOverflowRetries = 3;
 
-        [Tooltip("Default context-window hint in tokens.")]
+        [Tooltip(
+            "When enabled, the Context Window value below bounds client-side history budgeting/compaction. " +
+            "When disabled, no client-side window is assumed and the provider enforces its own real limit " +
+            "(context-overflow retries still recover from provider errors).")]
+        [SerializeField]
+        private bool enableContextWindowOverriding;
+
+        [Tooltip("Context-window hint in tokens. Used only when context window overriding is enabled.")]
         [SerializeField]
         [Min(256)]
         private int contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
@@ -654,8 +670,14 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>When true, <see cref="Temperature"/> is sent on LLM requests; when false, backends use default sampling temperature.</summary>
         public bool OverrideTemperature => enableTemperatureOverriding;
 
-        /// <summary>Global max-output cap (tokens).</summary>
-        public int MaxTokens => maxTokens;
+        /// <summary>When true, <see cref="MaxTokens"/> caps completions; when false, no output cap is sent.</summary>
+        public bool OverrideMaxTokens => enableMaxTokensOverriding;
+
+        /// <summary>
+        /// Global max-output cap (tokens). <c>0</c> = no cap sent (provider decides); returned whenever
+        /// max-tokens overriding is disabled.
+        /// </summary>
+        public int MaxTokens => enableMaxTokensOverriding && maxTokens > 0 ? maxTokens : 0;
 
         /// <summary>Maximum client-limited requests allowed in the current session; zero disables this limit.</summary>
         public int MaxClientLimitedRequestsPerSession =>
@@ -761,10 +783,18 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc cref="ICoreAISettings.MaxContextOverflowRetries"/>
         public int MaxContextOverflowRetries => maxContextOverflowRetries < 0 ? 0 : maxContextOverflowRetries;
 
-        /// <summary>Estimated context-window tokens exposed to budgeting.</summary>
-        public int ContextWindowTokens => contextWindowTokens < 256
-            ? CoreAISettings.DefaultContextWindowTokens
-            : contextWindowTokens;
+        /// <summary>When true, <see cref="ContextWindowTokens"/> bounds client-side budgeting; when false, unlimited.</summary>
+        public bool OverrideContextWindow => enableContextWindowOverriding;
+
+        /// <summary>
+        /// Estimated context-window tokens exposed to budgeting. When overriding is disabled this returns
+        /// <see cref="CoreAISettings.UnlimitedContextWindowTokens"/> so client-side history budgeting never
+        /// binds and the provider enforces its own real limit. Routed endpoints with explicit window
+        /// knowledge still win over this value in the orchestrator.
+        /// </summary>
+        public int ContextWindowTokens => enableContextWindowOverriding
+            ? (contextWindowTokens < 256 ? CoreAISettings.DefaultContextWindowTokens : contextWindowTokens)
+            : CoreAISettings.UnlimitedContextWindowTokens;
 
         /// <summary>Global streaming flag.</summary>
         public bool EnableStreaming => enableStreaming;
@@ -917,9 +947,18 @@ namespace CoreAI.Infrastructure.Llm
             logTokenUsage = options.LogTokenUsage;
             logLlmLatency = options.LogLlmLatency;
             logLlmConnectionErrors = options.LogLlmConnectionErrors;
-            contextWindowTokens = options.ContextWindowTokens < 256
-                ? CoreAISettings.DefaultContextWindowTokens
-                : options.ContextWindowTokens;
+            // Portable options carry the RESOLVED window: the unlimited sentinel (or an invalid value)
+            // maps back to "override off"; any explicit real window maps to "override on".
+            if (options.ContextWindowTokens < 256 ||
+                options.ContextWindowTokens >= CoreAISettings.UnlimitedContextWindowTokens)
+            {
+                enableContextWindowOverriding = false;
+            }
+            else
+            {
+                enableContextWindowOverriding = true;
+                contextWindowTokens = options.ContextWindowTokens;
+            }
             universalSystemPromptPrefix = options.UniversalSystemPromptPrefix ?? "";
             toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
@@ -931,7 +970,12 @@ namespace CoreAI.Infrastructure.Llm
             logMeaiToolCallingSteps = options.LogMeaiToolCallingSteps;
             allowDuplicateToolCalls = options.AllowDuplicateToolCalls;
             enableStreaming = options.EnableStreaming;
-            maxTokens = options.MaxTokens <= 0 ? 2048 : options.MaxTokens;
+            // Resolved MaxTokens: 0 = no cap (override off); positive = explicit cap (override on).
+            enableMaxTokensOverriding = options.MaxTokens > 0;
+            if (options.MaxTokens > 0)
+            {
+                maxTokens = options.MaxTokens;
+            }
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
             enableTokenCalibration = options.EnableTokenCalibration;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
@@ -977,7 +1021,11 @@ namespace CoreAI.Infrastructure.Llm
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
             enableTemperatureOverriding = overrideTemperature;
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
-            this.maxTokens = maxTokens <= 0 ? 2048 : maxTokens;
+            enableMaxTokensOverriding = maxTokens > 0;
+            if (maxTokens > 0)
+            {
+                this.maxTokens = maxTokens;
+            }
         }
 
         /// <summary>
@@ -1215,6 +1263,11 @@ namespace CoreAI.Infrastructure.Llm
             if (contextWindowTokens < 256)
             {
                 contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
+            }
+
+            if (maxTokens < 0)
+            {
+                maxTokens = 0;
             }
 
             if (maxConcurrentOrchestrations < 1)

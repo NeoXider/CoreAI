@@ -68,6 +68,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private VisualElement _llmUnityAdvancedGroup;
         private HelpBox _llmUnityAutoHint;
         private PropertyField _temperatureField;
+        private PropertyField _maxTokensField;
+        private PropertyField _contextWindowField;
         private HelpBox _emptyPrefixHint;
         private VisualElement _offlineCustomGroup;
         private HelpBox _offlineDefaultInfo;
@@ -129,6 +131,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _llmUnityAdvancedGroup = root.Q<VisualElement>("llmunity-advanced-group");
             _llmUnityAutoHint = root.Q<HelpBox>("llmunity-auto-hint");
             _temperatureField = root.Q<PropertyField>("temperature-field");
+            _maxTokensField = root.Q<PropertyField>("max-tokens-field");
+            _contextWindowField = root.Q<PropertyField>("context-window-field");
             _emptyPrefixHint = root.Q<HelpBox>("empty-prefix-hint");
             _offlineCustomGroup = root.Q<VisualElement>("offline-custom-group");
             _offlineDefaultInfo = root.Q<HelpBox>("offline-default-info");
@@ -451,6 +455,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             Show(_fallbackActiveInfo, settings.HasValidFallbackBackend);
 
             _temperatureField.SetEnabled(settings.OverrideTemperature);
+            _maxTokensField.SetEnabled(settings.OverrideMaxTokens);
+            _contextWindowField.SetEnabled(settings.OverrideContextWindow);
             Show(_emptyPrefixHint, string.IsNullOrEmpty(settings.UniversalSystemPromptPrefix));
 
             Show(_offlineCustomGroup, settings.OfflineUseCustomResponse);

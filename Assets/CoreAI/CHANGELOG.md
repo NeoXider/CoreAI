@@ -28,6 +28,9 @@
   surface degraded health instead of keeping a stale Ready state; reports are generation-stamped
   (`LlmRoleRouteSnapshot.Generation`) so a late completion from a replaced endpoint cannot mutate its
   successor's health; default no-op for legacy registries.
+- `CoreAISettings.UnlimitedContextWindowTokens` — the effectively-unlimited context-window sentinel used
+  when a host asset has no explicit window override, so client-side history budgeting never binds and the
+  provider enforces its own real limit.
 
 ### Changed
 
