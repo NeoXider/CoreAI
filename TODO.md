@@ -11,6 +11,27 @@
 > `frost|2`, each through
 > native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
 
+## [A7] Post-remediation audit residue (2026-07-17) — accepted-risk items from the a2a2311e audits
+
+> Two codex reviewers + one Fable 5 deep audit over the 5.9.0 remediation wave. Everything confirmed
+> and tractable was fixed in the follow-up commit (streaming health, generation-stamped health reports,
+> LlmClientException code preservation, bounded host drain, snapshots under the lock, abandoned-stream
+> terminal publish, two test hardenings, routing docs). Remaining accepted-risk items:
+
+- [ ] **Route pinning across one request's construction.** Tool capability and context window are
+      resolved at prompt-build time, the client at send time; a role reassignment landing inside that
+      millisecond window can build one request with the old endpoint's budget/tool contract and send it
+      to the new endpoint (self-heals next request). Proper fix: resolve one `LlmRoleRouteSnapshot` per
+      task turn and pin its profile id into the outgoing request (needs an effective-profile
+      resolution hook on `ILlmClient`; weigh against explicit-pin failover semantics).
+- [ ] **No generation lease between resolve and execution.** `InFlightRequests` increments only inside
+      `CompleteAsync`; a caller that resolves a client and holds it before invoking can race a
+      removal/re-save that force-releases the host. Window is microseconds on the routing path;
+      relevant only to external `ResolveClientForRole` users holding clients across awaits.
+- [ ] **Disposed registry keeps resolving.** `LlmClientRegistry.Dispose` requests host release but
+      public resolution APIs never check `_disposed`; resolution during scope teardown can hand out a
+      client whose host is being released. Consider `ObjectDisposedException` guards under `_gate`.
+
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
 > Multi-agent audit across four dimensions with adversarial verification (22 confirmed, 9 refuted).

@@ -23,9 +23,11 @@
   and client-limited decorators.
 - `LlmEndpointDescriptor.DeriveEndpointSlug` / `EnsureUniqueEndpointId` — the endpoint-id derivation used by
   the Hub editor now lives in the portable contract and is unit-testable.
-- `ILlmClientRegistry.ReportRouteFailure(profileId, errorCode, error)` — routing clients report
-  endpoint-level request failures (expired credentials, unreachable backend) so registries can surface
-  degraded health instead of keeping a stale Ready state; default no-op for legacy registries.
+- `ILlmClientRegistry.ReportRouteFailure(profileId, generation, errorCode, error)` — routing clients
+  report endpoint-level request failures (expired credentials, unreachable backend) so registries can
+  surface degraded health instead of keeping a stale Ready state; reports are generation-stamped
+  (`LlmRoleRouteSnapshot.Generation`) so a late completion from a replaced endpoint cannot mutate its
+  successor's health; default no-op for legacy registries.
 
 ### Changed
 

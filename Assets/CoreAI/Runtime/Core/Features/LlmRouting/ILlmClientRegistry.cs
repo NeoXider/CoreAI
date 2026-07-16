@@ -18,6 +18,13 @@ namespace CoreAI.Ai
         /// case <see cref="ContextWindowTokens"/> is a default rather than endpoint knowledge.
         /// </summary>
         public bool IsRouted { get; set; }
+
+        /// <summary>
+        /// Endpoint generation that serves this route; 0 when unknown (legacy/manifest routes).
+        /// Callers echo it into <see cref="ILlmClientRegistry.ReportRouteFailure"/> so a late
+        /// completion from a replaced endpoint cannot mutate its successor's health.
+        /// </summary>
+        public long Generation { get; set; }
     }
 
     /// <summary>
@@ -88,9 +95,11 @@ namespace CoreAI.Ai
         /// <summary>
         /// Reports an endpoint-level request failure observed on a routed profile (expired credentials,
         /// unreachable backend) so registries can surface degraded health on the endpoint snapshot
-        /// instead of keeping a stale Ready state until restart. Default: no-op for legacy registries.
+        /// instead of keeping a stale Ready state until restart. <paramref name="generation"/> is the
+        /// <see cref="LlmRoleRouteSnapshot.Generation"/> that served the request; registries ignore
+        /// reports from superseded or unknown (0) generations. Default: no-op for legacy registries.
         /// </summary>
-        void ReportRouteFailure(string profileId, LlmErrorCode errorCode, string error)
+        void ReportRouteFailure(string profileId, long generation, LlmErrorCode errorCode, string error)
         {
         }
     }

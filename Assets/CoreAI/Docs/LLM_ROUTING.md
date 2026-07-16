@@ -57,6 +57,22 @@ in-memory key, an explicit empty string clears it, and a non-empty value replace
 as an environment-variable name. Applications may inject another provider for a platform keychain or
 authenticated backend.
 
+#### Route snapshots, endpoint health, and descriptor behavior fields (5.9)
+
+- `ILlmClientRegistry.ResolveRouteForRole(roleId, explicitProfileId)` returns an atomic
+  `LlmRoleRouteSnapshot` — client, effective profile id, context window, execution mode, `IsRouted` —
+  observed together so a concurrent switch cannot mix one endpoint's client with another's metadata.
+  `IsRouted == false` marks the reserved `"fallback"` diagnostic (legacy backend, settings-owned window).
+- Profile-aware `ILlmClient` capability queries — `SupportsNativeToolCallingForRole(roleId, profileId)` and
+  `ResolveContextWindowTokensForRole(roleId, profileId)` — let the orchestrator's tool strategy and context
+  budgeting follow the endpoint a request is actually routed to; all built-in decorators forward them.
+- `ILlmClientRegistry.ReportRouteFailure(profileId, errorCode, error)` lets routing clients report
+  endpoint-level failures (`AuthExpired`, `BackendUnavailable`) so registries surface degraded health on the
+  endpoint snapshot instead of keeping a stale Ready appearance; a later success clears it. Default: no-op.
+- `LlmEndpointDescriptor` behavior fields for HTTP endpoints — `MaxTokens`, `ReasoningMode`,
+  `ThinkingBudgetTokens`, `ExtraBodyJson` — are validated by `Validate()` and travel with the persisted
+  descriptor. `DeriveEndpointSlug` / `EnsureUniqueEndpointId` provide portable endpoint-id derivation.
+
 - `LlmRouteProfile` describes a profile id, execution mode, model alias, context window, response cap, and capabilities.
 - `LlmRouteRule` maps role patterns to profile ids. Exact role ids, prefix patterns ending with `*`, and `*` wildcard are supported.
 - `LlmRouteTable` stores profiles and rules and validates duplicate/missing profile references.

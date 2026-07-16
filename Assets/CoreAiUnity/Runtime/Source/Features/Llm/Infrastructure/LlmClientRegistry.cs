@@ -23,6 +23,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Reserved diagnostic profile id reported when no routing rule matched.</summary>
         internal const string LegacyFallbackProfileId = "fallback";
 
+        /// <summary>Bounded drain before an owned llama.cpp host is force-released (see release path).</summary>
+        private const int OwnedHostDrainTimeoutMs = 120_000;
+
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
         private readonly ICoreAISettings _settings;
@@ -487,6 +490,21 @@ namespace CoreAI.Infrastructure.Llm
             lock (_gate)
             {
                 string profileId = ResolveProfileIdForRole(roleId, explicitProfileId);
+                long generation = 0;
+                if (!string.IsNullOrEmpty(profileId) &&
+                    TryResolveReadyRuntimeEndpointLocked(profileId, out RuntimeEndpoint served, out _))
+                {
+                    generation = served.Generation;
+                }
+                else if (!string.IsNullOrEmpty(profileId) &&
+                         TryResolveActivatingRuntimeEndpointLocked(profileId, out RuntimeEndpoint activating))
+                {
+                    // WHY: a request that resolves while the endpoint is still activating must still be
+                    // able to report health for the generation it will be served by; generation 0 would
+                    // silently drop those reports.
+                    generation = activating.Generation;
+                }
+
                 return new LlmRoleRouteSnapshot
                 {
                     Client = ResolveClientForRole(roleId, explicitProfileId),
@@ -495,13 +513,14 @@ namespace CoreAI.Infrastructure.Llm
                     Mode = ResolveExecutionModeForRole(roleId, explicitProfileId),
                     IsRouted = !string.IsNullOrEmpty(profileId) &&
                                (_runtimeProfiles.ContainsKey(profileId) ||
-                                _byProfileId.ContainsKey(profileId))
+                                _byProfileId.ContainsKey(profileId)),
+                    Generation = generation
                 };
             }
         }
 
         /// <inheritdoc />
-        public void ReportRouteFailure(string profileId, LlmErrorCode errorCode, string error)
+        public void ReportRouteFailure(string profileId, long generation, LlmErrorCode errorCode, string error)
         {
             string profile = profileId?.Trim() ?? "";
             if (profile.Length == 0 || string.Equals(profile, LegacyFallbackProfileId, StringComparison.Ordinal))
@@ -514,8 +533,13 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (_runtimeProfiles.TryGetValue(profile, out LlmRuntimeProfile runtimeProfile) &&
                     _runtimeEndpoints.TryGetValue(runtimeProfile.EndpointId, out RuntimeEndpoint runtime) &&
-                    runtime.State == LlmEndpointLifecycleState.Ready)
+                    runtime.State == LlmEndpointLifecycleState.Ready &&
+                    generation != 0 && runtime.Generation == generation)
                 {
+                    // WHY (generation check): a late completion from a replaced endpoint must not mark
+                    // or clear its successor's health — only reports from the serving generation count.
+                    // Unknown generation (0, e.g. a request that resolved while activating) is dropped
+                    // rather than treated as a wildcard that could mutate an unrelated generation.
                     // WHY: the endpoint stays Ready so traffic still flows and a transient outage
                     // needs no manual re-activation, but the failure must be visible on the snapshot —
                     // otherwise the UI keeps reporting a healthy endpoint whose key expired mid-session.
@@ -615,6 +639,8 @@ namespace CoreAI.Infrastructure.Llm
             LlmEndpointDescriptor copy = FileLlmEndpointRegistryStore.CloneDescriptor(descriptor);
             RuntimeEndpoint runtime;
             RuntimeEndpoint replacedRuntime = null;
+            Task<LlmEndpointSnapshot> activationToAwait;
+            LlmEndpointSnapshot immediateSnapshot;
             lock (_gate)
             {
                 string effectiveSessionApiKey = sessionApiKey;
@@ -714,14 +740,19 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     runtime.ActivationTask = BeginActivationLocked(runtime, cancellationToken);
                 }
+
+                // WHY: snapshot under the lock — State/Error/Descriptor flags mutate in place under
+                // _gate elsewhere, so snapshotting outside can observe a torn Active/State pair.
+                activationToAwait = runtime.ActivationTask;
+                immediateSnapshot = activationToAwait == null ? ToSnapshot(runtime) : null;
             }
 
             RequestOwnedHostRelease(replacedRuntime);
             SaveRuntimeState();
             Changed?.Invoke();
-            return runtime.ActivationTask != null
-                ? AwaitActivationForCallerAsync(runtime.ActivationTask, cancellationToken)
-                : Task.FromResult(ToSnapshot(runtime));
+            return activationToAwait != null
+                ? AwaitActivationForCallerAsync(activationToAwait, cancellationToken)
+                : Task.FromResult(immediateSnapshot);
         }
 
         /// <inheritdoc />
@@ -735,6 +766,8 @@ namespace CoreAI.Infrastructure.Llm
             RuntimeEndpoint runtime;
             RuntimeEndpoint release = null;
             RuntimeEndpoint pendingRelease = null;
+            Task<LlmEndpointSnapshot> activationToAwait;
+            LlmEndpointSnapshot immediateSnapshot;
             lock (_gate)
             {
                 string id = endpointId?.Trim() ?? "";
@@ -767,6 +800,12 @@ namespace CoreAI.Infrastructure.Llm
                         runtime.ActivationTask = BeginActivationLocked(runtime, cancellationToken);
                     }
                 }
+
+                // WHY: snapshot under the lock — see AddOrUpdateEndpointAsync.
+                activationToAwait = runtime.ActivationTask != null && !runtime.ActivationTask.IsCompleted
+                    ? runtime.ActivationTask
+                    : null;
+                immediateSnapshot = activationToAwait == null ? ToSnapshot(runtime) : null;
             }
 
             RequestOwnedHostRelease(pendingRelease);
@@ -774,9 +813,9 @@ namespace CoreAI.Infrastructure.Llm
 
             SaveRuntimeState();
             Changed?.Invoke();
-            return runtime.ActivationTask != null && !runtime.ActivationTask.IsCompleted
-                ? AwaitActivationForCallerAsync(runtime.ActivationTask, cancellationToken)
-                : Task.FromResult(ToSnapshot(runtime));
+            return activationToAwait != null
+                ? AwaitActivationForCallerAsync(activationToAwait, cancellationToken)
+                : Task.FromResult(immediateSnapshot);
         }
 
         /// <inheritdoc />
@@ -1250,11 +1289,26 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            int drainWaitedMs = 0;
             while (Volatile.Read(ref runtime.InFlightRequests) > 0)
             {
+                if (drainWaitedMs >= OwnedHostDrainTimeoutMs)
+                {
+                    // WHY: an SSE stream that never completes would otherwise hold the llama.cpp host
+                    // (VRAM, GameObject) forever AND hang any later re-activation that awaits this
+                    // release. Forcing the release after a bounded drain is the lesser harm.
+                    _logger.LogWarning(
+                        GameLogFeature.Llm,
+                        $"LlmClientRegistry: forcing owned host release for '{runtime.Descriptor?.EndpointId}' " +
+                        $"after {OwnedHostDrainTimeoutMs / 1000}s drain timeout with " +
+                        $"{Volatile.Read(ref runtime.InFlightRequests)} request(s) still tracked.");
+                    break;
+                }
+
                 // WHY: paced poll instead of Task.Yield — there is no completion source for the
                 // in-flight counter, and a yield loop hot-spins a worker for long SSE streams.
                 await Task.Delay(10);
+                drainWaitedMs += 10;
             }
 
             Func<Task> release = Interlocked.Exchange(ref runtime.ReleaseOwnedHostAsync, null);

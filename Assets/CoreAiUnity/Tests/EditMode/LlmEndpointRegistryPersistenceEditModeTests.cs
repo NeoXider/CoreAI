@@ -638,7 +638,16 @@ namespace CoreAI.Tests.EditMode
             LlmEndpointDescriptor second = Descriptor("cloud", "https://example.test/v1");
             second.Active = false;
             second.DisplayName = "second";
-            Task secondSave = Task.Run(async () => await registry.AddOrUpdateEndpointAsync(second));
+            using ManualResetEventSlim secondStarted = new(false);
+            Task secondSave = Task.Run(async () =>
+            {
+                secondStarted.Set();
+                await registry.AddOrUpdateEndpointAsync(second);
+            });
+            // WHY: prove the second worker is actually scheduled and running before the negative
+            // check — otherwise a saturated worker pool lets the assertion pass vacuously even with
+            // the persistence gate removed.
+            Assert.IsTrue(secondStarted.Wait(TimeSpan.FromSeconds(2)), "The second save task must start.");
             bool concurrentSaveEntered = await WaitForConditionAsync(
                 () => store.Calls > 1,
                 TimeSpan.FromMilliseconds(250));

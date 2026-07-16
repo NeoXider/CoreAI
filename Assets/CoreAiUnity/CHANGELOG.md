@@ -90,17 +90,27 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Ready-endpoint health is no longer sticky: when a routed request fails with `AuthExpired` or
   `BackendUnavailable` mid-conversation, the endpoint snapshot reports a `Degraded: …` error and `Changed`
   fires for the UI; the endpoint stays routable and the next successful request clears the note.
+- Post-audit hardening of the health/diagnostics path (codex + Fable 5 adversarial review of the wave):
+  health reports are generation-stamped, so a late completion from a replaced endpoint generation can
+  neither degrade nor clear its successor's health (activating endpoints report their real generation
+  too); streaming failures now publish completion/health — `LlmClientException` keeps its error code on
+  both paths instead of collapsing to `ProviderError`, and a stream abandoned by its consumer publishes a
+  terminal `LlmRequestCompleted` from the iterator's `finally` instead of leaking a started-only request.
+- Owned llama.cpp host drain is bounded (120 s): a never-ending SSE stream can no longer hold the host
+  (VRAM/GameObject) forever or hang a later re-activation; the forced release is logged.
+- `AddOrUpdateEndpointAsync`/`SetEndpointActiveAsync` build their immediate result snapshot under the
+  registry lock, so callers can no longer observe a torn `Active`/`State` pair.
 
 ### Tests
 
 - Flagship regression `LlmEndpointSwitchFlagshipEditModeTests`: a real registry + routing client +
   orchestrator conversation switches endpoints mid-dialogue and proves history survives while profile id,
   context window, and tool strategy follow the new endpoint.
-- `LlmRoutingRegressionEditModeTests` — thirteen regressions covering the fallback sentinel echo, wildcard
+- `LlmRoutingRegressionEditModeTests` — fourteen regressions covering the fallback sentinel echo, wildcard
   role patterns, the inactive re-save host leak, `CancelInFlight` semantics, restore with an unresolvable
   secret, behavior-field round-trips, activation coalescing on edits, routed tool strategy and context
-  window, `KeepWarm`-only activation, `Changed` event delivery, and mid-conversation health degradation
-  with recovery.
+  window, `KeepWarm`-only activation, `Changed` event delivery, mid-conversation health degradation with
+  recovery, and stale-generation health-report rejection.
 - `HubRoutingUiRegressionEditModeTests` — slug/unique-id helpers, descriptor-based Hub validation, and the
   tri-state save outcome.
 - Test-suite hygiene: replaced every `Assert.ThrowsAsync`/`CatchAsync` with try/await/catch (interactive

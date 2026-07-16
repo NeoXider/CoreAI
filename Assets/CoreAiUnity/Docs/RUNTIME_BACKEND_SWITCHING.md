@@ -26,6 +26,27 @@ The registry supports zero, one, or many configured endpoints. With zero endpoin
 (including Offline) remains usable. With one endpoint, it can be assigned to any number of agents. With
 many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve different agents concurrently.
 
+### Routing metadata and endpoint health (5.9)
+
+- **`ILlmClientRegistry.ResolveRouteForRole(roleId, explicitProfileId)`** returns one atomic
+  `LlmRoleRouteSnapshot` — client, effective profile id, context window, execution mode, and `IsRouted` —
+  observed under a single lock acquisition, so a concurrent endpoint switch can never pair one endpoint's
+  client with another endpoint's metadata. `IsRouted == false` means the reserved `"fallback"` diagnostic:
+  the legacy backend serves the request and the context window is a settings default, not endpoint knowledge.
+- **Tool strategy and context budgeting follow the route.** The orchestrator asks
+  `SupportsNativeToolCallingForRole(roleId, profileId)` and `ResolveContextWindowTokensForRole(roleId,
+  profileId)` on the routed client, so an agent re-routed mid-conversation adopts the new endpoint's
+  native/text tool contract and its context window (min-ed with the role's configured budget).
+- **Endpoint health is not sticky.** When a routed request fails with `AuthExpired` or
+  `BackendUnavailable`, the routing client calls `ILlmClientRegistry.ReportRouteFailure` and the endpoint
+  snapshot reports a `Degraded: …` error while staying Ready (routable — a transient outage needs no manual
+  re-activation); `Changed` fires for UI refresh, and the next successful request clears the note.
+- **Descriptor behavior fields.** `LlmEndpointDescriptor` carries per-endpoint request shaping for HTTP
+  endpoints — `MaxTokens`, `ReasoningMode`, `ThinkingBudgetTokens`, `ExtraBodyJson` — validated by
+  `Validate()`, persisted, and part of the client fingerprint (editing them re-activates the client).
+- **Endpoint id helpers.** `LlmEndpointDescriptor.DeriveEndpointSlug(displayName)` and
+  `EnsureUniqueEndpointId(slug, existingIds)` are the portable id-derivation used by the Hub editor.
+
 ### Switching keeps the conversation
 
 Endpoint/profile selection is independent of role-keyed agent state. Switching a role to another endpoint

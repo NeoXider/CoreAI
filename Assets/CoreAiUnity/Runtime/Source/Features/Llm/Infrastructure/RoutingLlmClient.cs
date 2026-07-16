@@ -94,28 +94,35 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            ILlmClient inner = Prepare(request, false, out LlmExecutionMode capturedMode);
+            ILlmClient inner = Prepare(request, false, out LlmExecutionMode capturedMode, out long capturedGeneration);
             try
             {
                 LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
-                PublishCompleted(request, capturedMode, false, result != null && result.Ok, result?.Error ?? "",
+                PublishCompleted(request, capturedMode, capturedGeneration, false, result != null && result.Ok, result?.Error ?? "",
                     result?.ErrorCode ?? LlmErrorCode.None);
                 PublishUsage(request, capturedMode, false, result);
                 return result;
             }
             catch (LlmOperationTimeoutException)
             {
-                PublishCompleted(request, capturedMode, false, false, "timeout", LlmErrorCode.Timeout);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "timeout", LlmErrorCode.Timeout);
                 throw;
             }
             catch (OperationCanceledException)
             {
-                PublishCompleted(request, capturedMode, false, false, "cancelled", LlmErrorCode.Cancelled);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "cancelled", LlmErrorCode.Cancelled);
+                throw;
+            }
+            catch (LlmClientException ex)
+            {
+                // WHY: collapsing to ProviderError would hide AuthExpired/BackendUnavailable from the
+                // degraded-health path and from diagnostics subscribers.
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message, ex.ErrorCode);
                 throw;
             }
             catch (Exception ex)
             {
-                PublishCompleted(request, capturedMode, false, false, ex.Message, LlmErrorCode.ProviderError);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message, LlmErrorCode.ProviderError);
                 throw;
             }
         }
@@ -139,11 +146,12 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            ILlmClient inner = Prepare(request, true, out LlmExecutionMode capturedMode);
+            ILlmClient inner = Prepare(request, true, out LlmExecutionMode capturedMode, out long capturedGeneration);
             bool ok = true;
             string error = "";
             LlmErrorCode errorCode = LlmErrorCode.None;
             LlmStreamChunk lastUsageChunk = null;
+            bool completedPublished = false;
 
             IAsyncEnumerator<LlmStreamChunk> enumerator =
                 inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
@@ -158,13 +166,31 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (LlmOperationTimeoutException)
                     {
-                        PublishCompleted(request, capturedMode, true, false, "timeout", LlmErrorCode.Timeout);
+                        completedPublished = true;
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout", LlmErrorCode.Timeout);
                         PublishUsage(request, capturedMode, true, lastUsageChunk, false);
                         throw;
                     }
                     catch (OperationCanceledException)
                     {
-                        PublishCompleted(request, capturedMode, true, false, "cancelled", LlmErrorCode.Cancelled);
+                        completedPublished = true;
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "cancelled", LlmErrorCode.Cancelled);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        throw;
+                    }
+                    catch (LlmClientException ex)
+                    {
+                        completedPublished = true;
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, ex.ErrorCode);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // WHY: a transport exception other than timeout/cancel previously escaped with no
+                        // completion event at all — subscribers saw a request start and never finish.
+                        completedPublished = true;
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, LlmErrorCode.ProviderError);
                         PublishUsage(request, capturedMode, true, lastUsageChunk, false);
                         throw;
                     }
@@ -194,11 +220,23 @@ namespace CoreAI.Infrastructure.Llm
                     yield return chunk;
                 }
 
-                PublishCompleted(request, capturedMode, true, ok, error, errorCode);
+                completedPublished = true;
+                PublishCompleted(request, capturedMode, capturedGeneration, true, ok, error, errorCode);
                 PublishUsage(request, capturedMode, true, lastUsageChunk, ok);
             }
             finally
             {
+                if (!completedPublished)
+                {
+                    // WHY: a consumer that abandons the stream (break + dispose) never lets the
+                    // generator reach the post-loop publish — without this, every abandoned stream
+                    // leaks an LlmRequestStarted with no matching LlmRequestCompleted.
+                    PublishCompleted(request, capturedMode, capturedGeneration, true, false,
+                        string.IsNullOrEmpty(error) ? "stream abandoned by consumer" : error,
+                        errorCode == LlmErrorCode.None ? LlmErrorCode.Cancelled : errorCode);
+                    PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                }
+
                 await enumerator.DisposeAsync();
             }
         }
@@ -206,7 +244,8 @@ namespace CoreAI.Infrastructure.Llm
         private ILlmClient Prepare(
             LlmCompletionRequest request,
             bool streaming,
-            out LlmExecutionMode capturedMode)
+            out LlmExecutionMode capturedMode,
+            out long capturedGeneration)
         {
             // WHY: one atomic route observation — resolving client/profile/context/mode separately
             // lets a concurrent endpoint switch pair endpoint A's client with endpoint B's metadata.
@@ -216,6 +255,7 @@ namespace CoreAI.Infrastructure.Llm
             request.RoutingProfileId = route.ProfileId;
             request.ContextWindowTokens = route.ContextWindowTokens;
             capturedMode = route.Mode;
+            capturedGeneration = route.Generation;
             _backendSelectedPublisher?.Publish(new LlmBackendSelected(
                 request.TraceId,
                 request.AgentRoleId,
@@ -234,6 +274,7 @@ namespace CoreAI.Infrastructure.Llm
         private void PublishCompleted(
             LlmCompletionRequest request,
             LlmExecutionMode capturedMode,
+            long capturedGeneration,
             bool streaming,
             bool success,
             string error,
@@ -244,11 +285,13 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: a Ready endpoint whose key expired or whose backend died mid-conversation must
                 // surface degraded health on its snapshot; otherwise the UI keeps reporting Ready
                 // until restart while every request fails.
-                _registry.ReportRouteFailure(request?.RoutingProfileId ?? "", errorCode, error);
+                _registry.ReportRouteFailure(
+                    request?.RoutingProfileId ?? "", capturedGeneration, errorCode, error);
             }
             else if (success)
             {
-                _registry.ReportRouteFailure(request?.RoutingProfileId ?? "", LlmErrorCode.None, "");
+                _registry.ReportRouteFailure(
+                    request?.RoutingProfileId ?? "", capturedGeneration, LlmErrorCode.None, "");
             }
 
             _requestCompletedPublisher?.Publish(new LlmRequestCompleted(

@@ -152,11 +152,13 @@ namespace CoreAI.Tests.EditMode
         public async Task ResaveAsInactive_ReleasesTheReadyOwnedHost()
         {
             int releases = 0;
+            TaskCompletionSource<bool> released = new(TaskCreationOptions.RunContinuationsAsynchronously);
             FakeFactory factory = new()
             {
                 ReleaseOwnedHostAsync = () =>
                 {
                     releases++;
+                    released.TrySetResult(true);
                     return Task.CompletedTask;
                 }
             };
@@ -168,7 +170,12 @@ namespace CoreAI.Tests.EditMode
             descriptor.Active = false;
             await registry.AddOrUpdateEndpointAsync(descriptor);
 
-            Assert.AreEqual(1, releases, "Re-saving a Ready endpoint as inactive must release its owned host.");
+            // WHY (bounded wait): the drain-then-release runs fire-and-forget; asserting inline only
+            // works while the release path happens to complete synchronously.
+            Task finished = await Task.WhenAny(released.Task, Task.Delay(5000));
+            Assert.AreSame(released.Task, finished,
+                "Re-saving a Ready endpoint as inactive must release its owned host.");
+            Assert.AreEqual(1, releases);
             Assert.AreEqual(LlmEndpointLifecycleState.Inactive, registry.GetEndpoints().Single().State);
         }
 
@@ -404,6 +411,34 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(recovered.Ok);
             Assert.AreEqual("", registry.GetEndpoints().Single().Error,
                 "A successful request must clear the degraded health note.");
+        }
+
+        [Test]
+        public async Task StaleGenerationHealthReport_DoesNotTouchTheReplacementEndpoint()
+        {
+            FakeFactory factory = new() { Client = new NamedClient("ok") };
+            LlmClientRegistry registry = BuildRegistry(new MemoryStore(), factory);
+            LlmEndpointDescriptor descriptor = Descriptor("cloud", "https://example.test/v1");
+            await registry.AddOrUpdateEndpointAsync(descriptor);
+            registry.AssignRoleProfile("Chat", "cloud");
+            long staleGeneration = registry.ResolveRouteForRole("Chat", "").Generation;
+            Assert.Greater(staleGeneration, 0L, "A routed runtime endpoint must expose its generation.");
+
+            descriptor.Model = "replacement-model";
+            await registry.AddOrUpdateEndpointAsync(descriptor);
+            long currentGeneration = registry.ResolveRouteForRole("Chat", "").Generation;
+            Assert.AreNotEqual(staleGeneration, currentGeneration, "Replacement must advance the generation.");
+
+            registry.ReportRouteFailure("cloud", staleGeneration, LlmErrorCode.AuthExpired, "401 from the old generation");
+            Assert.AreEqual("", registry.GetEndpoints().Single().Error,
+                "A late failure from the replaced generation must not degrade its successor.");
+
+            registry.ReportRouteFailure("cloud", currentGeneration, LlmErrorCode.AuthExpired, "401");
+            StringAssert.Contains("Degraded", registry.GetEndpoints().Single().Error,
+                "A failure from the serving generation must still degrade health.");
+            registry.ReportRouteFailure("cloud", staleGeneration, LlmErrorCode.None, "");
+            StringAssert.Contains("Degraded", registry.GetEndpoints().Single().Error,
+                "A late success from the replaced generation must not clear the successor's degradation.");
         }
 
         private LlmClientRegistry BuildRegistry(
