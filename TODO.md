@@ -31,6 +31,14 @@
 - [ ] **Disposed registry keeps resolving.** `LlmClientRegistry.Dispose` requests host release but
       public resolution APIs never check `_disposed`; resolution during scope teardown can hand out a
       client whose host is being released. Consider `ObjectDisposedException` guards under `_gate`.
+- [ ] **Offline + persisted role→profile assignment surfaces `RoutingUnavailableClient`.** (Opus 4.8
+      audit, 2026-07-17, Minor.) In Offline mode the restore gate keeps endpoints Inactive; if the user
+      also has a persisted `_runtimeRoleProfiles` assignment, `ResolveClientForRole` returns
+      `RoutingUnavailableClient(profile)` ("routing profile 'X' is unavailable") instead of falling
+      through to the offline/legacy client. Arguably more correct than the pre-fix behavior (which booted
+      the backend behind the user's back), and default demos have no runtime role assignments, so the
+      Offline smoke never hits it. Suggested direction: when settings mode is Offline, treat an
+      inactive-routed role as falling through to `_legacyFallback`. Not a 5.9.0 blocker.
 
 ## [A6] Deep audit wave (2026-07-13) — runtime / architecture / tests / security, all 22 findings fixed
 
