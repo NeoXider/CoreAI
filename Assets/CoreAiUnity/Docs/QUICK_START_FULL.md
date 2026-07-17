@@ -143,7 +143,7 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 │     API Key:     (empty)                     │
 │     Model:       qwen3.5-4b                  │
 │     Temperature: 0.2                         │
-│     Max Tokens:  4096                        │
+│     Max Tokens:  off (provider decides)      │
 │     Timeout:     120                         │
 │                                              │
 │  ⚙️ General:                                 │

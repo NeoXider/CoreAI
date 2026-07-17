@@ -93,6 +93,11 @@ file APIs that a host game exposes through components.
   sandbox limits.
 - Mod error budget and auto-unload still apply to persistent mods.
 - `Allowed Scenes` on `CoreAiLuaWorldModule` constrains scene-loading commands.
+- **Runtime lifecycle is scope-bound.** The `DontDestroyOnLoad` `CoreAI_LuaModTicker` that drives
+  `hooks_on`/`hooks_every` handlers is destroyed via the owning container's dispose callback, so mod
+  ticking stops when the scope is disposed instead of leaking a live runtime into later scenes. The
+  `FileLuaModStore` is disposal-safe: a late `store_set`/`store_get` (or a `Set`/`Get`/`Clear`) from a
+  handler that ticks once more during teardown degrades to a no-op after `Dispose` instead of throwing.
 
 ## Mod LLM Tools
 

@@ -38,9 +38,13 @@ many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve dif
   profileId)` on the routed client, so an agent re-routed mid-conversation adopts the new endpoint's
   native/text tool contract and its context window (min-ed with the role's configured budget).
 - **Endpoint health is not sticky.** When a routed request fails with `AuthExpired` or
-  `BackendUnavailable`, the routing client calls `ILlmClientRegistry.ReportRouteFailure` and the endpoint
-  snapshot reports a `Degraded: …` error while staying Ready (routable — a transient outage needs no manual
-  re-activation); `Changed` fires for UI refresh, and the next successful request clears the note.
+  `BackendUnavailable`, the routing client calls `ILlmClientRegistry.ReportRouteFailure(profileId,
+  generation, errorCode, error)` and the endpoint snapshot reports a `Degraded: …` error while staying Ready
+  (routable — a transient outage needs no manual re-activation); `Changed` fires for UI refresh, and the next
+  successful request clears the note. Reports are **generation-stamped**: the client echoes the
+  `LlmRoleRouteSnapshot.Generation` the request started on, so a late failure from a replaced endpoint cannot
+  degrade its successor (mismatched or `0` generations are dropped). Both streaming and non-streaming
+  completion paths publish the report.
 - **Descriptor behavior fields.** `LlmEndpointDescriptor` carries per-endpoint request shaping for HTTP
   endpoints — `MaxTokens`, `ReasoningMode`, `ThinkingBudgetTokens`, `ExtraBodyJson` — validated by
   `Validate()`, persisted, and part of the client fingerprint (editing them re-activates the client).
@@ -56,7 +60,10 @@ same conversation through the new backend, while an in-flight request finishes o
 where it started.
 
 `Active = true` allows new routing. `KeepWarm = true` keeps an inactive endpoint initialized for a later
-switch without routing new work to it. Active and keep-warm endpoints repeat readiness on restart. HTTP
+switch without routing new work to it. Active and keep-warm endpoints repeat readiness on restart — **except
+when the execution mode is `Offline`**: persisted Active/KeepWarm endpoints are then restored for display and
+explicit activation but are **not** auto-activated, so restoring a scene in Offline mode never boots a native
+local model or HTTP host behind the user's back. HTTP
 readiness prefers `GET {BaseUrl}/models` (normally `/v1/models`); a `404`/`405` falls back to a minimal
 `POST {BaseUrl}/chat/completions`, where a handler-level response proves readiness. Authentication,
 missing-route, server, and network failures remain failures. LLMUnity has no models route, so

@@ -37,6 +37,10 @@ Standard OpenAI-compatible payload:
 }
 ```
 
+> Since 5.9.0, `temperature` and `max_tokens` are only present when their respective overrides are enabled
+> on `CoreAISettingsAsset` (both OFF by default). When an override is off the key is omitted entirely and the
+> provider chooses its own value — the server must not assume either field is always sent.
+
 ## 4. Response
 
 ### 4.1. Success (200 OK)

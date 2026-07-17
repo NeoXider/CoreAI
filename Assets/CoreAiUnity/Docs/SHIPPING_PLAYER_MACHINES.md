@@ -60,7 +60,7 @@ Remember the model is also **read into memory** at load time — disk size is a 
 
 ### 2.3 RAM / VRAM guidance
 
-- Budget roughly **model file size + 1–2 GB** of working memory (KV cache grows with context window; the 128K default `Context Window` in `CoreAISettingsAsset` is far more than a small local model needs — lower it for local GGUF to shrink the KV cache).
+- Budget roughly **model file size + 1–2 GB** of working memory (KV cache grows with context window). For local GGUF, size the KV cache from the `LLM` component's own context size; the `CoreAISettingsAsset` **Context Window** setting is a client-side history budget that is **OFF by default** since 5.9.0 (unlimited sentinel). If you enable **Enable context window overriding**, its default is 128K — far more than a small local model needs, so lower it to bound client-side budgeting.
 - **Num GPU Layers > 0** on the `LLM` component offloads layers to VRAM; with no or weak GPU, llama.cpp runs on CPU (slower, uses system RAM).
 - Align **Num GPU layers** and **context size** with your *minimum* target hardware — this is already a line item in the pre-release checklist of [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md).
 

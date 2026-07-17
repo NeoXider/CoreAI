@@ -42,7 +42,9 @@ backend changes. In-flight requests retain the endpoint generation on which they
 
 `Active` controls whether new requests may route to an endpoint. `KeepWarm` may keep an inactive endpoint
 loaded and Ready for a later switch, but does not make it routable. Activating a persisted endpoint starts
-its readiness sequence again after process restart. HTTP endpoints prefer a successful OpenAI-compatible
+its readiness sequence again after process restart — but when the execution mode is `Offline`, persisted
+Active/KeepWarm endpoints are restored for display/explicit activation only and are **not** auto-activated,
+so an Offline restore never boots a local model or HTTP host behind the user's back. HTTP endpoints prefer a successful OpenAI-compatible
 `GET {BaseUrl}/models` probe. If that optional route returns `404` or `405`, CoreAI falls back to a minimal
 `POST {BaseUrl}/chat/completions` probe and accepts a handler-level response; authentication failures,
 missing completion routes, server errors, and network failures still fail readiness. LLMUnity does not expose `/v1/models`: its endpoints first
@@ -66,9 +68,13 @@ authenticated backend.
 - Profile-aware `ILlmClient` capability queries — `SupportsNativeToolCallingForRole(roleId, profileId)` and
   `ResolveContextWindowTokensForRole(roleId, profileId)` — let the orchestrator's tool strategy and context
   budgeting follow the endpoint a request is actually routed to; all built-in decorators forward them.
-- `ILlmClientRegistry.ReportRouteFailure(profileId, errorCode, error)` lets routing clients report
-  endpoint-level failures (`AuthExpired`, `BackendUnavailable`) so registries surface degraded health on the
-  endpoint snapshot instead of keeping a stale Ready appearance; a later success clears it. Default: no-op.
+- `ILlmClientRegistry.ReportRouteFailure(profileId, generation, errorCode, error)` lets routing clients
+  report endpoint-level failures (`AuthExpired`, `BackendUnavailable`) so registries surface degraded health
+  on the endpoint snapshot instead of keeping a stale Ready appearance; a later success clears it. Reports are
+  **generation-stamped** (`LlmRoleRouteSnapshot.Generation`, echoed back from the route the request started
+  on): a report whose generation no longer matches the endpoint's current generation is dropped, so a late
+  completion from a replaced endpoint cannot mutate its successor's health; a report with generation `0` is
+  ignored. Both streaming and non-streaming paths publish the report. Default: no-op for legacy registries.
 - `LlmEndpointDescriptor` behavior fields for HTTP endpoints — `MaxTokens`, `ReasoningMode`,
   `ThinkingBudgetTokens`, `ExtraBodyJson` — are validated by `Validate()` and travel with the persisted
   descriptor. `DeriveEndpointSlug` / `EnsureUniqueEndpointId` provide portable endpoint-id derivation.
