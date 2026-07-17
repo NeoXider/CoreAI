@@ -6,6 +6,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- `MixedBackendParallelAgentsPlayModeTests` — drives two agents concurrently against two different live
+  backends in one play session (native LLMUnity GGUF + OpenAI-compatible HTTP / LM Studio), asserting both
+  turns complete with non-empty answers and that the native host and HTTP transport run in parallel without
+  interfering. Skips gracefully when either backend is unavailable. Verified green against Qwen3.5-4B
+  (LLMUnity) + qwen3.5-4b-mtp (LM Studio).
 - Runtime endpoint management for multiple simultaneously active OpenAI-compatible APIs and LLMUnity,
   including per-agent routing, endpoint lifecycle state, hot switching, persistence with secret redaction,
   and deterministic EditMode/PlayMode coverage. External APIs prefer `/models`, with a handler-level
