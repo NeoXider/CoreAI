@@ -13,18 +13,19 @@ MonoBehaviour:
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
   backendType: 2
-  executionMode: 0
+  executionMode: 2
   autoPriority: 0
-  apiBaseUrl: http://localhost:1234/v1
-  apiKey: 
-  modelName: qwopus3.5-9b-coder-mtp
+  apiBaseUrl: http://127.0.0.1:1234/v1
+  apiKey: lm-studio
+  modelName: qwen3.5-4b-mtp
   visionSupport: 0
-  enableTemperatureOverriding: 0
-  temperature: 0.1
-  maxTokens: 20000
+  enableTemperatureOverriding: 1
+  temperature: 0.2
+  enableMaxTokensOverriding: 0
+  maxTokens: 2048
   maxClientLimitedRequestsPerSession: 0
   maxClientLimitedPromptChars: 0
-  requestTimeoutSeconds: 240
+  requestTimeoutSeconds: 120
   enableFallbackBackend: 0
   secondaryApiBaseUrl: 
   secondaryApiKey: 
@@ -50,8 +51,9 @@ MonoBehaviour:
   maxLuaRepairRetries: 3
   maxToolCallRetries: 3
   allowDuplicateToolCalls: 0
-  maxLlmRequestRetries: 2
+  maxLlmRequestRetries: 3
   maxContextOverflowRetries: 3
+  enableContextWindowOverriding: 0
   contextWindowTokens: 128000
   maxToolResultChars: 8000
   defaultToolTimeoutMs: 30000
@@ -75,8 +77,8 @@ MonoBehaviour:
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
-  enableMeaiDebugLogging: 1
-  enableHttpDebugLogging: 1
+  enableMeaiDebugLogging: 0
+  enableHttpDebugLogging: 0
   logLlmInput: 1
   logLlmOutput: 1
   logTokenUsage: 1
@@ -86,8 +88,8 @@ MonoBehaviour:
   logToolCallArguments: 1
   logToolCallResults: 1
   logMeaiToolCallingSteps: 1
-  llmRequestTimeoutSeconds: 240
+  llmRequestTimeoutSeconds: 180
   maxConcurrentOrchestrations: 2
-  logOrchestrationMetrics: 1
+  logOrchestrationMetrics: 0
   inputTokenPricePer1KUsd: 0
   outputTokenPricePer1KUsd: 0
