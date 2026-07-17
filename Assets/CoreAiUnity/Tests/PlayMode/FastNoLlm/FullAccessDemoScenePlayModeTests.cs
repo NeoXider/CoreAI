@@ -11,6 +11,14 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class FullAccessDemoScenePlayModeTests
     {
+
+        [UnityTearDown]
+        public IEnumerator UnloadLoadedScenes()
+        {
+            // Single-mode scene loads otherwise persist past this test and leak their scope into the
+            // rest of the PlayMode run.
+            yield return PlayModeSceneSandbox.UnloadToEmptyScene();
+        }
         private const string ScenePath = "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity";
 
         [UnityTest]

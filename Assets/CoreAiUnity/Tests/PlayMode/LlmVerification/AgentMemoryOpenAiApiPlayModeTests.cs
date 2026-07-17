@@ -158,10 +158,17 @@ namespace CoreAI.Tests.PlayMode
             }
 
             AssertAgentMemoryCleared(setup, "after clear tool");
-            Assert.IsFalse(
-                setup.MemoryStore.TryLoad(Role, out _),
-                "After memory tool clear, store must not retain a row for Creator (Clear removes the key).");
-            Debug.Log("[AgentMemoryOpenAiApiPlayMode] Clear OK — role row absent.");
+            // Since the audit-wave versioning rework the memory tool's clear is a VERSIONED mutation:
+            // the role row survives with empty memory plus a recorded "clear" version so an accidental
+            // clear can be rolled back (ListVersions/Revert). Only the direct store-level Clear removes
+            // the role key when nothing else shares the file.
+            if (setup.MemoryStore.TryLoad(Role, out AgentMemoryState cleared))
+            {
+                Assert.IsTrue(string.IsNullOrWhiteSpace(cleared.Memory),
+                    "After memory tool clear, any retained row must hold no memory content.");
+            }
+
+            Debug.Log("[AgentMemoryOpenAiApiPlayMode] Clear OK — memory content empty.");
         }
 
         /// <summary>

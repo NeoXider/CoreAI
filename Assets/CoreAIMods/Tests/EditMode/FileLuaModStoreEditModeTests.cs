@@ -91,5 +91,27 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("underscore", _store.Get("A_B", "key"));
             Assert.AreEqual(2, Directory.GetFiles(_root, "*.json").Length);
         }
+
+        [Test]
+        public void DisposedStore_LateHandlerCalls_AreSilentNoOps()
+        {
+            // Regression: mod handlers are driven by a per-frame tick that can fire once more while the
+            // owning scope tears down; a late store_set used to throw ObjectDisposedException out of the
+            // mod handler ("The semaphore has been disposed") and fail unrelated PlayMode tests.
+            _store.Set("tetris3d", "score", "42");
+            Assert.AreEqual("42", _store.Get("tetris3d", "score"));
+
+            _store.Dispose();
+
+            Assert.DoesNotThrow(() => _store.Set("tetris3d", "score", "late-write"),
+                "store_set from a late mod tick must not throw after the scope disposed the store.");
+            Assert.AreEqual("", _store.Get("tetris3d", "score"),
+                "Reads after dispose degrade to the empty default instead of throwing.");
+            Assert.DoesNotThrow(() => _store.Clear("tetris3d"));
+
+            _store = new FileLuaModStore(_root);
+            Assert.AreEqual("42", _store.Get("tetris3d", "score"),
+                "A write attempted after dispose must not reach the file.");
+        }
     }
 }

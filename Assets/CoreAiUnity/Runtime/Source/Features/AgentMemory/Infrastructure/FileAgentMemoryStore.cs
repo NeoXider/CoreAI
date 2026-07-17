@@ -372,6 +372,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 {
                     string existingJson = File.ReadAllText(path);
                     Persisted p;
+                    bool parseFailed = false;
                     try
                     {
                         p = JsonUtility.FromJson<Persisted>(existingJson);
@@ -386,6 +387,21 @@ namespace CoreAI.Infrastructure.AiMemory
                     {
                         _log?.Warn($"[FileAgentMemoryStore] Replacing unparseable memory for {roleId}.");
                         p = new Persisted();
+                        parseFailed = true;
+                    }
+
+                    // WHY: the role file also carries persisted chat history/transcripts, so a memory
+                    // clear must not destroy them. When nothing but memory lives in the file, the clear
+                    // removes the role key entirely (the documented Clear contract; regression a883db00).
+                    // A corrupt file is instead replaced with an explicit cleared marker so the next load
+                    // does not resurrect garbage.
+                    if (!parseFailed &&
+                        !HasChatHistoryPayload(p.chatHistoryJson) &&
+                        !HasTranscriptPayload(p.transcriptEntriesJson))
+                    {
+                        File.Delete(path);
+                        PersistFsForWebGl();
+                        return;
                     }
 
                     p.memory = "";
@@ -399,6 +415,45 @@ namespace CoreAI.Infrastructure.AiMemory
             catch (Exception ex)
             {
                 _log?.Error($"[FileAgentMemoryStore] Failed to clear memory for {roleId}: {ex}");
+            }
+        }
+
+        /// <summary>True when the serialized chat-history wrapper actually carries messages.</summary>
+        private static bool HasChatHistoryPayload(string serialized)
+        {
+            if (string.IsNullOrWhiteSpace(serialized))
+            {
+                return false;
+            }
+
+            try
+            {
+                ChatMessageArrayWrapper wrapper = JsonUtility.FromJson<ChatMessageArrayWrapper>(serialized);
+                return wrapper.Items is { Length: > 0 };
+            }
+            catch
+            {
+                return true; // unknown format — err on preserving the file
+            }
+        }
+
+        /// <summary>True when the serialized transcript list actually carries entries.</summary>
+        private static bool HasTranscriptPayload(string serialized)
+        {
+            if (string.IsNullOrWhiteSpace(serialized))
+            {
+                return false;
+            }
+
+            try
+            {
+                List<ConversationEntry> entries =
+                    JsonConvert.DeserializeObject<List<ConversationEntry>>(serialized, TranscriptJson);
+                return entries is { Count: > 0 };
+            }
+            catch
+            {
+                return true; // unknown format — err on preserving the file
             }
         }
 

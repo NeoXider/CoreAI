@@ -18,6 +18,14 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class CoreAiChatDemoRealModelWebGlPlayModeTests
     {
+
+        [UnityTearDown]
+        public IEnumerator UnloadLoadedScenes()
+        {
+            // Single-mode scene loads otherwise persist past this test and leak their scope into the
+            // rest of the PlayMode run.
+            yield return PlayModeSceneSandbox.UnloadToEmptyScene();
+        }
         private const string LogPrefix = "[CoreAI.Tests.ChatSceneRealModel]";
         private const string SceneName = "CoreAiChatDemo";
         private const string RoleId = "SmartChat";

@@ -118,6 +118,57 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Clear_WithoutPersistedConversation_RemovesTheRoleKey()
+        {
+            // Regression (PlayMode MemoryTool_ClearsMemory): when the role file holds ONLY memory —
+            // no persisted chat history or transcripts — Clear must remove the key entirely instead of
+            // leaving an empty row behind (contract from a883db00, broken by the audit-wave rewrite).
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                AgentMemoryState state = new() { Memory = "only_memory", LastSystemPrompt = "s" };
+                state.RecordVersion("write", state.Memory);
+                store.Save(_roleId, state);
+
+                store.Clear(_roleId);
+
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.IsFalse(reloaded.TryLoad(_roleId, out _),
+                    "Clear must remove the role key when no persisted conversation shares the file.");
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void Clear_AfterChatHistoryCleared_RemovesTheRoleKey()
+        {
+            // Once ClearChatHistory left only cleared conversation markers in the file, a memory clear
+            // has nothing left to preserve — the role key must go away like in the memory-only case.
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                store.Save(_roleId, new AgentMemoryState { Memory = "only_memory" });
+                store.AppendChatMessage(_roleId, "user", "temp", true);
+                store.ClearChatHistory(_roleId);
+
+                store.Clear(_roleId);
+
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.IsFalse(reloaded.TryLoad(_roleId, out _),
+                    "An empty serialized history wrapper must not keep the cleared role row alive.");
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
         public void Clear_OnDisk_WipesMemoryVersionsAndSnapshot_BumpsPromptVersion()
         {
             string root = CreateTempRoot();

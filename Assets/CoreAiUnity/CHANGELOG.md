@@ -29,6 +29,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed (PlayMode suite stability)
 
+- `FileAgentMemoryStore.Clear` removes the role key again when the file holds no persisted chat
+  history/transcripts (regression of the a883db00 contract introduced by the audit-wave rewrite); files
+  that do share persisted conversation keep it and only wipe the memory fields, and a corrupt file is
+  still replaced with an explicit cleared marker. EditMode regressions cover the memory-only and
+  cleared-history cases; the live PlayMode clear test now asserts the versioned-clear contract (row may
+  survive with empty memory + a rollback version) instead of the pre-versioning key-removal contract.
+- Scene-loading PlayMode tests (demo smoke, FullAccess scene, chat panel stop, WebGL chat demo) now
+  return the run to an empty scene via a shared `PlayModeSceneSandbox` teardown. A demo scene left
+  loaded kept its `CoreAILifetimeScope` alive for every later test, so `CoreAiBackend.Status` could read
+  backend state from an arbitrary leftover scope (flaky `OfflineScope_SwitchedToLiveHttp` failures). The
+  demo smoke additionally asserts no `CoreAI_LuaModTicker` survives scope disposal, and a new
+  `FileLuaModStore` EditMode regression proves late post-dispose store calls are silent no-ops.
+
 - Leaked immortal mod ticker: `CoreAiModsInstaller` created a `DontDestroyOnLoad` `CoreAI_LuaModTicker`
   per container build and never destroyed it, so every scene/test left behind a live runtime that kept
   driving the user's persisted Lua mods (e.g. a saved tetris mod) into unrelated scenes — cross-test

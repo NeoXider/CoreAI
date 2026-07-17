@@ -118,6 +118,21 @@ namespace CoreAI.Tests.PlayMode
             RestoreSharedSettings();
         }
 
+        [UnityTearDown]
+        public IEnumerator UnloadLoadedDemoScenes()
+        {
+            // The smoke leaves the last demo scene loaded otherwise; its live scope + controllers then
+            // bleed into every later PlayMode test in the run.
+            yield return PlayModeSceneSandbox.UnloadToEmptyScene();
+
+            // Regression: the DontDestroyOnLoad mod ticker must die with its scope. Before the
+            // container dispose hook, every demo scene leaked an immortal CoreAI_LuaModTicker that kept
+            // driving persisted user mods into later tests (and eventually OOM-crashed the editor).
+            yield return null;
+            Assert.IsNull(GameObject.Find("CoreAI_LuaModTicker"),
+                "Mod tickers must be destroyed when their owning scope disposes (no cross-test leaks).");
+        }
+
         private void RestoreSharedSettings()
         {
             if (_sharedSettings != null && !string.IsNullOrEmpty(_sharedSettingsSnapshotJson))
