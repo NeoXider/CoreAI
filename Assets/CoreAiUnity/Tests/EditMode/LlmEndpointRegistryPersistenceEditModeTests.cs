@@ -229,6 +229,38 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Constructor_InOfflineMode_RestoresConfigurationWithoutAutoActivation()
+        {
+            // Regression: with LLMUnity + autostart persisted as Active, every scene load used to boot
+            // a native llama.cpp host even when the settings said Offline — rapid Single-mode scene
+            // cycling (the published-demo smoke) then crashed the editor mid-construction.
+            _settings.ConfigureOffline();
+            MemoryStore store = new()
+            {
+                State = new LlmEndpointRegistryState
+                {
+                    Endpoints = new[] { Descriptor("cloud", "https://example.test/v1") },
+                    Profiles = new[]
+                    {
+                        new LlmRuntimeProfile { ProfileId = "chat", EndpointId = "cloud" }
+                    },
+                    RoleProfiles = new[]
+                    {
+                        new LlmPersistedRoleProfile { RolePattern = "SmartChat", ProfileId = "chat" }
+                    }
+                }
+            };
+            FakeFactory factory = new();
+
+            LlmClientRegistry registry = BuildRegistry(store, factory);
+
+            Assert.AreEqual(0, factory.Calls, "Offline mode must not auto-activate persisted endpoints.");
+            Assert.AreEqual(LlmEndpointLifecycleState.Inactive, registry.GetEndpoints().Single().State);
+            Assert.AreEqual("chat", registry.GetRoleProfile("SmartChat"),
+                "Configuration is still restored for display/explicit activation.");
+        }
+
+        [Test]
         public async Task Constructor_RestoresActiveEndpointAndAgentAssignmentReady()
         {
             MemoryStore store = new()

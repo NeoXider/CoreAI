@@ -27,6 +27,17 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   Start, success, timeout, cancellation, and failure logs identify the endpoint, model filename, LLMAgent,
   port, and completed-phase duration in milliseconds without recording credentials or full model paths.
 
+### Fixed (editor crash)
+
+- Editor crash in the published-demo smoke (`AllPublishedDemoScenes_...`): the demo scenes share
+  `Resources/CoreAISettings`, so with the LLMUnity backend + autostart selected every Single-mode scene
+  load booted a native llama.cpp service that the next load tore down mid-construction
+  (`LLMService::LLMService` on a worker thread). Two fixes: the registry no longer auto-activates
+  persisted Active/KeepWarm endpoints on restore when execution mode is Offline (configuration is still
+  restored for display/explicit activation; EditMode regression), and the smoke itself now forces the
+  shared settings asset to Offline for the run and restores its exact serialized state afterwards, so the
+  FastNoLlm suite no longer depends on the developer's last-selected backend.
+
 ### Changed
 
 - Max output tokens and context window are now explicit overrides on `CoreAISettingsAsset` (mirroring the

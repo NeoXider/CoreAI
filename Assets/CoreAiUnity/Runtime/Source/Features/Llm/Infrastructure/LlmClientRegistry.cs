@@ -1472,6 +1472,15 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            // WHY: Offline execution mode means "no LLM backends" — restoring persisted Active/KeepWarm
+            // endpoints must not boot native local models (llama.cpp) or HTTP hosts behind the user's
+            // back. Descriptors/profiles/role assignments above are still restored so the Hub keeps
+            // showing them; endpoints simply stay Inactive until explicitly activated.
+            if (_settings is CoreAISettingsAsset offlineCheck && offlineCheck.UseOffline)
+            {
+                return;
+            }
+
             foreach (RuntimeEndpoint endpoint in _runtimeEndpoints.Values)
             {
                 if (!endpoint.Descriptor.Active && !endpoint.Descriptor.KeepWarm)

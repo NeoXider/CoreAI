@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using CoreAI.Composition;
 using NUnit.Framework;
+using CoreAI.Infrastructure.Llm;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -14,6 +16,8 @@ namespace CoreAI.Tests.PlayMode
     {
         private Application.LogCallback _capture;
         private bool _previousIgnoreFailingMessages;
+        private CoreAISettingsAsset _sharedSettings;
+        private string _sharedSettingsSnapshotJson;
 
         private static readonly string[] ScenePaths =
         {
@@ -32,6 +36,18 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator AllPublishedDemoScenes_LoadWithScopeCameraAndSupportedShaders()
         {
+            // WHY: the demo scenes all reference the shared Resources/CoreAISettings asset, so this
+            // FastNoLlm smoke would otherwise inherit whatever backend the developer last selected.
+            // With LLMUnity + autostart, every Single-mode scene load boots a native llama.cpp
+            // service that the next load tears down mid-construction — a real editor crash
+            // (LLMService::LLMService on a worker thread), not a test failure. Force Offline for the
+            // duration and restore the exact serialized state afterwards.
+            _sharedSettings = CoreAISettingsAsset.Instance;
+            Assert.IsNotNull(_sharedSettings,
+                "Shared Resources/CoreAISettings asset must exist for the demo scene smoke.");
+            _sharedSettingsSnapshotJson = EditorJsonUtility.ToJson(_sharedSettings);
+            _sharedSettings.ConfigureOffline();
+
             List<string> unexpectedErrors = new();
             string currentScene = "(startup)";
             Application.LogCallback capture = (condition, stackTrace, type) =>
@@ -99,6 +115,19 @@ namespace CoreAI.Tests.PlayMode
         public void TearDown()
         {
             CleanupLogCapture();
+            RestoreSharedSettings();
+        }
+
+        private void RestoreSharedSettings()
+        {
+            if (_sharedSettings != null && !string.IsNullOrEmpty(_sharedSettingsSnapshotJson))
+            {
+                // In-memory restore only: the asset was never saved, so disk state is untouched.
+                EditorJsonUtility.FromJsonOverwrite(_sharedSettingsSnapshotJson, _sharedSettings);
+            }
+
+            _sharedSettings = null;
+            _sharedSettingsSnapshotJson = null;
         }
 
         private void CleanupLogCapture()
