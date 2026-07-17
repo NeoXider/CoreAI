@@ -27,6 +27,23 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   Start, success, timeout, cancellation, and failure logs identify the endpoint, model filename, LLMAgent,
   port, and completed-phase duration in milliseconds without recording credentials or full model paths.
 
+### Fixed (PlayMode suite stability)
+
+- Leaked immortal mod ticker: `CoreAiModsInstaller` created a `DontDestroyOnLoad` `CoreAI_LuaModTicker`
+  per container build and never destroyed it, so every scene/test left behind a live runtime that kept
+  driving the user's persisted Lua mods (e.g. a saved tetris mod) into unrelated scenes — cross-test
+  log contamination, world-command spam, unbounded growth and an eventual editor OOM crash during full
+  PlayMode runs. The ticker is now destroyed via a container dispose callback.
+- `FileLuaModStore` is disposal-safe: a mod handler ticking once more during scene teardown used to hit
+  `store_set: The semaphore has been disposed` (failed ~16 unrelated PlayMode tests); late calls now
+  degrade to no-ops after Dispose.
+- `FullAccessDemo` no longer ships the LLMUnity sample `MobileDemo` object and a scene-placed in-process
+  `LLM`/`LLMAgent` ("CoreAI_LLM"): the sample downloaded a GGUF and warmed the model on scene start
+  (LLMUnityException spam in tests, native llama.cpp boot behind CoreAI's back during scene cycling).
+  CoreAI's own auto-created runtime host drives the local model instead.
+- `QwenDemoSafetyPlayModeTests` reflected type name updated to the `CoreAI.Demos.QwenDemo` namespace
+  (same rename the EditMode suite already got).
+
 ### Fixed (editor crash)
 
 - Editor crash in the published-demo smoke (`AllPublishedDemoScenes_...`): the demo scenes share

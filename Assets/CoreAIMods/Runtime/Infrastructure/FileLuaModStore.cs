@@ -49,6 +49,53 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         private readonly SemaphoreSlim _gate = new(1, 1);
 
+        /// <summary>
+        /// Set by <see cref="Dispose"/>. The store is scope-owned while mod handlers are driven by a
+        /// per-frame tick that can fire once more during scene teardown, so a late store_set/get must
+        /// degrade to a no-op instead of throwing ObjectDisposedException out of the mod handler.
+        /// </summary>
+        private volatile bool _disposed;
+
+        /// <summary>
+        /// Enters the file gate unless the store is (or becomes) disposed mid-entry.
+        /// </summary>
+        private bool TryEnterGate()
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            try
+            {
+                _gate.Wait();
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+
+            if (_disposed)
+            {
+                ExitGate();
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ExitGate()
+        {
+            try
+            {
+                _gate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Dispose raced with a handler holding the gate; nothing left to release.
+            }
+        }
+
         /// <summary>Creates a file-backed Lua mod store under CoreAI persistent data.</summary>
         /// <param name="rootDirectory">
         /// Optional override for the storage directory; defaults to the CoreAI Lua mod folder under
@@ -72,7 +119,11 @@ namespace CoreAI.Infrastructure.Lua
                 return "";
             }
 
-            _gate.Wait();
+            if (!TryEnterGate())
+            {
+                return "";
+            }
+
             try
             {
                 Dictionary<string, string> values = LoadModCore(modId);
@@ -80,7 +131,7 @@ namespace CoreAI.Infrastructure.Lua
             }
             finally
             {
-                _gate.Release();
+                ExitGate();
             }
         }
 
@@ -98,14 +149,18 @@ namespace CoreAI.Infrastructure.Lua
                     $"Lua mod store value exceeds {MaxValueBytes} bytes for mod '{modId}', key '{key}'.");
             }
 
-            _gate.Wait();
+            if (!TryEnterGate())
+            {
+                return;
+            }
+
             try
             {
                 SetCore(modId, key, value);
             }
             finally
             {
-                _gate.Release();
+                ExitGate();
             }
         }
 
@@ -140,14 +195,18 @@ namespace CoreAI.Infrastructure.Lua
                 return;
             }
 
-            _gate.Wait();
+            if (!TryEnterGate())
+            {
+                return;
+            }
+
             try
             {
                 ClearCore(modId);
             }
             finally
             {
-                _gate.Release();
+                ExitGate();
             }
         }
 
@@ -204,9 +263,13 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
-        /// <summary>Releases the internal file-access semaphore.</summary>
+        /// <summary>
+        /// Marks the store disposed (late mod-handler calls become no-ops) and releases the
+        /// internal file-access semaphore.
+        /// </summary>
         public void Dispose()
         {
+            _disposed = true;
             _gate.Dispose();
         }
 

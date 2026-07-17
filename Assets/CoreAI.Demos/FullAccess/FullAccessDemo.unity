@@ -202,7 +202,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 107963747}
+      - m_Target: {fileID: 0}
         m_TargetAssemblyTypeName: LLMUnitySamples.MobileDemo, Assembly-CSharp
         m_MethodName: CancelRequests
         m_Mode: 1
@@ -252,58 +252,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8055416}
   m_CullTransparentMesh: 1
---- !u!1 &107963744
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 107963746}
-  - component: {fileID: 107963747}
-  m_Layer: 0
-  m_Name: MobileDemo
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &107963746
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 107963744}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &107963747
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 107963744}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 708542fec6999ea3ebd7c69404932bb3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  llmAgent: {fileID: 893675958}
-  ChatPanel: {fileID: 591612037}
-  playerText: {fileID: 1714482232}
-  AIText: {fileID: 624083530}
-  ErrorText: {fileID: 1688602496}
-  DownloadPanel: {fileID: 332743750}
-  progressBar: {fileID: 332743752}
-  progressText: {fileID: 381203299}
 --- !u!1 &158550913
 GameObject:
   m_ObjectHideFlags: 0
@@ -868,7 +816,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 37e0bb673a6c4874a9f11c08b6592ed6, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAiLuaWorldModule
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   allowedScenes: []
@@ -1718,117 +1666,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 870921912}
   m_CullTransparentMesh: 1
---- !u!1 &893675957
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 893675960}
-  - component: {fileID: 893675959}
-  - component: {fileID: 893675958}
-  m_Layer: 0
-  m_Name: CoreAI_LLM
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &893675958
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 893675957}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b4326d5ae3b03ff55847035351559f4e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: undream.llmunity.Runtime::LLMUnity.LLMAgent
-  advancedOptions: 0
-  _remote: 0
-  _llm: {fileID: 893675959}
-  _APIKey: 
-  _host: localhost
-  _port: 13333
-  numRetries: 5
-  _grammar: 
-  numPredict: -1
-  cachePrompt: 1
-  seed: 0
-  temperature: 0.2
-  topK: 40
-  topP: 0.9
-  minP: 0.05
-  repeatPenalty: 1.1
-  presencePenalty: 0
-  frequencyPenalty: 0
-  typicalP: 1
-  repeatLastN: 64
-  mirostat: 0
-  mirostatTau: 5
-  mirostatEta: 0.1
-  nProbs: 0
-  ignoreEos: 0
-  save: 
-  debugPrompt: 0
-  overflowStrategy: 0
-  overflowTargetRatio: 0.5
-  overflowSummarizePrompt: 
-  _slot: -1
-  _systemPrompt: A chat between a curious human and an artificial intelligence assistant.
-    The assistant gives helpful, detailed, and polite answers to the human's questions.
---- !u!114 &893675959
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 893675957}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a50e3140c3ecaaf1c848dbf141cc2074, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: undream.llmunity.Runtime::LLMUnity.LLM
-  advancedOptions: 0
-  _remote: 0
-  _port: 13333
-  _APIKey: 
-  _SSLCert: 
-  _SSLKey: 
-  _numThreads: -1
-  _numGPULayers: 99
-  _parallelPrompts: 1
-  _contextSize: 8192
-  _batchSize: 512
-  _model: Qwen3.5-4B-Q4_K_M.gguf
-  _flashAttention: 1
-  _reasoning: 0
-  _lora: 
-  _loraWeights: 
-  dontDestroyOnLoad: 0
-  _embeddingsOnly: 0
-  _embeddingLength: 2560
-  minContextLength: 0
-  maxContextLength: 262144
---- !u!4 &893675960
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 893675957}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &933156839
 GameObject:
   m_ObjectHideFlags: 0
@@ -3283,6 +3120,4 @@ SceneRoots:
   - {fileID: 2100352201}
   - {fileID: 1665080582}
   - {fileID: 687163846}
-  - {fileID: 893675960}
   - {fileID: 158550917}
-  - {fileID: 107963746}

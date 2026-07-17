@@ -98,6 +98,21 @@ namespace CoreAI.Composition
             // persistent store, so rehydrating there would inject earlier-run mods into every fresh
             // container; and DontDestroyOnLoad throws outside play mode. EditMode consumers load and Tick
             // explicitly. Best-effort: a rehydrate failure never aborts container construction.
+            // WHY: the ticker is DontDestroyOnLoad (its runtime must keep ticking across additive scene
+            // loads while the owning scope lives), so scene unload does NOT destroy it. Without an
+            // explicit dispose hook every scope build leaks an immortal ticker whose runtime keeps
+            // driving persisted mod handlers into scenes/tests that no longer own them (observed:
+            // cross-test world-command spam and an eventual editor OOM during full PlayMode runs).
+            GameObject[] tickerHolder = new GameObject[1];
+            builder.RegisterDisposeCallback(_ =>
+            {
+                if (tickerHolder[0] != null)
+                {
+                    Object.Destroy(tickerHolder[0]);
+                    tickerHolder[0] = null;
+                }
+            });
+
             builder.RegisterBuildCallback(container =>
             {
                 try
@@ -111,6 +126,7 @@ namespace CoreAI.Composition
                         LuaCsModRuntime runtime = container.Resolve<LuaCsModStack>().Runtime;
 
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
+                        tickerHolder[0] = tickerGo;
                         Object.DontDestroyOnLoad(tickerGo);
 
                         void RehydrateAndStartTicking()
