@@ -23,6 +23,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsWorldQueryBindings _worldQuery;
         private readonly LuaCsFullUnityRuntimeBindings _full;
         private readonly LuaCsInputRuntimeBindings _input;
+        private readonly LuaCsRobloxApiBindings _roblox;
         private readonly LuaCsLogicSlots _logicSlots = new();
 
         public LuaCsGameplayBindings(
@@ -35,7 +36,8 @@ namespace CoreAI.Ai.LuaCs
             IDataOverlayPayloadValidator validator = null,
             IFullLuaAccessBlacklistPolicy fullBlacklistPolicy = null,
             bool allowNonPublicFullMembers = false,
-            LuaCapabilities capabilities = LuaCapabilities.All)
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            LuaCsRobloxApiBindings robloxApi = null)
             : this(
                 logger,
                 new LuaCsVersioningRuntimeBindings(
@@ -50,7 +52,8 @@ namespace CoreAI.Ai.LuaCs
                 new LuaCsFullUnityRuntimeBindings(logger, allowNonPublicFullMembers, fullBlacklistPolicy),
                 capabilities,
                 new LuaCsInputRuntimeBindings(),
-                new LuaCsDefaultRuntimeBindings())
+                new LuaCsDefaultRuntimeBindings(),
+                robloxApi)
         {
         }
 
@@ -64,7 +67,8 @@ namespace CoreAI.Ai.LuaCs
             LuaCsFullUnityRuntimeBindings full = null,
             LuaCapabilities capabilities = LuaCapabilities.All,
             LuaCsInputRuntimeBindings input = null,
-            LuaCsDefaultRuntimeBindings defaultBindings = null)
+            LuaCsDefaultRuntimeBindings defaultBindings = null,
+            LuaCsRobloxApiBindings robloxApi = null)
         {
             _capabilities = capabilities;
             _default = defaultBindings ?? new LuaCsDefaultRuntimeBindings();
@@ -76,7 +80,11 @@ namespace CoreAI.Ai.LuaCs
             _worldQuery = worldQuery;
             _full = full;
             _input = input;
+            _roblox = robloxApi;
         }
+
+        /// <summary>Optional Roblox API surface shared by every mod and the one-off executor.</summary>
+        public LuaCsRobloxApiBindings RobloxApi => _roblox;
 
         public LuaCapabilities Capabilities => _capabilities;
 
@@ -111,6 +119,10 @@ namespace CoreAI.Ai.LuaCs
                 _versioning?.RegisterGameplayApis(registry);
                 _worldQuery?.RegisterGameplayApis(registry);
             }
+
+            // WHY: the Roblox surface trims itself (Read gate inside, Instance.new under WorldEdit)
+            // and threads the owner mod id so created instances land in the ownership ledger.
+            _roblox?.Register(registry, effective, ownerModId);
 
             if ((effective & LuaCapabilities.WorldEdit) != 0)
             {

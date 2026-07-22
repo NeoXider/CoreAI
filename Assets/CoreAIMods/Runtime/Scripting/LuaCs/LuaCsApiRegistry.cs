@@ -25,6 +25,8 @@ namespace CoreAI.Sandbox.LuaCs
 
         private readonly Dictionary<string, LuaFunction> _luaFunctions = new(StringComparer.Ordinal);
 
+        private readonly Dictionary<string, Func<LuaValue>> _valueFactories = new(StringComparer.Ordinal);
+
         /// <summary>Registers a typed host delegate with the target runtime registry.</summary>
         public void Register(string name, Delegate callback)
         {
@@ -34,6 +36,27 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             _apis[name] = callback ?? throw new ArgumentNullException(nameof(callback));
+            _callbacks.Remove(name);
+            _luaFunctions.Remove(name);
+            _valueFactories.Remove(name);
+        }
+
+        /// <summary>
+        /// Registers a non-function global (table/userdata) built lazily per state. Engine-specific
+        /// escape hatch like <see cref="RegisterCallback(string, LuaFunction)"/>: the Roblox API
+        /// surface installs value globals (<c>Vector3</c>, <c>Enum</c>, <c>game</c>, ...) through it.
+        /// WHY: the factory runs once per <see cref="ApplyTo"/> so mutable tables are never shared
+        /// between mod states.
+        /// </summary>
+        public void RegisterValue(string name, Func<LuaValue> valueFactory)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("API name is required.", nameof(name));
+            }
+
+            _valueFactories[name] = valueFactory ?? throw new ArgumentNullException(nameof(valueFactory));
+            _apis.Remove(name);
             _callbacks.Remove(name);
             _luaFunctions.Remove(name);
         }
@@ -78,6 +101,7 @@ namespace CoreAI.Sandbox.LuaCs
             _callbacks[name] = callback ?? throw new ArgumentNullException(nameof(callback));
             _apis.Remove(name);
             _luaFunctions.Remove(name);
+            _valueFactories.Remove(name);
         }
 
         /// <summary>Registers a prebuilt Lua-CSharp callback.</summary>
@@ -96,6 +120,7 @@ namespace CoreAI.Sandbox.LuaCs
             _luaFunctions[name] = callback;
             _apis.Remove(name);
             _callbacks.Remove(name);
+            _valueFactories.Remove(name);
         }
 
         /// <summary>Attempts to resolve a registered typed host delegate by name.</summary>
@@ -115,7 +140,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>True when <paramref name="name"/> is registered (tests / introspection).</summary>
         public bool Contains(string name)
         {
-            return _apis.ContainsKey(name) || _callbacks.ContainsKey(name) || _luaFunctions.ContainsKey(name);
+            return _apis.ContainsKey(name) || _callbacks.ContainsKey(name) || _luaFunctions.ContainsKey(name)
+                   || _valueFactories.ContainsKey(name);
         }
 
         /// <summary>Exposes registered callbacks on a seam-created state's global environment.</summary>
@@ -162,6 +188,11 @@ namespace CoreAI.Sandbox.LuaCs
             foreach (KeyValuePair<string, LuaFunction> kv in _luaFunctions)
             {
                 state.Environment[kv.Key] = kv.Value;
+            }
+
+            foreach (KeyValuePair<string, Func<LuaValue>> kv in _valueFactories)
+            {
+                state.Environment[kv.Key] = kv.Value();
             }
         }
 

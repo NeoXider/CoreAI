@@ -4,6 +4,26 @@
 
 ### Added
 
+- Roblox API MVP1 (materialization slice): `CoreAI.RobloxApi.Binding` Unity-adapter assembly
+  (`Assets/CoreAIMods/Runtime/RobloxApi/Binding/`) with `InstanceGameObjectBinder` implementing
+  the `IInstanceBackingBinder` seam over real GameObjects per D5 — Parts materialize as unit-cube
+  primitives scaled `Size × RobloxSpace.MetersPerStud` (asset rule: geometry never rescaled, only
+  numbers convert), Folder/Model/containers as empty transforms; the transform hierarchy mirrors
+  the registry hierarchy; detach deactivates (not destroys), Destroy releases the GameObject.
+  One-way MVP1 Part property push via the engine-free `IPartPropertySink` surface
+  (CFrame/Position/Size/Color/Anchored/Transparency/CanCollide + `PartProperties` bundle with
+  Roblox Part defaults): pose/size through `RobloxSpace` (D2 single boundary), color+alpha via
+  `MaterialPropertyBlock` (`_Color`+`_BaseColor`, `Transparency == 1` hides the renderer),
+  `Anchored` toggles a `useGravity: false` Rigidbody (DEV-6 per-body gravity lands MVP8),
+  `CanCollide` toggles the collider; reverse physics→registry sync is out of scope until MVP8.
+  `RobloxWorldHost` scene entry point (no statics, ARCHITECTURE_RULES §2) owns
+  RobloxSpace-configure + binder + registry + `DataModelBootstrap` per scene. The
+  `IInstanceBackingBinder` seam gained `OnReparented`/`OnNameChanged` hooks (registry fires them
+  for materialized instances; in-memory fake logs `reparent:`/`rename:`). EditMode tests in
+  `Tests/EditMode/RobloxApi/Binding/` cover hierarchy mirroring, park/reactivate, destroy
+  cleanup, name sync, and the §5.1.8 item-11 goldens (stud cube 4×1×2 → 1.12×0.28×0.56 m at
+  0.28 plus the 1:1 zero-asset-change check).
+
 - Roblox API MVP1 (registry slice): engine-free `CoreAI.RobloxApi.Instances` Domain assembly
   (`Assets/CoreAIMods/Runtime/RobloxApi/Instances/`, `noEngineReferences: true`, zero references):
   `InstanceRegistry` as the single identity owner (roadmap §3.3 — `InstanceId` ↔ future Mirror
@@ -33,6 +53,33 @@
   raises the roadmap's loud stub), and deterministic seedable `RbxRandom` (xoshiro256**, floored
   seed, inclusive `NextInteger`, `NextUnitVector`, Fisher-Yates `Shuffle`, `Clone`). `tostring`
   formats match Roblox so corpus scripts can string-match.
+- Roblox API MVP1 (Lua bindings slice): `LuaCsRobloxApiBindings`
+  (`Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRoblox*.cs`, adapter layer — the only folder
+  allowed to touch the VM) installs the roadmap §5.1.3 Lua surface into mod environments through
+  the `IScriptFunctionRegistry` seam: datatype constructor globals (`Vector3`/`Vector2`/`CFrame`/
+  `Color3`/`UDim`/`UDim2`/`Random`) as tagged userdata with shared locked metatables (operators
+  `+ - * / - == tostring` per Roblox, methods, Roblox `tostring` formats), the interned `Enum`
+  registry global (unknown enum/item raise the contract errors), `Instance.new` over the registry's
+  scripted-creation whitelist (exact Roblox error for non-creatable classes; deprecated
+  `parent` second argument works and logs once per mod), full instance member dispatch on thin
+  per-instance proxies (Name/Parent/Archivable, navigation incl. child-by-name sugar,
+  Clone/Destroy/ClearAllChildren, attributes/tags, `GetFullName`, `WaitForChild` immediate path),
+  the `game`/`workspace` globals over one shared `InstanceRegistry` world, and
+  `game:GetService` with the exact `X is not a valid Service name` / phase-naming stub texts.
+  Ownership threads the gameplay-bindings owner-mod-id convention: mod-created instances get
+  `mod:<id>` origin (hot-reload sweep via `GetOwnedBy`), one-off console scripts get `console:*`
+  world-owned origin. Capability-gated per the existing tiers: Read = datatypes + navigation,
+  WorldEdit = `Instance.new` + every mutation. Roblox-layer errors cross into Lua preserving the
+  §5.2.7 `CODE: message | fix: ...` line verbatim (pcall-able); DEV-7 is enforced strictly at the
+  Lua boundary (INSTANCE_DESTROYED on destroyed-instance member access, PARENT_LOCKED on
+  re-parent). Loud stubs per §5.1.6: BasePart spatial properties + `Model:PivotTo/GetPivot`
+  (→ Unity binder slice, MVP1 task 7), `signal:Connect/Once/Wait`, `task.wait/spawn/defer/delay/
+  cancel`, absent-child `WaitForChild` (→ MVP2), `Instance.fromExisting` (backlog);
+  `task.synchronize/desynchronize` are DEV-5 no-ops with a once-per-mod note. Wiring: opt-in
+  `LuaCsModStackOptions.RobloxApi` shared by the persistent runtime and the one-off executor;
+  `LuaCsApiRegistry` gained the engine-specific `RegisterValue` escape hatch for non-function
+  globals (fresh per state). EditMode suite `Tests/EditMode/RobloxApi/LuaBindings/` (25 tests)
+  runs corpus-style snippets through the real `LuaCsModRuntimeFactory` stack.
 - `RobloxSpace` (`CoreAI.RobloxApi.Unity` adapter assembly) — THE single Roblox-to-Unity
   conversion boundary per roadmap D2/D3: configurable session-constant scale (default 1 stud =
   0.28 m), Z-mirror handedness bridge (Roblox right-handed `LookVector = -Z` onto Unity +Z

@@ -46,6 +46,13 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>When true, Full-tier reflection may touch non-public members.</summary>
         public bool AllowNonPublicFullMembers;
 
+        /// <summary>
+        /// Optional Roblox API surface (roadmap §5.1.3: datatype constructors, Enum, Instance.new,
+        /// game/workspace). One shared instance means every mod and the one-off executor operate on
+        /// the same instance world. Null = the Roblox globals are not installed.
+        /// </summary>
+        public LuaCsRobloxApiBindings RobloxApi;
+
         // ---- Runtime services (fed into LuaCsModRuntime / LuaCsGameToolExecutor) -----------------
 
         /// <summary>Persistent per-mod k/v store backing <c>store_set</c>/<c>store_get</c>.</summary>
@@ -173,7 +180,8 @@ namespace CoreAI.Ai.LuaCs
                 options.AllowedScenes,
                 fullBlacklistPolicy: options.FullBlacklistPolicy,
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
-                capabilities: options.Capabilities);
+                capabilities: options.Capabilities,
+                robloxApi: options.RobloxApi);
 
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
