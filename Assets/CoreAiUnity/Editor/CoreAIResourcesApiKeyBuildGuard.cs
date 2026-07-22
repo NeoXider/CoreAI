@@ -9,16 +9,16 @@ using UnityEngine;
 namespace CoreAI.Editor
 {
     /// <summary>
-    /// Build-time guard that FAILS the build when a <see cref="CoreAISettingsAsset"/> that ships inside a
-    /// <c>Resources</c> folder carries a non-empty <c>apiKey</c> or <c>secondaryApiKey</c>.
+    /// Build-time guard that WARNS (does not fail the build) when a <see cref="CoreAISettingsAsset"/> that
+    /// ships inside a <c>Resources</c> folder carries a non-empty <c>apiKey</c> or <c>secondaryApiKey</c>.
     /// <para>
     /// Anything under a <c>Resources/</c> folder is packed into the player and is trivially recoverable from
     /// the shipped build (strings are not encrypted). A committed key in such an asset is therefore an
-    /// exposed secret. Keys must come from environment variables or secure runtime storage and be injected
-    /// at runtime — never from the committed Resources asset.
+    /// exposed secret. Prefer environment variables or secure runtime storage and inject the key at runtime.
     /// </para>
-    /// The committed asset is expected to ship with EMPTY keys, so a clean checkout builds fine; this guard
-    /// only triggers when a key was actually filled in.
+    /// This is intentionally a warning, not a hard block: a harmless local placeholder (e.g. an LM Studio
+    /// key the server ignores) should not stop a build. The console warning still flags a real key so it is
+    /// not shipped by accident.
     /// </summary>
     public sealed class CoreAIResourcesApiKeyBuildGuard : IPreprocessBuildWithReport
     {
@@ -49,12 +49,12 @@ namespace CoreAI.Editor
                         ? "apiKey"
                         : "secondaryApiKey";
 
-                throw new BuildFailedException(
+                Debug.LogWarning(
                     $"[CoreAI] The CoreAISettings asset at '{path}' lives under a Resources folder and has a " +
                     $"non-empty {which}. Resources assets are packed into the build and the key is recoverable " +
-                    "from the shipped player. Clear the key on the committed Resources asset and supply it at " +
-                    "runtime from an environment variable or secure storage (e.g. CoreAISettings.Instance / a " +
-                    "local-only config), then rebuild.");
+                    "from the shipped player. If this is a real secret, clear it on the committed Resources asset " +
+                    "and supply it at runtime from an environment variable or secure storage (e.g. " +
+                    "CoreAISettings.Instance / a local-only config). Building anyway.");
             }
         }
 

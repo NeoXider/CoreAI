@@ -1,5 +1,15 @@
 # Changelog
 
+## [6.1.3] - 2026-07-23
+
+### Changed
+
+- `CoreAIResourcesApiKeyBuildGuard` now **warns instead of failing the build** when a Resources
+  `CoreAISettings` asset carries a non-empty `apiKey`/`secondaryApiKey`. WHY: a harmless local
+  placeholder (e.g. an LM Studio key the server ignores) should not hard-block a build; the console
+  warning still flags a real secret so it is not shipped by accident. The committed asset keeps its
+  `lm-studio` placeholder and now builds an APK/EXE directly.
+
 ## [6.1.2] - 2026-07-23
 
 ### Fixed
