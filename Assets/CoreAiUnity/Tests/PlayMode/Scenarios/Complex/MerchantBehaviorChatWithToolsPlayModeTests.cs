@@ -26,7 +26,7 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
     public sealed class MerchantBehaviorChatWithToolsPlayModeTests
     {
         private const int LlmStepTimeoutSeconds = 240;
-        private const int ScenarioStepMaxOutputTokens = 2048;
+        private const int ScenarioStepMaxOutputTokens = 128000;
 
         [Test]
         public async Task MerchantEconomy_BuyWithoutDiscount_DoesNotMutateOnInsufficientGold()

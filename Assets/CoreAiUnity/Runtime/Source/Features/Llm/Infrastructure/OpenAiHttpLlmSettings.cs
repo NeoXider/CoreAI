@@ -37,7 +37,7 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField]
         [Min(64)]
-        private int maxTokens = 2048;
+        private int maxTokens = 128000;
 
         [Header("Provider-specific request body")]
         [Tooltip("Raw JSON object merged into each OpenAI-compatible request body. Leave empty for standard requests.")]
@@ -178,7 +178,7 @@ namespace CoreAI.Infrastructure.Llm
             model = string.IsNullOrWhiteSpace(options.Model) ? "gpt-4o-mini" : options.Model;
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
             requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
-            maxTokens = options.MaxTokens < 64 ? 2048 : options.MaxTokens;
+            maxTokens = options.MaxTokens < 64 ? 128000 : options.MaxTokens;
             extraBodyJson = options.ExtraBodyJson ?? "";
             reasoningMode = options.ReasoningMode;
             thinkingBudgetTokens = options.ThinkingBudgetTokens < 0 ? 0 : options.ThinkingBudgetTokens;
@@ -199,7 +199,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int requestTimeoutSeconds = 120,
-            int maxTokens = 2048,
+            int maxTokens = 128000,
             LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi,
             int maxRequestsPerSession = 0,
             int maxPromptChars = 0)
@@ -213,7 +213,7 @@ namespace CoreAI.Infrastructure.Llm
             this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = temperature;
             this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
-            this.maxTokens = maxTokens < 64 ? 2048 : maxTokens;
+            this.maxTokens = maxTokens < 64 ? 128000 : maxTokens;
             this.maxRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             this.maxPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
         }

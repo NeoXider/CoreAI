@@ -237,7 +237,7 @@ namespace CoreAI.Tests.PlayMode
                     "Do not expose tool-call syntax, JSON, or arguments in the user-visible reply.",
                 UserPayload = "Remember that the student's name is Alex and they prefer math.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() },
-                MaxOutputTokens = 2048
+                MaxOutputTokens = 128000
             };
 
             StreamResultBox box = new();
@@ -397,7 +397,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Merchant,
                 Hint = "What items do you have for sale?",
-                MaxOutputTokens = 2048
+                MaxOutputTokens = 128000
             }, orchCts.Token);
 
             yield return WaitTask(orchTask, 240f, "OrchestratorMerchant", orchCts);

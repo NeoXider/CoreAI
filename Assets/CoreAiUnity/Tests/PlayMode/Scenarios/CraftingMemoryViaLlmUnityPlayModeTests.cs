@@ -24,7 +24,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class CraftingMemoryViaLlmUnityPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;
-        private const int CraftTurnMaxOutputTokens = 2048;
+        private const int CraftTurnMaxOutputTokens = 128000;
 
         private sealed class InMemoryStore : IAgentMemoryStore
         {

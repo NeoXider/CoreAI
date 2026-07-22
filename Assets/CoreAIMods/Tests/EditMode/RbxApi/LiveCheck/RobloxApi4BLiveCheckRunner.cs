@@ -27,7 +27,9 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
     public static class RobloxApi4BLiveCheckRunner
     {
         public const string DefaultBaseUrl = "http://127.0.0.1:1234/v1";
-        public const string DefaultModel = "qwen_qwen3.5-4b";
+        // WHY: the -mtp build emits answer tokens via multi-token prediction — far faster to first
+        // usable output than the plain reasoning build, which repeatedly blew the HTTP window.
+        public const string DefaultModel = "qwen3.5-4b-mtp";
 
         // ---- Endpoint config (env-overridable, LM-Studio defaults) --------------------------
 
@@ -373,8 +375,9 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
                 ["model"] = Model,
                 ["temperature"] = 0.1,
                 // WHY: qwen_qwen3.5-4b is a reasoning model — it spends tokens in reasoning_content
-                // before emitting the answer in content, so a small budget truncates the code block.
-                ["max_tokens"] = 8000,
+                // before emitting the answer in content, so any tight budget truncates the code
+                // block. Effectively unlimited: the HTTP timeout is the real bound.
+                ["max_tokens"] = 128000,
                 ["stream"] = false,
                 ["messages"] = new JArray(messages)
             };

@@ -313,7 +313,7 @@ namespace CoreAI.Tests.PlayMode
                     "briefly. Do not explain your reasoning.",
                 Hint = question,
                 Attachments = attachments,
-                MaxOutputTokens = 256
+                MaxOutputTokens = 128000
             };
         }
 

@@ -290,7 +290,7 @@ Some merchants only trade specific item types.",
                     {
                         RoleId = "GM_skills",
                         Hint = userMsg,
-                        MaxOutputTokens = 2048
+                        MaxOutputTokens = 128000
                     }, skillsTimeout.Token);
 
                     Stopwatch skillsSw = Stopwatch.StartNew();
@@ -382,7 +382,7 @@ Some merchants only trade specific item types.",
                     {
                         RoleId = "GM_direct",
                         Hint = userMsg,
-                        MaxOutputTokens = 2048
+                        MaxOutputTokens = 128000
                     }, directTimeout.Token);
 
                     Stopwatch directSw = Stopwatch.StartNew();

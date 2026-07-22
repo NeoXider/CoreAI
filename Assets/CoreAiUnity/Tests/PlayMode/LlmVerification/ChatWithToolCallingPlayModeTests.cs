@@ -24,7 +24,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class MerchantWithToolCallingPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;
-        private const int LiveModelMaxOutputTokens = 2048;
+        private const int LiveModelMaxOutputTokens = 128000;
 
         private sealed class InMemoryStore : IAgentMemoryStore
         {

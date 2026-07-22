@@ -37,7 +37,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class FullPipelineE2EPlayModeTests
     {
         private const int PhaseTimeoutSeconds = 180;
-        private const int LiveModelMaxOutputTokens = 2048;
+        private const int LiveModelMaxOutputTokens = 128000;
 
         // Tool call tracking.
 

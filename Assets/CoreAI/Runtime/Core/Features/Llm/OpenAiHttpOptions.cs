@@ -16,7 +16,7 @@ namespace CoreAI.Infrastructure.Llm
         public string Model { get; set; } = "gpt-4o-mini";
         public float Temperature { get; set; } = 0.2f;
         public int RequestTimeoutSeconds { get; set; } = 120;
-        public int MaxTokens { get; set; } = 2048;
+        public int MaxTokens { get; set; } = 128000;
         public string ExtraBodyJson { get; set; } = "";
         public LlmReasoningMode ReasoningMode { get; set; } = LlmReasoningMode.ProviderDefault;
         public int ThinkingBudgetTokens { get; set; }

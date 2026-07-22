@@ -37,7 +37,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class SkillSetReadSkillVerificationPlayModeTests
     {
         private const int ComplexTurnTimeoutSeconds = 240;
-        private const int LiveModelMaxOutputTokens = 2048;
+        private const int LiveModelMaxOutputTokens = 128000;
 
         // ── Tracking ──────────────────────────────────────────────────────────
 

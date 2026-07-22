@@ -22,7 +22,7 @@ MonoBehaviour:
   enableTemperatureOverriding: 1
   temperature: 0.2
   enableMaxTokensOverriding: 0
-  maxTokens: 2048
+  maxTokens: 128000
   maxClientLimitedRequestsPerSession: 0
   maxClientLimitedPromptChars: 0
   requestTimeoutSeconds: 120

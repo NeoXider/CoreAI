@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Output-token policy: never cap LLM output tightly — every default/live-call `max_tokens` budget is
+  now 128000 (effectively uncapped; the HTTP timeout is the real bound) or omitted entirely.
+  `CoreAISettingsOptions.MaxTokens` / `OpenAiHttpOptions.MaxTokens` defaults went 2048 → 128000.
+  WHY: reasoning models spend their budget in `reasoning_content` before answering, so a tight cap
+  silently truncates the answer and masquerades as a model failure. Unit tests that assert budget
+  arithmetic with small fake values are unaffected; the Opus preset keeps the provider's own limit.
+
 ### Added
 
 - Luau syntax is now accepted everywhere Lua compiles: `LuauSourceGate` runs the engine-free

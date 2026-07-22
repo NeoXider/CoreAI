@@ -30,7 +30,7 @@ namespace CoreAI
         public bool LogMeaiToolCallingSteps { get; set; } = true;
         public bool AllowDuplicateToolCalls { get; set; }
         public bool EnableStreaming { get; set; } = true;
-        public int MaxTokens { get; set; } = 2048;
+        public int MaxTokens { get; set; } = 128000;
         public bool EnableLlmContextCompaction { get; set; }
         public bool EnableTokenCalibration { get; set; } = CoreAISettings.DefaultEnableTokenCalibration;
         public string TokenCalibrationModelKey { get; set; } = "default";

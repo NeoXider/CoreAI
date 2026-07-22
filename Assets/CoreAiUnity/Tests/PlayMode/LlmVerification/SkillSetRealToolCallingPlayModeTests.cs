@@ -26,7 +26,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class SkillSetRealToolCallingPlayModeTests
     {
         private const int ComplexTurnTimeoutSeconds = 240;
-        private const int LiveModelMaxOutputTokens = 2048;
+        private const int LiveModelMaxOutputTokens = 128000;
 
         // ── Tool call trackers ────────────────────────────────────────────────
 

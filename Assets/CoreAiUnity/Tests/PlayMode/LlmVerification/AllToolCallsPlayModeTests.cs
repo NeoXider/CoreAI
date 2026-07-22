@@ -170,7 +170,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt,
                         ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
                         RequiredToolName = "memory",
-                        MaxOutputTokens = 2048
+                        MaxOutputTokens = 128000
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write", cts);
@@ -232,7 +232,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt,
                         ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
                         RequiredToolName = "memory",
-                        MaxOutputTokens = 2048
+                        MaxOutputTokens = 128000
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append", cts);
@@ -289,7 +289,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt,
                         ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
                         RequiredToolName = "memory",
-                        MaxOutputTokens = 2048
+                        MaxOutputTokens = 128000
                     }, cts.Token);
 
                     yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear", cts);

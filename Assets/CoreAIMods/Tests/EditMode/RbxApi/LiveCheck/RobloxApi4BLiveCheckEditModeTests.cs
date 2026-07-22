@@ -38,11 +38,17 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
         {
             _savedContext = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(null);
+            // WHY: this live gate asserts on world state and executor results, not console hygiene.
+            // Orphaned continuations from an aborted previous run (NUnit [Timeout] aborts mid-await)
+            // can log e.g. "SynchronizationContext may not be used as a TaskScheduler" during THIS
+            // test and NUnit would fail it for an unrelated logged exception.
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;
         }
 
         [TearDown]
         public void RestoreSynchronizationContext()
         {
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = false;
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 

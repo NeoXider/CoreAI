@@ -342,7 +342,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     RoleId = BuiltInAgentRoleIds.AiNpc,
                     Hint = "Welcome the player and remember their name is 'Hero'",
-                    MaxOutputTokens = 2048
+                    MaxOutputTokens = 128000
                 }, cts.Token);
 
                 yield return PlayModeTestAwait.WaitTask(t, 240f, "AINpc with tools", cts);

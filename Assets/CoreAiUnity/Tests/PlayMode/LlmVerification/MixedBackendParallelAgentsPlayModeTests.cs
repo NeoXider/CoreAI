@@ -83,13 +83,13 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.SmartChat,
                 Hint = "Reply with exactly one word: alpha",
-                MaxOutputTokens = 256
+                MaxOutputTokens = 128000
             });
             Task<string> httpTask = httpAgent.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.SmartChat,
                 Hint = "Reply with exactly one word: beta",
-                MaxOutputTokens = 256
+                MaxOutputTokens = 128000
             });
 
             yield return PlayModeTestAwait.WaitTask(

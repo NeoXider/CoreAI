@@ -166,7 +166,7 @@ namespace CoreAI.Tests.PlayMode
                     "If a tool is unavailable, recover by using an available tool instead of retrying the failed name.",
                 UserPayload = "Save this important info to memory.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() },
-                MaxOutputTokens = 2048
+                MaxOutputTokens = 128000
             };
 
             ResultBox box = new();

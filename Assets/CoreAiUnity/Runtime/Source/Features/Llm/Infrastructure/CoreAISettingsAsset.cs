@@ -146,7 +146,7 @@ namespace CoreAI.Infrastructure.Llm
             "Used only when max tokens overriding is enabled.")]
         [SerializeField]
         [Min(0)]
-        private int maxTokens = 2048;
+        private int maxTokens = 128000;
 
         [Header("Client limits")]
         [SerializeField]
@@ -1010,7 +1010,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048,
+            int maxTokens = 128000,
             bool overrideTemperature = true)
         {
             backendType = LlmBackendType.OpenAiHttp;
@@ -1037,7 +1037,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048,
+            int maxTokens = 128000,
             bool overrideTemperature = true)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
@@ -1055,7 +1055,7 @@ namespace CoreAI.Infrastructure.Llm
             int maxPromptChars,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048,
+            int maxTokens = 128000,
             bool overrideTemperature = true)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
@@ -1073,7 +1073,7 @@ namespace CoreAI.Infrastructure.Llm
             string backendAuthToken = "",
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 2048,
+            int maxTokens = 128000,
             bool overrideTemperature = true)
         {
             ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens,

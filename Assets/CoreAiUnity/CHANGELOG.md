@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Changed
+
+- Output-token policy: `CoreAISettingsAsset` / `OpenAiHttpLlmSettings` `maxTokens` defaults (and the
+  bundled `CoreAISettings*.asset` resources), the backend connectivity probe, and every live
+  PlayMode verification test now use 128000 instead of 2048/256 — effectively uncapped output.
+  Tight budgets silently truncate reasoning models (thinking counts toward `max_tokens`).
+  `CLOUD_COST_BUDGETING.md` / `COREAI_SETTINGS.md` updated to teach the new rule: control cost with
+  cheaper models and shorter prompts, not output caps.
+
 ### Added
 
 - `Docs/SUBSCRIPTION_BRIDGE.md` — "bring your own subscription": power the in-game AI from a Claude
