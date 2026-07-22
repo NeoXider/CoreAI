@@ -1,5 +1,22 @@
 # Changelog
 
+## [6.1.2] - 2026-07-23
+
+### Fixed
+
+- Android players of the mods-enabled demo failed to compile (`CS0234: the namespace 'Hub' does not
+  exist in 'CoreAI.Ai'`): the `COREAI_HAS_HUB` scripting define was set for Standalone but missing on
+  Android, so the `CoreAI.Mods.Hub` assembly (namespace `CoreAI.Ai.Hub`) was stripped from Android
+  builds while a demo still referenced it. Added `COREAI_HAS_HUB` to the Android PlayerSettings defines,
+  so the Full Access demo now builds an APK.
+
+### Changed
+
+- Mods tab rows now show an explicit bold **On / Off** label next to the enable checkbox. WHY: a bare
+  checkbox did not read as on/off at a glance — the state only showed on hover or in the meta line — so
+  it was unclear how to disable a mod. Editing is unchanged: the per-row **Edit** button opens the inline
+  Lua editor.
+
 ## [6.1.1] - 2026-07-23
 
 ### Removed

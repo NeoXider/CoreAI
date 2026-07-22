@@ -253,10 +253,19 @@ namespace CoreAI.Ai.Hub
 
             Toggle toggle = new() { value = mod.IsLoaded };
             toggle.tooltip = "Enable / disable (load / unload) the mod.";
-            toggle.style.marginRight = 6f;
+            toggle.style.marginRight = 4f;
             toggle.SetEnabled(_service.IsSupported);
             toggle.RegisterValueChangedCallback(evt => ToggleMod(mod.Id, evt.newValue));
             top.Add(toggle);
+
+            // WHY: a bare checkbox did not read as "on/off" at a glance (the state only showed on hover
+            // or in the meta line), so label it explicitly next to the toggle.
+            Label state = HubModWidgets.MakeFieldLabel(mod.IsLoaded ? "On" : "Off");
+            state.style.unityFontStyleAndWeight = FontStyle.Bold;
+            state.style.color = mod.IsLoaded ? HubModWidgets.Accent : HubModWidgets.Muted;
+            state.style.width = 30f;
+            state.style.marginRight = 8f;
+            top.Add(state);
 
             VisualElement nameCol = new();
             nameCol.style.flexGrow = 1f;
