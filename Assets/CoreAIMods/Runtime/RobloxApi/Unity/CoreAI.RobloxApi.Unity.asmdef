@@ -1,0 +1,16 @@
+{
+  "name": "CoreAI.RobloxApi.Unity",
+  "rootNamespace": "CoreAI.Mods.Roblox.Spatial",
+  "references": [
+    "CoreAI.RobloxApi.Datatypes"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
