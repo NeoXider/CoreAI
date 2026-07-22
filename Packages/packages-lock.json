@@ -24,7 +24,7 @@
         "com.unity.nuget.newtonsoft-json": "3.0.2",
         "com.unity.test-framework": "1.1.31"
       },
-      "hash": "c0908b88d6ec2d7152df2a8fc9c1590270856390"
+      "hash": "bd72241ab91c664176091789c9408d676783abec"
     },
     "com.cysharp.messagepipe": {
       "version": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
@@ -61,12 +61,11 @@
       "depth": 0,
       "source": "git",
       "dependencies": {
-        "com.unity.textmeshpro": "3.0.6",
         "com.unity.ai.navigation": "1.1.7",
         "com.unity.inputsystem": "1.14.2",
         "com.unity.ugui": "1.0.0"
       },
-      "hash": "9f3e7c7bacb99211dc14c1cdc13fd5af08d532dd"
+      "hash": "f4cb40d26517c7c1213fda9a6c0954b328d71d36"
     },
     "com.unity.ai.navigation": {
       "version": "2.0.12",
@@ -375,14 +374,6 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
-    },
-    "com.unity.textmeshpro": {
-      "version": "5.0.0",
-      "depth": 1,
-      "source": "builtin",
-      "dependencies": {
-        "com.unity.ugui": "2.0.0"
-      }
     },
     "com.unity.timeline": {
       "version": "1.8.12",
