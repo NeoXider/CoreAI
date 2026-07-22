@@ -4,7 +4,7 @@
 
 ### Added
 
-- Roblox API MVP1 wiring: `CoreAiModsInstaller` now sets `RobloxApi = new LuaCsRobloxApiBindings()`, so the production mod stack installs the Roblox globals (`Vector3`/`CFrame`/`Color3`/`Enum`/`Instance.new`/`game`/`workspace`) and the persistent runtime + one-off `execute_lua` executor share one `InstanceRegistry` world.
+- Roblox API MVP1 wiring: `CoreAiModsInstaller` now installs `RobloxApi` on the production mod stack (headless in-memory by default, or bound to the `RobloxWorldHost` scene host when present), so the Roblox globals (`Vector3`/`CFrame`/`Color3`/`Enum`/`Instance.new`/`game`/`workspace`) are available and the persistent runtime + one-off `execute_lua` executor share one `InstanceRegistry` world.
 
 - Roblox API MVP1 (materialization slice): `CoreAI.RobloxApi.Binding` Unity-adapter assembly
   (`Assets/CoreAIMods/Runtime/RobloxApi/Binding/`) with `InstanceGameObjectBinder` implementing
