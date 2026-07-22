@@ -2,6 +2,13 @@
 
 ## [6.0.0] - 2026-07-22
 
+### Removed
+
+- `CoreAiBackendPanel` (the uGUI Canvas backend-switch panel, its Editor `CoreAiBackendPanelBuilder`
+  and prefab) is gone — the Hub's **AI Settings** tab (`HubSettingsPage`) is the UITK replacement and
+  edits the same Base URL / API key / model / execution mode through the unchanged `CoreAiBackend`
+  facade. Panel-specific EditMode tests were dropped; the `CoreAiBackend` facade tests remain.
+
 ### Fixed
 
 - Lua mod stores can now be namespaced per composition: `CoreAiModsLifetimeScope` gained an optional
@@ -13,6 +20,13 @@
   remaining mods keep loading.
 
 ### Changed
+
+- FullAccess demo is now a single UI Toolkit Hub window instead of five floating IMGUI/uGUI panels.
+  Its Lua-platform (F6), info (F7), prompt-buttons (F8), mod-manager (F9) and token-budget (F10)
+  overlays plus the uGUI backend panel became Hub tabs: Full Access, Full-Mode Mod, Prompts, Lua
+  Platform, Token Budget alongside the built-in AI Settings / Statistics / Mods / World / Logs. New
+  shared `DemoHubWidgets` UITK toolkit keeps demo pages visually consistent with the built-in Hub
+  pages; `LuaPlatformExampleController` and `ChatPromptButtonsController` are now GUI-less drivers.
 
 - Output-token policy: never cap LLM output tightly — every default/live-call `max_tokens` budget is
   now 128000 (effectively uncapped; the HTTP timeout is the real bound) or omitted entirely.

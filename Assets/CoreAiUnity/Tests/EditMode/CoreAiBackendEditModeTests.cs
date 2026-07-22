@@ -2,21 +2,16 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
-using CoreAI.Editor;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.UI;
 using NUnit.Framework;
-using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode coverage for <see cref="CoreAiBackend"/> (runtime backend switching facade) and the
-    /// <see cref="CoreAiBackendPanel"/> Canvas component. No live scope exists in EditMode, so switch
-    /// methods must mutate settings, return <c>false</c> (settings-only), and still raise
-    /// <see cref="CoreAiBackend.OnBackendChanged"/>.
+    /// EditMode coverage for <see cref="CoreAiBackend"/>, the runtime backend switching facade. No live
+    /// scope exists in EditMode, so switch methods must mutate settings, return <c>false</c>
+    /// (settings-only), and still raise <see cref="CoreAiBackend.OnBackendChanged"/>.
     /// </summary>
     public sealed class CoreAiBackendEditModeTests
     {
@@ -172,97 +167,6 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 CoreAiBackend.OnBackendChanged -= Throwing;
-            }
-        }
-
-        [Test]
-        public void BackendPanel_BuilderHierarchy_IsFullyWired()
-        {
-            GameObject root = CoreAiBackendPanelBuilder.BuildHierarchy();
-            try
-            {
-                CoreAiBackendPanel panel = root.GetComponentInChildren<CoreAiBackendPanel>(true);
-                Assert.IsNotNull(panel, "Builder must attach CoreAiBackendPanel.");
-                Assert.IsNotNull(root.GetComponentInChildren<TMP_Dropdown>(true));
-                Assert.AreEqual(3, root.GetComponentsInChildren<TMP_InputField>(true).Length,
-                    "Base URL + API key + model fields.");
-                Assert.AreEqual(3, root.GetComponentsInChildren<Button>(true).Length,
-                    "Apply + Test + Close buttons.");
-                Assert.IsNotNull(root.GetComponent<Canvas>(), "Root must be a Canvas.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(root);
-            }
-        }
-
-        [Test]
-        public void BackendPanel_Apply_Offline_SwitchesSettings()
-        {
-            GameObject root = CoreAiBackendPanelBuilder.BuildHierarchy();
-            try
-            {
-                CoreAiBackendPanel panel = root.GetComponentInChildren<CoreAiBackendPanel>(true);
-                TMP_Dropdown dropdown = root.GetComponentInChildren<TMP_Dropdown>(true);
-
-                // OnEnable does not run in EditMode instantiation reliably; wire options directly.
-                panel.LoadCurrent();
-                if (dropdown.options.Count == 0)
-                {
-                    dropdown.options = new List<TMP_Dropdown.OptionData>
-                    {
-                        new("Auto"), new("LLMUnity (local)"), new("HTTP API"), new("Offline")
-                    };
-                }
-
-                dropdown.SetValueWithoutNotify(3); // Offline (see CoreAiBackendPanel.DropdownModes)
-                panel.Apply();
-
-                Assert.AreEqual(LlmExecutionMode.Offline, _testSettings.ExecutionMode,
-                    "Apply with the Offline option must switch the settings to Offline.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(root);
-            }
-        }
-
-        [Test]
-        public void BackendPanel_Apply_HttpApi_UsesFieldValues_AndKeepsKeyWhenEmpty()
-        {
-            _testSettings.ConfigureClientOwnedApi("http://old/v1", "existing-key", "old-model");
-
-            GameObject root = CoreAiBackendPanelBuilder.BuildHierarchy();
-            try
-            {
-                CoreAiBackendPanel panel = root.GetComponentInChildren<CoreAiBackendPanel>(true);
-                TMP_Dropdown dropdown = root.GetComponentInChildren<TMP_Dropdown>(true);
-                TMP_InputField[] inputs = root.GetComponentsInChildren<TMP_InputField>(true);
-
-                panel.LoadCurrent();
-                if (dropdown.options.Count == 0)
-                {
-                    dropdown.options = new List<TMP_Dropdown.OptionData>
-                    {
-                        new("Auto"), new("LLMUnity (local)"), new("HTTP API"), new("Offline")
-                    };
-                }
-
-                dropdown.SetValueWithoutNotify(2); // HTTP API
-                inputs[0].SetTextWithoutNotify("http://new/v1"); // BaseUrl (builder order)
-                // inputs[1] = ApiKey stays EMPTY -> the configured key must be kept.
-                inputs[2].SetTextWithoutNotify("new-model");
-
-                panel.Apply();
-
-                Assert.AreEqual("http://new/v1", _testSettings.ApiBaseUrl);
-                Assert.AreEqual("new-model", _testSettings.ModelName);
-                Assert.AreEqual("existing-key", _testSettings.ApiKey,
-                    "Empty key field must keep the configured API key.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(root);
             }
         }
     }
