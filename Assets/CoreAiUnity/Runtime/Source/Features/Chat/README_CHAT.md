@@ -169,6 +169,7 @@ All toggles are in the **CoreAI → Chat Config** asset on the panel (`CoreAiCha
 | **Enable Open Chat Keyboard Shortcut** | When off — collapsed (FAB) chat opens **only by clicking** the FAB, no key. |
 | **Open Chat Hotkey** | `KeyCode` to open collapsed chat (default **C**). For **A–Z**, both key code and typed character are considered (without Ctrl / Cmd / Alt). |
 | **Enable Escape Chat Shortcuts** | When off — **Esc** is not handled by the panel (useful if Esc is fully reserved for FPS / pause). |
+| **Chat Requires Visible Cursor** (since 4.14) — see [cursor gating](#chat-cursor-gating) | When on (**default**) — the open hotkey and Esc only react while the mouse cursor is visible and unlocked. When off — hotkeys work regardless of cursor state (legacy behavior). |
 
 ### From code (on top of config)
 
@@ -208,6 +209,39 @@ void OnWorldMapClosed()
 **Gameplay integration:** after each `SetCollapsed`, `protected virtual void OnCollapsedStateChanged(bool collapsed)` is called — in a subclass you can hook pause, cursor, etc., without pulling game controllers into CoreAI.
 
 Subclasses that override **`Update()`** must call **`base.Update()` first** (otherwise you lose the WebGL fix, hotkey polling, and the **long-request hint** tick).
+
+<a id="chat-cursor-gating"></a>
+
+### Cursor gating (first-person / locked-cursor games) — since 4.14
+
+By default (**`ChatRequiresVisibleCursor` = true**), the open hotkey and Esc only react while
+**`UnityEngine.Cursor.visible`** is true and **`UnityEngine.Cursor.lockState`** is not **`Locked`**. This
+keeps the chat out of the way while a first-person controller owns the mouse: with the cursor locked and
+hidden (the common FPS convention), pressing the open hotkey does not pop the chat over gameplay, and a
+gameplay key that happens to match the hotkey is not intercepted.
+
+- **Mid-turn lock:** if the cursor gets locked/hidden while the chat input has keyboard focus (e.g. the
+  player re-enters gameplay), the panel releases that focus on the next frame so movement keys never type
+  into the chat. It does **not** auto-refocus when the cursor becomes visible again — the player has to
+  reopen chat explicitly (click the FAB or press the open hotkey).
+- **`Confined`** lock mode still counts as "visible" (the cursor is clamped to the window, not hidden), so
+  chat hotkeys keep working under `CursorLockMode.Confined`.
+- **Runtime override:** `SetRuntimeChatRequiresVisibleCursor(bool?)` / `EffectiveChatRequiresVisibleCursor`,
+  same precedence and `ClearRuntimeHotkeyOverrides()` participation as the other hotkey overrides above.
+- Set `ChatRequiresVisibleCursor = false` (asset or `CoreAiChatOptions`) to restore the pre-4.14 behavior
+  where chat hotkeys always react regardless of cursor state.
+
+**CoreAI Hub:** `CoreAiHubWindow` mirrors this with its own `requireVisibleCursor` field (default on),
+gating both Escape and its optional `toggleHotkey`. The Hub's chat tab additionally disables the embedded
+panel's own Escape handling (`SetRuntimeEscapeChatShortcutsEnabled(false)`) so Escape always belongs to
+the Hub — otherwise Escape would collapse the chat *inside* its tab instead of the Hub itself. A page can
+implement `CoreAI.Hub.IHubEscapeHandler.TryHandleEscape()` to consume Escape before the Hub falls back to
+collapsing. **`HubChatPage`'s default is to never consume Escape**: pressing it always collapses the Hub
+immediately, and any in-progress generation keeps running in the background — the answer still appears
+normally once the Hub is expanded again. Set `HubChatPage.StopGenerationOnEscape = true` (constructor
+parameter or property, also forwarded by `HubBuiltInPages.RegisterAll(..., chatStopGenerationOnEscape: true)`)
+to opt into the first Escape stopping an in-flight turn instead (consuming that key-press; a second Escape
+then collapses the Hub).
 
 <a id="programmatic-chat-submit"></a>
 

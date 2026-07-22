@@ -32,6 +32,15 @@ namespace CoreAI.Chat
         int MaxMessageLength { get; }
         bool EnableOpenChatKeyboardShortcut { get; }
         bool EnableEscapeChatShortcuts { get; }
+
+        /// <summary>
+        /// When true (default), the chat panel only handles its open hotkey and Escape while the mouse
+        /// cursor is visible and unlocked. Keeps first-person / locked-cursor gameplay in control of
+        /// WASD and other keys instead of the chat stealing keyboard focus. Set false to let chat
+        /// hotkeys work regardless of cursor state.
+        /// </summary>
+        bool ChatRequiresVisibleCursor { get; }
+
         string ErrorMessagePrefix { get; }
         string TimeoutMessage { get; }
         string NoResponseMessage { get; }
@@ -123,6 +132,7 @@ namespace CoreAI.Chat
         public int MaxMessageLength { get; set; } = 2000;
         public bool EnableOpenChatKeyboardShortcut { get; set; } = true;
         public bool EnableEscapeChatShortcuts { get; set; } = true;
+        public bool ChatRequiresVisibleCursor { get; set; } = true;
         public string ErrorMessagePrefix { get; set; } = DefaultErrorMessagePrefix;
         public string TimeoutMessage { get; set; } = DefaultTimeoutMessage;
         public string NoResponseMessage { get; set; } = DefaultNoResponseMessage;
@@ -177,6 +187,7 @@ namespace CoreAI.Chat
                 MaxMessageLength = source.MaxMessageLength,
                 EnableOpenChatKeyboardShortcut = source.EnableOpenChatKeyboardShortcut,
                 EnableEscapeChatShortcuts = source.EnableEscapeChatShortcuts,
+                ChatRequiresVisibleCursor = source.ChatRequiresVisibleCursor,
                 ErrorMessagePrefix = source.ErrorMessagePrefix,
                 TimeoutMessage = source.TimeoutMessage,
                 NoResponseMessage = source.NoResponseMessage

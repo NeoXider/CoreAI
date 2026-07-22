@@ -31,13 +31,18 @@ namespace CoreAI.Hub.UI
         /// <param name="chatConfig">Optional chat configuration asset (also shown on the Settings page).</param>
         /// <param name="settings">Optional host settings surfaced by Settings and Statistics.</param>
         /// <param name="metrics">Optional orchestration metrics surfaced by Statistics.</param>
+        /// <param name="chatStopGenerationOnEscape">
+        /// Opt-in, off by default: forwarded to <see cref="HubChatPage.StopGenerationOnEscape"/>. See that
+        /// property for the default-vs-opt-in Escape behavior.
+        /// </param>
         public static void RegisterAll(
             HubPageRegistry registry,
             VisualTreeAsset chatTemplate = null,
             StyleSheet chatStyleSheet = null,
             CoreAiChatConfig chatConfig = null,
             ICoreAISettings settings = null,
-            InMemoryAiOrchestrationMetrics metrics = null)
+            InMemoryAiOrchestrationMetrics metrics = null,
+            bool chatStopGenerationOnEscape = false)
         {
             if (registry == null)
             {
@@ -46,7 +51,9 @@ namespace CoreAI.Hub.UI
 
             registry.Register(
                 ChatPageId,
-                () => new HubChatPage(chatTemplate, chatStyleSheet, chatConfig),
+                () => new HubChatPage(
+                    chatTemplate, chatStyleSheet, chatConfig,
+                    stopGenerationOnEscape: chatStopGenerationOnEscape),
                 0);
 
             registry.Register(

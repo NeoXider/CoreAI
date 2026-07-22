@@ -43,9 +43,11 @@ namespace CoreAI.Chat
         private PanelRenderer _panelRenderer;
 #endif
 
-        // When embedded, the panel renders into a caller-supplied VisualElement instead of its own
-        // UIDocument/PanelRenderer. The chat UXML is cloned into that host once the host's panel is
-        // ready, then the panel binds to it exactly like the UIDocument path.
+        /// <summary>
+        /// When embedded, the panel renders into a caller-supplied VisualElement instead of its own
+        /// UIDocument/PanelRenderer. The chat UXML is cloned into that host once the host's panel is
+        /// ready, then the panel binds to it exactly like the UIDocument path.
+        /// </summary>
         private bool _embeddedHostMode;
         private VisualElement _embeddedHost;
         private VisualTreeAsset _embeddedChatTemplate;
@@ -89,28 +91,45 @@ namespace CoreAI.Chat
 
         private Label _streamingLabel;
         private bool _isStreaming;
-        private bool _isSending; // prevents Shift+Enter sending while AI is busy
+
+        /// <summary>
+        /// True once the streaming bubble's rendered text hit <see cref="MaxAssistantRenderChars"/>;
+        /// later chunks still reach the full-response accumulator but are no longer rendered.
+        /// </summary>
+        private bool _streamingRenderCapReached;
+
+        private bool _isSending; // WHY: prevents Shift+Enter sending while AI is busy
         private bool _stopRequestedByUser;
         private bool _isStopping;
         private bool _isClearing;
 
         private bool _lastPublishedBusy;
 
-        // Monotonic counter incremented at the start of each agent turn.
+        /// <summary>
+        /// Monotonic counter incremented at the start of each agent turn. Turn code captures the value
+        /// at start and compares it before mutating shared UI/busy state, so a superseded turn that is
+        /// still unwinding (e.g. after an agent switch) can never write into the newer turn's bubbles.
+        /// </summary>
         private int _currentTurnGeneration;
 
-        // When an assistant turn streams prose, then a tool round runs, then more prose arrives,
-        // the post-tool prose must land in a NEW bubble (claude/cursor behaviour). This flag marks
-        // that the in-flight streaming bubble was sealed at a tool-round boundary; the next visible
-        // prose chunk opens a fresh bubble instead of appending to the old (now-resolved) one.
+        /// <summary>
+        /// When an assistant turn streams prose, then a tool round runs, then more prose arrives,
+        /// the post-tool prose must land in a NEW bubble (claude/cursor behaviour). This flag marks
+        /// that the in-flight streaming bubble was sealed at a tool-round boundary; the next visible
+        /// prose chunk opens a fresh bubble instead of appending to the old (now-resolved) one.
+        /// </summary>
         private bool _streamingBubbleSealed;
 
-        // Tracks the in-flight tool round so we can emit ToolRoundStarted with the last tool name.
+        /// <summary>Tracks the in-flight tool round so ToolRoundStarted can carry the last tool name.</summary>
         private string _lastToolNameInTurn;
-        private int _toolRoundIterationInTurn; // 1-based iteration index inside current turn
 
-        // Stream-gap diagnostic: if the orchestrator goes silent for > this many seconds between chunks,
-        // log a single Info line so the host can tell "model slow" from "UI lost a chunk".
+        /// <summary>1-based iteration index inside the current turn.</summary>
+        private int _toolRoundIterationInTurn;
+
+        /// <summary>
+        /// Stream-gap diagnostic: if the orchestrator goes silent for more than this many seconds
+        /// between chunks, log one Info line so the host can tell "model slow" from "UI lost a chunk".
+        /// </summary>
         private const double StreamGapWarnSeconds = 5.0;
 
         /// <summary>Runtime overrides for hotkeys. <c>null</c> = follow <see cref="config"/> (or built-in defaults if config is null).</summary>
@@ -118,6 +137,11 @@ namespace CoreAI.Chat
 
         private KeyCode? _runtimeOverrideOpenChatHotkey;
         private bool? _runtimeOverrideEscapeChatShortcuts;
+        private bool? _runtimeOverrideChatRequiresVisibleCursor;
+
+        /// <summary>Tracks the previous frame's cursor-gated input-allowed state so <see cref="Update"/>
+        /// can detect the allowed → blocked transition and release keyboard focus exactly once.</summary>
+        private bool? _wasChatInputAllowed;
 
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // True while streaming assistant output is currently visible.
@@ -128,6 +152,12 @@ namespace CoreAI.Chat
         /// destabilize ScrollView layout and leave the scrollbar at an old position.
         /// </summary>
         private bool _streamingScrollScheduled;
+
+        /// <summary>
+        /// At most one pending <see cref="ScrollToBottom"/> chain per burst of appended messages, so a
+        /// flood of <see cref="AddMessage"/> calls does not stack five scheduler jobs per message.
+        /// </summary>
+        private bool _scrollToBottomScheduled;
 
         private IVisualElementScheduledItem _typingAnimation;
         private int _typingDotCount;
@@ -244,6 +274,7 @@ namespace CoreAI.Chat
                 WebGLInput.captureAllKeyboardInput = false;
             }
 #endif
+            TickChatInputCursorGating();
             PollChatToggleShortcuts();
             TickLongRequestHint();
         }
@@ -367,8 +398,8 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // The chat tree must be attached to a live panel before styles/layout apply, mirroring the
-            // UIDocument path where rootVisualElement is already panel-attached in OnEnable.
+            // WHY: the chat tree must be attached to a live panel before styles/layout apply, mirroring
+            // the UIDocument path where rootVisualElement is already panel-attached in OnEnable.
             _embeddedHost.RegisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
             if (_embeddedHost.panel != null)
             {
@@ -522,6 +553,8 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            CancelActiveRequestOnDisable();
+
             if (_embeddedHost != null)
             {
                 _embeddedHost.UnregisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
@@ -538,6 +571,31 @@ namespace CoreAI.Chat
             UnbindUiCallbacks(true);
             StopTypingAnimation();
             ResetUiReferences();
+        }
+
+        /// <summary>
+        /// Cancels the in-flight request when the panel component is disabled, so a hidden/disabled
+        /// standalone panel never keeps a zombie streaming turn alive. The Hub collapse path is
+        /// unaffected: collapsing only toggles a USS class and never disables the panel GameObject,
+        /// so generation intentionally keeps running while the Hub is collapsed.
+        /// </summary>
+        private void CancelActiveRequestOnDisable()
+        {
+            CancellationTokenSource active = _activeRequestCts;
+            if (!IsCancellationSourceActive(active))
+            {
+                return;
+            }
+
+            try
+            {
+                active.Cancel();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] OnDisable: active request cancel failed: {ex.Message}");
+            }
         }
 
         protected virtual void OnDestroy()
@@ -651,7 +709,8 @@ namespace CoreAI.Chat
             CoreAiRoutingUiResult result = _routingUiController.AssignProfileToRole(ActiveRoleId, profileId);
             if (!result.Ok)
             {
-                Debug.LogWarning("[CoreAiChatPanel] API profile assignment failed: " + result.Message);
+                Logger.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatPanel] API profile assignment failed: " + result.Message);
                 RefreshApiProfileControls();
             }
             else if (string.IsNullOrEmpty(profileId))
@@ -813,11 +872,10 @@ namespace CoreAI.Chat
 
             string previousRole = _activeRoleId;
             _activeRoleId = evt.newValue;
-            Debug.Log($"[CoreAiChatPanel] Active agent role -> {_activeRoleId}");
 
-            // Re-target the panel to the newly selected role. Stop any in-flight turn for the *previous*
-            // role so its late streaming output does not bleed into the newly selected role's transcript,
-            // then reload this role's chat history.
+            // WHY: re-target the panel to the newly selected role. Stop any in-flight turn for the
+            // *previous* role so its late streaming output does not bleed into the newly selected
+            // role's transcript, then reload this role's chat history.
             if (isActiveAndEnabled)
             {
                 if (!string.IsNullOrEmpty(previousRole))
@@ -826,15 +884,19 @@ namespace CoreAI.Chat
                     {
                         CoreAi.StopAgent(previousRole);
                     }
-                    catch
+                    catch (Exception facadeEx)
                     {
+                        // WHY: best-effort stop — the facade may have no live scope during teardown;
+                        // fall back to the chat service, and never let the dropdown handler throw.
                         try
                         {
                             _chatService?.StopAgent(previousRole);
                         }
-                        catch
+                        catch (Exception serviceEx)
                         {
-                            // Ignore — best-effort stop.
+                            Logger.LogWarning(GameLogFeature.Core,
+                                $"[CoreAiChatPanel] StopAgent('{previousRole}') failed during agent switch. " +
+                                $"CoreAi: {facadeEx.Message}; ChatService: {serviceEx.Message}");
                         }
                     }
                 }
@@ -999,6 +1061,10 @@ namespace CoreAI.Chat
             _apiProfileToggle = null;
             _longRequestHint = null;
             _streamingLabel = null;
+            // WHY: pending scheduler jobs die with the old visual tree; a stuck flag would block every
+            // scroll after a UI rebuild.
+            _scrollToBottomScheduled = false;
+            _streamingScrollScheduled = false;
         }
 
         protected virtual void ApplyConfig()
@@ -1126,6 +1192,47 @@ namespace CoreAI.Chat
             }
 
             return Options.EnableEscapeChatShortcuts;
+        }
+
+        private bool IsChatRequiresVisibleCursorEnabled()
+        {
+            if (_runtimeOverrideChatRequiresVisibleCursor.HasValue)
+            {
+                return _runtimeOverrideChatRequiresVisibleCursor.Value;
+            }
+
+            return Options.ChatRequiresVisibleCursor;
+        }
+
+        /// <summary>
+        /// Whether chat hotkeys (open + Escape) should react right now, given cursor visibility gating.
+        /// Pure so EditMode tests can cover every lock-mode/visibility combination without a live cursor.
+        /// </summary>
+        internal static bool IsChatInputAllowed(bool requiresVisibleCursor, bool cursorVisible, CursorLockMode lockMode)
+        {
+            return !requiresVisibleCursor || (cursorVisible && lockMode != CursorLockMode.Locked);
+        }
+
+        private bool IsChatInputAllowedNow()
+        {
+            return IsChatInputAllowed(
+                IsChatRequiresVisibleCursorEnabled(), UnityEngine.Cursor.visible, UnityEngine.Cursor.lockState);
+        }
+
+        /// <summary>
+        /// Detects the allowed → blocked cursor-gating transition (cursor just got locked/hidden) and
+        /// releases chat keyboard focus so movement keys never type into the chat input. Does not
+        /// auto-refocus on the reverse transition — the player has to click/press the open hotkey again.
+        /// </summary>
+        private void TickChatInputCursorGating()
+        {
+            bool allowedNow = IsChatInputAllowedNow();
+            if (_wasChatInputAllowed == true && !allowedNow)
+            {
+                ReleaseChatKeyboardFocus();
+            }
+
+            _wasChatInputAllowed = allowedNow;
         }
 
         private KeyCode ResolvedOpenChatHotkey()
@@ -1307,6 +1414,9 @@ namespace CoreAI.Chat
         /// <summary>Resolved escape-shortcut state after runtime overrides.</summary>
         public bool EffectiveEscapeChatShortcutsEnabled => IsEscapeChatShortcutEnabled();
 
+        /// <summary>Resolved cursor-gating state after runtime overrides.</summary>
+        public bool EffectiveChatRequiresVisibleCursor => IsChatRequiresVisibleCursorEnabled();
+
         /// <summary>
         /// Overrides whether the runtime open-chat keyboard shortcut is enabled.
         /// </summary>
@@ -1334,12 +1444,22 @@ namespace CoreAI.Chat
             ApplyShortcutTooltips();
         }
 
+        /// <summary>
+        /// Overrides whether chat hotkeys require a visible, unlocked mouse cursor (see
+        /// <see cref="ICoreAiChatOptions.ChatRequiresVisibleCursor"/>).
+        /// </summary>
+        public void SetRuntimeChatRequiresVisibleCursor(bool? requiresVisibleCursor)
+        {
+            _runtimeOverrideChatRequiresVisibleCursor = requiresVisibleCursor;
+        }
+
         /// <summary>Clears runtime hotkey overrides so the panel uses configuration defaults again.</summary>
         public void ClearRuntimeHotkeyOverrides()
         {
             _runtimeOverrideOpenChatShortcutEnabled = null;
             _runtimeOverrideOpenChatHotkey = null;
             _runtimeOverrideEscapeChatShortcuts = null;
+            _runtimeOverrideChatRequiresVisibleCursor = null;
             ApplyShortcutTooltips();
         }
 
@@ -1460,8 +1580,12 @@ namespace CoreAI.Chat
                 string hint = JObject.Parse(trimmed)["hint"]?.ToString();
                 return string.IsNullOrWhiteSpace(hint) ? content : hint;
             }
-            catch
+            catch (Exception ex)
             {
+                // WHY: user text that merely starts with '{' is not guaranteed to be composer JSON;
+                // rendering the raw content is the correct fallback, but never fail silently.
+                Logger.LogDebug(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Persisted message hint parse failed; rendering raw content: {ex.Message}");
                 return content;
             }
         }
@@ -1538,6 +1662,11 @@ namespace CoreAI.Chat
 
         private void OnRootKeyDown(KeyDownEvent evt)
         {
+            if (!IsChatInputAllowedNow())
+            {
+                return;
+            }
+
             if (IsCollapsed && IsOpenChatKeyboardShortcutEnabled() &&
                 IsOpenChatHotkeyFromKeys(ResolvedOpenChatHotkey(), evt.keyCode, evt.character, evt.ctrlKey,
                     evt.commandKey, evt.altKey))
@@ -1550,7 +1679,7 @@ namespace CoreAI.Chat
             if (!IsCollapsed && IsEscapeChatShortcutEnabled() && IsEscape(evt))
             {
                 MarkInputEventHandled(evt);
-                if (IsRequestInProgress())
+                if (IsRequestInProgress)
                 {
                     if (Options.EnableStopGeneration)
                     {
@@ -1667,6 +1796,11 @@ namespace CoreAI.Chat
         {
             try
             {
+                if (!IsChatInputAllowedNow())
+                {
+                    return;
+                }
+
                 bool noUitkKeyboardFocus =
                     Root == null ||
                     Root.focusController == null ||
@@ -1695,7 +1829,7 @@ namespace CoreAI.Chat
                 {
                     if (Input.GetKeyDown(KeyCode.Escape))
                     {
-                        if (IsRequestInProgress())
+                        if (IsRequestInProgress)
                         {
                             if (Options.EnableStopGeneration)
                             {
@@ -1709,8 +1843,12 @@ namespace CoreAI.Chat
                     }
                 }
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
+                // WHY: legacy Input can throw during editor teardown / input-system switches; polling
+                // resumes next frame, but keep a debug trace instead of swallowing silently.
+                Logger.LogDebug(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] PollChatToggleShortcuts skipped this frame: {ex.Message}");
             }
         }
 
@@ -1724,13 +1862,17 @@ namespace CoreAI.Chat
             return keyCode == KeyCode.Escape || character == 27;
         }
 
-        private bool IsRequestInProgress()
-        {
-            // `_isSending` covers the whole agent turn (RunAgentTurnAsync `finally`).
-            // `_isStreaming` stays true until the streaming enumerator fully completes
-            // (LLM chunks + orchestrator post-work); do not clear it on `chunk.IsDone` alone.
-            return _isSending || _isStreaming;
-        }
+        /// <summary>
+        /// Whether an AI request/stream is currently in progress for this panel. `_isSending` covers the
+        /// whole agent turn (RunAgentTurnAsync `finally`); `_isStreaming` stays true until the streaming
+        /// enumerator fully completes (LLM chunks + orchestrator post-work) — do not clear it on
+        /// `chunk.IsDone` alone. Public so host UI (e.g. the CoreAI Hub) can decide what Escape does
+        /// without duplicating the panel's busy bookkeeping.
+        /// </summary>
+        public bool IsRequestInProgress => _isSending || _isStreaming;
+
+        /// <summary>Effective "Enable Stop Generation" setting after config/runtime options.</summary>
+        public bool EffectiveEnableStopGeneration => Options.EnableStopGeneration;
 
         /// <summary>
         /// Fires <see cref="BusyStateChanged"/> whenever <see cref="IsBusy"/> transitions.
@@ -1799,7 +1941,7 @@ namespace CoreAI.Chat
 
         private void TrySendInput(bool stopIfBusy)
         {
-            if (IsRequestInProgress())
+            if (IsRequestInProgress)
             {
                 if (stopIfBusy && Options.EnableStopGeneration)
                 {
@@ -1814,8 +1956,8 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // Even if the button is disabled, TextField key events can still fire.
-            // Prevent sending while an AI request/stream is in progress.
+            // WHY: even if the button is disabled, TextField key events can still fire — never send
+            // while an AI request/stream is in progress.
             if (IsActionInProgress() || (SendButton != null && !SendButton.enabledSelf))
             {
                 return;
@@ -1919,8 +2061,8 @@ namespace CoreAI.Chat
 
         private async Task SendToAIFromUiAsync(string userText)
         {
-            // Mark busy before the first await so TrySendInput/Stop sees IsRequestInProgress even if the
-            // backend completes the first streaming iteration synchronously (e.g. stub / zero-delay mock).
+            // WHY: mark busy before the first await so TrySendInput/Stop sees IsRequestInProgress even
+            // if the backend completes the first streaming iteration synchronously (stub / zero-delay mock).
             _isSending = true;
             _stopRequestedByUser = false;
             UpdateSendButtonVisualState();
@@ -1939,8 +2081,11 @@ namespace CoreAI.Chat
             }
         }
 
-        /// <param name="userTextForModel">The user text for model value.</param>
-        /// <param name="simulatedAssistantReply">The simulated assistant reply value.</param>
+        /// <summary>
+        /// Runs one full agent turn (streaming or buffered) and returns the final assistant text, or
+        /// <c>null</c> on cancel/error. A non-empty <paramref name="simulatedAssistantReply"/> bypasses
+        /// the AI service and renders the given reply directly (test/demo path).
+        /// </summary>
         private async Task<string?> RunAgentTurnAsync(
             string userTextForModel,
             string simulatedAssistantReply,
@@ -1968,8 +2113,9 @@ namespace CoreAI.Chat
             }
 
             string roleId = _activeRoleId ?? Options.RoleId ?? BuiltInAgentRoleIds.SmartChat;
-            // can compare values across awaits to detect "a newer turn is already in flight".
-            Interlocked.Increment(ref _currentTurnGeneration);
+            // WHY: capture this turn's generation so code after awaits can detect "a newer turn is
+            // already in flight" and drop stale UI appends/finishes (see IsStaleTurn).
+            int turnGeneration = Interlocked.Increment(ref _currentTurnGeneration);
             _toolRoundIterationInTurn = 1;
 
             if (!_isSending)
@@ -1996,7 +2142,7 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    return await SendStreamingAsync(request, requestCts.Token);
+                    return await SendStreamingAsync(request, turnGeneration, requestCts.Token);
                 }
 
                 return await SendNonStreamingAsync(request, requestCts.Token);
@@ -2004,6 +2150,11 @@ namespace CoreAI.Chat
             catch (OperationCanceledException)
             {
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
+                if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    return null;
+                }
+
                 FinishStreaming();
                 HideTypingIndicator();
                 ResetLongRequestHint();
@@ -2021,9 +2172,13 @@ namespace CoreAI.Chat
             catch (Exception ex)
             {
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
-                FinishStreaming();
                 Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Error: {ex}");
-                AddMessage(Options.ErrorMessagePrefix + ex.Message, false);
+                if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    FinishStreaming();
+                    AddMessage(Options.ErrorMessagePrefix + ex.Message, false);
+                }
+
                 return null;
             }
             finally
@@ -2038,21 +2193,29 @@ namespace CoreAI.Chat
                         $"[CoreAiChatPanel] RunAgentTurnAsync finally: SwitchToMainThread: {ex.Message}");
                 }
 
-                FinishStreaming();
-                HideTypingIndicator();
-                _isSending = false;
-                _stopRequestedByUser = false;
-                ResetLongRequestHint();
+                // WHY: when a newer turn superseded this one, its busy flags/streaming bubble/typing row
+                // belong to that turn — a stale unwind must only release its own cancellation source.
+                if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    FinishStreaming();
+                    HideTypingIndicator();
+                    _isSending = false;
+                    _stopRequestedByUser = false;
+                    ResetLongRequestHint();
+                    _lastToolNameInTurn = null;
+                }
+
                 if (ReferenceEquals(_activeRequestCts, requestCts))
                 {
                     _activeRequestCts = null;
                 }
 
-                _lastToolNameInTurn = null;
-
                 requestCts.Dispose();
-                UpdateSendButtonVisualState();
-                InputField?.schedule.Execute(FocusInputField);
+                if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    UpdateSendButtonVisualState();
+                    InputField?.schedule.Execute(FocusInputField);
+                }
             }
         }
 
@@ -2114,14 +2277,18 @@ namespace CoreAI.Chat
             return uiConfigWantsStreaming;
         }
 
-        private async Task<string?> SendStreamingAsync(AiTaskRequest request, CancellationToken ct)
+        private async Task<string?> SendStreamingAsync(
+            AiTaskRequest request,
+            int turnGeneration,
+            CancellationToken ct)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
             _streamingBubbleSealed = false;
 
-            // Yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish the enumerator.
+            // WHY: yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish
+            // the enumerator.
             await Task.Yield();
             _isStreaming = true;
             UpdateSendButtonVisualState();
@@ -2145,8 +2312,17 @@ namespace CoreAI.Chat
 
                     lastChunkAt = DateTime.UtcNow;
 
-                    // LLM/orchestrator stack uses ConfigureAwait(false); UITK must be touched on the main thread
+                    // WHY: LLM/orchestrator stack uses ConfigureAwait(false); UITK must be touched on
+                    // the main thread.
                     await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
+
+                    // WHY: a newer turn may have started while this one awaited (agent switch / stop +
+                    // resend); stop touching the UI — the new turn owns the transcript and busy state.
+                    if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                    {
+                        return null;
+                    }
+
                     if (!string.IsNullOrEmpty(chunk.Error))
                     {
                         if (_stopRequestedByUser &&
@@ -2189,7 +2365,8 @@ namespace CoreAI.Chat
                         }
                         else
                         {
-                            // ApplyStreamingToolProgressTypingHint (StopTypingAnimation) even before any prose.
+                            // WHY: restart the dot animation that ApplyStreamingToolProgressTypingHint
+                            // paused (StopTypingAnimation), even before any prose has streamed.
                             ShowTypingIndicator();
                         }
 
@@ -2212,11 +2389,19 @@ namespace CoreAI.Chat
                                 StartStreaming();
                             }
 
+                            // WHY: fullResponse keeps the complete text for history/handlers; only the
+                            // rendered streaming label is capped (see AppendToStreaming).
                             string formatted = FormatResponseText(visible);
                             fullResponse += formatted;
-                            AppendToStreaming(formatted);
+                            AppendToStreaming(formatted, turnGeneration);
                         }
                     }
+                }
+
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
+                if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    return null;
                 }
 
                 if (string.IsNullOrEmpty(fullResponse))
@@ -2225,7 +2410,6 @@ namespace CoreAI.Chat
                     return null;
                 }
 
-                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
                 OnResponseReceived(fullResponse);
                 OnAiResponseCompleted?.Invoke(fullResponse);
                 return fullResponse;
@@ -2242,10 +2426,13 @@ namespace CoreAI.Chat
                         $"[CoreAiChatPanel] SendStreamingAsync finally: SwitchToMainThread: {ex.Message}");
                 }
 
-                FinishStreaming();
-                HideTypingIndicator();
-                UpdateSendButtonVisualState();
-                ScrollToBottom();
+                if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    FinishStreaming();
+                    HideTypingIndicator();
+                    UpdateSendButtonVisualState();
+                    ScrollToBottom();
+                }
             }
         }
 
@@ -2423,6 +2610,51 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Whether a turn that captured <paramref name="turnGeneration"/> at its start has been
+        /// superseded by a newer turn. Stale turns must not mutate transcript or busy state.
+        /// </summary>
+        internal static bool IsStaleTurn(int turnGeneration, int currentTurnGeneration)
+        {
+            return turnGeneration != currentTurnGeneration;
+        }
+
+        /// <summary>
+        /// Render-only append for one streamed chunk. Below <see cref="MaxAssistantRenderChars"/> the
+        /// chunk is appended verbatim; the append that crosses the cap seals the bubble via
+        /// <see cref="ClampAssistantForRender"/> (clamped, open code fence closed, ellipsis marker) and
+        /// sets <paramref name="cappedAtLimit"/> so callers stop rendering later chunks. The full
+        /// response text is accumulated separately and still reaches history/persistence untouched.
+        /// </summary>
+        internal static string AppendStreamingChunkForRender(
+            string renderedText,
+            string chunk,
+            out bool cappedAtLimit)
+        {
+            renderedText ??= string.Empty;
+            if (renderedText.Length >= MaxAssistantRenderChars)
+            {
+                cappedAtLimit = true;
+                return renderedText;
+            }
+
+            if (string.IsNullOrEmpty(chunk))
+            {
+                cappedAtLimit = false;
+                return renderedText;
+            }
+
+            string combined = renderedText + chunk;
+            if (combined.Length <= MaxAssistantRenderChars)
+            {
+                cappedAtLimit = false;
+                return combined;
+            }
+
+            cappedAtLimit = true;
+            return ClampAssistantForRender(combined);
+        }
+
+        /// <summary>
         /// Creates message bubble.
         /// </summary>
         protected virtual VisualElement CreateMessageBubble(string text, bool isUser)
@@ -2570,9 +2802,9 @@ namespace CoreAI.Chat
         private void TryRegisterToolCallChatDisplay()
         {
             TryUnregisterToolCallChatDisplay();
-            // Always subscribe: the handler also tracks `_lastToolNameInTurn` for the
-            // ToolRoundStarted public event, independent of `ShowToolCallsInChat`.
-            // The bubble-rendering branch inside the handler is still gated by runtime options.
+            // WHY: always subscribe — the handler also tracks `_lastToolNameInTurn` for the
+            // ToolRoundStarted public event, independent of `ShowToolCallsInChat`. The bubble-rendering
+            // branch inside the handler is still gated by runtime options.
             _toolExecutedChatHandler = OnToolExecutedChatDisplay;
             CoreAi.OnToolExecuted += _toolExecutedChatHandler;
         }
@@ -2596,7 +2828,7 @@ namespace CoreAI.Chat
         {
             ICoreAiChatOptions options = Options;
             string panelRole = ActiveRoleId;
-            // listeners want the name regardless of whether the bubble is rendered.
+            // WHY: ToolRoundStarted listeners want the name regardless of whether the bubble is rendered.
             if (string.Equals(roleId, panelRole, StringComparison.Ordinal))
             {
                 _lastToolNameInTurn = toolName;
@@ -2672,7 +2904,7 @@ namespace CoreAI.Chat
 
         private void StopActiveGeneration()
         {
-            if (_isStopping || !IsRequestInProgress())
+            if (_isStopping || !IsRequestInProgress)
             {
                 return;
             }
@@ -2823,10 +3055,10 @@ namespace CoreAI.Chat
 
         private void UpdateSendButtonVisualState()
         {
-            // Single funnel for busy-state changes: every flag mutation in the panel
-            // already calls UpdateSendButtonVisualState() to refresh the send/stop affordance,
-            // so emitting the public BusyStateChanged event here keeps the contract consistent
-            // without sprinkling RaiseBusyStateChangedIfChanged() everywhere.
+            // WHY: single funnel for busy-state changes — every flag mutation in the panel already
+            // calls UpdateSendButtonVisualState() to refresh the send/stop affordance, so emitting the
+            // public BusyStateChanged event here keeps the contract consistent without sprinkling
+            // RaiseBusyStateChangedIfChanged() everywhere.
             RaiseBusyStateChangedIfChanged();
 
             if (SendButton == null)
@@ -2834,7 +3066,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            bool isBusy = IsRequestInProgress();
+            bool isBusy = IsRequestInProgress;
             bool stopEnabled = Options.EnableStopGeneration;
             ICoreAiChatTextOptions textOptions = TextOptions;
             SendButton.text =
@@ -2924,7 +3156,7 @@ namespace CoreAI.Chat
             bool isClearing,
             bool stopGenerationEnabled)
         {
-            // While a request is running the button is the stop control, so it must stay clickable.
+            // WHY: while a request is running the button is the stop control, so it must stay clickable.
             if (isStopping || isClearing)
             {
                 return false;
@@ -3002,6 +3234,7 @@ namespace CoreAI.Chat
             RaiseBusyStateChangedIfChanged();
             _streamingLabel = null;
             _streamingBubbleSealed = false;
+            _streamingRenderCapReached = false;
 
             if (MessageScroll == null)
             {
@@ -3025,14 +3258,27 @@ namespace CoreAI.Chat
             ScrollToBottom();
         }
 
-        private void AppendToStreaming(string chunk)
+        /// <summary>
+        /// Appends one streamed chunk to the in-flight bubble's rendered text. Stale turns are dropped
+        /// (defense-in-depth behind the <see cref="IsRequestInProgress"/> gate), and the rendered text
+        /// is hard-capped at <see cref="MaxAssistantRenderChars"/> — the WebGL GPU-buffer backstop that
+        /// <see cref="AddMessage"/> applies to non-streamed bubbles (full text still reaches history).
+        /// </summary>
+        private void AppendToStreaming(string chunk, int turnGeneration)
         {
-            if (_streamingLabel == null || !_isStreaming)
+            if (_streamingLabel == null || !_isStreaming || _streamingRenderCapReached)
             {
                 return;
             }
 
-            _streamingLabel.text = (_streamingLabel.text ?? "") + chunk;
+            if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+            {
+                return;
+            }
+
+            _streamingLabel.text =
+                AppendStreamingChunkForRender(_streamingLabel.text, chunk, out bool cappedAtLimit);
+            _streamingRenderCapReached = cappedAtLimit;
             ScheduleStreamingScrollToBottom();
         }
 
@@ -3063,18 +3309,26 @@ namespace CoreAI.Chat
 
             _isStreaming = false;
             _streamingLabel = null;
+            _streamingRenderCapReached = false;
             RaiseBusyStateChangedIfChanged();
         }
 
+        /// <summary>
+        /// Requests a scroll to the newest message. Coalesced: a burst of appended messages schedules a
+        /// single settle chain (immediate + delayed snaps for late layout passes) instead of five
+        /// scheduler jobs per message.
+        /// </summary>
         protected void ScrollToBottom()
         {
-            if (MessageScroll == null)
+            if (MessageScroll == null || _scrollToBottomScheduled)
             {
                 return;
             }
 
+            _scrollToBottomScheduled = true;
             MessageScroll.schedule.Execute(() =>
             {
+                _scrollToBottomScheduled = false;
                 SnapScrollToBottom();
                 MessageScroll.schedule.Execute(SnapScrollToBottom);
                 MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(80);
@@ -3152,7 +3406,8 @@ namespace CoreAI.Chat
 
                 string roleId = ActiveRoleId;
 
-                // Wrap the following block with exception-safe behavior.
+                // WHY: the CoreAi facade may have no live scope; fall back to clearing history through
+                // the chat service so the visible transcript and persisted history stay in sync.
                 try
                 {
                     CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory);
@@ -3185,7 +3440,7 @@ namespace CoreAI.Chat
         /// </summary>
         public void StopAgent()
         {
-            bool wasInProgress = IsRequestInProgress();
+            bool wasInProgress = IsRequestInProgress;
             StopActiveGeneration();
 
             if (wasInProgress)

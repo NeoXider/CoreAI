@@ -485,6 +485,80 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Truth table for the cursor-gating helper that gates chat hotkeys/Escape in first-person /
+        /// locked-cursor games. Covers all combinations of "requires visible cursor", cursor visibility,
+        /// and every <see cref="CursorLockMode"/> (None, Locked, Confined).
+        /// </summary>
+        [Test]
+        public void IsChatInputAllowed_TruthTable()
+        {
+            // requiresVisibleCursor = false → always allowed, regardless of cursor state.
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, true, CursorLockMode.None));
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, false, CursorLockMode.None));
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, true, CursorLockMode.Locked));
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, false, CursorLockMode.Locked));
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, true, CursorLockMode.Confined));
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(false, false, CursorLockMode.Confined));
+
+            // requiresVisibleCursor = true → allowed only when visible AND not locked.
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(true, true, CursorLockMode.None), "visible + unlocked");
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputAllowed(true, true, CursorLockMode.Confined),
+                "visible + confined is still allowed (cursor is visible, just clamped to the window)");
+            Assert.IsFalse(CoreAiChatPanel.IsChatInputAllowed(true, true, CursorLockMode.Locked),
+                "visible but locked is blocked — locked cursors are typically hidden by the game too");
+            Assert.IsFalse(CoreAiChatPanel.IsChatInputAllowed(true, false, CursorLockMode.None), "hidden + unlocked");
+            Assert.IsFalse(CoreAiChatPanel.IsChatInputAllowed(true, false, CursorLockMode.Locked), "hidden + locked");
+            Assert.IsFalse(CoreAiChatPanel.IsChatInputAllowed(true, false, CursorLockMode.Confined),
+                "hidden + confined");
+        }
+
+        [Test]
+        public void RuntimeChatRequiresVisibleCursorOverride_PrecedenceOverConfig()
+        {
+            GameObject go = new("CoreAiChatPanel_RuntimeChatRequiresVisibleCursor_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+
+                // Config true, no override → follows config (true).
+                panel.SetRuntimeOptions(new CoreAiChatOptions { ChatRequiresVisibleCursor = true });
+                Assert.IsTrue(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config true, override false → override wins.
+                panel.SetRuntimeChatRequiresVisibleCursor(false);
+                Assert.IsFalse(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config true, override true → override wins (still true).
+                panel.SetRuntimeChatRequiresVisibleCursor(true);
+                Assert.IsTrue(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config true, override cleared (null) → falls back to config (true).
+                panel.SetRuntimeChatRequiresVisibleCursor(null);
+                Assert.IsTrue(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config false, no override → follows config (false).
+                panel.SetRuntimeOptions(new CoreAiChatOptions { ChatRequiresVisibleCursor = false });
+                Assert.IsFalse(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config false, override true → override wins.
+                panel.SetRuntimeChatRequiresVisibleCursor(true);
+                Assert.IsTrue(panel.EffectiveChatRequiresVisibleCursor);
+
+                // Config false, override false → override wins (still false).
+                panel.SetRuntimeChatRequiresVisibleCursor(false);
+                Assert.IsFalse(panel.EffectiveChatRequiresVisibleCursor);
+
+                // ClearRuntimeHotkeyOverrides() also clears the cursor-gating override.
+                panel.ClearRuntimeHotkeyOverrides();
+                Assert.IsFalse(panel.EffectiveChatRequiresVisibleCursor, "falls back to config (false)");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
         [Test]
         public void SetCollapsed_UpdatesStateAndNotifiesOverrideHook()
         {

@@ -54,6 +54,24 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private string emptyStateText = "No Hub pages registered.";
 
+        [Header("Escape / Hotkeys")]
+        [Tooltip("When the Hub is expanded, Escape collapses it (same visual state as the collapse " +
+                 "button) after first giving the active page a chance to consume it via " +
+                 "IHubEscapeHandler. Off disables Escape handling for the Hub entirely.")]
+        [SerializeField]
+        private bool escapeCollapses = true;
+
+        [Tooltip("Optional hotkey that expands/collapses the Hub when no UI Toolkit element has " +
+                 "keyboard focus. KeyCode.None disables the hotkey.")]
+        [SerializeField]
+        private KeyCode toggleHotkey = KeyCode.None;
+
+        [Tooltip("Require the mouse cursor to be visible and unlocked before Escape or the toggle " +
+                 "hotkey are handled — keeps the Hub out of the way while gameplay owns the cursor " +
+                 "(first-person / locked-cursor games). Mirrors CoreAiChatOptions.ChatRequiresVisibleCursor.")]
+        [SerializeField]
+        private bool requireVisibleCursor = true;
+
         private UIDocument _document;
         private VisualElement _boundUiRoot;
         private VisualElement _root;
@@ -156,6 +174,7 @@ namespace CoreAI.Hub.UI
             }
 
             EnsureUi(uiRoot);
+            PollEscapeAndToggleHotkey();
         }
 
         private void EnsureUi(VisualElement uiRoot)
@@ -207,6 +226,8 @@ namespace CoreAI.Hub.UI
                 _collapseButton.clicked += ToggleCollapsed;
             }
 
+            _root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
+
             if (styleSheet != null)
             {
                 _root.styleSheets.Add(styleSheet);
@@ -248,12 +269,117 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        // ===================== Escape / Hotkeys =====================
+
+        /// <summary>
+        /// Whether Escape/toggle-hotkey input should be handled right now, given cursor visibility
+        /// gating. Pure so EditMode tests can cover every lock-mode/visibility combination without a
+        /// live cursor. Mirrors <c>CoreAiChatPanel.IsChatInputAllowed</c>.
+        /// </summary>
+        internal static bool IsHubInputAllowed(bool requireVisibleCursor, bool cursorVisible, CursorLockMode lockMode)
+        {
+            return !requireVisibleCursor || (cursorVisible && lockMode != CursorLockMode.Locked);
+        }
+
+        /// <summary>
+        /// Decides what Escape should do, given whether the active page already consumed it. Pure so
+        /// EditMode tests can cover "page handles", "hub collapses", and "disabled by escapeCollapses"
+        /// without a live UI Toolkit panel.
+        /// </summary>
+        internal static bool ShouldCollapseOnEscape(bool escapeCollapses, bool isExpanded, bool pageHandledEscape)
+        {
+            return escapeCollapses && isExpanded && !pageHandledEscape;
+        }
+
+        private bool IsHubInputAllowedNow()
+        {
+            return IsHubInputAllowed(
+                requireVisibleCursor, UnityEngine.Cursor.visible, UnityEngine.Cursor.lockState);
+        }
+
+        private void OnRootKeyDown(KeyDownEvent evt)
+        {
+            if (evt.keyCode != KeyCode.Escape && evt.character != (char)27)
+            {
+                return;
+            }
+
+            HandleEscapeRequested();
+        }
+
+        /// <summary>
+        /// Legacy-input fallback for Escape and <see cref="toggleHotkey"/>, mirroring
+        /// <c>CoreAiChatPanel.PollChatToggleShortcuts</c>: only acts when no UI Toolkit element holds
+        /// keyboard focus, so it never fights typing in a focused text field.
+        /// </summary>
+        private void PollEscapeAndToggleHotkey()
+        {
+            if (!_uiReady || _root == null || !IsHubInputAllowedNow())
+            {
+                return;
+            }
+
+            bool noUitkKeyboardFocus =
+                _root.focusController == null || _root.focusController.focusedElement == null;
+            if (!noUitkKeyboardFocus)
+            {
+                return;
+            }
+
+            if (!_collapsed && Input.GetKeyDown(KeyCode.Escape))
+            {
+                HandleEscapeRequested();
+                return;
+            }
+
+            if (toggleHotkey != KeyCode.None && Input.GetKeyDown(toggleHotkey))
+            {
+                ToggleCollapsed();
+            }
+        }
+
+        private void HandleEscapeRequested()
+        {
+            if (!_uiReady || _collapsed || !IsHubInputAllowedNow())
+            {
+                return;
+            }
+
+            bool pageHandled = TryActivePageHandleEscape();
+            if (ShouldCollapseOnEscape(escapeCollapses, true, pageHandled))
+            {
+                SetCollapsed(true);
+            }
+        }
+
+        private bool TryActivePageHandleEscape()
+        {
+            if (_activePageId == null ||
+                !_pages.TryGetValue(_activePageId, out IHubPage page) ||
+                page is not IHubEscapeHandler escapeHandler)
+            {
+                return false;
+            }
+
+            try
+            {
+                return escapeHandler.TryHandleEscape();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[CoreAiHubWindow] Page '{_activePageId}' TryHandleEscape threw: {ex}");
+                return false;
+            }
+        }
+
         private void Unwire()
         {
             if (_collapseButton != null)
             {
                 _collapseButton.clicked -= ToggleCollapsed;
             }
+
+            _root?.UnregisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
 
             _tabButtons.Clear();
             _root = null;

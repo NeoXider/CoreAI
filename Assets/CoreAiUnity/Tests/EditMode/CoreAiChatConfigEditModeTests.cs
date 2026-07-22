@@ -53,6 +53,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(config.ShowToolCallsInChat, "по умолчанию tool-call строки в чате не показываем");
             Assert.IsTrue(config.EnableStopGeneration, "по умолчанию пользователь может остановить генерацию");
             Assert.IsTrue(config.ShowClearButton, "по умолчанию кнопка очистки доступна");
+            Assert.IsTrue(config.ChatRequiresVisibleCursor,
+                "по умолчанию чат реагирует на хоткеи только при видимом курсоре");
 
             Object.DestroyImmediate(config);
         }
@@ -133,6 +135,7 @@ namespace CoreAI.Tests.EditMode
             public int MaxMessageLength => 2000;
             public bool EnableOpenChatKeyboardShortcut => true;
             public bool EnableEscapeChatShortcuts => true;
+            public bool ChatRequiresVisibleCursor => true;
             public string ErrorMessagePrefix => CoreAiChatOptions.DefaultErrorMessagePrefix;
             public string TimeoutMessage => CoreAiChatOptions.DefaultTimeoutMessage;
             public string NoResponseMessage => CoreAiChatOptions.DefaultNoResponseMessage;

@@ -152,6 +152,13 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _enableEscapeChatShortcuts = true;
 
+        [Tooltip(
+            "Only handle the open hotkey and Esc while the mouse cursor is visible and unlocked. Keeps " +
+            "first-person / locked-cursor gameplay in control of WASD and other keys instead of the chat " +
+            "stealing keyboard focus. Disable to let chat hotkeys work regardless of cursor state.")]
+        [SerializeField]
+        private bool _chatRequiresVisibleCursor = true;
+
         [Header("Errors")]
         [SerializeField]
         private string _errorMessagePrefix = "Error: ";
@@ -199,6 +206,7 @@ namespace CoreAI.Chat
         public bool EnableOpenChatKeyboardShortcut => _enableOpenChatKeyboardShortcut;
         public KeyCode OpenChatHotkey => _openChatHotkey;
         public bool EnableEscapeChatShortcuts => _enableEscapeChatShortcuts;
+        public bool ChatRequiresVisibleCursor => _chatRequiresVisibleCursor;
         public string ErrorMessagePrefix => _errorMessagePrefix;
         public string TimeoutMessage => _timeoutMessage;
         public string NoResponseMessage => _noResponseMessage;
@@ -253,6 +261,7 @@ namespace CoreAI.Chat
             _maxMessageLength = options.MaxMessageLength;
             _enableOpenChatKeyboardShortcut = options.EnableOpenChatKeyboardShortcut;
             _enableEscapeChatShortcuts = options.EnableEscapeChatShortcuts;
+            _chatRequiresVisibleCursor = options.ChatRequiresVisibleCursor;
             _errorMessagePrefix = options.ErrorMessagePrefix;
             _timeoutMessage = options.TimeoutMessage;
             _noResponseMessage = options.NoResponseMessage;
