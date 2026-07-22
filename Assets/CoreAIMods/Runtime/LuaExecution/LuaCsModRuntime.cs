@@ -513,6 +513,13 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
 
+            // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau
+            // syntax (compound assignment, continue, string interpolation, if-expressions, type
+            // annotations). Keyed by the mod id so any surfaced diagnostic maps to the right source; a
+            // downlevel Error throws out of the load (never a silent raw fallback). mod.Source keeps the
+            // ORIGINAL author text — get_source/versions round-trip the Luau the user wrote.
+            string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
+
             IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
             RegisterGameplayBindings(registry, capabilities, modId);
             RegisterModApis(registry, mod);
@@ -530,7 +537,7 @@ namespace CoreAI.Ai.LuaCs
             PushTransactionScope();
             try
             {
-                _engine.RunChunk(mod.State, luaCode);
+                _engine.RunChunk(mod.State, compileSource);
             }
             finally
             {

@@ -10,8 +10,13 @@ Luau-only constructs a typical Roblox gameplay script uses into forms the bundle
   `autoReferenced: false`, references: none. A pure text transform: no `UnityEngine`, no `Lua`
   VM. `LuauDownleveler.Process` is the only public entry point; it never throws (malformed input is
   returned verbatim with an Error diagnostic).
-- **Consumers** — `CoreAI.Mods` references this assembly; mod loading opts in explicitly (not yet
-  wired). Tests reference it directly.
+- **Consumers** — `CoreAI.Mods` references this assembly. It is wired into every runtime Lua compile
+  path through `LuauSourceGate.ToLua52(source, chunkName)`, which runs `Process` before the Lua 5.2
+  VM compiles the chunk: mod load/reload (`LuaCsModRuntime.BuildMod`), the one-shot `execute_lua`
+  path (`LuaCsGameToolExecutor`), and the AI envelope path (`LuaCsAiEnvelopeProcessor`). Default-on
+  with no flag — valid Lua 5.2 is byte-identical passthrough, so plain scripts are unaffected; a
+  downlevel Error is surfaced as the load/exec failure (never a silent raw fallback). Tests reference
+  it directly.
 
 ## Seams / structure
 

@@ -101,8 +101,9 @@ INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED.
   `task.synchronize/desynchronize` are silent no-ops.
 - Signals (`inst.ChildAdded:Connect`, `:Once`, `:Wait`), `WaitForChild(name)` when the child
   is absent, `Model:PivotTo/GetPivot`, `Instance.fromExisting` (use `Clone`).
-- Luau-only syntax is NOT accepted: write plain Lua 5.2 (no `+=`/`continue`/`` `str{}` ``
-  interpolation / type annotations).
+- Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
+  `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
+  type annotations/casts all work. Plain Lua 5.2 is unaffected.
 
 ## 9. Examples
 

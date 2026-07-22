@@ -106,7 +106,12 @@ namespace CoreAI.Ai.LuaCs
                 _bindings.RegisterGameplayApis(registry);
                 IScriptState state = _engine.CreateState();
                 registry.ApplyTo(state);
-                object[] results = _engine.RunChunk(state, code, cancellationToken: cancellationToken);
+
+                // WHY: Downlevel Luau -> Lua 5.2 before compiling so one-shot scripts accept the same
+                // Luau syntax mods do; a downlevel Error is thrown here and caught below as the exec
+                // failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
+                string compileCode = LuauSourceGate.ToLua52(code, "execute_lua");
+                object[] results = _engine.RunChunk(state, compileCode, cancellationToken: cancellationToken);
                 string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
                 _observer.OnLuaSuccess(summary);
                 LuaExecutedSuccessfully?.Invoke(code ?? "");

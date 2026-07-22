@@ -101,7 +101,12 @@ namespace CoreAI.Ai.LuaCs
                 _bindings.RegisterGameplayApis(registry);
                 IScriptState state = _engine.CreateState();
                 registry.ApplyTo(state);
-                object[] results = _engine.RunChunk(state, lua);
+
+                // WHY: Downlevel Luau -> Lua 5.2 before compiling so embedded envelope scripts accept
+                // the same Luau syntax mods do; a downlevel Error is thrown here and caught below (which
+                // also drives the Programmer repair loop). Version recording keeps the ORIGINAL `lua`.
+                string compileLua = LuauSourceGate.ToLua52(lua, "envelope");
+                object[] results = _engine.RunChunk(state, compileLua);
                 string summary = Truncate(LuaCsGameToolExecutor.Summarize(results),
                     MaxResultSummaryLength);
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))

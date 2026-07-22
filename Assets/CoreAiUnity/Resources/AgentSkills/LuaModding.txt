@@ -22,6 +22,9 @@ Contents: 1. Execution models  2. World API  3. Scene queries  4. Full tier (uni
   reaches Lua as a literal backslash and the whole source collapses into one broken line).
 - Sandbox: no io/os/require/load/debug. Instruction and time budgets apply; a handler burning
   >100 ms is reported as an error. Keep per-tick work small.
+- Syntax: Luau is accepted and auto-downleveled to Lua 5.2 before compiling - `+=` (and the other
+  compound assignments), `continue`, `` `str{}` `` string interpolation, if-then-else expressions,
+  and type annotations/casts all work. Plain Lua 5.2 is unaffected.
 
 ## 2. World API (WorldEdit tier - no Full mode needed)
 

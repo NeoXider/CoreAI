@@ -12,7 +12,8 @@ namespace CoreAI.Infrastructure.Luau
     /// escapes — into equivalents the bundled Lua-CSharp (Lua 5.2) VM parses.
     /// darklua's rule set is the reference spec. Plain Lua passes through untouched
     /// (<see cref="DownlevelResult.Changed"/> = false); malformed input is returned verbatim with an
-    /// Error diagnostic — this API never throws. Not yet wired into mod loading; callers opt in.
+    /// Error diagnostic — this API never throws. Wired into every runtime Lua compile path via
+    /// <c>LuauSourceGate</c> (mod load/reload, <c>execute_lua</c>, the AI envelope).
     /// </summary>
     public static class LuauDownleveler
     {
