@@ -109,6 +109,14 @@ namespace CoreAI.Ai
         /// <summary>Optional MEAI chat history.</summary>
         public IList<Microsoft.Extensions.AI.ChatMessage> ChatHistory { get; set; }
 
+        /// <summary>
+        /// Optional files attached to the current user turn. When non-empty, the client builds the current-turn
+        /// user message via <see cref="AiUserMessageBuilder.BuildUserMessage"/> (image parts for vision models,
+        /// inlined text blocks for every model) instead of wrapping <see cref="UserPayload"/> as plain text.
+        /// <c>null</c>/empty preserves the legacy plain-text path.
+        /// </summary>
+        public IReadOnlyList<AiAttachment> Attachments { get; set; }
+
         /// <summary>End-to-end trace id (orchestrator / LLM decorator / command router).</summary>
         public string TraceId { get; set; } = "";
 

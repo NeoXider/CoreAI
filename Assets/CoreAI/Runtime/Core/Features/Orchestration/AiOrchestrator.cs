@@ -1234,7 +1234,8 @@ namespace CoreAI.Ai
                 // accumulate in history — a stale telemetry snapshot on every turn bloats context and confuses
                 // the model about which state is current. Live state is delivered fresh each turn (current
                 // payload) and on demand via the game_state tool, so history stays a clean conversation.
-                _memoryStore.AppendChatMessage(bundle.RoleId, "user", task.Hint ?? string.Empty,
+                _memoryStore.AppendChatMessage(bundle.RoleId, "user",
+                    AppendAttachmentPlaceholders(task.Hint ?? string.Empty, task.Attachments),
                     bundle.RoleConfig.PersistChatHistory);
                 // WHY: Persist the assistant turn WITHOUT hidden <think> reasoning: chain-of-thought is
                 // per-turn scratch space (observed up to ~16k chars) that bloats the durable store and
@@ -1293,6 +1294,37 @@ namespace CoreAI.Ai
             return visible;
         }
 
+        /// <summary>
+        /// Appends compact, byte-free placeholders (e.g. <c>[attachment: hero.png image/png 12 KB]</c>) for each
+        /// attachment to the persisted user turn. The chat-history store is text-based, so raw image bytes are
+        /// never persisted — the placeholder keeps history serializable while recording that files were sent.
+        /// </summary>
+        private static string AppendAttachmentPlaceholders(string hint, IReadOnlyList<AiAttachment> attachments)
+        {
+            if (attachments == null || attachments.Count == 0)
+            {
+                return hint;
+            }
+
+            StringBuilder sb = new(hint ?? "");
+            foreach (AiAttachment attachment in attachments)
+            {
+                if (attachment == null)
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+
+                sb.Append(attachment.DescribeForHistory());
+            }
+
+            return sb.ToString();
+        }
+
         private static Microsoft.Extensions.AI.ChatRole ResolveChatHistoryRole(string role)
         {
             if (string.Equals(role, "user", StringComparison.Ordinal))
@@ -1324,6 +1356,7 @@ namespace CoreAI.Ai
                 RoleId = task.RoleId,
                 RoutingProfileId = task.RoutingProfileId ?? "",
                 Hint = hint,
+                Attachments = task.Attachments,
                 LuaRepairGeneration = task.LuaRepairGeneration,
                 LuaRepairPreviousCode = task.LuaRepairPreviousCode,
                 LuaRepairErrorMessage = task.LuaRepairErrorMessage,
@@ -1769,6 +1802,7 @@ namespace CoreAI.Ai
                 SystemPrompt = bundle.SystemPrompt,
                 UserPayload = userPayload,
                 ChatHistory = bundle.ChatHistory,
+                Attachments = task.Attachments,
                 TraceId = bundle.TraceId,
                 Tools = bundle.Tools,
                 AllowedToolNames = task.AllowedToolNames,

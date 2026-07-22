@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -23,6 +25,24 @@ namespace CoreAI.Ai
 
         /// <summary>User or system hint that describes the requested task.</summary>
         public string Hint { get; set; } = "";
+
+        /// <summary>
+        /// Optional files attached to this turn alongside the text prompt. CoreAI routes each
+        /// <see cref="AiAttachment"/> by its (possibly inferred) media type when composing the user message:
+        /// <list type="number">
+        /// <item><description><b>Images</b> (<c>image/png</c>, <c>image/jpeg</c>, <c>image/webp</c>,
+        /// <c>image/gif</c>) are sent as native image parts — only <b>vision-capable</b> models receive them;
+        /// text-only models typically error or ignore the image per provider.</description></item>
+        /// <item><description><b>Text-like files</b> (<c>text/*</c>, <c>application/json</c>, Lua, Markdown,
+        /// source code, …) are decoded as UTF-8 and inlined into the prompt as delimited blocks, so they reach
+        /// <b>every</b> model, including text-only local ones.</description></item>
+        /// <item><description>Any other media type (audio, video, meshes, arbitrary binary) throws at compose
+        /// time — attachments are never silently dropped.</description></item>
+        /// </list>
+        /// <c>null</c> or empty leaves the turn as a plain-text prompt (unchanged behavior). Composition and
+        /// validation live in <see cref="AiUserMessageBuilder"/>.
+        /// </summary>
+        public IReadOnlyList<AiAttachment> Attachments { get; set; }
 
         /// <summary>Lua repair generation associated with this command.</summary>
         public int LuaRepairGeneration { get; set; }

@@ -341,12 +341,12 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!string.IsNullOrWhiteSpace(request.UserPayload))
                 {
-                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
+                    chatMessages.Add(AiUserMessageBuilder.BuildUserMessage(request.UserPayload, request.Attachments));
                 }
             }
             else
             {
-                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
+                chatMessages.Add(AiUserMessageBuilder.BuildUserMessage(request.UserPayload ?? "", request.Attachments));
             }
 
             return chatMessages;
