@@ -206,6 +206,12 @@ namespace CoreAI.Composition
                         BuiltInLuaModdingSkillText.SkillName,
                         BuiltInLuaModdingSkillText.SkillDescription,
                         skillOverride != null ? skillOverride.text : BuiltInLuaModdingSkillText.Instructions));
+
+                    TextAsset rbxSkillOverride = Resources.Load<TextAsset>("AgentSkills/RbxApi");
+                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
+                        BuiltInRbxApiSkillText.SkillName,
+                        BuiltInRbxApiSkillText.SkillDescription,
+                        rbxSkillOverride != null ? rbxSkillOverride.text : BuiltInRbxApiSkillText.Instructions));
                 }
                 catch (VContainerException)
                 {

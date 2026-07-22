@@ -103,6 +103,64 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void RbxApiInstructions_CoverTheApiFamiliesThePromptSummarizes()
+        {
+            string text = BuiltInRbxApiSkillText.Instructions;
+
+            string[] required =
+            {
+                "Instance.new", "game:GetService", "workspace",
+                "Vector3", "CFrame", "Color3", "UDim", "Random", "Enum",
+                "Position", "Size", "CFrame", "Transparency", "Anchored", "CanCollide",
+                "SetAttribute", "GetAttribute", "AddTag", "HasTag",
+                "BAD_ARGUMENT", "INSTANCE_DESTROYED", "PARENT_LOCKED", "NOT_IMPLEMENTED",
+                "1 stud = 0.28 m", "LookVector is -Z"
+            };
+            foreach (string api in required)
+            {
+                StringAssert.Contains(api, text, $"Rbx skill reference lost coverage of '{api}'");
+            }
+
+            // Worked examples and the not-implemented catalog are the reason this skill exists.
+            StringAssert.Contains("```lua", text);
+            StringAssert.Contains("Not implemented", text);
+        }
+
+        [Test]
+        public async Task ReadSkillTool_ReturnsRbxApiInstructions()
+        {
+            SkillSet rbx = new(
+                BuiltInRbxApiSkillText.SkillName,
+                BuiltInRbxApiSkillText.SkillDescription,
+                BuiltInRbxApiSkillText.Instructions);
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { BuildSkill(), rbx });
+
+            string json = await ReadAsync(tool, BuiltInRbxApiSkillText.SkillName);
+
+            StringAssert.Contains("\"success\":true", json);
+            StringAssert.Contains("Instance.new", json);
+        }
+
+        [Test]
+        public void ProgrammerPrompt_PointsAtTheRbxSkill()
+        {
+            StringAssert.Contains("read_skill('Rbx API')", BuiltInAgentSystemPromptTexts.Programmer);
+        }
+
+        [Test]
+        public void RbxApiResourcesOverride_WhenPresent_MatchesTheBuiltInText()
+        {
+            UnityEngine.TextAsset overrideAsset =
+                UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/RbxApi");
+            if (overrideAsset == null)
+            {
+                Assert.Ignore("No Resources/AgentSkills/RbxApi override in this project.");
+            }
+
+            Assert.AreEqual(BuiltInRbxApiSkillText.Instructions, overrideAsset.text);
+        }
+
+        [Test]
         public void AddSkillForRole_SameName_ReplacesInsteadOfDuplicating()
         {
             AgentMemoryPolicy policy = new();
