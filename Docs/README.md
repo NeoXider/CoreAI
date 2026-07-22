@@ -35,27 +35,23 @@ Use these paths when you have a concrete task:
 | Add a new LLM tool | Tool-calling best practices -> AgentBuilder -> relevant tests |
 | Expose Lua or AI-authored scripts | Lua sandbox security -> runtime binding code -> sandbox tests |
 | Decide what to build next | Module audit -> TODO -> orchestration plan |
-| Think about packaging or monetization | Local business plans -> module audit -> public README positioning |
 
 ## Product And Planning
 
 | Document | Purpose |
 |---|---|
 | [TODO.md](../TODO.md) | Live backlog, completed archive, and remaining feature-level debt. Open audit findings (CI, package isolation, durability, full-tier query) live here. |
-| [BACKLOG.md](../Assets/CoreAiUnity/Docs/BACKLOG.md) | Non-blocking future work and product/positioning bets (incl. the idea-audit bets: director-AI scene, replay, mod gallery, indie license, case study). |
+| [BACKLOG.md](../Assets/CoreAiUnity/Docs/BACKLOG.md) | Non-blocking future work and feature ideas (director-AI scene, replay, mod gallery, and more). |
 | [TODO/MultiAgent_Orchestration_v2.0.md](../TODO/MultiAgent_Orchestration_v2.0.md) | Multi-agent orchestration plan. |
 | [BENCHMARK_LEADERBOARD.md](BENCHMARK_LEADERBOARD.md) | Public community leaderboard for the Game-Creation Benchmark: ranked results, suite versioning, and the score-submission workflow. |
 | [CoreAIMods/MOD_SHARING.md](CoreAIMods/MOD_SHARING.md) | Shareable mod bundle format, Hub export/import flow, import safety, and the proposed community mod gallery process. |
 
-## Business Plans
+## Private planning material
 
-Files under `Docs/LocalBusinessPlans/` are intentionally local/ignored planning
-material. They are useful for monetization and packaging strategy, but they are not
-part of the public package documentation surface.
-
-If a business-plan conclusion becomes product guidance, copy the stable decision
-into a public package document instead of linking private planning notes from
-user-facing docs.
+Files under `Docs/LocalBusinessPlans/` are intentionally local/untracked (gitignored) and
+are **not** part of the public package documentation surface. Do not link them from
+user-facing docs; if a planning conclusion becomes product guidance, copy the stable
+technical decision into a public package document instead.
 
 ## Documentation Rules
 

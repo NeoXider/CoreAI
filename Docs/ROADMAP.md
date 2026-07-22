@@ -81,11 +81,13 @@ with exactly one conversion boundary (`RobloxSpace`).
 **Current state.** MVP0 (engine abstraction seam: neutral `CoreAI.Scripting` contracts, `LuaCs*`
 adapters as the single VM layer, seam-honesty tests) has landed, plus the quarantine error
 policy, the Luau→Lua 5.2 downlevel preprocessor (standalone, 93 EditMode tests), the Lua log
-service core, and editor Lua/Luau syntax highlighting.
+service core, and editor Lua/Luau syntax highlighting. The **MVP1 core** — pure-spec datatypes,
+`InstanceRegistry`/`RbxDataModel`, the `RobloxSpace` conversion boundary (1 stud = 0.28 m
+default), the GameObject materialization binder, and the Lua Instance/datatype surface — is on
+disk with its Lua wiring in progress.
 
-**Next milestones.** MVP1 (Instance/DataModel core with multiplayer-ready identity in
-`InstanceRegistry`), MVP2 (task scheduler, signals, clocks, `game:GetService` with loud stubs),
-then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
+**Next milestones.** Finish MVP1 (Lua wiring + §5.1.8 acceptance gate), MVP2 (task scheduler,
+signals, clocks, `game:GetService` with loud stubs), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
 DataStore, input, Mirror, replication, dedicated server, GUI, audio/FX, in-game console,
 performance/WebGL).
 

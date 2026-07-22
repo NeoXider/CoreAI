@@ -6,10 +6,13 @@ hallucinates less and ships working code faster. Humans get a familiar, document
 
 This document is the single plan of record. It supersedes the previous MVP1..MVP4 seed roadmap;
 "Standing decisions" below are carried over in substance and refined where the detailed design
-forced a choice. MVP0 (the engine abstraction seam) has **landed (2026-07-22)**; the Lua log
-service core has **landed** in `Assets/CoreAIMods/Runtime/Logging/`, editor Lua/Luau syntax
-highlighting has **shipped (editor-side)**, and the three normative Roblox-behavior reference
-docs are **complete** in `Docs/CoreAIMods/RobloxReference/` (§2.1).
+forced a choice. MVP0 (the engine abstraction seam) has **landed (2026-07-22)** and the **MVP1
+core** (datatypes, `InstanceRegistry`/`RbxDataModel`, the `RobloxSpace` conversion boundary, the
+GameObject materialization binder, and the Lua Instance/datatype surface) is **on disk with its
+Lua wiring in progress** (§MVP1); the Lua log service core has **landed** in
+`Assets/CoreAIMods/Runtime/Logging/`, editor Lua/Luau syntax highlighting has **shipped
+(editor-side)**, and the three normative Roblox-behavior reference docs are **complete** in
+`Docs/CoreAIMods/RobloxReference/` (§2.1).
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -385,7 +388,7 @@ the MVP1–MVP5 surface.
 | # | Title | Depends on | Effort |
 |---|-------|-----------|--------|
 | MVP0 | Engine abstraction seam *(landed 2026-07-22)* | — | M |
-| MVP1 | Instance/DataModel core + pure-spec datatypes + RobloxSpace + identity | MVP0 | L |
+| MVP1 | Instance/DataModel core + pure-spec datatypes + RobloxSpace + identity *(core landed; Lua wiring in progress)* | MVP0 | L |
 | MVP2 | Scheduler, signals, clocks, services framework, loopback remotes | MVP1 | L |
 | MVP3 | World file (place package) + two-tier backups | MVP1, MVP2 | M |
 | MVP4 | RBXL import/export (round trip both directions; scripts arrive as disabled mods) | MVP1, MVP2, MVP3 | M |
@@ -447,8 +450,15 @@ Ordering changes vs. the seed roadmap, with justification:
   a grep for `using Lua;` outside `Scripting/LuaCs/`+`Infrastructure/` adapters returns nothing.
 - **Effort**: M (landed).
 
-### MVP1 — Instance/DataModel core (detail: §5.1)
+### MVP1 — Instance/DataModel core (detail: §5.1) *(core landed; Lua wiring in progress)*
 
+- **Status**: the engine-free datatypes, `InstanceRegistry`/`RbxDataModel` core, the `RobloxSpace`
+  conversion boundary, the `IInstanceBackingBinder`/`InstanceGameObjectBinder` materialization
+  slice, and the Lua surface (`Instance.new`/`game`/`workspace`, datatype globals, Part spatial
+  properties pushed through `IPartPropertySink`) are on disk in
+  `Assets/CoreAIMods/Runtime/RobloxApi/` + `Runtime/Scripting/LuaCs/LuaCsRoblox*.cs` and wired by
+  `CoreAiModsInstaller`. Final wiring (datatype-valued attributes, namespace consolidation to
+  `CoreAI.Mods.Roblox.*`) and the full §5.1.8 acceptance-gate sign-off are in progress.
 - **Goal**: `game`, `workspace`, `Instance.new`, the full navigation/lifecycle member set,
   pure-spec datatypes with the `RobloxSpace` conversion boundary, and the unified identity
   registry.
@@ -1488,9 +1498,11 @@ format is **stable and machine-parsable from day one**, LOCKED):
 Rules: no stack-trace-only errors (the top frame is resolved to mod/script/line even through the
 scheduler); identical repeated errors are coalesced in the ring buffer with a counter (AI context
 budget is finite; `LuaLogFormatter.ToPromptText` renders the coalesced view); `debug.traceback`
-remains available for depth. The `[mod:<id> …]` prefix is anchored in the VM itself: script
-chunk names are `mod:<id>` (landing with the quarantine work, §2), so even raw VM tracebacks
-resolve to the owning mod.
+remains available for depth. The `[mod:<id> script:… line:…]` prefix is **not attached yet**:
+`RbxError` carries the ready seam (`WithContext(modId, script, line)` and the format above), but
+wiring it is **deferred to MVP5**, where script chunk names become `mod:<id>` in the VM itself so
+even raw VM tracebacks resolve to the owning mod. Until then errors surface with the
+`CODE: message | fix: …` body and no mod prefix.
 
 #### 5.2.8 Risks and mitigations
 

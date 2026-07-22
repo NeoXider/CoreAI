@@ -1,6 +1,6 @@
 # CoreAI Game-Creation Benchmark
 
-Package graph: `com.neoxider.coreaibenchmark` 5.5.0 depends on `com.neoxider.coreai`,
+Package graph: `com.neoxider.coreaibenchmark` 5.9.0 depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
@@ -82,7 +82,7 @@ The benchmark reports two speed numbers:
 
 Open the UI Toolkit benchmark window from:
 
-`CoreAI/Benchmarks/Benchmark Window (UITK)...`
+`CoreAI/Benchmarks/Benchmark Window…`
 
 The window has four tabs, plus toolbar **Open folder** / **Open report** shortcuts:
 
@@ -118,7 +118,12 @@ Environment shaping is also supported:
 | `COREAI_TEST_MODEL` | Model id to request. |
 | `COREAI_BENCHMARK_GROUPS` | CSV group filter, such as `G1,G2,G6`; empty means all groups. |
 | `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. |
+| `COREAI_BENCHMARK_TIMEOUT` | Per-scenario wall-clock timeout override in seconds; `0`/unset uses the per-scenario default. |
+| `COREAI_BENCHMARK_ROUNDTRIPS` | Per-request tool-call roundtrip cap for the standard scenarios (G1-G5, G7-G8); `0`/unset means the default `40`. G6 has its own, much higher cap (below). |
 | `COREAI_BENCHMARK_VISION_MODE` | G6 free-build vision mode: `off` (default, text-only build), `image` (the model gets a camera tool to SEE and refine its own scene — vision-capable models only), or `both` (run the text-only build AND an image-feedback build to compare). Also a **Vision feedback** dropdown in the benchmark window. |
+| `COREAI_BENCHMARK_FREEBUILD_PROMPT` | Replaces the G6 free-build prompt verbatim with your own (e.g. build something other than the default castle). |
+| `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. Also settable from the benchmark window UI field. |
+| `COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS` | G6 tool-call cap; `0`/unset means the default `1000` (effectively unbounded — the model builds until it stops or the time budget elapses, then the scene is graded and screenshotted). |
 
 For an LM Studio multi-model sweep, load one model at a time, run the benchmark, unload it, and move to the next model. Example structure:
 

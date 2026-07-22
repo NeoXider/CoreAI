@@ -168,7 +168,7 @@ date and model in the filename, so runs are self-identifying and never overwrite
 ### Launching (convenient)
 `GameCreationBenchmarkLauncher` (editor-only test assembly) drives the suite via `TestRunnerApi`:
 - Menu **CoreAI ▸ Benchmarks ▸ Run Game-Creation Benchmark** (one click; opens the report when done).
-- Menu **CoreAI ▸ Benchmarks ▸ Benchmark Window (UITK)…** — Run/History/Models/Compare tabs: pick
+- Menu **CoreAI ▸ Benchmarks ▸ Benchmark Window…** — Run/History/Models/Compare tabs: pick
   model/connection, G1–G8 groups and repetitions, browse past runs, a sortable model leaderboard, and
   build the cross-model comparison report.
 - Batchmode: `-executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli`

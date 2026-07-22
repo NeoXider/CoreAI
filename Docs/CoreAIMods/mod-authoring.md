@@ -75,9 +75,10 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   serviced on later ticks), quarantine after consecutive failures (mod stays loaded; reload resumes it).
 
 ## Lua version note
-Lua-CSharp targets **Lua 5.4** semantics. Watch: integer/float subtype, bitwise operators
-(`&`, `|`, `~`, `<<`, `>>` are native, not a `bit` library), and partial stdlib coverage — a missing library
-function errors, so keep to common `string`/`table`/`math` calls.
+Lua-CSharp targets **Lua 5.2** semantics with **double-only numbers** — there is no integer/float
+subtype and no native bitwise operators (`&`, `|`, `~`, `<<`, `>>` postdate 5.2). Luau sources are
+run through the downleveler (Luau → Lua 5.2) at ingestion. Stdlib coverage is partial — a missing
+library function errors, so keep to common `string`/`table`/`math` calls.
 
 ## Bundled mods — ship a game with ready-made mods
 Drop `.lua` files (each with an `@coreai` header) into a **`Resources/CoreAIMods/`** folder. On the first

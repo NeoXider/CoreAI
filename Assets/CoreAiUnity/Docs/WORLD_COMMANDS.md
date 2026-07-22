@@ -39,11 +39,13 @@ Current public actions:
 | Action | Purpose |
 |---|---|
 | `spawn` | Create a registered prefab or built-in primitive. |
+| `spawn_batch` | Spawn several prefabs/primitives in one call. |
+| `list_prefabs` | List the registered prefab keys available to `spawn`. |
 | `change` | Apply optional position, rotation, scale, or parent changes to an existing object. |
 | `set_color` | Set renderer colour from an HTML colour string. |
 | `destroy` | Remove an object by name. |
 | `load_scene` / `reload_scene` | Load or reload scenes. |
-| `set_active` | Enable or disable an object. |
+| `set_active` | Enable (show) an object. The public LLM action always activates; use Lua/WorldEdit for disabling. |
 | `play_animation` / `stop_animation` / `list_animations` | Control or inspect animations. |
 | `play_sound` / `set_volume` | Control AudioSource playback and volume. |
 | `show_text` / `hide_panel` | Show or hide simple UI text/panels. |

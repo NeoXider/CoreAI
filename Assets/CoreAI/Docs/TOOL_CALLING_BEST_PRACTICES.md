@@ -186,7 +186,7 @@ default 20) stops runaway loops, but the right value depends on the agent role:
   **Creator** roles already default to unlimited.
 
 Set it per agent (`AgentBuilder.WithMaxToolCallRoundtrips`), per call (`AiTaskRequest.MaxToolCallRoundtrips`),
-or globally (`CoreAISettings.MaxToolCallRoundtrips`); priority is per-call → per-agent → global.
+or globally (`CoreAISettings.MaxToolCallRoundtrips`); priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`, where the Programmer/Creator unlimited default lives) → global.
 
 ## SkillSet Organization
 

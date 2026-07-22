@@ -384,7 +384,7 @@ Agent stopped: exceeded maximum of 20 tool-call roundtrips
 - Per call: `new AiTaskRequest { MaxToolCallRoundtrips = 0 }`.
 - Global: `CoreAISettings.MaxToolCallRoundtrips = 40;` or raise it in the CoreAI settings asset.
 
-Priority is per-call → per-agent → global. The built-in **Programmer** and **Creator** roles are already unlimited by default.
+Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) → global. The built-in **Programmer** and **Creator** roles set the per-role step to `0` = unlimited, so they are uncapped by default.
 
 ---
 

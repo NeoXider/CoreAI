@@ -820,7 +820,7 @@ var builder = new AgentBuilder("WorldBuilder")
     .Build();
 ```
 
-Priority mirrors the token budget: `AiTaskRequest.MaxToolCallRoundtrips` (per-call) → `AgentBuilder.WithMaxToolCallRoundtrips` (per-agent) → `CoreAISettings.MaxToolCallRoundtrips` (global, default 20). The built-in **Programmer** and **Creator** roles default to `0` (unlimited) because they routinely need many tool rounds per turn. When the cap is hit, the agent stops and logs a warning that names the role, the cap, its source, and how to raise or disable it.
+Priority mirrors the token budget: `AiTaskRequest.MaxToolCallRoundtrips` (per-call) → `AgentBuilder.WithMaxToolCallRoundtrips` (per-agent) → per-role policy (`AgentMemoryPolicy`) → `CoreAISettings.MaxToolCallRoundtrips` (global, default 20). The built-in **Programmer** and **Creator** roles set the per-role step to `0` (unlimited) because they routinely need many tool rounds per turn. When the cap is hit, the agent stops and logs a warning that names the role, the cap, its source, and how to raise or disable it.
 
 For free-build or visual agents that may emit 24+ spawns in one turn, set `.WithMaxToolCallRoundtrips(0)`.
 

@@ -3,10 +3,6 @@
 Status: format sections (1–3, 5) describe the **shipped implementation** as of 2026-07-10.
 Section 4 (community gallery) is a **process proposal** — nothing in it exists yet.
 
-Related product bet: the UGC loop ("shareable mod format + gallery + one-click import from the Hub")
-is the modding-loop moat — tracked in [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md)
-("Idea / positioning bets").
-
 ## 1. Why share mods
 
 CoreAI's modding pillar is built around an AI (or a player) writing small Lua mods at
@@ -14,8 +10,7 @@ runtime: hooks, timers, world edits, logic overrides. A mod written in one sessi
 authored by the in-game AI via the `manage_mods` tool — is just text plus a manifest, so it
 can travel: between play sessions (the source store), between projects, and between players.
 That is the UGC loop: content produced *inside* one game strengthens the ecosystem for
-everyone else, and it is the one moat that grows through other people's work rather than
-ours.
+everyone else — the shared-mod format is what lets that content travel.
 
 The runtime side of this loop already ships: every mod runtime can serialize a mod into a
 single self-contained JSON bundle and load such a bundle back with safe capability masking.
@@ -305,4 +300,4 @@ package entirely. A failed revert/reload leaves the running mod untouched.
 - [LUA_GAME_API.md § Persistence & Sharing](../../Assets/CoreAI/Docs/LUA_GAME_API.md) — source store, export/import API contract, revision history and rollback.
 - [FIRST_MOD.md](../../Assets/CoreAI/Docs/FIRST_MOD.md) — writing your first mod.
 - [mod-system.md](mod-system.md) / [mod-authoring.md](mod-authoring.md) — mod runtime internals and authoring notes.
-- [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md) — "Idea / positioning bets", where the UGC-loop bet lives.
+- [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md) — future ideas for the mod-sharing / UGC loop.
