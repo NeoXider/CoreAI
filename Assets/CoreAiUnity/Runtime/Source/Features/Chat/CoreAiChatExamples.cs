@@ -40,6 +40,10 @@ namespace CoreAI.Chat
             "Create a mod named tetris with this code and load it:\n" +
             "```lua\n" + TetrisLua + "```";
 
+        private const string ClickerMessage =
+            "Create a mod named clicker with this code and load it:\n" +
+            "```lua\n" + ClickerLua + "```";
+
         private const string CastleMessage =
             "Build the most impressive castle you can within the -9..9 build volume (one Unity unit = one " +
             "meter, y is height, ground at y=0). Use the world_command tool: action='spawn', a DISTINCT " +
@@ -62,6 +66,7 @@ namespace CoreAI.Chat
         private static readonly CoreAiChatExample[] Examples =
         {
             new("tetris", "Tetris mod", TetrisMessage),
+            new("clicker", "Clicker game", ClickerMessage),
             new("castle", "Build a castle", CastleMessage),
             new("arena", "Fix the broken arena", ArenaMessage),
         };
@@ -200,6 +205,12 @@ local function start_game()
   store_set('tetris_started', '1')
 end
 
+-- Frame the board: drop the Main Camera straight in front of the grid so the game is always on
+-- screen no matter where the host scene left the camera.
+if coreai_world_exists('Main Camera') then
+  coreai_world_change('Main Camera', { x = 0, y = 0, z = -22, rx = 0, ry = 0, rz = 0 })
+end
+
 spawn_grid()
 start_game()
 
@@ -228,6 +239,80 @@ hooks_on('tick', function()
   end
 
   render()
+end)
+";
+
+        // A tiny idle/clicker game: left-click the golden cube to earn points, every 10 points stacks a
+        // gold coin into a tower, a passive +1/0.5s keeps it alive unattended, and 'r' resets. Uses only
+        // documented globals (input_mouse_button / input_key_down, coreai_world_*, store_*, report).
+        private const string ClickerLua =
+@"local BTN = 'clicker_button'
+local MAX_COINS = 24
+local score = tonumber(store_get('clicker_score')) or 0
+local coins = 0
+local pulse = 0
+local was_down = false
+
+-- Frame the scene on the button so the game is always visible in the host scene.
+if coreai_world_exists('Main Camera') then
+  coreai_world_change('Main Camera', { x = 0, y = 2, z = -12, rx = 6, ry = 0, rz = 0 })
+end
+
+coreai_world_spawn({ prefab = 'cube', name = BTN, x = 0, y = 2, z = 0, scaleX = 1.5, scaleY = 1.5, scaleZ = 1.5 })
+coreai_world_set_color(BTN, '#FFC400')
+
+local function coin_name(i) return 'clicker_coin_' .. i end
+
+local function spawn_coin(i)
+  if i > MAX_COINS then return end
+  local name = coin_name(i)
+  coreai_world_spawn({
+    prefab = 'cube', name = name,
+    x = -4.0, y = 0.4 + (i - 1) * 0.45, z = 0,
+    scaleX = 0.8, scaleY = 0.35, scaleZ = 0.8,
+  })
+  coreai_world_set_color(name, '#FFD700')
+end
+
+local function publish()
+  store_set('clicker_score', tostring(score))
+  report(string.format('SCORE=%d coins=%d', score, coins))
+end
+
+local function add_points(n)
+  score = score + n
+  local want = math.min(math.floor(score / 10), MAX_COINS)
+  while coins < want do
+    coins = coins + 1
+    spawn_coin(coins)
+  end
+  if n > 0 then pulse = 6 end
+  publish()
+end
+
+-- Restore the coin tower from the persisted score on load.
+add_points(0)
+
+hooks_on('tick', function()
+  local down = input_mouse_button(0)
+  if down and not was_down then add_points(1) end
+  was_down = down
+  if input_key_down('r') then
+    for i = 1, coins do coreai_world_destroy(coin_name(i)) end
+    coins = 0
+    score = 0
+    publish()
+  end
+end)
+
+-- Passive income so the tower visibly grows even without a player (idle-game style).
+hooks_every(0.5, function() add_points(1) end)
+
+-- Click feedback: the button pops on each earn and eases back to rest size.
+hooks_every(0.05, function()
+  if pulse > 0 then pulse = pulse - 1 end
+  local s = 1.5 + pulse * 0.07
+  coreai_world_change(BTN, { scaleX = s, scaleY = s, scaleZ = s })
 end)
 ";
 

@@ -50,6 +50,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ClickerExample_LuaParses()
+        {
+            AssertExampleLuaParses("clicker");
+        }
+
+        [Test]
         public void ArenaExample_LuaParses()
         {
             AssertExampleLuaParses("arena");

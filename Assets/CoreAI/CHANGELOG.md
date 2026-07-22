@@ -1,5 +1,23 @@
 # Changelog
 
+## [6.1.0] - 2026-07-23
+
+### Added
+
+- New built-in chat example **Clicker game** (`CoreAiChatExamples`): a ready-to-run Lua idle/clicker
+  mod (left-click the golden cube to earn points, every 10 stacks a gold coin, passive income keeps it
+  growing unattended, `r` resets) alongside the existing Tetris one. Both are "create a mod named X
+  with this code and load it" prompts, so the Programmer agent only has to wrap the given code in a
+  `manage_mods` call — the deterministic path that actually renders a playable game from chat. A
+  parse-gate EditMode test (`ClickerExample_LuaParses`) validates the Lua on the real VM.
+
+### Changed
+
+- The Tetris chat-example mod now frames the scene itself: on load it drops the `Main Camera` straight
+  in front of its board (`coreai_world_change('Main Camera', ...)`). WHY: the mod rendered correctly
+  but the host scene's camera was left pointing elsewhere, so the board fell outside the view and the
+  game looked like it "did nothing". A mod that builds a game should own the shot that shows it.
+
 ## [6.0.0] - 2026-07-22
 
 ### Removed
