@@ -6,6 +6,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- `Docs/SUBSCRIPTION_BRIDGE.md` — "bring your own subscription": power the in-game AI from a Claude
+  Code / Codex CLI subscription via a local OpenAI-compatible bridge (`agent.sh openai-server`,
+  Base URL `http://127.0.0.1:8801/v1`). Documents the honest limitations (multi-second first token,
+  one conversation at a time, prompt-emulated tool calls) and distinguishes it from the CoreAIMcp
+  server (external control channel, not the game's brain). Linked from `DOCS_INDEX.md`.
+
 - `CoreAiChatConfig.ChatRequiresVisibleCursor` (default on) and `CoreAiChatPanel.SetRuntimeChatRequiresVisibleCursor(bool?)`
   / `EffectiveChatRequiresVisibleCursor` — the chat's open hotkey and Escape now only react while the
   mouse cursor is visible and unlocked (`Cursor.visible` + `Cursor.lockState != Locked`); the panel

@@ -4,6 +4,24 @@
 
 ### Added
 
+- Luau syntax is now accepted everywhere Lua compiles: `LuauSourceGate` runs the engine-free
+  downleveler before the Lua 5.2 VM at all three raw-source compile sites (mod load/reload incl.
+  auto-repair, one-off `execute_lua`, AI envelope), so `+=`-family compound assignment, `continue`,
+  backtick string interpolation, if-then-else expressions, and type annotations/casts just work.
+  Fail-loud: malformed Luau surfaces as `LuauDownlevelSyntaxException` with line-tagged diagnostics
+  instead of an opaque VM parse error; plain Lua 5.2 passes through byte-identically. Both skill-text
+  pairs (RbxApi, LuaModding) now advertise Luau support.
+
+- IMGUI ban ratchet fitness test (`ImguiBanRatchetEditModeTests`): runtime + demo trees are scanned
+  for IMGUI tokens and any file off the shrink-only whitelist (seeded with today's 18 offenders)
+  fails the suite; stale whitelist entries fail too, so every UITK migration must delete its line.
+  Editor folders are soft-reported only. Companion `DEMO_INVENTORY.md` catalogs all demo scenes with
+  UI tech and P1-P4 redesign priorities.
+
+- Env-gated live check for the Rbx API against a real local model (`RobloxApi4BLiveCheck*`,
+  LM Studio / `COREAI_TEST_BASE_URL`): three scenarios through the production factory + bindings +
+  `execute_lua` executor; self-skips when no endpoint is served.
+
 - Roblox API MVP1 wiring: `CoreAiModsInstaller` now installs `RobloxApi` on the production mod stack (headless in-memory by default, or bound to the `RobloxWorldHost` scene host when present), so the Roblox globals (`Vector3`/`CFrame`/`Color3`/`Enum`/`Instance.new`/`game`/`workspace`) are available and the persistent runtime + one-off `execute_lua` executor share one `InstanceRegistry` world.
 
 - Roblox API MVP1 (materialization slice): `CoreAI.RobloxApi.Binding` Unity-adapter assembly
