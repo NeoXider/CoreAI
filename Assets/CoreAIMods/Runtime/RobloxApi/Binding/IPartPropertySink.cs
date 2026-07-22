@@ -1,5 +1,5 @@
 using CoreAI.Mods.Roblox.Datatypes;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 
 namespace CoreAI.Mods.Roblox.Binding
 {

@@ -1,4 +1,4 @@
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Seam between the engine-free registry and whatever backs instances in the running world

@@ -1,7 +1,9 @@
 {
   "name": "CoreAI.RobloxApi.Instances",
-  "rootNamespace": "CoreAI.RobloxApi.Instances",
-  "references": [],
+  "rootNamespace": "CoreAI.Mods.Roblox.Instances",
+  "references": [
+    "CoreAI.RobloxApi.Datatypes"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

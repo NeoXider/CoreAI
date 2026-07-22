@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// In-memory fake of the backing-object seam: tracks which instances are currently

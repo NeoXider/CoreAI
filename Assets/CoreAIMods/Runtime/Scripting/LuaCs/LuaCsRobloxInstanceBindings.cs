@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Binding;
+using CoreAI.Mods.Roblox.Datatypes;
+using CoreAI.Mods.Roblox.Instances;
 using Lua;
 using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;
@@ -45,6 +47,9 @@ namespace CoreAI.Ai.LuaCs
 
         public bool CanWorldEdit => (Capabilities & LuaCapabilities.WorldEdit) != 0;
 
+        /// <summary>Sink storing BasePart spatial/appearance state in Roblox space (shared world).</summary>
+        public IPartPropertySink PartSink => Bindings.PartSink;
+
         /// <summary>
         /// Wraps an instance keeping one proxy per instance so Lua <c>==</c> and table keys behave
         /// like Roblox reference identity.
@@ -81,18 +86,18 @@ namespace CoreAI.Ai.LuaCs
     /// <summary>
     /// Lua member dispatch for <see cref="RbxInstance"/> proxies (roadmap §5.1.3): properties,
     /// navigation, lifecycle, attributes, tags, child-by-name sugar, ServiceProvider members on
-    /// the DataModel, and loud stubs for the surface that lands in later slices (BasePart spatial
-    /// properties → Unity binder task; signals/WaitForChild yield → MVP2). Destroyed instances
-    /// follow DEV-7 at the Lua boundary: every member access raises INSTANCE_DESTROYED (the
-    /// tombstone exception applies only inside destruction-queued handlers, which arrive with the
-    /// MVP2 signal system).
+    /// the DataModel, BasePart spatial/appearance properties over the part-property sink, and loud
+    /// stubs for the surface that lands in later slices (signals/WaitForChild yield → MVP2).
+    /// Destroyed instances follow DEV-7 at the Lua boundary: every member access raises
+    /// INSTANCE_DESTROYED (the tombstone exception applies only inside destruction-queued handlers,
+    /// which arrive with the MVP2 signal system).
     /// </summary>
     internal static class LuaCsRobloxInstanceBindings
     {
-        /// <summary>BasePart properties whose materialization needs the Unity binder slice.</summary>
-        private static readonly HashSet<string> BasePartSpatialProperties = new(StringComparer.Ordinal)
+        /// <summary>BasePart members still awaiting their own slice: Shape/Material need the
+        /// primitive+material catalog, Orientation/Rotation need Euler decomposition.</summary>
+        private static readonly HashSet<string> UnwiredSpatialProperties = new(StringComparer.Ordinal)
         {
-            "Position", "Size", "CFrame", "Color", "Transparency", "Anchored", "CanCollide",
             "Shape", "Material", "Orientation", "Rotation"
         };
 
@@ -131,9 +136,9 @@ namespace CoreAI.Ai.LuaCs
                     return method;
                 }
 
-                if (self.IsA("BasePart") && BasePartSpatialProperties.Contains(key))
+                if (TryReadSpatial(context, self, key, out LuaValue spatial))
                 {
-                    throw SpatialStub(key);
+                    return spatial;
                 }
 
                 RbxInstance child = self.FindFirstChild(key);
@@ -174,15 +179,15 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 ThrowIfDestroyedForLua(self, key);
-                if (self.IsA("BasePart") && BasePartSpatialProperties.Contains(key))
+                if (TryWriteSpatial(context, self, key, value))
                 {
-                    context.RequireWorldEdit("setting " + self.ClassName + "." + key);
-                    throw SpatialStub(key);
+                    return LuaValue.Nil;
                 }
 
                 throw RbxError.BadArgument(
                     key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
-                    "set a writable Instance property (Name, Parent, Archivable) or use SetAttribute");
+                    "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
+                    "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
             });
 
             meta[Metamethods.Eq] = Fn("Instance.__eq", ctx =>
@@ -325,14 +330,14 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             });
 
-            // ---- Model pivot (Unity binder slice) ----
-            // TODO: MVP1 binder task — Model pivot rides the GameObject materialization slice.
+            // ---- Model pivot ----
+            // TODO: MVP2 — Model pivot aggregates child-part CFrames; single-part CFrame is wired.
             Method("PivotTo", (_, self) => throw RbxError.NotImplemented(
-                self.ClassName + ":PivotTo", "the Unity instance-binder slice (MVP1 task 7)",
-                "spatial state lands with the GameObject binder; keep layout data in attributes until then"));
+                self.ClassName + ":PivotTo", "the Model pivot follow-up",
+                "set part.CFrame directly; Model-level pivot aggregation lands in MVP2"));
             Method("GetPivot", (_, self) => throw RbxError.NotImplemented(
-                self.ClassName + ":GetPivot", "the Unity instance-binder slice (MVP1 task 7)",
-                "spatial state lands with the GameObject binder; keep layout data in attributes until then"));
+                self.ClassName + ":GetPivot", "the Model pivot follow-up",
+                "read part.CFrame directly; Model-level pivot aggregation lands in MVP2"));
 
             return methods;
         }
@@ -408,6 +413,10 @@ namespace CoreAI.Ai.LuaCs
                 case string s: return s;
                 case bool b: return b;
                 case double d: return d;
+                case RbxVector3 v3: return LuaCsRobloxDatatypeBindings.Wrap(v3);
+                case RbxVector2 v2: return LuaCsRobloxDatatypeBindings.Wrap(v2);
+                case RbxColor3 c: return LuaCsRobloxDatatypeBindings.Wrap(c);
+                case RbxUDim u: return LuaCsRobloxDatatypeBindings.Wrap(u);
                 default: return LuaValue.Nil;
             }
         }
@@ -421,21 +430,163 @@ namespace CoreAI.Ai.LuaCs
                 case LuaValueType.Number: return value.Read<double>();
                 case LuaValueType.String: return value.Read<string>();
                 default:
-                    // WHY: Roblox parity — tables/functions/userdata are rejected by the attribute
-                    // contract; naming the Lua-side type keeps the BAD_ARGUMENT fix actionable.
+                    // WHY: attributes accept the datatype subset the contract serializes; other
+                    // userdata/tables/functions are rejected. Naming the Lua-side type and the exact
+                    // supported list keeps the BAD_ARGUMENT fix actionable and Roblox-parity honest.
+                    if (TryUnbox(value, out RbxVector3 v3)) return v3;
+                    if (TryUnbox(value, out RbxVector2 v2)) return v2;
+                    if (TryUnbox(value, out RbxColor3 c)) return c;
+                    if (TryUnbox(value, out RbxUDim u)) return u;
                     throw RbxError.BadArgument(
-                        "attribute value of type " + Describe(value) + " is not supported in MVP1",
-                        "pass a string, boolean, or number at argument 2");
+                        "attribute value of type " + Describe(value) + " is not supported",
+                        "pass a string, boolean, number, Vector3, Vector2, Color3, or UDim at argument 2");
             }
+        }
+
+        // ---- BasePart spatial/appearance (part-property sink) -------------------------------
+
+        /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype; throws
+        /// the loud stub for still-unwired members (Shape/Material/Orientation/Rotation).</summary>
+        private static bool TryReadSpatial(LuaCsRobloxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            if (!self.IsA("BasePart"))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            PartProperties properties = context.PartSink.GetPartPropertiesOrDefault(self.Id);
+            switch (key)
+            {
+                case "Position": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Position); return true;
+                case "Size": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Size); return true;
+                case "CFrame": value = LuaCsRobloxDatatypeBindings.Wrap(properties.CFrame); return true;
+                case "Color": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Color); return true;
+                case "Transparency": value = properties.Transparency; return true;
+                case "Anchored": value = properties.Anchored; return true;
+                case "CanCollide": value = properties.CanCollide; return true;
+                default:
+                    if (UnwiredSpatialProperties.Contains(key))
+                    {
+                        throw SpatialStub(key);
+                    }
+
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        /// <summary>Writes a wired BasePart property through the sink (Roblox Part semantics:
+        /// setting Position keeps orientation, setting CFrame sets both).</summary>
+        private static bool TryWriteSpatial(LuaCsRobloxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!self.IsA("BasePart"))
+            {
+                return false;
+            }
+
+            IPartPropertySink sink = context.PartSink;
+            InstanceId id = self.Id;
+            switch (key)
+            {
+                case "Position":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Position");
+                    sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
+                    return true;
+                case "Size":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Size");
+                    sink.SetSize(id, ReadVector3Value(value, "Part.Size assignment"));
+                    return true;
+                case "CFrame":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".CFrame");
+                    sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
+                    return true;
+                case "Color":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Color");
+                    sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
+                    return true;
+                case "Transparency":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Transparency");
+                    sink.SetTransparency(id, ReadNumberValue(value, "Part.Transparency assignment"));
+                    return true;
+                case "Anchored":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Anchored");
+                    sink.SetAnchored(id, value.ToBoolean());
+                    return true;
+                case "CanCollide":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".CanCollide");
+                    sink.SetCanCollide(id, value.ToBoolean());
+                    return true;
+                default:
+                    if (UnwiredSpatialProperties.Contains(key))
+                    {
+                        context.RequireWorldEdit("setting " + self.ClassName + "." + key);
+                        throw SpatialStub(key);
+                    }
+
+                    return false;
+            }
+        }
+
+        private static RbxVector3 ReadVector3Value(LuaValue value, string what)
+        {
+            if (TryUnbox(value, out RbxVector3 vector))
+            {
+                return vector;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a Vector3",
+                "pass a Vector3, got " + Describe(value));
+        }
+
+        private static RbxCFrame ReadCFrameValue(LuaValue value, string what)
+        {
+            if (TryUnbox(value, out RbxCFrame cframe))
+            {
+                return cframe;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a CFrame",
+                "pass a CFrame, got " + Describe(value));
+        }
+
+        private static RbxColor3 ReadColor3Value(LuaValue value, string what)
+        {
+            if (TryUnbox(value, out RbxColor3 color))
+            {
+                return color;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a Color3",
+                "pass a Color3, got " + Describe(value));
+        }
+
+        private static float ReadNumberValue(LuaValue value, string what)
+        {
+            if (value.Type == LuaValueType.Number)
+            {
+                return (float)value.Read<double>();
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a number",
+                "pass a number, got " + Describe(value));
         }
 
         private static RbxError SpatialStub(string property)
         {
-            // TODO: MVP1 task 7 — InstanceGameObjectBinder materializes BasePart spatial state.
+            // WHY: Position/Size/CFrame/Color/Transparency/Anchored/CanCollide are wired to the
+            // part-property sink; Shape/Material need the primitive+material catalog and
+            // Orientation/Rotation need Euler decomposition — both later BasePart follow-ups.
             return RbxError.NotImplemented(
-                "BasePart." + property + " materialization",
-                "the Unity instance-binder slice (MVP1 task 7)",
-                "spatial properties land with the GameObject binder; stage layout in attributes until then");
+                "BasePart." + property,
+                "the BasePart material/shape + orientation follow-up",
+                "set CFrame/Position/Size/Color/Transparency/Anchored/CanCollide, which are wired now");
         }
     }
 }

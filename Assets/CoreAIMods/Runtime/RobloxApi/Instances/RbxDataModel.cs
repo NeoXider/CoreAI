@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// The game root (Roblox DataModel) with ServiceProvider semantics: GetService resolves

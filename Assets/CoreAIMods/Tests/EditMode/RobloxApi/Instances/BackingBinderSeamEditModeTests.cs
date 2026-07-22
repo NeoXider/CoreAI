@@ -1,4 +1,4 @@
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RobloxApi.Instances

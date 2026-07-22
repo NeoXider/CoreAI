@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Single owner of instance identity (roadmap §3.3): allocates ids, holds one
@@ -9,6 +9,9 @@ namespace CoreAI.RobloxApi.Instances
     /// (InstanceId / Mirror netId / CoreAI world name), and drives the backing-object binder
     /// per D5. Instances are created only through this registry so no instance ever exists
     /// without a record.
+    /// WHY: single-threaded, main-thread-only by invariant — Lua executes on the main thread and
+    /// the registry's dictionaries are unsynchronized; only InstanceIdAllocator locks for ids that
+    /// may be minted off-thread.
     /// </summary>
     public sealed class InstanceRegistry
     {

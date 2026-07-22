@@ -84,7 +84,14 @@ namespace CoreAI.Composition
                 Log = c.ResolveOrDefault<Logging.ILog>(),
                 ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                 Capabilities = scriptCapabilities,
-                OneOffCapabilities = oneOffCapabilities
+                OneOffCapabilities = oneOffCapabilities,
+                // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
+                // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
+                // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
+                // Part spatial/appearance writes land in the default in-memory part-property sink; a
+                // scene that owns a RobloxWorldHost passes host.Binder as partSink to materialize
+                // parts as GameObjects (LuaCsRobloxApiBindings ctor).
+                RobloxApi = new LuaCsRobloxApiBindings()
             }), Lifetime.Singleton);
 
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)

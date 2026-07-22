@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Engine-free core of the Roblox Instance member set (roadmap §5.1.2): hierarchy,

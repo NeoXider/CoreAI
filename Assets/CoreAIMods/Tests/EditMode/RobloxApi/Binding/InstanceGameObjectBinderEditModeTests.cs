@@ -1,7 +1,7 @@
 using CoreAI.Mods.Roblox.Binding;
 using CoreAI.Mods.Roblox.Datatypes;
 using CoreAI.Mods.Roblox.Spatial;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 using NUnit.Framework;
 using UnityEngine;
 

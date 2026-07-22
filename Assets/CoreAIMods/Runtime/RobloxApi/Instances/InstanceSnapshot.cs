@@ -1,17 +1,25 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
-    /// <summary>Attribute value kinds an MVP1 snapshot can carry (primitive subset).</summary>
+    /// <summary>Attribute value kinds a snapshot can carry: the primitive subset plus the datatype
+    /// subset Roblox attributes support that exists today. Datatype kinds serialize their
+    /// components into <see cref="AttributeSnapshot.StringValue"/> as a stable invariant-culture
+    /// string so capture→restore→capture stays byte-identical.</summary>
     public enum AttributeValueKind
     {
         String,
         Number,
-        Bool
+        Bool,
+        Vector3,
+        Vector2,
+        Color3,
+        UDim
     }
 
-    /// <summary>One serialized attribute; exactly one value field is meaningful per kind.</summary>
+    /// <summary>One serialized attribute; exactly one value field is meaningful per kind
+    /// (datatype kinds encode their components into <see cref="StringValue"/>).</summary>
     [Serializable]
     public sealed class AttributeSnapshot
     {

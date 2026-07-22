@@ -1,4 +1,4 @@
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Ownership-ledger origin tags (roadmap §2, one-shot execution + ownership ledger):

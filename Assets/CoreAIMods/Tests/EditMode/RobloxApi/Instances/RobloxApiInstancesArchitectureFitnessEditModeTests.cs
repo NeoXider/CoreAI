@@ -45,16 +45,40 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
                 "into the Unity adapter (world-binding task) instead:\n" + string.Join("\n", offenders));
         }
 
+        // WHY: ARCHITECTURE_RULES §1 lets a Domain assembly reference sibling engine-free Domain
+        // contracts only; datatype-valued attributes (audit finding 4) need the Datatypes sibling,
+        // so the fitness test allows that single reference while still forbidding any engine/VM/DI
+        // assembly from creeping in.
+        private static readonly HashSet<string> AllowedDomainReferences = new()
+        {
+            "CoreAI.RobloxApi.Datatypes"
+        };
+
         [Test]
-        public void Asmdef_DeclaresNoEngineReferencesAndNoAssemblyReferences()
+        public void Asmdef_DeclaresNoEngineReferencesAndOnlyDomainReferences()
         {
             string asmdefPath = Path.Combine(ModuleRoot, "CoreAI.RobloxApi.Instances.asmdef");
             Assert.IsTrue(File.Exists(asmdefPath), $"asmdef not found: {asmdefPath}");
 
             string json = File.ReadAllText(asmdefPath);
             StringAssert.Contains("\"noEngineReferences\": true", json);
-            StringAssert.Contains("\"references\": []", json,
-                "the Domain asmdef must reference no other assemblies (inward-only rule)");
+
+            List<string> offenders = new();
+            foreach (Match match in Regex.Matches(json, "\"references\"\\s*:\\s*\\[(?<body>[^\\]]*)\\]"))
+            {
+                foreach (Match entry in Regex.Matches(match.Groups["body"].Value, "\"(?<name>[^\"]+)\""))
+                {
+                    string name = entry.Groups["name"].Value;
+                    if (!AllowedDomainReferences.Contains(name))
+                    {
+                        offenders.Add(name);
+                    }
+                }
+            }
+
+            Assert.IsEmpty(offenders,
+                "the Domain asmdef may reference sibling engine-free Domain assemblies only " +
+                "(inward-only rule); disallowed references: " + string.Join(", ", offenders));
         }
     }
 }

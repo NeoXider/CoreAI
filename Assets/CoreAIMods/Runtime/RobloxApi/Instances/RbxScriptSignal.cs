@@ -1,4 +1,4 @@
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Inert MVP1 hook point for Roblox signals (ChildAdded, Destroying, ...). The signal

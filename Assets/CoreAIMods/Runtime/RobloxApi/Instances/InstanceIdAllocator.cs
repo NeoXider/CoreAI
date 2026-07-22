@@ -1,6 +1,6 @@
 using System;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Monotonic id allocator with the §3.3 authority-bit partition: two independent counters,

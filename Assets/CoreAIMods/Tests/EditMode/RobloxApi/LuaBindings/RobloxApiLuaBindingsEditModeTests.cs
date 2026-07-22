@@ -4,8 +4,12 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Binding;
+using CoreAI.Mods.Roblox.Datatypes;
+using CoreAI.Mods.Roblox.Instances;
+using CoreAI.Mods.Roblox.Spatial;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
 {
@@ -204,6 +208,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 assert(Enum.Material.Wood == Enum.Material.Wood)
                 assert(Enum.Material.Wood ~= Enum.Material.Metal)
                 assert(Enum.Material.Wood.EnumType == Enum.Material)
+                assert(tostring(Enum) == 'Enum')
                 local items = Enum.Axis:GetEnumItems()
                 assert(#items == 3 and items[1] == Enum.Axis.X)");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
@@ -483,14 +488,157 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         // ---- Loud stubs (§5.1.6) ------------------------------------------------------------
 
         [Test]
-        public void Lua_BasePartSpatialWrite_LoudStubNamesBinderSlice()
+        public void Lua_BasePartSpatialWrites_ReflectInPartProperties()
+        {
+            LuaCsRobloxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            stack.Runtime.LoadMod("m", @"
+                local p = Instance.new('Part')
+                p.Name = 'Spatial'
+                p.Parent = workspace
+                p.Position = Vector3.new(1, 2, 3)
+                p.Size = Vector3.new(5, 6, 7)
+                p.Color = Color3.fromRGB(255, 128, 0)
+                p.Transparency = 0.25
+                p.Anchored = true
+                p.CanCollide = false");
+
+            RbxInstance part = roblox.Game.FindFirstChildOfClass("Workspace").FindFirstChild("Spatial");
+            Assert.IsNotNull(part);
+            PartProperties props = roblox.PartSink.GetPartPropertiesOrDefault(part.Id);
+            Assert.AreEqual(new RbxVector3(1f, 2f, 3f), props.Position);
+            Assert.AreEqual(new RbxVector3(5f, 6f, 7f), props.Size);
+            Assert.AreEqual(RbxColor3.FromRGB(255f, 128f, 0f), props.Color);
+            Assert.AreEqual(0.25f, props.Transparency, 1e-5f);
+            Assert.IsTrue(props.Anchored);
+            Assert.IsFalse(props.CanCollide);
+        }
+
+        [Test]
+        public void Lua_BasePartCFrame_SetsBoth_Position_SetKeepsOrientation()
+        {
+            LuaCsRobloxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-4 end
+                local p = Instance.new('Part')
+                p.Name = 'Oriented'
+                p.Parent = workspace
+                p.CFrame = CFrame.new(0, 5, 0) * CFrame.Angles(0, math.pi / 2, 0)
+                assert(p.CFrame.Position == Vector3.new(0, 5, 0))
+                assert(near(p.CFrame.LookVector.X, -1))
+                -- setting Position preserves rotation (Roblox Part semantics)
+                p.Position = Vector3.new(9, 9, 9)
+                assert(p.Position == Vector3.new(9, 9, 9))
+                assert(near(p.CFrame.LookVector.X, -1))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartPreset_SetInCSharp_ReadableFromLua()
+        {
+            LuaCsRobloxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            RbxInstance part = roblox.Registry.Create("Part");
+            part.Name = "Preset";
+            part.Parent = roblox.Registry.WorldRoot;
+            roblox.PartSink.SetSize(part.Id, new RbxVector3(8f, 9f, 10f));
+            roblox.PartSink.SetAnchored(part.Id, true);
+
+            stack.Runtime.LoadMod("m", @"
+                local p = workspace:FindFirstChild('Preset')
+                assert(p.Size == Vector3.new(8, 9, 10))
+                assert(p.Anchored == true)
+                -- an untouched fresh Part reads Roblox defaults
+                local q = Instance.new('Part')
+                assert(q.Size == Vector3.new(4, 1, 2))
+                assert(q.Transparency == 0)
+                assert(q.CanCollide == true)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartUnwiredProperty_RaisesLoudStub()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
             Exception ex = LoadFails(stack, "m", @"
                 local p = Instance.new('Part')
-                p.Position = Vector3.new(0, 10, 0)");
+                p.Material = Enum.Material.Wood");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("MVP1 task 7", FullText(ex));
+            StringAssert.Contains("BasePart.Material", FullText(ex));
+        }
+
+        [Test]
+        public void Lua_BasePartPosition_RoundTripsThroughBinder_NoScaleOrChiralityDistortion()
+        {
+            // WHY: the golden — a Lua Position write must survive Roblox→Unity→(read) with no
+            // double-conversion: the GameObject lands at the 0.28-scaled, Z-mirrored pose while the
+            // Lua/registry side keeps pure Roblox-space studs (mirrors PositionGolden in the binder
+            // tests, driven end-to-end through the Lua surface).
+            RobloxSpace.ResetForTests(0.28f);
+            var root = new GameObject("GoldenRoot");
+            try
+            {
+                var binder = new InstanceGameObjectBinder(root.transform);
+                var registry = new InstanceRegistry(null, binder);
+                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+                var roblox = new LuaCsRobloxApiBindings(registry, game, partSink: binder);
+                LuaCsModStack stack = BuildStack(roblox);
+
+                RbxInstance part = registry.Create("Part");
+                part.Name = "Golden";
+                part.Parent = registry.WorldRoot;
+
+                stack.Runtime.LoadMod("m", @"
+                    local p = workspace:FindFirstChild('Golden')
+                    p.Position = Vector3.new(10, 5, -4)
+                    assert(p.Position == Vector3.new(10, 5, -4), 'Lua must read pure Roblox studs')");
+
+                PartProperties props = binder.GetPartPropertiesOrDefault(part.Id);
+                Assert.AreEqual(10f, props.Position.X, 1e-4f);
+                Assert.AreEqual(5f, props.Position.Y, 1e-4f);
+                Assert.AreEqual(-4f, props.Position.Z, 1e-4f);
+
+                Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject go));
+                Assert.AreEqual(2.8f, go.transform.position.x, 1e-4f);
+                Assert.AreEqual(1.4f, go.transform.position.y, 1e-4f);
+                Assert.AreEqual(1.12f, go.transform.position.z, 1e-4f, "mod-space z = -Unity z (D2)");
+
+                game.Destroy();
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                RobloxSpace.ResetForTests();
+            }
+        }
+
+        [Test]
+        public void Lua_R6_7_DatatypeAttribute_Vector3RoundTrip()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local f = Instance.new('Folder', workspace)
+                f:SetAttribute('Spawn', Vector3.new(1, 2, 3))
+                f:SetAttribute('Tint', Color3.fromRGB(255, 0, 0))
+                local v = f:GetAttribute('Spawn')
+                assert(v == Vector3.new(1, 2, 3))
+                assert(v.X == 1 and v.Y == 2 and v.Z == 3)
+                assert(f:GetAttribute('Tint') == Color3.fromRGB(255, 0, 0))
+                local attrs = f:GetAttributes()
+                assert(attrs.Spawn == Vector3.new(1, 2, 3))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_UnsupportedDatatypeAttribute_RejectedWithSupportedList()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            Exception ex = LoadFails(stack, "m",
+                "Instance.new('Folder'):SetAttribute('Bad', CFrame.new(1, 2, 3))");
+            StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
+            StringAssert.Contains("CFrame", FullText(ex));
+            StringAssert.Contains("Vector3, Vector2, Color3, or UDim", FullText(ex));
         }
 
         [Test]

@@ -1,7 +1,8 @@
 using System;
 using System.Threading;
+using CoreAI.Mods.Roblox.Binding;
 using CoreAI.Mods.Roblox.Datatypes;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
@@ -26,15 +27,20 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxDataModel _game;
         private readonly RbxInstance _workspace;
         private readonly RbxEnumRegistry _enums;
+        private readonly IPartPropertySink _partSink;
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
 
         /// <summary>
         /// Creates the bindings over an existing world, or bootstraps a fresh MVP1 game tree when
         /// <paramref name="registry"/>/<paramref name="game"/> are omitted.
+        /// <paramref name="partSink"/> receives BasePart spatial/appearance writes and stores the
+        /// Roblox-space <see cref="PartProperties"/> the Lua layer reads back; pass the live
+        /// <see cref="InstanceGameObjectBinder"/> (which is both binder and sink) to materialize
+        /// parts as GameObjects, or omit it for the headless in-memory default.
         /// </summary>
         public LuaCsRobloxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
-            RbxEnumRegistry enums = null, Action<string> log = null)
+            RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _game = game ?? DataModelBootstrap.CreateGame(_registry);
@@ -42,6 +48,7 @@ namespace CoreAI.Ai.LuaCs
                          ?? throw new ArgumentException(
                              "the game tree has no Workspace child", nameof(game));
             _enums = enums ?? RbxEnumRegistry.CreateWithBuiltins();
+            _partSink = partSink ?? new InMemoryPartPropertySink();
             _log = log;
         }
 
@@ -53,6 +60,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared enum registry exposed as the <c>Enum</c> global.</summary>
         public RbxEnumRegistry Enums => _enums;
+
+        /// <summary>Sink that stores BasePart spatial/appearance state the Lua layer reads and writes.</summary>
+        public IPartPropertySink PartSink => _partSink;
 
         /// <summary>
         /// Registers the Roblox surface on one script registry at the given capability tier.

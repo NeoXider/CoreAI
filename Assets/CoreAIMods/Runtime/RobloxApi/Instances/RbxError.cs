@@ -1,6 +1,6 @@
 using System;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Stable machine error codes for the Roblox API layer (roadmap §5.2.7). The wire names
@@ -26,7 +26,9 @@ namespace CoreAI.RobloxApi.Instances
     /// <summary>
     /// Structured error for the Roblox API layer following the roadmap §5.2.7 format:
     /// <c>[mod:id script:path line:n] CODE: message | fix: suggestion</c>. Mod context is optional
-    /// at the Domain level — the scripting/marshalling layer attaches it via <see cref="WithContext"/>.
+    /// at the Domain level and is NOT attached today: <see cref="WithContext"/> is the ready seam,
+    /// but wiring the mod/script/line prefix is deferred to the MVP5 VM chunk-name work, so errors
+    /// currently surface with no prefix.
     /// </summary>
     public sealed class RbxError : Exception
     {

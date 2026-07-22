@@ -430,7 +430,8 @@ namespace CoreAI.Mods.Roblox.Datatypes
         {
             float[] c = a.GetComponents();
             float[] d = b.GetComponents();
-            // c/d layout: [x y z r00 r01 r02 r10 r11 r12 r20 r21 r22]
+            // WHY: GetComponents layout is [x y z r00 r01 r02 r10 r11 r12 r20 r21 r22], so the
+            // rotation block starts at index 3 — the indices below multiply the two 3x3 matrices.
             float r00 = c[3] * d[3] + c[4] * d[6] + c[5] * d[9];
             float r01 = c[3] * d[4] + c[4] * d[7] + c[5] * d[10];
             float r02 = c[3] * d[5] + c[4] * d[8] + c[5] * d[11];

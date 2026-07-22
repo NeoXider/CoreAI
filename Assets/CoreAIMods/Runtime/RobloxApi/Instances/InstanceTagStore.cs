@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Registry-level tag store — the CollectionService substrate (R6.8). Instance:AddTag/

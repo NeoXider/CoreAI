@@ -1,4 +1,4 @@
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// The single reconciliation point for the three identity spaces (roadmap §3.3):

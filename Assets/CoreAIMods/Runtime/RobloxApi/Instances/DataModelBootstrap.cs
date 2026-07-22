@@ -1,4 +1,4 @@
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Builds the canonical MVP1 game tree: DataModel root with Workspace (registered as the

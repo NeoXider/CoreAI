@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using CoreAI.Mods.Roblox.Datatypes;
 using CoreAI.Mods.Roblox.Spatial;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 using UnityEngine;
 
 namespace CoreAI.Mods.Roblox.Binding

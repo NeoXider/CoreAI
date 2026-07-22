@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CoreAI.Mods.Roblox.Datatypes;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Instances;
 using Lua;
 using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;
@@ -218,7 +218,7 @@ namespace CoreAI.Ai.LuaCs
 
                 return Wrap(registry.Get(key));
             });
-            meta[Metamethods.ToString] = Fn("Enum.__tostring", _ => "Enums");
+            meta[Metamethods.ToString] = Fn("Enum.__tostring", _ => "Enum");
             Lock(meta);
 
             LuaTable t = new();

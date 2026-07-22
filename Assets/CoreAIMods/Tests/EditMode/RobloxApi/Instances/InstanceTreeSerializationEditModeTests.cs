@@ -1,4 +1,5 @@
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Datatypes;
+using CoreAI.Mods.Roblox.Instances;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RobloxApi.Instances
@@ -91,6 +92,48 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
             Assert.IsNotNull(restoredHead);
             Assert.IsFalse(restoredHead.Archivable);
             Assert.AreEqual(true, restoredHead.GetAttribute("Enabled"));
+        }
+
+        [Test]
+        public void DatatypeAttributes_SurviveCaptureRestoreWithStableStringRoundTrip()
+        {
+            var source = new InstanceRegistry();
+            RbxDataModel game = DataModelBootstrap.CreateGame(source);
+            RbxInstance part = source.Create("Part");
+            part.Name = "Node";
+            part.Parent = source.WorldRoot;
+            part.SetAttribute("Spawn", new RbxVector3(1.5f, -2f, 3.25f));
+            part.SetAttribute("Screen", new RbxVector2(10f, 20f));
+            part.SetAttribute("Tint", RbxColor3.FromRGB(255f, 128f, 0f));
+            part.SetAttribute("Pad", new RbxUDim(0.5f, 12));
+
+            InstanceTreeSnapshot first = InstanceTreeSerializer.Capture(game);
+
+            var target = new InstanceRegistry();
+            var restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(first, target);
+            DataModelBootstrap.AttachWorldRoot(target, restoredGame);
+
+            Assert.IsTrue(target.TryGet(part.Id, out RbxInstance restored));
+            Assert.AreEqual(new RbxVector3(1.5f, -2f, 3.25f), restored.GetAttribute("Spawn"));
+            Assert.AreEqual(new RbxVector2(10f, 20f), restored.GetAttribute("Screen"));
+            Assert.AreEqual(RbxColor3.FromRGB(255f, 128f, 0f), restored.GetAttribute("Tint"));
+            Assert.AreEqual(new RbxUDim(0.5f, 12), restored.GetAttribute("Pad"));
+
+            // WHY: capture→restore→capture must be byte-identical, including the datatype string codec.
+            InstanceTreeSnapshot second = InstanceTreeSerializer.Capture(restoredGame);
+            Assert.AreEqual(first.Instances.Count, second.Instances.Count);
+            for (int i = 0; i < first.Instances.Count; i++)
+            {
+                Assert.AreEqual(first.Instances[i].Attributes.Count, second.Instances[i].Attributes.Count);
+                for (int j = 0; j < first.Instances[i].Attributes.Count; j++)
+                {
+                    AttributeSnapshot a = first.Instances[i].Attributes[j];
+                    AttributeSnapshot b = second.Instances[i].Attributes[j];
+                    Assert.AreEqual(a.Name, b.Name);
+                    Assert.AreEqual(a.Kind, b.Kind);
+                    Assert.AreEqual(a.StringValue, b.StringValue);
+                }
+            }
         }
 
         [Test]

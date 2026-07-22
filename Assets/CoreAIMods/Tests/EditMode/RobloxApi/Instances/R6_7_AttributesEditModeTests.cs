@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using CoreAI.RobloxApi.Instances;
+using CoreAI.Mods.Roblox.Datatypes;
+using CoreAI.Mods.Roblox.Instances;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RobloxApi.Instances
@@ -83,6 +84,21 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
             StringAssert.Contains("Object", error.RawMessage);
             StringAssert.Contains("fix:", error.Message);
+            StringAssert.Contains("Vector3, Vector2, Color3, or UDim", error.Message);
+        }
+
+        [Test]
+        public void R6_7_DatatypeValues_AreStoredAndReturnedUnchanged()
+        {
+            _part.SetAttribute("Spawn", new RbxVector3(1f, 2f, 3f));
+            _part.SetAttribute("Screen", new RbxVector2(4f, 5f));
+            _part.SetAttribute("Tint", RbxColor3.FromRGB(255f, 0f, 0f));
+            _part.SetAttribute("Pad", new RbxUDim(0.5f, 8));
+
+            Assert.AreEqual(new RbxVector3(1f, 2f, 3f), _part.GetAttribute("Spawn"));
+            Assert.AreEqual(new RbxVector2(4f, 5f), _part.GetAttribute("Screen"));
+            Assert.AreEqual(RbxColor3.FromRGB(255f, 0f, 0f), _part.GetAttribute("Tint"));
+            Assert.AreEqual(new RbxUDim(0.5f, 8), _part.GetAttribute("Pad"));
         }
     }
 }

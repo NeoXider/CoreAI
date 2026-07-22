@@ -46,10 +46,10 @@ namespace CoreAI.Mods.Roblox.Datatypes
         /// <summary>Random:Clone() — a new generator with identical state.</summary>
         public RbxRandom Clone() => new RbxRandom(_s0, _s1, _s2, _s3);
 
-        /// <summary>Random:NextNumber() — uniform in [0, 1].</summary>
+        /// <summary>Random:NextNumber() — uniform in [0, 1).</summary>
         public double NextNumber() => (NextUInt64() >> 11) * (1.0 / 9007199254740992.0);
 
-        /// <summary>Random:NextNumber(min, max) — uniform in [min, max].</summary>
+        /// <summary>Random:NextNumber(min, max) — uniform in [min, max).</summary>
         public double NextNumber(double min, double max)
         {
             if (min > max)
@@ -123,7 +123,7 @@ namespace CoreAI.Mods.Roblox.Datatypes
 
         private ulong NextUInt64()
         {
-            // xoshiro256** by Blackman & Vigna (public domain).
+            // WHY: xoshiro256** by Blackman & Vigna (public domain) — the scrambled generator step.
             ulong result = RotateLeft(_s1 * 5UL, 7) * 9UL;
             ulong t = _s1 << 17;
             _s2 ^= _s0;

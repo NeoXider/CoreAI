@@ -1,6 +1,6 @@
 using System;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Stable per-session instance identity (roadmap §3.3): ulong, monotonic, never reused;

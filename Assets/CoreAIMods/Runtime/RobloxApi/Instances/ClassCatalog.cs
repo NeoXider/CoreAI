@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// One class descriptor row: ancestry is data, not C# inheritance depth (roadmap §5.1.7 risk

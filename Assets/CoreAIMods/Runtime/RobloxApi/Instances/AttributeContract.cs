@@ -1,14 +1,15 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Roblox.Datatypes;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Attribute name and value validation per R6.7 (Instance.yaml limitations): names are
     /// alphanumeric plus period/hyphen/slash/underscore, at most 100 characters, and may not
-    /// start with the reserved "RBX" prefix. MVP1 values are the primitive subset
-    /// (string/bool/number); datatype values (Vector3, Color3, ...) arrive with the property
-    /// system and the Datatypes slice. Tables are rejected — Roblox parity (§5.1.5).
+    /// start with the reserved "RBX" prefix. Values are the primitive subset (string/bool/number)
+    /// plus the datatype subset Roblox attributes support that exists today (Vector3, Vector2,
+    /// Color3, UDim). Tables and every other type are rejected — Roblox parity (§5.1.5).
     /// </summary>
     public static class AttributeContract
     {
@@ -51,8 +52,9 @@ namespace CoreAI.RobloxApi.Instances
         }
 
         /// <summary>
-        /// Normalizes an accepted value (numbers become double for stable serialization) or
-        /// throws BAD_ARGUMENT naming the offending type. Null is handled by the caller (remove).
+        /// Normalizes an accepted value (numbers become double for stable serialization; the
+        /// datatype subset is stored as-is) or throws BAD_ARGUMENT naming the offending type and
+        /// the exact supported list. Null is handled by the caller (remove).
         /// </summary>
         public static object NormalizeValue(object value)
         {
@@ -70,10 +72,18 @@ namespace CoreAI.RobloxApi.Instances
                     return (double)i;
                 case long l:
                     return (double)l;
+                case RbxVector3 v3:
+                    return v3;
+                case RbxVector2 v2:
+                    return v2;
+                case RbxColor3 c:
+                    return c;
+                case RbxUDim u:
+                    return u;
                 default:
                     throw RbxError.BadArgument(
-                        "attribute value of type " + value.GetType().Name + " is not supported in MVP1",
-                        "pass a string, boolean, or number at argument 2");
+                        "attribute value of type " + value.GetType().Name + " is not supported",
+                        "pass a string, boolean, number, Vector3, Vector2, Color3, or UDim at argument 2");
             }
         }
 

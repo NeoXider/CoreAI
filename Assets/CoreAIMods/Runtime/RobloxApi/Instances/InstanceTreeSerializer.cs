@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using System.Globalization;
+using CoreAI.Mods.Roblox.Datatypes;
 
-namespace CoreAI.RobloxApi.Instances
+namespace CoreAI.Mods.Roblox.Instances
 {
     /// <summary>
     /// Captures and restores instance subtrees with stable ids (roadmap §2, world file; Q3
@@ -75,10 +77,26 @@ namespace CoreAI.RobloxApi.Instances
                     snapshot.Kind = AttributeValueKind.Number;
                     snapshot.NumberValue = d;
                     break;
+                case RbxVector3 v3:
+                    snapshot.Kind = AttributeValueKind.Vector3;
+                    snapshot.StringValue = Join(v3.X, v3.Y, v3.Z);
+                    break;
+                case RbxVector2 v2:
+                    snapshot.Kind = AttributeValueKind.Vector2;
+                    snapshot.StringValue = Join(v2.X, v2.Y);
+                    break;
+                case RbxColor3 c:
+                    snapshot.Kind = AttributeValueKind.Color3;
+                    snapshot.StringValue = Join(c.R, c.G, c.B);
+                    break;
+                case RbxUDim u:
+                    snapshot.Kind = AttributeValueKind.UDim;
+                    snapshot.StringValue = F(u.Scale) + "," + u.Offset.ToString(CultureInfo.InvariantCulture);
+                    break;
                 default:
                     throw RbxError.BadArgument(
                         "attribute '" + name + "' holds a non-serializable value",
-                        "store only string/boolean/number attributes in MVP1");
+                        "store only string/boolean/number/Vector3/Vector2/Color3/UDim attributes");
             }
 
             return snapshot;
@@ -139,8 +157,64 @@ namespace CoreAI.RobloxApi.Instances
             {
                 case AttributeValueKind.String: return attribute.StringValue;
                 case AttributeValueKind.Bool: return attribute.BoolValue;
+                case AttributeValueKind.Number: return attribute.NumberValue;
+                case AttributeValueKind.Vector3:
+                {
+                    float[] p = Parse(attribute.StringValue, 3);
+                    return new RbxVector3(p[0], p[1], p[2]);
+                }
+                case AttributeValueKind.Vector2:
+                {
+                    float[] p = Parse(attribute.StringValue, 2);
+                    return new RbxVector2(p[0], p[1]);
+                }
+                case AttributeValueKind.Color3:
+                {
+                    float[] p = Parse(attribute.StringValue, 3);
+                    return new RbxColor3(p[0], p[1], p[2]);
+                }
+                case AttributeValueKind.UDim:
+                {
+                    float[] p = Parse(attribute.StringValue, 2);
+                    return new RbxUDim(p[0], (int)p[1]);
+                }
                 default: return attribute.NumberValue;
             }
+        }
+
+        // ---- Datatype attribute string codec (stable, invariant-culture) --------------------
+
+        private static string Join(params float[] components)
+        {
+            var parts = new string[components.Length];
+            for (int i = 0; i < components.Length; i++)
+            {
+                parts[i] = F(components[i]);
+            }
+
+            return string.Join(",", parts);
+        }
+
+        /// <summary>Round-trippable float format so restore reproduces the captured value exactly.</summary>
+        private static string F(float value) => value.ToString("R", CultureInfo.InvariantCulture);
+
+        private static float[] Parse(string serialized, int expected)
+        {
+            string[] parts = (serialized ?? string.Empty).Split(',');
+            if (parts.Length != expected)
+            {
+                throw RbxError.BadArgument(
+                    "datatype attribute value '" + serialized + "' is malformed",
+                    "expected " + expected + " comma-separated components");
+            }
+
+            var result = new float[expected];
+            for (int i = 0; i < expected; i++)
+            {
+                result[i] = float.Parse(parts[i], CultureInfo.InvariantCulture);
+            }
+
+            return result;
         }
     }
 }
