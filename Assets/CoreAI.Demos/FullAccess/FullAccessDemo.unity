@@ -328,7 +328,6 @@ MonoBehaviour:
   targetCube: {fileID: 0}
   coreAiScope: {fileID: 0}
   luaPlatformDriver: {fileID: 0}
-  chatPromptDriver: {fileID: 0}
   fullModeModSourceOverride: {fileID: 0}
   chatConfig: {fileID: 11400000, guid: 35a273c9c56ed3d488f1445c0c8c3efb, type: 2}
 --- !u!114 &481775746
@@ -857,62 +856,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &2100352199
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2100352201}
-  - component: {fileID: 2100352200}
-  m_Layer: 0
-  m_Name: DemoPromptButtons
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &2100352200
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2100352199}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1944e5601b054674f9aba21055a2342c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
-  title: Full Access mod prompts
-  prompts:
-  - Label: Make cube float
-    Prompt: Make the cube float above the arena and keep it there as a small saved
-      mod. Tell me briefly what changed.
-  - Label: Make cube bigger
-    Prompt: Make the cube noticeably bigger, but keep it in the same place. Save
-      it as a reusable mod and tell me briefly what changed.
-  - Label: Inspect cube
-    Prompt: Check the cube in the scene and tell me its current position, scale,
-      and important components. Do not change it.
-  submitWhenInputUnavailable: 0
---- !u!4 &2100352201
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2100352199}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2106438248
 GameObject:
   m_ObjectHideFlags: 0
@@ -988,6 +931,5 @@ SceneRoots:
   - {fileID: 1614572739}
   - {fileID: 2106438250}
   - {fileID: 349880793}
-  - {fileID: 2100352201}
   - {fileID: 687163846}
   - {fileID: 481775750}

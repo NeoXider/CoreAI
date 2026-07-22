@@ -49,8 +49,10 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(target, "FullAccessHubDemoController must create or normalize TargetCube.");
             Assert.AreEqual(0.5f, target.transform.position.y, 0.01f);
 
-            MonoBehaviour buttons = FindBehaviour("CoreAI.Demos.ChatPromptButtonsController");
-            Assert.IsNotNull(buttons, "FullAccessDemo must expose prompt buttons for manual demo checks.");
+            // Prompt templates are surfaced by the chat panel's own "≡" example menu (enabled by the host),
+            // so the demo must contain a chat panel rather than the legacy prompt-buttons controller.
+            MonoBehaviour chat = FindBehaviour("CoreAI.Chat.CoreAiChatPanel");
+            Assert.IsNotNull(chat, "FullAccessDemo must contain a CoreAiChatPanel that hosts the example prompts.");
         }
 
         private static MonoBehaviour FindBehaviour(string typeFullName)

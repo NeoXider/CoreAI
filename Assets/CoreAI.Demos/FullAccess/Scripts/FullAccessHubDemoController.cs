@@ -36,9 +36,6 @@ namespace CoreAI.Demos
         [SerializeField]
         private LuaPlatformExampleController luaPlatformDriver;
 
-        [Tooltip("GUI-less chat prompt-templates driver (Prompts tab). Auto-found when left empty.")]
-        [SerializeField]
-        private ChatPromptButtonsController chatPromptDriver;
 
         [Tooltip("Optional Lua source override for the Full-mode mod. Uses the embedded default when unset.")]
         [SerializeField]
@@ -72,10 +69,6 @@ namespace CoreAI.Demos
                 LuaPlatformHubPage.DefaultPageId,
                 () => new LuaPlatformHubPage(ResolveDriver),
                 20);
-            Registry.Register(
-                ChatPromptsHubPage.DefaultPageId,
-                () => new ChatPromptsHubPage(ResolvePromptDriver),
-                15);
             Registry.Register(
                 TokenBudgetHubPage.DefaultPageId,
                 () => new TokenBudgetHubPage(),
@@ -181,7 +174,10 @@ namespace CoreAI.Demos
             if (panel != null)
             {
                 panel.EnableAgentSwitching();
-                Debug.Log("[FullAccessHubDemo] Agent dropdown enabled on CoreAiChatPanel.");
+                // Surface the demo example prompts (Tetris / castle / fix arena) via the chat's own "≡"
+                // menu — the single prompt-templates location, demo-only (off in the base chat).
+                panel.EnableExamplePrompts();
+                Debug.Log("[FullAccessHubDemo] Agent dropdown + example prompts enabled on CoreAiChatPanel.");
             }
             else
             {
@@ -247,16 +243,6 @@ namespace CoreAI.Demos
             }
 
             return luaPlatformDriver;
-        }
-
-        private ChatPromptButtonsController ResolvePromptDriver()
-        {
-            if (chatPromptDriver == null)
-            {
-                chatPromptDriver = FindFirstObjectByType<ChatPromptButtonsController>(FindObjectsInactive.Include);
-            }
-
-            return chatPromptDriver;
         }
 
         private string ModSourceOverrideText()

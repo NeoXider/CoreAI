@@ -615,6 +615,7 @@ namespace CoreAI.Chat
         private string _activeRoleId;
         private bool _agentSwitchingEnabled;
         private bool _apiSwitchingEnabled;
+        private bool _examplesEnabled;
         private bool _apiSelectorExpanded;
         private ICoreAiRoutingUiController _routingUiController;
         private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
@@ -634,6 +635,17 @@ namespace CoreAI.Chat
             _agentSwitchingEnabled = true;
             _activeRoleId ??= Options?.RoleId ?? BuiltInAgentRoleIds.SmartChat;
             TryBuildAgentDropdown();
+        }
+
+        /// <summary>
+        /// Enables the compact "≡" example-prompts menu at runtime (e.g. from a demo controller). Off by
+        /// default so the base chat ships without demo-flavoured example prompts; safe to call before or
+        /// after the UI is built.
+        /// </summary>
+        public void EnableExamplePrompts()
+        {
+            _examplesEnabled = true;
+            TryBuildExamplesButton();
         }
 
         /// <summary>
@@ -1009,7 +1021,9 @@ namespace CoreAI.Chat
         /// </summary>
         private void TryBuildExamplesButton()
         {
-            if (_examplesButton != null || InputField == null)
+            // WHY: opt-in (EnableExamplePrompts) so the base/production chat has no example menu — the
+            // built-in examples are demo content and should only surface in the demo scenes.
+            if (!_examplesEnabled || _examplesButton != null || InputField == null)
             {
                 return;
             }

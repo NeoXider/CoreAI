@@ -8,10 +8,10 @@ using UnityEngine.UIElements;
 namespace CoreAI.Demos
 {
     /// <summary>
-    /// GUI-less driver for demo prompt templates: holds a serialized list of preset prompts and inserts a
-    /// chosen prompt into the CoreAI chat input so users can inspect/edit it before sending. The UI is a
-    /// UI Toolkit Hub tab (<see cref="ChatPromptsHubPage"/>) that reads <see cref="Prompts"/> and calls
-    /// <see cref="InsertOrSubmit"/>; this component owns only the data and the chat wiring.
+    /// GUI-less driver holding a serialized list of preset prompts that can be inserted into the CoreAI
+    /// chat input via <see cref="InsertOrSubmit"/>. Legacy: demo prompt templates now live in the chat's
+    /// own "≡" example menu (see <c>CoreAiChatPanel.EnableExamplePrompts</c>); this component is retained
+    /// for demo scenes not yet migrated to that single prompt location.
     /// </summary>
     public sealed class ChatPromptButtonsController : MonoBehaviour
     {

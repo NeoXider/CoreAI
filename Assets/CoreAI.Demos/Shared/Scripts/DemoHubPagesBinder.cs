@@ -56,13 +56,13 @@ namespace CoreAI.Demos
             }
 #endif
 
-            if (FindFirstObjectByType<ChatPromptButtonsController>(FindObjectsInactive.Include) != null)
+            // WHY: prompt templates live in ONE place — the chat's own "≡" example menu. Turn it on here so
+            // it shows in demo scenes only (the base chat ships with it off). No separate Prompts Hub tab.
+            CoreAI.Chat.CoreAiChatPanel chat =
+                FindFirstObjectByType<CoreAI.Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
+            if (chat != null)
             {
-                registry.Register(
-                    ChatPromptsHubPage.DefaultPageId,
-                    () => new ChatPromptsHubPage(
-                        () => FindFirstObjectByType<ChatPromptButtonsController>(FindObjectsInactive.Include)),
-                    15);
+                chat.EnableExamplePrompts();
             }
         }
     }
