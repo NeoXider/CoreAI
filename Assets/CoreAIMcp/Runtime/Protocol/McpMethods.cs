@@ -26,7 +26,7 @@ namespace CoreAI.Mcp.Protocol
         public const string Name = "coreai";
 
         /// <summary>Advertised server version (tracks the package version).</summary>
-        public const string Version = "5.9.0";
+        public const string Version = "6.0.0";
 
         /// <summary>
         /// Protocol version echoed when the client omits one. The server echoes the client's requested

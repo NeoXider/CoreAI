@@ -2,9 +2,15 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [Unreleased]
+## [6.0.0] - 2026-07-22
 
 ### Changed
+
+- Runtime logging now routes through the CoreAI logger (`CoreAI.Logging.Log`) instead of raw
+  `UnityEngine.Debug`: the mods world-query and bundled-mod-source warnings, the CoreAIMcp server
+  bootstrap logs, and the CoreAIHub window's page-lifecycle diagnostics were all migrated (level and
+  message preserved). Lua mods keep their own separate logger (`ILuaLogService` ring buffers +
+  `get_mod_logs`), distinct from the core log.
 
 - Output-token policy: `CoreAISettingsAsset` / `OpenAiHttpLlmSettings` `maxTokens` defaults (and the
   bundled `CoreAISettings*.asset` resources), the backend connectivity probe, and every live
@@ -14,6 +20,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   cheaper models and shorter prompts, not output caps.
 
 ### Added
+
+- Live end-to-end LLM verification gates (`[Explicit]`, self-skip without a backend, proven on a local
+  4B): the Builder, Creator, and Programmer roles each build a small castle through the production
+  pipeline — Builder/Creator via the `world_command` tool, Programmer via Lua `coreai_world_spawn`; the
+  Programmer also builds the built-in Tetris example mod and repairs a deliberately broken mod
+  (`list`/`diagnostics`/`get_source`/`reload`). These lock in that a small local model can create and
+  fix games end-to-end.
 
 - `Docs/SUBSCRIPTION_BRIDGE.md` — "bring your own subscription": power the in-game AI from a Claude
   Code / Codex CLI subscription via a local OpenAI-compatible bridge (`agent.sh openai-server`,
