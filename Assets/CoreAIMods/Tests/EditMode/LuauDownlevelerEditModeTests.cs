@@ -249,15 +249,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void CompoundOnDottedPath_DuplicatesPath()
+        public void CompoundOnDottedPath_CapturesObjectTemp()
         {
-            AssertRewrites("stats.points += 10", "stats.points = stats.points + ( 10)");
+            // WHY: a '.'-target reads through __index, so the object is captured once instead of the
+            // access text being duplicated (which would double a side-effecting __index).
+            AssertRewrites("stats.points += 10",
+                "do local __luau_t0 = stats __luau_t0.points = __luau_t0.points + ( 10) end");
         }
 
         [Test]
-        public void CompoundOnSimpleIndex_DuplicatesIndex()
+        public void CompoundOnSimpleIndex_CapturesObjectAndKeyTemps()
         {
-            AssertRewrites("t[i] += 1", "t[i] = t[i] + ( 1)");
+            AssertRewrites("t[i] += 1",
+                "do local __luau_t0 = t local __luau_t1 = i  __luau_t0[__luau_t1] = __luau_t0[__luau_t1] + ( 1) end");
         }
 
         [Test]
@@ -405,7 +409,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `{if ok then \"yes\" else \"no\"}`",
-                "local m = (\"\" .. tostring((function() if ok then return \"yes\" else return \"no\" end end)()) .. \"\")");
+                "local m = (\"\" .. tostring((function() if ok then return (\"yes\") else return (\"no\") end end)()) .. \"\")");
         }
 
         [Test]
@@ -423,7 +427,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local v = if c then 1 else 2",
-                "local v = (function() if c then return 1 else return 2 end end)()");
+                "local v = (function() if c then return (1) else return (2) end end)()");
         }
 
         [Test]
@@ -431,7 +435,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local r = if a then 1 elseif b then 2 else 3",
-                "local r = (function() if a then return 1 elseif b then return 2 else return 3 end end)()");
+                "local r = (function() if a then return (1) elseif b then return (2) else return (3) end end)()");
         }
 
         [Test]
@@ -439,7 +443,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "f(if c then 1 else 2, 3)",
-                "f((function() if c then return 1 else return 2 end end)(), 3)");
+                "f((function() if c then return (1) else return (2) end end)(), 3)");
         }
 
         [Test]
@@ -447,7 +451,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "return if c then f() else g()",
-                "return (function() if c then return f() else return g() end end)()");
+                "return (function() if c then return (f()) else return (g()) end end)()");
         }
 
         // ---------------------------------------------------------------- floor division
@@ -581,6 +585,68 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.IsTrue(mentioned, "Expected an Info diagnostic naming the rewritten construct.");
+        }
+
+        // ---------------------------------------------------------------- generics
+
+        [Test]
+        public void GenericFunction_Unannotated_StripsTypeParameters()
+        {
+            AssertRewrites("local function identity<T>(x) return x end",
+                "local function identity(x) return x end");
+        }
+
+        [Test]
+        public void GenericGlobalFunction_Unannotated_StripsTypeParameters()
+        {
+            AssertRewrites("function wrap<T, U>(a, b) return a end",
+                "function wrap(a, b) return a end");
+        }
+
+        [Test]
+        public void PlainComparisons_DoNotFalselyTrigger()
+        {
+            AssertUnchanged("if a < b then f() end");
+            AssertUnchanged("x = y > z");
+        }
+
+        [Test]
+        public void ComparisonsThatArmGenericHeuristic_PassThroughByteIdentical()
+        {
+            // WHY: 'a < b, c > d' arms the '<'-before-'>' heuristic, but the parse produces zero edits
+            // so the original string instance is returned unchanged — a false positive is a safe no-op.
+            AssertUnchanged("f(a < b, c > d)");
+        }
+
+        // ---------------------------------------------------------------- unsupported constructs
+
+        [Test]
+        public void IfExpressionWithTopLevelVararg_IsUnsupportedAndLeftUnchanged()
+        {
+            DownlevelResult result =
+                LuauDownleveler.Process("local function f(...) return if true then ... else 0 end");
+            Assert.IsFalse(result.Changed, "The if-expression must be passed through, not half-rewritten.");
+            bool warned = false;
+            foreach (DownlevelDiagnostic d in result.Diagnostics)
+            {
+                warned |= d.Severity == DownlevelSeverity.Warning && d.Message.Contains("unsupported");
+            }
+
+            Assert.IsTrue(warned, "Expected an 'unsupported' warning for the vararg if-expression.");
+        }
+
+        // ---------------------------------------------------------------- string escapes
+
+        [Test]
+        public void UnicodeEscape_RewritesToDecimalBytes()
+        {
+            AssertRewrites("local s = \"\\u{48}\"", "local s = \"\\072\"");
+        }
+
+        [Test]
+        public void ZEscape_StripsFollowingWhitespace()
+        {
+            AssertRewrites("local s = \"a\\z   b\"", "local s = \"ab\"");
         }
     }
 }

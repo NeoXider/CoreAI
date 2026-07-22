@@ -34,6 +34,9 @@ namespace CoreAI.Ai.Logging
         private long _sequence;
 
         /// <inheritdoc />
+        // WHY: fired outside _gate (see Append), so storage stays uncontended and a slow handler can
+        // never stall other threads' appends. The cost is best-effort ordering under concurrent
+        // appends — consumers order by LuaLogEntry.Sequence, which is assigned under the lock.
         public event Action<LuaLogEntry> EntryAppended;
 
         /// <param name="perModCapacity">Ring buffer capacity for each mod id.</param>

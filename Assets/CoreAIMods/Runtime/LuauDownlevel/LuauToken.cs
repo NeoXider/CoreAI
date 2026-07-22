@@ -29,6 +29,12 @@ namespace CoreAI.Infrastructure.Luau
         /// <summary>Lua 5.2 spelling for Luau-only number literals (binary, digit separators); null when already valid.</summary>
         public string NumberRewrite;
 
+        /// <summary>
+        /// Lua 5.2 spelling for a quoted string carrying Luau-only escapes (<c>\u{XXXX}</c>, <c>\z</c>);
+        /// includes the surrounding quotes and is null when the literal is already valid 5.2.
+        /// </summary>
+        public string StringRewrite;
+
         /// <summary>Segments of a backtick interpolated string; null for every other kind.</summary>
         public List<LuauInterpPart> InterpParts;
     }

@@ -3,6 +3,7 @@
   "rootNamespace": "CoreAI.Tests",
   "references": [
     "CoreAI.Mods",
+    "CoreAI.LuauDownlevel",
     "CoreAI.RobloxApi.Instances",
     "CoreAI.RobloxApi.Datatypes",
     "CoreAI.RobloxApi.Unity",

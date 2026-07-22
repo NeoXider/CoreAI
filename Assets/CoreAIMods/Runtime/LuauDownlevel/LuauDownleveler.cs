@@ -6,9 +6,10 @@ namespace CoreAI.Infrastructure.Luau
 {
     /// <summary>
     /// Standalone Luau → Lua 5.2 downlevel preprocessor. Rewrites the Luau-only constructs a typical
-    /// Roblox gameplay script uses — type annotations/declarations/casts, compound assignments,
-    /// <c>continue</c>, backtick string interpolation, if-then-else expressions, floor division and
-    /// Luau number literals — into equivalents the bundled Lua-CSharp (Lua 5.2) VM parses.
+    /// Roblox gameplay script uses — type annotations/declarations/casts, generic type-parameter
+    /// lists, compound assignments, <c>continue</c>, backtick string interpolation, if-then-else
+    /// expressions, floor division, Luau number literals and the <c>\u{XXXX}</c>/<c>\z</c> string
+    /// escapes — into equivalents the bundled Lua-CSharp (Lua 5.2) VM parses.
     /// darklua's rule set is the reference spec. Plain Lua passes through untouched
     /// (<see cref="DownlevelResult.Changed"/> = false); malformed input is returned verbatim with an
     /// Error diagnostic — this API never throws. Not yet wired into mod loading; callers opt in.
@@ -108,9 +109,12 @@ namespace CoreAI.Infrastructure.Luau
 
         /// <summary>
         /// Cheap trigger scan so plain Lua skips the parser entirely. False positives only cost a
-        /// parse (which produces zero edits); the checks are chosen so no Luau-only construct can
-        /// slip past — an if-expression is recognized by the token before <c>if</c>, every other
-        /// construct by its own token.
+        /// parse (which produces zero edits and re-emits the source byte-identically); the checks are
+        /// chosen so no Luau-only construct can slip past — an if-expression is recognized by the token
+        /// before <c>if</c>, a generic type-parameter list by an identifier directly followed by
+        /// <c>&lt;</c> that closes with <c>&gt;</c> before the next <c>(</c>, string escapes and Luau
+        /// number literals by a token rewrite the lexer already computed, every other construct by its
+        /// own token.
         /// </summary>
         static bool NeedsDownlevel(List<LuauToken> tokens)
         {
@@ -121,6 +125,13 @@ namespace CoreAI.Infrastructure.Luau
                 {
                     case LuauTokenKind.InterpString:
                         return true;
+                    case LuauTokenKind.String:
+                        if (t.StringRewrite != null)
+                        {
+                            return true;
+                        }
+
+                        break;
                     case LuauTokenKind.Number:
                         if (t.NumberRewrite != null)
                         {
@@ -160,6 +171,14 @@ namespace CoreAI.Infrastructure.Luau
                             case "&":
                             case "@":
                                 return true;
+                            case "<":
+                                if (i > 0 && tokens[i - 1].Kind == LuauTokenKind.Name &&
+                                    LooksLikeGenericList(tokens, i))
+                                {
+                                    return true;
+                                }
+
+                                break;
                         }
 
                         break;
@@ -167,6 +186,77 @@ namespace CoreAI.Infrastructure.Luau
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Heuristic for a generic type-parameter list opening at <paramref name="open"/> (a
+        /// <c>&lt;</c> directly after an identifier): true when a matching <c>&gt;</c> appears before
+        /// the next call <c>(</c> or a token that cannot occur inside a type-parameter list. Only used
+        /// to arm the parser — a false positive triggers a no-op parse (byte-identical passthrough), so
+        /// this errs toward triggering; an unannotated generic function (<c>function f&lt;T&gt;()</c>)
+        /// must never slip past. Plain comparisons (<c>a &lt; b then</c>) stop at the keyword and do
+        /// not trigger.
+        /// </summary>
+        static bool LooksLikeGenericList(List<LuauToken> tokens, int open)
+        {
+            for (int i = open + 1; i < tokens.Count; i++)
+            {
+                LuauToken t = tokens[i];
+                if (t.Kind == LuauTokenKind.Punct)
+                {
+                    switch (t.Text)
+                    {
+                        case ">":
+                        case ">=":
+                            return true;
+                        case ",":
+                        case ".":
+                        case "<":
+                        case "...":
+                            continue;
+                        default:
+                            return false;
+                    }
+                }
+
+                if (t.Kind == LuauTokenKind.Name && !IsTypeListStopWord(t.Text))
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+
+        static bool IsTypeListStopWord(string text)
+        {
+            switch (text)
+            {
+                // WHY: keywords that end a statement/expression cannot appear inside a type-parameter
+                // list, so hitting one means the '<' was a comparison operator, not a generic opener.
+                case "then":
+                case "do":
+                case "end":
+                case "return":
+                case "if":
+                case "else":
+                case "elseif":
+                case "while":
+                case "for":
+                case "repeat":
+                case "until":
+                case "local":
+                case "function":
+                case "in":
+                case "and":
+                case "or":
+                case "not":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         static bool IsIfExpressionPosition(LuauToken prev)

@@ -66,6 +66,9 @@ namespace CoreAI.Ai.Logging
         /// <summary>Creates the MEAI function surface for <c>get_mod_logs</c>.</summary>
         public AIFunction CreateAIFunction()
         {
+            // WHY: System.Threading.Tasks.Task is banned by ARCHITECTURE_RULES §3, but this is a
+            // framework-boundary exception — MEAI's AIFunctionFactory.Create binds a delegate whose
+            // contract is Task<string>; it does not accept UniTask. The work underneath is synchronous.
             Func<string, string, long, int, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
@@ -87,6 +90,10 @@ namespace CoreAI.Ai.Logging
             int max_entries = DefaultMaxEntries,
             CancellationToken cancellationToken = default)
         {
+            // WHY: the underlying Query is synchronous so the token cannot be threaded further; observe
+            // it at the one point that is trivially safe — before doing any work — per §3's intent.
+            cancellationToken.ThrowIfCancellationRequested();
+
             LuaLogLevel? minLevel = null;
             if (!string.IsNullOrWhiteSpace(level))
             {

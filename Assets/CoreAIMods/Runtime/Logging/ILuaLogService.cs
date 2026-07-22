@@ -27,7 +27,14 @@ namespace CoreAI.Ai.Logging
         /// </summary>
         IReadOnlyList<LuaLogEntry> Query(LuaLogQuery query);
 
-        /// <summary>Raised synchronously, after storage, every time an entry is appended.</summary>
+        /// <summary>
+        /// Raised synchronously, after storage, every time an entry is appended. Delivery order is
+        /// best-effort: the handler runs outside the storage lock, so under concurrent appends from
+        /// multiple threads two entries can be delivered in a different order than they were sequenced.
+        /// Consumers that need a total order (e.g. a file sink) must order by
+        /// <see cref="LuaLogEntry.Sequence"/> rather than trust arrival order — the built-in
+        /// <c>LuaLogFileSink</c> writes <see cref="LuaLogEntry.Sequence"/> on every line for exactly this.
+        /// </summary>
         event Action<LuaLogEntry> EntryAppended;
 
         /// <summary>

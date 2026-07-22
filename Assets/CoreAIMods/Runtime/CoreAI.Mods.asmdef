@@ -4,8 +4,10 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
+    "CoreAI.LuauDownlevel",
     "CoreAI.RobloxApi.Datatypes",
     "CoreAI.RobloxApi.Instances",
+    "CoreAI.RobloxApi.Binding",
     "MessagePipe",
     "MessagePipe.VContainer",
     "Unity.TextMeshPro",

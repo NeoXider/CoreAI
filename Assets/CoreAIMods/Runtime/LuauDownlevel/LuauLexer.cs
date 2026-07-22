@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace CoreAI.Infrastructure.Luau
 {
@@ -94,7 +95,10 @@ namespace CoreAI.Infrastructure.Luau
             if (c == '"' || c == '\'')
             {
                 LexQuotedString(c);
-                return Make(LuauTokenKind.String, _s.Substring(start, _p - start), start, _p, line, col);
+                string text = _s.Substring(start, _p - start);
+                LuauToken tok = Make(LuauTokenKind.String, text, start, _p, line, col);
+                tok.StringRewrite = ConvertLuauStringEscapes(text);
+                return tok;
             }
 
             if (c == '[' && _p + 1 < _s.Length && (_s[_p + 1] == '[' || _s[_p + 1] == '='))
@@ -347,8 +351,11 @@ namespace CoreAI.Infrastructure.Luau
                         _p++;
                     }
 
-                    while (_p < _s.Length && char.IsDigit(_s[_p]))
+                    // WHY: Luau permits digit separators in the exponent too ('1e1_0'); consume and
+                    // strip them like the mantissa's so the rewritten literal stays valid Lua 5.2.
+                    while (_p < _s.Length && (char.IsDigit(_s[_p]) || _s[_p] == '_'))
                     {
+                        sawUnderscore |= _s[_p] == '_';
                         _p++;
                     }
                 }
@@ -500,6 +507,120 @@ namespace CoreAI.Infrastructure.Luau
                 case '@': return "@";
                 default: return null;
             }
+        }
+
+        /// <summary>
+        /// Rewrites the Luau-only escapes a quoted string may carry into Lua 5.2 spellings:
+        /// <c>\u{XXXX}</c> becomes the code point's UTF-8 bytes as zero-padded <c>\ddd</c> decimal
+        /// escapes and <c>\z</c> (plus the whitespace it swallows) is removed. Returns the full
+        /// rewritten literal (quotes included) or null when nothing had to change; malformed
+        /// <c>\u{...}</c> is left verbatim for the VM to reject.
+        /// </summary>
+        static string ConvertLuauStringEscapes(string text)
+        {
+            if (text.IndexOf('\\') < 0)
+            {
+                return null;
+            }
+
+            StringBuilder sb = null;
+            int i = 0;
+            while (i < text.Length)
+            {
+                char c = text[i];
+                if (c != '\\' || i + 1 >= text.Length)
+                {
+                    sb?.Append(c);
+                    i++;
+                    continue;
+                }
+
+                char n = text[i + 1];
+                if (n == 'z')
+                {
+                    // WHY: Luau '\z' drops the escape and every following whitespace char.
+                    sb ??= new StringBuilder(text.Length).Append(text, 0, i);
+                    i += 2;
+                    while (i < text.Length && IsLuaWhitespace(text[i]))
+                    {
+                        i++;
+                    }
+
+                    continue;
+                }
+
+                if (n == 'u' && i + 2 < text.Length && text[i + 2] == '{')
+                {
+                    int j = i + 3;
+                    int cp = 0;
+                    int digits = 0;
+                    while (j < text.Length && Uri.IsHexDigit(text[j]))
+                    {
+                        cp = (cp << 4) + HexValue(text[j]);
+                        digits++;
+                        j++;
+                    }
+
+                    if (digits > 0 && j < text.Length && text[j] == '}' && cp <= 0x10FFFF)
+                    {
+                        sb ??= new StringBuilder(text.Length + 8).Append(text, 0, i);
+                        AppendUtf8DecimalEscapes(sb, cp);
+                        i = j + 1;
+                        continue;
+                    }
+                }
+
+                sb?.Append(c).Append(n);
+                i += 2;
+            }
+
+            return sb?.ToString();
+        }
+
+        static bool IsLuaWhitespace(char c)
+        {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+        }
+
+        static int HexValue(char c)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                return c - '0';
+            }
+
+            return (c >= 'a' ? c - 'a' : c - 'A') + 10;
+        }
+
+        static void AppendUtf8DecimalEscapes(StringBuilder sb, int cp)
+        {
+            if (cp <= 0x7F)
+            {
+                AppendByte(sb, cp);
+            }
+            else if (cp <= 0x7FF)
+            {
+                AppendByte(sb, 0xC0 | (cp >> 6));
+                AppendByte(sb, 0x80 | (cp & 0x3F));
+            }
+            else if (cp <= 0xFFFF)
+            {
+                AppendByte(sb, 0xE0 | (cp >> 12));
+                AppendByte(sb, 0x80 | ((cp >> 6) & 0x3F));
+                AppendByte(sb, 0x80 | (cp & 0x3F));
+            }
+            else
+            {
+                AppendByte(sb, 0xF0 | (cp >> 18));
+                AppendByte(sb, 0x80 | ((cp >> 12) & 0x3F));
+                AppendByte(sb, 0x80 | ((cp >> 6) & 0x3F));
+                AppendByte(sb, 0x80 | (cp & 0x3F));
+            }
+        }
+
+        static void AppendByte(StringBuilder sb, int b)
+        {
+            sb.Append('\\').Append(b.ToString("D3", CultureInfo.InvariantCulture));
         }
     }
 }

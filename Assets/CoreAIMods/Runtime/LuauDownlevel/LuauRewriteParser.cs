@@ -81,6 +81,7 @@ namespace CoreAI.Infrastructure.Luau
         int _pendingEqPos = -1;
         readonly List<LoopFrame> _loops = new List<LoopFrame>();
         readonly List<int> _ifExprFuncDepths = new List<int>();
+        readonly List<bool> _ifExprUnsupported = new List<bool>();
 
         sealed class LoopFrame
         {
@@ -266,9 +267,21 @@ namespace CoreAI.Infrastructure.Luau
             return false;
         }
 
+        // WHY: temp names use the '__luau_t' prefix on the assumption that user code never declares an
+        // identifier with it; the counter is shared across the whole chunk so every generated temp is
+        // unique. A colliding user identifier would shadow a temp and is treated as out of contract.
         string NextTemp()
         {
             return "__luau_t" + _ctx.TempCounter++;
+        }
+
+        void EmitStringRewrite(LuauToken t)
+        {
+            if (t.StringRewrite != null)
+            {
+                ReplaceToken(t, t.StringRewrite);
+                _ctx.Note("string escape", t);
+            }
         }
 
         void Warn(string message, LuauToken at)
@@ -911,11 +924,11 @@ namespace CoreAI.Infrastructure.Luau
             Advance();
             string binOp = opTok.Text == "..=" ? ".." : opTok.Text.Substring(0, opTok.Text.Length - 1);
 
-            // WHY: any '(' in the target span may be a call (including inside index brackets), and
-            // duplicating a call would evaluate its side effects twice — capture temps instead.
-            bool needTemp = target.HasCall ||
-                            SpanHasChar(target.Start, target.End, '(') ||
-                            SpanHasChar(target.Start, target.End, '\n');
+            // WHY: only a bare identifier is safe to duplicate. Any '.'/'[' means the target reads
+            // through '__index' (and writes through '__newindex'), and any '(' is a call — evaluating
+            // the access text twice would double those side effects, so capture the object/key in
+            // temps instead. LastKind == Name is exactly a suffix-free identifier.
+            bool needTemp = target.LastKind != SuffixKind.Name;
             if (!needTemp)
             {
                 string lhs = GetRewrittenText(target.Start, target.End);
@@ -1109,6 +1122,7 @@ namespace CoreAI.Infrastructure.Luau
             }
             else if (t.Kind == LuauTokenKind.String)
             {
+                EmitStringRewrite(t);
                 Advance();
                 end = t.End;
             }
@@ -1125,7 +1139,7 @@ namespace CoreAI.Infrastructure.Luau
             }
             else if (IsPunct(t, "..."))
             {
-                WarnIfVarargInsideIfExpression(t);
+                MarkVarargUnsupportedIfInsideIfExpression(t);
                 Advance();
                 end = t.End;
             }
@@ -1160,13 +1174,18 @@ namespace CoreAI.Infrastructure.Luau
             return end;
         }
 
-        void WarnIfVarargInsideIfExpression(LuauToken t)
+        /// <summary>
+        /// A top-level <c>...</c> in an if-expression branch would become a parse error inside the
+        /// generated closure (the closure has no varargs), so the enclosing if-expression is marked
+        /// unsupported and left unrewritten rather than emitting broken code.
+        /// </summary>
+        void MarkVarargUnsupportedIfInsideIfExpression(LuauToken t)
         {
-            for (int i = 0; i < _ifExprFuncDepths.Count; i++)
+            for (int i = _ifExprFuncDepths.Count - 1; i >= 0; i--)
             {
                 if (_ifExprFuncDepths[i] == _funcDepth)
                 {
-                    Warn("'...' inside an if-expression is rewritten into a closure and will not see the enclosing varargs", t);
+                    _ifExprUnsupported[i] = true;
                     return;
                 }
             }
@@ -1174,27 +1193,57 @@ namespace CoreAI.Infrastructure.Luau
 
         int ParseIfExpression(LuauToken ifTok)
         {
+            int editMark = _ctx.Edits.Count;
             ReplaceToken(ifTok, "(function() if");
             Advance();
             _ifExprFuncDepths.Add(_funcDepth);
+            _ifExprUnsupported.Add(false);
             ParseExpr();
-            ReplaceToken(ExpectKeyword("then"), "then return");
-            ParseExpr();
+            WrapIfExpressionBranch();
             while (IsName(Cur, "elseif"))
             {
                 Advance();
                 ParseExpr();
-                ReplaceToken(ExpectKeyword("then"), "then return");
-                ParseExpr();
+                WrapIfExpressionBranch();
             }
 
             LuauToken elseTok = ExpectKeyword("else");
             ReplaceToken(elseTok, "else return");
+            int branchStart = Cur.Start;
             int end = ParseExpr();
+            Insert(branchStart, "(");
+            Insert(end, ")");
             Insert(end, " end end)()");
+
+            bool unsupported = _ifExprUnsupported[_ifExprUnsupported.Count - 1];
+            _ifExprUnsupported.RemoveAt(_ifExprUnsupported.Count - 1);
             _ifExprFuncDepths.RemoveAt(_ifExprFuncDepths.Count - 1);
+            if (unsupported)
+            {
+                // WHY: a top-level vararg in a branch cannot be lowered into the closure; drop every
+                // edit this if-expression produced and pass the original construct through with a
+                // diagnostic rather than emitting code that fails to parse under Lua 5.2.
+                _ctx.Edits.RemoveRange(editMark, _ctx.Edits.Count - editMark);
+                Warn("'...' (varargs) inside an if-then-else expression is unsupported; the construct was left unchanged", ifTok);
+                return end;
+            }
+
             _ctx.Note("if expression", ifTok);
             return end;
+        }
+
+        /// <summary>
+        /// Rewrites <c>then EXPR</c> into <c>then return (EXPR)</c>. The parentheses truncate a
+        /// multi-value tail call or <c>...</c> to a single result, matching Luau's if-expression
+        /// semantics (darklua expands all results; parenthesizing is the cheap correct fix).
+        /// </summary>
+        void WrapIfExpressionBranch()
+        {
+            ReplaceToken(ExpectKeyword("then"), "then return");
+            int branchStart = Cur.Start;
+            int end = ParseExpr();
+            Insert(branchStart, "(");
+            Insert(end, ")");
         }
 
         int ParseTableConstructor()
@@ -1326,6 +1375,7 @@ namespace CoreAI.Infrastructure.Luau
 
             if (t.Kind == LuauTokenKind.String)
             {
+                EmitStringRewrite(t);
                 Advance();
                 return t.End;
             }

@@ -250,6 +250,87 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void GenericFunction_Unannotated_IsDownleveledAndRuns()
+        {
+            // WHY: no ':' annotation anywhere — only '<T>' — so the trigger scan must catch the
+            // generic list, otherwise this slips through unrewritten and fails the 5.2 VM.
+            Assert.AreEqual(42, RunNumber("local function identity<T>(x) return x end return identity(42)"));
+        }
+
+        [Test]
+        public void IfExpression_MultiReturnInTail_TruncatesToOneValue()
+        {
+            string luau =
+                "local function multi() return 10, 20, 30 end\n" +
+                "return select(\"#\", if true then multi() else multi())\n";
+            Assert.AreEqual(1, RunNumber(luau), "if-expression branches must truncate multi-returns to one value.");
+        }
+
+        [Test]
+        public void IfExpression_MultiReturnInTail_KeepsFirstValue()
+        {
+            string luau =
+                "local function multi() return 10, 20, 30 end\n" +
+                "return (if true then multi() else multi())\n";
+            Assert.AreEqual(10, RunNumber(luau));
+        }
+
+        [Test]
+        public void CompoundOnDottedPath_EvaluatesObjectExactlyOnce()
+        {
+            string luau =
+                "local reads = 0\n" +
+                "local inner = { c = 10 }\n" +
+                "local a = setmetatable({}, { __index = function(_, k) if k == \"b\" then reads = reads + 1 end return inner end })\n" +
+                "a.b.c += 1\n" +
+                "return reads, inner.c\n";
+            LuaValue[] result = RunLuau(luau);
+            Assert.AreEqual(1, result[0].Read<double>(), "'a.b' must be evaluated once, not twice.");
+            Assert.AreEqual(11, result[1].Read<double>());
+        }
+
+        [Test]
+        public void CompoundOnIndexedThenField_EvaluatesIndexExactlyOnce()
+        {
+            string luau =
+                "local reads = 0\n" +
+                "local inner = { v = 5 }\n" +
+                "local a = setmetatable({}, { __index = function(_, key) reads = reads + 1 return inner end })\n" +
+                "local k = \"anything\"\n" +
+                "a[k].v += 1\n" +
+                "return reads, inner.v\n";
+            LuaValue[] result = RunLuau(luau);
+            Assert.AreEqual(1, result[0].Read<double>(), "'a[k]' must be evaluated once, not twice.");
+            Assert.AreEqual(6, result[1].Read<double>());
+        }
+
+        [Test]
+        public void UnicodeEscape_AsciiCodePoint_DecodesToChar()
+        {
+            LuaValue[] result = RunLuau("return \"\\u{48}i\"");
+            Assert.AreEqual("Hi", result[0].Read<string>());
+        }
+
+        [Test]
+        public void UnicodeEscape_MultiByte_EmitsTwoUtf8Bytes()
+        {
+            Assert.AreEqual(2, RunNumber("return #\"\\u{E9}\""));
+        }
+
+        [Test]
+        public void ZEscape_StripsItselfAndFollowingWhitespace()
+        {
+            LuaValue[] result = RunLuau("return \"a\\z   b\"");
+            Assert.AreEqual("ab", result[0].Read<string>());
+        }
+
+        [Test]
+        public void ExponentDigitSeparator_IsStripped()
+        {
+            Assert.AreEqual(1e10, RunNumber("return 1e1_0"));
+        }
+
+        [Test]
         public void PlainLua_RunsUnchanged()
         {
             DownlevelResult result = LuauDownleveler.Process(
