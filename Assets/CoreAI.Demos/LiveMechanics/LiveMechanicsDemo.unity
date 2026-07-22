@@ -171,6 +171,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: live-mechanics-demo
 --- !u!1 &349880790
 GameObject:
   m_ObjectHideFlags: 0

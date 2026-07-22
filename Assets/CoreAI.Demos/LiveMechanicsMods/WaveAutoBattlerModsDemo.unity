@@ -219,6 +219,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: wave-auto-battler-demo
 --- !u!1 &532788468
 GameObject:
   m_ObjectHideFlags: 0

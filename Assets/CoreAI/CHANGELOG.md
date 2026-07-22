@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Lua mod stores can now be namespaced per composition: `CoreAiModsLifetimeScope` gained an optional
+  serialized `storeId` (plumbed through `RegisterCoreAiMods` into `FileLuaModStore` /
+  `FileLuaModSourceStore`), and every mods-enabled demo scene sets a distinct id, so mods persisted by
+  one demo no longer rehydrate in every other demo (and fail under a lower Lua tier). Empty `storeId`
+  keeps the shared default path — the main game's store location is unchanged. A mod that still fails
+  to rehydrate is now quietly skipped with a single warning (no error-level stack trace) while the
+  remaining mods keep loading.
+
 ### Changed
 
 - Output-token policy: never cap LLM output tightly — every default/live-call `max_tokens` budget is

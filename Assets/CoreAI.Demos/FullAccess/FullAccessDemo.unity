@@ -889,6 +889,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: full-access-demo
 --- !u!1 &471225850
 GameObject:
   m_ObjectHideFlags: 0

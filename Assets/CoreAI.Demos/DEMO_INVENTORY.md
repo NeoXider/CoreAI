@@ -16,6 +16,8 @@ status/slot overlay that explains what is happening). Every demo also has a fold
 **Mods/Lua** = the demo loads or persists Lua mods and therefore depends on the mod runtime; these are
 the demos that need the isolated per-demo mod-store fix (they currently share `FileLuaModStore`, so mods
 saved in one demo leak into another).
+FIXED: every mods-enabled demo scene now sets a distinct `storeId` on its `CoreAiModsLifetimeScope`, so
+its persisted mods live in an isolated store subdirectory and never rehydrate in another demo.
 
 ---
 
@@ -73,9 +75,10 @@ saved in one demo leak into another).
   rest (Skills, both Qwen, WorldCommands, FullAccess, ModdableUnits, `_mainCoreAI`) are IMGUI-only. Every
   IMGUI file here is on the `ImguiBanRatchetEditModeTests` whitelist — the DemoPanel redesign is the path
   to deleting those whitelist entries.
-- **Isolated mod-store fix needed** (shared `FileLuaModStore` today): Live Mechanics, both LiveMechanicsMods
-  scenes, MiniRpg, Full Access, Moddable Units, Lua Mods, and the Hub Mods page. Persisted mod sources from
-  one demo currently surface in the others.
+- **Isolated mod-store fix — DONE**: Live Mechanics, both LiveMechanicsMods scenes, MiniRpg, Full Access,
+  Moddable Units, Lua Mods, and the Hub scene (hosting the Hub Mods page) each set a distinct
+  `CoreAiModsLifetimeScope.storeId`, so persisted mod sources no longer surface across demos; an empty
+  `storeId` (the main-game default) keeps the original shared location.
 - **Moddable Units** is aspirational — its `forge_*` bindings compile but are not surfaced to running mods;
   it should stay P4 until `TODO(moddableunits-binding-seam)` is threaded through the mods installer.
 - **DirectorAi** and **WebGlLuaSelfTest** ship as scripts only and need a host scene before they can be

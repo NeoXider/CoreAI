@@ -542,6 +542,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: moddable-units-demo
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0

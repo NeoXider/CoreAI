@@ -316,6 +316,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: mini-rpg-demo
 --- !u!1 &504376627
 GameObject:
   m_ObjectHideFlags: 0

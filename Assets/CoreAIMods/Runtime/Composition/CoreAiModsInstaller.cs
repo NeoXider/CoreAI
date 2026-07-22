@@ -38,12 +38,20 @@ namespace CoreAI.Composition
         /// When true, Full-tier Lua reflection may access non-public members. Off by default.
         /// </param>
         /// <param name="fullLuaBlacklistPolicy">Optional deny-list applied to Full-tier reflection.</param>
+        /// <param name="modStoreId">
+        /// Optional namespace for the default file-backed mod stores. Empty (the default) keeps the
+        /// shared store location the main game uses today; non-empty isolates this composition's
+        /// persisted mods under its own subdirectory so compositions with different capability tiers
+        /// (e.g. demo scenes) never rehydrate each other's mods. Ignored when the host registers its
+        /// own <see cref="ILuaModStore"/>/<see cref="ILuaModSourceStore"/>.
+        /// </param>
         public static void RegisterCoreAiMods(
             this IContainerBuilder builder,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
             bool enableFullLuaAccess = false,
             bool enableFullLuaPrivateAccess = false,
-            IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null)
+            IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null,
+            string modStoreId = null)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -59,8 +67,9 @@ namespace CoreAI.Composition
 
             // Persistent stores so mods survive a restart and export/import works. ResolveOrDefault in the
             // factory means a host that wires its own store wins; otherwise these file-backed defaults apply.
-            builder.Register(_ => new FileLuaModStore(), Lifetime.Singleton).As<ILuaModStore>();
-            builder.Register(_ => new FileLuaModSourceStore(), Lifetime.Singleton).As<ILuaModSourceStore>();
+            builder.Register(_ => new FileLuaModStore(storeId: modStoreId), Lifetime.Singleton).As<ILuaModStore>();
+            builder.Register(_ => new FileLuaModSourceStore(storeId: modStoreId), Lifetime.Singleton)
+                .As<ILuaModSourceStore>();
 
             // Mods shipped with the build: Resources/CoreAIMods/*.lua are seeded into the store on startup
             // (before rehydrate) so a game can ship with a ready-made set of mods. Hosts register additional

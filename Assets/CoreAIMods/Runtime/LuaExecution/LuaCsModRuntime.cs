@@ -1691,7 +1691,11 @@ namespace CoreAI.Ai.LuaCs
                 }
                 catch (Exception ex)
                 {
-                    _log?.Error($"[LuaCsModRuntime] Rehydrate of mod '{modId}' failed: {ex}");
+                    // WHY: quiet skip, not an error — a persisted mod may target a capability tier this
+                    // composition does not grant (e.g. a Full-tier demo's mod rehydrating under Read).
+                    // One short warning per mod, no stack trace; the mod stays unloaded until the store
+                    // entry is fixed or forgotten, and the remaining mods keep loading.
+                    _log?.Warn($"[LuaCsModRuntime] Rehydrate skipped mod '{modId}': {ex.Message}");
                 }
             }
 

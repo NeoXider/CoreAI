@@ -93,6 +93,55 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void FileLuaModStore_DifferentStoreIds_IsolateSameModId()
+        {
+            FileLuaModStore storeA = new(_root, storeId: "demo-a");
+            FileLuaModStore storeB = new(_root, storeId: "demo-b");
+            try
+            {
+                storeA.Set("mod", "key", "from-a");
+
+                Assert.AreEqual("", storeB.Get("mod", "key"),
+                    "A value saved under one store id must be invisible to another store id.");
+                Assert.AreEqual("from-a", storeA.Get("mod", "key"));
+
+                storeB.Set("mod", "key", "from-b");
+                Assert.AreEqual("from-a", storeA.Get("mod", "key"),
+                    "A write under one store id must not leak into another store id.");
+
+                string dirA = Path.Combine(_root, "Stores", "demo-a");
+                string dirB = Path.Combine(_root, "Stores", "demo-b");
+                Assert.AreEqual(1, Directory.GetFiles(dirA, "*.json").Length,
+                    "Each store id must persist its files in its own subdirectory.");
+                Assert.AreEqual(1, Directory.GetFiles(dirB, "*.json").Length);
+            }
+            finally
+            {
+                storeA.Dispose();
+                storeB.Dispose();
+            }
+        }
+
+        [Test]
+        public void FileLuaModStore_EmptyStoreId_KeepsSharedRootPath()
+        {
+            FileLuaModStore defaulted = new(_root, storeId: "");
+            try
+            {
+                defaulted.Set("mod", "key", "value");
+
+                Assert.AreEqual(1, Directory.GetFiles(_root, "*.json").Length,
+                    "An empty store id must keep today's shared root path unchanged.");
+                Assert.AreEqual("value", _store.Get("mod", "key"),
+                    "An id-less store must read what another id-less store on the same root wrote.");
+            }
+            finally
+            {
+                defaulted.Dispose();
+            }
+        }
+
+        [Test]
         public void DisposedStore_LateHandlerCalls_AreSilentNoOps()
         {
             // Regression: mod handlers are driven by a per-frame tick that can fire once more while the

@@ -45,6 +45,13 @@ namespace CoreAI.Composition
         [SerializeField]
         private Mods.Rbx.Binding.RobloxWorldHost robloxWorldHost;
 
+        [Header("Mod store")]
+        [Tooltip("Optional namespace for this composition's persisted mods. Empty = the shared default " +
+                 "store (main game). Set a distinct id per demo/scene so mods saved by one composition " +
+                 "never rehydrate in another with a different Lua tier.")]
+        [SerializeField]
+        private string storeId;
+
         // WHY: Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
         // overriding FindParent to return the parent directly would bypass the deferral and NRE when this
@@ -70,7 +77,8 @@ namespace CoreAI.Composition
                 scenes,
                 enableFullLuaAccess,
                 enableFullLuaPrivateAccess,
-                blacklistPolicy as IFullLuaAccessBlacklistPolicy);
+                blacklistPolicy as IFullLuaAccessBlacklistPolicy,
+                storeId);
         }
     }
 }

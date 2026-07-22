@@ -171,6 +171,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  storeId: hub-demo
 --- !u!1 &439269026
 GameObject:
   m_ObjectHideFlags: 0

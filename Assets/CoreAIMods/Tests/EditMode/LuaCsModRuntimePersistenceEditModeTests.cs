@@ -126,6 +126,31 @@ namespace CoreAI.Tests.EditMode
             return new LuaCsModRuntime(sourceStore: store);
         }
 
+        /// <summary>In-memory <see cref="CoreAI.Logging.ILog"/> capturing per-level messages for assertions.</summary>
+        private sealed class FakeLog : CoreAI.Logging.ILog
+        {
+            public readonly List<string> Warnings = new();
+            public readonly List<string> Errors = new();
+
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                Warnings.Add(message);
+            }
+
+            public void Error(string message, string tag = null)
+            {
+                Errors.Add(message);
+            }
+        }
+
         // ==================== Source-store persistence ====================
 
         [Test]
@@ -169,6 +194,47 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, loaded, "Only the active mod must be rehydrated.");
             Assert.IsTrue(runtime.IsLoaded("active"));
             Assert.IsFalse(runtime.IsLoaded("dormant"), "A dormant mod must not auto-load.");
+        }
+
+        [Test]
+        public void LuaCs_RehydrateFromStore_FailingMod_IsQuietlySkipped_OthersStillLoad()
+        {
+            // Regression: a persisted mod that fails to load (e.g. saved by a composition with a wider
+            // Lua tier) used to log a full error + stack trace; it must instead be skipped with a single
+            // warning while the remaining mods rehydrate normally.
+            FakeSourceStore store = new();
+            store.Save("broken", "error('boom')", new LuaModManifest
+            {
+                Id = "broken",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = true
+            });
+            store.Save("healthy", "local x = 1", new LuaModManifest
+            {
+                Id = "healthy",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = true
+            });
+
+            FakeLog log = new();
+            LuaCsModRuntime runtime = new(sourceStore: store, log: log);
+            int loaded = runtime.RehydrateFromStore(LuaCapabilities.All);
+
+            Assert.AreEqual(1, loaded, "The healthy mod must still rehydrate despite the broken one.");
+            Assert.IsTrue(runtime.IsLoaded("healthy"));
+            Assert.IsFalse(runtime.IsLoaded("broken"), "The failing mod must stay unloaded.");
+
+            Assert.AreEqual(0, log.Errors.Count, "A rehydrate failure must not log at error level.");
+            int brokenWarnings = 0;
+            foreach (string warning in log.Warnings)
+            {
+                if (warning.Contains("broken"))
+                {
+                    brokenWarnings++;
+                }
+            }
+
+            Assert.AreEqual(1, brokenWarnings, "Exactly one warning must be logged for the failing mod.");
         }
 
         [Test]

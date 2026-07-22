@@ -102,12 +102,18 @@ namespace CoreAI.Infrastructure.Lua
         /// <see cref="Application.persistentDataPath"/>.
         /// </param>
         /// <param name="log">Optional logger.</param>
-        public FileLuaModStore(string rootDirectory = null, ILog log = null)
+        /// <param name="storeId">
+        /// Optional composition namespace. Empty keeps the shared default root (the main game's
+        /// store); non-empty isolates this store under a <c>Stores/&lt;id&gt;</c> subdirectory. See
+        /// <see cref="LuaModStoreId"/>.
+        /// </param>
+        public FileLuaModStore(string rootDirectory = null, ILog log = null, string storeId = null)
         {
-            _dir = !string.IsNullOrWhiteSpace(rootDirectory)
+            string baseDir = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
                 : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                     CoreAiPersistentPaths.LuaMods);
+            _dir = LuaModStoreId.ApplyTo(baseDir, storeId);
             _log = log;
         }
 

@@ -134,5 +134,39 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("local x = 1", source);
             Assert.AreEqual("mod", manifest.Id);
         }
+
+        [Test]
+        public void FileLuaModSourceStore_DifferentStoreIds_IsolateSameModId()
+        {
+            FileLuaModSourceStore storeA = new(_root, storeId: "demo-a");
+            FileLuaModSourceStore storeB = new(_root, storeId: "demo-b");
+
+            storeA.Save("mod", "local a = 1", Manifest("mod"));
+
+            Assert.IsFalse(storeB.TryLoad("mod", out _, out _),
+                "A package saved under one store id must be invisible to another store id.");
+            Assert.AreEqual(0, storeB.List().Count,
+                "List under an unused store id must not surface another id's packages.");
+            Assert.IsTrue(storeA.TryLoad("mod", out string source, out _));
+            Assert.AreEqual("local a = 1", source);
+
+            Assert.IsTrue(Directory.Exists(Path.Combine(_root, "Stores", "demo-a")),
+                "Each store id must persist its packages in its own subdirectory.");
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "Stores", "demo-b", "mod")));
+        }
+
+        [Test]
+        public void FileLuaModSourceStore_EmptyStoreId_KeepsSharedRootPath()
+        {
+            FileLuaModSourceStore defaulted = new(_root, storeId: null);
+
+            defaulted.Save("mod", "local x = 1", Manifest("mod"));
+
+            Assert.IsTrue(_store.TryLoad("mod", out string source, out _),
+                "An id-less store must read what another id-less store on the same root wrote.");
+            Assert.AreEqual("local x = 1", source);
+            Assert.IsTrue(Directory.Exists(Path.Combine(_root, "mod")),
+                "An empty store id must keep today's shared root layout unchanged.");
+        }
     }
 }

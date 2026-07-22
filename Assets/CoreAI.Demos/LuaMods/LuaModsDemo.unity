@@ -299,6 +299,7 @@ MonoBehaviour:
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
   robloxWorldHost: {fileID: 1463305900}
+  storeId: lua-mods-demo
 --- !u!1 &677593126
 GameObject:
   m_ObjectHideFlags: 0
