@@ -120,7 +120,7 @@ namespace CoreAI.Mcp.Server
             IObjectResolver resolver = ResolveContainer();
             if (resolver == null)
             {
-                Debug.LogWarning(
+                CoreAI.Logging.Log.Instance.Warn(
                     "[CoreAI MCP] No CoreAI LifetimeScope with a built container was found; server not started. " +
                     "Ensure a CoreAILifetimeScope (and CoreAiModsLifetimeScope) is present and built.");
                 return;
@@ -129,7 +129,7 @@ namespace CoreAI.Mcp.Server
             McpToolRegistry registry = BuildRegistry(resolver);
             if (registry.Count == 0)
             {
-                Debug.LogWarning(
+                CoreAI.Logging.Log.Instance.Warn(
                     "[CoreAI MCP] No MCP tools resolved from the composition; server not started.");
                 return;
             }
@@ -137,8 +137,8 @@ namespace CoreAI.Mcp.Server
             _sessions = new McpSessionStore();
             McpRpcDispatcher dispatcher = new(registry, _sessions, this);
             _server = new McpHttpServer(port, dispatcher,
-                m => Debug.Log($"[CoreAI MCP] {m}"),
-                e => Debug.LogWarning($"[CoreAI MCP] {e}"));
+                m => CoreAI.Logging.Log.Instance.Info($"[CoreAI MCP] {m}"),
+                e => CoreAI.Logging.Log.Instance.Warn($"[CoreAI MCP] {e}"));
 
             try
             {
@@ -150,7 +150,7 @@ namespace CoreAI.Mcp.Server
                 _server = null;
                 // WHY: HttpListener on Windows can need a URL ACL for a non-admin process; point the user
                 // at the fix instead of a bare stack trace.
-                Debug.LogError(
+                CoreAI.Logging.Log.Instance.Error(
                     $"[CoreAI MCP] Failed to start on port {port}: {ex.Message}. " +
                     $"If this is an access error on Windows, reserve the URL once as admin: " +
                     $"netsh http add urlacl url=http://127.0.0.1:{port}/mcp/ user=%USERNAME%");

@@ -63,8 +63,9 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (System.Exception ex)
                 {
-                    Debug.LogWarning(
-                        $"[ResourcesBundledModSource] Skipping bundled mod asset '{asset.name}': {ex.Message}");
+                    CoreAI.Logging.Log.Instance.Warn(
+                        $"[ResourcesBundledModSource] Skipping bundled mod asset '{asset.name}': {ex.Message}",
+                        CoreAI.Logging.LogTag.Lua);
                 }
             }
 

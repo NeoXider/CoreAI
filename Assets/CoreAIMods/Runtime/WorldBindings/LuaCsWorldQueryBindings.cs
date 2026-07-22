@@ -73,9 +73,10 @@ namespace CoreAI.Ai.LuaCs
                     rootObjects, searchPattern, MaxFindResults, MatchesPattern, results);
                 if (truncated)
                 {
-                    Debug.LogWarning(
+                    CoreAI.Logging.Log.Instance.Warn(
                         $"coreai_world_find: visited-node budget ({WorldQuerySceneWalker.MaxVisitedNodes}) " +
-                        "reached before the scene walk finished; results may be incomplete.");
+                        "reached before the scene walk finished; results may be incomplete.",
+                        CoreAI.Logging.LogTag.World);
                 }
 
                 return results;
