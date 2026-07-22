@@ -269,7 +269,9 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
                 UserTask = scenario.UserTask
             };
 
-            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(240) };
+            // WHY: reasoning models (qwen3.5-4b) burn minutes in reasoning_content before answering;
+            // 240s timed out on the first live run, so give a small local model real headroom.
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(600) };
 
             List<JObject> messages = new()
             {
@@ -372,7 +374,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
                 ["temperature"] = 0.1,
                 // WHY: qwen_qwen3.5-4b is a reasoning model — it spends tokens in reasoning_content
                 // before emitting the answer in content, so a small budget truncates the code block.
-                ["max_tokens"] = 4000,
+                ["max_tokens"] = 8000,
                 ["stream"] = false,
                 ["messages"] = new JArray(messages)
             };

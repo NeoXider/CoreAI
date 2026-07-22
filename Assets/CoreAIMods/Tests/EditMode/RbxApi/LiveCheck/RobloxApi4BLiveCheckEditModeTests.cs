@@ -22,6 +22,10 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
     [TestFixture]
     [Category("LiveLlm")]
     [Explicit("Live LM Studio 4B check — run manually; requires a local OpenAI-compatible endpoint.")]
+    // WHY: NUnit's default 180s per-test timeout killed all three scenarios before the reasoning
+    // model answered — a 4B reasoning model can burn several minutes in reasoning_content per call,
+    // and a scenario is up to two calls. 30 min covers 2 x 600s HTTP timeouts plus execution.
+    [Timeout(1_800_000)]
     public sealed class RobloxApi4BLiveCheckEditModeTests
     {
         private SynchronizationContext _savedContext;
