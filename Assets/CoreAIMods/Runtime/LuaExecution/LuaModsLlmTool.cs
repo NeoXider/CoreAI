@@ -85,6 +85,8 @@ namespace CoreAI.Ai
             "Each load/reload records a new revision; use versions then revert to undo a bad edit. " +
             "A hook or timer that starts throwing at runtime is reported via diagnostics (not as an error on the " +
             "call that loaded it) - poll diagnostics, fix the mod, and reload it. " +
+            "A mod that keeps failing is QUARANTINED, never auto-unloaded: it stays in list (quarantined=true) " +
+            "with its handlers/timers suspended, and a successful reload clears the quarantine and resumes it. " +
             "Use get_source before reload to edit existing behavior. " +
             "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
             "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end. " +
@@ -194,8 +196,14 @@ namespace CoreAI.Ai
         {
             IReadOnlyList<LuaModInfo> mods = _runtime.ListMods();
             List<object> items = new(mods.Count);
+            int quarantined = 0;
             foreach (LuaModInfo mod in mods)
             {
+                if (mod.Quarantined)
+                {
+                    quarantined++;
+                }
+
                 items.Add(new
                 {
                     id = mod.Id,
@@ -203,12 +211,17 @@ namespace CoreAI.Ai
                     handlers = mod.HandlerCount,
                     timers = mod.TimerCount,
                     errors = mod.ErrorCount,
+                    quarantined = mod.Quarantined,
                     log_reports = mod.LogReports,
                     loaded_at_utc = mod.LoadedAtUtc.ToString("O")
                 });
             }
 
-            return Ok($"{items.Count} mod(s) loaded.", items);
+            string message = quarantined == 0
+                ? $"{items.Count} mod(s) loaded."
+                : $"{items.Count} mod(s) loaded; {quarantined} quarantined (still loaded, dispatch suspended " +
+                  "after repeated errors - check diagnostics, fix the code, and reload to resume).";
+            return Ok(message, items);
         }
 
         private string GetSource(string modId)
@@ -398,7 +411,9 @@ namespace CoreAI.Ai
             string scope = string.IsNullOrWhiteSpace(modId) ? "all mods" : $"mod '{modId.Trim()}'";
             string message = total == 0
                 ? $"No recent runtime handler errors for {scope}."
-                : $"{total} recent runtime handler error(s) for {scope} (newest last). Fix the mod and reload it.";
+                : $"{total} recent runtime handler error(s) for {scope} (newest last). Fix the mod and reload it. " +
+                  "A mod past its error threshold is quarantined (still loaded, dispatch suspended) - " +
+                  "reload clears the quarantine.";
             return Ok(message, items);
         }
 

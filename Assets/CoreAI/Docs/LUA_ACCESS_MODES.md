@@ -91,7 +91,7 @@ file APIs that a host game exposes through components.
 - Lua chunks and mod handlers still run with the Lua-CSharp sandbox and instruction/time limits.
 - `CoreAiFullUnityLuaRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
   sandbox limits.
-- Mod error budget and auto-unload still apply to persistent mods.
+- Mod error budget still applies to persistent mods: repeated failures quarantine the mod (kept loaded, dispatch suspended; reload clears it).
 - `Allowed Scenes` on `CoreAiLuaWorldModule` constrains scene-loading commands.
 - **Runtime lifecycle is scope-bound.** The `DontDestroyOnLoad` `CoreAI_LuaModTicker` that drives
   `hooks_on`/`hooks_every` handlers is destroyed via the owning container's dispose callback, so mod

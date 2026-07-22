@@ -3,11 +3,28 @@ using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Logging;
 using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 using Newtonsoft.Json;
 
 namespace CoreAI.Ai.LuaCs
 {
+    /// <summary>
+    /// Why a mod instance's runtime side effects (logic-slot overrides, future instance registries /
+    /// signals) are being torn down. Carried by <see cref="LuaCsModRuntime.ModTearingDown"/>.
+    /// </summary>
+    public enum LuaModTeardownReason
+    {
+        /// <summary>The mod is being removed from the runtime (<see cref="LuaCsModRuntime.UnloadMod"/>).</summary>
+        Unload,
+
+        /// <summary>The mod is being replaced by a new instance (<see cref="LuaCsModRuntime.ReloadMod"/>); fired before the swap.</summary>
+        Reload,
+
+        /// <summary>The mod hit its consecutive-error threshold and enters quarantine (kept loaded, dispatch suspended).</summary>
+        Quarantine
+    }
+
     /// <summary>
     /// Lua-CSharp (nuskey8/Lua-CSharp) persistent runtime for long-lived mods. This is the ADDITIVE
     /// counterpart of the MoonSharp <c>CoreAI.Ai.LuaModRuntime</c>, built as part of the
@@ -26,9 +43,15 @@ namespace CoreAI.Ai.LuaCs
     /// <item><c>mods_export/mods_get/mods_call/mods_list_exports</c> — cross-mod, plain-data-copied surface.</item>
     /// </list>
     /// The host calls <see cref="Tick"/> once per frame; every handler/timer call runs under a
-    /// per-call instruction/time guard (<see cref="LuaCsExecutionGuard"/>), and a mod failing
-    /// <see cref="MaxErrorsBeforeUnload"/> times in a row (the counter resets on a successful call)
-    /// is unloaded automatically.
+    /// per-call instruction/time guard (<see cref="LuaCsExecutionGuard"/>).
+    ///
+    /// ERROR POLICY — QUARANTINE, NOT UNLOAD: a mod failing <see cref="MaxErrorsBeforeQuarantine"/>
+    /// times in a row (the counter resets on a successful call) is QUARANTINED: it stops dispatching
+    /// (handlers, timers, and queued events are all skipped and its logic-slot overrides revert to
+    /// vanilla) but it STAYS loaded and fully addressable — <c>manage_mods list/get_source/diagnostics</c>
+    /// keep seeing it and <see cref="ReloadMod"/> works normally, clearing the quarantine and the error
+    /// streak. This keeps the async repair loop honest: an LLM repair that takes seconds or minutes
+    /// still finds the mod it was asked to fix instead of a "not loaded" error after an auto-unload.
     ///
     /// SCOPE NOTE (migration pass 1): the heavy world/unity gameplay bindings that the MoonSharp
     /// runtime injects via <c>IGameLuaRuntimeBindings.RegisterGameplayApis(LuaApiRegistry)</c> are
@@ -62,7 +85,13 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public const int DefaultMaxEventsDispatchedPerTickGlobal = 256;
 
-        public const int MaxErrorsBeforeUnload = 8;
+        /// <summary>
+        /// Default consecutive-error streak (reset by any successful call) at which a mod is
+        /// quarantined — suspended from dispatch but kept loaded so it can be inspected and repaired
+        /// via <see cref="ReloadMod"/>. Overridable per runtime via the constructor /
+        /// <c>LuaCsModStackOptions.MaxErrorsBeforeQuarantine</c>.
+        /// </summary>
+        public const int DefaultMaxErrorsBeforeQuarantine = 8;
 
         /// <summary>Maximum values/functions one mod may publish via <c>mods_export</c>.</summary>
         public const int DefaultMaxExportsPerMod = 64;
@@ -105,30 +134,39 @@ namespace CoreAI.Ai.LuaCs
         {
             public double IntervalSeconds;
             public double DueIn;
-            public LuaFunction Fn;
+            public object Fn;
         }
 
         private sealed class Mod
         {
             public string Id = "";
-            public LuaState State;
+            public IScriptState State;
             public string Source = "";
             public LuaCapabilities Caps;
             public bool LogReports;
-            public readonly Dictionary<string, List<LuaFunction>> Handlers = new(StringComparer.Ordinal);
+            public readonly Dictionary<string, List<object>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
             public readonly Queue<KeyValuePair<string, string>> Pending = new();
-            public readonly Dictionary<string, LuaValue> Exports = new(StringComparer.Ordinal);
+            public readonly Dictionary<string, object> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;
             public DateTime LoadedAtUtc;
+
+            /// <summary>
+            /// True once the mod hit the consecutive-error threshold: it stays loaded and addressable
+            /// but is skipped by <see cref="Tick"/> (no handlers, timers, or queued events) until a
+            /// <see cref="ReloadMod"/> replaces it with a fresh, un-quarantined instance.
+            /// </summary>
+            public bool Quarantined;
         }
 
         private readonly object _gate = new();
         private readonly Dictionary<string, Mod> _mods = new(StringComparer.Ordinal);
-        private readonly LuaCsSecureEnvironment _env = new();
-        private readonly LuaCsExecutionGuard _handlerGuard;
-        private readonly Action<LuaCsApiRegistry, LuaCapabilities> _gameplayBindings;
+        private readonly IScriptEngine _engine;
+        private readonly IValueMarshaller _marshaller;
+        private readonly IScriptExecutionGuard _handlerGuard;
+        private readonly Action<IScriptFunctionRegistry, LuaCapabilities, string> _gameplayBindings;
+        private readonly LuaCsLogicSlots _logicSlots;
         private readonly ILuaModStore _store;
         private readonly ILuaModSourceStore _sourceStore;
         private readonly ILuaScriptVersionStore _versionStore;
@@ -161,8 +199,25 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Raised after a mod source is successfully loaded or reloaded: (modId, source, caps).</summary>
         public event Action<string, string, LuaCapabilities> ModSourceLoaded;
 
-        /// <summary>Raised after a mod is unloaded, including automatic unloads after repeated errors: (modId, source, caps).</summary>
+        /// <summary>Raised after a mod is unloaded via <see cref="UnloadMod"/>/<see cref="ForgetMod"/>: (modId, source, caps). Repeated errors never unload — see <see cref="ModQuarantined"/>.</summary>
         public event Action<string, string, LuaCapabilities> ModSourceUnloaded;
+
+        /// <summary>
+        /// Raised when a mod hits <see cref="MaxErrorsBeforeQuarantine"/> consecutive errors and is
+        /// quarantined: (modId, consecutiveErrorCount). The mod stays loaded but stops dispatching
+        /// until it is reloaded; hosts drive their repair loop from this instead of an unload.
+        /// Subscribers are isolated: a throwing subscriber never skips the rest.
+        /// </summary>
+        public event Action<string, int> ModQuarantined;
+
+        /// <summary>
+        /// Raised whenever a mod instance's runtime side effects are being torn down — on
+        /// <see cref="UnloadMod"/>, on <see cref="ReloadMod"/> (before the new instance is swapped in),
+        /// and on quarantine entry: (modId, reason). Logic-slot overrides are already cleared by the
+        /// runtime itself; future subsystems (instance registries, signals) subscribe here to release
+        /// the mod's effects at the same point. Subscribers are isolated.
+        /// </summary>
+        public event Action<string, LuaModTeardownReason> ModTearingDown;
 
         /// <summary>
         /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>:
@@ -186,10 +241,20 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public static bool IsSupported => true;
 
+        /// <summary>
+        /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined.
+        /// Quarantine suspends dispatch (handlers, timers, queued events) and reverts the mod's
+        /// logic-slot overrides to vanilla, but the mod stays loaded; <see cref="ReloadMod"/> clears
+        /// both the quarantine and the streak.
+        /// </summary>
+        public int MaxErrorsBeforeQuarantine { get; }
+
         /// <param name="gameplayBindings">
         /// Optional seam for registering ported world/unity gameplay APIs on each mod's
-        /// <see cref="LuaCsApiRegistry"/>, scoped to the mod's granted <see cref="LuaCapabilities"/>.
-        /// Null = mods only get the built-in mod-core APIs. See <see cref="RegisterGameplayBindings"/>.
+        /// <see cref="LuaCsApiRegistry"/>, scoped to the mod's granted <see cref="LuaCapabilities"/>;
+        /// the third argument is the owning mod's id so ownership-tracked surfaces (logic slots) can
+        /// attribute what a mod registers. Null = mods only get the built-in mod-core APIs. See
+        /// <see cref="RegisterGameplayBindings"/>.
         /// </param>
         /// <param name="store">Optional persistent per-mod k/v store backing <c>store_set/get</c>.</param>
         /// <param name="log">Optional logger.</param>
@@ -223,7 +288,7 @@ namespace CoreAI.Ai.LuaCs
         /// <param name="handlerMaxAllocatedBytes">
         /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
         /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>) cuts the offending call and is charged to the
-        /// same consecutive-error streak as any failure (<see cref="MaxErrorsBeforeUnload"/>, reset on success).
+        /// same consecutive-error streak as any failure (<see cref="MaxErrorsBeforeQuarantine"/>, reset on success).
         /// This is a PER-CALL first-growth backstop, not a cross-call cumulative limiter: because
         /// GC.GetTotalMemory reports the committed-heap high-water mark, only the first oversized allocation
         /// trips — later calls reuse that committed space and no longer cross the budget — so a lone trip is
@@ -231,8 +296,18 @@ namespace CoreAI.Ai.LuaCs
         /// by the per-call step/time budgets instead. Defaults to
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </param>
+        /// <param name="maxErrorsBeforeQuarantine">
+        /// Consecutive-error streak (reset by any success) at which a mod is quarantined — dispatch
+        /// suspended, mod kept loaded and repairable. Defaults to
+        /// <see cref="DefaultMaxErrorsBeforeQuarantine"/>; clamped to at least 1.
+        /// </param>
+        /// <param name="logicSlots">
+        /// Optional shared logic-slot surface. When supplied, the runtime clears a mod's slot
+        /// overrides on unload/reload/quarantine (<see cref="ModTearingDown"/>) and records override
+        /// failures in the same diagnostics channel as handler errors, attributed to the owning mod.
+        /// </param>
         public LuaCsModRuntime(
-            Action<LuaCsApiRegistry, LuaCapabilities> gameplayBindings = null,
+            Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
             ILog log = null,
             int handlerTimeoutMs = DefaultHandlerTimeoutMs,
@@ -241,7 +316,10 @@ namespace CoreAI.Ai.LuaCs
             bool autoPersistMods = true,
             ILuaScriptVersionStore versionStore = null,
             ILuaTransactionScope transactionScope = null,
-            long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget)
+            long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
+            IScriptEngine engine = null,
+            int maxErrorsBeforeQuarantine = DefaultMaxErrorsBeforeQuarantine,
+            LuaCsLogicSlots logicSlots = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -250,7 +328,22 @@ namespace CoreAI.Ai.LuaCs
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
             _transactionScope = transactionScope;
-            _handlerGuard = new LuaCsExecutionGuard(handlerTimeoutMs, handlerMaxSteps, handlerMaxAllocatedBytes);
+            MaxErrorsBeforeQuarantine = Math.Max(1, maxErrorsBeforeQuarantine);
+            _logicSlots = logicSlots;
+            if (_logicSlots != null)
+            {
+                // WHY: A failing logic_define override is a MOD failure, not a host detail: routing it
+                // into the handler-error channel makes it visible to diagnostics/auto-repair instead of
+                // the old silent revert-to-vanilla.
+                _logicSlots.OverrideFailed += OnLogicSlotOverrideFailed;
+            }
+
+            // WHY: The factory is the composition root that wires the engine; the default here only keeps
+            // direct construction (tests, fixtures) working without an explicit engine.
+            _engine = engine ?? new LuaCsScriptEngine();
+            _marshaller = _engine.Marshaller;
+            _handlerGuard = _engine.CreateGuard(
+                new ExecutionBudget(handlerTimeoutMs, handlerMaxSteps, handlerMaxAllocatedBytes));
         }
 
         /// <summary>The <see cref="ILuaScriptVersionStore"/> key for a mod's revision history.</summary>
@@ -275,7 +368,8 @@ namespace CoreAI.Ai.LuaCs
                         TimerCount = mod.Timers.Count,
                         ErrorCount = mod.ErrorCount,
                         LogReports = mod.LogReports,
-                        LoadedAtUtc = mod.LoadedAtUtc
+                        LoadedAtUtc = mod.LoadedAtUtc,
+                        Quarantined = mod.Quarantined
                     });
                 }
             }
@@ -419,14 +513,15 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
 
-            LuaCsApiRegistry registry = new();
-            RegisterGameplayBindings(registry, capabilities);
+            IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
+            RegisterGameplayBindings(registry, capabilities, modId);
             RegisterModApis(registry, mod);
 
             // WHY: Create the state BEFORE running the chunk; the mod-core callbacks capture `mod` and read
             // mod.State (set here) only when they later run, so self-referential cross-mod calls made
             // during load resolve correctly.
-            mod.State = _env.Create(registry);
+            mod.State = _engine.CreateState();
+            registry.ApplyTo(mod.State);
 
             // WHY: Run the load chunk on its own transaction frame (mirroring the MoonSharp runtime's
             // per-run reset) so a transaction left open by a failing load is discarded with the frame and
@@ -435,7 +530,7 @@ namespace CoreAI.Ai.LuaCs
             PushTransactionScope();
             try
             {
-                _env.RunChunk(mod.State, luaCode);
+                _engine.RunChunk(mod.State, luaCode);
             }
             finally
             {
@@ -455,7 +550,8 @@ namespace CoreAI.Ai.LuaCs
         /// per-mod <see cref="LuaCsApiRegistry"/>, scoped to <paramref name="capabilities"/>. The
         /// callback is responsible for its own fail-closed capability trimming.
         /// </summary>
-        private void RegisterGameplayBindings(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        private void RegisterGameplayBindings(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId)
         {
             if (_gameplayBindings == null || capabilities == LuaCapabilities.None)
             {
@@ -463,7 +559,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             // TODO(migration): connect ported world/unity gameplay bindings here.
-            _gameplayBindings(registry, capabilities);
+            _gameplayBindings(registry, capabilities, ownerModId);
         }
 
         /// <summary>Unloads a mod and drops its handlers/timers/queued events.</summary>
@@ -484,6 +580,7 @@ namespace CoreAI.Ai.LuaCs
                 _mods.Remove(modId);
             }
 
+            TeardownModEffects(modId, LuaModTeardownReason.Unload);
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' unloaded.");
 
             // WHY: Keep the persisted package but mark it dormant so it does not auto-reload next start; the
@@ -507,7 +604,12 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Replaces a loaded mod with new code, keeping its capability tier. The new chunk is built and
-        /// run first; if it fails, the old mod stays loaded and untouched.
+        /// run first; if it fails, the old mod stays loaded and untouched (including its quarantine
+        /// state). On success the old instance's runtime effects are torn down before the swap
+        /// (<see cref="ModTearingDown"/> with <see cref="LuaModTeardownReason.Reload"/> — its logic-slot
+        /// overrides are cleared while the replacement chunk's own <c>logic_define</c> calls are kept),
+        /// and the replacement starts with a zero error streak and no quarantine, so reloading is THE
+        /// way to bring a quarantined mod back to life.
         /// </summary>
         public void ReloadMod(string id, string luaCode)
         {
@@ -529,6 +631,12 @@ namespace CoreAI.Ai.LuaCs
             }
 
             Mod replacement = BuildMod(modId, luaCode, caps);
+
+            // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
+            // are gone by the time the replacement is live — the old formula must never be invoked
+            // after the new load. The replacement's state is excluded: its load chunk already ran in
+            // BuildMod and may have re-defined slots, and those fresh defines must survive.
+            TeardownModEffects(modId, LuaModTeardownReason.Reload, replacement.State);
 
             lock (_gate)
             {
@@ -710,7 +818,17 @@ namespace CoreAI.Ai.LuaCs
                 _tickScratch.Clear();
                 foreach (Mod mod in _mods.Values)
                 {
-                    _tickScratch.Add(mod);
+                    // WHY: Quarantined mods stay loaded/addressable but must not run: no timers, no
+                    // handler dispatch, until a reload replaces them with a fresh instance.
+                    if (!mod.Quarantined)
+                    {
+                        _tickScratch.Add(mod);
+                    }
+                }
+
+                if (_tickScratch.Count == 0)
+                {
+                    return;
                 }
             }
 
@@ -748,13 +866,104 @@ namespace CoreAI.Ai.LuaCs
                     }
                 }
 
-                if (mod.ErrorCount >= MaxErrorsBeforeUnload)
+                QuarantineIfExhausted(mod);
+            }
+        }
+
+        /// <summary>
+        /// Quarantines a mod whose consecutive-error streak reached <see cref="MaxErrorsBeforeQuarantine"/>:
+        /// dispatch is suspended and its logic-slot overrides revert to vanilla, but the mod stays in the
+        /// registry so diagnostics still see it and <see cref="ReloadMod"/> can repair it at any time.
+        /// </summary>
+        private void QuarantineIfExhausted(Mod mod)
+        {
+            if (mod.Quarantined || mod.ErrorCount < MaxErrorsBeforeQuarantine)
+            {
+                return;
+            }
+
+            lock (_gate)
+            {
+                // WHY: `mod` comes from the tick snapshot and may be STALE: a repair's ReloadMod can land
+                // mid-tick (e.g. from a ModHandlerErrored subscriber) and swap the registry entry. Only
+                // the still-live instance may be quarantined — quarantining by id from the old object's
+                // error streak would suspend the freshly repaired mod.
+                if (!_mods.TryGetValue(mod.Id, out Mod live) || !ReferenceEquals(live, mod))
                 {
-                    UnloadMod(mod.Id);
-                    _log?.Warn(
-                        $"[LuaCsModRuntime] Mod '{mod.Id}' unloaded after {mod.ErrorCount} handler errors.");
+                    return;
+                }
+
+                mod.Quarantined = true;
+            }
+
+            _log?.Warn(
+                $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.ErrorCount} consecutive handler " +
+                "errors: dispatch suspended, mod kept loaded; reload it to clear the quarantine.");
+
+            TeardownModEffects(mod.Id, LuaModTeardownReason.Quarantine);
+            RaiseModQuarantined(mod.Id, mod.ErrorCount);
+        }
+
+        /// <summary>
+        /// Central teardown of one mod instance's runtime side effects, shared by unload, reload
+        /// (before the swap; <paramref name="keepState"/> excludes the replacement's fresh defines) and
+        /// quarantine entry: clears the mod's logic-slot overrides (fail back to the vanilla formula)
+        /// and raises <see cref="ModTearingDown"/> so future subsystems can release the mod's effects
+        /// at the same point. Best-effort: a failing slot surface must not break the lifecycle path.
+        /// </summary>
+        private void TeardownModEffects(string modId, LuaModTeardownReason reason, IScriptState keepState = null)
+        {
+            if (_logicSlots != null)
+            {
+                try
+                {
+                    int cleared = _logicSlots.ClearOwnedBy(modId, keepState);
+                    if (cleared > 0)
+                    {
+                        _log?.Info(
+                            $"[LuaCsModRuntime] Cleared {cleared} logic-slot override(s) of mod '{modId}' ({reason}).");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Clearing logic-slot overrides of '{modId}' failed: {ex}");
                 }
             }
+
+            RaiseModTearingDown(modId, reason);
+        }
+
+        /// <summary>
+        /// Routes a logic-slot override failure (already reset to vanilla by <see cref="LuaCsLogicSlots"/>)
+        /// into the mod's handler-error channel: it charges the owning mod's consecutive-error streak and
+        /// is recorded/raised like any hook failure, so <c>diagnostics</c>/auto-repair see WHICH mod's
+        /// formula broke instead of a silent revert.
+        /// </summary>
+        private void OnLogicSlotOverrideFailed(string ownerModId, string slot, string error)
+        {
+            string modId = Normalize(ownerModId);
+            if (modId.Length == 0)
+            {
+                return;
+            }
+
+            int streak;
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    mod.ErrorCount++;
+                    streak = mod.ErrorCount;
+                }
+                else
+                {
+                    streak = 1;
+                }
+            }
+
+            string message = $"logic slot '{slot}' override failed and was reset to vanilla: {error}";
+            RecordHandlerError(modId, message, streak);
+            RaiseModHandlerErrored(modId, message, streak);
         }
 
         private void TickTimers(Mod mod, double dt)
@@ -787,7 +996,7 @@ namespace CoreAI.Ai.LuaCs
             while (dispatched < limit)
             {
                 KeyValuePair<string, string> evt;
-                LuaFunction[] handlerSnapshot;
+                object[] handlerSnapshot;
                 lock (_gate)
                 {
                     if (mod.Pending.Count == 0)
@@ -800,9 +1009,9 @@ namespace CoreAI.Ai.LuaCs
                     // WHY: Snapshot the handler list under the gate: a dispatched handler may call hooks_on()
                     // for the same event, mutating mod.Handlers; enumerating the live list would then
                     // throw out of the (unguarded) tick.
-                    handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<LuaFunction> handlers)
+                    handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<object> handlers)
                         ? handlers.ToArray()
-                        : Array.Empty<LuaFunction>();
+                        : Array.Empty<object>();
 
                     // WHY: No-drop contract: only dequeue when the remaining budget can run every handler of
                     // this event. Exception: an event whose own handler count exceeds the whole budget
@@ -816,7 +1025,7 @@ namespace CoreAI.Ai.LuaCs
                     mod.Pending.Dequeue();
                 }
 
-                foreach (LuaFunction fn in handlerSnapshot)
+                foreach (object fn in handlerSnapshot)
                 {
                     InvokeGuarded(mod, fn, evt.Key, evt.Value);
                     dispatched++;
@@ -826,7 +1035,7 @@ namespace CoreAI.Ai.LuaCs
             return dispatched;
         }
 
-        private void InvokeGuarded(Mod mod, LuaFunction fn, params object[] args)
+        private void InvokeGuarded(Mod mod, object fn, params object[] args)
         {
             // WHY: Push an isolated transaction frame around this call (mirroring the MoonSharp runtime and
             // LuaCsGameToolExecutor) so a transaction opened inside one invocation is discarded with the
@@ -835,38 +1044,33 @@ namespace CoreAI.Ai.LuaCs
             PushTransactionScope();
             try
             {
-                LuaValue[] luaArgs = new LuaValue[args.Length];
-                for (int i = 0; i < args.Length; i++)
-                {
-                    luaArgs[i] = HostToLua(args[i]);
-                }
+                _handlerGuard.Invoke(mod.State, fn, CancellationToken.None, args);
 
-                _handlerGuard.Execute(mod.State, fn, CancellationToken.None, luaArgs);
-
-                // WHY: "MaxErrorsBeforeUnload failures in a row": a successful call forgives past errors, so
-                // rare sporadic failures over a long lifetime do not unload the mod.
+                // WHY: "MaxErrorsBeforeQuarantine failures in a row": a successful call forgives past
+                // errors, so rare sporadic failures over a long lifetime do not quarantine the mod.
                 mod.ErrorCount = 0;
             }
             catch (Exception ex)
             {
                 // WHY: An allocation-budget trip is charged to the same consecutive-error streak as any other
-                // failure — a success resets it, so a mod is only unloaded after MaxErrorsBeforeUnload failures
-                // IN A ROW. This is safe despite the budget reading the shared process heap (which can trip a
-                // blameless mod on unrelated growth) because a memory trip is effectively a ONCE-PER-LIFETIME
-                // event: GC.GetTotalMemory reports the COMMITTED heap high-water mark, so the FIRST oversized
-                // allocation grows the heap and trips, but every later call reuses that committed space and its
-                // per-call delta no longer crosses the budget (verified empirically — a mod bombing every tick
-                // trips ~once, not repeatedly, even with a forced GC between calls). So a lone noise trip is
-                // forgiven by the next success and never unloads a healthy mod, while the per-call step/time
-                // budgets — not this streak — are what bound a mod that keeps allocating within the committed
-                // envelope. Classified by TYPE (see IsMemoryBudgetTrip) for the log label only; a mod cannot
-                // forge the marker in its own error text to change how it is charged (all failures charge alike).
-                bool memoryTrip = LuaCsExecutionGuard.IsMemoryBudgetTrip(ex);
+                // failure — a success resets it, so a mod is only quarantined after MaxErrorsBeforeQuarantine
+                // failures IN A ROW. This is safe despite the budget reading the shared process heap (which can
+                // trip a blameless mod on unrelated growth) because a memory trip is effectively a
+                // ONCE-PER-LIFETIME event: GC.GetTotalMemory reports the COMMITTED heap high-water mark, so the
+                // FIRST oversized allocation grows the heap and trips, but every later call reuses that committed
+                // space and its per-call delta no longer crosses the budget (verified empirically — a mod bombing
+                // every tick trips ~once, not repeatedly, even with a forced GC between calls). So a lone noise
+                // trip is forgiven by the next success and never quarantines a healthy mod, while the per-call
+                // step/time budgets — not this streak — are what bound a mod that keeps allocating within the
+                // committed envelope. Classified by TYPE (see IsMemoryBudgetTrip) for the log label only; a mod
+                // cannot forge the marker in its own error text to change how it is charged (all failures charge
+                // alike).
+                bool memoryTrip = ScriptExecutionErrors.IsMemoryBudgetTrip(ex);
                 mod.ErrorCount++;
 
                 _log?.Error(
                     $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed " +
-                    $"({(memoryTrip ? "memory-budget trip" : "error")} {mod.ErrorCount}/{MaxErrorsBeforeUnload}): {ex}");
+                    $"({(memoryTrip ? "memory-budget trip" : "error")} {mod.ErrorCount}/{MaxErrorsBeforeQuarantine}): {ex}");
 
                 string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
                 if (message.Length == 0)
@@ -978,6 +1182,48 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        private void RaiseModQuarantined(string modId, int errorCount)
+        {
+            Action<string, int> handler = ModQuarantined;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, int> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, errorCount);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] [subscriber] ModQuarantined handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
+        private void RaiseModTearingDown(string modId, LuaModTeardownReason reason)
+        {
+            Action<string, LuaModTeardownReason> handler = ModTearingDown;
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, LuaModTeardownReason> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(modId, reason);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] [subscriber] ModTearingDown handler for '{modId}' threw: {ex}");
+                }
+            }
+        }
+
         private void RaiseModHandlerErrored(string modId, string message, int consecutiveErrorCount)
         {
             Action<string, string, int> handler = ModHandlerErrored;
@@ -1041,14 +1287,14 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private void RegisterModApis(LuaCsApiRegistry registry, Mod mod)
+        private void RegisterModApis(IScriptFunctionRegistry registry, Mod mod)
         {
             registry.Register("mod_id", new Func<string>(() => mod.Id));
 
-            registry.Register("hooks_on", new Func<string, LuaValue, bool>((evt, fnValue) =>
+            registry.RegisterVarArgs("hooks_on", call =>
             {
-                string name = Normalize(evt);
-                LuaFunction fn = ReadFunction(fnValue);
+                string name = Normalize(call.GetString(0));
+                object fn = ReadFunction(call, 1);
                 if (name.Length == 0 || fn == null)
                 {
                     throw new ArgumentException("hooks_on: event name and function are required.");
@@ -1072,7 +1318,7 @@ namespace CoreAI.Ai.LuaCs
                         DueIn = MinTimerIntervalSeconds,
                         Fn = fn
                     });
-                    return true;
+                    return ScriptCallResult.Return(true);
                 }
 
                 if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
@@ -1081,20 +1327,21 @@ namespace CoreAI.Ai.LuaCs
                         $"hooks_on: handler limit reached ({DefaultMaxHandlersPerMod}).");
                 }
 
-                if (!mod.Handlers.TryGetValue(name, out List<LuaFunction> list))
+                if (!mod.Handlers.TryGetValue(name, out List<object> list))
                 {
-                    list = new List<LuaFunction>();
+                    list = new List<object>();
                     mod.Handlers[name] = list;
                 }
 
                 list.Add(fn);
                 mod.HandlerCount++;
-                return true;
-            }));
+                return ScriptCallResult.Return(true);
+            });
 
-            registry.Register("hooks_every", new Func<double, LuaValue, bool>((seconds, fnValue) =>
+            registry.RegisterVarArgs("hooks_every", call =>
             {
-                LuaFunction fn = ReadFunction(fnValue);
+                double seconds = call.GetNumber(0);
+                object fn = ReadFunction(call, 1);
                 if (fn == null || double.IsNaN(seconds) || double.IsInfinity(seconds) ||
                     seconds < MinTimerIntervalSeconds)
                 {
@@ -1109,8 +1356,8 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 mod.Timers.Add(new TimerEntry { IntervalSeconds = seconds, DueIn = seconds, Fn = fn });
-                return true;
-            }));
+                return ScriptCallResult.Return(true);
+            });
 
             registry.Register("events_emit", new Func<string, string, bool>((evt, payload) =>
             {
@@ -1124,14 +1371,15 @@ namespace CoreAI.Ai.LuaCs
                 return true;
             }));
 
-            registry.Register("mods_export", new Action<string, LuaValue>((name, value) =>
+            registry.RegisterVarArgs("mods_export", call =>
             {
-                string exportName = Normalize(name);
+                string exportName = Normalize(call.GetString(0));
                 if (exportName.Length == 0)
                 {
                     throw new ArgumentException("mods_export: name is required.");
                 }
 
+                object value = call.GetArgument(1);
                 lock (_gate)
                 {
                     if (!mod.Exports.ContainsKey(exportName) && mod.Exports.Count >= DefaultMaxExportsPerMod)
@@ -1142,12 +1390,16 @@ namespace CoreAI.Ai.LuaCs
 
                     mod.Exports[exportName] = value;
                 }
-            }));
 
-            registry.Register("mods_get", new Func<string, string, LuaValue>((targetId, name) =>
+                return ScriptCallResult.Return(new object[] { null });
+            });
+
+            registry.RegisterVarArgs("mods_get", call =>
             {
-                LuaValue export = FindExport(targetId, name, out Mod _);
-                if (export.Type == LuaValueType.Function)
+                string targetId = call.GetString(0);
+                string name = call.GetString(1);
+                object export = FindExport(targetId, name, out Mod _);
+                if (_marshaller.GetKind(export) == ScriptValueKind.Function)
                 {
                     throw new ArgumentException(
                         $"mods_get: '{Normalize(name)}' of mod '{Normalize(targetId)}' is a function - use mods_call.");
@@ -1156,17 +1408,16 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: Marshal by value: cross-mod reads copy plain data only (no functions/closures/live
                 // refs), so no mod can mutate another's state behind its back — the multiplayer-
                 // determinism rule.
-                return FromPortable(ToPortable(export, CrossModTableDepth));
-            }));
+                return ScriptCallResult.Return(
+                    _marshaller.FromPortable(_marshaller.ToPortable(export, CrossModTableDepth)));
+            });
 
-            // WHY: Varargs need the raw execution context: a typed LuaValue[] parameter cannot express
-            // "the third and subsequent Lua arguments".
-            registry.RegisterCallback("mods_call", (ctx, ct) =>
+            registry.RegisterVarArgs("mods_call", call =>
             {
-                string targetId = ctx.HasArgument(0) ? ctx.GetArgument(0).Read<string>() : null;
-                string name = ctx.HasArgument(1) ? ctx.GetArgument(1).Read<string>() : null;
-                LuaValue export = FindExport(targetId, name, out Mod target);
-                if (export.Type != LuaValueType.Function)
+                string targetId = call.GetString(0);
+                string name = call.GetString(1);
+                object export = FindExport(targetId, name, out Mod target);
+                if (_marshaller.GetKind(export) != ScriptValueKind.Function)
                 {
                     throw new ArgumentException(
                         $"mods_call: '{Normalize(name)}' of mod '{Normalize(targetId)}' is not a function - use mods_get.");
@@ -1178,18 +1429,18 @@ namespace CoreAI.Ai.LuaCs
                         $"mods_call: cross-mod call depth limit reached ({MaxCrossCallDepth}) - break the cycle.");
                 }
 
-                int extra = Math.Max(0, ctx.ArgumentCount - 2);
-                LuaValue[] marshalled = new LuaValue[extra];
+                int extra = Math.Max(0, call.ArgumentCount - 2);
+                object[] marshalled = new object[extra];
                 for (int i = 0; i < extra; i++)
                 {
                     // WHY: Copy caller args into plain data, then rebuild them for the callee's state.
-                    marshalled[i] = FromPortable(ToPortable(ctx.GetArgument(i + 2), CrossModTableDepth));
+                    marshalled[i] = _marshaller.FromPortable(
+                        _marshaller.ToPortable(call.GetArgument(i + 2), CrossModTableDepth));
                 }
 
-                LuaFunction exportFn = export.Read<LuaFunction>();
                 _crossCallDepth++;
 
-                // WHY: The callee runs on a DIFFERENT LuaState but shares this runtime's single world
+                // WHY: The callee runs on a DIFFERENT state but shares this runtime's single world
                 // binding instance. Push an isolated transaction frame so the callee's
                 // coreai_world_begin/commit operate on their OWN frame and cannot flush or clear the
                 // caller's still-open transaction (the buffer-corruption bug); popped in finally so a
@@ -1197,13 +1448,13 @@ namespace CoreAI.Ai.LuaCs
                 PushTransactionScope();
                 try
                 {
-                    LuaValue[] results =
-                        _handlerGuard.Execute(target.State, exportFn, CancellationToken.None, marshalled);
-                    LuaValue first = results.Length > 0 ? results[0] : LuaValue.Nil;
+                    object[] results =
+                        _handlerGuard.Invoke(target.State, export, CancellationToken.None, marshalled);
+                    object first = results.Length > 0 ? results[0] : null;
 
                     // WHY: Marshal the result back into the caller's state by value.
-                    return new System.Threading.Tasks.ValueTask<int>(
-                        ctx.Return(FromPortable(ToPortable(first, CrossModTableDepth))));
+                    return ScriptCallResult.Return(
+                        _marshaller.FromPortable(_marshaller.ToPortable(first, CrossModTableDepth)));
                 }
                 finally
                 {
@@ -1260,12 +1511,12 @@ namespace CoreAI.Ai.LuaCs
 
             // WHY: print() inside a mod behaves like report(): same event pipeline, same LogReports mute,
             // same report buffer. Overrides the basic library's print on this mod's environment.
-            registry.RegisterCallback("print", (ctx, ct) =>
+            registry.RegisterVarArgs("print", call =>
             {
-                string[] parts = new string[ctx.ArgumentCount];
-                for (int i = 0; i < ctx.ArgumentCount; i++)
+                string[] parts = new string[call.ArgumentCount];
+                for (int i = 0; i < call.ArgumentCount; i++)
                 {
-                    parts[i] = ctx.GetArgument(i).ToString();
+                    parts[i] = call.DescribeArgument(i);
                 }
 
                 string text = string.Join("\t", parts);
@@ -1276,12 +1527,12 @@ namespace CoreAI.Ai.LuaCs
                     RaiseModReportEmitted(mod.Id, text);
                 }
 
-                return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+                return ScriptCallResult.Empty;
             });
         }
 
         /// <summary>Resolves a mod's export or throws a descriptive error naming what is missing.</summary>
-        private LuaValue FindExport(string targetId, string name, out Mod target)
+        private object FindExport(string targetId, string name, out Mod target)
         {
             string modId = Normalize(targetId);
             string exportName = Normalize(name);
@@ -1292,7 +1543,7 @@ namespace CoreAI.Ai.LuaCs
                     throw new ArgumentException($"mod '{modId}' is not loaded.");
                 }
 
-                if (!target.Exports.TryGetValue(exportName, out LuaValue export))
+                if (!target.Exports.TryGetValue(exportName, out object export))
                 {
                     throw new ArgumentException(
                         $"mod '{modId}' has no export '{exportName}' (mods_list_exports lists available names).");
@@ -1302,101 +1553,10 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        /// <summary>Reads a Lua-CSharp function value, or null when the value is not a function.</summary>
-        private static LuaFunction ReadFunction(LuaValue value)
+        /// <summary>Reads a function-valued argument, or null when the argument is not a function.</summary>
+        private static object ReadFunction(ScriptCallContext call, int index)
         {
-            return value.Type == LuaValueType.Function ? value.Read<LuaFunction>() : null;
-        }
-
-        private static LuaValue HostToLua(object arg)
-        {
-            switch (arg)
-            {
-                case null:
-                    return LuaValue.Nil;
-                case string s:
-                    return new LuaValue(s);
-                case bool b:
-                    return new LuaValue(b);
-                case double d:
-                    return new LuaValue(d);
-                case int i:
-                    return new LuaValue((double)i);
-                case long l:
-                    return new LuaValue((double)l);
-                case float f:
-                    return new LuaValue((double)f);
-                default:
-                    return LuaValue.FromObject(arg);
-            }
-        }
-
-        /// <summary>
-        /// Converts a Lua value to a state-independent representation: nil/boolean/number/string plus
-        /// tables up to <paramref name="depth"/> levels. Cross-mod reads/calls marshal BY VALUE so no
-        /// mod can mutate another's live state and no function/closure/live ref crosses the boundary.
-        /// </summary>
-        private static object ToPortable(LuaValue value, int depth)
-        {
-            switch (value.Type)
-            {
-                case LuaValueType.Nil:
-                    return null;
-                case LuaValueType.Boolean:
-                    return value.Read<bool>();
-                case LuaValueType.Number:
-                    return value.Read<double>();
-                case LuaValueType.String:
-                    return value.Read<string>();
-                case LuaValueType.Table:
-                    if (depth <= 0)
-                    {
-                        throw new ArgumentException(
-                            $"cross-mod tables may nest at most {CrossModTableDepth} levels.");
-                    }
-
-                    LuaTable table = value.Read<LuaTable>();
-                    List<KeyValuePair<object, object>> pairs = new();
-                    foreach (KeyValuePair<LuaValue, LuaValue> pair in table)
-                    {
-                        pairs.Add(new KeyValuePair<object, object>(
-                            ToPortable(pair.Key, depth - 1),
-                            ToPortable(pair.Value, depth - 1)));
-                    }
-
-                    return pairs;
-                default:
-                    throw new ArgumentException(
-                        $"cross-mod values must be nil/boolean/number/string/table (got {value.Type}).");
-            }
-        }
-
-        /// <summary>Rebuilds a <see cref="ToPortable"/> value as a fresh Lua-CSharp value (new tables).</summary>
-        private static LuaValue FromPortable(object value)
-        {
-            switch (value)
-            {
-                case null:
-                    return LuaValue.Nil;
-                case bool b:
-                    return new LuaValue(b);
-                case double d:
-                    return new LuaValue(d);
-                case string s:
-                    return new LuaValue(s);
-                case List<KeyValuePair<object, object>> pairs:
-                {
-                    LuaTable table = new();
-                    foreach (KeyValuePair<object, object> pair in pairs)
-                    {
-                        table[FromPortable(pair.Key)] = FromPortable(pair.Value);
-                    }
-
-                    return new LuaValue(table);
-                }
-                default:
-                    return LuaValue.Nil;
-            }
+            return call.GetKind(index) == ScriptValueKind.Function ? call.GetArgument(index) : null;
         }
 
         private void EmitFromMod(Mod sender, string evt, string payload)
@@ -1418,6 +1578,13 @@ namespace CoreAI.Ai.LuaCs
 
         private void EnqueueLocked(Mod mod, string evt, string payload)
         {
+            // WHY: Quarantine suspends the whole dispatch surface; queueing into a mod that will never
+            // dispatch again (a reload swaps in a fresh instance with a fresh queue) is pure waste.
+            if (mod.Quarantined)
+            {
+                return;
+            }
+
             if (mod.Pending.Count >= DefaultMaxQueuedEventsPerMod)
             {
                 // WHY: Drop oldest: a stalled mod must not grow its queue without bound.

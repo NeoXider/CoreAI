@@ -273,7 +273,8 @@ removes `io`, `os`, `debug`, `package`, `require`, `loadfile`, `dofile`, and all
 CLR/Unity reflection entry points; hosts only ever add narrow, validated C# bindings. Runaway
 code is bounded by instruction budgets, wall-clock timeouts, a per-execution total-allocation
 budget (default 64 MB), `string.rep`/`table.concat` output caps, coroutine lifetime budgets,
-and a mod error budget with auto-unload.
+and a mod error budget with quarantine (a repeatedly failing mod stays loaded but stops dispatching
+until it is reloaded).
 
 ### What to actually look for when reviewing untrusted Lua
 

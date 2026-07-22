@@ -528,9 +528,10 @@ namespace CoreAI.Tests.EditMode
             });
 
             // A runaway handler must be CUT by the step/time budget before it completes — it never reaches
-            // store_set. One cut must not unload a mod (a single failure is below MaxErrorsBeforeUnload), and the
-            // failure is surfaced for observability. (A loop, not an allocation bomb: the step/time budgets are
-            // the reliable guards, and a huge concat is a non-interruptible single opcode that risks OOM.)
+            // store_set. One cut must not quarantine a mod (a single failure is below MaxErrorsBeforeQuarantine),
+            // and the failure is surfaced for observability. (A loop, not an allocation bomb: the step/time
+            // budgets are the reliable guards, and a huge concat is a non-interruptible single opcode that
+            // risks OOM.)
             stack.Runtime.LoadMod("m", @"
                 hooks_on('bomb', function()
                     while true do local x = 1 end
@@ -541,7 +542,9 @@ namespace CoreAI.Tests.EditMode
             stack.Runtime.Tick(0);
 
             Assert.IsTrue(stack.Runtime.IsLoaded("m"),
-                "A single cut run must not auto-unload the mod (one failure < MaxErrorsBeforeUnload).");
+                "A single cut run must not quarantine the mod (one failure < MaxErrorsBeforeQuarantine).");
+            Assert.IsFalse(stack.Runtime.ListMods()[0].Quarantined,
+                "A single failure must leave the mod un-quarantined.");
             Assert.AreEqual("", store.Get("m", "reached"),
                 "The runaway run must be cut before completing (the guard stays real).");
 
@@ -551,7 +554,7 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(30000)]
-        public void LuaCs_ForgedMemoryMarker_IsChargedAndUnloads()
+        public void LuaCs_ForgedMemoryMarker_IsChargedAndQuarantines()
         {
             MemoryStore store = new();
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -563,25 +566,29 @@ namespace CoreAI.Tests.EditMode
             });
 
             // SECURITY: a mod that forges the memory-trip marker in its own error() text must NOT dodge the
-            // consecutive-error auto-unload guard — trips are classified by TYPE, so this is a normal error.
+            // consecutive-error quarantine guard — trips are classified by TYPE, so this is a normal error.
             stack.Runtime.LoadMod("m", @"
                 hooks_on('boom', function()
                     error('LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET forged by mod')
                 end)");
 
-            for (int i = 0; i < LuaCsModRuntime.MaxErrorsBeforeUnload + 1 && stack.Runtime.IsLoaded("m"); i++)
+            for (int i = 0;
+                 i < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine + 1 && !stack.Runtime.ListMods()[0].Quarantined;
+                 i++)
             {
                 stack.Runtime.EmitEvent("boom", "");
                 stack.Runtime.Tick(0);
             }
 
-            Assert.IsFalse(stack.Runtime.IsLoaded("m"),
-                "A mod forging the memory marker in its error text must still be auto-unloaded on the error streak.");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"),
+                "Quarantine keeps the mod loaded and repairable — repeated errors never unload.");
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined,
+                "A mod forging the memory marker in its error text must still be quarantined on the error streak.");
         }
 
-        // NOTE: the runaway-handler auto-unload case (a mod whose handler loops every call is unloaded after
-        // MaxErrorsBeforeUnload cuts) is covered transitively by LuaCs_ForgedMemoryMarker_IsChargedAndUnloads
-        // (repeat-error → unload) and LuaCs_RunawayHandler_IsCutAndSurvivesOneTrip (a runaway IS cut and charged)
+        // NOTE: the runaway-handler quarantine case (a mod whose handler loops every call is quarantined after
+        // MaxErrorsBeforeQuarantine cuts) is covered transitively by LuaCs_ForgedMemoryMarker_IsChargedAndQuarantines
+        // (repeat-error → quarantine) and LuaCs_RunawayHandler_IsCutAndSurvivesOneTrip (a runaway IS cut and charged)
         // plus the pre-existing LuaCs_OneOff_RunawayLoop_CutByInstructionBudget. A dedicated 8-cut variant is
         // intentionally omitted: the guard cuts a TIGHT infinite loop only after ~8s (the instruction hook fires
         // coarsely for a body-less/tight loop, so the sub-second step/time budgets are not enforced promptly),
@@ -614,8 +621,8 @@ namespace CoreAI.Tests.EditMode
 
             // A memory trip is charged to the ordinary consecutive-error streak (a success resets it), so a mod
             // that trips once — on its own first oversized allocation or on unrelated shared-heap growth — and
-            // then runs cleanly is forgiven and never unloaded. This mod bombs on its FIRST invocation only and
-            // succeeds on every later call, so it must stay loaded well past MaxErrorsBeforeUnload ticks.
+            // then runs cleanly is forgiven and never quarantined. This mod bombs on its FIRST invocation only and
+            // succeeds on every later call, so it must stay dispatching well past MaxErrorsBeforeQuarantine ticks.
             stack.Runtime.LoadMod("occasional", @"
                 local n = 0
                 hooks_on('poke', function()
@@ -626,7 +633,7 @@ namespace CoreAI.Tests.EditMode
                     end
                 end)");
 
-            for (int i = 0; i < (LuaCsModRuntime.MaxErrorsBeforeUnload * 2) + 2; i++)
+            for (int i = 0; i < (LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2) + 2; i++)
             {
                 stack.Runtime.EmitEvent("poke", "");
                 stack.Runtime.Tick(0);
@@ -634,6 +641,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(stack.Runtime.IsLoaded("occasional"),
                 "A single memory trip followed by successful calls must be forgiven (streak reset) and keep the mod loaded.");
+            Assert.IsFalse(stack.Runtime.ListMods()[0].Quarantined,
+                "A forgiven streak must never quarantine the mod.");
         }
 
         [Test]
@@ -679,22 +688,247 @@ namespace CoreAI.Tests.EditMode
             });
 
             // SECURITY: the mod swallows a failure INSIDE pcall, then throws a REAL, unrelated error. That real
-            // error must be charged to the normal error streak and unload the mod — a swallowed inner failure
-            // must never launder a subsequent real error out of the auto-unload guard.
+            // error must be charged to the normal error streak and quarantine the mod — a swallowed inner failure
+            // must never launder a subsequent real error out of the quarantine guard.
             stack.Runtime.LoadMod("m", @"
                 hooks_on('evade', function()
                     pcall(function() error('swallowed inner failure') end)
                     error('a real unrelated error')
                 end)");
 
-            for (int i = 0; i < LuaCsModRuntime.MaxErrorsBeforeUnload + 1 && stack.Runtime.IsLoaded("m"); i++)
+            for (int i = 0;
+                 i < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine + 1 && !stack.Runtime.ListMods()[0].Quarantined;
+                 i++)
             {
                 stack.Runtime.EmitEvent("evade", "");
                 stack.Runtime.Tick(0);
             }
 
-            Assert.IsFalse(stack.Runtime.IsLoaded("m"),
-                "A real error after a pcall-swallowed memory trip must charge the error streak and unload the mod.");
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined,
+                "A real error after a pcall-swallowed memory trip must charge the error streak and quarantine the mod.");
+        }
+
+        /// <summary>Stack with a low quarantine threshold so streak tests stay fast.</summary>
+        private static LuaCsModStack BuildQuarantineStack(MemoryStore store, int maxErrorsBeforeQuarantine = 2)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                MaxErrorsBeforeQuarantine = maxErrorsBeforeQuarantine
+            });
+        }
+
+        private const string FailingModSource = @"
+            hooks_on('boom', function() error('boom') end)
+            hooks_on('work', function()
+                store_set('n', tostring((tonumber(store_get('n')) or 0) + 1))
+            end)
+            hooks_every(0.05, function()
+                store_set('t', tostring((tonumber(store_get('t')) or 0) + 1))
+            end)";
+
+        private const string HealthyModSource = @"
+            hooks_on('work', function()
+                store_set('n', tostring((tonumber(store_get('n')) or 0) + 1))
+            end)";
+
+        [Test]
+        public void LuaCs_Quarantine_ModStaysListedAndStopsDispatching()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildQuarantineStack(store);
+            stack.Runtime.LoadMod("m", FailingModSource);
+
+            string quarantinedId = null;
+            int quarantinedStreak = 0;
+            stack.Runtime.ModQuarantined += (id, count) =>
+            {
+                quarantinedId = id;
+                quarantinedStreak = count;
+            };
+
+            for (int i = 0; i < 2; i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"), "A quarantined mod must STAY loaded and addressable.");
+            LuaModInfo info = stack.Runtime.ListMods()[0];
+            Assert.IsTrue(info.Quarantined, "ListMods must surface the quarantine so the repairing agent SEES it.");
+            Assert.AreEqual("m", quarantinedId, "ModQuarantined must fire with the mod id.");
+            Assert.AreEqual(2, quarantinedStreak, "ModQuarantined must carry the error streak.");
+            Assert.IsTrue(stack.Runtime.TryGetModSource("m", out string source) && source.Length > 0,
+                "get_source must keep working for a quarantined mod.");
+
+            // Suspended: named-event handlers and timers must both stop running.
+            stack.Runtime.EmitEvent("work", "");
+            stack.Runtime.Tick(0.06);
+            stack.Runtime.Tick(0.06);
+            Assert.AreEqual("", store.Get("m", "n"), "A quarantined mod's hooks_on handlers must not dispatch.");
+            Assert.AreEqual("", store.Get("m", "t"), "A quarantined mod's hooks_every timers must not fire.");
+        }
+
+        [Test]
+        public void LuaCs_Quarantine_ReloadClearsQuarantineAndResumesDispatch()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildQuarantineStack(store);
+            stack.Runtime.LoadMod("m", FailingModSource);
+
+            for (int i = 0; i < 2; i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined, "Precondition: the mod is quarantined.");
+
+            // The flagship repair path: an async LLM repair lands as a plain ReloadMod — it must work on a
+            // quarantined mod, clear the quarantine + streak, and dispatch must resume.
+            Assert.DoesNotThrow(() => stack.Runtime.ReloadMod("m", HealthyModSource),
+                "ReloadMod on a quarantined mod must succeed normally.");
+
+            LuaModInfo info = stack.Runtime.ListMods()[0];
+            Assert.IsFalse(info.Quarantined, "A successful reload must clear the quarantine.");
+            Assert.AreEqual(0, info.ErrorCount, "A successful reload must clear the error streak.");
+
+            stack.Runtime.EmitEvent("work", "");
+            stack.Runtime.Tick(0);
+            Assert.AreEqual("1", store.Get("m", "n"), "Dispatch must resume after the repairing reload.");
+        }
+
+        [Test]
+        public void LuaCs_Quarantine_ReloadLandsMidTick_FreshInstanceIsNotQuarantined()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildQuarantineStack(store);
+            stack.Runtime.LoadMod("m", FailingModSource);
+
+            // Reproduces the stale-snapshot race: Tick iterates a snapshot of mod objects; this subscriber
+            // reloads the mod MID-TICK the moment the streak hits the threshold, swapping the registry
+            // entry. The quarantine check at the end of the tick then sees the OLD object's streak — it
+            // must re-resolve the live entry and skip, never suspending the freshly repaired instance.
+            bool repaired = false;
+            stack.Runtime.ModHandlerErrored += (id, error, count) =>
+            {
+                if (!repaired && count >= 2)
+                {
+                    repaired = true;
+                    stack.Runtime.ReloadMod("m", HealthyModSource);
+                }
+            };
+
+            for (int i = 0; i < 2; i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(repaired, "Precondition: the mid-tick repair ran.");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+            Assert.IsFalse(stack.Runtime.ListMods()[0].Quarantined,
+                "The stale snapshot's error streak must not quarantine the freshly reloaded instance.");
+
+            stack.Runtime.EmitEvent("work", "");
+            stack.Runtime.Tick(0);
+            Assert.AreEqual("1", store.Get("m", "n"), "The repaired instance must dispatch normally.");
+        }
+
+        [Test]
+        public void LuaCs_LogicSlots_OverrideClearedOnUnload()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+
+            List<(string ModId, LuaModTeardownReason Reason)> teardowns = new();
+            stack.Runtime.ModTearingDown += (id, reason) => teardowns.Add((id, reason));
+
+            stack.Runtime.LoadMod("m", "logic_define('dmg', function(x) return x * 2 end)");
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double value, 21), "The mod's override is installed.");
+            Assert.AreEqual(42d, value);
+
+            stack.Runtime.UnloadMod("m");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "Unload must clear the mod's logic-slot override — the dead mod's formula is never invoked again.");
+            Assert.IsFalse(slots.TryInvokeNumber("dmg", out _, 21), "The call falls back to the C# default.");
+            CollectionAssert.Contains(teardowns, ("m", LuaModTeardownReason.Unload),
+                "ModTearingDown must fire for the unload so future subsystems can hook the same point.");
+        }
+
+        [Test]
+        public void LuaCs_LogicSlots_ReloadDropsOldFormula_AndKeepsTheReplacementsOwn()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+            slots.DeclareSlot("loot");
+
+            stack.Runtime.LoadMod("m", @"
+                logic_define('dmg', function(x) return x * 2 end)
+                logic_define('loot', function() return 10 end)");
+
+            // v2 re-defines dmg with a NEW formula and drops loot entirely. After the reload the old
+            // instance's formulas must be gone: dmg answers with the new math, loot reverts to vanilla.
+            stack.Runtime.ReloadMod("m", "logic_define('dmg', function(x) return x * 3 end)");
+
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double value, 10),
+                "The replacement's own logic_define (made during its load chunk) must survive the teardown.");
+            Assert.AreEqual(30d, value, "The NEW formula answers — the old mod version's formula is dead.");
+            Assert.IsFalse(slots.IsOverridden("loot"),
+                "A slot the new version no longer defines must revert to vanilla, not keep the stale formula.");
+        }
+
+        [Test]
+        public void LuaCs_LogicSlots_QuarantineRevertsOverridesToVanilla()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildQuarantineStack(store);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+
+            stack.Runtime.LoadMod("m",
+                "logic_define('dmg', function(x) return x * 2 end)\n" + FailingModSource);
+            Assert.IsTrue(slots.IsOverridden("dmg"), "Precondition: the override is installed.");
+
+            for (int i = 0; i < 2; i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined, "Precondition: the mod is quarantined.");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "Quarantine must clear the broken mod's overrides — its formula must stop being invoked.");
+        }
+
+        [Test]
+        public void LuaCs_LogicSlots_OverrideFailure_AttributedToOwningModInDiagnostics()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+
+            stack.Runtime.LoadMod("m", "logic_define('dmg', function() error('formula broke') end)");
+
+            Assert.IsFalse(slots.TryInvokeNumber("dmg", out _, 1),
+                "The failing override fails open: the call reports 'not overridden'.");
+            Assert.IsFalse(slots.IsOverridden("dmg"), "The failing override is reset to vanilla.");
+
+            // The old behavior was a SILENT revert; the failure must now land in the mod's own error
+            // channel with the slot named, so diagnostics/get_mod_logs show which mod's formula broke.
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.IsNotEmpty(errors, "The override failure must be recorded against the owning mod.");
+            StringAssert.Contains("dmg", errors[0].Error, "The recorded error must name the slot.");
+            Assert.AreEqual(1, stack.Runtime.ListMods()[0].ErrorCount,
+                "The override failure charges the owning mod's error streak.");
         }
     }
 }

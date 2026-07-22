@@ -146,7 +146,11 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("fix_this_lua", task.Hint);
             StringAssert.Contains("lua_error", task.Hint);
             StringAssert.Contains("manage_mods reload", task.Hint);
-            StringAssert.Contains("manage_mods load", task.Hint);
+            // WHY: The error policy is quarantine, not unload — the prompt must teach that the mod is
+            // still loaded and that reload clears the quarantine, not a reload-vs-load workaround.
+            StringAssert.Contains("QUARANTINE", task.Hint);
+            StringAssert.Contains("clears the", task.Hint);
+            StringAssert.DoesNotContain("manage_mods load", task.Hint);
             StringAssert.Contains("do not create a new mod id", task.Hint);
         }
     }

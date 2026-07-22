@@ -66,7 +66,8 @@ errors for the same mod, the bridge sends a headless Programmer repair task with
 - the saved source version key, when available.
 
 The Programmer is instructed to preserve the same mod id and reload the fixed source through
-`manage_mods reload`, or load it again if the broken mod was already auto-unloaded. The policy allows
+`manage_mods reload` — a failing mod is quarantined (kept loaded, dispatch suspended), never
+auto-unloaded, and a successful reload clears the quarantine. The policy allows
 2 repair attempts per mod and uses a cooldown to avoid repair loops. The current auto-repair status is
 shown in the `F9` mod manager panel.
 

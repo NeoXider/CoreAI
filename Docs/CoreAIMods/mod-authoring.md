@@ -72,7 +72,7 @@ authoritative channel) over direct mutation — it stays deterministic and multi
 - An **instruction budget** (via Lua-CSharp `SetHook`) cuts a runaway handler (`while true do end`) on ALL
   platforms incl. WebGL — a buggy mod cannot hang a frame.
 - Caps: per-handler steps/time, timer min interval `0.05 s`, exports/mod, dispatch per tick (no events dropped;
-  serviced on later ticks), auto-unload after consecutive failures.
+  serviced on later ticks), quarantine after consecutive failures (mod stays loaded; reload resumes it).
 
 ## Lua version note
 Lua-CSharp targets **Lua 5.4** semantics. Watch: integer/float subtype, bitwise operators

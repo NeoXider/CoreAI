@@ -90,6 +90,29 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task List_QuarantinedMod_SurfacesQuarantineFlagAndHint()
+        {
+            LuaCsModRuntime runtime = new(maxErrorsBeforeQuarantine: 1);
+            LuaModsLlmTool tool = CreateTool(runtime);
+            runtime.LoadMod("broken", "hooks_on('boom', function() error('boom') end)");
+
+            runtime.EmitEvent("boom", "");
+            runtime.Tick(0);
+
+            // The repairing AI must SEE 'quarantined' in list instead of a missing mod.
+            JObject list = await ExecuteAsync(tool, "list");
+            JArray mods = (JArray)list["data"];
+            Assert.AreEqual(1, mods.Count, "A quarantined mod must still be listed.");
+            Assert.IsTrue(mods[0].Value<bool>("quarantined"), "list must surface quarantined=true.");
+            StringAssert.Contains("quarantined", list.Value<string>("message"),
+                "The list message must call out quarantined mods and the reload path.");
+
+            JObject diagnostics = await ExecuteAsync(tool, "diagnostics", "broken");
+            StringAssert.Contains("quarantine", diagnostics.Value<string>("message"),
+                "diagnostics must teach that reload clears the quarantine.");
+        }
+
+        [Test]
         public async Task Reload_ReplacesSource_AndUnloadRemoves()
         {
             LuaCsModRuntime runtime = new();

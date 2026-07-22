@@ -12,6 +12,14 @@ namespace CoreAI.Ai
         public int ErrorCount;
         public bool LogReports;
         public DateTime LoadedAtUtc;
+
+        /// <summary>
+        /// True when the mod hit its consecutive-error threshold and was quarantined: it stays loaded
+        /// and addressable (list/get_source/diagnostics/reload all work) but its handlers, timers, and
+        /// queued events are suspended until a reload replaces it. Runtimes without a quarantine
+        /// concept always report false.
+        /// </summary>
+        public bool Quarantined;
     }
 
     /// <summary>

@@ -66,7 +66,7 @@ namespace CoreAI.Ai
         /// <summary>(modId, source, caps) after a mod source is successfully loaded or reloaded.</summary>
         event Action<string, string, LuaCapabilities> ModSourceLoaded;
 
-        /// <summary>(modId, source, caps) after a mod is unloaded (including automatic error unloads).</summary>
+        /// <summary>(modId, source, caps) after a mod is explicitly unloaded. Repeated runtime errors quarantine a mod (kept loaded, dispatch suspended) instead of unloading it.</summary>
         event Action<string, string, LuaCapabilities> ModSourceUnloaded;
 
         /// <summary>(modId, eventName, payload) when a mod calls <c>events_emit</c>.</summary>

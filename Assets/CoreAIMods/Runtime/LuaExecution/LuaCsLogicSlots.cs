@@ -1,29 +1,35 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using CoreAI.Logging;
-using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 
 namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
-    /// Lua-CSharp (nuskey8/Lua-CSharp) counterpart of <see cref="CoreAI.Ai.LuaLogicSlots"/>: named
-    /// overridable decision points (damage formula, loot table, price curve, ...). The game declares
-    /// slots and calls <see cref="TryInvokeNumber"/> &amp; co. at the point of use, falling back to its
-    /// C# default when no Lua override is installed. Sandboxed scripts redefine a slot with
+    /// Lua-CSharp counterpart of <see cref="CoreAI.Ai.LuaLogicSlots"/>: named overridable decision
+    /// points (damage formula, loot table, price curve, ...). The game declares slots and calls
+    /// <see cref="TryInvokeNumber"/> &amp; co. at the point of use, falling back to its C# default when
+    /// no Lua override is installed. Sandboxed scripts redefine a slot with
     /// <c>logic_define(name, fn)</c> and remove it with <c>logic_reset(name)</c>.
     /// <para>
     /// Fail-open policy: when an override throws or exceeds its budget the override is removed and the
     /// call reports "not overridden", so a broken script degrades to vanilla behavior instead of
-    /// breaking the game loop every frame. The error is logged and kept in <see cref="LastError"/>.
+    /// breaking the game loop every frame. The failure is attributed: the error is logged, kept in
+    /// <see cref="LastError"/>, and raised via <see cref="OverrideFailed"/> with the defining mod's id
+    /// so the host can route it into the mod-error diagnostics channel instead of a silent revert.
     /// </para>
     /// <para>
-    /// VM-agnostic surface: unlike the MoonSharp version — whose public <c>TryInvoke</c> leaks a
-    /// <c>DynValue</c> — the general <see cref="TryInvoke(string, out object, object[])"/> here returns
-    /// a plain CLR value (double/bool/string/null/boxed) with no VM type in the signature, so callers do
-    /// not depend on the concrete Lua VM. The typed helpers do the type checks internally.
+    /// Ownership: each override records the mod id passed to <see cref="RegisterApis"/> (null for
+    /// ownerless surfaces such as the one-off executor). <see cref="ClearOwnedBy"/> removes a mod's
+    /// overrides on unload/reload/quarantine so a dead or broken mod's formula is never invoked again.
+    /// </para>
+    /// <para>
+    /// VM-agnostic surface: overrides are stored as opaque <see cref="IScriptState"/>/callable handles
+    /// and invoked through the <see cref="IScriptExecutionGuard"/> seam, so no VM type appears anywhere
+    /// in this class. <see cref="TryInvoke(string, out object, object[])"/> returns a plain CLR value
+    /// (double/bool/string/null/boxed) and the typed helpers do the kind checks internally.
     /// </para>
     /// </summary>
     public sealed class LuaCsLogicSlots
@@ -36,18 +42,29 @@ namespace CoreAI.Ai.LuaCs
 
         private sealed class OverrideEntry
         {
-            public LuaFunction Fn;
-            public LuaState State;
+            public object Fn;
+            public IScriptState State;
+
+            /// <summary>Id of the mod whose registry defined this override; null/empty for ownerless surfaces.</summary>
+            public string OwnerModId;
         }
 
         private readonly object _gate = new();
         private readonly HashSet<string> _declared = new(StringComparer.Ordinal);
         private readonly Dictionary<string, OverrideEntry> _overrides = new(StringComparer.Ordinal);
-        private readonly LuaCsExecutionGuard _guard;
+        private readonly IScriptExecutionGuard _guard;
+        private readonly IValueMarshaller _marshaller;
         private readonly ILog _log;
 
         /// <summary>Description of the most recent override failure, or empty.</summary>
         public string LastError { get; private set; } = "";
+
+        /// <summary>
+        /// Raised when an installed override throws or exceeds its budget and is reset to vanilla:
+        /// (ownerModId, slot, error). <c>ownerModId</c> is empty for ownerless overrides (one-off
+        /// scripts). Subscribers are isolated: one throwing subscriber never skips the rest.
+        /// </summary>
+        public event Action<string, string, string> OverrideFailed;
 
         public LuaCsLogicSlots(
             ILog log = null,
@@ -55,7 +72,12 @@ namespace CoreAI.Ai.LuaCs
             long invokeMaxSteps = DefaultInvokeMaxSteps)
         {
             _log = log;
-            _guard = new LuaCsExecutionGuard(invokeTimeoutMs, invokeMaxSteps);
+
+            // WHY: Slots are engine-passive — they never create states, only call back into states handed
+            // to logic_define — so the Lua-CSharp guard/marshaller pair is bound here directly instead of
+            // carrying a full IScriptEngine dependency through every host constructor.
+            _guard = new LuaCsScriptExecutionGuard(new ExecutionBudget(invokeTimeoutMs, invokeMaxSteps));
+            _marshaller = LuaCsValueMarshaller.Instance;
         }
 
         /// <summary>
@@ -117,39 +139,42 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Registers <c>logic_define(name, fn)</c>, <c>logic_reset(name)</c> and <c>logic_list()</c> on
-        /// the sandbox registry.
+        /// the sandbox registry. <paramref name="ownerModId"/> stamps every override defined through
+        /// this registry with the owning mod, so <see cref="ClearOwnedBy"/> can remove them when the
+        /// mod is unloaded, reloaded, or quarantined; null/empty marks ownerless surfaces (one-off
+        /// scripts) whose overrides only ever leave via <c>logic_reset</c>/<see cref="ResetAll"/>.
         /// </summary>
-        public void RegisterApis(LuaCsApiRegistry registry)
+        public void RegisterApis(IScriptFunctionRegistry registry, string ownerModId = null)
         {
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
             }
 
-            // WHY: logic_define is registered as a raw callback so it can capture ctx.State: a LuaFunction
-            // does not carry its owning LuaState, and TryInvoke needs that state to call the override
-            // back under the guard.
-            registry.RegisterCallback("logic_define", (ctx, ct) =>
+            string owner = Normalize(ownerModId);
+
+            // WHY: logic_define is registered as a var-args callback so it can capture the calling state:
+            // a bare function handle does not carry its owning state, and TryInvoke needs that state to
+            // call the override back under the guard.
+            registry.RegisterVarArgs("logic_define", call =>
             {
-                string name = ctx.HasArgument(0) ? ctx.GetArgument(0).Read<string>() : null;
-                LuaValue fnValue = ctx.HasArgument(1) ? ctx.GetArgument(1) : LuaValue.Nil;
-                bool defined = Define(name, fnValue, ctx.State);
-                return new ValueTask<int>(ctx.Return(new LuaValue(defined)));
+                string name = call.GetString(0);
+                object fn = call.GetKind(1) == ScriptValueKind.Function ? call.GetArgument(1) : null;
+                bool defined = Define(name, fn, call.State, owner);
+                return ScriptCallResult.Return(defined);
             });
 
             registry.Register("logic_reset", new Action<string>(Reset));
             registry.Register("logic_list", new Func<List<object>>(ListSlots));
         }
 
-        private bool Define(string name, LuaValue fnValue, LuaState state)
+        private bool Define(string name, object fn, IScriptState state, string ownerModId)
         {
             string slot = Normalize(name);
-            if (fnValue.Type != LuaValueType.Function)
+            if (fn == null)
             {
                 throw new ArgumentException("logic_define: second argument must be a function.");
             }
-
-            LuaFunction fn = fnValue.Read<LuaFunction>();
 
             lock (_gate)
             {
@@ -159,10 +184,67 @@ namespace CoreAI.Ai.LuaCs
                         $"logic_define: slot '{slot}' is not declared by the game. Use logic_list().");
                 }
 
-                _overrides[slot] = new OverrideEntry { Fn = fn, State = state };
+                _overrides[slot] = new OverrideEntry { Fn = fn, State = state, OwnerModId = ownerModId };
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Removes every override defined by the given mod, so an unloaded/reloaded/quarantined mod's
+        /// formulas are never invoked again (callers fall back to the C# default). Pass
+        /// <paramref name="except"/> to keep overrides bound to that live script state — the reload
+        /// path uses this so the replacement chunk's fresh <c>logic_define</c> calls survive while the
+        /// old instance's are cleared. Returns the number of overrides removed.
+        /// </summary>
+        public int ClearOwnedBy(string modId, IScriptState except = null)
+        {
+            string owner = Normalize(modId);
+            if (owner.Length == 0)
+            {
+                return 0;
+            }
+
+            List<string> removed = new();
+            lock (_gate)
+            {
+                foreach (KeyValuePair<string, OverrideEntry> pair in _overrides)
+                {
+                    if (string.Equals(pair.Value.OwnerModId, owner, StringComparison.Ordinal) &&
+                        !SameUnderlyingState(pair.Value.State, except))
+                    {
+                        removed.Add(pair.Key);
+                    }
+                }
+
+                foreach (string slot in removed)
+                {
+                    _overrides.Remove(slot);
+                }
+            }
+
+            return removed.Count;
+        }
+
+        /// <summary>
+        /// True when both handles wrap the same live VM state. Wrapper identity is not enough: the
+        /// call-context and the runtime hand out distinct <see cref="IScriptState"/> wrappers around
+        /// the same underlying state, so the comparison unwraps Lua-CSharp states.
+        /// </summary>
+        private static bool SameUnderlyingState(IScriptState a, IScriptState b)
+        {
+            if (a == null || b == null)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(a, b))
+            {
+                return true;
+            }
+
+            return a is LuaCsScriptState left && b is LuaCsScriptState right &&
+                   ReferenceEquals(left.State, right.State);
         }
 
         private List<object> ListSlots()
@@ -191,9 +273,9 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public bool TryInvoke(string name, out object result, params object[] args)
         {
-            if (TryInvokeRaw(name, out LuaValue raw, args))
+            if (TryInvokeRaw(name, out object raw, args))
             {
-                result = ToClr(raw);
+                result = _marshaller.ToHostValue(raw);
                 return true;
             }
 
@@ -205,12 +287,13 @@ namespace CoreAI.Ai.LuaCs
         public bool TryInvokeNumber(string name, out double value, params object[] args)
         {
             value = 0d;
-            if (!TryInvokeRaw(name, out LuaValue result, args) || result.Type != LuaValueType.Number)
+            if (!TryInvokeRaw(name, out object result, args) ||
+                _marshaller.GetKind(result) != ScriptValueKind.Number)
             {
                 return false;
             }
 
-            value = result.Read<double>();
+            value = (double)_marshaller.ToHostValue(result);
             return double.IsFinite(value);
         }
 
@@ -218,12 +301,13 @@ namespace CoreAI.Ai.LuaCs
         public bool TryInvokeBool(string name, out bool value, params object[] args)
         {
             value = false;
-            if (!TryInvokeRaw(name, out LuaValue result, args) || result.Type != LuaValueType.Boolean)
+            if (!TryInvokeRaw(name, out object result, args) ||
+                _marshaller.GetKind(result) != ScriptValueKind.Boolean)
             {
                 return false;
             }
 
-            value = result.Read<bool>();
+            value = (bool)_marshaller.ToHostValue(result);
             return true;
         }
 
@@ -231,21 +315,22 @@ namespace CoreAI.Ai.LuaCs
         public bool TryInvokeString(string name, out string value, params object[] args)
         {
             value = "";
-            if (!TryInvokeRaw(name, out LuaValue result, args) || result.Type != LuaValueType.String)
+            if (!TryInvokeRaw(name, out object result, args) ||
+                _marshaller.GetKind(result) != ScriptValueKind.String)
             {
                 return false;
             }
 
-            value = result.Read<string>() ?? "";
+            value = (string)_marshaller.ToHostValue(result) ?? "";
             return true;
         }
 
-        // WHY: Runs the override synchronously under the guard, returning the raw first Lua-CSharp result.
+        // WHY: Runs the override synchronously under the guard, returning the raw first script result.
         // Formulas never yield, so the sync drive (inside the guard) is safe. Internal: the public
         // surface stays VM-agnostic.
-        private bool TryInvokeRaw(string name, out LuaValue result, params object[] args)
+        private bool TryInvokeRaw(string name, out object result, params object[] args)
         {
-            result = LuaValue.Nil;
+            result = null;
             string slot = Normalize(name);
             OverrideEntry entry;
             lock (_gate)
@@ -258,65 +343,48 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                LuaValue[] luaArgs = args == null ? Array.Empty<LuaValue>() : new LuaValue[args.Length];
-                for (int i = 0; i < luaArgs.Length; i++)
-                {
-                    luaArgs[i] = HostToLua(args[i]);
-                }
-
-                LuaValue[] results =
-                    _guard.Execute(entry.State, entry.Fn, CancellationToken.None, luaArgs);
-                result = results.Length > 0 ? results[0] : LuaValue.Nil;
+                object[] results = _guard.Invoke(entry.State, entry.Fn, CancellationToken.None,
+                    args ?? Array.Empty<object>());
+                result = results.Length > 0 ? results[0] : null;
                 return true;
             }
             catch (Exception ex)
             {
-                // WHY: Fail open: a broken override must not break the game loop on every call.
+                // WHY: Fail open: a broken override must not break the game loop on every call. The
+                // reset is attributed, not silent: OverrideFailed carries the defining mod's id so the
+                // runtime can record it in the same diagnostics channel as handler errors.
                 Reset(slot);
+                string owner = entry.OwnerModId ?? "";
                 LastError = $"slot '{slot}': {ex.Message}";
-                _log?.Error($"[LuaCsLogicSlots] Override for '{slot}' failed and was reset: {ex}");
-                result = LuaValue.Nil;
+                _log?.Error(
+                    $"[LuaCsLogicSlots] Override for '{slot}'" +
+                    $"{(owner.Length > 0 ? $" (mod '{owner}')" : "")} failed and was reset: {ex}");
+                RaiseOverrideFailed(owner, slot, ex.Message ?? ex.GetType().Name);
+                result = null;
                 return false;
             }
         }
 
-        private static object ToClr(LuaValue value)
+        // WHY: Per-subscriber isolated raise (mirrors the runtime's event raisers): a throwing
+        // telemetry subscriber must not turn the fail-open path into a game-loop failure.
+        private void RaiseOverrideFailed(string ownerModId, string slot, string error)
         {
-            switch (value.Type)
+            Action<string, string, string> handler = OverrideFailed;
+            if (handler == null)
             {
-                case LuaValueType.Nil:
-                    return null;
-                case LuaValueType.Boolean:
-                    return value.Read<bool>();
-                case LuaValueType.Number:
-                    return value.Read<double>();
-                case LuaValueType.String:
-                    return value.Read<string>();
-                default:
-                    return value.Read<object>();
+                return;
             }
-        }
 
-        private static LuaValue HostToLua(object arg)
-        {
-            switch (arg)
+            foreach (Action<string, string, string> subscriber in handler.GetInvocationList())
             {
-                case null:
-                    return LuaValue.Nil;
-                case string s:
-                    return new LuaValue(s);
-                case bool b:
-                    return new LuaValue(b);
-                case double d:
-                    return new LuaValue(d);
-                case int i:
-                    return new LuaValue((double)i);
-                case long l:
-                    return new LuaValue((double)l);
-                case float f:
-                    return new LuaValue((double)f);
-                default:
-                    return LuaValue.FromObject(arg);
+                try
+                {
+                    subscriber(ownerModId, slot, error);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsLogicSlots] [subscriber] OverrideFailed handler for '{slot}' threw: {ex}");
+                }
             }
         }
 

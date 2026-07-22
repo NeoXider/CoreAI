@@ -6,6 +6,8 @@ using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -88,8 +90,16 @@ namespace CoreAI.Ai.LuaCs
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
 
         /// <summary>
+        /// Consecutive-error streak (reset by any success) at which a persistent mod is quarantined —
+        /// dispatch suspended, mod kept loaded and repairable via reload. See
+        /// <see cref="LuaCsModRuntime.MaxErrorsBeforeQuarantine"/>.
+        /// </summary>
+        public int MaxErrorsBeforeQuarantine = LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine;
+
+        /// <summary>
         /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
-        /// cuts the offending call without charging the consecutive-error auto-unload streak. Defaults to
+        /// cuts the offending call and is charged to the same consecutive-error quarantine streak as any
+        /// failure (reset on success). Defaults to
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </summary>
         public long HandlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
@@ -165,15 +175,26 @@ namespace CoreAI.Ai.LuaCs
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
                 capabilities: options.Capabilities);
 
+            // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
+            // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
+            // state directly and a future engine swap happens here alone.
+            LuaCsScriptEngine engine = new();
+
             // WHY: Register the built-in surface first, then any host/per-scene additions, through the SAME
             // seam, so an injected demo API (forge_define/...) reaches every loaded mod alongside the core APIs.
-            Action<LuaCsApiRegistry, LuaCapabilities> registerAll = options.AdditionalGameplayBindings == null
-                ? bindings.Register
-                : (registry, caps) =>
-                {
-                    bindings.Register(registry, caps);
-                    options.AdditionalGameplayBindings(registry, caps);
-                };
+            // The third argument is the owning mod's id; ownership-tracked surfaces (logic slots) use it so a
+            // mod's registrations can be torn down on unload/reload/quarantine.
+            Action<IScriptFunctionRegistry, LuaCapabilities, string> registerAll =
+                options.AdditionalGameplayBindings == null
+                    ? bindings.Register
+                    : (registry, caps, ownerModId) =>
+                    {
+                        bindings.Register(registry, caps, ownerModId);
+
+                        // WHY: The compatibility field is typed against the concrete Lua-CSharp registry; this
+                        // stack only ever creates registries via the Lua-CSharp engine, so the cast is exact.
+                        options.AdditionalGameplayBindings((LuaCsApiRegistry)registry, caps);
+                    };
 
             LuaCsModRuntime runtime = new(
                 registerAll,
@@ -190,10 +211,16 @@ namespace CoreAI.Ai.LuaCs
                 // runtime lets it reset a leaked coreai_world_begin per guarded call, exactly as the
                 // one-off executor resets around every chunk.
                 transactionScope: bindings,
-                handlerMaxAllocatedBytes: options.HandlerMaxAllocatedBytes);
+                handlerMaxAllocatedBytes: options.HandlerMaxAllocatedBytes,
+                engine: engine,
+                maxErrorsBeforeQuarantine: options.MaxErrorsBeforeQuarantine,
+                // WHY: Handing the shared slot surface to the runtime closes the teardown loop: a mod's
+                // logic_define overrides are cleared on unload/reload/quarantine and override failures are
+                // attributed into the mod's diagnostics channel.
+                logicSlots: bindings.LogicSlots);
 
             LuaCsGameToolExecutor executor = new(
-                new LuaCsSecureEnvironment(),
+                engine.Environment,
                 new CapabilityScopedGameRuntimeBindings(
                     bindings, options.OneOffCapabilities, options.AdditionalGameplayBindings),
                 options.ExecutionObserver ?? new NullLuaExecutionObserver());

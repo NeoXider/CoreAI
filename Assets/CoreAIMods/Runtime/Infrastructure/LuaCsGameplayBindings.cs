@@ -4,6 +4,7 @@ using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -87,7 +88,18 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public LuaCsLogicSlots LogicSlots => _logicSlots;
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
+        {
+            Register(registry, capabilities, null);
+        }
+
+        /// <summary>
+        /// Registers the capability-scoped surface on one script registry. <paramref name="ownerModId"/>
+        /// identifies the persistent mod that owns the registry (null for ownerless surfaces such as the
+        /// one-off executor) so ownership-tracked APIs — the logic slots — can attribute and later tear
+        /// down what that mod registered.
+        /// </summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities, string ownerModId)
         {
             LuaCapabilities effective = _capabilities & capabilities;
 
@@ -114,7 +126,7 @@ namespace CoreAI.Ai.LuaCs
 
             if ((effective & LuaCapabilities.LogicOverride) != 0)
             {
-                _logicSlots.RegisterApis(registry);
+                _logicSlots.RegisterApis(registry, ownerModId);
             }
 
             if ((effective & LuaCapabilities.Full) != 0)

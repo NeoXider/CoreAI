@@ -84,6 +84,6 @@ WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample"
 
 Full access is **opt-in** and gated behind the Full capability tier. Public-only is the
 default member surface (see above). The Lua-CSharp sandbox (no `io`/`os`/`load`),
-instruction and time limits, and the auto-unload-on-repeated-errors policy still apply.
+instruction and time limits, and the quarantine-on-repeated-errors policy still apply.
 A type/member blacklist is available through `IFullLuaAccessBlacklistPolicy`; see
 `Assets/CoreAI/Docs/LUA_ACCESS_MODES.md`.

@@ -298,7 +298,8 @@ untouched, exactly like `ReloadMod`.
 ### Runtime handler-error feedback
 
 Load/reload errors propagate synchronously to whoever triggered them, but a hook or timer that throws
-**later**, during `Tick`, only raises `ModHandlerErrored` (and counts toward host-side auto-unload). The
+**later**, during `Tick`, only raises `ModHandlerErrored` (and counts toward the quarantine threshold —
+the mod stays loaded with dispatch suspended until a reload). The
 runtime now also buffers these Tick-time failures in a bounded ring (`MaxRetainedHandlerErrors`), readable
 via `GetRecentHandlerErrors(modId = null)` and clearable via `ClearRecentHandlerErrors(modId = null)`, so
 the agent can learn of them on a later turn through `manage_mods diagnostics` and repair the mod.

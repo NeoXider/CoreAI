@@ -185,9 +185,11 @@ namespace CoreAI.Ai
             string id = (modId ?? "").Trim();
             string hint =
                 $"The Lua mod '{id}' is throwing at runtime and must be fixed. The broken source is in " +
-                "fix_this_lua and the error is in lua_error. Fix the bug, then re-apply the corrected Lua under " +
-                $"the same id: call manage_mods reload mod_id='{id}' if it is still loaded, otherwise " +
-                $"manage_mods load mod_id='{id}' (run manage_mods list first if unsure). " +
+                "fix_this_lua and the error is in lua_error. The mod is still loaded: repeated errors " +
+                "QUARANTINE a mod (its handlers/timers are suspended and it shows quarantined=true in " +
+                "manage_mods list) but never unload it. Fix the bug, then re-apply the corrected Lua under " +
+                $"the same id with manage_mods reload mod_id='{id}' - a successful reload clears the " +
+                "quarantine and the error streak and the mod resumes running. " +
                 "Keep the mod's original intent and id; do not create a new mod id.";
 
             return new AiTaskRequest
