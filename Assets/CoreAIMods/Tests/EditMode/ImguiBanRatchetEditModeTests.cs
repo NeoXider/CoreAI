@@ -57,11 +57,7 @@ namespace CoreAI.Tests.EditMode
         {
             // --- CoreAI.Demos: legacy OnGUI demo controllers (to be rebuilt on the shared DemoPanel) ---
             "CoreAI.Demos/DirectorAi/Scripts/DirectorAiDemoController.cs",                            // OnGUI overlay + GUIStyle labels
-            "CoreAI.Demos/FullAccess/Scripts/FullAccessDemoController.cs",                            // OnGUI GUILayout control panel
-            "CoreAI.Demos/FullAccess/Scripts/FullModeModDemoController.cs",                           // OnGUI GUILayout mod panel
-            "CoreAI.Demos/FullAccess/Scripts/LuaPlatformExampleController.cs",                        // OnGUI GUILayout platform demo
             "CoreAI.Demos/LiveMechanics/Scripts/LiveMechanicsDemoController.cs",                      // OnGUI GUILayout live-tuning panel
-            "CoreAI.Demos/LiveMechanicsMods/Scripts/ChatPromptButtonsController.cs",                 // OnGUI GUILayout prompt buttons
             "CoreAI.Demos/LiveMechanicsMods/Scripts/LiveMechanicsModsChatPersistenceController.cs",  // large OnGUI GUILayout chat panel
             "CoreAI.Demos/LiveMechanicsMods/Scripts/WaveAutoBattlerModsDemoController.cs",           // OnGUI GUILayout auto-battler panel
             "CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs",                                  // OnGUI GUILayout mod list panel

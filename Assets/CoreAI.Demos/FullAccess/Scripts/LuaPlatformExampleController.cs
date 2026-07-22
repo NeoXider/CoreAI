@@ -9,49 +9,26 @@ using VContainer;
 namespace CoreAI.Demos
 {
     /// <summary>
-    /// Example host that creates every Lua script itself and loads it into <see cref="ILuaModRuntime"/>:
-    /// a two-mod platform self-test (timers, tick alias, variables/closures, store, cross-mod events,
-    /// coroutines) plus a self-playing 3D falling-blocks game ("Tetris") built entirely from one Lua mod
-    /// on the WorldEdit API. No LLM involved — this is the deterministic reference the chat agent is
-    /// later asked to reproduce via manage_mods tool calls.
-    /// Panel toggle: F6. WebGL driver entry points: SendMessage("LuaPlatformExample", "RunSelfTest"|
-    /// "StartTetris"|"StopTetris"|"DumpStatus").
+    /// GUI-less scene driver for "Lua as a second game language": creates every Lua script itself and
+    /// loads it into <see cref="ILuaModRuntime"/> — a two-mod platform self-test (timers, tick alias,
+    /// variables/closures, store, cross-mod events, coroutines) plus a self-playing 3D falling-blocks
+    /// game ("Tetris") built entirely from one Lua mod on the WorldEdit API. No LLM is involved; this is
+    /// the deterministic reference the chat agent is later asked to reproduce via manage_mods tool calls.
+    /// The retained-mode UI lives in <see cref="LuaPlatformHubPage"/>, which drives this component and
+    /// reflects its live state through the public read-only properties below.
+    /// WebGL driver entry points (SendMessage("LuaPlatformExample", …)): <see cref="RunSelfTest"/>,
+    /// <see cref="StartTetris"/>, <see cref="StopTetris"/>, <see cref="DumpStatus"/> (alias
+    /// <see cref="LogStatus"/>), and <see cref="TetrisMove"/> (alias <see cref="NudgePiece"/>).
     /// </summary>
     public sealed class LuaPlatformExampleController : MonoBehaviour
     {
         private const string SelfTestAId = "platform_selftest_a";
         private const string SelfTestBId = "platform_selftest_b";
         private const string TetrisId = "tetris3d";
-        private const int WindowId = 0x10D_0002;
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
         [SerializeField]
         private CoreAILifetimeScope coreAiScope;
-
-        [Tooltip("Hotkey that toggles the panel. Set to None to disable keyboard toggling.")]
-        [SerializeField]
-        private KeyCode toggleKey = KeyCode.F6;
-
-        [SerializeField]
-        private Rect panelRect = new(470, 92, 400, 330);
-
-        [Tooltip("Panel visibility on start; toggle at runtime via the hotkey or PanelVisible.")]
-        [SerializeField]
-        private bool showPanel = true;
-
-        /// <summary>Programmatic open/close of the panel (same effect as the hotkey).</summary>
-        public bool PanelVisible
-        {
-            get => showPanel;
-            set => showPanel = value;
-        }
-
-        /// <summary>Toggle hotkey; <see cref="KeyCode.None"/> disables keyboard toggling.</summary>
-        public KeyCode ToggleKey
-        {
-            get => toggleKey;
-            set => toggleKey = value;
-        }
 
         private ILuaModRuntime _mods;
         private string _status = "Waiting for CoreAI scope.";
@@ -59,8 +36,24 @@ namespace CoreAI.Demos
         private readonly List<string> _selfTestLines = new();
         private string _tetrisHud = "";
         private bool _pendingSelfTestUnload;
-        private Vector2 _scroll;
-        private GUIStyle _richLabel;
+
+        /// <summary>Current one-line driver status (loading, self-test progress, Tetris state).</summary>
+        public string Status => _status;
+
+        /// <summary>Latest self-test verdict line (PASS/FAIL summary or "not run yet").</summary>
+        public string SelfTestSummary => _selfTestSummary;
+
+        /// <summary>Latest Tetris HUD line reported by the mod, or an empty string when idle.</summary>
+        public string TetrisHud => _tetrisHud;
+
+        /// <summary>Per-check self-test report lines, most recent run.</summary>
+        public IReadOnlyList<string> SelfTestLines => _selfTestLines;
+
+        /// <summary>True once the mods runtime has been resolved and the driver is ready to accept commands.</summary>
+        public bool IsReady => _mods != null;
+
+        /// <summary>True while the Tetris mod is loaded and playing.</summary>
+        public bool IsTetrisRunning => _mods != null && _mods.IsLoaded(TetrisId);
 
         private IEnumerator Start()
         {
@@ -107,11 +100,6 @@ namespace CoreAI.Demos
 
         private void Update()
         {
-            if (toggleKey != KeyCode.None && Input.GetKeyDown(toggleKey))
-            {
-                showPanel = !showPanel;
-            }
-
             if (_pendingSelfTestUnload)
             {
                 // Unload outside the report callback: the callback fires from inside the runtime's
@@ -199,10 +187,22 @@ namespace CoreAI.Demos
                       $"tetris={(_mods != null && _mods.IsLoaded(TetrisId) ? "running" : "stopped")} {_tetrisHud}");
         }
 
+        /// <summary>WebGL SendMessage alias for <see cref="DumpStatus"/>.</summary>
+        public void LogStatus()
+        {
+            DumpStatus();
+        }
+
         /// <summary>Nudges the falling piece: payload "-1" left, "1" right (named-event demo).</summary>
         public void TetrisMove(string delta)
         {
             _mods?.EmitEvent("tetris_move", delta ?? "0");
+        }
+
+        /// <summary>WebGL SendMessage alias for <see cref="TetrisMove"/>.</summary>
+        public void NudgePiece(string delta)
+        {
+            TetrisMove(delta);
         }
 
         private void OnModReport(string modId, string message)
@@ -234,64 +234,6 @@ namespace CoreAI.Demos
                 _status = "Self-test finished.";
                 Debug.Log($"[LuaPlatformExample] SELFTEST {(pass ? "PASS" : "FAIL")}: {message}");
             }
-        }
-
-        private void OnGUI()
-        {
-            if (!showPanel)
-            {
-                return;
-            }
-
-            _richLabel ??= new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
-            panelRect.x = Mathf.Clamp(panelRect.x, 0f, Mathf.Max(0f, Screen.width - 120f));
-            panelRect.y = Mathf.Clamp(panelRect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
-            panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, $"Lua Platform Example  ({toggleKey})");
-        }
-
-        private void DrawWindow(int id)
-        {
-            if (GUI.Button(new Rect(panelRect.width - 58f, 2f, 52f, 18f), "Hide"))
-            {
-                showPanel = false;
-            }
-
-            GUILayout.Label(_status, _richLabel);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Run self-test"))
-            {
-                RunSelfTest();
-            }
-
-            bool tetrisRunning = _mods != null && _mods.IsLoaded(TetrisId);
-            if (GUILayout.Button(tetrisRunning ? "Restart Tetris" : "Start Tetris"))
-            {
-                StartTetris();
-            }
-
-            GUI.enabled = tetrisRunning;
-            if (GUILayout.Button("Stop", GUILayout.Width(52)))
-            {
-                StopTetris();
-            }
-
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
-
-            GUILayout.Label($"<b>Self-test:</b> {_selfTestSummary}", _richLabel);
-            if (!string.IsNullOrEmpty(_tetrisHud))
-            {
-                GUILayout.Label($"<b>Tetris:</b> {_tetrisHud}", _richLabel);
-            }
-
-            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(150));
-            foreach (string line in _selfTestLines)
-            {
-                GUILayout.Label(line, _richLabel);
-            }
-
-            GUILayout.EndScrollView();
-            GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
         }
 
         /// <summary>Receiver half of the cross-mod event check: answers every ping with pong.</summary>

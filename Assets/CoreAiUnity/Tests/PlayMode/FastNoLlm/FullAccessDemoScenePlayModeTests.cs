@@ -42,11 +42,11 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsFalse(luaModule.FullPrivateAccessEnabled,
                 "FullAccessDemo should keep private reflection access off by default.");
 
-            Assert.IsNotNull(FindBehaviour("CoreAI.Demos.FullAccessDemoController"),
-                "FullAccessDemoController must be present.");
+            Assert.IsNotNull(FindBehaviour("CoreAI.Demos.FullAccessHubDemoController"),
+                "FullAccessHubDemoController must be present.");
 
             GameObject target = GameObject.Find("TargetCube");
-            Assert.IsNotNull(target, "FullAccessDemoController must create or normalize TargetCube.");
+            Assert.IsNotNull(target, "FullAccessHubDemoController must create or normalize TargetCube.");
             Assert.AreEqual(0.5f, target.transform.position.y, 0.01f);
 
             MonoBehaviour buttons = FindBehaviour("CoreAI.Demos.ChatPromptButtonsController");

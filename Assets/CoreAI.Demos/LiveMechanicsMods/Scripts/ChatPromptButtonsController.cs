@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using CoreAI.Chat;
@@ -7,8 +8,10 @@ using UnityEngine.UIElements;
 namespace CoreAI.Demos
 {
     /// <summary>
-    /// Small IMGUI helper for demo scenes: preset prompts are inserted into the CoreAI chat input
-    /// so users can inspect/edit them before sending.
+    /// GUI-less driver for demo prompt templates: holds a serialized list of preset prompts and inserts a
+    /// chosen prompt into the CoreAI chat input so users can inspect/edit it before sending. The UI is a
+    /// UI Toolkit Hub tab (<see cref="ChatPromptsHubPage"/>) that reads <see cref="Prompts"/> and calls
+    /// <see cref="InsertOrSubmit"/>; this component owns only the data and the chat wiring.
     /// </summary>
     public sealed class ChatPromptButtonsController : MonoBehaviour
     {
@@ -24,94 +27,37 @@ namespace CoreAI.Demos
         [SerializeField]
         private string title = "Prompt templates";
 
-        [Tooltip("Width/height of the panel. It is auto-anchored to the bottom of the screen, " +
-                 "just left of the chat, so it does not overlap the usage / mod panels.")]
-        [SerializeField]
-        private Rect panelRect = new(12, 420, 520, 180);
-
-        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")]
-        [SerializeField]
-        private float chatReserveWidth = 700f;
-
         [SerializeField]
         private PromptButton[] prompts = System.Array.Empty<PromptButton>();
 
         [SerializeField]
         private bool submitWhenInputUnavailable;
 
-        [Tooltip("Show or hide the prompt buttons panel.")]
-        [SerializeField]
-        private bool _showPanel = true;
-
-        [Tooltip("Hotkey that toggles the panel at runtime. Set to None to disable the hotkey.")]
-        [SerializeField]
-        private KeyCode _toggleKey = KeyCode.F8;
-
         private CoreAiChatPanel _chatPanel;
         private string _status = "Click a prompt to insert it into chat.";
+
+        /// <summary>Panel title shown by the Hub page.</summary>
+        public string Title => title;
+
+        /// <summary>The preset prompts rendered by the Hub page.</summary>
+        public IReadOnlyList<PromptButton> Prompts => prompts;
+
+        /// <summary>Last insertion status, surfaced by the Hub page.</summary>
+        public string Status => _status;
 
         private void Awake()
         {
             _chatPanel = FindFirstObjectByType<CoreAiChatPanel>();
         }
 
-        private void Update()
-        {
-            if (_toggleKey != KeyCode.None && Input.GetKeyDown(_toggleKey))
-            {
-                _showPanel = !_showPanel;
-            }
-        }
-
-        public void Configure(string panelTitle, Rect rect, PromptButton[] promptButtons)
+        public void Configure(string panelTitle, PromptButton[] promptButtons)
         {
             title = panelTitle;
-            panelRect = rect;
             prompts = promptButtons ?? System.Array.Empty<PromptButton>();
         }
 
-        private void OnGUI()
-        {
-            if (prompts == null || prompts.Length == 0 || !_showPanel)
-            {
-                return;
-            }
-
-            // Anchor to the bottom of the screen, just left of the chat panel, so the prompt
-            // buttons sit next to the chat and never overlap the usage / mod-manager panels.
-            float w = Mathf.Min(panelRect.width, Screen.width - 24f);
-            float h = panelRect.height;
-            float x = Mathf.Clamp(Screen.width - chatReserveWidth - w - 12f, 12f,
-                Mathf.Max(12f, Screen.width - w - 12f));
-            float y = Mathf.Max(12f, Screen.height - h - 12f);
-            Rect rect = new(x, y, w, h);
-
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            if (GUI.Button(new Rect(w - 58f, 2f, 52f, 18f), "Hide"))
-            {
-                _showPanel = false;
-            }
-
-            GUILayout.Label($"<b>{title}</b> ({_toggleKey})", RichLabel());
-            GUILayout.Label(_status, RichLabel());
-
-            foreach (PromptButton prompt in prompts)
-            {
-                if (prompt == null || string.IsNullOrWhiteSpace(prompt.Prompt))
-                {
-                    continue;
-                }
-
-                if (GUILayout.Button(prompt.Label, GUILayout.Height(28)))
-                {
-                    InsertOrSubmit(prompt.Prompt);
-                }
-            }
-
-            GUILayout.EndArea();
-        }
-
-        private void InsertOrSubmit(string prompt)
+        /// <summary>Inserts <paramref name="prompt"/> into the chat input (or submits it as a fallback).</summary>
+        public void InsertOrSubmit(string prompt)
         {
             if (_chatPanel == null)
             {
@@ -157,11 +103,6 @@ namespace CoreAI.Demos
             input.value = text ?? "";
             input.schedule.Execute(() => input.Focus());
             return true;
-        }
-
-        private static GUIStyle RichLabel()
-        {
-            return new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
         }
     }
 }
