@@ -38,6 +38,13 @@ namespace CoreAI.Composition
         [SerializeField]
         private ScriptableObject blacklistPolicy;
 
+        [Header("Rbx world")]
+        [Tooltip("Optional scene RobloxWorldHost. When set, the Rbx API (Instance.new/Part properties) " +
+                 "materializes parts as GameObjects under the host via its binder; when empty, the Rbx " +
+                 "world is headless in-memory.")]
+        [SerializeField]
+        private Mods.Rbx.Binding.RobloxWorldHost robloxWorldHost;
+
         // WHY: Parenting to the CoreAI scope is done via VContainer's `parentReference` (set in the scene to
         // CoreAILifetimeScope). That path defers this child's build until the parent container exists —
         // overriding FindParent to return the parent directly would bypass the deferral and NRE when this
@@ -49,6 +56,14 @@ namespace CoreAI.Composition
             // mods module supplies it here. The Lua-CSharp sandbox is created inside the factory, so no
             // sandbox registration is needed at this scope.
             builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+
+            if (robloxWorldHost != null)
+            {
+                // WHY: explicit serialized reference per ARCHITECTURE_RULES par.2 (no scene reflection,
+                // no static singleton) - the host's world/binder become the Rbx API backing so Lua
+                // parts materialize as GameObjects instead of the headless in-memory default.
+                builder.RegisterInstance(robloxWorldHost);
+            }
 
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;
             builder.RegisterCoreAiMods(

@@ -69,8 +69,28 @@ namespace CoreAI.Composition
 
             // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
-            builder.Register(c => LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            builder.Register(c =>
             {
+                // WHY: a scene that references a RobloxWorldHost on its CoreAiModsLifetimeScope gets a
+                // VISIBLE Rbx world - the host's registry/game/binder back the Lua surface, so
+                // Instance.new('Part') materializes a GameObject. Without a host the world stays
+                // headless in-memory (same API, no rendering). Initialize() is idempotent and safe
+                // before Awake ordering.
+                CoreAI.Mods.Rbx.Binding.RobloxWorldHost rbxHost = c.ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RobloxWorldHost>();
+                LuaCsRobloxApiBindings robloxApi;
+                if (rbxHost != null)
+                {
+                    rbxHost.Initialize();
+                    robloxApi = new LuaCsRobloxApiBindings(
+                        rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder);
+                }
+                else
+                {
+                    robloxApi = new LuaCsRobloxApiBindings();
+                }
+
+                return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
                 Logger = c.Resolve<IGameLogger>(),
                 LuaScriptVersions = c.ResolveOrDefault<ILuaScriptVersionStore>(),
                 DataOverlayVersions = c.ResolveOrDefault<IDataOverlayVersionStore>(),
@@ -88,11 +108,9 @@ namespace CoreAI.Composition
                 // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
                 // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
                 // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
-                // Part spatial/appearance writes land in the default in-memory part-property sink; a
-                // scene that owns a RobloxWorldHost passes host.Binder as partSink to materialize
-                // parts as GameObjects (LuaCsRobloxApiBindings ctor).
-                RobloxApi = new LuaCsRobloxApiBindings()
-            }), Lifetime.Singleton);
+                RobloxApi = robloxApi
+                });
+            }, Lifetime.Singleton);
 
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)
                 .AsSelf().As<ILuaModRuntime>();
