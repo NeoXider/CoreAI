@@ -196,7 +196,16 @@ namespace CoreAI.Ai.Hub
             // Deferred one tick: ScrollTo needs the just-added element's layout resolved first.
             if (lastLine != null)
             {
-                _logScroll.schedule.Execute(() => _logScroll.ScrollTo(lastLine));
+                _logScroll.schedule.Execute(() =>
+                {
+                    // WHY: the periodic Refresh may have cleared and rebuilt the list before this deferred
+                    // tick ran, so the captured line can already be detached — ScrollTo would then throw
+                    // "not a child of the ScrollView content-container". Only scroll while it is still parented.
+                    if (lastLine.parent == _logScroll.contentContainer)
+                    {
+                        _logScroll.ScrollTo(lastLine);
+                    }
+                });
             }
         }
 

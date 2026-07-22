@@ -8,9 +8,9 @@
   top: 24px;
   left: 24px;
   width: 720px;
-  height: 640px;
+  height: 720px;
   max-width: 94%;
-  max-height: 92%;
+  max-height: 94%;
   background-color: rgba(6, 14, 30, 0.93);
   border-radius: 16px;
   border-width: 2px;
@@ -67,7 +67,7 @@
    the tab buttons added in CoreAiHubWindow.RebuildTabs. */
 .coreai-hub-tabbar {
   flex-shrink: 0;
-  max-height: 76px;
+  max-height: 124px;
   background-color: rgba(10, 22, 45, 0.95);
   border-bottom-width: 1px;
   border-bottom-color: rgba(17, 160, 181, 0.3);
@@ -85,17 +85,17 @@
 }
 
 .coreai-hub-tab {
-  height: 34px;
-  margin-right: 8px;
-  margin-bottom: 4px;
-  padding-left: 16px;
-  padding-right: 16px;
+  height: 32px;
+  margin-right: 6px;
+  margin-bottom: 5px;
+  padding-left: 13px;
+  padding-right: 13px;
   background-color: rgba(17, 160, 181, 0.15);
   border-width: 1px;
   border-color: rgba(77, 208, 225, 0.35);
-  border-radius: 17px;
+  border-radius: 16px;
   color: rgb(197, 220, 232);
-  font-size: 15px;
+  font-size: 14px;
   -unity-font-style: bold;
   transition-duration: 0.15s;
 }
