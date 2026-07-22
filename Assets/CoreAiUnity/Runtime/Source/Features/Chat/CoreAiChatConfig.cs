@@ -159,6 +159,14 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _chatRequiresVisibleCursor = true;
 
+        [Header("Tools")]
+        [Tooltip(
+            "Give every chat agent the runtime camera tool (camera_capture / camera_look / camera_list) so a " +
+            "vision-capable model can see and refine its own work. Text-only models never call it. Silently " +
+            "skipped when the agent-vision service is unavailable (no world executor to render).")]
+        [SerializeField]
+        private bool _enableCameraTool = true;
+
         [Header("Errors")]
         [SerializeField]
         private string _errorMessagePrefix = "Error: ";
@@ -207,6 +215,7 @@ namespace CoreAI.Chat
         public KeyCode OpenChatHotkey => _openChatHotkey;
         public bool EnableEscapeChatShortcuts => _enableEscapeChatShortcuts;
         public bool ChatRequiresVisibleCursor => _chatRequiresVisibleCursor;
+        public bool EnableCameraTool => _enableCameraTool;
         public string ErrorMessagePrefix => _errorMessagePrefix;
         public string TimeoutMessage => _timeoutMessage;
         public string NoResponseMessage => _noResponseMessage;
@@ -262,6 +271,7 @@ namespace CoreAI.Chat
             _enableOpenChatKeyboardShortcut = options.EnableOpenChatKeyboardShortcut;
             _enableEscapeChatShortcuts = options.EnableEscapeChatShortcuts;
             _chatRequiresVisibleCursor = options.ChatRequiresVisibleCursor;
+            _enableCameraTool = options.EnableCameraTool;
             _errorMessagePrefix = options.ErrorMessagePrefix;
             _timeoutMessage = options.TimeoutMessage;
             _noResponseMessage = options.NoResponseMessage;

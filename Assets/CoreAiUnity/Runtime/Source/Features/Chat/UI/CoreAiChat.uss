@@ -505,6 +505,27 @@
   background-color: rgba(180, 32, 50, 1);
 }
 
+/* Examples menu button: compact affordance on the input row, left of the text field. */
+.coreai-chat-examples-button {
+  width: 40px;
+  height: 40px;
+  margin-right: 8px;
+  padding: 0;
+  background-color: rgba(17, 160, 181, 0.2);
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.35);
+  color: rgb(197, 220, 232);
+  border-radius: 20px;
+  font-size: 18px;
+  flex-shrink: 0;
+  transition-duration: 0.15s;
+}
+
+.coreai-chat-examples-button:hover {
+  background-color: rgba(77, 208, 225, 0.35);
+  border-color: rgba(77, 208, 225, 0.7);
+}
+
 /* Scrollbar: Telegram-style vertical ScrollView bar.
    Official Unity selector chain:
    .unity-scroll-view__vertical-scroller -> .unity-scroller__slider ->

@@ -55,6 +55,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(config.ShowClearButton, "по умолчанию кнопка очистки доступна");
             Assert.IsTrue(config.ChatRequiresVisibleCursor,
                 "по умолчанию чат реагирует на хоткеи только при видимом курсоре");
+            Assert.IsTrue(config.EnableCameraTool,
+                "по умолчанию агентам чата выдаётся камера-инструмент");
 
             Object.DestroyImmediate(config);
         }
@@ -136,6 +138,7 @@ namespace CoreAI.Tests.EditMode
             public bool EnableOpenChatKeyboardShortcut => true;
             public bool EnableEscapeChatShortcuts => true;
             public bool ChatRequiresVisibleCursor => true;
+            public bool EnableCameraTool => true;
             public string ErrorMessagePrefix => CoreAiChatOptions.DefaultErrorMessagePrefix;
             public string TimeoutMessage => CoreAiChatOptions.DefaultTimeoutMessage;
             public string NoResponseMessage => CoreAiChatOptions.DefaultNoResponseMessage;

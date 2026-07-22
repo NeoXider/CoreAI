@@ -101,6 +101,21 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 
 ---
 
+### 2.1.1 Builder
+
+| | |
+|--|--|
+| **ID** | `Builder` |
+| **Goal** | Build a **whole 3D scene** from a natural-language description — place every object itself. |
+| **Behavior** | One spawn tool call per object with explicit coordinates (one Unity unit = one meter), a DISTINCT targetName, `scaleX/scaleY/scaleZ` for non-uniform parts, and `action='set_color'` (HTML colors) so nothing reads as unfinished; keeps building until the scene is complete. When a **camera** tool is available it may capture a screenshot to inspect and refine its own work. |
+| **Inputs** | Build request / subject, world snapshot. |
+| **Outputs** | `world_command` tool calls (spawn / set_color / …). |
+| **Placement** | Usually **HostAuthoritative** in multiplayer (like Creator). |
+| **Defaults** | Unlimited tool-call roundtrips (0 = never cut off mid-build), Creator-style tool-result memory (CompactSummary + smart compaction). |
+| **Examples** | “Build a castle”; “build a futuristic city”; “lay out a small village”. |
+
+---
+
 ### 2.2 Analyzer
 
 | | |

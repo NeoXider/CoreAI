@@ -114,6 +114,31 @@ namespace CoreAI.Ai
             }
         }
 
+        /// <summary>
+        /// Returns a snapshot of the skills registered for <paramref name="roleId"/> (empty when the role
+        /// has none). Exposed so out-of-band surfaces — e.g. the MCP server's <c>read_skill</c> tool —
+        /// can serve the SAME skill reference the in-game agent gets from its <c>read_skill</c> catalog,
+        /// keeping one source of truth instead of duplicating the docs.
+        /// </summary>
+        public IReadOnlyList<SkillSet> GetSkillsForRole(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return System.Array.Empty<SkillSet>();
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                if (_roleSkillCatalogs.TryGetValue(roleId, out MutableSkillCatalog catalog))
+                {
+                    return new List<SkillSet>(catalog);
+                }
+            }
+
+            return System.Array.Empty<SkillSet>();
+        }
+
         /// <summary>Registers a runtime context provider for a single role.</summary>
         public void SetRuntimeContextProvider(string roleId, IAgentRuntimeContextProvider provider)
         {
@@ -307,10 +332,14 @@ namespace CoreAI.Ai
                     useLlmContextCompaction: smartCompaction);
 
                 // WHY: The Programmer writes/iterates Lua and routinely needs many tool roundtrips in one turn
-                // (generate → run → read error → fix → re-run …), and the Creator orchestrates a whole
-                // build across many tool calls. Cap both at 0 = unlimited so they are never cut off
-                // mid-task. Other built-in roles inherit the global default (null = 20).
-                if (isProgrammer || roleId == BuiltInAgentRoleIds.Creator)
+                // (generate → run → read error → fix → re-run …), and the Creator/Builder orchestrate a whole
+                // build across many tool calls (one spawn per object). Cap them at 0 = unlimited so they are
+                // never cut off mid-task. Builder shares the Creator's tool-result memory treatment
+                // (CompactSummary + smart compaction) since it is not in needsExactToolOutput above. Other
+                // built-in roles inherit the global default (null = 20).
+                if (isProgrammer ||
+                    roleId == BuiltInAgentRoleIds.Creator ||
+                    roleId == BuiltInAgentRoleIds.Builder)
                 {
                     builtIn.MaxToolCallRoundtrips = 0;
                 }

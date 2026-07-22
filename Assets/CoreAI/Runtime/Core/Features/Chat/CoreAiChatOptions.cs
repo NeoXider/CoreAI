@@ -41,6 +41,14 @@ namespace CoreAI.Chat
         /// </summary>
         bool ChatRequiresVisibleCursor { get; }
 
+        /// <summary>
+        /// When true (default), every chat agent is given the runtime <c>camera</c> tool
+        /// (<c>camera_capture</c> / <c>camera_look</c> / <c>camera_list</c>) so a vision-capable model can
+        /// see and refine its own work. Text-only models simply never call it. When the agent-vision
+        /// service is unavailable (e.g. no world executor to render) the tool is silently skipped.
+        /// </summary>
+        bool EnableCameraTool { get; }
+
         string ErrorMessagePrefix { get; }
         string TimeoutMessage { get; }
         string NoResponseMessage { get; }
@@ -133,6 +141,7 @@ namespace CoreAI.Chat
         public bool EnableOpenChatKeyboardShortcut { get; set; } = true;
         public bool EnableEscapeChatShortcuts { get; set; } = true;
         public bool ChatRequiresVisibleCursor { get; set; } = true;
+        public bool EnableCameraTool { get; set; } = true;
         public string ErrorMessagePrefix { get; set; } = DefaultErrorMessagePrefix;
         public string TimeoutMessage { get; set; } = DefaultTimeoutMessage;
         public string NoResponseMessage { get; set; } = DefaultNoResponseMessage;
@@ -188,6 +197,7 @@ namespace CoreAI.Chat
                 EnableOpenChatKeyboardShortcut = source.EnableOpenChatKeyboardShortcut,
                 EnableEscapeChatShortcuts = source.EnableEscapeChatShortcuts,
                 ChatRequiresVisibleCursor = source.ChatRequiresVisibleCursor,
+                EnableCameraTool = source.EnableCameraTool,
                 ErrorMessagePrefix = source.ErrorMessagePrefix,
                 TimeoutMessage = source.TimeoutMessage,
                 NoResponseMessage = source.NoResponseMessage

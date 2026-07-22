@@ -106,6 +106,7 @@ namespace CoreAI.Ai
             string basePrompt = roleId switch
             {
                 BuiltInAgentRoleIds.Creator => BuiltInAgentSystemPromptTexts.Creator,
+                BuiltInAgentRoleIds.Builder => BuiltInAgentSystemPromptTexts.Builder,
                 BuiltInAgentRoleIds.Analyzer => BuiltInAgentSystemPromptTexts.Analyzer,
                 BuiltInAgentRoleIds.Programmer => BuiltInAgentSystemPromptTexts.Programmer,
                 BuiltInAgentRoleIds.AiNpc => BuiltInAgentSystemPromptTexts.AiNpc,

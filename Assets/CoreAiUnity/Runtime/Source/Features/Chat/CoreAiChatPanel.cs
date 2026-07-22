@@ -607,6 +607,7 @@ namespace CoreAI.Chat
             _activeRequestCts?.Dispose();
         }
 
+        private Button _examplesButton;
         private DropdownField _agentDropdown;
         private DropdownField _apiProfileDropdown;
         private Button _apiProfileToggle;
@@ -872,6 +873,9 @@ namespace CoreAI.Chat
             string previousRole = _activeRoleId;
             _activeRoleId = evt.newValue;
 
+            // WHY: every chat agent (including one switched to at runtime) gets the camera tool when enabled.
+            EnsureCameraToolForActiveRole();
+
             // WHY: re-target the panel to the newly selected role. Stop any in-flight turn for the
             // *previous* role so its late streaming output does not bleed into the newly selected
             // role's transcript, then reload this role's chat history.
@@ -966,6 +970,8 @@ namespace CoreAI.Chat
                 InputField.RegisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
             }
 
+            TryBuildExamplesButton();
+
             Root?.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
 
             if (MessageScroll != null)
@@ -994,6 +1000,68 @@ namespace CoreAI.Chat
             ApplyClearButtonVisibility();
             UpdateSendButtonVisualState();
             ApplyShortcutTooltips();
+        }
+
+        /// <summary>
+        /// Adds a compact "Examples" menu button to the input row. Clicking it opens a UITK dropdown of the
+        /// built-in <see cref="CoreAiChatExamples"/>; picking one INSERTS its text into the chat input (it is
+        /// not auto-sent — the player presses send). Kept small so it does not clutter the default layout.
+        /// </summary>
+        private void TryBuildExamplesButton()
+        {
+            if (_examplesButton != null || InputField == null)
+            {
+                return;
+            }
+
+            VisualElement inputContainer = InputField.parent;
+            if (inputContainer == null || CoreAiChatExamples.All.Count == 0)
+            {
+                return;
+            }
+
+            _examplesButton = new Button(ShowExamplesMenu)
+            {
+                // WHY: "≡" reads as a compact menu affordance and is a common glyph in the default font;
+                // plain text so no image asset is required.
+                text = "≡",
+                tooltip = "Insert an example prompt"
+            };
+            _examplesButton.AddToClassList("coreai-chat-examples-button");
+            _examplesButton.focusable = false;
+            inputContainer.Insert(0, _examplesButton);
+        }
+
+        private void ShowExamplesMenu()
+        {
+            if (_examplesButton == null)
+            {
+                return;
+            }
+
+            GenericDropdownMenu menu = new();
+            foreach (CoreAiChatExample example in CoreAiChatExamples.All)
+            {
+                CoreAiChatExample captured = example;
+                menu.AddItem(captured.Title, false, () => InsertExampleIntoInput(captured));
+            }
+
+            menu.DropDown(_examplesButton.worldBound, _examplesButton, false);
+        }
+
+        /// <summary>
+        /// Puts the example text into the input field without sending it, then focuses the input so the
+        /// player can review or edit before pressing send.
+        /// </summary>
+        private void InsertExampleIntoInput(CoreAiChatExample example)
+        {
+            if (InputField == null || string.IsNullOrEmpty(example.Message))
+            {
+                return;
+            }
+
+            InputField.value = example.Message;
+            InputField.schedule.Execute(FocusInputField);
         }
 
         private static VisualElement ResolveChatContainer(VisualElement root)
@@ -1055,6 +1123,7 @@ namespace CoreAI.Chat
             TypingLabel = null;
             HeaderTitle = null;
             HeaderIcon = null;
+            _examplesButton = null;
             _agentDropdown = null;
             _apiProfileDropdown = null;
             _apiProfileToggle = null;
@@ -1469,7 +1538,25 @@ namespace CoreAI.Chat
             {
                 Logger.LogWarning(GameLogFeature.Core,
                     "[CoreAiChatPanel] CoreAiChatService not available (no CoreAILifetimeScope on scene?).");
+                return;
             }
+
+            EnsureCameraToolForActiveRole();
+        }
+
+        /// <summary>
+        /// Gives the active chat agent the runtime camera tool when <see cref="ICoreAiChatOptions.EnableCameraTool"/>
+        /// is on. No-op when the service or agent-vision wiring is absent (silent degrade for text-only /
+        /// headless scenes). Called on service init and whenever the agent is switched.
+        /// </summary>
+        private void EnsureCameraToolForActiveRole()
+        {
+            if (_chatService == null || !Options.EnableCameraTool)
+            {
+                return;
+            }
+
+            _chatService.TryEnsureCameraToolForRole(ActiveRoleId, true);
         }
 
         /// <summary>

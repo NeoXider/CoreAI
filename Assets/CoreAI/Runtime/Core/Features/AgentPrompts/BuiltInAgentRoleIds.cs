@@ -10,6 +10,9 @@ namespace CoreAI.Ai
         /// <summary>Creator.</summary>
         public const string Creator = "Creator";
 
+        /// <summary>3D scene builder: places every object itself with explicit coordinates.</summary>
+        public const string Builder = "Builder";
+
         /// <summary>Analyzer.</summary>
         public const string Analyzer = "Analyzer";
 
@@ -41,6 +44,7 @@ namespace CoreAI.Ai
         public static readonly IReadOnlyList<string> AllBuiltInRoles = new[]
         {
             Creator,
+            Builder,
             Analyzer,
             Programmer,
             AiNpc,

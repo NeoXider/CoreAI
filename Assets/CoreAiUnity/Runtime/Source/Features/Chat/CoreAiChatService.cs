@@ -25,6 +25,7 @@ namespace CoreAI.Chat
         private readonly IAgentMemoryStore _memoryStore;
         private readonly IGameLogger _logger;
         private readonly ILlmClient _llmClient;
+        private readonly Vision.IAgentCameraService _cameraService;
 
         public CoreAiChatService(
             IAiOrchestrationService orchestrator,
@@ -32,7 +33,8 @@ namespace CoreAI.Chat
             ICoreAISettings settings = null,
             IAgentMemoryStore memoryStore = null,
             IGameLogger logger = null,
-            ILlmClient llmClient = null)
+            ILlmClient llmClient = null,
+            Vision.IAgentCameraService cameraService = null)
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _memoryPolicy = memoryPolicy;
@@ -40,6 +42,7 @@ namespace CoreAI.Chat
             _memoryStore = memoryStore;
             _logger = logger;
             _llmClient = llmClient;
+            _cameraService = cameraService;
         }
 
         /// <summary>
@@ -63,6 +66,7 @@ namespace CoreAI.Chat
                 IAgentMemoryStore memStore = null;
                 IGameLogger logger = null;
                 ILlmClient llmClient = null;
+                Vision.IAgentCameraService cameraService = null;
 
                 try
                 {
@@ -114,7 +118,23 @@ namespace CoreAI.Chat
                         $"[CoreAiChatService] Resolve ILlmClient: {ex.Message}");
                 }
 
-                return new CoreAiChatService(orchestrator, policy, settings, memStore, logger, llmClient);
+                // WHY: agent-vision is optional wiring (WorldCommandsInstaller.RegisterAgentVision registers
+                // it). Minimal containers without a world executor simply resolve null, so the camera tool is
+                // silently skipped and text-only chat is unaffected.
+                try
+                {
+                    cameraService =
+                        (Vision.IAgentCameraService)scope.Container.Resolve(typeof(Vision.IAgentCameraService));
+                }
+                catch (Exception ex)
+                {
+                    // WHY: optional service — absent whenever the scene has no world executor; Debug, not Warning.
+                    GameLoggerUnscopedFallback.Instance.LogDebug(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve IAgentCameraService (optional): {ex.Message}");
+                }
+
+                return new CoreAiChatService(
+                    orchestrator, policy, settings, memStore, logger, llmClient, cameraService);
             }
             catch (Exception ex)
             {
@@ -281,6 +301,18 @@ namespace CoreAI.Chat
                 timerHandle?.Dispose();
                 timeoutCts?.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Gives the chat agent <paramref name="roleId"/> the runtime <c>camera</c> tool when
+        /// <paramref name="enabled"/> is true and the agent-vision service is available. Idempotent and
+        /// silently degrades (returns false) when disabled, when no vision service was resolved, or when the
+        /// role already has the tool. Vision-capable models can then see and refine their own work; text-only
+        /// models never call it. See <see cref="CoreAiChatCameraTools"/>.
+        /// </summary>
+        public bool TryEnsureCameraToolForRole(string roleId, bool enabled)
+        {
+            return CoreAiChatCameraTools.TryAttachCameraTool(_memoryPolicy, _cameraService, roleId, enabled);
         }
 
         /// <summary>Clears the stored chat history for the selected agent role.</summary>

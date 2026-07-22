@@ -16,6 +16,7 @@ namespace CoreAI.Tests.EditMode
                 new[]
                 {
                     BuiltInAgentRoleIds.Creator,
+                    BuiltInAgentRoleIds.Builder,
                     BuiltInAgentRoleIds.Analyzer,
                     BuiltInAgentRoleIds.Programmer,
                     BuiltInAgentRoleIds.AiNpc,

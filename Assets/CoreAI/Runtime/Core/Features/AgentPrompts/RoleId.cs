@@ -38,6 +38,9 @@ namespace CoreAI.Ai
         /// <summary>Creator.</summary>
         public static RoleId Creator => new(BuiltInAgentRoleIds.Creator);
 
+        /// <summary>3D scene builder.</summary>
+        public static RoleId Builder => new(BuiltInAgentRoleIds.Builder);
+
         /// <summary>Analyzer.</summary>
         public static RoleId Analyzer => new(BuiltInAgentRoleIds.Analyzer);
 
