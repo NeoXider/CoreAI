@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -836,6 +837,57 @@ namespace CoreAI.Tests.EditMode
             stack.Runtime.EmitEvent("work", "");
             stack.Runtime.Tick(0);
             Assert.AreEqual("1", store.Get("m", "n"), "The repaired instance must dispatch normally.");
+        }
+
+        [Test]
+        public void LuaCs_Quarantine_CrossModExportSuspended_HealthyCallerNotEscalated()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildQuarantineStack(store);
+
+            // provider exports a callable AND has a failing handler that drives it into quarantine.
+            stack.Runtime.LoadMod("provider", @"
+                mods_export('scale', function(x) return (tonumber(x) or 0) * 2 end)
+                hooks_on('boom', function() error('boom') end)");
+
+            // consumer is HEALTHY: it pcall-wraps its cross-mod call so a suspended target is handled,
+            // not propagated into its own streak.
+            stack.Runtime.LoadMod("consumer", @"
+                hooks_on('use', function()
+                    local ok, err = pcall(function() return mods_call('provider', 'scale', 10) end)
+                    store_set('ok', ok and 'yes' or 'no')
+                    store_set('err', tostring(err))
+                end)");
+
+            for (int i = 0; i < 2; i++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                stack.Runtime.Tick(0);
+            }
+
+            LuaModInfo provider = stack.Runtime.ListMods().Single(m => m.Id == "provider");
+            Assert.IsTrue(provider.Quarantined, "Precondition: the provider mod is quarantined.");
+
+            // The quarantined export must be suspended: repeated cross-mod calls all fail with the
+            // quarantine error, and must never escalate the healthy caller's streak into quarantine.
+            for (int i = 0; i < (LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2) + 2; i++)
+            {
+                stack.Runtime.EmitEvent("use", "");
+                stack.Runtime.Tick(0);
+            }
+
+            Assert.AreEqual("no", store.Get("consumer", "ok"),
+                "A quarantined mod's exports must NOT be callable via mods_call.");
+            StringAssert.Contains("quarantined", store.Get("consumer", "err"),
+                "The failure must be attributable to the quarantined target, naming the quarantine.");
+            StringAssert.Contains("provider", store.Get("consumer", "err"),
+                "The quarantine error must name the target mod.");
+
+            LuaModInfo consumer = stack.Runtime.ListMods().Single(m => m.Id == "consumer");
+            Assert.IsFalse(consumer.Quarantined,
+                "Repeated calls into a quarantined mod must not quarantine the healthy caller.");
+            Assert.AreEqual(0, consumer.ErrorCount,
+                "The quarantined-target failure must not be mis-charged to the caller's error streak.");
         }
 
         [Test]

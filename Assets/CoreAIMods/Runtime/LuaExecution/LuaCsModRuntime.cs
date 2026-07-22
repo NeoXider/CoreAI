@@ -32,7 +32,7 @@ namespace CoreAI.Ai.LuaCs
     /// <c>LuaModRuntime</c> -> <c>LuaCsModRuntime</c> by type because the public lifecycle/tick/
     /// diagnostics surface below mirrors the MoonSharp runtime.
     ///
-    /// A mod is a sandboxed Lua-CSharp <see cref="LuaState"/> that registers hooks during load and
+    /// A mod is a sandboxed Lua-CSharp <see cref="IScriptState"/> that registers hooks during load and
     /// then lives across frames:
     /// <list type="bullet">
     /// <item><c>hooks_on(event, fn)</c> — handler for named events (from the game or other mods).</item>
@@ -251,7 +251,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <param name="gameplayBindings">
         /// Optional seam for registering ported world/unity gameplay APIs on each mod's
-        /// <see cref="LuaCsApiRegistry"/>, scoped to the mod's granted <see cref="LuaCapabilities"/>;
+        /// <see cref="IScriptFunctionRegistry"/>, scoped to the mod's granted <see cref="LuaCapabilities"/>;
         /// the third argument is the owning mod's id so ownership-tracked surfaces (logic slots) can
         /// attribute what a mod registers. Null = mods only get the built-in mod-core APIs. See
         /// <see cref="RegisterGameplayBindings"/>.
@@ -546,8 +546,8 @@ namespace CoreAI.Ai.LuaCs
         /// <c>IGameLuaRuntimeBindings.RegisterGameplayApis(LuaApiRegistry)</c> (optionally scoped by
         /// <c>ICapabilityScopedLuaBindings</c>). Those heavy bindings are NOT ported to Lua-CSharp in
         /// this pass. Until a ported binding provider exists, a host may inject an
-        /// <see cref="Action{LuaCsApiRegistry, LuaCapabilities}"/> that registers gameplay APIs on the
-        /// per-mod <see cref="LuaCsApiRegistry"/>, scoped to <paramref name="capabilities"/>. The
+        /// <see cref="Action{IScriptFunctionRegistry, LuaCapabilities}"/> that registers gameplay APIs on the
+        /// per-mod <see cref="IScriptFunctionRegistry"/>, scoped to <paramref name="capabilities"/>. The
         /// callback is responsible for its own fail-closed capability trimming.
         /// </summary>
         private void RegisterGameplayBindings(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
@@ -1541,6 +1541,18 @@ namespace CoreAI.Ai.LuaCs
                 if (!_mods.TryGetValue(modId, out target))
                 {
                     throw new ArgumentException($"mod '{modId}' is not loaded.");
+                }
+
+                // WHY: Quarantine must suspend ALL FOUR dispatch surfaces — handlers, timers, queued
+                // events/logic_define overrides, AND cross-mod exports (mods_call/mods_get). Without
+                // this guard a quarantined mod's export stays synchronously invokable: a broken export
+                // that throws surfaces in the CALLER's InvokeGuarded catch and mis-charges the caller's
+                // error streak, driving a healthy dependent mod into quarantine. Fail here so the error
+                // is attributable to the quarantined target, not the caller.
+                if (target.Quarantined)
+                {
+                    throw new InvalidOperationException(
+                        $"mod '{modId}' is quarantined - its exports are suspended; reload it to clear the quarantine.");
                 }
 
                 if (!target.Exports.TryGetValue(exportName, out object export))

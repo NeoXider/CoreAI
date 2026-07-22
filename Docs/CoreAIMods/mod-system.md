@@ -161,6 +161,9 @@ configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is
 
 - **Suspended:** its `hooks_on` handlers, `hooks_every` timers, and queued events are all skipped,
   and its `logic_define` overrides are cleared so the game falls back to the vanilla C# formulas.
+  Its cross-mod exports are suspended too: another mod's `mods_call`/`mods_get` into a quarantined
+  mod fails with a quarantine error instead of invoking the export, so a broken mod cannot charge the
+  caller's error streak.
 - **Still loaded:** the mod stays in the runtime and in `manage_mods list` (with
   `quarantined: true`); `get_source`, `diagnostics`, `versions`, `export` keep working. This is what
   keeps the async "AI repairs a broken mod live" loop honest — a repair that takes minutes still
