@@ -152,6 +152,55 @@ from a per-frame path. See §6.
 `tick` (~20 Hz, existing), `save`, `load`. Mods subscribe via `hooks_on`. Combine with existing world
 transactions (`coreai_world_begin/commit`), persistence (`store_set/get`), and capability tiers.
 
+## 5a. Error policy: quarantine, not unload
+
+Runtime failures never auto-unload a mod. Every hook/timer call runs under a per-call guard; a
+failure increments the mod's **consecutive-error streak** (any successful call resets it to zero).
+When the streak reaches the threshold — `LuaCsModRuntime.MaxErrorsBeforeQuarantine`, default 8,
+configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is **quarantined**:
+
+- **Suspended:** its `hooks_on` handlers, `hooks_every` timers, and queued events are all skipped,
+  and its `logic_define` overrides are cleared so the game falls back to the vanilla C# formulas.
+- **Still loaded:** the mod stays in the runtime and in `manage_mods list` (with
+  `quarantined: true`); `get_source`, `diagnostics`, `versions`, `export` keep working. This is what
+  keeps the async "AI repairs a broken mod live" loop honest — a repair that takes minutes still
+  finds its target instead of a `not loaded` error.
+- **Cleared by reload:** a successful `manage_mods reload` (or `ReloadMod`) swaps in a fresh
+  instance with a zero streak and no quarantine, and dispatch resumes. `unload`/`forget` remain the
+  explicit removal paths.
+
+Observability: quarantine entry raises `LuaCsModRuntime.ModQuarantined(modId, errorCount)`, and every
+teardown of a mod instance's side effects (unload, reload pre-swap, quarantine entry) raises
+`ModTearingDown(modId, reason)` — future subsystems (instance registries, signals) hook the same
+point. Logic-slot override failures are fail-open (reset to vanilla) but attributed: they are
+recorded into the mod's handler-error diagnostics with the owning mod id and slot name.
+
+## 5b. Multiplayer write policy (planned — lands with the Roblox API track, MVP12)
+
+CoreAI is a framework, not one game: what clients may change in a shared world is **per-world
+configuration**, not a hardcoded rule. The world setting `ClientWritePolicy` (part of the host
+integration profile) selects one of three modes:
+
+- **`RobloxParity` (default):** a client write to a server-owned replicated instance applies
+  locally, never replicates, and the server state overwrites it on the next sync. This mirrors
+  documented Roblox behavior (local VFX/hides are a feature) — the Roblox tutorial corpus and the
+  LLM's priors assume it, so it is the default.
+- **`Strict`:** such writes are rejected with a `NOT_AUTHORITY` error (plus a "use a RemoteEvent"
+  hint) — competitive games, anti-cheat.
+- **`Open`:** client writes are forwarded to the server and replicate to everyone — creative /
+  co-build worlds (the "friend's AI edits the host's world" scenario).
+
+Implementation seam (reserved now, implemented at MVP12): every mutation is routed through a single
+authority resolver `(instance, property/action) → ApplyLocalOnly | Replicate | Reject`. The MVP
+implementation behind that seam is just the world-default policy above; **partial authority** —
+per-instance / per-property / per-player rules ("clients may move furniture but not delete walls")
+— is planned future functionality that becomes a new resolver implementation, not a replication
+rewrite. `NOT_AUTHORITY` always fires on explicit replication attempts regardless of policy.
+
+The AI-facing Lua skill deliberately does NOT document this yet: the skill only describes the
+implemented surface (a documented-but-missing feature is a bug magnet for LLM authors). The skill
+section for write policies ships together with MVP12. Details: `ROBLOX_API_ROADMAP.md` §MVP12.
+
 ## 6. Performance / optimization
 
 Root cause of the observed 6 FPS with the mod panel open: `LiveMechanicsModsChatPersistenceController`

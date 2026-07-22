@@ -19,6 +19,7 @@
 <a href="#-recommended-models">Models</a>&nbsp;&nbsp;•&nbsp;
 <a href="#%EF%B8%8F-architecture">Architecture</a>&nbsp;&nbsp;•&nbsp;
 <a href="#-documentation">Docs</a>&nbsp;&nbsp;•&nbsp;
+<a href="Docs/ROADMAP.md">Roadmap</a>&nbsp;&nbsp;•&nbsp;
 <a href="#-tests">Tests</a>
 </sub>
 
@@ -58,6 +59,8 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 ⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
 
+> 🗺️ **Where this is going:** a Roblox-like Lua API written by the in-game AI, live multiplayer co-creation (the game *is* the editor), shareable world packages, and drop-in embedding into existing Unity games — the full plan with tracks and milestones lives in the **[Framework Roadmap](Docs/ROADMAP.md)**.
+
 ### Why not just call the API yourself?
 
 Raw API calls get you text; CoreAI gives you the production layer around that text. Tool-calling, persistent memory, streaming, Lua sandboxing, retries, and multi-backend routing are already wired into Unity and covered by tests. You still own your game logic, but you do not have to rebuild the fragile glue around local models, OpenAI-compatible APIs, tool repair, and long-running conversations. CoreAI is the shortest path from "chat box" to agents that can safely act inside the game.
@@ -77,6 +80,7 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 | [Architecture](#%EF%B8%8F-architecture) | Five packages, install profiles, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
+| [Framework Roadmap](Docs/ROADMAP.md) | Vision, tracks (Roblox-like Lua API, multiplayer co-creation, worlds), release plan |
 | [Tests](#-tests) | EditMode & PlayMode |
 | [Multiplayer & Singleplayer](#-multiplayer-and-singleplayer) | Host-authoritative multiplayer, local singleplayer |
 | [Changelog](#changelog) | Unity + core release notes (single source of truth) |

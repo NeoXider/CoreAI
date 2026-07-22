@@ -11,6 +11,53 @@
 > `frost|2`, each through
 > native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
 
+## Roblox API ladder (MVP0-MVP17) — foundation items (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`)
+
+- [x] **1. Engine abstraction seam** *(rung: MVP0)* (2026-07-22) — neutral `CoreAI.Scripting` contracts
+      (`IScriptEngine`/`IScriptState`/`IValueMarshaller`/`IScriptFunctionRegistry` +
+      `ScriptCallContext`/`IScriptTable`/`IScriptCoroutine`/`IExecutionBudget`/`IScriptExecutionGuard`);
+      `LuaCs*` classes moved under `Runtime/Scripting/LuaCs` as the single adapter layer; runtime,
+      logic slots, tool executor, envelope processor and all binders migrated off Lua types;
+      marshalling consolidated into `LuaCsValueMarshaller`; seam-honesty scan test guards the boundary.
+      Verification gate: run `ScriptEngineSeamEditModeTests` + `ScriptingSeamHonestyEditModeTests` and
+      the full EditMode suite on next editor start (compile gates all green via `dotnet build`).
+- [x] **1a. Quarantine error policy + logic-slot teardown** *(rung: §2 quarantine decision)* (2026-07-22) — `LuaCsModRuntime` now
+      QUARANTINES a mod at the consecutive-error threshold (`MaxErrorsBeforeQuarantine`, default 8,
+      `LuaCsModStackOptions` option) instead of unloading it: dispatch (handlers/timers/queued events)
+      suspends, the mod stays listed/addressable, `ReloadMod` clears quarantine + streak; stale-tick-
+      snapshot identity check so a mid-tick repair reload is never suspended on the old instance's
+      streak. New `ModQuarantined`/`ModTearingDown(reason)` events; `TeardownModEffects` clears
+      `logic_define` overrides on unload/reload/quarantine (`LuaCsLogicSlots.ClearOwnedBy`, owner mod
+      id threaded through the bindings seam); override failures are attributed into the handler-error
+      diagnostics channel instead of a silent vanilla revert. `manage_mods` list/diagnostics surface
+      `quarantined`; auto-repair prompt rewritten. Docs: `mod-system.md` §5a.
+      Verification gate: run the new `LuaCs_Quarantine_*` / `LuaCs_LogicSlots_*` tests in
+      `LuaCsModRuntimeEditModeTests`, `List_QuarantinedMod_SurfacesQuarantineFlagAndHint` in
+      `LuaModsLlmToolEditModeTests`, and the full EditMode suite on next editor start (compile gates
+      green via `dotnet build`: Mods, Source, Mods.Tests, Tests, Demos, Mods.Hub, Benchmarking).
+- [ ] 2. Instance/DataModel registry *(rung: MVP1)* — `game`, `workspace`, `Instance.new`, `.Parent`,
+      `FindFirstChild`, `WaitForChild`, `GetChildren/GetDescendants`, `Clone`, `Destroy`, attributes;
+      multiplayer-ready ids (`InstanceRegistry` owns identity; reserves Mirror `netId` + world-command
+      name fields).
+- [ ] 3. Core datatypes *(rung: MVP1)* — `Vector3`, `CFrame`, `Color3`, `UDim2`, `Enum.*` (current Roblox API shape).
+- [ ] 4. Task scheduler *(rung: MVP2)* — `task.wait/spawn/defer/delay`, legacy `wait`, on the existing coroutine
+      substrate; `RunService.Heartbeat/PostSimulation`; connection objects with `:Disconnect()`.
+- [ ] 5. `game:GetService` *(rung: MVP2)* — whitelist registry; unimplemented services = loud stubs.
+- [x] 6. Luau preprocessor *(rung: MVP5 — `LoadMod` wiring)* — LANDED as the targeted mini-rewriter
+      (`Assets/CoreAIMods/Runtime/LuauDownlevel/`: `LuauLexer`/`LuauRewriteParser`/`LuauDownleveler`,
+      standalone, 93 EditMode tests; Q1 resolved — Loretta reconsidered only if construct coverage
+      proves insufficient). Remaining work is the MVP5 wiring into `LoadMod` with source maps.
+- [ ] 7. Mod system UX *(rung: MVP5)* — `Mods/<ModName>/` with `mod.json` manifest, script contexts mapped to
+      folders, enable/disable without deletion, hot reload, C# management API.
+- [ ] 8. Lua log service *(rung: MVP5, deliverable 7)* — per-mod ring buffers + `get_mod_logs` AI tool (core shipped; wire into the
+      mod runtime's print/warn/error capture, DI composition, and the Programmer tool set).
+- [ ] 9. Editor syntax highlighting *(rung: MVP7)* — importer + highlighted inspector/editor window (shipped in
+      `[Unreleased]`; keep in sync with Luau constructs from item 6).
+- [ ] 10. Networking API stubs *(rung: MVP2)* — `RemoteEvent`/`RemoteFunction`/`ReplicatedStorage` in local-loopback
+      via `INetworkBridge`; `NullNetworkBridge` default.
+- [ ] 11. Test corpus *(rung: MVP2)* — ~20 real-world Roblox tutorial-grade scripts as fixtures (preprocessor + API
+      smoke: "paste → runs").
+
 ## [A7] Post-remediation audit residue (2026-07-17) — accepted-risk items from the a2a2311e audits
 
 > Two codex reviewers + one Fable 5 deep audit over the 5.9.0 remediation wave. Everything confirmed
@@ -220,6 +267,33 @@
       the new read/verify API).
 
 ## Roadmap (prioritized)
+
+### [Roblox ladder] Roblox-like Mod API — foundation (see `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`)
+
+> Tracks the seed foundation list above as work lands. Items are worked by multiple agents
+> in parallel on separate files; update this list per item, don't rewrite others' lines.
+
+- [~] **#8 Lua log service — core done, runtime wiring pending.** Standalone `ILuaLogService` in
+      `Assets/CoreAIMods/Runtime/Logging/`: `LuaLogEntry`/`LuaLogLevel`/`LuaLogQuery` model,
+      `LuaLogService` (per-mod + global ring buffers, thread-safe, optional error mirror to
+      `IGameLogger`), `LuaLogFormatter.ToPromptText` (AI-facing compact text with truncation),
+      `GetModLogsLlmTool` (`get_mod_logs`, read-only), optional `LuaLogFileSink` (off by default,
+      `persistentDataPath/CoreAI/Logs`, `CoreAiWebGlPersistence.Sync()` on write). EditMode tests cover
+      ring-buffer eviction/caps, the query filter matrix, sequence monotonicity, `EntryAppended`,
+      formatter truncation, and a concurrent append/query smoke test. `CoreAI.Mods`/`CoreAI.Mods.Tests`
+      `dotnet build` both green. Not yet wired: nothing calls `ILuaLogService.Append` from the mod
+      runtime's `print`/`warn`/`error`/runtime-error paths, nothing registers `ILuaLogService` in
+      `CoreAiModsInstaller`/`CoreAiModsLifetimeScope`, and `GetModLogsLlmTool` is not attached to the
+      Programmer tool set (`// TODO:` left in the tool's XML doc). Follow-up: wire Append calls into
+      `LuaCsModRuntime`'s existing report/error capture paths, register the service + tool, remove the
+      TODO.
+- [x] **#9 Editor Lua/Luau syntax highlighting.** `.luau` `ScriptedImporter` (`.lua` already had one in
+      `CoreAiUnity/Editor`) → `TextAsset`; custom `TextAsset` inspector highlights `.lua`/`.luau`/
+      `.lua.txt`, falls back to a plain view for other text assets; standalone `CoreAI/Lua Script
+      Viewer` window (file picker, drag-drop, font-size slider, copy-path/reveal). Reusable
+      editor-independent tokenizer + rich-text formatter in
+      `Assets/CoreAIMods/Runtime/LuaAssets` (`CoreAI.LuaAssets`) for a future in-game console. Read-only
+      for MVP1; editing stays in external IDEs (`// TODO:` left in `LuaScriptViewerWindow`).
 
 ### [R4] Runtime UI (UI Toolkit) — AI & mods build in-game interfaces (owner request 2026-07-12)
 

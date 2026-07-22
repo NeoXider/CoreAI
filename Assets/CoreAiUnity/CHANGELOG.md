@@ -6,6 +6,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- `CoreAiChatConfig.ChatRequiresVisibleCursor` (default on) and `CoreAiChatPanel.SetRuntimeChatRequiresVisibleCursor(bool?)`
+  / `EffectiveChatRequiresVisibleCursor` — the chat's open hotkey and Escape now only react while the
+  mouse cursor is visible and unlocked (`Cursor.visible` + `Cursor.lockState != Locked`); the panel
+  releases chat keyboard focus the moment the cursor gets locked/hidden mid-turn so a first-person
+  controller never has WASD/E swallowed by a stray focused chat input. Does not auto-refocus when the
+  cursor comes back — the player has to reopen chat explicitly. Pure `CoreAiChatPanel.IsChatInputAllowed`
+  helper covers the truth table in EditMode tests.
+- `CoreAiHubWindow` now handles Escape and an optional `toggleHotkey` for the Hub itself: Escape first
+  gives the active page a chance to consume it via the new `CoreAI.Hub.IHubEscapeHandler` interface, then
+  collapses the Hub to the toggle button (same visual state as the collapse button) unless
+  `escapeCollapses` is off. Both are gated behind `requireVisibleCursor` (on by default), mirroring the
+  chat panel's cursor gating.
 - `MixedBackendParallelAgentsPlayModeTests` — drives two agents concurrently against two different live
   backends in one play session (native LLMUnity GGUF + OpenAI-compatible HTTP / LM Studio), asserting both
   turns complete with non-empty answers and that the native host and HTTP transport run in parallel without
@@ -31,6 +43,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Structured LLMUnity diagnostics now time native llama.cpp model loading separately from HTTP readiness.
   Start, success, timeout, cancellation, and failure logs identify the endpoint, model filename, LLMAgent,
   port, and completed-phase duration in milliseconds without recording credentials or full model paths.
+
+### Fixed (Hub / embedded chat Escape and keyboard focus)
+
+- The Hub window could not be dismissed with Escape, and the chat embedded in a Hub tab
+  (`HubChatPage` → `CoreAiChatPanel.CreateEmbedded`) handled Escape itself and collapsed *inside* the
+  tab — so pressing Esc made the chat disappear while the Hub stayed open. `HubChatPage` now disables the
+  embedded panel's own Escape shortcut (`SetRuntimeEscapeChatShortcutsEnabled(false)`) and implements
+  `IHubEscapeHandler`, so Escape belongs to the Hub: by **default** it always collapses the Hub
+  immediately and any in-progress generation keeps running in the background (the answer still lands
+  normally once the Hub reopens). Opt in per page with `HubChatPage.StopGenerationOnEscape = true` (or
+  `HubBuiltInPages.RegisterAll(..., chatStopGenerationOnEscape: true)`) to make the first Escape stop an
+  in-flight turn instead, consuming that key-press so a second Escape is needed to collapse the Hub. The
+  page also re-expands the embedded panel on activation so it can never be left collapsed inside its own
+  tab.
+- Neither the chat panel nor the Hub was aware of cursor lock: in first-person games (locked/hidden
+  cursor) the chat still reacted to its open hotkey and Escape, and its input field could steal WASD from
+  gameplay. Both now gate keyboard handling behind cursor visibility by default (see
+  `ChatRequiresVisibleCursor` / `CoreAiHubWindow.requireVisibleCursor` above).
 
 ### Fixed (PlayMode suite stability)
 

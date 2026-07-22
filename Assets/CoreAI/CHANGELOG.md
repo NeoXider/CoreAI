@@ -4,6 +4,17 @@
 
 ### Added
 
+- Editor Lua/Luau syntax highlighting for mod scripts: a `.luau` `ScriptedImporter` (mirrors the
+  existing `.lua` importer, both producing a plain `TextAsset`), a custom `TextAsset` inspector that
+  renders highlighted read-only source for `.lua`/`.luau`/`.lua.txt` assets (falling back to a plain
+  text view for every other `TextAsset`), and a standalone `CoreAI/Lua Script Viewer` window with a file
+  picker, drag-and-drop, a font-size slider, and copy-path/reveal actions. The lexer
+  (`CoreAI.LuaAssets.LuaTokenizer`) and rich-text formatter are pure C# with no engine/editor dependency
+  (`Assets/CoreAIMods/Runtime/LuaAssets`) so a future in-game console can reuse them; they classify
+  keywords, strings (short/long/backtick interpolation), `--`/`--[[ ]]` comments, numbers (hex,
+  exponent, underscore separators), function calls, Roblox/Luau globals (`game`/`workspace`/`task`/...),
+  and — best-effort — Luau type-annotation colons vs. method-call colons. Very large sources are capped
+  before rendering (`LuaSourceCap`, 64 KiB default) to keep the inspector responsive.
 - Runtime-first multi-endpoint LLM contracts: dynamic HTTP, LLMUnity, and Offline endpoint descriptors,
   named routing profiles, role assignments, lifecycle snapshots, and safe add/update/activate/remove APIs.
 - `AgentBuilder.WithLlmProfile(...)` and per-request `AiTaskRequest.RoutingProfileId`; an explicit request
@@ -31,9 +42,85 @@
 - `CoreAISettings.UnlimitedContextWindowTokens` — the effectively-unlimited context-window sentinel used
   when a host asset has no explicit window override, so client-side history budgeting never binds and the
   provider enforces its own real limit.
+- `ICoreAiChatOptions.ChatRequiresVisibleCursor` (default `true`) — chat hotkeys (open + Escape) only
+  react while the mouse cursor is visible and unlocked, so first-person / locked-cursor gameplay keeps
+  WASD and other keys instead of the chat stealing keyboard focus. Set `false` to restore the old
+  always-on behavior.
+- `CoreAI.Hub.IHubEscapeHandler` — optional hook a Hub page implements to get first refusal on Escape
+  while it is active (e.g. stop an in-flight AI request) before the Hub falls back to collapsing itself.
+- `ILuaLogService`/`LuaLogService` (`Assets/CoreAIMods/Runtime/Logging/`) — standalone Lua mod log
+  service, independent of the Unity console: per-mod + global bounded ring buffers, thread-safe
+  append/query, `LuaLogQuery` filter (mod id, min severity, since-sequence, text contains, max count),
+  `EntryAppended` event, optional error-only mirror to `IGameLogger`. `LuaLogFormatter.ToPromptText`
+  renders a compact, character-budgeted, LLM-friendly view for AI self-repair; `GetModLogsLlmTool`
+  (`get_mod_logs`, read-only) exposes it as a tool. Optional off-by-default `LuaLogFileSink` rolls logs
+  to `persistentDataPath/CoreAI/Logs`, flushed via `CoreAiWebGlPersistence.Sync()` on WebGL. MVP1 item 8
+  (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`) — core only; not yet wired into the mod runtime's
+  print/warn/error/runtime-error capture, DI composition, or the Programmer tool set (see `TODO.md`).
+
+- Script-engine abstraction seam (Roblox roadmap MVP1 item 1): new engine-neutral contracts in
+  `Assets/CoreAIMods/Runtime/Scripting` (`CoreAI.Scripting`) — `IScriptEngine`, `IScriptState`,
+  `IValueMarshaller`, `IScriptFunctionRegistry` (+ `ScriptCallContext`/`ScriptCallResult` var-args
+  shape), `IScriptTable`, `IScriptCoroutine`, `IExecutionBudget`/`ExecutionBudget`,
+  `IScriptExecutionGuard`, `ScriptRuntimeException` + type-based
+  `ScriptExecutionErrors.IsMemoryBudgetTrip`. The Lua-CSharp classes
+  (`LuaCsApiRegistry`/`LuaCsSecureEnvironment`/`LuaCsExecutionGuard`/`LuaCsCoroutineHandle`/
+  `LuaCsCoroutineRunner`, moved from `Runtime/Sandbox` with their GUIDs) plus new
+  `LuaCsScriptEngine`/`LuaCsScriptState`/`LuaCsValueMarshaller`/`LuaCsScriptTable`/
+  `LuaCsScriptExecutionGuard`/`LuaCsScriptCoroutine` adapters under `Runtime/Scripting/LuaCs`
+  (`CoreAI.Scripting.LuaCs`) are now the single adapter layer, so a future VM swap reimplements
+  `Scripting/` only. Scattered CLR-to-Lua conversions (registry `ToLuaValue`/`CoerceArgument`,
+  runtime/logic-slots `HostToLua`/`ToClr`, cross-mod `ToPortable`/`FromPortable`) are consolidated
+  behavior-compatibly into `LuaCsValueMarshaller`. EditMode coverage: marshaller round-trip truth
+  table, typed + var-args registry dispatch, seam-level guard budget cut, coroutine resume, and a
+  seam-honesty regression scan asserting no `using Lua` outside `Runtime/Scripting` (the tripwire the
+  MoonSharp removal never had).
+- Luau → Lua 5.2 downlevel preprocessor (`CoreAI.Infrastructure.Luau.LuauDownleveler.Process`,
+  `Runtime/LuauDownlevel/`, standalone — not yet wired into mod loading): strips type
+  annotations/declarations/casts and rewrites compound assignments (`+= -= *= /= //= %= ^= ..=`),
+  `continue` (goto-free repeat-until-true form; repeat-loop conditions evaluated at the continue
+  site per Luau scoping), backtick string interpolation (nested included) to `tostring` concats,
+  `if-then-else` expressions to inline closures, floor division to `math.floor`, and Luau-only
+  number literals (`0b...`, digit separators) — darklua's rule set as the reference spec.
+  Hand-rolled lexer + recursive-descent rewriter over the full Luau grammar (no Loretta dependency
+  closure; the API stays parser-agnostic so Loretta can be swapped in after an IL2CPP/WebGL smoke
+  test). Plain Lua passes through untouched via a trigger scan; malformed input never throws —
+  the original source returns with line/column Error diagnostics; deletions re-emit newlines so
+  runtime error lines match the author's source. Side-effecting compound targets
+  (`t[key()] += 1`) capture temps to evaluate exactly once. EditMode coverage: 93 tests —
+  per-construct rewrites, strings/comments immunity, contextual keywords as identifiers,
+  malformed-input passthrough, determinism, line preservation, six original Roblox-style corpus
+  scripts parse-gated through the bundled Lua-CSharp VM, and semantic execution checks
+  (associativity, floor rounding, continue flow in every loop kind, falsy if-expressions).
 
 ### Changed
 
+- Mod error policy is now QUARANTINE, not unload: a mod hitting its consecutive-error threshold
+  (`LuaCsModRuntime.MaxErrorsBeforeQuarantine`, default 8, configurable via
+  `LuaCsModStackOptions.MaxErrorsBeforeQuarantine`; formerly the `MaxErrorsBeforeUnload` const) stops
+  dispatching (handlers, timers, queued events) and reverts its logic-slot overrides to vanilla, but
+  STAYS loaded and addressable — `manage_mods list` shows `quarantined: true`, `get_source`/
+  `diagnostics` keep working, and a successful `reload` clears the quarantine and the error streak.
+  This unbreaks the async "AI repairs a broken mod live" loop: a repair that takes minutes no longer
+  races an auto-unload into a `not loaded` failure. New `ModQuarantined(modId, errorCount)` and
+  `ModTearingDown(modId, LuaModTeardownReason)` runtime events (per-subscriber isolated), plus
+  `LuaModInfo.Quarantined`; the auto-repair prompt and `manage_mods` guidance teach the quarantine
+  workflow instead of reload-vs-load workarounds. Documented in `Docs/CoreAIMods/mod-system.md` §5a.
+- `LuaCsModRuntime`'s gameplay-bindings seam gained the owning mod id
+  (`Action<IScriptFunctionRegistry, LuaCapabilities, string>`); `LuaCsGameplayBindings.Register` and
+  `LuaCsLogicSlots.RegisterApis` accept the owner so every `logic_define` override records which mod
+  defined it.
+- VM-neutral mod stack now depends on the scripting seam instead of Lua-CSharp types:
+  `LuaCsModRuntime` (states, handlers, exports, guarded calls), `LuaCsLogicSlots`,
+  `LuaCsGameToolExecutor`, `LuaCsAiEnvelopeProcessor` and every gameplay binder register through
+  `IScriptFunctionRegistry` (`RegisterGameplayApis(IScriptFunctionRegistry)`);
+  `LuaCsWorldRuntimeBindings` reads props via the neutral `IScriptTable` view;
+  `LuaCsFullUnityRuntimeBindings` splits into a neutral reflection partial plus a
+  `Scripting/LuaCs` marshalling partial. `LuaCsModRuntime`'s gameplay-bindings callback is now
+  `Action<IScriptFunctionRegistry, LuaCapabilities>` (+ optional `IScriptEngine` parameter), and
+  `LuaCsModRuntimeFactory` wires the single `LuaCsScriptEngine` as composition root. Mod-facing Lua
+  behavior is unchanged; `ILuaCsGameRuntimeBindings` keeps its concrete-registry signature as the
+  compatibility shape for existing demo/scene bindings.
 - Lua/world-command composition is now owned by an optional child module instead of being presented as
   root CoreAI settings; legacy serialized scenes remain compatible during migration.
 - Endpoint configuration now explicitly supports zero, one, or many providers, independent `Active` and
@@ -41,6 +128,23 @@
 
 ### Fixed
 
+- `LuaLogFormatter.ToPromptText` truncation (hot-reload audit #11): when the character budget is
+  exceeded it now keeps the NEWEST entries (the AI cares about recent events) instead of the oldest,
+  emits the `...(+N more)` marker at the top (previously the end-appended marker could silently not
+  fit, yielding truncated output with no marker), and coalesces identical consecutive messages into
+  one `×N` line before budget accounting so log spam no longer eats the prompt budget.
+- Stale-snapshot race in `LuaCsModRuntime.Tick`: the end-of-tick error-threshold check now re-resolves
+  the live registry entry and verifies object identity before quarantining, so a repair's `ReloadMod`
+  landing mid-tick (e.g. from a `ModHandlerErrored` subscriber) can no longer get the freshly repaired
+  instance suspended (previously: unloaded) on the old instance's error streak.
+- `logic_define` overrides no longer survive their mod: unload, reload (before the swap, keeping the
+  replacement chunk's own fresh defines), and quarantine entry all clear the mod's logic-slot overrides
+  via the new `LuaCsLogicSlots.ClearOwnedBy(modId)` teardown, so the game can never keep invoking a
+  dead or broken mod version's formula while the AI sees "reload OK".
+- Logic-slot override failures are no longer a silent revert-to-vanilla: `LuaCsLogicSlots` raises
+  `OverrideFailed(ownerModId, slot, error)` and the runtime records it into the same handler-error
+  channel as hook/timer failures (charging the owning mod's streak), so `manage_mods diagnostics` and
+  auto-repair see which mod's formula broke.
 - `HttpClientOpenAiTransport` now bypasses the system proxy only for loopback URLs; external OpenAI-compatible
   APIs retain the host platform's proxy policy for both non-streaming and SSE requests.
 - Full-Lua composition tests now forget their persisted probe mod before disposing the container, so running
