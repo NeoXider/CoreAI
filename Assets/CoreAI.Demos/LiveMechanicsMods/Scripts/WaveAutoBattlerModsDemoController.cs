@@ -11,7 +11,8 @@ namespace CoreAI.Demos
 {
     /// <summary>
     /// A compact auto-battler scene where chat-created Lua mods can change real combat rules:
-    /// wave size, enemy scaling, hero damage, rewards, regen, hooks and timed effects.
+    /// wave size, enemy scaling, hero damage, rewards, regen, hooks and timed effects. GUI-less
+    /// driver: <see cref="WaveAutoBattlerHubPage"/> reads its public state and renders the Hub UI.
     /// </summary>
     public sealed class WaveAutoBattlerModsDemoController : MonoBehaviour
     {
@@ -29,6 +30,39 @@ namespace CoreAI.Demos
         private static readonly int BaseColorProperty = Shader.PropertyToID("_BaseColor");
         private static readonly int LegacyColorProperty = Shader.PropertyToID("_Color");
 
+        // WHY: mirrors the slot declarations in DeclareSlots so the Hub page can render one row per
+        // slot (with its Lua argument signature) without duplicating the slot list.
+        private static readonly (string Slot, string Args)[] SlotDescriptors =
+        {
+            (HeroDamageSlot, "(heroAttack, heroLevel, wave)"),
+            (HeroAttackIntervalSlot, "(heroLevel, wave)"),
+            (HeroRegenSlot, "(heroLevel, wave)"),
+            (EnemyCountSlot, "(wave)"),
+            (EnemyHpSlot, "(wave)"),
+            (EnemyDamageSlot, "(wave)"),
+            (WaveRewardSlot, "(wave)")
+        };
+
+        /// <summary>Read-only view of one Lua logic slot for UI consumption.</summary>
+        public readonly struct SlotView
+        {
+            public SlotView(string slot, string valueText, bool overridden)
+            {
+                Slot = slot;
+                ValueText = valueText;
+                Overridden = overridden;
+            }
+
+            /// <summary>Slot id (e.g. "hero_damage").</summary>
+            public string Slot { get; }
+
+            /// <summary>Display text: the Lua argument signature the slot is invoked with.</summary>
+            public string ValueText { get; }
+
+            /// <summary>True when a loaded Lua mod currently overrides the C# default.</summary>
+            public bool Overridden { get; }
+        }
+
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
         [SerializeField]
         private CoreAILifetimeScope coreAiScope;
@@ -44,8 +78,8 @@ namespace CoreAI.Demos
         private ILuaModRuntime _mods;
         private LuaCsLogicSlots _slots;
         private GameObject _heroVisual;
-        private GUIStyle _richLabelStyle;
         private IReadOnlyList<LuaModInfo> _cachedMods = System.Array.Empty<LuaModInfo>();
+        private readonly List<SlotView> _slotViews = new();
         private MaterialPropertyBlock _colorBlock;
         private float _heroHp;
         private float _heroMaxHp = 120f;
@@ -64,6 +98,62 @@ namespace CoreAI.Demos
             public float Hp;
             public float MaxHp;
             public float Damage;
+        }
+
+        /// <summary>Human-readable state line for the Hub page.</summary>
+        public string Status => _status;
+
+        /// <summary>True once the demo resolved its Lua runtime and slots and is simulating.</summary>
+        public bool IsReady => _slots != null && _mods != null;
+
+        /// <summary>Current wave number (1-based).</summary>
+        public int Wave => _wave;
+
+        /// <summary>Current hero level.</summary>
+        public int HeroLevel => _heroLevel;
+
+        /// <summary>Current hero hit points (clamped at 0 for display).</summary>
+        public float HeroHp => Mathf.Max(0f, _heroHp);
+
+        /// <summary>Maximum hero hit points.</summary>
+        public float HeroMaxHp => _heroMaxHp;
+
+        /// <summary>Accumulated gold.</summary>
+        public int Gold => _gold;
+
+        /// <summary>Accumulated experience toward the next level.</summary>
+        public float Xp => _xp;
+
+        /// <summary>Number of enemies alive in the current wave.</summary>
+        public int EnemiesAlive => _enemies.Count;
+
+        /// <summary>Effective hero attack interval (seconds), including any Lua override.</summary>
+        public float HeroAttackIntervalSeconds => _slots != null ? CurrentHeroAttackInterval() : 0f;
+
+        /// <summary>Recent battle log lines (oldest first, capped).</summary>
+        public IReadOnlyList<string> BattleLog => _log;
+
+        /// <summary>Mods currently loaded in the runtime (cached, refreshed on load/unload).</summary>
+        public IReadOnlyList<LuaModInfo> LoadedMods => _cachedMods;
+
+        /// <summary>
+        /// Builds the per-slot view list (slot id, argument signature, Lua-override flag) from the same
+        /// registry the simulation queries. The returned list is reused between calls.
+        /// </summary>
+        public IReadOnlyList<SlotView> GetSlotViews()
+        {
+            _slotViews.Clear();
+            if (_slots == null)
+            {
+                return _slotViews;
+            }
+
+            foreach ((string slot, string args) in SlotDescriptors)
+            {
+                _slotViews.Add(new SlotView(slot, args, _slots.IsOverridden(slot)));
+            }
+
+            return _slotViews;
         }
 
         private void Start()
@@ -388,65 +478,6 @@ namespace CoreAI.Demos
             }
         }
 
-        private void OnGUI()
-        {
-            GUILayout.BeginArea(new Rect(12, 12, 560, 390), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI - Wave Auto-Battler Mods Demo</b>", RichLabel());
-            GUILayout.Label(_status, RichLabel());
-            if (_slots == null || _mods == null)
-            {
-                GUILayout.EndArea();
-                return;
-            }
-
-            GUILayout.Space(4);
-            GUILayout.Label(
-                $"Wave <b>{_wave}</b>   Hero Lvl <b>{_heroLevel}</b>   HP <b>{Mathf.Max(0f, _heroHp):0.#}</b>/{_heroMaxHp:0.#}   Gold <b>{_gold}</b>   XP <b>{_xp:0.#}</b>",
-                RichLabel());
-            GUILayout.Label(
-                $"Enemies alive: <b>{_enemies.Count}</b>   Hero attack interval: {CurrentHeroAttackInterval():0.##}s",
-                RichLabel());
-
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Lua mod slots</b>", RichLabel());
-            DrawSlot(HeroDamageSlot, "(heroAttack, heroLevel, wave)");
-            DrawSlot(HeroAttackIntervalSlot, "(heroLevel, wave)");
-            DrawSlot(HeroRegenSlot, "(heroLevel, wave)");
-            DrawSlot(EnemyCountSlot, "(wave)");
-            DrawSlot(EnemyHpSlot, "(wave)");
-            DrawSlot(EnemyDamageSlot, "(wave)");
-            DrawSlot(WaveRewardSlot, "(wave)");
-
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Loaded mods</b>", RichLabel());
-            if (_cachedMods.Count == 0)
-            {
-                GUILayout.Label("No mods loaded.");
-            }
-            else
-            {
-                foreach (LuaModInfo mod in _cachedMods)
-                {
-                    GUILayout.Label(
-                        $"* {mod.Id} caps={mod.Capabilities} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
-                }
-            }
-
-            GUILayout.Space(4);
-            GUILayout.Label("<b>Battle log</b>", RichLabel());
-            foreach (string line in _log)
-            {
-                GUILayout.Label(line);
-            }
-
-            GUILayout.EndArea();
-        }
-
-        private void DrawSlot(string slot, string args)
-        {
-            GUILayout.Label($"* {slot}{args} - {(_slots.IsOverridden(slot) ? "Lua override" : "C# default")}");
-        }
-
         private void SetRendererColor(GameObject go, Color color)
         {
             if (go == null || !go.TryGetComponent(out Renderer renderer))
@@ -462,11 +493,6 @@ namespace CoreAI.Demos
             _colorBlock.SetColor(BaseColorProperty, color);
             _colorBlock.SetColor(LegacyColorProperty, color);
             renderer.SetPropertyBlock(_colorBlock);
-        }
-
-        private GUIStyle RichLabel()
-        {
-            return _richLabelStyle ??= new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
         }
 #else
         private void Start()

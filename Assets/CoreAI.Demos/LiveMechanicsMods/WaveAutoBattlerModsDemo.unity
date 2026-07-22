@@ -146,7 +146,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 37e0bb673a6c4874a9f11c08b6592ed6, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAiLuaWorldModule
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   allowedScenes: []
@@ -219,6 +219,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  robloxWorldHost: {fileID: 0}
   storeId: wave-auto-battler-demo
 --- !u!1 &532788468
 GameObject:
@@ -233,6 +234,7 @@ GameObject:
   - component: {fileID: 532788470}
   - component: {fileID: 532788469}
   - component: {fileID: 532788998}
+  - component: {fileID: 532788999}
   m_Layer: 0
   m_Name: CoreAiHub
   m_TagString: Untagged
@@ -269,6 +271,9 @@ MonoBehaviour:
   shellUxml: {fileID: 9197481963319205126, guid: 92cecbafcc9cdc14cbec690a46024236, type: 3}
   styleSheet: {fileID: 0}
   emptyStateText: No Hub pages registered.
+  escapeCollapses: 1
+  toggleHotkey: 0
+  requireVisibleCursor: 1
 --- !u!114 &532788471
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -324,6 +329,19 @@ MonoBehaviour:
   chatTemplate: {fileID: 9197481963319205126, guid: c56ffd49a798940449e9f69ecf685e16, type: 3}
   chatStyleSheet: {fileID: 7433441132597879392, guid: 54e4e52b0db8c294fb66ec9495faa77f, type: 3}
   chatConfig: {fileID: 11400000, guid: 2c1f97b0edb9d834e81caf1d162a7434, type: 2}
+--- !u!114 &532788999
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 532788468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 34c35c3ae1fa03742a61c0a7aa497e2b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.DemoHubPagesBinder
+  registerTokenBudget: 1
 --- !u!1 &573228319
 GameObject:
   m_ObjectHideFlags: 0
@@ -519,79 +537,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &933156839
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 933156841}
-  - component: {fileID: 933156842}
-  - component: {fileID: 933156843}
-  m_Layer: 0
-  m_Name: LiveMechanicsDemo
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &933156841
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 933156839}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &933156842
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 933156839}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6d57e3171f1205e4592a79e45315eace, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.LiveMechanicsModsChatPersistenceController
-  coreAiScope: {fileID: 0}
-  modKeyPrefix: demo.wave_auto_battler.mods_chat.mod.
-  panelTitle: Wave Auto-Battler Mod Manager
-  toggleKey: 290
-  panelRect:
-    serializedVersion: 2
-    x: 470
-    y: 12
-    width: 430
-    height: 460
-  showPanel: 1
-  transientModIds:
-  - auto_repair_smoke
---- !u!114 &933156843
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 933156839}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f684e3ef8cb34affb7e1aa9006e81e6c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Diagnostics.CoreAiTokenBudgetOverlay
-  _showOverlay: 1
-  _toggleKey: 291
-  _rollingWindowSeconds: 60
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -874,13 +819,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
   title: "Lua mod tasks (easy \u2192 hard)"
-  panelRect:
-    serializedVersion: 2
-    x: 12
-    y: 412
-    width: 560
-    height: 180
-  chatReserveWidth: 700
   prompts:
   - Label: 'Easy: recolor background'
     Prompt: Create and load a persistent Lua mod named 'bg_recolor' that every 2
@@ -897,8 +835,6 @@ MonoBehaviour:
       with mods_get(''spawner'',''count'') and, when it exceeds 5, emit a ''boss_wave''
       event and report it. Load both.'
   submitWhenInputUnavailable: 0
-  _showPanel: 1
-  _toggleKey: 289
 --- !u!4 &2100352201
 Transform:
   m_ObjectHideFlags: 0
@@ -952,7 +888,7 @@ MonoBehaviour:
   agentPromptsManifest: {fileID: 11400000, guid: 76ac5bc3577a387409a9559c4de4a341, type: 2}
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}
   luaWorldModule: {fileID: 104913044}
-  legacyWorldPrefabRegistry: {fileID: 0}
+  worldPrefabRegistry: {fileID: 0}
   legacyLuaAllowedScenes: []
   legacyEnableFullLuaAccess: 0
   legacyEnableFullLuaPrivateAccess: 0
@@ -985,7 +921,6 @@ SceneRoots:
   - {fileID: 573228322}
   - {fileID: 1614572739}
   - {fileID: 2106438250}
-  - {fileID: 933156841}
   - {fileID: 1828887120}
   - {fileID: 2100352201}
   - {fileID: 532788472}

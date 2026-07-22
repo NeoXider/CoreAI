@@ -59,7 +59,6 @@ namespace CoreAI.Tests.EditMode
             "CoreAI.Demos/DirectorAi/Scripts/DirectorAiDemoController.cs",                            // OnGUI overlay + GUIStyle labels
             "CoreAI.Demos/LiveMechanics/Scripts/LiveMechanicsDemoController.cs",                      // OnGUI GUILayout live-tuning panel
             "CoreAI.Demos/LiveMechanicsMods/Scripts/LiveMechanicsModsChatPersistenceController.cs",  // large OnGUI GUILayout chat panel
-            "CoreAI.Demos/LiveMechanicsMods/Scripts/WaveAutoBattlerModsDemoController.cs",           // OnGUI GUILayout auto-battler panel
             "CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs",                                  // OnGUI GUILayout mod list panel
             "CoreAI.Demos/ModdableUnits/Scripts/ModdableUnitsDemoController.cs",                      // OnGUI GUILayout unit panel
             "CoreAI.Demos/QwenDemo/GenieDemo.cs",                                                     // OnGUI GUILayout genie prompt demo
