@@ -4,6 +4,46 @@
 
 ### Added
 
+- Roblox API MVP1 (registry slice): engine-free `CoreAI.RobloxApi.Instances` Domain assembly
+  (`Assets/CoreAIMods/Runtime/RobloxApi/Instances/`, `noEngineReferences: true`, zero references):
+  `InstanceRegistry` as the single identity owner (roadmap §3.3 — `InstanceId` ↔ future Mirror
+  `netId` ↔ CoreAI world name reconcile in one `InstanceRecord`, with the `OriginTag` ownership
+  ledger `mod:`/`console:`/`ai:`), a monotonic id allocator partitioned by the top authority bit
+  (server- vs locally-assigned; a wire-contract guard rejects locally-assigned ids), the Roblox
+  `Instance` member core (`Name`/`Parent` with hierarchy validation, `FindFirstChild*` + ancestor
+  trio, `GetChildren`/`GetDescendants`, `IsA` over a data-driven `ClassCatalog` for the MVP1 class
+  set, `Clone` per R6.5, `Destroy` per R6.2 with `PARENT_LOCKED`/`INSTANCE_DESTROYED`,
+  `GetFullName`, attributes per R6.7, tags per R6.8 on the CollectionService-substrate
+  `InstanceTagStore`), `RbxDataModel` with ServiceProvider `GetService`/`FindService` semantics
+  (exact Roblox `X is not a valid Service name` on unknown names; planned services raise
+  phase-naming loud stubs), stable-id `InstanceTreeSnapshot` serialization for the MVP3 world
+  file, the `IInstanceBackingBinder` seam (D5) with an in-memory fake (the Unity GameObject
+  binder lands with the world-binding task), inert MVP2 signal hook points, and the §5.2.7
+  structured `RbxError` surface. EditMode tests in `Tests/EditMode/RobloxApi/Instances/` cover
+  the §5.1.8 registry items plus an architecture-fitness test mirroring the scripting
+  seam-honesty tripwire.
+- Roblox API MVP1 (datatypes slice): engine-free `CoreAI.RobloxApi.Datatypes` Domain assembly
+  (`Assets/CoreAIMods/Runtime/RobloxApi/Datatypes/`, `noEngineReferences`, zero references) with
+  pure-spec Roblox math datatypes — `RbxVector3`, `RbxVector2`, full `RbxCFrame` (all documented
+  constructors incl. quaternion/matrix/lookAt/lookAlong/axis-angle/euler orders, axis vectors with
+  right-handed `LookVector = -Z`, To/FromWorld/ObjectSpace, Lerp via slerp, Orthonormalize,
+  component/euler/axis-angle decomposition, operator table), `RbxColor3` (new/fromRGB/fromHSV/
+  fromHex/Lerp/ToHSV/ToHex), `RbxUDim`/`RbxUDim2`, Enum plumbing (`RbxEnumItem`/`RbxEnum`/
+  `RbxEnumRegistry` seeded with Material/PartType/NormalId/Axis/RotationOrder; unknown-enum access
+  raises the roadmap's loud stub), and deterministic seedable `RbxRandom` (xoshiro256**, floored
+  seed, inclusive `NextInteger`, `NextUnitVector`, Fisher-Yates `Shuffle`, `Clone`). `tostring`
+  formats match Roblox so corpus scripts can string-match.
+- `RobloxSpace` (`CoreAI.RobloxApi.Unity` adapter assembly) — THE single Roblox-to-Unity
+  conversion boundary per roadmap D2/D3: configurable session-constant scale (default 1 stud =
+  0.28 m), Z-mirror handedness bridge (Roblox right-handed `LookVector = -Z` onto Unity +Z
+  forward; quaternion conjugation `(-x, -y, z, w)`), position/rotation/CFrame/velocity/direction/
+  size/acceleration conversions both ways, plus an internal test-only scale reset hook for
+  dual-scale EditMode runs.
+- EditMode test suite under `Tests/EditMode/RobloxApi/Datatypes/`: CFrame golden fixtures
+  (chirality, lookAt fallback, nested composition), `RobloxSpace` round-trip property tests at
+  0.28 and 1:1 plus scale-config and `z = -z` fixtures, deterministic-Random tests, and the
+  architecture-fitness tests keeping the Datatypes Domain engine-free and `RobloxSpace` the only
+  conversion point (D2 lint rule).
 - Editor Lua/Luau syntax highlighting for mod scripts: a `.luau` `ScriptedImporter` (mirrors the
   existing `.lua` importer, both producing a plain `TextAsset`), a custom `TextAsset` inspector that
   renders highlighted read-only source for `.lua`/`.luau`/`.lua.txt` assets (falling back to a plain
