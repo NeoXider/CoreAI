@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using UnityEngine;
 
 namespace CoreAI.Ai.LuaCs
@@ -11,7 +12,7 @@ namespace CoreAI.Ai.LuaCs
     {
         public const float MaxTimeScale = 10f;
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Gameplay) == 0)
             {
@@ -21,7 +22,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterTimeApis(registry);
         }
 
-        public void RegisterTimeApis(LuaCsApiRegistry registry)
+        public void RegisterTimeApis(IScriptFunctionRegistry registry)
         {
             registry.Register("time_delta", new Func<float>(() => Time.deltaTime));
             registry.Register("time_unscaled_delta", new Func<float>(() => Time.unscaledDeltaTime));

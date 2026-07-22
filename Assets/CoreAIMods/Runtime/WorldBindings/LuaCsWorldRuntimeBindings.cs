@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
-using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
 using UnityEngine;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
@@ -60,7 +59,7 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.WorldEdit) == 0)
             {
@@ -70,9 +69,9 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
-            registry.Register("coreai_world_spawn", new Func<LuaTable, string>(props =>
+            registry.Register("coreai_world_spawn", new Func<IScriptTable, string>(props =>
             {
                 if (props == null)
                 {
@@ -107,7 +106,7 @@ namespace CoreAI.Ai.LuaCs
                 return name;
             }));
 
-            registry.Register("coreai_world_change", new Action<string, LuaTable>((targetName, props) =>
+            registry.Register("coreai_world_change", new Action<string, IScriptTable>((targetName, props) =>
             {
                 string name = (targetName ?? "").Trim();
                 if (string.IsNullOrEmpty(name))
@@ -226,7 +225,7 @@ namespace CoreAI.Ai.LuaCs
                 Publish(CoreAiWorldCommandEnvelope.SetColor(name, color));
             }));
 
-            registry.Register("coreai_world_spawn_batch", new Func<LuaTable, int>(entries =>
+            registry.Register("coreai_world_spawn_batch", new Func<IScriptTable, int>(entries =>
             {
                 if (entries == null)
                 {
@@ -234,9 +233,9 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 List<CoreAiWorldCommandEnvelope> commands = new();
-                foreach (KeyValuePair<LuaValue, LuaValue> pair in entries)
+                foreach (KeyValuePair<object, object> pair in entries.Pairs)
                 {
-                    if (pair.Value.Type != LuaValueType.Table)
+                    if (pair.Value is not IScriptTable entry)
                     {
                         throw new ArgumentException("spawn_batch entries must be tables.");
                     }
@@ -246,7 +245,6 @@ namespace CoreAI.Ai.LuaCs
                         throw new ArgumentException($"spawn_batch exceeds maximum of {MaxBatchSize} entries.");
                     }
 
-                    LuaTable entry = pair.Value.Read<LuaTable>();
                     string prefab = GetRequiredString(entry, "prefab");
                     string name = GetRequiredString(entry, "name");
                     double x = GetRequiredNumber(entry, "x");
@@ -469,83 +467,80 @@ namespace CoreAI.Ai.LuaCs
             return (float)scale;
         }
 
-        private static string GetRequiredString(LuaTable table, string key)
+        private static string GetRequiredString(IScriptTable table, string key)
         {
-            LuaValue value = table[key];
-            if (value.Type != LuaValueType.String || string.IsNullOrWhiteSpace(value.Read<string>()))
+            if (table[key] is not string s || string.IsNullOrWhiteSpace(s))
             {
                 throw new ArgumentException($"'{key}' must be a non-empty string.");
             }
 
-            return value.Read<string>().Trim();
+            return s.Trim();
         }
 
-        private static double GetRequiredNumber(LuaTable table, string key)
+        private static double GetRequiredNumber(IScriptTable table, string key)
         {
-            LuaValue value = table[key];
-            if (value.Type != LuaValueType.Number)
+            if (table[key] is not double d)
             {
                 throw new ArgumentException($"'{key}' must be a number.");
             }
 
-            return value.Read<double>();
+            return d;
         }
 
-        private static double GetOptionalNumber(LuaTable table, string key, double fallback)
+        private static double GetOptionalNumber(IScriptTable table, string key, double fallback)
         {
-            LuaValue value = table[key];
-            if (value.Type == LuaValueType.Nil)
+            object value = table[key];
+            if (value == null)
             {
                 return fallback;
             }
 
-            if (value.Type != LuaValueType.Number)
+            if (value is not double d)
             {
                 throw new ArgumentException($"'{key}' must be a number.");
             }
 
-            return value.Read<double>();
+            return d;
         }
 
-        private static string GetOptionalString(LuaTable table, string key, string fallback)
+        private static string GetOptionalString(IScriptTable table, string key, string fallback)
         {
-            LuaValue value = table[key];
-            if (value.Type == LuaValueType.Nil)
+            object value = table[key];
+            if (value == null)
             {
                 return fallback;
             }
 
-            if (value.Type == LuaValueType.Number)
+            if (value is double num)
             {
-                double num = value.Read<double>();
                 return double.IsNaN(num) ? fallback : num.ToString("G");
             }
 
-            if (value.Type != LuaValueType.String)
+            if (value is not string s)
             {
                 throw new ArgumentException($"'{key}' must be a string.");
             }
 
-            return value.Read<string>().Trim();
+            return s.Trim();
         }
 
-        private static float GetOptionalScale(LuaTable table, string key, float fallback)
+        private static float GetOptionalScale(IScriptTable table, string key, float fallback)
         {
-            LuaValue value = table[key];
-            if (value.Type == LuaValueType.Nil)
+            object value = table[key];
+            if (value == null)
             {
                 return fallback;
             }
 
-            if (value.Type != LuaValueType.Number)
+            if (value is not double d)
             {
                 throw new ArgumentException($"'{key}' must be a number.");
             }
 
-            return ValidateUniformScale(value.Read<double>());
+            return ValidateUniformScale(d);
         }
 
-        private static bool HasAny(LuaTable table, params string[] keys)
+        private static bool HasAny(IScriptTable table, params string[] keys)
         {
             foreach (string key in keys)
             {
@@ -558,9 +553,9 @@ namespace CoreAI.Ai.LuaCs
             return false;
         }
 
-        private static bool Has(LuaTable table, string key)
+        private static bool Has(IScriptTable table, string key)
         {
-            return table[key].Type != LuaValueType.Nil;
+            return table.Has(key);
         }
 
         private void Publish(CoreAiWorldCommandEnvelope env)

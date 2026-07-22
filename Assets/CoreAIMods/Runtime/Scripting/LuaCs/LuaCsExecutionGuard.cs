@@ -14,7 +14,7 @@ namespace CoreAI.Sandbox.LuaCs
     /// <c>error("…EXCEEDED_MEMORY_BUDGET…")</c> text cannot masquerade as a memory-budget trip in logs or
     /// telemetry. Only this guard can construct it.
     /// </summary>
-    public sealed class LuaMemoryBudgetException : Exception
+    public sealed class LuaMemoryBudgetException : Exception, CoreAI.Scripting.IScriptMemoryBudgetTrip
     {
         /// <param name="message">The message value.</param>
         /// <param name="inner">The underlying VM exception, if any.</param>

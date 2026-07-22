@@ -1,6 +1,7 @@
 using System;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -16,7 +17,7 @@ namespace CoreAI.Ai.LuaCs
             _logger = logger;
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Read) == 0)
             {
@@ -26,7 +27,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("report", (Action<string>)(msg =>
                 _logger.LogInfo(GameLogFeature.MessagePipe, $"[Lua report] {msg}")));

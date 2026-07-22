@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using UnityEngine;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
@@ -37,7 +38,7 @@ namespace CoreAI.Ai.LuaCs
         {
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Read) == 0)
             {
@@ -47,7 +48,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("coreai_lua_reset", new Action<string>(k =>
             {

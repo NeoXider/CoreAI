@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Infrastructure.World;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -21,7 +22,7 @@ namespace CoreAI.Ai.LuaCs
             _prefabRegistry = prefabRegistry;
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Read) == 0)
             {
@@ -31,7 +32,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("coreai_world_exists", new Func<string, bool>(name =>
             {

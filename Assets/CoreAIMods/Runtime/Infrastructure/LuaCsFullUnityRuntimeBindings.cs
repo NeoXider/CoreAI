@@ -1,23 +1,22 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Reflection;
-using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
-using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
-    /// Lua-CSharp counterpart of <c>CoreAiFullUnityLuaRuntimeBindings</c>.
+    /// Lua-CSharp counterpart of <c>CoreAiFullUnityLuaRuntimeBindings</c>. Partial: the engine-neutral
+    /// reflection/scene logic lives here; the VM-specific value conversion lives in the
+    /// <c>Scripting/LuaCs</c> adapter partial, which is what a second engine would reimplement.
     /// </summary>
-    public sealed class LuaCsFullUnityRuntimeBindings
+    public sealed partial class LuaCsFullUnityRuntimeBindings
     {
         private static readonly ConcurrentDictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
 
@@ -62,7 +61,7 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Full) == 0)
             {
@@ -72,57 +71,67 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("unity_find", new Func<string, int>(FindByName));
             registry.Register("unity_id", new Func<string, int>(FindByName));
-            registry.RegisterCallback("unity_list_objects", (ctx, ct) =>
-                new ValueTask<int>(ctx.Return(ToLuaValue(ListObjects(ReadOptionalMax(ctx, 0))))));
-            registry.RegisterCallback("unity_find_all", (ctx, ct) =>
-                new ValueTask<int>(ctx.Return(ToLuaValue(FindAll(
-                    ReadString(ctx, 0, "unity_find_all"),
-                    ReadOptionalMax(ctx, 1))))));
-            registry.RegisterCallback("unity_find_by_tag", (ctx, ct) =>
-                new ValueTask<int>(ctx.Return(ToLuaValue(FindByTag(
-                    ReadString(ctx, 0, "unity_find_by_tag"),
-                    ReadOptionalMax(ctx, 1))))));
-            registry.RegisterCallback("unity_find_by_component", (ctx, ct) =>
-                new ValueTask<int>(ctx.Return(ToLuaValue(FindByComponent(
-                    ReadString(ctx, 0, "unity_find_by_component"),
-                    ReadOptionalMax(ctx, 1))))));
-            registry.Register("unity_describe_object", new Func<int, LuaValue>(instanceId =>
-                ToLuaValue(DescribeObject(instanceId))));
+            registry.RegisterVarArgs("unity_list_objects", call =>
+                ScriptCallResult.Return(ClrToScriptValue(ListObjects(ReadOptionalMax(call, 0)))));
+            registry.RegisterVarArgs("unity_find_all", call =>
+                ScriptCallResult.Return(ClrToScriptValue(FindAll(
+                    ReadString(call, 0, "unity_find_all"),
+                    ReadOptionalMax(call, 1)))));
+            registry.RegisterVarArgs("unity_find_by_tag", call =>
+                ScriptCallResult.Return(ClrToScriptValue(FindByTag(
+                    ReadString(call, 0, "unity_find_by_tag"),
+                    ReadOptionalMax(call, 1)))));
+            registry.RegisterVarArgs("unity_find_by_component", call =>
+                ScriptCallResult.Return(ClrToScriptValue(FindByComponent(
+                    ReadString(call, 0, "unity_find_by_component"),
+                    ReadOptionalMax(call, 1)))));
+            registry.Register("unity_describe_object", new Func<int, object>(instanceId =>
+                ClrToScriptValue(DescribeObject(instanceId))));
             registry.Register("unity_set_active", new Func<int, bool, bool>(SetActive));
-            registry.Register("unity_get_position", new Func<int, LuaTable>(GetPosition));
+            registry.Register("unity_get_position", new Func<int, object>(instanceId =>
+                ClrToScriptValue(GetPosition(instanceId))));
             registry.Register("unity_set_position", new Func<int, double, double, double, bool>(SetPosition));
-            registry.Register("unity_get_transform", new Func<int, LuaValue>(instanceId =>
-                ToLuaValue(GetTransform(instanceId))));
+            registry.Register("unity_get_transform", new Func<int, object>(instanceId =>
+                ClrToScriptValue(GetTransform(instanceId))));
             registry.Register("unity_set_rotation_euler",
                 new Func<int, double, double, double, bool>(SetRotationEuler));
             registry.Register("unity_set_scale", new Func<int, double, double, double, bool>(SetScale));
             registry.Register("unity_parent", new Func<int, int, bool, bool>(SetParent));
-            registry.Register("unity_get_children", new Func<int, LuaValue>(instanceId =>
-                ToLuaValue(GetChildren(instanceId))));
+            registry.Register("unity_get_children", new Func<int, object>(instanceId =>
+                ClrToScriptValue(GetChildren(instanceId))));
             registry.Register("unity_list_components", new Func<int, List<string>>(ListComponents));
-            registry.RegisterCallback("unity_list_members", (ctx, ct) =>
-                new ValueTask<int>(ctx.Return(ToLuaValue(ListMembers(
-                    ReadInt(ctx, 0, "unity_list_members"),
-                    ReadString(ctx, 1, "unity_list_members"))))));
-            registry.Register("unity_get_member", new Func<int, string, string, LuaValue>(GetMember));
-            registry.Register("unity_set_member", new Func<int, string, string, LuaValue, bool>(SetMember));
-            registry.RegisterCallback("unity_call", (ctx, ct) =>
+            registry.RegisterVarArgs("unity_list_members", call =>
+                ScriptCallResult.Return(ClrToScriptValue(ListMembers(
+                    ReadInt(call, 0, "unity_list_members"),
+                    ReadString(call, 1, "unity_list_members")))));
+            registry.Register("unity_get_member", new Func<int, string, string, object>((instanceId,
+                    componentType, memberName) =>
+                ClrToScriptValue(GetMemberValue(instanceId, componentType, memberName))));
+            registry.RegisterVarArgs("unity_set_member", call =>
             {
-                int instanceId = ReadInt(ctx, 0, "unity_call");
-                string componentType = ReadString(ctx, 1, "unity_call");
-                string methodName = ReadString(ctx, 2, "unity_call");
-                int count = Math.Max(0, ctx.ArgumentCount - 3);
-                LuaValue[] args = new LuaValue[count];
+                int instanceId = Convert.ToInt32(call.GetNumber(0));
+                string componentType = call.GetString(1);
+                string memberName = call.GetString(2);
+                object raw = call.GetArgument(3);
+                return ScriptCallResult.Return(SetMemberRaw(instanceId, componentType, memberName, raw));
+            });
+            registry.RegisterVarArgs("unity_call", call =>
+            {
+                int instanceId = ReadInt(call, 0, "unity_call");
+                string componentType = ReadString(call, 1, "unity_call");
+                string methodName = ReadString(call, 2, "unity_call");
+                int count = Math.Max(0, call.ArgumentCount - 3);
+                object[] args = new object[count];
                 for (int i = 0; i < count; i++)
                 {
-                    args[i] = ctx.GetArgument(i + 3);
+                    args[i] = call.GetArgument(i + 3);
                 }
 
-                return new ValueTask<int>(ctx.Return(CallMethod(instanceId, componentType, methodName, args)));
+                return ScriptCallResult.Return(CallMethodRaw(instanceId, componentType, methodName, args));
             });
             registry.Register("unity_add_component", new Func<int, string, bool>(AddComponent));
             registry.Register("unity_destroy", new Func<int, bool>(DestroyObject));
@@ -134,96 +143,34 @@ namespace CoreAI.Ai.LuaCs
                    (_allowNonPublic ? BindingFlags.NonPublic : BindingFlags.Default);
         }
 
-        private static int ReadOptionalMax(LuaFunctionExecutionContext ctx, int index)
+        private static int ReadOptionalMax(ScriptCallContext call, int index)
         {
-            if (ctx == null || !ctx.HasArgument(index) || ctx.GetArgument(index).Type == LuaValueType.Nil)
+            if (call == null || !call.HasArgument(index) || call.GetKind(index) == ScriptValueKind.Nil)
             {
                 return 100;
             }
 
-            return (int)ctx.GetArgument(index).Read<double>();
+            return (int)call.GetNumber(index);
         }
 
-        private static string ReadString(LuaFunctionExecutionContext ctx, int index, string apiName)
+        private static string ReadString(ScriptCallContext call, int index, string apiName)
         {
-            if (ctx == null || !ctx.HasArgument(index) || ctx.GetArgument(index).Type != LuaValueType.String)
+            if (call == null || call.GetKind(index) != ScriptValueKind.String)
             {
                 throw new ArgumentException($"{apiName}: argument {index + 1} must be a string.");
             }
 
-            return ctx.GetArgument(index).Read<string>();
+            return call.GetString(index);
         }
 
-        private static int ReadInt(LuaFunctionExecutionContext ctx, int index, string apiName)
+        private static int ReadInt(ScriptCallContext call, int index, string apiName)
         {
-            if (ctx == null || !ctx.HasArgument(index) || ctx.GetArgument(index).Type != LuaValueType.Number)
+            if (call == null || call.GetKind(index) != ScriptValueKind.Number)
             {
                 throw new ArgumentException($"{apiName}: argument {index + 1} must be a number.");
             }
 
-            return (int)ctx.GetArgument(index).Read<double>();
-        }
-
-        private static LuaValue ToLuaValue(object value)
-        {
-            if (value == null)
-            {
-                return LuaValue.Nil;
-            }
-
-            switch (value)
-            {
-                case LuaValue lua:
-                    return lua;
-                case LuaTable table:
-                    return new LuaValue(table);
-                case bool b:
-                    return new LuaValue(b);
-                case string s:
-                    return new LuaValue(s);
-                case int i:
-                    return new LuaValue((double)i);
-                case long l:
-                    return new LuaValue((double)l);
-                case float f:
-                    return new LuaValue((double)f);
-                case double d:
-                    return new LuaValue(d);
-                case IDictionary<string, object> dict:
-                {
-                    LuaTable table = new();
-                    foreach (KeyValuePair<string, object> kv in dict)
-                    {
-                        table[kv.Key] = ToLuaValue(kv.Value);
-                    }
-
-                    return new LuaValue(table);
-                }
-                case IEnumerable<string> strings:
-                {
-                    LuaTable table = new();
-                    int index = 1;
-                    foreach (string item in strings)
-                    {
-                        table[new LuaValue((double)index++)] = new LuaValue(item);
-                    }
-
-                    return new LuaValue(table);
-                }
-                case IEnumerable<object> list:
-                {
-                    LuaTable table = new();
-                    int index = 1;
-                    foreach (object item in list)
-                    {
-                        table[new LuaValue((double)index++)] = ToLuaValue(item);
-                    }
-
-                    return new LuaValue(table);
-                }
-                default:
-                    return new LuaValue(value.ToString());
-            }
+            return (int)call.GetNumber(index);
         }
 
         private static int FindByName(string name)
@@ -350,7 +297,7 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
-        private static LuaTable GetPosition(int instanceId)
+        private static Dictionary<string, object> GetPosition(int instanceId)
         {
             GameObject go = Resolve(instanceId);
             if (go == null)
@@ -358,12 +305,7 @@ namespace CoreAI.Ai.LuaCs
                 throw new InvalidOperationException($"unity_get_position: object id {instanceId} not found.");
             }
 
-            Vector3 p = go.transform.position;
-            LuaTable t = new();
-            t["x"] = new LuaValue((double)p.x);
-            t["y"] = new LuaValue((double)p.y);
-            t["z"] = new LuaValue((double)p.z);
-            return t;
+            return Vector(go.transform.position);
         }
 
         private static bool SetPosition(int instanceId, double x, double y, double z)
@@ -485,7 +427,7 @@ namespace CoreAI.Ai.LuaCs
             return results;
         }
 
-        private LuaValue GetMember(int instanceId, string componentType, string memberName)
+        private object GetMemberValue(int instanceId, string componentType, string memberName)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -495,17 +437,15 @@ namespace CoreAI.Ai.LuaCs
             }
 
             MemberInfo member = ResolveMember(target.GetType(), memberName);
-            object value = member switch
+            return member switch
             {
                 FieldInfo fi => fi.GetValue(target),
                 PropertyInfo pi => pi.GetValue(target),
                 _ => throw new InvalidOperationException($"unity_get_member: '{memberName}' is not readable.")
             };
-
-            return ToLuaValue(value);
         }
 
-        private bool SetMember(int instanceId, string componentType, string memberName, LuaValue value)
+        private bool SetMemberRaw(int instanceId, string componentType, string memberName, object rawValue)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -514,7 +454,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             MemberInfo member = ResolveMember(target.GetType(), memberName);
-            object converted = FromLuaValue(value, member);
+            object converted = ConvertScriptMember(rawValue, member);
             switch (member)
             {
                 case FieldInfo fi:
@@ -528,7 +468,7 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private LuaValue CallMethod(int instanceId, string componentType, string methodName, LuaValue[] args)
+        private object CallMethodRaw(int instanceId, string componentType, string methodName, object[] rawArgs)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -557,20 +497,20 @@ namespace CoreAI.Ai.LuaCs
             EnsureMemberAllowed(method);
 
             ParameterInfo[] parameters = method.GetParameters();
-            if (parameters.Length != (args?.Length ?? 0))
+            if (parameters.Length != (rawArgs?.Length ?? 0))
             {
                 throw new InvalidOperationException(
-                    $"unity_call: '{methodName}' expects {parameters.Length} args, got {args?.Length ?? 0}.");
+                    $"unity_call: '{methodName}' expects {parameters.Length} args, got {rawArgs?.Length ?? 0}.");
             }
 
             object[] invokeArgs = new object[parameters.Length];
             for (int i = 0; i < parameters.Length; i++)
             {
-                invokeArgs[i] = ConvertArg(args[i], parameters[i].ParameterType);
+                invokeArgs[i] = ConvertScriptArg(rawArgs[i], parameters[i].ParameterType);
             }
 
             object result = method.Invoke(target, invokeArgs);
-            return ToLuaValue(result);
+            return ClrToScriptValue(result);
         }
 
         private static GameObject Resolve(int instanceId)
@@ -645,19 +585,6 @@ namespace CoreAI.Ai.LuaCs
 
             UnityObjectMissedScanTime[missKey] = now;
             return null;
-        }
-
-        private static Vector3 ReadVector3(LuaTable t)
-        {
-            if (t == null)
-            {
-                return Vector3.zero;
-            }
-
-            return new Vector3(
-                (float)ReadRequiredTableNumber(t, "x"),
-                (float)ReadRequiredTableNumber(t, "y"),
-                (float)ReadRequiredTableNumber(t, "z"));
         }
 
         private delegate bool ObjectMatch(GameObject go, string search);
@@ -1033,262 +960,6 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return false;
-        }
-
-        private static object FromLuaValue(LuaValue value, MemberInfo member)
-        {
-            Type targetType = member switch
-            {
-                FieldInfo fi => fi.FieldType,
-                PropertyInfo pi => pi.PropertyType,
-                _ => typeof(object)
-            };
-            return ConvertArg(value, targetType);
-        }
-
-        private static object ConvertArg(LuaValue value, Type targetType)
-        {
-            if (value.Type == LuaValueType.Nil)
-            {
-                return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
-            }
-
-            if (targetType == typeof(string))
-            {
-                return ReadStringValue(value);
-            }
-
-            if (targetType == typeof(bool))
-            {
-                return value.Type == LuaValueType.Boolean ? value.Read<bool>() : value.Read<double>() != 0d;
-            }
-
-            if (targetType == typeof(int))
-            {
-                return (int)ReadNumber(value);
-            }
-
-            if (targetType == typeof(float))
-            {
-                return (float)ReadNumber(value);
-            }
-
-            if (targetType == typeof(double))
-            {
-                return ReadNumber(value);
-            }
-
-            if (targetType == typeof(long))
-            {
-                return (long)ReadNumber(value);
-            }
-
-            if (targetType == typeof(uint))
-            {
-                return (uint)ReadNumber(value);
-            }
-
-            if (targetType == typeof(ulong))
-            {
-                return (ulong)ReadNumber(value);
-            }
-
-            if (targetType == typeof(short))
-            {
-                return (short)ReadNumber(value);
-            }
-
-            if (targetType == typeof(ushort))
-            {
-                return (ushort)ReadNumber(value);
-            }
-
-            if (targetType == typeof(byte))
-            {
-                return (byte)ReadNumber(value);
-            }
-
-            if (targetType == typeof(sbyte))
-            {
-                return (sbyte)ReadNumber(value);
-            }
-
-            if (targetType.IsEnum && value.Type == LuaValueType.String)
-            {
-                return Enum.Parse(targetType, value.Read<string>(), true);
-            }
-
-            if (targetType.IsEnum && value.Type == LuaValueType.Number)
-            {
-                return Enum.ToObject(targetType, (long)ReadNumber(value));
-            }
-
-            if (targetType == typeof(Vector3) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                return new Vector3(
-                    (float)ReadRequiredTableNumber(t, "x"),
-                    (float)ReadRequiredTableNumber(t, "y"),
-                    (float)ReadRequiredTableNumber(t, "z"));
-            }
-
-            if (targetType == typeof(Vector2) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                return new Vector2(
-                    (float)ReadRequiredTableNumber(t, "x"),
-                    (float)ReadRequiredTableNumber(t, "y"));
-            }
-
-            if (targetType == typeof(Vector4) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                return new Vector4(
-                    (float)ReadRequiredTableNumber(t, "x"),
-                    (float)ReadRequiredTableNumber(t, "y"),
-                    (float)ReadRequiredTableNumber(t, "z"),
-                    (float)ReadRequiredTableNumber(t, "w"));
-            }
-
-            if (targetType == typeof(Color))
-            {
-                if (value.Type == LuaValueType.String)
-                {
-                    string text = value.Read<string>();
-                    if (ColorUtility.TryParseHtmlString(text, out Color color))
-                    {
-                        return color;
-                    }
-
-                    throw new InvalidOperationException($"Could not parse Color from '{text}'.");
-                }
-
-                if (value.Type == LuaValueType.Table)
-                {
-                    LuaTable t = value.Read<LuaTable>();
-                    return new Color(
-                        (float)ReadRequiredTableNumber(t, "r"),
-                        (float)ReadRequiredTableNumber(t, "g"),
-                        (float)ReadRequiredTableNumber(t, "b"),
-                        ReadOptionalTableNumber(t, "a", 1f));
-                }
-            }
-
-            if (targetType == typeof(Quaternion) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                LuaValue w = t["w"];
-                if (w.Type != LuaValueType.Nil)
-                {
-                    return new Quaternion(
-                        (float)ReadRequiredTableNumber(t, "x"),
-                        (float)ReadRequiredTableNumber(t, "y"),
-                        (float)ReadRequiredTableNumber(t, "z"),
-                        (float)ReadNumber(w));
-                }
-
-                return Quaternion.Euler(
-                    (float)ReadRequiredTableNumber(t, "x"),
-                    (float)ReadRequiredTableNumber(t, "y"),
-                    (float)ReadRequiredTableNumber(t, "z"));
-            }
-
-            if (targetType == typeof(Rect) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                return new Rect(
-                    (float)ReadRequiredTableNumber(t, "x"),
-                    (float)ReadRequiredTableNumber(t, "y"),
-                    (float)ReadRequiredTableNumber(t, "width"),
-                    (float)ReadRequiredTableNumber(t, "height"));
-            }
-
-            if (targetType == typeof(Bounds) && value.Type == LuaValueType.Table)
-            {
-                LuaTable t = value.Read<LuaTable>();
-                Vector3 center = ReadVector3(ReadRequiredTable(t, "center"));
-                Vector3 size = ReadVector3(ReadRequiredTable(t, "size"));
-                return new Bounds(center, size);
-            }
-
-            if (targetType == typeof(Color32))
-            {
-                if (value.Type == LuaValueType.String &&
-                    ColorUtility.TryParseHtmlString(value.Read<string>(), out Color parsed))
-                {
-                    return (Color32)parsed;
-                }
-
-                if (value.Type == LuaValueType.Table)
-                {
-                    LuaTable t = value.Read<LuaTable>();
-                    return new Color32(
-                        (byte)ReadRequiredTableNumber(t, "r"),
-                        (byte)ReadRequiredTableNumber(t, "g"),
-                        (byte)ReadRequiredTableNumber(t, "b"),
-                        (byte)ReadOptionalTableNumber(t, "a", 255f));
-                }
-            }
-
-            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && value.Type == LuaValueType.Number)
-            {
-                return ResolveUnityObject((int)ReadNumber(value), targetType);
-            }
-
-            object obj = value.Read<object>();
-            return obj == null || targetType.IsInstanceOfType(obj)
-                ? obj
-                : Convert.ChangeType(obj, targetType, CultureInfo.InvariantCulture);
-        }
-
-        private static double ReadNumber(LuaValue value)
-        {
-            if (value.Type != LuaValueType.Number)
-            {
-                throw new ArgumentException($"value must be a number, got {value.Type}.");
-            }
-
-            return value.Read<double>();
-        }
-
-        private static string ReadStringValue(LuaValue value)
-        {
-            return value.Type switch
-            {
-                LuaValueType.String => value.Read<string>(),
-                LuaValueType.Number => value.Read<double>().ToString(CultureInfo.InvariantCulture),
-                LuaValueType.Boolean => value.Read<bool>() ? "true" : "false",
-                LuaValueType.Nil => "",
-                _ => value.ToString()
-            };
-        }
-
-        private static LuaTable ReadRequiredTable(LuaTable table, string key)
-        {
-            LuaValue value = table[key];
-            if (value.Type != LuaValueType.Table)
-            {
-                throw new ArgumentException($"'{key}' must be a table.");
-            }
-
-            return value.Read<LuaTable>();
-        }
-
-        private static double ReadRequiredTableNumber(LuaTable table, string key)
-        {
-            LuaValue value = table[key];
-            if (value.Type != LuaValueType.Number)
-            {
-                throw new ArgumentException($"'{key}' must be a number.");
-            }
-
-            return value.Read<double>();
-        }
-
-        private static float ReadOptionalTableNumber(LuaTable table, string key, float defaultValue)
-        {
-            LuaValue value = table[key];
-            return value.Type == LuaValueType.Nil ? defaultValue : (float)ReadNumber(value);
         }
 
         private List<MemberInfo> GetAllowedSettableMembers(Type type)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using UnityEngine;
 
 namespace CoreAI.Ai.LuaCs
@@ -28,7 +29,7 @@ namespace CoreAI.Ai.LuaCs
             ["9"] = KeyCode.Alpha9
         };
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.Gameplay) == 0)
             {
@@ -38,7 +39,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("input_key", new Func<string, bool>(name => Input.GetKey(ParseKey(name))));
             registry.Register("input_key_down", new Func<string, bool>(name => Input.GetKeyDown(ParseKey(name))));

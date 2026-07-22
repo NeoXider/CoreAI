@@ -1,17 +1,21 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 using Lua;
 
 namespace CoreAI.Sandbox.LuaCs
 {
     /// <summary>
-    /// Registry of host callbacks exposed to secured Lua-CSharp scripts.
+    /// Registry of host callbacks exposed to secured Lua-CSharp scripts. Implements the engine-neutral
+    /// <see cref="IScriptFunctionRegistry"/> seam; the Lua-typed <see cref="RegisterCallback(string, LuaFunction)"/>
+    /// overloads remain as the engine-specific escape hatch for adapter-layer and legacy callers.
+    /// Value conversion is delegated to <see cref="LuaCsValueMarshaller"/> (single authority).
     /// </summary>
-    public sealed class LuaCsApiRegistry
+    public sealed class LuaCsApiRegistry : IScriptFunctionRegistry
     {
         private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
 
@@ -32,6 +36,33 @@ namespace CoreAI.Sandbox.LuaCs
             _apis[name] = callback ?? throw new ArgumentNullException(nameof(callback));
             _callbacks.Remove(name);
             _luaFunctions.Remove(name);
+        }
+
+        /// <summary>Registers an engine-neutral var-args callback (raw arguments, multiple returns).</summary>
+        public void RegisterVarArgs(string name, Func<ScriptCallContext, ScriptCallResult> callback)
+        {
+            if (callback == null)
+            {
+                throw new ArgumentNullException(nameof(callback));
+            }
+
+            RegisterCallback(name, (ctx, ct) =>
+            {
+                ScriptCallResult result = callback(new LuaCsScriptCallContext(ctx));
+                IReadOnlyList<object> values = result.Values;
+                if (values.Count == 0)
+                {
+                    return new ValueTask<int>(ctx.Return());
+                }
+
+                LuaValue[] luaValues = new LuaValue[values.Count];
+                for (int i = 0; i < values.Count; i++)
+                {
+                    luaValues[i] = LuaCsValueMarshaller.ToLuaValue(values[i]);
+                }
+
+                return new ValueTask<int>(ctx.Return(luaValues));
+            });
         }
 
         /// <summary>Registers a Lua-CSharp callback when the API needs custom argument handling.</summary>
@@ -87,6 +118,12 @@ namespace CoreAI.Sandbox.LuaCs
             return _apis.ContainsKey(name) || _callbacks.ContainsKey(name) || _luaFunctions.ContainsKey(name);
         }
 
+        /// <summary>Exposes registered callbacks on a seam-created state's global environment.</summary>
+        public void ApplyTo(IScriptState state)
+        {
+            ApplyToEnvironment(LuaCsScriptState.Unwrap(state));
+        }
+
         /// <summary>Exposes registered callbacks on the Lua-CSharp global environment.</summary>
         public void ApplyToEnvironment(LuaState state)
         {
@@ -137,7 +174,7 @@ namespace CoreAI.Sandbox.LuaCs
                 {
                     object[] args = CoerceArgsForDelegate(ctx, parameters);
                     object result = callback.DynamicInvoke(args);
-                    return new ValueTask<int>(ctx.Return(ToLuaValue(result)));
+                    return new ValueTask<int>(ctx.Return(LuaCsValueMarshaller.ToLuaValue(result)));
                 }
                 catch (LuaRuntimeException)
                 {
@@ -163,148 +200,10 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 LuaValue value = ctx.HasArgument(i) ? ctx.GetArgument(i) : LuaValue.Nil;
                 Type parameterType = parameters[i].ParameterType;
-                args[i] = CoerceArgument(value, parameterType);
+                args[i] = LuaCsValueMarshaller.CoerceArgument(value, parameterType);
             }
 
             return args;
-        }
-
-        private static object CoerceArgument(LuaValue value, Type parameterType)
-        {
-            Type targetType = Nullable.GetUnderlyingType(parameterType) ?? parameterType;
-            if (value.Type == LuaValueType.Table && IsNumericType(targetType))
-            {
-                LuaTable table = value.Read<LuaTable>();
-                LuaValue id = table["id"];
-                if (id.Type == LuaValueType.Number)
-                {
-                    value = id;
-                }
-            }
-
-            if (value.Type == LuaValueType.Nil)
-            {
-                return parameterType.IsValueType && Nullable.GetUnderlyingType(parameterType) == null
-                    ? Activator.CreateInstance(parameterType)
-                    : null;
-            }
-
-            if (targetType == typeof(LuaValue))
-            {
-                return value;
-            }
-
-            if (targetType == typeof(LuaTable))
-            {
-                return value.Read<LuaTable>();
-            }
-
-            if (targetType == typeof(string))
-            {
-                return value.Read<string>();
-            }
-
-            if (targetType == typeof(bool))
-            {
-                return value.Read<bool>();
-            }
-
-            if (targetType == typeof(double))
-            {
-                return value.Read<double>();
-            }
-
-            if (targetType == typeof(float))
-            {
-                return (float)value.Read<double>();
-            }
-
-            if (targetType == typeof(int))
-            {
-                return Convert.ToInt32(value.Read<double>());
-            }
-
-            if (targetType == typeof(long))
-            {
-                return Convert.ToInt64(value.Read<double>());
-            }
-
-            if (targetType.IsEnum)
-            {
-                return Enum.ToObject(targetType, Convert.ToInt32(value.Read<double>()));
-            }
-
-            object obj = value.Read<object>();
-            return obj == null || targetType.IsInstanceOfType(obj) ? obj : Convert.ChangeType(obj, targetType);
-        }
-
-        private static LuaValue ToLuaValue(object value)
-        {
-            if (value == null)
-            {
-                return LuaValue.Nil;
-            }
-
-            if (value is LuaValue luaValue)
-            {
-                return luaValue;
-            }
-
-            if (value is LuaFunction function)
-            {
-                return new LuaValue(function);
-            }
-
-            if (value is LuaTable table)
-            {
-                return new LuaValue(table);
-            }
-
-            if (value is bool b)
-            {
-                return new LuaValue(b);
-            }
-
-            if (value is string s)
-            {
-                return new LuaValue(s);
-            }
-
-            if (value is int or long or float or double or decimal or short or byte)
-            {
-                return new LuaValue(Convert.ToDouble(value));
-            }
-
-            if (value is IDictionary dictionary)
-            {
-                LuaTable result = new();
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    result[ToLuaValue(entry.Key)] = ToLuaValue(entry.Value);
-                }
-
-                return new LuaValue(result);
-            }
-
-            if (value is IEnumerable enumerable)
-            {
-                LuaTable result = new();
-                int index = 1;
-                foreach (object item in enumerable)
-                {
-                    result[new LuaValue((double)index++)] = ToLuaValue(item);
-                }
-
-                return new LuaValue(result);
-            }
-
-            return LuaValue.FromObject(value);
-        }
-
-        private static bool IsNumericType(Type type)
-        {
-            return type == typeof(int) || type == typeof(long) ||
-                   type == typeof(double) || type == typeof(float);
         }
 
         private static LuaRuntimeException ToLuaRuntimeException(LuaState state, string name, Exception ex)

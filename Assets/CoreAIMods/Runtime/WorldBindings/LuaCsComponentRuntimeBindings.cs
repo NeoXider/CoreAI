@@ -2,6 +2,7 @@ using System;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using UnityEngine;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
@@ -19,7 +20,7 @@ namespace CoreAI.Ai.LuaCs
             _sink = sink;
         }
 
-        public void Register(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
             if ((capabilities & LuaCapabilities.WorldEdit) == 0)
             {
@@ -29,7 +30,7 @@ namespace CoreAI.Ai.LuaCs
             RegisterGameplayApis(registry);
         }
 
-        public void RegisterGameplayApis(LuaCsApiRegistry registry)
+        public void RegisterGameplayApis(IScriptFunctionRegistry registry)
         {
             registry.Register("coreai_component_add", new Action<string, string>((targetName, componentType) =>
             {

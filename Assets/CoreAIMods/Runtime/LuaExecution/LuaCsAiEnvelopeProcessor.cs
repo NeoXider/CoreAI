@@ -1,7 +1,8 @@
 using System;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
 namespace CoreAI.Ai.LuaCs
@@ -26,7 +27,7 @@ namespace CoreAI.Ai.LuaCs
 
         private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
 
-        private readonly LuaCsSecureEnvironment _sandbox;
+        private readonly IScriptEngine _engine;
         private readonly ILuaCsGameRuntimeBindings _bindings;
         private readonly IAiGameCommandSink _sink;
         private readonly Func<IAiOrchestrationService> _resolveOrchestrator;
@@ -45,7 +46,12 @@ namespace CoreAI.Ai.LuaCs
             ICoreAISettings settings = null,
             LuaGenerationRateLimiter rateLimiter = null)
         {
-            _sandbox = sandbox ?? throw new ArgumentNullException(nameof(sandbox));
+            if (sandbox == null)
+            {
+                throw new ArgumentNullException(nameof(sandbox));
+            }
+
+            _engine = new LuaCsScriptEngine(sandbox);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _sink = sink ?? throw new ArgumentNullException(nameof(sink));
             _resolveOrchestrator = resolveOrchestrator ?? throw new ArgumentNullException(nameof(resolveOrchestrator));
@@ -93,8 +99,9 @@ namespace CoreAI.Ai.LuaCs
             {
                 LuaCsApiRegistry registry = new();
                 _bindings.RegisterGameplayApis(registry);
-                LuaState state = _sandbox.Create(registry);
-                LuaValue[] results = _sandbox.RunChunk(state, lua);
+                IScriptState state = _engine.CreateState();
+                registry.ApplyTo(state);
+                object[] results = _engine.RunChunk(state, lua);
                 string summary = Truncate(LuaCsGameToolExecutor.Summarize(results),
                     MaxResultSummaryLength);
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))

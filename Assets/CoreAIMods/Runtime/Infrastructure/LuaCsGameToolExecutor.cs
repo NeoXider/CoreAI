@@ -4,7 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Sandbox.LuaCs;
-using Lua;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -46,7 +47,7 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsGameToolExecutor : LuaTool.ILuaExecutor
     {
-        private readonly LuaCsSecureEnvironment _sandbox;
+        private readonly IScriptEngine _engine;
         private readonly ILuaCsGameRuntimeBindings _bindings;
         private readonly ILuaExecutionObserver _observer;
 
@@ -70,7 +71,12 @@ namespace CoreAI.Ai.LuaCs
             ILuaCsGameRuntimeBindings bindings,
             ILuaExecutionObserver observer)
         {
-            _sandbox = sandbox ?? throw new ArgumentNullException(nameof(sandbox));
+            if (sandbox == null)
+            {
+                throw new ArgumentNullException(nameof(sandbox));
+            }
+
+            _engine = new LuaCsScriptEngine(sandbox);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
         }
@@ -98,8 +104,9 @@ namespace CoreAI.Ai.LuaCs
             {
                 LuaCsApiRegistry registry = new();
                 _bindings.RegisterGameplayApis(registry);
-                LuaState state = _sandbox.Create(registry);
-                LuaValue[] results = _sandbox.RunChunk(state, code, cancellationToken: cancellationToken);
+                IScriptState state = _engine.CreateState();
+                registry.ApplyTo(state);
+                object[] results = _engine.RunChunk(state, code, cancellationToken: cancellationToken);
                 string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
                 _observer.OnLuaSuccess(summary);
                 LuaExecutedSuccessfully?.Invoke(code ?? "");
@@ -120,7 +127,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Renders the chunk's first return value into a printable summary (VM-agnostic).</summary>
-        internal static string Summarize(LuaValue[] results)
+        internal static string Summarize(object[] results)
         {
             if (results == null || results.Length == 0)
             {
@@ -130,20 +137,21 @@ namespace CoreAI.Ai.LuaCs
             return Stringify(results[0]);
         }
 
-        private static string Stringify(LuaValue value)
+        private static string Stringify(object value)
         {
-            switch (value.Type)
+            IValueMarshaller marshaller = LuaCsValueMarshaller.Instance;
+            switch (marshaller.GetKind(value))
             {
-                case LuaValueType.Nil:
+                case ScriptValueKind.Nil:
                     return "nil";
-                case LuaValueType.Boolean:
-                    return value.Read<bool>() ? "true" : "false";
-                case LuaValueType.Number:
-                    return value.Read<double>().ToString(CultureInfo.InvariantCulture);
-                case LuaValueType.String:
-                    return value.Read<string>() ?? "";
+                case ScriptValueKind.Boolean:
+                    return (bool)marshaller.ToHostValue(value) ? "true" : "false";
+                case ScriptValueKind.Number:
+                    return ((double)marshaller.ToHostValue(value)).ToString(CultureInfo.InvariantCulture);
+                case ScriptValueKind.String:
+                    return (string)marshaller.ToHostValue(value) ?? "";
                 default:
-                    return value.ToString();
+                    return marshaller.Describe(value);
             }
         }
 
