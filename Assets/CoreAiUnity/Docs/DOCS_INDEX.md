@@ -36,6 +36,7 @@ Package manifests:
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md) | Runtime multi-endpoint registry, provider switching, Hub endpoint editor, and agent assignments. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
+| [SUBSCRIPTION_BRIDGE.md](SUBSCRIPTION_BRIDGE.md) | Bring your own subscription: power the in-game AI from a Claude Code / Codex CLI via a local OpenAI-compatible bridge (dev/testing). |
 | [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable Lua (Lua-CSharp) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
 
