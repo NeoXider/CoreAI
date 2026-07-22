@@ -11,6 +11,13 @@ service core has **landed** in `Assets/CoreAIMods/Runtime/Logging/`, editor Lua/
 highlighting has **shipped (editor-side)**, and the three normative Roblox-behavior reference
 docs are **complete** in `Docs/CoreAIMods/RobloxReference/` (§2.1).
 
+**Architecture (normative)**: every deliverable in this ladder is built to
+`Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
+inward-only references with the Unity adapter as the sole engine boundary, interface-first
+DI via installers, UniTask + CancellationToken discipline, and a per-module
+architecture-fitness test (the seam-honesty test is the template). Reviewers reject work
+that violates it.
+
 **Versioning (LOCKED)**: the Roblox-like Lua mod API is a breaking change to the mod contract,
 so it ships as a **major** bump — the CoreAI package family goes **5.9.0 → 6.0.0**. All **five**
 lockstep packages (`com.neoxider.coreai`, `com.neoxider.coreaiunity`, `com.neoxider.coreaimods`,

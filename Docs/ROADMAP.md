@@ -268,9 +268,13 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
    never a silent difference.
 5. **Loud stubs.** Unimplemented surface fails with a structured `NOT_IMPLEMENTED` error naming
    the roadmap phase and a workaround — machine-parsable from day one, never silent.
-6. **Tests as conformance gates.** Every MVP rung has a Definition of Done backed by
+6. **Clean architecture, test-enforced.** All new work follows `Docs/ARCHITECTURE_RULES.md`:
+   engine-free Domain assemblies, inward-only dependencies, interface-first composition,
+   UniTask/CancellationToken discipline — with per-module architecture-fitness tests, so
+   layering is verified by CI rather than convention.
+7. **Tests as conformance gates.** Every MVP rung has a Definition of Done backed by
    rule-citing conformance tests, the real-script corpus ("paste → runs"), seam-honesty scans,
    and the benchmark as the live quality bar; adversarial re-audits are part of the process.
-7. **Safety is layered, not optional.** Sandbox capability tiers with host masking, execution
+8. **Safety is layered, not optional.** Sandbox capability tiers with host masking, execution
    budgets, quarantine-not-unload, versioned sources with revert, autosave before every AI
    mutation, redacted secrets and logs.
