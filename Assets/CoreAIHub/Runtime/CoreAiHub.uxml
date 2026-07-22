@@ -7,6 +7,7 @@
     <ui:VisualElement name="coreai-hub-content" class="coreai-hub-content">
       <ui:Label name="coreai-hub-empty" class="coreai-hub-empty"/>
     </ui:VisualElement>
+    <ui:Label name="coreai-hub-title" text="CoreAI" class="coreai-hub-title"/>
     <ui:Button name="coreai-hub-collapse" text="&#8211;" class="coreai-hub-collapse"/>
   </ui:VisualElement>
 </ui:UXML>

@@ -36,18 +36,10 @@ namespace CoreAI.Demos
         [SerializeField]
         private LuaPlatformExampleController luaPlatformDriver;
 
-
-        [Tooltip("Optional Lua source override for the Full-mode mod. Uses the embedded default when unset.")]
-        [SerializeField]
-        private TextAsset fullModeModSourceOverride;
-
         [Tooltip("Backend config asset edited by the Settings tab (Base URL / API key / model). " +
                  "This is the UITK replacement for the old CoreAiBackendPanel.")]
         [SerializeField]
         private CoreAiChatConfig chatConfig;
-
-        private ILuaModRuntime _modsRuntime;
-        private bool _modsResolved;
 
         /// <summary>The registry created and owned by this host.</summary>
         public HubPageRegistry Registry { get; private set; }
@@ -61,10 +53,6 @@ namespace CoreAI.Demos
                 FullAccessInfoHubPage.DefaultPageId,
                 () => new FullAccessInfoHubPage(() => targetCube),
                 0);
-            Registry.Register(
-                FullModeModHubPage.DefaultPageId,
-                () => new FullModeModHubPage(ResolveModsRuntime, () => targetCube, ModSourceOverrideText()),
-                10);
             Registry.Register(
                 LuaPlatformHubPage.DefaultPageId,
                 () => new LuaPlatformHubPage(ResolveDriver),
@@ -185,37 +173,6 @@ namespace CoreAI.Demos
             }
         }
 
-        private ILuaModRuntime ResolveModsRuntime()
-        {
-            if (_modsResolved)
-            {
-                return _modsRuntime;
-            }
-
-            _modsResolved = true;
-            try
-            {
-                if (coreAiScope == null)
-                {
-                    coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
-                }
-
-                if (coreAiScope == null || coreAiScope.Container == null)
-                {
-                    return null;
-                }
-
-                _modsRuntime = CoreAiDemoScope.ResolveModsContainer(coreAiScope).Resolve<ILuaModRuntime>();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[FullAccessHubDemo] Failed to resolve mods runtime: {ex.Message}");
-                _modsRuntime = null;
-            }
-
-            return _modsRuntime;
-        }
-
         private T ResolveFromCore<T>() where T : class
         {
             try
@@ -243,13 +200,6 @@ namespace CoreAI.Demos
             }
 
             return luaPlatformDriver;
-        }
-
-        private string ModSourceOverrideText()
-        {
-            return fullModeModSourceOverride != null && !string.IsNullOrWhiteSpace(fullModeModSourceOverride.text)
-                ? fullModeModSourceOverride.text
-                : null;
         }
 
         private static T TryResolve<T>(IObjectResolver container) where T : class

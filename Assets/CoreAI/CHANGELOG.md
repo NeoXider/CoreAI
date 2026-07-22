@@ -1,5 +1,21 @@
 # Changelog
 
+## [6.1.1] - 2026-07-23
+
+### Removed
+
+- The **Full-Mode Mod** demo tab (`FullModeModHubPage`) is gone from the Full Access demo Hub. It was a
+  ported IMGUI panel demonstrating the Full-tier `unity_*` reflection API by moving `TargetCube`, but it
+  overlapped the live **Mods** tab and only half-worked unless Full Lua access was toggled on the scope —
+  so it read as a broken/redundant tab. Its registration and the now-unused `fullModeModSourceOverride`
+  field / helper were removed from `FullAccessHubDemoController`.
+
+### Changed
+
+- Collapsed Hub is now a legible launcher chip: it shows a **"CoreAI"** brand label next to the restore
+  button instead of a blank dark bar with a lone floating "+". New `coreai-hub-title` element (shown only
+  while collapsed; the tab bar is the header when expanded).
+
 ## [6.1.0] - 2026-07-23
 
 ### Added

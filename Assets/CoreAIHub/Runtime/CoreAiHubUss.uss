@@ -19,15 +19,36 @@
   overflow: hidden;
 }
 
-/* Collapsed state: shrink to a small bar holding just the toggle button. */
+/* Collapsed state: shrink to a compact launcher chip holding the brand label + toggle. */
 .coreai-hub-root.coreai-hub--collapsed {
-  width: 132px;
-  height: 34px;
+  width: 150px;
+  height: 36px;
+  border-color: rgba(77, 208, 225, 0.5);
 }
 
 .coreai-hub-root.coreai-hub--collapsed .coreai-hub-tabbar,
 .coreai-hub-root.coreai-hub--collapsed .coreai-hub-content {
   display: none;
+}
+
+/* Brand label: only shown while collapsed, so the chip reads as "CoreAI", not a blank bar.
+   Expanded, the tab bar is the header, so it stays hidden. */
+.coreai-hub-title {
+  display: none;
+}
+
+.coreai-hub-root.coreai-hub--collapsed .coreai-hub-title {
+  display: flex;
+  position: absolute;
+  left: 0;
+  right: 32px;
+  top: 0;
+  bottom: 0;
+  padding-left: 14px;
+  color: rgb(77, 208, 225);
+  font-size: 14px;
+  -unity-font-style: bold;
+  -unity-text-align: middle-left;
 }
 
 /* Collapse/expand toggle (top-right), independent of the tab bar. */
