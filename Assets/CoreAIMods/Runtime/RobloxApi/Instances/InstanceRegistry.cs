@@ -283,10 +283,26 @@ namespace CoreAI.RobloxApi.Instances
             bool isInWorld = IsInWorld(instance);
             if (wasInWorld == isInWorld)
             {
+                // WHY: a move fully inside the world subtree changes no membership but must
+                // still mirror into the backing hierarchy (transform re-parent in Unity).
+                if (isInWorld && _byId.TryGetValue(instance.Id, out InstanceRecord record)
+                    && record.IsMaterialized)
+                {
+                    _binder.OnReparented(record);
+                }
+
                 return;
             }
 
             ApplyWorldMembership(instance, isInWorld);
+        }
+
+        internal void OnNameChanged(RbxInstance instance)
+        {
+            if (_byId.TryGetValue(instance.Id, out InstanceRecord record) && record.IsMaterialized)
+            {
+                _binder.OnNameChanged(record);
+            }
         }
 
         private void ApplyWorldMembership(RbxInstance root, bool entered)

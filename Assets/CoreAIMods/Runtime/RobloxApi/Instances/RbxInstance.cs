@@ -56,6 +56,7 @@ namespace CoreAI.RobloxApi.Instances
                 ThrowIfDestroyed("Name");
                 _name = value ?? throw RbxError.BadArgument("Name cannot be nil",
                     "pass a string, e.g. instance.Name = \"SpawnPad\"");
+                Registry?.OnNameChanged(this);
             }
         }
 

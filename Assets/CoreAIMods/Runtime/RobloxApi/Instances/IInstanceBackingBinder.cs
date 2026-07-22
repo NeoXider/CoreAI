@@ -18,6 +18,17 @@ namespace CoreAI.RobloxApi.Instances
 
         /// <summary>The instance was destroyed — release any backing object (D6 step 6).</summary>
         void OnDestroyed(InstanceRecord record);
+
+        /// <summary>
+        /// The instance moved to a new parent while staying inside the world-root subtree —
+        /// mirror the move in the backing hierarchy (transform re-parenting in Unity). Fired
+        /// only for materialized instances; membership changes fire OnEnteredWorld/OnLeftWorld
+        /// instead.
+        /// </summary>
+        void OnReparented(InstanceRecord record);
+
+        /// <summary>Name changed on a materialized instance — sync the backing object's name.</summary>
+        void OnNameChanged(InstanceRecord record);
     }
 
     /// <summary>Null object for hosts that bind nothing (headless tests, storage-only trees).</summary>
@@ -34,6 +45,14 @@ namespace CoreAI.RobloxApi.Instances
         }
 
         public void OnDestroyed(InstanceRecord record)
+        {
+        }
+
+        public void OnReparented(InstanceRecord record)
+        {
+        }
+
+        public void OnNameChanged(InstanceRecord record)
         {
         }
     }

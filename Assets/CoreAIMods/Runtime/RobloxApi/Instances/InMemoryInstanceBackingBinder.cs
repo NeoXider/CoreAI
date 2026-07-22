@@ -16,7 +16,8 @@ namespace CoreAI.RobloxApi.Instances
         /// <summary>Ids with a live (materialized) fake backing object.</summary>
         public IReadOnlyCollection<InstanceId> Materialized => _materialized;
 
-        /// <summary>Chronological event log, entries like "enter:5", "leave:5", "destroy:5".</summary>
+        /// <summary>Chronological event log, entries like "enter:5", "leave:5", "destroy:5",
+        /// "reparent:5", "rename:5".</summary>
         public IReadOnlyList<string> Events => _events;
 
         public bool IsMaterialized(InstanceId id) => _materialized.Contains(id);
@@ -37,6 +38,16 @@ namespace CoreAI.RobloxApi.Instances
         {
             _materialized.Remove(record.Id);
             _events.Add("destroy:" + record.Id.Value);
+        }
+
+        public void OnReparented(InstanceRecord record)
+        {
+            _events.Add("reparent:" + record.Id.Value);
+        }
+
+        public void OnNameChanged(InstanceRecord record)
+        {
+            _events.Add("rename:" + record.Id.Value);
         }
     }
 }

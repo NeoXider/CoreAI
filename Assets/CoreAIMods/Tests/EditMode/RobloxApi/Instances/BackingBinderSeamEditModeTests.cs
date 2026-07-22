@@ -64,7 +64,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
         }
 
         [Test]
-        public void D5_ReparentWithinWorkspace_KeepsTheBackingObject()
+        public void D5_ReparentWithinWorkspace_KeepsTheBackingObjectAndMirrorsTheMove()
         {
             RbxInstance model = _registry.Create("Model");
             RbxInstance part = _registry.Create("Part");
@@ -75,7 +75,29 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
             part.Parent = model;
 
             Assert.IsTrue(_binder.IsMaterialized(part.Id));
-            Assert.AreEqual(eventsBefore, _binder.Events.Count);
+            Assert.AreEqual(eventsBefore + 1, _binder.Events.Count);
+            Assert.AreEqual("reparent:" + part.Id.Value, _binder.Events[_binder.Events.Count - 1]);
+        }
+
+        [Test]
+        public void NameChange_OnMaterializedInstance_ReachesTheBinder()
+        {
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = _registry.WorldRoot;
+
+            part.Name = "SpawnPad";
+
+            CollectionAssert.Contains(_binder.Events, "rename:" + part.Id.Value);
+        }
+
+        [Test]
+        public void NameChange_OutsideTheWorld_StaysSilent()
+        {
+            RbxInstance part = _registry.Create("Part");
+
+            part.Name = "SpawnPad";
+
+            CollectionAssert.DoesNotContain(_binder.Events, "rename:" + part.Id.Value);
         }
 
         [Test]
