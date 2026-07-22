@@ -458,7 +458,7 @@ Ordering changes vs. the seed roadmap, with justification:
   properties pushed through `IPartPropertySink`) are on disk in
   `Assets/CoreAIMods/Runtime/RobloxApi/` + `Runtime/Scripting/LuaCs/LuaCsRoblox*.cs` and wired by
   `CoreAiModsInstaller`. Final wiring (datatype-valued attributes, namespace consolidation to
-  `CoreAI.Mods.Roblox.*`) and the full §5.1.8 acceptance-gate sign-off are in progress.
+  `CoreAI.Mods.Rbx.*`) and the full §5.1.8 acceptance-gate sign-off are in progress.
 - **Goal**: `game`, `workspace`, `Instance.new`, the full navigation/lifecycle member set,
   pure-spec datatypes with the `RobloxSpace` conversion boundary, and the unified identity
   registry.
@@ -940,7 +940,7 @@ Ordering changes vs. the seed roadmap, with justification:
 ## 5. MVP1 and MVP2 in detail
 
 New code home: `Assets/CoreAIMods/Runtime/RobloxApi/` (asmdef: part of `CoreAI.Mods`), all files
-guarded `#if !COREAI_NO_LUA` where they touch the VM adapter, namespace `CoreAI.Mods.Roblox`.
+guarded `#if !COREAI_NO_LUA` where they touch the VM adapter, namespace `CoreAI.Mods.Rbx`.
 C# classes use the `Rbx` prefix to avoid colliding with Unity types (`RbxInstance` vs. Unity
 `Object`); the *Lua-visible* names are unprefixed Roblox names. Rule IDs cited below refer to
 the normative docs in §2.1.

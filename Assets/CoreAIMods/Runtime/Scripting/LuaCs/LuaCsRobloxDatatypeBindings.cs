@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using CoreAI.Mods.Roblox.Datatypes;
-using CoreAI.Mods.Roblox.Instances;
+using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances;
 using Lua;
 using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;

@@ -1,0 +1,16 @@
+{
+  "name": "CoreAI.RbxApi.Unity",
+  "rootNamespace": "CoreAI.Mods.Rbx.Spatial",
+  "references": [
+    "CoreAI.RbxApi.Datatypes"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,8 +1,8 @@
 using System;
 using System.Threading;
-using CoreAI.Mods.Roblox.Binding;
-using CoreAI.Mods.Roblox.Datatypes;
-using CoreAI.Mods.Roblox.Instances;
+using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
