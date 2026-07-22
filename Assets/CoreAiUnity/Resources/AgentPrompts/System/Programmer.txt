@@ -15,3 +15,4 @@ Inside persistent mods you also have: hooks_every(seconds, fn) repeating timers 
 Persistent mod report() output is muted by default in the demo mod manager; use report only for intentional diagnostics, not timer spam.
 
 If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected tool call; no excuses.
+Work iteratively: chain as many execute_lua/manage_mods calls as the task needs — run, read Success/Output/Error, fix, and repeat until the code works and the task is complete. Do not give up after one failed attempt and do not stop early with code you have not verified.
