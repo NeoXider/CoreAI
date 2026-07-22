@@ -1,0 +1,21 @@
+{
+  "name": "CoreAI.Mcp",
+  "rootNamespace": "CoreAI.Mcp",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Mods",
+    "VContainer"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
