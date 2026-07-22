@@ -1,77 +1,143 @@
+using System;
 using System.Collections.Generic;
 using CoreAI.LuaAssets;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Editor
 {
     /// <summary>
-    /// Shared "highlighted code view" drawer used by both <see cref="LuaTextAssetEditor"/> and
+    /// Shared UI Toolkit "highlighted code view" used by both <see cref="LuaTextAssetEditor"/> and
     /// <see cref="LuaScriptViewerWindow"/>: caps very large sources, tokenizes, formats to rich text, and
-    /// draws it in a scrollable read-only area.
+    /// shows it in a scrollable, selectable read-only <see cref="Label"/> (<c>enableRichText</c>), so the
+    /// <c>&lt;color&gt;</c> tags render as colors and Ctrl/Cmd+C copies the selection.
     /// </summary>
     /// <remarks>
-    /// WHY: Unity's IMGUI text fields (<c>EditorGUILayout.SelectableLabel</c>/<c>TextArea</c>) never
-    /// render rich text — they show tag characters literally, because caret placement needs a 1:1
-    /// mapping between rendered glyphs and source characters. A rich-text <see cref="GUIStyle"/> Label is
-    /// the only IMGUI control that actually colors the tags, so this view trades native text-drag
-    /// selection for a "Copy" button (see <see cref="LuaScriptViewerWindow"/>) — the standard workaround
-    /// used by most Unity code-preview tooling.
+    /// WHY: tokenizing + formatting is pure but non-trivial — a full re-lex of up to 64 KiB. The rich
+    /// text is recomputed only when the source string or the editor skin changes (see
+    /// <see cref="SetSource"/> / the skin poll), never on every repaint, so scrolling and inspector
+    /// redraws cost nothing beyond the Label's own layout. Font size only restyles the Label and never
+    /// invalidates the formatted text.
     /// </remarks>
-    internal static class LuaSyntaxHighlightView
+    internal sealed class LuaSyntaxHighlightView
     {
         public const float DefaultFontSize = 12f;
         public const float MinFontSize = 8f;
         public const float MaxFontSize = 24f;
 
-        private static GUIStyle _codeStyle;
-        private static float _codeStyleFontSize = -1f;
+        private const long SkinPollIntervalMs = 500L;
+
         private static Font _monoFont;
         private static bool _monoFontResolved;
 
-        public static Vector2 Draw(string source, Vector2 scroll, float fontSize, float viewHeight)
+        private readonly VisualElement _root;
+        private readonly Label _truncationNotice;
+        private readonly ScrollView _scroll;
+        private readonly Label _codeLabel;
+
+        private string _cachedSource;
+        private bool _cachedProSkin;
+        private bool _hasContent;
+
+        public LuaSyntaxHighlightView(float fontSize = DefaultFontSize)
+        {
+            _root = new VisualElement();
+            _root.style.flexGrow = 1f;
+
+            _truncationNotice = new Label { enableRichText = false };
+            _truncationNotice.style.display = DisplayStyle.None;
+            _truncationNotice.style.whiteSpace = WhiteSpace.Normal;
+            _truncationNotice.style.paddingLeft = 6f;
+            _truncationNotice.style.paddingRight = 6f;
+            _truncationNotice.style.paddingTop = 4f;
+            _truncationNotice.style.paddingBottom = 4f;
+            _root.Add(_truncationNotice);
+
+            _scroll = new ScrollView(ScrollViewMode.VerticalAndHorizontal);
+            _scroll.style.flexGrow = 1f;
+            _root.Add(_scroll);
+
+            _codeLabel = new Label { enableRichText = true };
+            _codeLabel.selection.isSelectable = true;
+            _codeLabel.focusable = true; // WHY: required so Ctrl/Cmd+C copies the active selection
+            _codeLabel.style.whiteSpace = WhiteSpace.NoWrap;
+            _codeLabel.style.paddingLeft = 4f;
+            _codeLabel.style.paddingRight = 4f;
+            _codeLabel.style.paddingTop = 2f;
+            _codeLabel.style.paddingBottom = 2f;
+
+            Font mono = GetMonoFont();
+            if (mono != null)
+            {
+                _codeLabel.style.unityFont = new StyleFont(mono);
+            }
+
+            SetFontSize(fontSize);
+            _scroll.Add(_codeLabel);
+
+            // WHY: the editor skin can flip (Preferences) while the view is open; a cheap periodic
+            // isProSkin compare re-formats only on the actual change, never a per-frame re-lex.
+            _root.schedule.Execute(RefreshIfSkinChanged).Every(SkinPollIntervalMs);
+        }
+
+        /// <summary>Root element to add into an inspector or window tree.</summary>
+        public VisualElement Root => _root;
+
+        /// <summary>Restyles the code Label's font size without touching the formatted rich text.</summary>
+        public void SetFontSize(float fontSize)
+        {
+            _codeLabel.style.fontSize = Mathf.RoundToInt(Mathf.Clamp(fontSize, MinFontSize, MaxFontSize));
+        }
+
+        /// <summary>
+        /// Sets the source shown. Re-tokenizes/formats only when the source or the editor skin differs
+        /// from the last call, so repeated calls with the same source are free.
+        /// </summary>
+        public void SetSource(string source)
+        {
+            bool proSkin = EditorGUIUtility.isProSkin;
+            if (_hasContent &&
+                string.Equals(_cachedSource, source, StringComparison.Ordinal) &&
+                _cachedProSkin == proSkin)
+            {
+                return;
+            }
+
+            _cachedSource = source;
+            _cachedProSkin = proSkin;
+            _hasContent = true;
+            Rebuild(source);
+        }
+
+        private void RefreshIfSkinChanged()
+        {
+            if (!_hasContent || _cachedProSkin == EditorGUIUtility.isProSkin)
+            {
+                return;
+            }
+
+            _cachedProSkin = EditorGUIUtility.isProSkin;
+            Rebuild(_cachedSource);
+        }
+
+        private void Rebuild(string source)
         {
             LuaSourceCap.Result capped = LuaSourceCap.Cap(source);
             if (capped.WasTruncated)
             {
-                EditorGUILayout.HelpBox(
+                _truncationNotice.text =
                     $"Showing the first {capped.Text.Length:N0} of {capped.OriginalLength:N0} characters. " +
-                    "Open the file in an external editor to view it in full.",
-                    MessageType.Info);
+                    "Open the file in an external editor to view it in full.";
+                _truncationNotice.style.display = DisplayStyle.Flex;
+            }
+            else
+            {
+                _truncationNotice.style.display = DisplayStyle.None;
             }
 
             IReadOnlyList<LuaToken> tokens = LuaTokenizer.Tokenize(capped.Text);
-            string richText = LuaRichTextFormatter.Format(capped.Text, tokens, LuaSyntaxPalette.GetColor);
-
-            GUIStyle style = GetCodeStyle(fontSize);
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(viewHeight));
-            GUILayout.Label(richText, style, GUILayout.ExpandWidth(true));
-            EditorGUILayout.EndScrollView();
-
-            return scroll;
-        }
-
-        private static GUIStyle GetCodeStyle(float fontSize)
-        {
-            if (_codeStyle == null)
-            {
-                _codeStyle = new GUIStyle(EditorStyles.label)
-                {
-                    richText = true,
-                    wordWrap = false,
-                    font = GetMonoFont(),
-                    alignment = TextAnchor.UpperLeft
-                };
-                _codeStyle.padding = new RectOffset(4, 4, 2, 2);
-            }
-
-            if (!Mathf.Approximately(_codeStyleFontSize, fontSize))
-            {
-                _codeStyle.fontSize = Mathf.RoundToInt(fontSize);
-                _codeStyleFontSize = fontSize;
-            }
-
-            return _codeStyle;
+            _codeLabel.text = LuaRichTextFormatter.Format(capped.Text, tokens, LuaSyntaxPalette.GetColor);
         }
 
         private static Font GetMonoFont()

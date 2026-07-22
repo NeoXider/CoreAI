@@ -144,8 +144,8 @@ namespace CoreAI.Chat
         private bool? _wasChatInputAllowed;
 
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
-        private bool _streamingStartedVisible; // True while streaming assistant output is currently visible.
-        private bool _nonStreamAssistantOutputStarted; // True while non-stream assistant output has started.
+        private bool _streamingStartedVisible; // WHY: true while streaming assistant output is currently visible.
+        private bool _nonStreamAssistantOutputStarted; // WHY: true while non-stream assistant output has started.
 
         /// <summary>
         /// Prevents duplicate deferred scroll jobs; nested <c>schedule.Execute</c> calls can
@@ -456,7 +456,6 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // Make the cloned template wrapper fill the host.
             chatRoot.style.flexGrow = 1f;
             chatRoot.style.width = Length.Percent(100);
             chatRoot.style.height = Length.Percent(100);
@@ -467,14 +466,14 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // .coreai-chat-embedded strips the floating border/radius. The container's fixed 650×910 and
+            // WHY: .coreai-chat-embedded strips the floating border/radius. The container's fixed 650×910 and
             // bottom-right anchoring resist USS/inline overrides in the cascade on this Unity version, so we
             // pin it absolute top-left and drive its exact pixel size from the wrapper's resolved geometry.
             // Absolute + left/top:0 guarantees alignment (no residual right-anchor shift → left-clip); the
             // geometry sync guarantees the size (and tracks resizes).
             container.AddToClassList("coreai-chat-embedded");
 
-            // Re-assert position AND size on every layout pass. Doing it inside the GeometryChanged callback
+            // WHY: re-assert position AND size on every layout pass. Doing it inside the GeometryChanged callback
             // (post-layout) makes it stick where a one-shot pre-layout set was being clobbered back to the
             // container's floating right/bottom:24 anchor (it resolved to a −24 offset on all sides).
             void Sync()
@@ -540,7 +539,7 @@ namespace CoreAI.Chat
         {
             if (_embeddedHostMode)
             {
-                // A Hub tab always shows the expanded chat; the FAB/collapse affordance and the
+                // WHY: a Hub tab always shows the expanded chat; the FAB/collapse affordance and the
                 // persisted collapsed pref are meaningless inside an embedded surface.
                 SetCollapsed(false, false);
                 return;
@@ -2072,7 +2071,7 @@ namespace CoreAI.Chat
             }
             catch (OperationCanceledException)
             {
-                // User stop/cancel is handled inside RunAgentTurnAsync when possible. Keep this
+                // WHY: user stop/cancel is handled inside RunAgentTurnAsync when possible. Keep this
                 // fire-and-forget entry point from surfacing an unobserved task exception on WebGL.
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2299,7 +2298,7 @@ namespace CoreAI.Chat
             {
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
-                    // Stream-gap diagnostic: helps tell "model is slow" from "UI lost a chunk".
+                    // WHY: stream-gap diagnostic: helps tell "model is slow" from "UI lost a chunk".
                     TimeSpan gap = DateTime.UtcNow - lastChunkAt;
                     if (gap.TotalSeconds > StreamGapWarnSeconds)
                     {
@@ -2337,7 +2336,7 @@ namespace CoreAI.Chat
 
                     if (chunk.BufferedStreamingNoToolBinding)
                     {
-                        // Heuristic for tool-round boundary: the orchestrator only emits a tool-progress hint
+                        // WHY: heuristic for tool-round boundary: the orchestrator only emits a tool-progress hint
                         // mid-stream when an LLM round just produced tool calls and a new round is about to
                         // start. If prose has already streamed in this turn (`_streamingStartedVisible`),
                         // want to show "tool X (k/N)" badges without reflection.
@@ -2346,7 +2345,7 @@ namespace CoreAI.Chat
                             _toolRoundIterationInTurn++;
                             RaiseToolRoundStarted(_toolRoundIterationInTurn, _lastToolNameInTurn);
 
-                            // Close the in-flight prose bubble at the tool-round boundary so the assistant
+                            // WHY: close the in-flight prose bubble at the tool-round boundary so the assistant
                             // answer after the tools lands in its own bubble below the tool-call bubbles
                             // (matches claude/cursor behaviour) instead of being appended to the bubble that
                             // was opened before the tools (which would leave tools below the answer).
@@ -2355,7 +2354,7 @@ namespace CoreAI.Chat
 
                         if (chunk.BufferedStreamingUseToolProgressHint)
                         {
-                            // Mid-turn: prose may already be streaming (typing row was hidden); show typing again.
+                            // WHY: mid-turn prose may already be streaming (typing row was hidden); show typing again.
                             if (_streamingStartedVisible)
                             {
                                 ShowTypingIndicator();
@@ -2592,7 +2591,7 @@ namespace CoreAI.Chat
 
             string clipped = text.Substring(0, MaxAssistantRenderChars);
 
-            // A truncation inside a ``` block leaves the fence open and breaks markdown layout; close it.
+            // WHY: a truncation inside a ``` block leaves the fence open and breaks markdown layout; close it.
             int fences = 0;
             for (int i = clipped.IndexOf(CodeFence, StringComparison.Ordinal);
                  i >= 0;
@@ -2699,7 +2698,7 @@ namespace CoreAI.Chat
             label.selection.isSelectable = true;
             label.selection.doubleClickSelectsWord = true;
             label.selection.tripleClickSelectsLine = true;
-            label.focusable = true; // required so Ctrl/Cmd+C copies the active selection
+            label.focusable = true; // WHY: required so Ctrl/Cmd+C copies the active selection
         }
 
         private VisualElement CreateMessageBubbleRow(bool isUser)
@@ -2767,7 +2766,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // WebGL GPU-buffer backstop: cap an oversized assistant dump before it becomes a giant bubble
+            // WHY: WebGL GPU-buffer backstop: cap an oversized assistant dump before it becomes a giant bubble
             // (user input is bounded by the input field). Hosts may cap earlier; this protects every
             // consumer of the package. See ClampAssistantForRender.
             if (!isUser)
@@ -2936,7 +2935,7 @@ namespace CoreAI.Chat
                     }
                 }
 
-                // Cancel the active HTTP/streaming request. On WebGL, cancellation callbacks can
+                // WHY: cancel the active HTTP/streaming request. On WebGL, cancellation callbacks can
                 // surface browser/JS-side exceptions; stop must never throw back into the UI loop.
                 if (IsCancellationSourceActive(activeRequestCts))
                 {
@@ -3184,7 +3183,7 @@ namespace CoreAI.Chat
             _typingAnimation = TypingIndicator.schedule.Execute(() =>
             {
                 _typingDotCount =
-                    _typingDotCount % 3 + 1; // Animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
+                    _typingDotCount % 3 + 1; // WHY: animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
                 if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
                 {
                     return;

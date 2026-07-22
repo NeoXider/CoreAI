@@ -85,7 +85,7 @@ namespace CoreAI.Hub.UI
         private bool _collapsed;
         private bool _missingShellWarned;
 
-        // Cached page instances and their created content, keyed by page id. These survive UI rebuilds —
+        // WHY: cached page instances and their created content, keyed by page id. These survive UI rebuilds —
         // only the visual tree gets recreated, never the pages themselves.
         private readonly Dictionary<string, IHubPage> _pages = new(StringComparer.Ordinal);
         private readonly Dictionary<string, VisualElement> _pageContent = new(StringComparer.Ordinal);
@@ -137,7 +137,7 @@ namespace CoreAI.Hub.UI
             VisualElement uiRoot = _document != null ? _document.rootVisualElement : null;
             if (uiRoot == null)
             {
-                // rootVisualElement can be null until the panel is ready; retried from Update().
+                // WHY: rootVisualElement can be null until the panel is ready; retried from Update().
                 return;
             }
 
@@ -158,7 +158,7 @@ namespace CoreAI.Hub.UI
 
         private void Update()
         {
-            // The UIDocument's rootVisualElement can be rebuilt after our OnEnable (e.g. another UIDocument
+            // WHY: the UIDocument's rootVisualElement can be rebuilt after our OnEnable (e.g. another UIDocument
             // sharing the PanelSettings re-inits the panel, or the panel comes up a frame late), which
             // orphans our cloned tree and leaves the Hub invisible. EnsureUi cheaply detects both "never
             // built" and "tree was (re)created" and re-runs the full bind in either case.
@@ -206,7 +206,7 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // Guard against double-adding if a stale clone is still parented under uiRoot.
+            // WHY: guard against double-adding if a stale clone is still parented under uiRoot.
             uiRoot.Q<VisualElement>(RootName)?.RemoveFromHierarchy();
             shellUxml.CloneTree(uiRoot);
 
@@ -431,11 +431,11 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // Registry events may arrive off the UI thread; marshal the rebuild onto the panel's
+            // WHY: registry events may arrive off the UI thread; marshal the rebuild onto the panel's
             // scheduler so VisualElement mutations always run on the main thread.
             _root.schedule.Execute(() =>
             {
-                // A re-registered id may point to a NEW factory (e.g. a DI binder upgrading the
+                // WHY: a re-registered id may point to a NEW factory (e.g. a DI binder upgrading the
                 // built-in Settings/Statistics pages with live sources after the DI-free bootstrap
                 // registered them with null sources). We cache page instances at metadata-peek time,
                 // so drop any cached instance/content for a still-present id and let the new factory
@@ -469,7 +469,7 @@ namespace CoreAI.Hub.UI
             IReadOnlyList<(string pageId, int order)> pages =
                 _registry != null ? _registry.List() : Array.Empty<(string, int)>();
 
-            // Drop cached content/instances for pages that no longer exist.
+            // WHY: drop cached content/instances for pages that no longer exist.
             PruneRemovedPages(pages);
 
             foreach ((string pageId, int _) in pages)
@@ -493,7 +493,7 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // Preserve the active page if it still exists; otherwise fall back to the first tab. Either
+            // WHY: preserve the active page if it still exists; otherwise fall back to the first tab. Either
             // way the active content must be re-parented into _content, since a rebuild may have replaced
             // it with a fresh (empty) container.
             bool activeStillPresent = _activePageId != null && _tabButtons.ContainsKey(_activePageId);
@@ -542,13 +542,13 @@ namespace CoreAI.Hub.UI
 
         private string ResolveDisplayName(string pageId)
         {
-            // Reuse an already-created page's display name; otherwise use the id until first activation.
+            // WHY: reuse an already-created page's display name; otherwise use the id until first activation.
             if (_pages.TryGetValue(pageId, out IHubPage cached) && cached != null)
             {
                 return string.IsNullOrEmpty(cached.DisplayName) ? pageId : cached.DisplayName;
             }
 
-            // Peek the factory to read metadata without mounting content.
+            // WHY: peek the factory to read metadata without mounting content.
             if (_registry != null && _registry.TryGet(pageId, out Func<IHubPage> factory) && factory != null)
             {
                 try
@@ -587,7 +587,6 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // Deactivate the outgoing page.
             if (_activePageId != null && _pages.TryGetValue(_activePageId, out IHubPage previous) && previous != null)
             {
                 try

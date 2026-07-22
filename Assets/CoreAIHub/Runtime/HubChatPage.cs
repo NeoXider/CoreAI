@@ -112,7 +112,7 @@ namespace CoreAI.Hub.UI
 
         private object BuildContent()
         {
-            // Fill the tab. The Chat page carries no inner padding of its own — the Hub content area drops
+            // WHY: fill the tab. The Chat page carries no inner padding of its own — the Hub content area drops
             // its padding for the chat (see CoreAiHubWindow full-bleed handling) so the chat reaches all four
             // edges evenly, with no left-clip and no right/bottom gap.
             _host = new VisualElement { name = "coreai-hub-chat-host" };
@@ -134,7 +134,7 @@ namespace CoreAI.Hub.UI
             // the chat visually "disappears" while the Hub window stays open.
             _panel?.SetRuntimeEscapeChatShortcutsEnabled(false);
 
-            // The Hub chat always offers the agent/role dropdown in its header so the player can switch
+            // WHY: the Hub chat always offers the agent/role dropdown in its header so the player can switch
             // between the conversational role and the Programmer role that carries the mod tools — i.e.
             // write mods straight from the Hub chat, not just the standalone chat.
             if (_panel != null)
@@ -142,7 +142,7 @@ namespace CoreAI.Hub.UI
                 _panel.EnableAgentSwitching();
                 _panel.EnableApiSwitching();
 
-                // The Hub chat always surfaces tool-call progress so the player can see mod/tool actions
+                // WHY: the Hub chat always surfaces tool-call progress so the player can see mod/tool actions
                 // execute inline. This overrides the shared chat config for the embedded panel only — the
                 // standalone chat keeps its own ShowToolCallsInChat setting.
                 CoreAiChatOptions hubOptions = _chatConfig != null
