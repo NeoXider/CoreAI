@@ -60,8 +60,8 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
 - `Instance.new("Class"[, parent])` — creatable classes are ONLY "Part", "Folder", "Model".
   Any other name errors. The parent argument is deprecated (logs once); set `.Parent` after
   configuring instead.
-- `game:GetService("Name")` — valid services: Workspace, ReplicatedStorage, ServerStorage,
-  ServerScriptService, StarterPlayer. Unknown name -> "X is not a valid Service name".
+- `game:GetService("Name")` — valid services: Workspace, Lighting, ReplicatedStorage,
+  ServerStorage, ServerScriptService, StarterPlayer. Unknown name -> "X is not a valid Service name".
   Also `game:FindService(name)`. `workspace` is `game:GetService("Workspace")`.
 - Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
   needs WorldEdit.

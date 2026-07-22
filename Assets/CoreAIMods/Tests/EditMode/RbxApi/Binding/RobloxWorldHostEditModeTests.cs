@@ -48,6 +48,33 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         }
 
         [Test]
+        public void Bootstrap_MirrorsExplorerUnderHost_StorageServicesInactive()
+        {
+            // WHY: the host GameObject represents game (DataModel); every service nests under it,
+            // Workspace/Lighting active, storage services inactive so their content is not physical.
+            Assert.IsTrue(_host.Binder.TryGetBoundObject(_host.Game.Id, out GameObject gameGo));
+            Assert.AreSame(_hostGo, gameGo, "the DataModel binds to the host GameObject itself");
+
+            AssertServiceActive("Workspace", true);
+            AssertServiceActive("Lighting", true);
+            AssertServiceActive("ReplicatedStorage", false);
+            AssertServiceActive("ServerStorage", false);
+            AssertServiceActive("ServerScriptService", false);
+            AssertServiceActive("StarterPlayer", false);
+        }
+
+        private void AssertServiceActive(string serviceName, bool expectedActiveSelf)
+        {
+            RbxInstance service = _host.Game.GetService(serviceName);
+            Assert.IsTrue(_host.Binder.TryGetBoundObject(service.Id, out GameObject serviceGo),
+                serviceName + " must materialize");
+            Assert.AreEqual(_hostGo.transform, serviceGo.transform.parent,
+                serviceName + " nests under the host (game)");
+            Assert.AreEqual(expectedActiveSelf, serviceGo.activeSelf,
+                serviceName + " active state must mirror Roblox physical-world membership");
+        }
+
+        [Test]
         public void Initialize_IsIdempotent()
         {
             InstanceRegistry registry = _host.Registry;

@@ -7,14 +7,18 @@ using UnityEngine;
 namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
-    /// Unity adapter of the backing-object seam (ROBLOX_API_ROADMAP.md §5.1.1 task 7):
-    /// materializes registry instances as GameObjects under a world root. Semantics per D5:
-    /// materialize on entering the workspace subtree, DEACTIVATE (not destroy) on detach so
-    /// re-parenting stays cheap, destroy on Destroy. Parts become unit-cube primitives scaled
-    /// by Size * RobloxSpace.MetersPerStud (asset rule, §2 — assets are never rescaled, only
-    /// numbers convert); Folder/Model/other containers become empty transforms. Every spatial
-    /// conversion goes through RobloxSpace (D2) — this class holds the binder's single call
-    /// sites allowed by the lint.
+    /// Unity adapter of the backing-object seam (ROBLOX_API_ROADMAP.md §5.1.1 task 7): mirrors
+    /// the whole Roblox explorer into the Unity hierarchy. The DataModel (game) IS the host
+    /// GameObject; services parent under it; Folder/Model/Part nest under their instance parents.
+    /// Semantics per D5: materialize on entering the scene (DataModel) subtree, DEACTIVATE (not
+    /// destroy) on detach so re-parenting stays cheap, destroy on Destroy. Parts become unit-cube
+    /// primitives scaled by Size * RobloxSpace.MetersPerStud (asset rule, §2 — assets are never
+    /// rescaled, only numbers convert); services/Folder/Model become empty transforms. Storage
+    /// services (ReplicatedStorage etc.) materialize INACTIVE so their subtrees never render or
+    /// collide, mirroring Roblox where only Workspace content is the physical world; a Part
+    /// re-parented out of Workspace slides under the inactive service GO and disappears
+    /// automatically via Unity's activeInHierarchy. Every spatial conversion goes through
+    /// RobloxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
     /// TODO: MVP1 follow-up — primitives catalog for Ball and the stud-authored
     /// Wedge/CornerWedge/oriented-Cylinder meshes (currently Block only).
     /// TODO: MVP8 — per-body gravity force (DEV-6) and reverse physics sync.
@@ -23,6 +27,15 @@ namespace CoreAI.Mods.Rbx.Binding
     {
         private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
         private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+
+        // WHY: storage services and their subtrees are not part of the physical world, so their
+        // GameObject materializes inactive (children inherit inactive-in-hierarchy). Workspace and
+        // Lighting stay active. Roblox's service set is fixed, so an explicit list is honest here.
+        private static readonly HashSet<string> InactiveServiceClasses =
+            new HashSet<string>(System.StringComparer.Ordinal)
+            {
+                "ReplicatedStorage", "ServerStorage", "ServerScriptService", "StarterPlayer"
+            };
 
         private readonly Transform _worldParent;
         private readonly Dictionary<InstanceId, BindingEntry> _bindings =
@@ -34,10 +47,14 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             public GameObject GameObject;
             public bool IsPart;
+
+            /// <summary>False only for the DataModel entry, which reuses the host GameObject —
+            /// teardown must never destroy, rename, or re-parent it.</summary>
+            public bool OwnsGameObject;
         }
 
-        /// <summary>Backing objects parent under <paramref name="worldParent"/>
-        /// (null = scene root).</summary>
+        /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
+        /// represents game/DataModel; null = scene root).</summary>
         public InstanceGameObjectBinder(Transform worldParent = null)
         {
             _worldParent = worldParent;
@@ -65,10 +82,14 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
-                // WHY: re-entry reactivates the parked object — D5 makes re-parenting cheap.
-                entry.GameObject.transform.SetParent(ResolveParentTransform(record.Instance), true);
-                entry.GameObject.name = record.Instance.Name;
-                entry.GameObject.SetActive(true);
+                if (entry.OwnsGameObject)
+                {
+                    // WHY: re-entry reactivates the parked object — D5 makes re-parenting cheap.
+                    entry.GameObject.transform.SetParent(ResolveParentTransform(record.Instance), true);
+                    entry.GameObject.name = record.Instance.Name;
+                    entry.GameObject.SetActive(DesiredActiveSelf(record.Instance));
+                }
+
                 return;
             }
 
@@ -82,7 +103,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnLeftWorld(InstanceRecord record)
         {
-            if (!_bindings.TryGetValue(record.Id, out BindingEntry entry))
+            // WHY: the DataModel host GameObject never leaves its own tree; guard so nothing
+            // deactivates or re-parents the host.
+            if (!_bindings.TryGetValue(record.Id, out BindingEntry entry) || !entry.OwnsGameObject)
             {
                 return;
             }
@@ -103,12 +126,17 @@ namespace CoreAI.Mods.Rbx.Binding
 
             _bindings.Remove(record.Id);
             _partProperties.Remove(record.Id);
-            SafeDestroy(entry.GameObject);
+            // WHY: the DataModel's backing object is the host GameObject — teardown releases the
+            // materialized children but never the host itself (RobloxWorldHost owns its lifecycle).
+            if (entry.OwnsGameObject)
+            {
+                SafeDestroy(entry.GameObject);
+            }
         }
 
         public void OnReparented(InstanceRecord record)
         {
-            if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
+            if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 // WHY: worldPositionStays — CFrames are world-space, so a hierarchy move
                 // must not shift the rendered pose.
@@ -118,7 +146,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnNameChanged(InstanceRecord record)
         {
-            if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
+            if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 entry.GameObject.name = record.Instance.Name;
             }
@@ -205,6 +233,20 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private BindingEntry CreateEntry(RbxInstance instance)
         {
+            if (instance.IsA("DataModel"))
+            {
+                // WHY: game IS the host GameObject — no new GO, and the entry is flagged so
+                // teardown never destroys/renames/re-parents the host. Falls back to a fresh root
+                // only when the binder was created without a host transform.
+                GameObject host = _worldParent != null ? _worldParent.gameObject : new GameObject(instance.Name);
+                return new BindingEntry
+                {
+                    GameObject = host,
+                    IsPart = false,
+                    OwnsGameObject = _worldParent == null
+                };
+            }
+
             bool isPart = instance.IsA("BasePart");
             // WHY: CreatePrimitive's built-in cube is authored 1 unit = 1 stud for us, so the
             // asset rule holds: geometry is never rescaled, only localScale carries the numbers.
@@ -213,7 +255,16 @@ namespace CoreAI.Mods.Rbx.Binding
                 : new GameObject();
             gameObject.name = instance.Name;
             gameObject.transform.SetParent(ResolveParentTransform(instance), false);
-            return new BindingEntry { GameObject = gameObject, IsPart = isPart };
+            gameObject.SetActive(DesiredActiveSelf(instance));
+            return new BindingEntry { GameObject = gameObject, IsPart = isPart, OwnsGameObject = true };
+        }
+
+        /// <summary>Storage-service GameObjects materialize inactive so their subtrees stay out
+        /// of the physical world; everything else (Workspace, Lighting, Folder, Model, Part) is
+        /// active and inherits its parent's hierarchy state.</summary>
+        private static bool DesiredActiveSelf(RbxInstance instance)
+        {
+            return !InactiveServiceClasses.Contains(instance.ClassName);
         }
 
         private Transform ResolveParentTransform(RbxInstance instance)

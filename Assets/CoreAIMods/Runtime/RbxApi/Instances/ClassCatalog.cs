@@ -99,7 +99,8 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// The MVP1 class set (roadmap §5.1.3): Instance, Folder, Model, Part (geometry-free
         /// placeholder — spatial properties arrive with the property/datatype slice), Workspace,
-        /// DataModel, and the container services so paths resolve.
+        /// DataModel, the container services so paths resolve, and Lighting as a structural
+        /// service node (its ClockTime/Ambient properties stay absent — the loud stub answers).
         /// </summary>
         public static ClassCatalog CreateMvp1()
         {
@@ -115,6 +116,9 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("ServiceProvider", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("DataModel", "ServiceProvider", false, false, false,
                 descriptor => new RbxDataModel(descriptor)));
+            // TODO: MVP-later — Lighting sun/ambient property mapping (ClockTime, Ambient,
+            // GeographicLatitude ...) lands with the lighting slice; today it is structure only.
+            catalog.Register(new ClassDescriptor("Lighting", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ReplicatedStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerScriptService", "Instance", false, false, true));

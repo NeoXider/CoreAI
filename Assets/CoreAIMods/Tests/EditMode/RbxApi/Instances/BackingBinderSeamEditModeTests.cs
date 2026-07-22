@@ -4,8 +4,10 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RobloxApi.Instances
 {
     /// <summary>Backing-object seam per D5 (§5.1.8 items 1–2 at registry level): unparented
-    /// instances have no backing; entering the workspace subtree materializes; detaching
-    /// deactivates; Destroy releases the backing object.</summary>
+    /// instances have no backing; entering the DataModel (scene) subtree materializes — the whole
+    /// explorer mirrors, storage services included; detaching deactivates; Destroy releases the
+    /// backing object. Active/inactive rendering of storage subtrees is the Unity adapter's job;
+    /// this seam only tracks tree membership.</summary>
     [TestFixture]
     public sealed class BackingBinderSeamEditModeTests
     {
@@ -56,11 +58,14 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
         }
 
         [Test]
-        public void D5_StorageOnlySubtrees_NeverMaterialize()
+        public void D5_StorageSubtrees_MaterializeThroughTheSameSeam()
         {
+            // WHY: the Unity hierarchy mirrors the whole Roblox explorer, so storage-service
+            // contents materialize too — the Unity adapter renders them inactive; the seam itself
+            // only tracks tree membership, so the fake reports them materialized.
             RbxInstance folder = _registry.Create("Folder");
             folder.Parent = _game.GetService("ReplicatedStorage");
-            Assert.IsFalse(_binder.IsMaterialized(folder.Id));
+            Assert.IsTrue(_binder.IsMaterialized(folder.Id));
         }
 
         [Test]

@@ -113,14 +113,14 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
             }
 
-            bool wasInWorld = Registry != null && Registry.IsInWorld(this);
+            bool wasInScene = Registry != null && Registry.IsInScene(this);
 
             RbxInstance oldParent = _parent;
             oldParent?._children.Remove(this);
             _parent = newParent;
             newParent?._children.Add(this);
 
-            Registry?.OnParentChanged(this, wasInWorld);
+            Registry?.OnParentChanged(this, wasInScene);
 
             // TODO: MVP2 — fire ChildAdded/ChildRemoved/AncestryChanged/DescendantAdded on the
             // deferred signal queue; the hook points exist (signal properties) but stay inert.

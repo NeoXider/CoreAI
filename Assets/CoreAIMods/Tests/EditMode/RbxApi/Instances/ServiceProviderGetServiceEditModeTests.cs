@@ -30,6 +30,20 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
         }
 
         [Test]
+        public void GetService_ResolvesLightingButLightingIsNotCreatable()
+        {
+            RbxInstance lighting = _game.GetService("Lighting");
+            Assert.AreEqual("Lighting", lighting.ClassName);
+            Assert.AreSame(_game, lighting.Parent);
+
+            // WHY: Lighting is a service — GetService resolves it, but Instance.new must reject it
+            // loudly (it is not a creatable class).
+            RbxError rejected = Assert.Throws<RbxError>(() => _registry.CreateScripted("Lighting"));
+            Assert.AreEqual(RbxErrorCode.BadArgument, rejected.Code);
+            StringAssert.Contains("Unable to create an Instance of type 'Lighting'", rejected.RawMessage);
+        }
+
+        [Test]
         public void GetService_UnknownName_RaisesUnknownServiceWithExactText()
         {
             RbxError error = Assert.Throws<RbxError>(() => _game.GetService("Bogus"));

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
@@ -55,6 +56,21 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
             return gameObject;
         }
 
+        /// <summary>Dot-joined transform names from just below the host (game) GameObject down to
+        /// <paramref name="leaf"/>, so it can be compared against RbxInstance.GetFullName.</summary>
+        private string TransformPathBelowHost(Transform leaf)
+        {
+            var names = new List<string>();
+            for (Transform current = leaf; current != null && current != _root.transform;
+                 current = current.parent)
+            {
+                names.Add(current.name);
+            }
+
+            names.Reverse();
+            return string.Join(".", names);
+        }
+
         // ---- Materialization / hierarchy ----------------------------------------------------
 
         [Test]
@@ -88,8 +104,85 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
             folder.Parent = _registry.WorldRoot;
 
             GameObject folderGo = BoundObject(folder);
+            Assert.IsTrue(folderGo.activeInHierarchy, "a Folder under Workspace is an active empty GO");
             Assert.IsNull(folderGo.GetComponent<Renderer>());
             Assert.IsNull(folderGo.GetComponent<Collider>());
+        }
+
+        [Test]
+        public void ModelWithTwoParts_NestUnderModel_AndFullNameMatchesTransformPath()
+        {
+            RbxInstance model = _registry.Create("Model");
+            model.Name = "Rig";
+            model.Parent = _registry.WorldRoot;
+            RbxInstance head = _registry.Create("Part");
+            head.Name = "Head";
+            head.Parent = model;
+            RbxInstance torso = _registry.Create("Part");
+            torso.Name = "Torso";
+            torso.Parent = model;
+
+            GameObject modelGo = BoundObject(model);
+            Assert.AreEqual(BoundObject(_registry.WorldRoot).transform, modelGo.transform.parent);
+            Assert.AreEqual(modelGo.transform, BoundObject(head).transform.parent);
+            Assert.AreEqual(modelGo.transform, BoundObject(torso).transform.parent);
+
+            // WHY: the Unity hierarchy mirrors the explorer, so GetFullName path segments equal the
+            // transform path segments below the host (game) GameObject.
+            Assert.AreEqual("Workspace.Rig.Head", head.GetFullName());
+            Assert.AreEqual(head.GetFullName(), TransformPathBelowHost(BoundObject(head).transform));
+        }
+
+        [Test]
+        public void ContainerRename_SyncsThroughTheSeam()
+        {
+            RbxInstance folder = _registry.Create("Folder");
+            folder.Parent = _registry.WorldRoot;
+            GameObject folderGo = BoundObject(folder);
+
+            folder.Name = "Loot";
+            Assert.AreEqual("Loot", folderGo.name, "containers rename through the same seam as parts");
+        }
+
+        [Test]
+        public void ReparentPartWorkspaceToReplicatedStorage_MovesUnderInactiveParent_AndBack()
+        {
+            RbxInstance part = CreatePartInWorld();
+            GameObject partGo = BoundObject(part);
+            Assert.IsTrue(partGo.activeInHierarchy);
+
+            RbxInstance storage = _game.GetService("ReplicatedStorage");
+            GameObject storageGo = BoundObject(storage);
+            Assert.IsFalse(storageGo.activeSelf, "storage services materialize inactive");
+
+            part.Parent = storage;
+            Assert.AreEqual(storageGo.transform, partGo.transform.parent, "the GO moves under the service");
+            Assert.IsFalse(partGo.activeInHierarchy,
+                "under an inactive service the Part leaves the physical world automatically");
+            Assert.IsTrue(partGo.activeSelf,
+                "only the parent is inactive — the Part's own active flag is untouched");
+
+            part.Parent = _registry.WorldRoot;
+            Assert.AreEqual(BoundObject(_registry.WorldRoot).transform, partGo.transform.parent);
+            Assert.IsTrue(partGo.activeInHierarchy, "back in Workspace the Part is physical again");
+        }
+
+        [Test]
+        public void DestroyModel_RemovesItsSubtree_HostSurvives()
+        {
+            RbxInstance model = _registry.Create("Model");
+            model.Parent = _registry.WorldRoot;
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = model;
+            GameObject modelGo = BoundObject(model);
+            GameObject partGo = BoundObject(part);
+
+            model.Destroy();
+
+            Assert.IsFalse(_binder.TryGetBoundObject(model.Id, out _));
+            Assert.IsFalse(_binder.TryGetBoundObject(part.Id, out _));
+            Assert.IsTrue(modelGo == null && partGo == null, "the Model subtree GameObjects are destroyed");
+            Assert.IsTrue(_root != null, "the host (game) GameObject survives child teardown");
         }
 
         [Test]

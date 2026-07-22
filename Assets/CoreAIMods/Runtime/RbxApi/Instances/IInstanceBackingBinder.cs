@@ -3,24 +3,24 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>
     /// Seam between the engine-free registry and whatever backs instances in the running world
     /// (GameObjects in the Unity adapter). Semantics per roadmap D5: an instance materializes
-    /// when it first enters the world-root (workspace) subtree, is DEACTIVATED (not destroyed)
-    /// when detached so re-parenting stays cheap, and releases its backing object on Destroy.
-    /// The Unity implementation (InstanceGameObjectBinder) lands with the world-binding task;
-    /// this slice ships only the in-memory fake.
+    /// when it first enters the scene root (DataModel) subtree — mirroring the whole Roblox
+    /// explorer, storage services included — is DEACTIVATED (not destroyed) when detached from
+    /// the tree so re-parenting stays cheap, and releases its backing object on Destroy. The
+    /// Unity adapter renders storage-service subtrees inactive; the physical world is Workspace.
     /// </summary>
     public interface IInstanceBackingBinder
     {
-        /// <summary>The instance entered the world-root subtree — materialize its backing object.</summary>
+        /// <summary>The instance entered the scene-root subtree — materialize its backing object.</summary>
         void OnEnteredWorld(InstanceRecord record);
 
-        /// <summary>The instance left the world-root subtree — deactivate, do not destroy (D5).</summary>
+        /// <summary>The instance left the scene-root subtree — deactivate, do not destroy (D5).</summary>
         void OnLeftWorld(InstanceRecord record);
 
         /// <summary>The instance was destroyed — release any backing object (D6 step 6).</summary>
         void OnDestroyed(InstanceRecord record);
 
         /// <summary>
-        /// The instance moved to a new parent while staying inside the world-root subtree —
+        /// The instance moved to a new parent while staying inside the scene-root subtree —
         /// mirror the move in the backing hierarchy (transform re-parenting in Unity). Fired
         /// only for materialized instances; membership changes fire OnEnteredWorld/OnLeftWorld
         /// instead.

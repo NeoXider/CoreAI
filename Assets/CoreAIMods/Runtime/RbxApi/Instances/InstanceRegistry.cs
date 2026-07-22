@@ -24,6 +24,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private readonly IInstanceBackingBinder _binder;
 
         private RbxInstance _worldRoot;
+        private RbxInstance _sceneRoot;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
             InstanceIdAllocator allocator = null)
@@ -41,7 +42,9 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>CollectionService substrate; instances delegate their tag members here.</summary>
         public InstanceTagStore Tags { get; }
 
-        /// <summary>The workspace instance whose subtree materializes backing objects (D5).</summary>
+        /// <summary>The Workspace instance — the physical-world handle callers parent visible
+        /// content to. Distinct from the materialization boundary (<see cref="_sceneRoot"/>):
+        /// the whole DataModel tree materializes, but only Workspace content is the active world.</summary>
         public RbxInstance WorldRoot => _worldRoot;
 
         public int Count => _byId.Count;
@@ -256,39 +259,51 @@ namespace CoreAI.Mods.Rbx.Instances
             return result;
         }
 
-        // ---- World-root / binder plumbing (D5) ----------------------------------------------
+        // ---- Scene-root / binder plumbing (D5) ----------------------------------------------
 
-        /// <summary>Declares the workspace root whose subtree materializes; sweeps the existing
-        /// subtree so late binding is consistent.</summary>
+        /// <summary>Sets the Workspace handle (physical-world root). Pointer only — the backing
+        /// hierarchy is driven by the scene root (<see cref="SetSceneRoot"/>), which mirrors the
+        /// whole DataModel tree, not just Workspace.</summary>
         public void SetWorldRoot(RbxInstance worldRoot)
         {
             _worldRoot = worldRoot;
-            if (worldRoot == null)
+        }
+
+        /// <summary>Declares the DataModel root whose whole subtree materializes into backing
+        /// objects (the Unity hierarchy mirrors the Roblox explorer); sweeps the existing subtree
+        /// so late binding is consistent. Storage-service subtrees materialize too — the binder
+        /// renders them inactive.</summary>
+        public void SetSceneRoot(RbxInstance sceneRoot)
+        {
+            _sceneRoot = sceneRoot;
+            if (sceneRoot == null)
             {
                 return;
             }
 
-            ApplyWorldMembership(worldRoot, true);
+            ApplySceneMembership(sceneRoot, true);
         }
 
-        internal bool IsInWorld(RbxInstance instance)
+        internal bool IsInScene(RbxInstance instance)
         {
-            if (_worldRoot == null || instance == null)
+            if (_sceneRoot == null || instance == null)
             {
                 return false;
             }
 
-            return ReferenceEquals(instance, _worldRoot) || instance.IsDescendantOf(_worldRoot);
+            return ReferenceEquals(instance, _sceneRoot) || instance.IsDescendantOf(_sceneRoot);
         }
 
-        internal void OnParentChanged(RbxInstance instance, bool wasInWorld)
+        internal void OnParentChanged(RbxInstance instance, bool wasInScene)
         {
-            bool isInWorld = IsInWorld(instance);
-            if (wasInWorld == isInWorld)
+            bool isInScene = IsInScene(instance);
+            if (wasInScene == isInScene)
             {
-                // WHY: a move fully inside the world subtree changes no membership but must
-                // still mirror into the backing hierarchy (transform re-parent in Unity).
-                if (isInWorld && _byId.TryGetValue(instance.Id, out InstanceRecord record)
+                // WHY: a move fully inside the scene tree changes no membership but must
+                // still mirror into the backing hierarchy (transform re-parent in Unity) — this
+                // is how a Part dragged Workspace->ReplicatedStorage slides under the inactive
+                // service GO and disappears from the physical world without leaving the tree.
+                if (isInScene && _byId.TryGetValue(instance.Id, out InstanceRecord record)
                     && record.IsMaterialized)
                 {
                     _binder.OnReparented(record);
@@ -297,7 +312,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            ApplyWorldMembership(instance, isInWorld);
+            ApplySceneMembership(instance, isInScene);
         }
 
         internal void OnNameChanged(RbxInstance instance)
@@ -308,7 +323,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        private void ApplyWorldMembership(RbxInstance root, bool entered)
+        private void ApplySceneMembership(RbxInstance root, bool entered)
         {
             NotifyMembership(root, entered);
             foreach (RbxInstance descendant in root.GetDescendants())
