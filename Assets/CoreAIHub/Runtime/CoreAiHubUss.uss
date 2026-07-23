@@ -205,6 +205,8 @@
   border-color: rgba(77, 208, 225, 0.35);
   border-radius: 4px;
   color: rgb(232, 246, 250);
+  --unity-cursor-color: rgb(77, 208, 225);
+  --unity-selection-color: rgba(77, 208, 225, 0.4);
   padding-left: 8px;
   padding-right: 8px;
 }

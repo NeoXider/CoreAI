@@ -197,16 +197,19 @@ namespace CoreAI.Hub.UI
             _httpGroup = MakeGroup("HTTP API");
             _baseUrl = new TextField("API base URL");
             StyleField(_baseUrl);
+            SetPlaceholder(_baseUrl, "http://127.0.0.1:1234/v1");
             _httpGroup.Add(_baseUrl);
 
             _apiKey = new TextField("API key");
             _apiKey.isPasswordField = true;
             _apiKey.maskChar = '*';
             StyleField(_apiKey);
+            SetPlaceholder(_apiKey, "lm-studio  (or your provider API key)");
             _httpGroup.Add(_apiKey);
 
             _model = new TextField("HTTP model");
             StyleField(_model);
+            SetPlaceholder(_model, "model id — Fetch models to list");
             _httpGroup.Add(_model);
 
             VisualElement modelDiscovery = new();
@@ -259,6 +262,7 @@ namespace CoreAI.Hub.UI
 
             _ggufModelPath = new TextField("GGUF model path (manual override)");
             StyleField(_ggufModelPath);
+            SetPlaceholder(_ggufModelPath, "auto-detected — leave empty unless overriding");
             _localGroup.Add(_ggufModelPath);
 
             _gpuLayers = new IntegerField("GPU layers");
@@ -390,6 +394,7 @@ namespace CoreAI.Hub.UI
                 tooltip = "Optional key sent as a Bearer token. Write-only and kept for this session only."
             };
             StyleField(_endpointSessionKey);
+            SetPlaceholder(_endpointSessionKey, "leave blank to keep the saved key");
             endpointGroup.Add(_endpointSessionKey);
 
             _endpointClearSessionKeyButton = MakeButton("Clear saved key", ClearSessionKey);
@@ -427,6 +432,7 @@ namespace CoreAI.Hub.UI
                 tooltip = "Name resolved by the host secret provider. The secret value is not stored."
             };
             StyleField(_endpointSecretReference);
+            SetPlaceholder(_endpointSecretReference, "secret name in your host provider");
             _endpointAdvanced.Add(_endpointSecretReference);
 
             _endpointKeepWarm = new Toggle("Keep warm")
@@ -441,6 +447,7 @@ namespace CoreAI.Hub.UI
                 tooltip = "Optional LLMAgent GameObject name. Leave empty to use the configured default agent."
             };
             StyleField(_endpointUnityAgentName);
+            SetPlaceholder(_endpointUnityAgentName, "default agent");
             _endpointAdvanced.Add(_endpointUnityAgentName);
 
             _endpointPort = new IntegerField("Local server port") { value = 13333 };
@@ -489,6 +496,7 @@ namespace CoreAI.Hub.UI
                 tooltip = "Optional runtime role id. When set, it overrides the built-in Agent selection."
             };
             StyleField(_routingCustomRole);
+            SetPlaceholder(_routingCustomRole, "override built-in Agent (optional)");
             _routingCustomRole.RegisterValueChangedCallback(_ => RefreshRoutingSelection());
             routingGroup.Add(_routingCustomRole);
 
@@ -1659,12 +1667,20 @@ namespace CoreAI.Hub.UI
             hint.style.color = new Color(1f, 1f, 1f, 0.35f);
             input.Add(hint);
 
+            // Hide the placeholder while the field is focused too, not only when it has text, so it
+            // never sits on top of the text caret (an empty focused field would otherwise hide where
+            // the cursor is).
+            bool focused = false;
             void Refresh()
             {
-                hint.style.display = string.IsNullOrEmpty(field.value) ? DisplayStyle.Flex : DisplayStyle.None;
+                hint.style.display = (!focused && string.IsNullOrEmpty(field.value))
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
             }
 
             field.RegisterValueChangedCallback(_ => Refresh());
+            field.RegisterCallback<FocusInEvent>(_ => { focused = true; Refresh(); });
+            field.RegisterCallback<FocusOutEvent>(_ => { focused = false; Refresh(); });
             Refresh();
         }
 
