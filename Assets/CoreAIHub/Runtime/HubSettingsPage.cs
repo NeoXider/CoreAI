@@ -29,6 +29,13 @@ namespace CoreAI.Hub.UI
             "Offline"
         };
 
+        private static readonly List<string> VisionOptions = new()
+        {
+            "Auto (detect from model name)",
+            "On (force multimodal)",
+            "Off (text-only)"
+        };
+
         private readonly ICoreAISettings _settings;
         private readonly CoreAiChatConfig _chatConfig;
         private readonly ICoreAiRoutingUiController _routingControllerOverride;
@@ -40,6 +47,11 @@ namespace CoreAI.Hub.UI
         private TextField _baseUrl;
         private TextField _apiKey;
         private TextField _model;
+        private DropdownField _modelPicker;
+        private Button _fetchModelsButton;
+        private Label _modelFetchStatus;
+        private DropdownField _visionMode;
+        private const string ModelPickerPlaceholder = "[ Fetch models to list ]";
         private TextField _ggufModelPath;
         private DropdownField _ggufModel;
         private const string GgufAutoLabel = "[ Auto / Fallback ]";
@@ -55,12 +67,16 @@ namespace CoreAI.Hub.UI
         private bool _busy;
         private bool _subscribed;
         private ICoreAiRoutingUiController _routingController;
-        private DropdownField _endpointPicker;
+        private VisualElement _endpointListContainer;
+        private Foldout _endpointAdvanced;
+        private DropdownField _endpointGgufModel;
         private TextField _endpointId;
         private TextField _endpointName;
         private DropdownField _endpointKind;
         private TextField _endpointBaseUrl;
         private TextField _endpointModel;
+        private DropdownField _endpointModelPicker;
+        private Button _endpointFetchModelsButton;
         private TextField _endpointUnityAgentName;
         private TextField _endpointSecretReference;
         private TextField _endpointSessionKey;
@@ -75,20 +91,18 @@ namespace CoreAI.Hub.UI
         private Label _endpointInventoryStatus;
         private Label _endpointOperationStatus;
         private Button _endpointSaveButton;
-        private Button _endpointRemoveButton;
         private DropdownField _routingRole;
         private TextField _routingCustomRole;
         private DropdownField _routingProfile;
         private Label _routingStatus;
-        private readonly Dictionary<string, string> _endpointIdByLabel = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
         private CancellationTokenSource _routingCts;
         private string _editingEndpointId = "";
         private bool _clearSessionKey;
-        private bool _removeConfirmationPending;
+        private string _removeConfirmEndpointId = "";
+        private Button _pendingRemoveButton;
         private SynchronizationContext _uiSynchronizationContext;
         private const string AutomaticProfileLabel = "Automatic / agent default";
-        private const string SelectEndpointLabel = "Select an endpoint…";
 
         /// <summary>Creates the Settings page from optional live config sources (null-tolerant).</summary>
         public HubSettingsPage(
@@ -192,6 +206,40 @@ namespace CoreAI.Hub.UI
             _model = new TextField("HTTP model");
             StyleField(_model);
             _httpGroup.Add(_model);
+
+            VisualElement modelDiscovery = new();
+            modelDiscovery.AddToClassList("coreai-hub-actions");
+            _fetchModelsButton = MakeButton("Fetch models", FetchHttpModels);
+            _fetchModelsButton.tooltip =
+                "Query GET {API base URL}/models and list the models the server advertises, " +
+                "so you can copy an exact name into HTTP model.";
+            modelDiscovery.Add(_fetchModelsButton);
+            _httpGroup.Add(modelDiscovery);
+
+            _modelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
+            StyleField(_modelPicker);
+            _modelPicker.tooltip = "Models reported by the server. Pick one to copy it into HTTP model.";
+            _modelPicker.RegisterValueChangedCallback(evt =>
+            {
+                if (!string.IsNullOrEmpty(evt.newValue) && evt.newValue != ModelPickerPlaceholder)
+                {
+                    _model.SetValueWithoutNotify(evt.newValue);
+                }
+            });
+            SetVisible(_modelPicker, false);
+            _httpGroup.Add(_modelPicker);
+
+            _modelFetchStatus = HubPageWidgets.MakeNote("");
+            _httpGroup.Add(_modelFetchStatus);
+
+            _visionMode = new DropdownField("Vision", VisionOptions, 0)
+            {
+                tooltip = "Whether images may be sent to this model and the camera tool is usable. " +
+                          "Auto guesses from the model name; set On for a multimodal model whose name is " +
+                          "not auto-detected (e.g. a local qwen3.5 vision build)."
+            };
+            StyleField(_visionMode);
+            _httpGroup.Add(_visionMode);
             body.Add(_httpGroup);
 
             _localGroup = MakeGroup("LLMUnity");
@@ -259,26 +307,27 @@ namespace CoreAI.Hub.UI
                 "Session keys are write-only and are never saved by this screen."));
 
             VisualElement endpointGroup = MakeGroup("Endpoints");
-            _endpointPicker = new DropdownField("Edit endpoint");
-            StyleField(_endpointPicker);
-            _endpointPicker.RegisterValueChangedCallback(_ => LoadSelectedEndpoint());
-            endpointGroup.Add(_endpointPicker);
+
+            // WHY: A live list of saved endpoints with a per-row Remove is clearer than a picker + a single
+            // ambiguous Remove button — you act on the specific endpoint you can see.
+            _endpointListContainer = new VisualElement();
+            endpointGroup.Add(_endpointListContainer);
+
+            _endpointInventoryStatus = HubPageWidgets.MakeNote("");
+            _endpointInventoryStatus.name = "coreai-endpoint-inventory-status";
+            endpointGroup.Add(_endpointInventoryStatus);
 
             VisualElement endpointActions = new();
             endpointActions.AddToClassList("coreai-hub-actions");
             endpointActions.Add(MakeButton("New endpoint", ClearEndpointEditor));
             endpointGroup.Add(endpointActions);
 
+            endpointGroup.Add(HubPageWidgets.MakeSection("Endpoint editor"));
+
             _endpointName = new TextField("Name");
             StyleField(_endpointName);
+            SetPlaceholder(_endpointName, "e.g. LM Studio (local)");
             endpointGroup.Add(_endpointName);
-
-            _endpointId = new TextField("Endpoint ID")
-            {
-                tooltip = "Stable id used by profiles. Leave empty to derive it from the name."
-            };
-            StyleField(_endpointId);
-            endpointGroup.Add(_endpointId);
 
             _endpointKind = new DropdownField(
                 "Type",
@@ -290,59 +339,49 @@ namespace CoreAI.Hub.UI
 
             _endpointBaseUrl = new TextField("Base URL");
             StyleField(_endpointBaseUrl);
+            SetPlaceholder(_endpointBaseUrl, "http://127.0.0.1:1234/v1");
             endpointGroup.Add(_endpointBaseUrl);
 
-            _endpointModel = new TextField("Model / GGUF");
+            _endpointModel = new TextField("Model");
             StyleField(_endpointModel);
+            SetPlaceholder(_endpointModel, "model id — Fetch models to list");
             endpointGroup.Add(_endpointModel);
 
-            _endpointUnityAgentName = new TextField("LLMUnity agent name")
+            VisualElement endpointModelDiscovery = new();
+            endpointModelDiscovery.AddToClassList("coreai-hub-actions");
+            _endpointFetchModelsButton = MakeButton("Fetch models", FetchEndpointModels);
+            _endpointFetchModelsButton.tooltip =
+                "Query GET {Base URL}/models and list the models the server advertises, " +
+                "so you can copy an exact name into Model.";
+            endpointModelDiscovery.Add(_endpointFetchModelsButton);
+            endpointGroup.Add(endpointModelDiscovery);
+
+            _endpointModelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
+            StyleField(_endpointModelPicker);
+            _endpointModelPicker.tooltip = "Models reported by the server. Pick one to copy it into Model.";
+            _endpointModelPicker.RegisterValueChangedCallback(evt =>
             {
-                tooltip = "Optional LLMAgent GameObject name. Leave empty to use the configured default agent."
-            };
-            StyleField(_endpointUnityAgentName);
-            endpointGroup.Add(_endpointUnityAgentName);
+                if (!string.IsNullOrEmpty(evt.newValue) && evt.newValue != ModelPickerPlaceholder)
+                {
+                    _endpointModel.SetValueWithoutNotify(evt.newValue);
+                }
+            });
+            SetVisible(_endpointModelPicker, false);
+            endpointGroup.Add(_endpointModelPicker);
 
-            _endpointContextWindow = new IntegerField("Context window") { value = 4096 };
-            StyleField(_endpointContextWindow);
-            endpointGroup.Add(_endpointContextWindow);
+            _endpointGgufModel = MakeEndpointGgufDropdown();
+            endpointGroup.Add(_endpointGgufModel);
 
-            _endpointPort = new IntegerField("Local server port") { value = 13333 };
-            StyleField(_endpointPort);
-            endpointGroup.Add(_endpointPort);
-
-            _endpointGpuLayers = new IntegerField("GPU layers");
-            StyleField(_endpointGpuLayers);
-            endpointGroup.Add(_endpointGpuLayers);
-
-            _endpointParallelSlots = new IntegerField("Parallel slots") { value = 1 };
-            StyleField(_endpointParallelSlots);
-            endpointGroup.Add(_endpointParallelSlots);
-
-            _endpointFlashAttention = new Toggle("Flash attention")
-            {
-                tooltip = "Enable llama.cpp flash attention for this local endpoint when supported."
-            };
-            StyleField(_endpointFlashAttention);
-            endpointGroup.Add(_endpointFlashAttention);
-
-            _endpointSecretReference = new TextField("Secret reference")
-            {
-                tooltip = "Name resolved by the host secret provider. The secret value is not stored."
-            };
-            StyleField(_endpointSecretReference);
-            endpointGroup.Add(_endpointSecretReference);
-
-            _endpointSessionKey = new TextField("Session API key")
+            _endpointSessionKey = new TextField("API key")
             {
                 isPasswordField = true,
                 maskChar = '*',
-                tooltip = "Optional write-only key kept for this running session only."
+                tooltip = "Optional key sent as a Bearer token. Write-only and kept for this session only."
             };
             StyleField(_endpointSessionKey);
             endpointGroup.Add(_endpointSessionKey);
 
-            _endpointClearSessionKeyButton = MakeButton("Clear saved session key", ClearSessionKey);
+            _endpointClearSessionKeyButton = MakeButton("Clear saved key", ClearSessionKey);
             _endpointClearSessionKeyButton.tooltip = "Explicitly forget the in-memory key for this endpoint. Leaving the field blank preserves it.";
             endpointGroup.Add(_endpointClearSessionKeyButton);
 
@@ -350,24 +389,72 @@ namespace CoreAI.Hub.UI
             StyleField(_endpointActive);
             endpointGroup.Add(_endpointActive);
 
+            _endpointAdvanced = new Foldout { text = "Advanced", value = false };
+            _endpointAdvanced.AddToClassList("coreai-hub-field");
+
+            _endpointId = new TextField("Endpoint ID")
+            {
+                tooltip = "Stable id used by profiles. Leave empty to derive it from the name."
+            };
+            StyleField(_endpointId);
+            SetPlaceholder(_endpointId, "auto-derived from name");
+            _endpointAdvanced.Add(_endpointId);
+
+            _endpointContextWindow = new IntegerField("Context window (tokens)")
+            {
+                tooltip = "0 (empty) = no limit; the provider decides. Otherwise the per-request token budget."
+            };
+            StyleField(_endpointContextWindow);
+            _endpointAdvanced.Add(_endpointContextWindow);
+
+            _endpointParallelSlots = new IntegerField("Parallel slots") { value = 1 };
+            StyleField(_endpointParallelSlots);
+            _endpointAdvanced.Add(_endpointParallelSlots);
+
+            _endpointSecretReference = new TextField("Secret reference")
+            {
+                tooltip = "Name resolved by the host secret provider. The secret value is not stored."
+            };
+            StyleField(_endpointSecretReference);
+            _endpointAdvanced.Add(_endpointSecretReference);
+
             _endpointKeepWarm = new Toggle("Keep warm")
             {
                 tooltip = "Keep the endpoint ready even when no agent is currently assigned."
             };
             StyleField(_endpointKeepWarm);
-            endpointGroup.Add(_endpointKeepWarm);
+            _endpointAdvanced.Add(_endpointKeepWarm);
+
+            _endpointUnityAgentName = new TextField("LLMUnity agent name")
+            {
+                tooltip = "Optional LLMAgent GameObject name. Leave empty to use the configured default agent."
+            };
+            StyleField(_endpointUnityAgentName);
+            _endpointAdvanced.Add(_endpointUnityAgentName);
+
+            _endpointPort = new IntegerField("Local server port") { value = 13333 };
+            StyleField(_endpointPort);
+            _endpointAdvanced.Add(_endpointPort);
+
+            _endpointGpuLayers = new IntegerField("GPU layers");
+            StyleField(_endpointGpuLayers);
+            _endpointAdvanced.Add(_endpointGpuLayers);
+
+            _endpointFlashAttention = new Toggle("Flash attention")
+            {
+                tooltip = "Enable llama.cpp flash attention for this local endpoint when supported."
+            };
+            StyleField(_endpointFlashAttention);
+            _endpointAdvanced.Add(_endpointFlashAttention);
+
+            endpointGroup.Add(_endpointAdvanced);
 
             VisualElement saveActions = new();
             saveActions.AddToClassList("coreai-hub-actions");
             _endpointSaveButton = MakeButton("Save endpoint", SaveEndpoint);
-            _endpointRemoveButton = MakeButton("Remove", RemoveEndpoint);
             saveActions.Add(_endpointSaveButton);
-            saveActions.Add(_endpointRemoveButton);
             endpointGroup.Add(saveActions);
 
-            _endpointInventoryStatus = HubPageWidgets.MakeNote("");
-            _endpointInventoryStatus.name = "coreai-endpoint-inventory-status";
-            endpointGroup.Add(_endpointInventoryStatus);
             _endpointOperationStatus = HubPageWidgets.MakeNote("");
             _endpointOperationStatus.name = "coreai-endpoint-operation-status";
             endpointGroup.Add(_endpointOperationStatus);
@@ -402,6 +489,9 @@ namespace CoreAI.Hub.UI
             routingGroup.Add(_routingStatus);
             body.Add(routingGroup);
 
+            // WHY: initialise the editor to a clean HTTP "New endpoint" state so field visibility is applied
+            // on first render (otherwise LLMUnity-only fields would show under an HTTP endpoint).
+            ClearEndpointEditor();
             RefreshEndpointManagement();
         }
 
@@ -460,37 +550,13 @@ namespace CoreAI.Hub.UI
 
         private void RefreshEndpointManagement()
         {
-            if (_endpointPicker == null)
+            if (_endpointListContainer == null)
             {
                 return;
             }
 
-            _endpointIdByLabel.Clear();
-            _endpointIdByLabel[SelectEndpointLabel] = "";
-            List<string> endpointLabels = new() { SelectEndpointLabel };
             IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingController?.GetEndpoints();
-            if (endpoints != null)
-            {
-                foreach (LlmEndpointSnapshot snapshot in endpoints)
-                {
-                    LlmEndpointDescriptor endpoint = snapshot?.Descriptor;
-                    if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.EndpointId))
-                    {
-                        continue;
-                    }
-
-                    string label = UniqueLabel(
-                        (string.IsNullOrWhiteSpace(endpoint.DisplayName) ? endpoint.EndpointId : endpoint.DisplayName) +
-                        " — " + snapshot.State,
-                        _endpointIdByLabel);
-                    _endpointIdByLabel[label] = endpoint.EndpointId;
-                    endpointLabels.Add(label);
-                }
-            }
-
-            string selectedEndpointId = ResolveSelectedEndpointId();
-            _endpointPicker.choices = endpointLabels;
-            _endpointPicker.SetValueWithoutNotify(FindLabel(_endpointIdByLabel, selectedEndpointId));
+            RebuildEndpointList(endpoints);
 
             _profileIdByLabel.Clear();
             _profileIdByLabel[AutomaticProfileLabel] = "";
@@ -517,14 +583,54 @@ namespace CoreAI.Hub.UI
             _routingProfile.choices = profileLabels;
             bool available = _routingController != null;
             _endpointSaveButton?.SetEnabled(available);
-            _endpointRemoveButton?.SetEnabled(available && !string.IsNullOrEmpty(ResolveSelectedEndpointId()));
             _routingProfile.SetEnabled(available);
             _endpointInventoryStatus.text = available
                 ? endpoints == null || endpoints.Count == 0
-                    ? "No API endpoints yet. Create one below; agents will use Automatic/default routing meanwhile."
-                    : endpoints.Count + " endpoint(s) available. Select one to inspect its live state."
+                    ? "No API endpoints yet. Create one below; agents use Automatic/default routing meanwhile."
+                    : endpoints.Count + " endpoint(s). Edit or Remove any below."
                 : "Endpoint registry is not available in the current CoreAI scope.";
             RefreshRoutingSelection();
+        }
+
+        /// <summary>
+        /// Rebuilds the endpoint list: one row per saved endpoint with its name/state and per-row
+        /// Edit / Remove buttons. Acting on the specific row avoids the old picker + single-Remove ambiguity.
+        /// </summary>
+        private void RebuildEndpointList(IReadOnlyList<LlmEndpointSnapshot> endpoints)
+        {
+            _endpointListContainer.Clear();
+            if (endpoints == null || endpoints.Count == 0)
+            {
+                return;
+            }
+
+            foreach (LlmEndpointSnapshot snapshot in endpoints)
+            {
+                LlmEndpointDescriptor endpoint = snapshot?.Descriptor;
+                if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.EndpointId))
+                {
+                    continue;
+                }
+
+                string endpointId = endpoint.EndpointId;
+                VisualElement row = new();
+                row.AddToClassList("coreai-hub-actions");
+                row.style.flexDirection = FlexDirection.Row;
+                row.style.alignItems = Align.Center;
+                row.style.justifyContent = Justify.SpaceBetween;
+
+                string name = string.IsNullOrWhiteSpace(endpoint.DisplayName) ? endpointId : endpoint.DisplayName;
+                bool isEditing = string.Equals(endpointId, _editingEndpointId, StringComparison.Ordinal);
+                Label label = HubPageWidgets.MakeNote((isEditing ? "▸ " : "") + name + "  —  " + snapshot.State);
+                label.style.flexGrow = 1;
+                row.Add(label);
+
+                row.Add(MakeButton("Edit", () => LoadEndpointById(endpointId)));
+                Button remove = MakeButton("Remove", null);
+                remove.clicked += () => RemoveEndpointRow(endpointId, name, remove);
+                row.Add(remove);
+                _endpointListContainer.Add(row);
+            }
         }
 
         private void RefreshRoutingSelection()
@@ -538,11 +644,10 @@ namespace CoreAI.Hub.UI
             _routingProfile.SetValueWithoutNotify(FindLabel(_profileIdByLabel, profileId, AutomaticProfileLabel));
         }
 
-        private void LoadSelectedEndpoint()
+        private void LoadEndpointById(string id)
         {
-            string id = ResolveSelectedEndpointId();
             IReadOnlyList<LlmEndpointSnapshot> endpoints = _routingController?.GetEndpoints();
-            if (endpoints == null)
+            if (endpoints == null || string.IsNullOrEmpty(id))
             {
                 return;
             }
@@ -553,17 +658,21 @@ namespace CoreAI.Hub.UI
                 if (endpoint != null && string.Equals(endpoint.EndpointId, id, StringComparison.Ordinal))
                 {
                     _editingEndpointId = endpoint.EndpointId;
-                    _removeConfirmationPending = false;
                     _endpointId.SetValueWithoutNotify(endpoint.EndpointId);
                     _endpointId.SetEnabled(false);
                     _endpointName.SetValueWithoutNotify(endpoint.DisplayName);
                     _endpointKind.SetValueWithoutNotify(KindLabel(endpoint.Kind));
                     _endpointBaseUrl.SetValueWithoutNotify(endpoint.BaseUrl);
-                    _endpointModel.SetValueWithoutNotify(
+                    string modelValue =
                         endpoint.Kind == LlmEndpointKind.LlmUnity && !string.IsNullOrWhiteSpace(endpoint.LocalModelPath)
                             ? endpoint.LocalModelPath
-                            : endpoint.Model);
-                    _endpointContextWindow.SetValueWithoutNotify(endpoint.ContextWindowTokens);
+                            : endpoint.Model;
+                    _endpointModel.SetValueWithoutNotify(modelValue);
+                    SyncEndpointGgufDropdown(modelValue);
+                    _endpointContextWindow.SetValueWithoutNotify(
+                        endpoint.ContextWindowTokens >= CoreAISettings.UnlimitedContextWindowTokens
+                            ? 0
+                            : endpoint.ContextWindowTokens);
                     _endpointPort.SetValueWithoutNotify(endpoint.Port);
                     _endpointGpuLayers.SetValueWithoutNotify(endpoint.GpuLayers);
                     _endpointParallelSlots.SetValueWithoutNotify(endpoint.ParallelSlots);
@@ -574,10 +683,12 @@ namespace CoreAI.Hub.UI
                     _clearSessionKey = false;
                     _endpointActive.SetValueWithoutNotify(endpoint.Active);
                     _endpointKeepWarm.SetValueWithoutNotify(endpoint.KeepWarm);
-                    _endpointOperationStatus.text = "State: " + snapshot.State +
-                                                    (string.IsNullOrWhiteSpace(snapshot.Error) ? "" : " — " + snapshot.Error);
-                    _endpointRemoveButton.text = "Remove";
+                    _endpointOperationStatus.text = "Editing '" + (string.IsNullOrWhiteSpace(endpoint.DisplayName)
+                        ? endpoint.EndpointId
+                        : endpoint.DisplayName) + "'. State: " + snapshot.State +
+                        (string.IsNullOrWhiteSpace(snapshot.Error) ? "" : " — " + snapshot.Error);
                     RefreshEndpointEditorVisibility();
+                    RefreshEndpointManagement();
                     return;
                 }
             }
@@ -586,15 +697,14 @@ namespace CoreAI.Hub.UI
         private void ClearEndpointEditor()
         {
             _editingEndpointId = "";
-            _removeConfirmationPending = false;
-            _endpointPicker.SetValueWithoutNotify("");
             _endpointId.SetValueWithoutNotify("");
             _endpointId.SetEnabled(true);
             _endpointName.SetValueWithoutNotify("");
             _endpointKind.SetValueWithoutNotify("HTTP API");
             _endpointBaseUrl.SetValueWithoutNotify("");
             _endpointModel.SetValueWithoutNotify("");
-            _endpointContextWindow.SetValueWithoutNotify(4096);
+            SyncEndpointGgufDropdown("");
+            _endpointContextWindow.SetValueWithoutNotify(0);
             _endpointPort.SetValueWithoutNotify(13333);
             _endpointGpuLayers.SetValueWithoutNotify(0);
             _endpointParallelSlots.SetValueWithoutNotify(1);
@@ -605,9 +715,9 @@ namespace CoreAI.Hub.UI
             _clearSessionKey = false;
             _endpointActive.SetValueWithoutNotify(true);
             _endpointKeepWarm.SetValueWithoutNotify(false);
-            _endpointOperationStatus.text = "New endpoint. Its stable ID is generated from the name unless provided.";
-            _endpointRemoveButton.text = "Remove";
+            _endpointOperationStatus.text = "New endpoint. Endpoint ID is derived from the name unless set in Advanced.";
             RefreshEndpointEditorVisibility();
+            RefreshEndpointManagement();
         }
 
         private async void SaveEndpoint()
@@ -669,8 +779,7 @@ namespace CoreAI.Hub.UI
                 _clearSessionKey = false;
                 _editingEndpointId = endpoint.EndpointId;
                 RefreshEndpointManagement();
-                _endpointPicker.SetValueWithoutNotify(FindLabel(_endpointIdByLabel, endpoint.EndpointId));
-                LoadSelectedEndpoint();
+                LoadEndpointById(endpoint.EndpointId);
                 _endpointOperationStatus.text = string.IsNullOrEmpty(result.Message)
                     ? result.Endpoint == null
                         ? "Endpoint saved."
@@ -687,43 +796,57 @@ namespace CoreAI.Hub.UI
             }
         }
 
-        private async void RemoveEndpoint()
+        private async void RemoveEndpointRow(string endpointId, string displayName, Button rowButton)
         {
-            string endpointId = ResolveSelectedEndpointId();
-            if (_routingController == null || string.IsNullOrEmpty(endpointId))
+            if (_routingController == null || string.IsNullOrEmpty(endpointId) || rowButton == null)
             {
                 return;
             }
 
-            if (!_removeConfirmationPending)
+            // WHY: Two-click inline confirm on the row's own button — no separate confirm dialog, and the
+            // pending state is bound to the specific row so it cannot act on the wrong endpoint.
+            if (!string.Equals(_removeConfirmEndpointId, endpointId, StringComparison.Ordinal))
             {
-                _removeConfirmationPending = true;
-                _endpointRemoveButton.text = "Confirm remove";
+                ResetRemoveConfirm();
+                _removeConfirmEndpointId = endpointId;
+                _pendingRemoveButton = rowButton;
+                rowButton.text = "Confirm?";
                 List<string> affected = AffectedBuiltInRoles(endpointId);
                 _endpointOperationStatus.text = affected.Count == 0
-                    ? "Press Confirm remove again to permanently remove this endpoint."
-                    : "Assigned agents: " + string.Join(", ", affected) +
-                      ". Press Confirm remove again; their routing will return to Automatic/default.";
+                    ? "Click 'Confirm?' again to remove '" + displayName + "'."
+                    : "Click 'Confirm?' again to remove '" + displayName + "'. Agents " +
+                      string.Join(", ", affected) + " will return to Automatic/default routing.";
                 return;
             }
 
+            ResetRemoveConfirm();
             SetEndpointBusy(true);
             try
             {
                 CoreAiRoutingUiResult result = await _routingController.RemoveEndpointAsync(endpointId);
-                if (result.Ok)
+                if (result.Ok && string.Equals(_editingEndpointId, endpointId, StringComparison.Ordinal))
                 {
                     ClearEndpointEditor();
                 }
 
                 RefreshEndpointManagement();
-                _endpointOperationStatus.text = result.Ok ? "Endpoint removed." : result.Message;
+                _endpointOperationStatus.text = result.Ok ? "Removed '" + displayName + "'." : result.Message;
             }
             finally
             {
-                _removeConfirmationPending = false;
                 SetEndpointBusy(false);
             }
+        }
+
+        private void ResetRemoveConfirm()
+        {
+            if (_pendingRemoveButton != null)
+            {
+                _pendingRemoveButton.text = "Remove";
+            }
+
+            _pendingRemoveButton = null;
+            _removeConfirmEndpointId = "";
         }
 
         private void AssignProfileToAgent()
@@ -777,7 +900,11 @@ namespace CoreAI.Hub.UI
                 SecretReference = (_endpointSecretReference.value ?? "").Trim(),
                 Active = _endpointActive.value,
                 KeepWarm = _endpointKeepWarm.value,
-                ContextWindowTokens = _endpointContextWindow.value,
+                // WHY: 0 / empty means "no limit" in the UI; the descriptor rejects < 256, so map it to the
+                // unlimited sentinel the rest of the stack already understands (provider decides the window).
+                ContextWindowTokens = _endpointContextWindow.value <= 0
+                    ? CoreAISettings.UnlimitedContextWindowTokens
+                    : _endpointContextWindow.value,
                 LocalModelPath = LabelKind(_endpointKind.value) == LlmEndpointKind.LlmUnity
                     ? (_endpointModel.value ?? "").Trim()
                     : "",
@@ -820,15 +947,24 @@ namespace CoreAI.Hub.UI
         private void RefreshEndpointEditorVisibility()
         {
             LlmEndpointKind kind = LabelKind(_endpointKind?.value);
-            SetVisible(_endpointBaseUrl, kind == LlmEndpointKind.HttpOpenAi);
-            SetVisible(_endpointSecretReference, kind == LlmEndpointKind.HttpOpenAi);
-            SetVisible(_endpointSessionKey, kind == LlmEndpointKind.HttpOpenAi);
-            SetVisible(_endpointClearSessionKeyButton, kind == LlmEndpointKind.HttpOpenAi);
-            SetVisible(_endpointModel, kind != LlmEndpointKind.Offline);
-            SetVisible(_endpointPort, kind == LlmEndpointKind.LlmUnity);
-            SetVisible(_endpointGpuLayers, kind == LlmEndpointKind.LlmUnity);
-            SetVisible(_endpointUnityAgentName, kind == LlmEndpointKind.LlmUnity);
-            SetVisible(_endpointFlashAttention, kind == LlmEndpointKind.LlmUnity);
+            bool http = kind == LlmEndpointKind.HttpOpenAi;
+            bool local = kind == LlmEndpointKind.LlmUnity;
+            SetVisible(_endpointBaseUrl, http);
+            SetVisible(_endpointSecretReference, http);
+            SetVisible(_endpointSessionKey, http);
+            SetVisible(_endpointClearSessionKeyButton, http);
+            // HTTP models are free-form text (+ discovery); LLMUnity models come from the GGUF dropdown.
+            SetVisible(_endpointModel, http);
+            SetVisible(_endpointFetchModelsButton, http);
+            if (!http)
+            {
+                SetVisible(_endpointModelPicker, false);
+            }
+            SetVisible(_endpointGgufModel, local);
+            SetVisible(_endpointPort, local);
+            SetVisible(_endpointGpuLayers, local);
+            SetVisible(_endpointUnityAgentName, local);
+            SetVisible(_endpointFlashAttention, local);
             SetVisible(_endpointParallelSlots, kind != LlmEndpointKind.Offline);
             _endpointKeepWarm?.SetEnabled(kind != LlmEndpointKind.Offline);
         }
@@ -836,8 +972,6 @@ namespace CoreAI.Hub.UI
         private void SetEndpointBusy(bool busy)
         {
             _endpointSaveButton?.SetEnabled(!busy && _routingController != null);
-            _endpointRemoveButton?.SetEnabled(!busy && _routingController != null &&
-                                               !string.IsNullOrEmpty(ResolveSelectedEndpointId()));
         }
 
         private void ClearSessionKey()
@@ -909,10 +1043,7 @@ namespace CoreAI.Hub.UI
 
         private string ResolveSelectedEndpointId()
         {
-            return _endpointPicker != null &&
-                   _endpointIdByLabel.TryGetValue(_endpointPicker.value ?? "", out string endpointId)
-                ? endpointId
-                : "";
+            return _editingEndpointId ?? "";
         }
 
         private static string UniqueLabel(string label, IReadOnlyDictionary<string, string> existing)
@@ -997,6 +1128,12 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
+            CoreAISettingsAsset visionAsset = ResolveSettingsAsset();
+            if (visionAsset != null && _visionMode != null)
+            {
+                visionAsset.SetVisionSupport(SelectedVisionMode());
+            }
+
             LlmExecutionMode mode = SelectedMode();
             bool live;
             switch (mode)
@@ -1061,6 +1198,106 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        private async void FetchHttpModels()
+        {
+            if (_busy)
+            {
+                return;
+            }
+
+            string baseUrl = (_baseUrl.value ?? "").Trim();
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                _modelFetchStatus.text = "Enter an API base URL first.";
+                return;
+            }
+
+            _busy = true;
+            SetButtonsEnabled(false);
+            _modelFetchStatus.text = "Fetching models…";
+            try
+            {
+                CoreAiModelListResult result = await CoreAiBackend.ListModelsAsync(baseUrl, ResolveApiKey());
+                PopulateModelPicker(_modelPicker, result);
+                _modelFetchStatus.text = result.Ok
+                    ? string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Found {0} model(s). Pick one to copy it into HTTP model.",
+                        result.Models.Count)
+                    : "Could not list models: " + Value(result.Error);
+            }
+            finally
+            {
+                _busy = false;
+                SetButtonsEnabled(true);
+            }
+        }
+
+        private async void FetchEndpointModels()
+        {
+            if (_busy)
+            {
+                return;
+            }
+
+            string baseUrl = (_endpointBaseUrl.value ?? "").Trim();
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                _endpointOperationStatus.text = "Enter a Base URL first.";
+                return;
+            }
+
+            _busy = true;
+            _endpointFetchModelsButton?.SetEnabled(false);
+            _endpointOperationStatus.text = "Fetching models…";
+            try
+            {
+                CoreAiModelListResult result = await CoreAiBackend.ListModelsAsync(
+                    baseUrl, _endpointSessionKey?.value ?? "");
+                PopulateModelPicker(_endpointModelPicker, result);
+                _endpointOperationStatus.text = result.Ok
+                    ? string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Found {0} model(s). Pick one to copy it into Model.",
+                        result.Models.Count)
+                    : "Could not list models: " + Value(result.Error);
+            }
+            finally
+            {
+                _busy = false;
+                _endpointFetchModelsButton?.SetEnabled(true);
+            }
+        }
+
+        private static void PopulateModelPicker(DropdownField picker, CoreAiModelListResult result)
+        {
+            if (picker == null)
+            {
+                return;
+            }
+
+            List<string> choices = new();
+            if (result.Ok)
+            {
+                foreach (string model in result.Models)
+                {
+                    if (!string.IsNullOrWhiteSpace(model))
+                    {
+                        choices.Add(model);
+                    }
+                }
+            }
+
+            if (choices.Count == 0)
+            {
+                choices.Add(ModelPickerPlaceholder);
+            }
+
+            picker.choices = choices;
+            picker.SetValueWithoutNotify(choices[0]);
+            SetVisible(picker, result.Ok);
+        }
+
         private void RefreshFromStatus()
         {
             if (_mode == null)
@@ -1077,6 +1314,11 @@ namespace CoreAI.Hub.UI
             _model.SetValueWithoutNotify(status.Model);
             _ggufModelPath.SetValueWithoutNotify(status.GgufModelPath);
             SyncGgufModelDropdown(status.GgufModelPath);
+
+            if (_visionMode != null && asset != null)
+            {
+                _visionMode.SetValueWithoutNotify(VisionModeToOption(asset.VisionSupport));
+            }
 
             if (asset != null)
             {
@@ -1214,6 +1456,35 @@ namespace CoreAI.Hub.UI
             return LlmExecutionMode.Auto;
         }
 
+        private VisionSupportMode SelectedVisionMode()
+        {
+            string value = _visionMode?.value;
+            if (string.Equals(value, VisionOptions[1], StringComparison.Ordinal))
+            {
+                return VisionSupportMode.On;
+            }
+
+            if (string.Equals(value, VisionOptions[2], StringComparison.Ordinal))
+            {
+                return VisionSupportMode.Off;
+            }
+
+            return VisionSupportMode.Auto;
+        }
+
+        private static string VisionModeToOption(VisionSupportMode mode)
+        {
+            switch (mode)
+            {
+                case VisionSupportMode.On:
+                    return VisionOptions[1];
+                case VisionSupportMode.Off:
+                    return VisionOptions[2];
+                default:
+                    return VisionOptions[0];
+            }
+        }
+
         private static Button MakeButton(string text, Action clicked)
         {
             Button button = new(clicked) { text = text };
@@ -1281,6 +1552,76 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        private DropdownField MakeEndpointGgufDropdown()
+        {
+            List<string> options = new() { GgufAutoLabel };
+            string[] models = CoreAiBackend.GetLlmUnityModelFileNames();
+            if (models != null)
+            {
+                foreach (string model in models)
+                {
+                    if (!string.IsNullOrEmpty(model))
+                    {
+                        options.Add(model);
+                    }
+                }
+            }
+
+            DropdownField dropdown = new("Model (GGUF)", options, 0);
+            StyleField(dropdown);
+            dropdown.tooltip =
+                "Pick a GGUF model known to the LLMUnity Model Manager. [ Auto / Fallback ] keeps the " +
+                "endpoint's configured default.";
+            dropdown.RegisterValueChangedCallback(evt =>
+                _endpointModel.SetValueWithoutNotify(evt.newValue == GgufAutoLabel ? "" : evt.newValue));
+            return dropdown;
+        }
+
+        private void SyncEndpointGgufDropdown(string path)
+        {
+            if (_endpointGgufModel == null)
+            {
+                return;
+            }
+
+            string trimmed = string.IsNullOrEmpty(path) ? "" : path.Trim();
+            _endpointGgufModel.SetValueWithoutNotify(
+                !string.IsNullOrEmpty(trimmed) && _endpointGgufModel.choices.IndexOf(trimmed) >= 0
+                    ? trimmed
+                    : GgufAutoLabel);
+        }
+
+        /// <summary>
+        /// Overlays a muted hint label inside a text field's input, shown only while the field is empty.
+        /// Value-safe: unlike the "fake value" trick, the field's <c>value</c> is never set to the hint, so
+        /// callers read the real (possibly empty) text.
+        /// </summary>
+        private static void SetPlaceholder(TextField field, string placeholder)
+        {
+            if (field == null || string.IsNullOrEmpty(placeholder))
+            {
+                return;
+            }
+
+            VisualElement input = field.Q("unity-text-input") ?? field;
+            Label hint = new(placeholder) { pickingMode = PickingMode.Ignore };
+            hint.style.position = Position.Absolute;
+            hint.style.left = 4;
+            hint.style.top = 0;
+            hint.style.bottom = 0;
+            hint.style.unityTextAlign = TextAnchor.MiddleLeft;
+            hint.style.color = new Color(1f, 1f, 1f, 0.35f);
+            input.Add(hint);
+
+            void Refresh()
+            {
+                hint.style.display = string.IsNullOrEmpty(field.value) ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+
+            field.RegisterValueChangedCallback(_ => Refresh());
+            Refresh();
+        }
+
         private static void StyleField(BaseField<string> field)
         {
             StyleFieldBase(field);
@@ -1324,6 +1665,11 @@ namespace CoreAI.Hub.UI
             if (_testButton != null)
             {
                 _testButton.SetEnabled(enabled);
+            }
+
+            if (_fetchModelsButton != null)
+            {
+                _fetchModelsButton.SetEnabled(enabled);
             }
         }
 

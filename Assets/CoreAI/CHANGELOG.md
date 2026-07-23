@@ -1,5 +1,33 @@
 # Changelog
 
+## [6.2.0] - 2026-07-23
+
+### Added
+
+- Hub **AI Settings → Fetch models** (HTTP backend and endpoint editor): queries an OpenAI-compatible
+  `GET {baseUrl}/models` and lists the advertised model ids in a dropdown, so an exact name can be
+  copied into the model field instead of typed from memory. (`CoreAiBackend.ListModelsAsync`)
+- Hub **AI Settings → Vision** override (Auto / On / Off): forces the vision/camera gate on a multimodal
+  model whose name the auto-heuristic does not recognise (e.g. a local `qwen3.5` vision build), so the
+  camera tool and image sends become usable without renaming the model. (`CoreAISettingsAsset.SetVisionSupport`)
+
+### Changed
+
+- Hub **API-profiles endpoint editor** redesigned: field visibility is applied on first render (HTTP
+  endpoints no longer show LLMUnity-only fields), an **Advanced** foldout hides secondary fields
+  (Endpoint ID, context window, ports, slots, secret reference, LLMUnity options), text fields carry
+  placeholder hints, LLMUnity endpoints pick their model from a **GGUF dropdown**, an empty context
+  window now means **no limit**, and endpoints are managed through a **list with a per-row Remove**
+  instead of a picker plus one ambiguous Remove button.
+- `execute_lua` result envelope is trimmed for the model: a null `Error` and an empty/`nil` `Output`
+  are dropped, so a side-effect success serialises to `{"Success":true}` rather than
+  `{"Success":true,"Output":"nil","Error":null}`.
+- `execute_lua` **table return values now serialise to JSON**: `return coreai_world_list_prefabs()` /
+  `coreai_world_find(...)` hand the model `["cube","sphere",...]` instead of an opaque `table: 0x…`
+  address, so discovery tools are actually legible.
+- Programmer system prompt: "CoreAI MoonSharp sandbox" → "CoreAI Lua sandbox" (the persistent mod
+  runtime migrated to Lua-CSharp; MoonSharp is no longer instantiated in production).
+
 ## [6.1.3] - 2026-07-23
 
 ### Changed

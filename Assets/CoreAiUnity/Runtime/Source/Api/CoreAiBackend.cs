@@ -75,6 +75,27 @@ namespace CoreAI
         public string Model { get; set; } = "";
     }
 
+    /// <summary>Result of an OpenAI-compatible model listing (<see cref="CoreAiBackend.ListModelsAsync"/>).</summary>
+    public readonly struct CoreAiModelListResult
+    {
+        /// <summary>Creates a model-list result.</summary>
+        public CoreAiModelListResult(bool ok, IReadOnlyList<string> models, string error)
+        {
+            Ok = ok;
+            Models = models ?? Array.Empty<string>();
+            Error = error ?? "";
+        }
+
+        /// <summary>True when at least one model id was returned.</summary>
+        public bool Ok { get; }
+
+        /// <summary>Advertised model ids, in server order, de-duplicated.</summary>
+        public IReadOnlyList<string> Models { get; }
+
+        /// <summary>Human-readable error when <see cref="Ok"/> is false.</summary>
+        public string Error { get; }
+    }
+
     /// <summary>
     /// Runtime backend control for CoreAI: switch between the OpenAI-compatible HTTP API, the LLMUnity
     /// local model, and Offline mode, change the API base URL / key / model, and health-check the
@@ -381,6 +402,139 @@ namespace CoreAI
                     Model = model
                 };
             }
+        }
+
+        /// <summary>
+        /// Queries an OpenAI-compatible <c>GET {baseUrl}/models</c> endpoint and returns the advertised
+        /// model ids. Purely a discovery convenience for the settings UI (so a user can see/copy the exact
+        /// model names a local server such as LM Studio or Ollama exposes); it does NOT change any backend
+        /// setting. <paramref name="apiKey"/> is optional — sent as a Bearer token only when non-empty (local
+        /// servers usually ignore it).
+        /// </summary>
+        public static async Task<CoreAiModelListResult> ListModelsAsync(
+            string baseUrl,
+            string apiKey = "",
+            int timeoutSeconds = 15,
+            CancellationToken cancellationToken = default)
+        {
+            string url = BuildModelsUrl(baseUrl);
+            if (string.IsNullOrEmpty(url))
+            {
+                return new CoreAiModelListResult(false, Array.Empty<string>(), "Base URL is empty.");
+            }
+
+            try
+            {
+                using System.Net.Http.HttpClient http = new()
+                {
+                    Timeout = TimeSpan.FromSeconds(timeoutSeconds <= 0 ? 15 : timeoutSeconds)
+                };
+                using System.Net.Http.HttpRequestMessage request =
+                    new(System.Net.Http.HttpMethod.Get, url);
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    request.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
+                }
+
+                using System.Net.Http.HttpResponseMessage response =
+                    await http.SendAsync(request, cancellationToken);
+                string payload = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    return new CoreAiModelListResult(
+                        false,
+                        Array.Empty<string>(),
+                        $"HTTP {(int)response.StatusCode} from {url}. {Truncate(payload, 200)}");
+                }
+
+                IReadOnlyList<string> models = ParseModelIds(payload);
+                return models.Count == 0
+                    ? new CoreAiModelListResult(false, models, "Server returned no models.")
+                    : new CoreAiModelListResult(true, models, "");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return new CoreAiModelListResult(
+                    false, Array.Empty<string>(), $"Request timed out after {timeoutSeconds}s.");
+            }
+            catch (Exception ex)
+            {
+                return new CoreAiModelListResult(false, Array.Empty<string>(), ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Builds the OpenAI-compatible models endpoint from a base URL. Returns an empty string for a
+        /// blank base URL; idempotent when the caller already passed a <c>.../models</c> URL.
+        /// </summary>
+        internal static string BuildModelsUrl(string baseUrl)
+        {
+            string trimmed = (baseUrl ?? "").Trim().TrimEnd('/');
+            if (trimmed.Length == 0)
+            {
+                return "";
+            }
+
+            return trimmed.EndsWith("/models", StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : trimmed + "/models";
+        }
+
+        /// <summary>
+        /// Extracts model ids from an OpenAI-compatible <c>/models</c> response. Accepts both the standard
+        /// <c>{"data":[{"id":...}]}</c> envelope and a bare JSON array of model objects/strings. Ids are
+        /// de-duplicated and returned in server order; a malformed body yields an empty list.
+        /// </summary>
+        internal static IReadOnlyList<string> ParseModelIds(string json)
+        {
+            List<string> ids = new();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return ids;
+            }
+
+            try
+            {
+                Newtonsoft.Json.Linq.JToken root = Newtonsoft.Json.Linq.JToken.Parse(json);
+                Newtonsoft.Json.Linq.JToken? array =
+                    root is Newtonsoft.Json.Linq.JArray ? root : root["data"];
+                if (array is not Newtonsoft.Json.Linq.JArray items)
+                {
+                    return ids;
+                }
+
+                HashSet<string> seen = new(StringComparer.Ordinal);
+                foreach (Newtonsoft.Json.Linq.JToken item in items)
+                {
+                    string id = item is Newtonsoft.Json.Linq.JValue
+                        ? item.ToString()
+                        : (string?)item["id"] ?? "";
+                    id = id.Trim();
+                    if (id.Length > 0 && seen.Add(id))
+                    {
+                        ids.Add(id);
+                    }
+                }
+            }
+            catch (Newtonsoft.Json.JsonException)
+            {
+                // WHY: A non-JSON body (HTML error page, proxy notice) is a normal failure mode for a
+                // mistyped URL; treat it as "no models" and let the caller surface the raw HTTP status.
+            }
+
+            return ids;
+        }
+
+        private static string Truncate(string text, int max)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "";
+            }
+
+            text = text.Replace("\r", " ").Replace("\n", " ").Trim();
+            return text.Length <= max ? text : text.Substring(0, max) + "…";
         }
 
         #region Internals

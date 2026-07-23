@@ -131,9 +131,31 @@ namespace CoreAI.Ai
             }
         }
 
+        private static readonly JsonSerializerSettings TrimNulls = new()
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        };
+
         private static string SerializeResult(LuaResult result)
         {
-            return JsonConvert.SerializeObject(result);
+            // WHY: trim boilerplate the model does not need — an empty/`nil` Output and a null Error are
+            // pure noise on success. A successful side-effect call serialises to {"Success":true}; a real
+            // return value or a failure Error still rides along. Keeps weak local models from reasoning over
+            // "Output":"nil" / "Error":null on every tool result.
+            string output = result.Output;
+            if (string.IsNullOrEmpty(output) || string.Equals(output, "nil", StringComparison.Ordinal))
+            {
+                output = null;
+            }
+
+            return JsonConvert.SerializeObject(
+                new LuaResult
+                {
+                    Success = result.Success,
+                    Output = output,
+                    Error = string.IsNullOrEmpty(result.Error) ? null : result.Error
+                },
+                TrimNulls);
         }
 
         /// <summary>Lua execution outcome for JSON serialization back to the model.</summary>

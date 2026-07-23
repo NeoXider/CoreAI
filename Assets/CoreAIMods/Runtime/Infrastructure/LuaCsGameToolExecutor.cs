@@ -142,6 +142,9 @@ namespace CoreAI.Ai.LuaCs
             return Stringify(results[0]);
         }
 
+        /// <summary>Max table nesting rendered into the Output summary before values are elided.</summary>
+        private const int MaxTableSummaryDepth = 4;
+
         private static string Stringify(object value)
         {
             IValueMarshaller marshaller = LuaCsValueMarshaller.Instance;
@@ -155,8 +158,27 @@ namespace CoreAI.Ai.LuaCs
                     return ((double)marshaller.ToHostValue(value)).ToString(CultureInfo.InvariantCulture);
                 case ScriptValueKind.String:
                     return (string)marshaller.ToHostValue(value) ?? "";
+                case ScriptValueKind.Table:
+                    return StringifyTable(marshaller, value);
                 default:
                     return marshaller.Describe(value);
+            }
+        }
+
+        // WHY: a returned table otherwise renders as "table: 0x…" (its address), which is useless to the
+        // model — e.g. `return coreai_world_list_prefabs()` or `coreai_world_find(...)` would hand the LLM
+        // an opaque handle instead of the actual names. Convert it to a portable structure and JSON-encode
+        // it so discovery tools are legible; fall back to the plain describe if conversion/encoding fails.
+        private static string StringifyTable(IValueMarshaller marshaller, object value)
+        {
+            try
+            {
+                object portable = marshaller.ToPortable(value, MaxTableSummaryDepth);
+                return Newtonsoft.Json.JsonConvert.SerializeObject(portable);
+            }
+            catch (Exception)
+            {
+                return marshaller.Describe(value);
             }
         }
 

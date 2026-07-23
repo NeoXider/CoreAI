@@ -1180,6 +1180,15 @@ namespace CoreAI.Infrastructure.Llm
             modelName = model ?? "";
         }
 
+        /// <summary>
+        /// Sets the vision/multimodal gate (runtime reconfiguration). Use <see cref="VisionSupportMode.On"/>
+        /// to force-enable vision on a multimodal model the name heuristic does not recognise.
+        /// </summary>
+        public void SetVisionSupport(VisionSupportMode mode)
+        {
+            visionSupport = mode;
+        }
+
         /// <summary>Sets execution mode, legacy backend, and model identifiers for backend/model resolution.</summary>
         public void SetModelResolution(
             LlmExecutionMode mode,
