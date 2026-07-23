@@ -77,7 +77,7 @@ Raw API calls get you text; CoreAI gives you the production layer around that te
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
 | [Integration examples & ideas](#-integration-examples--ideas) | Practical game-design patterns using CoreAI tools & memory |
-| [Architecture](#%EF%B8%8F-architecture) | Five packages, install profiles, diagram |
+| [Architecture](#%EF%B8%8F-architecture) | Six packages, install profiles, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
 | [Framework Roadmap](Docs/ROADMAP.md) | Vision, tracks (Roblox-like Lua API, multiplayer co-creation, worlds), release plan |
@@ -262,7 +262,7 @@ AI doesn't just generate text — it **calls code** for real actions:
 
 | Tool | What it does | Who uses it |
 |------|--------------|-------------|
-| 🌍 **WorldCommandTool** | Spawns primitives/prefabs and moves, rotates, scales, parents, or toggles objects in the world | Creator AI |
+| 🌍 **WorldLlmTool** (`world_command`) | Spawns primitives/prefabs and moves, rotates, scales, parents, or toggles objects in the world | Creator AI |
 | 🧱 **component_command** | Adds/configures curated Unity components such as `Rigidbody`, colliders, and `Light` without reflection | Creator AI |
 | ⚡ **Action/Event Tool** | Calls any C# method or triggers an Event | All Agents |
 | 🧠 **MemoryTool** | Saves/reads memory between sessions | All Agents |
@@ -431,7 +431,7 @@ The table below is a snapshot of a recorded PlayMode run against real LLM backen
 How can you use CoreAI in your game? Here are some "Brainrot-free" ideas:
 
 1.  **The "Alive" Merchant**: Instead of a static list, the blacksmith remembers that you sold him a legendary dragon scale yesterday. He might offer you a "special deal" on a Dragon-slaying sword today.
-2.  **Autonomous Game Master**: Let the AI monitor the player's health and resources. If the player is struggling, the GM might "whisper" a hint or "accidentally" spawn a health potion nearby via `WorldCommandTool`.
+2.  **Autonomous Game Master**: Let the AI monitor the player's health and resources. If the player is struggling, the GM might "whisper" a hint or "accidentally" spawn a health potion nearby via `WorldLlmTool`.
 3.  **Real-time Lore Narrator**: As the player enters a new biome, the AI generates unique lore based on the current weather, time of day, and the player's equipped items.
 4.  **AI-Driven Procedural Quests**: Quests are no longer `Kill X Wolves`. An AI King asks you to `Investigate why the wolves are glowing`, and you can actually *interview* the wolves (who might be under a Lua-driven spell).
 5.  **Voice/Chat-to-Action**: "Make it rain fire!" -> The AI parses the intent, checks the `WeatherTool`, and executes the corresponding Lua script to trigger a firestorm.
@@ -440,7 +440,7 @@ How can you use CoreAI in your game? Here are some "Brainrot-free" ideas:
 
 ## 🏛️ Architecture
 
-The repository ships as **five UPM packages**. Only the first two are required; Mods, Hub, and Benchmark are optional and installed independently:
+The repository ships as **six UPM packages**. Only the first two are required; Mods, Hub, Benchmark, and the MCP server are optional and installed independently:
 
 | Package | What's inside | Depends on |
 |---------|--------------|--------------|
@@ -449,6 +449,7 @@ The repository ships as **five UPM packages**. Only the first two are required; 
 | **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — Lua-CSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) with reusable grouped **sub-tabs** (e.g. Mods + Logs) | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
+| **[com.neoxider.coreaimcp](Assets/CoreAIMcp)** | Optional in-game **MCP server** — an external agent (Claude Code, any MCP client) drives the *running* game (`execute_lua`, `manage_mods`, and `world_command`/`screenshot` when present) over localhost HTTP; opt-in, loopback-only | `coreaiunity` + `coreaimods` |
 
 Mods and Hub are independent optional installs — neither requires the other. When **both** are present, Mods' Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define, adding a Mods page to the Hub window; without Hub installed, that assembly compiles out and Mods works standalone (`execute_lua`/`manage_mods` tools, no Hub UI).
 
