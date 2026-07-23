@@ -11,7 +11,7 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreaimods": "6.0.0",
-    "com.neoxider.coreaiunity": "6.0.0"
+    "com.neoxider.coreaimods": "6.2.0",
+    "com.neoxider.coreaiunity": "6.2.0"
   }
 }
