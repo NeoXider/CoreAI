@@ -224,6 +224,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Tokenize_GotoKeyword_IsKeyword()
+        {
+            List<LuaToken> tokens = Significant("goto");
+            Assert.AreEqual(LuaTokenKind.Keyword, tokens[0].Kind);
+        }
+
+        [Test]
         public void Tokenize_CompoundAssignPlusEquals_IsSingleOperatorToken()
         {
             const string source = "x += 1";

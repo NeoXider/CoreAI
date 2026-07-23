@@ -306,6 +306,7 @@ GameObject:
   - component: {fileID: 481775747}
   - component: {fileID: 481775746}
   - component: {fileID: 481775745}
+  - component: {fileID: 481775751}
   m_Layer: 0
   m_Name: CoreAiHub
   m_TagString: Untagged
@@ -328,7 +329,6 @@ MonoBehaviour:
   targetCube: {fileID: 0}
   coreAiScope: {fileID: 0}
   luaPlatformDriver: {fileID: 0}
-  fullModeModSourceOverride: {fileID: 0}
   chatConfig: {fileID: 11400000, guid: 35a273c9c56ed3d488f1445c0c8c3efb, type: 2}
 --- !u!114 &481775746
 MonoBehaviour:
@@ -411,6 +411,25 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &481775751
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 481775744}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7685b0dcbf88bd4aa64e17421b6c629, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Mods::CoreAI.Presentation.CoreAiLuaModAutoRepair
+  lifetimeScope: {fileID: 0}
+  autoRepairEnabled: 1
+  minConsecutiveErrors: 1
+  maxAttemptsPerMod: 2
+  cooldownSeconds: 20
+  modVersionKeyPrefix: 
+  sourceTag: lua_mod_auto_repair
 --- !u!1 &573228319
 GameObject:
   m_ObjectHideFlags: 0

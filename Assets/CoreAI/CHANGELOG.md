@@ -17,7 +17,11 @@
   **Settings / Token Budget / Statistics** are now sub-tabs of a single **AI Settings** tab, keeping the
   top tab bar short; new sub-tab groupings are one registration.
 - Hub **Lua mod editor** now renders **Lua syntax highlighting** in the inline editor (keywords,
-  strings, numbers, comments) while keeping the field editable. (`LuaSyntaxHighlighter`)
+  strings, numbers, comments) while keeping the field editable, including the `goto` keyword.
+  (`LuaSyntaxHighlighter`, `LuaTokenizer`)
+- Full Access demo now **self-heals a failing mod on its first runtime error**: a `CoreAiLuaModAutoRepair`
+  component is wired into the demo Hub with the repair threshold lowered to one consecutive error, so a
+  broken mod is handed back to the Programmer to fix without waiting for a streak.
 - Programmer skill **`read_skill('Full Lua')`**: the full `unity_*` reflection surface moved behind an
   on-demand skill, so it stays available as a rarely-needed backup without bloating the base prompt.
 
@@ -30,6 +34,8 @@
   `coreai_world_find` / `coreai_world_pos` / `coreai_world_exists` remain, and the `WorldEdit` capability
   still gates the Rbx surface. Prompts, tool descriptions, the Lua Modding skill and the gallery example
   Lua were updated to match. (`RegisterWorldEditBuildBindings`)
+- Hub **Mods** and **Mod Logs** are now grouped under one **Mods** top tab with `[Mods, Logs]` sub-tabs
+  instead of two separate top tabs, keeping the tab bar compact. (`HubModsPages`)
 
 - Hub **API-profiles endpoint editor** redesigned: field visibility is applied on first render (HTTP
   endpoints no longer show LLMUnity-only fields), an **Advanced** foldout hides secondary fields

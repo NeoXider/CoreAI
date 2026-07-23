@@ -1,11 +1,13 @@
 using System;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Hub;
+using CoreAI.Hub.UI;
 
 namespace CoreAI.Ai.Hub
 {
     /// <summary>
-    /// One-call registration of the CoreAI Mods page into a <see cref="HubPageRegistry"/>. The page is
+    /// One-call registration of the CoreAI Mods tab into a <see cref="HubPageRegistry"/>: a single
+    /// grouped page with [Mods, Logs] sub-tabs (via <see cref="HubSubTabPage"/>). The page is
     /// registered as a lazy factory (its content is built only when the tab is first activated) at
     /// order 300 by default, so it slots after the built-in Chat (0) / Settings (100) / Statistics
     /// (200) tabs. Overloads accept the Lua-CSharp <see cref="LuaCsModRuntime"/> plus the shared
@@ -16,13 +18,13 @@ namespace CoreAI.Ai.Hub
         /// <summary>Registry id of the Mods page.</summary>
         public const string ModsPageId = HubModsPage.DefaultPageId;
 
-        /// <summary>Registry id of the Mod Logs page.</summary>
+        /// <summary>Page id of the Mod Logs page, shown as the Logs sub-tab under the Mods tab.</summary>
         public const string LogsPageId = HubModLogsPage.DefaultPageId;
 
         /// <summary>Default Hub tab order for the Mods page (after Chat/Settings/Statistics).</summary>
         public const int DefaultOrder = 300;
 
-        /// <summary>Default Hub tab order for the Mod Logs page (after Mods).</summary>
+        /// <summary>Default order of the Mod Logs child page inside the Mods tab.</summary>
         public const int DefaultLogsOrder = 350;
 
         /// <summary>Registers the Mods page backed by the Lua-CSharp <see cref="LuaCsModRuntime"/>.</summary>
@@ -61,8 +63,17 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(service));
             }
 
-            registry.Register(ModsPageId, () => new HubModsPage(service, order), order);
-            registry.Register(LogsPageId, () => new HubModLogsPage(service, DefaultLogsOrder), DefaultLogsOrder);
+            // WHY: one top-level Mods tab with [Mods, Logs] sub-tabs instead of two top tabs, keeping the
+            // tab bar compact; HubSubTabPage proxies activation lifecycle to whichever sub-tab is visible.
+            registry.Register(
+                ModsPageId,
+                () => new HubSubTabPage(
+                    ModsPageId,
+                    "Mods",
+                    order,
+                    new HubModsPage(service, order),
+                    new HubModLogsPage(service, DefaultLogsOrder)),
+                order);
         }
     }
 }

@@ -13,8 +13,8 @@ namespace CoreAI.LuaAssets
     {
         private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
         {
-            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
-            "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if",
+            "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
             // WHY: "type"/"export" are Luau soft keywords (only reserved at statement start); this
             // best-effort lexer highlights them unconditionally, matching how most Luau editors do it.
             "continue", "type", "export"
