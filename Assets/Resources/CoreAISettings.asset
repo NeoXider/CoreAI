@@ -19,7 +19,7 @@ MonoBehaviour:
   apiKey: lm-studio
   modelName: qwen3.5-4b-mtp
   visionSupport: 0
-  enableTemperatureOverriding: 1
+  enableTemperatureOverriding: 0
   temperature: 0.2
   enableMaxTokensOverriding: 0
   maxTokens: 128000
