@@ -57,24 +57,23 @@ namespace CoreAI.Demos
                 LuaPlatformHubPage.DefaultPageId,
                 () => new LuaPlatformHubPage(ResolveDriver),
                 20);
-            Registry.Register(
-                TokenBudgetHubPage.DefaultPageId,
-                () => new TokenBudgetHubPage(),
-                90);
 
             // WHY: no Chat tab here — this scene keeps its dedicated CoreAiChatUI panel. The Hub is the
-            // tools companion: Settings (the UITK backend config that replaces CoreAiBackendPanel) and
-            // Statistics, both fed live values from the scene scope when available (null-tolerant).
+            // tools companion. Settings, Token Budget and Statistics are grouped under one "AI Settings" tab
+            // as sub-tabs (HubSubTabPage) so the top tab bar stays short; each is fed live scope values when
+            // available (null-tolerant).
             ICoreAISettings settings = ResolveFromCore<ICoreAISettings>();
             InMemoryAiOrchestrationMetrics metrics = ResolveFromCore<InMemoryAiOrchestrationMetrics>();
             Registry.Register(
-                HubSettingsPage.DefaultPageId,
-                () => new HubSettingsPage(settings, chatConfig),
+                "coreai.hub.aisettings",
+                () => new HubSubTabPage(
+                    "coreai.hub.aisettings",
+                    "AI Settings",
+                    100,
+                    new HubSettingsPage(settings, chatConfig),
+                    new TokenBudgetHubPage(),
+                    new HubStatisticsPage(metrics, settings)),
                 100);
-            Registry.Register(
-                HubStatisticsPage.DefaultPageId,
-                () => new HubStatisticsPage(metrics, settings),
-                200);
 
             CoreAiHubWindow window = GetComponent<CoreAiHubWindow>();
             if (window != null)

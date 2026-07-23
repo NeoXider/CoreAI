@@ -470,6 +470,51 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaCs_WorldBuildBindingsDisabled_RemovesBuildApisButKeepsRbxAndQueries()
+        {
+            MemoryStore store = new();
+            FakeCommandSink sink = new();
+            // WHY: mirrors CoreAiModsInstaller exactly — WorldEdit capability is granted (so the Rbx
+            // Instance.new build surface stays available), but the coreai_world_* BUILD bindings are skipped
+            // via RegisterWorldEditBuildBindings = false, so the Programmer builds the world only the Roblox
+            // way. Read-gated world queries must survive.
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                CommandSink = sink,
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                // WHY: wire the Rbx surface so the test proves it SURVIVES the flag — the whole point is that
+                // dropping the coreai_world_* build bindings must not take Instance.new down with them.
+                RobloxApi = new LuaCsRobloxApiBindings(),
+                RegisterWorldEditBuildBindings = false
+            });
+
+            stack.Runtime.LoadMod("m", @"
+                store_set('spawn', (coreai_world_spawn ~= nil) and 'yes' or 'no')
+                store_set('change', (coreai_world_change ~= nil) and 'yes' or 'no')
+                store_set('set_color', (coreai_world_set_color ~= nil) and 'yes' or 'no')
+                store_set('destroy', (coreai_world_destroy ~= nil) and 'yes' or 'no')
+                store_set('find', (coreai_world_find ~= nil) and 'yes' or 'no')
+                store_set('pos', (coreai_world_pos ~= nil) and 'yes' or 'no')
+                store_set('exists', (coreai_world_exists ~= nil) and 'yes' or 'no')
+                store_set('rbx', (Instance ~= nil) and 'yes' or 'no')",
+                LuaCapabilities.All);
+
+            Assert.AreEqual("no", store.Get("m", "spawn"), "World BUILD API coreai_world_spawn must be removed.");
+            Assert.AreEqual("no", store.Get("m", "change"), "World BUILD API coreai_world_change must be removed.");
+            Assert.AreEqual("no", store.Get("m", "set_color"), "World BUILD API coreai_world_set_color must be removed.");
+            Assert.AreEqual("no", store.Get("m", "destroy"), "World BUILD API coreai_world_destroy must be removed.");
+            Assert.AreEqual("yes", store.Get("m", "find"), "Read-only coreai_world_find must remain.");
+            Assert.AreEqual("yes", store.Get("m", "pos"), "Read-only coreai_world_pos must remain.");
+            Assert.AreEqual("yes", store.Get("m", "exists"), "Read-only coreai_world_exists must remain.");
+            Assert.AreEqual("yes", store.Get("m", "rbx"),
+                "Rbx Instance surface must remain — WorldEdit is still granted, only the build bindings are gone.");
+            Assert.AreEqual(0, sink.Commands.Count, "Presence probing must not route any world command.");
+        }
+
+        [Test]
         public void LuaCs_NestedModsCall_WorldTransaction_DoesNotCorruptCallerBuffer()
         {
             MemoryStore store = new();

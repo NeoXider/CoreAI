@@ -58,22 +58,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void BuiltInProgrammerPrompt_IncludesFullLuaModeGuidance()
+        public void BuiltInProgrammerPrompt_PointsAtSkillsAndOmitsWorldBuildPrimitives()
         {
             BuiltInDefaultAgentSystemPromptProvider provider = new();
 
             Assert.IsTrue(provider.TryGetSystemPrompt(BuiltInAgentRoleIds.Programmer, out string prompt));
-            StringAssert.Contains("Full Lua Mode", prompt);
-            StringAssert.Contains("unity_list_objects", prompt);
-            StringAssert.Contains("unity_find_by_component", prompt);
-            StringAssert.Contains("unity_describe_object", prompt);
-            StringAssert.Contains("unity_set_member", prompt);
-            StringAssert.Contains("coreai_world_spawn", prompt);
-            StringAssert.Contains("coreai_world_change", prompt);
-            StringAssert.Contains("coreai_world_set_color", prompt);
-            Assert.IsFalse(prompt.Contains("coreai_world_rotate"));
-            Assert.IsFalse(prompt.Contains("coreai_world_set_transform"));
-            StringAssert.Contains("WorldEdit APIs do not require Full mode", prompt);
+            StringAssert.Contains("read_skill('Rbx API')", prompt);
+            StringAssert.Contains("read_skill('Full Lua')", prompt);
+            StringAssert.Contains("coreai_world_find", prompt);
+            StringAssert.Contains("coreai_world_pos", prompt);
+            // The Programmer builds via the Rbx surface; the low-level WorldEdit build primitives
+            // are no longer registered for it and must not be advertised.
+            Assert.IsFalse(prompt.Contains("coreai_world_spawn"));
+            Assert.IsFalse(prompt.Contains("coreai_world_change"));
+            Assert.IsFalse(prompt.Contains("coreai_world_set_color"));
+            Assert.IsFalse(prompt.Contains("coreai_world_destroy"));
+            Assert.IsFalse(prompt.Contains("unity_list_objects"));
+            Assert.IsFalse(prompt.Contains("unity_set_member"));
             StringAssert.Contains("Success/Output/Error", prompt);
             StringAssert.Contains("game.enemies", prompt);
             StringAssert.Contains("GameObject.Find", prompt);
@@ -82,21 +83,22 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ProgrammerResourcePrompt_IncludesFullLuaModeGuidance()
+        public void ProgrammerResourcePrompt_PointsAtSkillsAndOmitsWorldBuildPrimitives()
         {
             TextAsset asset = Resources.Load<TextAsset>("AgentPrompts/System/Programmer");
 
             Assert.IsNotNull(asset);
             string prompt = asset.text;
-            StringAssert.Contains("Full Lua Mode", prompt);
-            StringAssert.Contains("unity_list_objects", prompt);
-            StringAssert.Contains("unity_set_member", prompt);
-            StringAssert.Contains("coreai_world_list_prefabs", prompt);
-            StringAssert.Contains("coreai_world_change", prompt);
-            StringAssert.Contains("coreai_world_set_color", prompt);
-            Assert.IsFalse(prompt.Contains("coreai_world_rotate"));
-            Assert.IsFalse(prompt.Contains("coreai_world_set_transform"));
-            StringAssert.Contains("WorldEdit Lua APIs do not require Full mode", prompt);
+            StringAssert.Contains("read_skill('Rbx API')", prompt);
+            StringAssert.Contains("read_skill('Full Lua')", prompt);
+            StringAssert.Contains("coreai_world_find", prompt);
+            StringAssert.Contains("coreai_world_pos", prompt);
+            Assert.IsFalse(prompt.Contains("coreai_world_spawn"));
+            Assert.IsFalse(prompt.Contains("coreai_world_change"));
+            Assert.IsFalse(prompt.Contains("coreai_world_set_color"));
+            Assert.IsFalse(prompt.Contains("coreai_world_destroy"));
+            Assert.IsFalse(prompt.Contains("unity_list_objects"));
+            Assert.IsFalse(prompt.Contains("unity_set_member"));
             StringAssert.Contains("Success/Output/Error", prompt);
             StringAssert.Contains("print()", prompt);
             StringAssert.Contains("GameObject.Find", prompt);

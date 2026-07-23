@@ -53,6 +53,14 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public LuaCsRobloxApiBindings RobloxApi;
 
+        /// <summary>
+        /// When false, the low-level WorldEdit build/edit APIs (<c>coreai_world_spawn</c>/... and the
+        /// component-edit surface) are NOT registered even though the WorldEdit capability itself may
+        /// stay granted (the Rbx surface still needs the capability for <c>Instance.new</c>). Read-tier
+        /// world queries are unaffected. Default true = full classic surface.
+        /// </summary>
+        public bool RegisterWorldEditBuildBindings = true;
+
         // ---- Runtime services (fed into LuaCsModRuntime / LuaCsGameToolExecutor) -----------------
 
         /// <summary>Persistent per-mod k/v store backing <c>store_set</c>/<c>store_get</c>.</summary>
@@ -181,7 +189,8 @@ namespace CoreAI.Ai.LuaCs
                 fullBlacklistPolicy: options.FullBlacklistPolicy,
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
                 capabilities: options.Capabilities,
-                robloxApi: options.RobloxApi);
+                robloxApi: options.RobloxApi,
+                registerWorldEditBuildBindings: options.RegisterWorldEditBuildBindings);
 
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM

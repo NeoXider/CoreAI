@@ -24,6 +24,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsFullUnityRuntimeBindings _full;
         private readonly LuaCsInputRuntimeBindings _input;
         private readonly LuaCsRobloxApiBindings _roblox;
+        private readonly bool _registerWorldEditBuildBindings;
         private readonly LuaCsLogicSlots _logicSlots = new();
 
         public LuaCsGameplayBindings(
@@ -37,7 +38,8 @@ namespace CoreAI.Ai.LuaCs
             IFullLuaAccessBlacklistPolicy fullBlacklistPolicy = null,
             bool allowNonPublicFullMembers = false,
             LuaCapabilities capabilities = LuaCapabilities.All,
-            LuaCsRobloxApiBindings robloxApi = null)
+            LuaCsRobloxApiBindings robloxApi = null,
+            bool registerWorldEditBuildBindings = true)
             : this(
                 logger,
                 new LuaCsVersioningRuntimeBindings(
@@ -53,7 +55,8 @@ namespace CoreAI.Ai.LuaCs
                 capabilities,
                 new LuaCsInputRuntimeBindings(),
                 new LuaCsDefaultRuntimeBindings(),
-                robloxApi)
+                robloxApi,
+                registerWorldEditBuildBindings)
         {
         }
 
@@ -68,7 +71,8 @@ namespace CoreAI.Ai.LuaCs
             LuaCapabilities capabilities = LuaCapabilities.All,
             LuaCsInputRuntimeBindings input = null,
             LuaCsDefaultRuntimeBindings defaultBindings = null,
-            LuaCsRobloxApiBindings robloxApi = null)
+            LuaCsRobloxApiBindings robloxApi = null,
+            bool registerWorldEditBuildBindings = true)
         {
             _capabilities = capabilities;
             _default = defaultBindings ?? new LuaCsDefaultRuntimeBindings();
@@ -81,6 +85,7 @@ namespace CoreAI.Ai.LuaCs
             _full = full;
             _input = input;
             _roblox = robloxApi;
+            _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
         }
 
         /// <summary>Optional Roblox API surface shared by every mod and the one-off executor.</summary>
@@ -124,7 +129,9 @@ namespace CoreAI.Ai.LuaCs
             // and threads the owner mod id so created instances land in the ownership ledger.
             _roblox?.Register(registry, effective, ownerModId);
 
-            if ((effective & LuaCapabilities.WorldEdit) != 0)
+            // WHY: a composition may keep the WorldEdit capability (the Rbx surface needs it for
+            // Instance.new) while withholding the low-level coreai_world_*/component build APIs.
+            if ((effective & LuaCapabilities.WorldEdit) != 0 && _registerWorldEditBuildBindings)
             {
                 _world?.RegisterGameplayApis(registry);
                 _components?.RegisterGameplayApis(registry);

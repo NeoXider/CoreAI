@@ -107,6 +107,12 @@ resolved value is `CoreAISettingsAsset.IsVisionEnabled`, surfaced as `CoreAi.IsV
 `CoreAiChatService.IsVisionEnabled()`. **Both** the host send path and tool registration check it; when it
 is `false`, no image is attached and `capture_camera` is not registered.
 
+The Hub **AI Settings** page exposes this as a **Vision** dropdown (Auto / On / Off, backed by
+`CoreAISettingsAsset.SetVisionSupport`). Use **On** to force the gate open for a multimodal model whose
+name the `Auto` heuristic does not recognise (e.g. a local `qwen3.5` vision build), so the camera tool and
+image sends become usable without renaming the model; use **Off** to hard-disable vision on a model the
+heuristic would otherwise treat as vision-capable.
+
 ### Host send path (camera → model)
 
 The provider-safe one-shot path: capture a camera and send it as a single **user** message

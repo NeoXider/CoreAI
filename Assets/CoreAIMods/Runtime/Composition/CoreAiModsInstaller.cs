@@ -117,7 +117,11 @@ namespace CoreAI.Composition
                 // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
                 // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
                 // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
-                RobloxApi = robloxApi
+                RobloxApi = robloxApi,
+                // WHY: the Programmer builds worlds via the Rbx surface and Lua mechanics, not the
+                // low-level coreai_world_* primitives; the WorldEdit capability itself stays granted
+                // because Instance.new requires it.
+                RegisterWorldEditBuildBindings = false
                 });
             }, Lifetime.Singleton);
 
@@ -239,6 +243,14 @@ namespace CoreAI.Composition
                         BuiltInRbxApiSkillText.SkillName,
                         BuiltInRbxApiSkillText.SkillDescription,
                         rbxSkillOverride != null ? rbxSkillOverride.text : BuiltInRbxApiSkillText.Instructions));
+
+                    TextAsset fullLuaSkillOverride = Resources.Load<TextAsset>("AgentSkills/FullLua");
+                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
+                        BuiltInFullLuaSkillText.SkillName,
+                        BuiltInFullLuaSkillText.SkillDescription,
+                        fullLuaSkillOverride != null
+                            ? fullLuaSkillOverride.text
+                            : BuiltInFullLuaSkillText.Instructions));
                 }
                 catch (VContainerException)
                 {

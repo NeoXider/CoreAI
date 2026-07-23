@@ -39,6 +39,7 @@ namespace CoreAI.Ai.Hub
         private readonly Action _onClose;
 
         private TextField _codeField;
+        private Label _highlightOverlay;
         private Label _status;
         private Label _diagnostics;
         private VisualElement _headerBox;
@@ -135,6 +136,7 @@ namespace CoreAI.Ai.Hub
             _codeField.style.marginTop = 6f;
             _codeField.style.marginBottom = 6f;
             HubModWidgets.StyleCodeField(_codeField);
+            BuildHighlightOverlay();
 
             root.Add(_codeField);
 
@@ -149,6 +151,69 @@ namespace CoreAI.Ai.Hub
             RefreshHeaderBox(_initialSource);
             RefreshDiagnostics();
             return scroll;
+        }
+
+        /// <summary>
+        /// Adds a Lua-highlighted rich-text overlay on top of the code field's input area. UI Toolkit's
+        /// editable TextField cannot render rich text itself, so the raw input glyphs are made
+        /// transparent (caret and selection stay visible via <see cref="TextField.textSelection"/>) and a
+        /// picking-ignored Label child paints the same text through
+        /// <see cref="LuaSyntaxHighlighter.Highlight"/>. Typing still goes into <see cref="_codeField"/>;
+        /// the overlay re-renders on every value change.
+        /// </summary>
+        private void BuildHighlightOverlay()
+        {
+            VisualElement input = _codeField.Q("unity-text-input");
+            if (input == null)
+            {
+                // WHY: no known Unity version lacks this element, but if it is ever renamed the editor
+                // must degrade to a plain (uncolored) yet fully working field rather than a blank one.
+                return;
+            }
+
+            Color codeTextColor = new(0.86f, 0.93f, 0.86f, 1f);
+
+            _highlightOverlay = new Label
+            {
+                name = "coreai-hub-mod-code-highlight",
+                enableRichText = true,
+                pickingMode = PickingMode.Ignore
+            };
+            _highlightOverlay.style.position = Position.Absolute;
+            // WHY: UI Toolkit lays out absolute children relative to the parent's content box (padding
+            // already applied), so a zero inset with zero own-padding lines the overlay text up with the
+            // input's glyphs; both share the inherited font and the field's 13px size, and both wrap at
+            // the same content width (WhiteSpace.Normal).
+            _highlightOverlay.style.left = 0f;
+            _highlightOverlay.style.top = 0f;
+            _highlightOverlay.style.right = 0f;
+            _highlightOverlay.style.bottom = 0f;
+            _highlightOverlay.style.marginLeft = 0f;
+            _highlightOverlay.style.marginRight = 0f;
+            _highlightOverlay.style.marginTop = 0f;
+            _highlightOverlay.style.marginBottom = 0f;
+            _highlightOverlay.style.paddingLeft = 0f;
+            _highlightOverlay.style.paddingRight = 0f;
+            _highlightOverlay.style.paddingTop = 0f;
+            _highlightOverlay.style.paddingBottom = 0f;
+            _highlightOverlay.style.whiteSpace = WhiteSpace.Normal;
+            _highlightOverlay.style.unityTextAlign = TextAnchor.UpperLeft;
+            _highlightOverlay.style.color = codeTextColor;
+            // TODO: if the input ever scrolls internally (it normally auto-grows inside the page's
+            // ScrollView instead), the overlay does not track that inner scroll offset; typing
+            // correctness is prioritized over pixel-perfect alignment in that edge case.
+            input.Add(_highlightOverlay);
+
+            // WHY: hide only the raw glyphs — the overlay repaints them colored in the same spots; the
+            // caret/selection would inherit the transparent color, so they are re-pinned explicitly.
+            input.style.color = new Color(0f, 0f, 0f, 0f);
+            _codeField.textSelection.cursorColor = codeTextColor;
+            _codeField.textSelection.selectionColor =
+                new Color(HubModWidgets.Accent.r, HubModWidgets.Accent.g, HubModWidgets.Accent.b, 0.35f);
+
+            _highlightOverlay.text = LuaSyntaxHighlighter.Highlight(_codeField.value);
+            _codeField.RegisterValueChangedCallback(evt =>
+                _highlightOverlay.text = LuaSyntaxHighlighter.Highlight(evt.newValue));
         }
 
         private void Save()

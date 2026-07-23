@@ -10,8 +10,26 @@
 - Hub **AI Settings → Vision** override (Auto / On / Off): forces the vision/camera gate on a multimodal
   model whose name the auto-heuristic does not recognise (e.g. a local `qwen3.5` vision build), so the
   camera tool and image sends become usable without renaming the model. (`CoreAISettingsAsset.SetVisionSupport`)
+- Hub **AI Settings → Vision → Detect**: a self-probe sends the model a synthetic image and reads back
+  the answer to decide whether it can actually see, then sets the Vision gate accordingly — so Auto
+  works even for a vision model the name heuristic misses. (`VisionSelfProbe`)
+- Hub **sub-tabs**: a reusable `HubSubTabView` / `HubSubTabPage` groups several pages under one top tab.
+  **Settings / Token Budget / Statistics** are now sub-tabs of a single **AI Settings** tab, keeping the
+  top tab bar short; new sub-tab groupings are one registration.
+- Hub **Lua mod editor** now renders **Lua syntax highlighting** in the inline editor (keywords,
+  strings, numbers, comments) while keeping the field editable. (`LuaSyntaxHighlighter`)
+- Programmer skill **`read_skill('Full Lua')`**: the full `unity_*` reflection surface moved behind an
+  on-demand skill, so it stays available as a rarely-needed backup without bloating the base prompt.
 
 ### Changed
+
+- **The Programmer builds the world Roblox-style only.** The low-level `coreai_world_*` build APIs
+  (`spawn` / `change` / `set_color` / `destroy` / `spawn_batch`) are no longer bound for persistent mods
+  or the one-off `execute_lua` executor; world building goes through the Rbx surface
+  (`Instance.new('Part')`, `game` / `workspace`, `Vector3` / `CFrame` / `Color3`). The read-only queries
+  `coreai_world_find` / `coreai_world_pos` / `coreai_world_exists` remain, and the `WorldEdit` capability
+  still gates the Rbx surface. Prompts, tool descriptions, the Lua Modding skill and the gallery example
+  Lua were updated to match. (`RegisterWorldEditBuildBindings`)
 
 - Hub **API-profiles endpoint editor** redesigned: field visibility is applied on first render (HTTP
   endpoints no longer show LLMUnity-only fields), an **Advanced** foldout hides secondary fields

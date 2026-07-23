@@ -141,6 +141,62 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, executor.CallCount);
         }
 
+        [Test]
+        public async Task ExecuteAsync_SuccessWithNilOutput_TrimsOutputAndErrorFromJson()
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult
+            {
+                Success = true,
+                Output = "nil"
+            });
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog());
+
+            string json = await tool.ExecuteAsync("side_effect()");
+
+            StringAssert.DoesNotContain("\"Error\"", json,
+                "A successful result must not serialize the null Error property");
+            StringAssert.DoesNotContain("nil", json,
+                "A nil Output is noise for the model and must be dropped from the envelope");
+            LuaTool.LuaResult parsed = JsonConvert.DeserializeObject<LuaTool.LuaResult>(json);
+            Assert.IsTrue(parsed.Success);
+        }
+
+        [Test]
+        public async Task ExecuteAsync_SuccessWithRealOutput_KeepsOutputInJson()
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult
+            {
+                Success = true,
+                Output = "hello"
+            });
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog());
+
+            string json = await tool.ExecuteAsync("return 'hello'");
+            LuaTool.LuaResult parsed = JsonConvert.DeserializeObject<LuaTool.LuaResult>(json);
+
+            Assert.IsTrue(parsed.Success);
+            Assert.AreEqual("hello", parsed.Output,
+                "A real return value must survive the envelope trim");
+        }
+
+        [Test]
+        public async Task ExecuteAsync_Failure_KeepsErrorInJson()
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult
+            {
+                Success = false,
+                Error = "attempt to index a nil value"
+            });
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog());
+
+            string json = await tool.ExecuteAsync("boom()");
+            LuaTool.LuaResult parsed = JsonConvert.DeserializeObject<LuaTool.LuaResult>(json);
+
+            Assert.IsFalse(parsed.Success);
+            Assert.AreEqual("attempt to index a nil value", parsed.Error,
+                "The failure Error must survive the envelope trim untouched");
+        }
+
         // ===================== CreateAIFunction =====================
 
         [Test]
@@ -195,10 +251,12 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.ParametersSchema));
             StringAssert.Contains("logic_define", wrapper.Description,
                 "execute_lua should advertise the runtime rule-slot API used by LiveMechanics.");
-            StringAssert.Contains("Full Lua Mode", wrapper.Description,
-                "execute_lua should advertise the Full Lua diagnostic workflow.");
-            StringAssert.Contains("unity_find_by_component", wrapper.Description,
-                "execute_lua should list Full scene discovery APIs.");
+            StringAssert.Contains("read_skill('Rbx API')", wrapper.Description,
+                "execute_lua should point at the Rbx building reference.");
+            StringAssert.Contains("read_skill('Full Lua')", wrapper.Description,
+                "execute_lua should point at the Full reflection skill instead of listing unity_* APIs.");
+            StringAssert.DoesNotContain("coreai_world_spawn", wrapper.Description,
+                "The Programmer no longer builds via WorldEdit primitives; the metadata must not advertise them.");
             StringAssert.DoesNotContain("create_item", wrapper.Description,
                 "The generic execute_lua metadata must not advertise helper globals that many scenes do not provide.");
             StringAssert.Contains("game.enemies", wrapper.Description,
@@ -207,8 +265,8 @@ namespace CoreAI.Tests.EditMode
                 "JSON schema должна описывать параметр code");
             StringAssert.Contains("logic_define", wrapper.ParametersSchema,
                 "The code parameter schema should steer local models toward declared rule slots.");
-            StringAssert.Contains("unity_describe_object", wrapper.ParametersSchema,
-                "The code parameter schema should steer local models toward Full diagnostics.");
+            StringAssert.Contains("coreai_world_find", wrapper.ParametersSchema,
+                "The code parameter schema should steer local models toward the read-only scene queries.");
         }
 
         // ===================== Helpers =====================

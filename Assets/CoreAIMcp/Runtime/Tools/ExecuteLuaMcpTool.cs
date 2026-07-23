@@ -31,10 +31,10 @@ namespace CoreAI.Mcp.Tools
         public string Description =>
             "Run a one-off snippet in the game's sandboxed Lua 5.2 VM (Lua-CSharp), the same executor " +
             "the in-game agent uses. State does not persist between calls - use manage_mods for long-lived " +
-            "hooks. Survival-minimum globals: report(message) to describe what you did; " +
-            "coreai_world_list_prefabs(), coreai_world_spawn({prefab,name,x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), " +
-            "coreai_world_change(name,{...}), coreai_world_set_color(name,html), coreai_world_destroy(name) for safe scene " +
-            "edits; logic_list()/logic_define(name, function(...) return v end) for rule slots. Return a compact " +
+            "hooks. Survival-minimum globals: report(message) to describe what you did; build world objects " +
+            "Roblox-style (Instance.new('Part'), game/workspace, Vector3/CFrame/Color3); inspect the scene with " +
+            "coreai_world_find(pattern)/coreai_world_pos(name)/coreai_world_exists(name); " +
+            "logic_list()/logic_define(name, function(...) return v end) for rule slots. Return a compact " +
             "string/JSON for diagnostics. Do NOT invent globals (no game.create, GameObject.Find, etc.). " +
             "Call read_skill('Lua Modding') or read_skill('Rbx API') FIRST for the full API reference.";
 

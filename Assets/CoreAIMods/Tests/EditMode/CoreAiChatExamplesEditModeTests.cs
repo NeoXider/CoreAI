@@ -108,7 +108,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         // Syntax gate through the real VM: only a parse error fails. Runtime faults are expected because the
-        // examples call host globals (coreai_world_spawn, hooks_every, ...) that are not registered here.
+        // examples call host globals (Instance.new, Color3, hooks_every, ...) that are not registered here.
         private static void AssertParsesUnderLuaCs(string lua)
         {
             LuaState state = LuaState.Create();

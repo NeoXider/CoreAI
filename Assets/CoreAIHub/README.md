@@ -78,7 +78,7 @@ of throwing.
 | Page | Id | Display | Order | Notes |
 |---|---|---|---:|---|
 | Chat | `coreai.hub.chat` | `Chat` | 0 | Hosts the real `CoreAiChatPanel` via `CreateEmbedded` — streaming, tools, history, and hotkeys behave exactly like the standalone chat. Full-bleed; implements `IHubEscapeHandler`. |
-| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. API keys are write-only in the UI. |
+| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. **Fetch models** lists a server's advertised model ids in a dropdown, a **Vision** override (Auto / On / Off) forces the multimodal gate, and the endpoint editor has a mode-aware form with an Advanced foldout and a per-row Remove — see [Runtime Backend Switching §3](../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md). API keys are write-only in the UI. |
 | Statistics | `coreai.hub.statistics` | `Statistics` | 200 | Orchestration metrics (completions, tool calls, …) from an optional `InMemoryAiOrchestrationMetrics`. |
 | About | `coreai.hub.about` | `About` | 1000 | Opt-in (off by default in `CoreAiHubDemo`) so the tab bar stays focused on functional pages. |
 | World state | `coreai.hub.worldstate` | `World` | — | Saved-state status plus Reset World / Save Now controls (see [WORLD_COMMANDS.md](../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7). The page class ships here, but it is registered on demand by `WorldStateHubBinder` in the optional mods package, not by `RegisterAll`. |

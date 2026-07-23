@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Vision;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -51,6 +52,7 @@ namespace CoreAI.Hub.UI
         private Button _fetchModelsButton;
         private Label _modelFetchStatus;
         private DropdownField _visionMode;
+        private Button _detectVisionButton;
         private const string ModelPickerPlaceholder = "[ Fetch models to list ]";
         private TextField _ggufModelPath;
         private DropdownField _ggufModel;
@@ -240,6 +242,15 @@ namespace CoreAI.Hub.UI
             };
             StyleField(_visionMode);
             _httpGroup.Add(_visionMode);
+
+            VisualElement visionActions = new();
+            visionActions.AddToClassList("coreai-hub-actions");
+            _detectVisionButton = MakeButton("Detect vision", DetectVision);
+            _detectVisionButton.tooltip =
+                "Send the model a small test image and check whether it can read it. " +
+                "Sets Vision to On/Off from the measured answer (requires a running CoreAI scope).";
+            visionActions.Add(_detectVisionButton);
+            _httpGroup.Add(visionActions);
             body.Add(_httpGroup);
 
             _localGroup = MakeGroup("LLMUnity");
@@ -372,7 +383,7 @@ namespace CoreAI.Hub.UI
             _endpointGgufModel = MakeEndpointGgufDropdown();
             endpointGroup.Add(_endpointGgufModel);
 
-            _endpointSessionKey = new TextField("API key")
+            _endpointSessionKey = new TextField("Session API key")
             {
                 isPasswordField = true,
                 maskChar = '*',
@@ -1198,6 +1209,41 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        private async void DetectVision()
+        {
+            if (_busy)
+            {
+                return;
+            }
+
+            CoreAISettingsAsset asset = ResolveSettingsAsset();
+            if (asset == null)
+            {
+                _modelFetchStatus.text = "No CoreAI settings asset resolved; cannot detect vision.";
+                return;
+            }
+
+            _busy = true;
+            SetButtonsEnabled(false);
+            _modelFetchStatus.text = "Probing vision: sending the model a test image…";
+            try
+            {
+                // TODO: verify live that the probe round-trips through the active backend and that the
+                // detected mode survives an Apply/RefreshFromStatus cycle in the Hub UI.
+                VisionSupportMode mode = await new VisionSelfProbe().DetectAndApplyAsync(asset);
+                _visionMode?.SetValueWithoutNotify(VisionModeToOption(mode));
+                _modelFetchStatus.text = mode == VisionSupportMode.On
+                    ? "Vision detected: the model read the test image. Vision set to On."
+                    : "Vision not detected: the model could not read the test image. Vision set to Off " +
+                      "(see Console for details).";
+            }
+            finally
+            {
+                _busy = false;
+                SetButtonsEnabled(true);
+            }
+        }
+
         private async void FetchHttpModels()
         {
             if (_busy)
@@ -1670,6 +1716,11 @@ namespace CoreAI.Hub.UI
             if (_fetchModelsButton != null)
             {
                 _fetchModelsButton.SetEnabled(enabled);
+            }
+
+            if (_detectVisionButton != null)
+            {
+                _detectVisionButton.SetEnabled(enabled);
             }
         }
 

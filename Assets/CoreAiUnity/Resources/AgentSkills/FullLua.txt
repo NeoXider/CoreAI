@@ -1,0 +1,45 @@
+# CoreAI Full Lua Reference (Full-tier reflection)
+
+Full mode exposes raw reflection over every GameObject and component in the scene. It is a
+BACKUP surface: prefer the Rbx API (read_skill('Rbx API')) for building and the standard mod
+mechanics (hooks/timers/store/input) for behaviour. Use Full only when a task truly needs to
+inspect or mutate arbitrary existing scene objects. These APIs are available only when the host
+enabled Full mode; otherwise every unity_* call is absent.
+
+## Workflow
+
+First run a small diagnostic execute_lua script: inspect the scene, return a compact string or
+JSON through return/report, then read Success/Output/Error BEFORE changing anything or loading a
+persistent mod. Do not hard-code one recipe for visual requests: inspect objects/components
+first, then use the smallest real API that matches the scene.
+
+## Discovery
+
+- `unity_list_objects(max)` -> root objects with ids.
+- `unity_find_all(pattern, max)` -> objects whose name matches the pattern.
+- `unity_find_by_tag(tag, max)`; `unity_find_by_component(type, max)`.
+- `unity_describe_object(id)` -> name, tag, active state, components.
+- `unity_get_children(id)`; `unity_list_components(id)`.
+
+## Transforms
+
+- `unity_get_transform(id)` -> position/rotation/scale.
+- `unity_set_position(id, x, y, z)`; `unity_set_rotation_euler(id, x, y, z)`;
+  `unity_set_scale(id, x, y, z)`.
+- `unity_parent(childId, parentIdOr0, worldPositionStays)` — parentId 0 unparents.
+
+## Members & methods
+
+- `unity_get_member(id, component, member)` / `unity_set_member(id, component, member, value)`.
+- `unity_call(id, component, method, args)` — invoke a component method with an args table.
+
+## Example diagnostic
+
+```lua
+local objs = unity_find_all('Enemy', 10)
+local names = {}
+for i, o in ipairs(objs) do names[i] = o.name .. ':' .. o.id end
+report(table.concat(names, ','))
+```
+Read the Output, pick the exact ids, and only then apply the smallest mutation
+(unity_set_position / unity_set_member) that fulfils the request.

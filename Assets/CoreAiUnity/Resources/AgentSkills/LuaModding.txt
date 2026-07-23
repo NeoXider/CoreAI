@@ -28,20 +28,17 @@ Contents: 1. Execution models  2. World API  3. Scene queries  4. Full tier (uni
 
 ## 2. World API (WorldEdit tier - no Full mode needed)
 
-- `coreai_world_list_prefabs()` -> table of prefab keys. Call before the first spawn.
-- `coreai_world_spawn({prefab='key', name='obj1', x=0,y=0,z=0, rx=0,ry=0,rz=0,
-   scale=1 or scaleX/scaleY/scaleZ, parent='optionalParentName'})`
-  Primitives work as prefab keys: 'cube','sphere','cylinder','capsule','plane','empty'.
-- `coreai_world_change(name, {x=,y=,z=, rx=,ry=,rz=, scale=, parent=})` - move/rotate/rescale.
-- `coreai_world_set_color(name, '#RRGGBB')`
-- `coreai_world_destroy(name)`; `coreai_world_exists(name)` -> bool
-- `coreai_world_spawn_batch(list)` and `coreai_world_grid` for many objects at once.
-- Transactions: `coreai_world_begin_transaction()` / `commit` / `rollback` to group edits.
-- Names are the contract: pick unique names at spawn and drive everything by name afterwards.
+World BUILDING (creating, moving, recoloring, destroying objects) is done Roblox-style:
+`Instance.new('Part')`, `game`/`workspace`, `Vector3`/`CFrame`/`Color3`, and Part properties
+(Position, Size, Color, Anchored, Parent = workspace). Call `read_skill('Rbx API')` for the
+full reference before building anything visible - there is no other world-building surface.
 
 ## 3. Scene queries (read-only, no Full mode needed)
 
-- `coreai_world_count_objects()`, `coreai_world_find(name)`, `coreai_world_get_transform(name)`
+- `coreai_world_find(pattern)` -> list of scene object names containing the pattern
+  (case-insensitive substring match, at most 100 results).
+- `coreai_world_pos(name)` -> `{x=,y=,z=}` table, or nil when the object does not exist.
+- `coreai_world_exists(name)` -> bool.
   (availability depends on host wiring - if a query global is nil, fall back to unity_* under Full).
 
 ## 4. Full tier (only when the host enabled Full Lua)
@@ -55,7 +52,7 @@ Inspect first, edit second. Ids come from the find functions.
   `unity_parent(childId, parentIdOr0, worldPositionStays)`
 - `unity_get_member(id,component,member)`, `unity_set_member(id,component,member,value)`,
   `unity_call(id,component,method,argsTable)`
-Prefer coreai_world_* for plain transforms even in Full mode - it is cheaper and logged.
+Prefer the Rbx surface (Part.Position / Part.CFrame) for plain transforms even in Full mode.
 
 ## 5. Timers & game loops (inside mods)
 
@@ -115,32 +112,35 @@ Exports (shared variables and functions, pull-based):
 
 ## 11. Complete mod example - miniature falling-block game
 
-Shows: spawn, color, per-load unique names, input with edge detection, gravity accumulator,
-store persistence, an event another mod (or the host) can send.
+Shows: Rbx-style build (Instance.new / workspace), reload-safe root, input with edge
+detection, gravity accumulator, store persistence, an event another mod (or the host) can send.
 
 ```lua
--- Per-load generation suffix: Unity destroys deferred (end of frame), so a reload that
--- destroys the old objects and spawns identical names in the same frame would collide.
-local gen = (tonumber(store_get('gen')) or 0) + 1
-store_set('gen', tostring(gen))
-local ROOT = 'MiniGameRoot_g' .. gen
-local prev = 'MiniGameRoot_g' .. (gen - 1)
-if coreai_world_exists(prev) then coreai_world_destroy(prev) end
-coreai_world_spawn({ prefab = 'empty', name = ROOT, x = 0, y = 0, z = 0 })
+-- Reload-safe root: drop the previous generation before building this one.
+local prev = workspace:FindFirstChild('MiniGameRoot')
+if prev then prev:Destroy() end
+local root = Instance.new('Model')
+root.Name = 'MiniGameRoot'
+root.Parent = workspace
 
 local score = tonumber(store_get('score')) or 0
-local px, py = 0, 10
-coreai_world_spawn({ prefab = 'cube', name = ROOT .. '_p', parent = ROOT, x = px, y = py, z = 0 })
-coreai_world_set_color(ROOT .. '_p', '#00CCFF')
+local px, py = 0, 40                              -- studs (1 stud = 0.28 m)
+local player = Instance.new('Part')
+player.Name = 'MiniGamePlayer'
+player.Size = Vector3.new(4, 4, 4)
+player.Position = Vector3.new(px, py, 0)
+player.Color = Color3.fromHex('#00CCFF')
+player.Anchored = true
+player.Parent = root
 
 local was_w = false
 hooks_every(0.05, function()                      -- input at 20 Hz
-  if input_key('a') and px > -4 then px = px - 1 end
-  if input_key('d') and px <  4 then px = px + 1 end
+  if input_key('a') and px > -16 then px = px - 4 end
+  if input_key('d') and px <  16 then px = px + 4 end
   local w = input_key('w')                        -- derived edge, never input_key_down here
   if w and not was_w then score = score + 1 end
   was_w = w
-  coreai_world_change(ROOT .. '_p', { x = px, y = py, z = 0 })
+  player.Position = Vector3.new(px, py, 0)
 end)
 
 local acc = 0
@@ -148,9 +148,9 @@ hooks_every(0.1, function()                       -- gravity with accumulator
   acc = acc + (input_key('s') and 5 or 1)
   if acc < 5 then return end
   acc = 0
-  py = py - 1
+  py = py - 4
   if py <= 0 then
-    py = 10
+    py = 40
     score = score + 10
     store_set('score', tostring(score))
     report('landed, score=' .. score)
@@ -176,5 +176,6 @@ end)
 - hooks_every interval below 0.05 s is clamped - do not rely on faster timers.
 - report() shows nothing: report logging is disabled for the mod by default - it is a host
   switch, not an error; state still changes.
-- A spawn you cannot see: wrong prefab key - call coreai_world_list_prefabs() first;
-  primitives 'cube'/'sphere'/'cylinder'/'capsule'/'plane'/'empty' always work.
+- A Part you cannot see: set .Parent (usually workspace) after configuring it and set
+  Anchored = true; remember coordinates are in STUDS (1 stud = 0.28 m), so meter-sized
+  numbers build a tiny scene.

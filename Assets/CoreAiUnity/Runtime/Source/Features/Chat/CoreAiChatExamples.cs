@@ -32,9 +32,9 @@ namespace CoreAI.Chat
     public static class CoreAiChatExamples
     {
         // WHY: Lua examples use ONLY APIs the Programmer prompt documents (hooks_every / hooks_on('tick'),
-        // input_key / input_key_down, coreai_world_spawn / _set_color / _change / _destroy with primitive
-        // prefab keys, store_set / store_get). The arena example compiles but fails at runtime on purpose,
-        // to demo the read-error → fix → reload loop.
+        // input_key / input_key_down, the Rbx build surface — Instance.new('Part'), Vector3 / Color3,
+        // Parent = workspace — and store_set / store_get). The arena example compiles but fails at runtime
+        // on purpose, to demo the read-error → fix → reload loop.
 
         private const string TetrisMessage =
             "Create a mod named tetris with this code and load it:\n" +
@@ -78,23 +78,24 @@ namespace CoreAI.Chat
         // move/rotate, blocks fall and lock, full rows clear, top-out ends the game and 'r' restarts.
         private const string TetrisLua =
 @"local COLS, ROWS = 10, 18
-local CELL = 1.0
-local ORIGIN_X, ORIGIN_Y = -4.5, 8.5
+local CELL = 3.5 -- studs (~1 m)
+local EMPTY = Color3.fromHex('#101820')
 
 local board = {}
+local parts = {}
 local piece = nil
 local fallTimer = 0
 local fallEvery = 0.5
 local gameOver = false
 
 local SHAPES = {
-  { color = '#33ccff', cells = { {0,0},{1,0},{2,0},{3,0} } },
-  { color = '#ffcc00', cells = { {0,0},{1,0},{0,1},{1,1} } },
-  { color = '#cc66ff', cells = { {0,0},{1,0},{2,0},{1,1} } },
-  { color = '#66ff66', cells = { {1,0},{2,0},{0,1},{1,1} } },
-  { color = '#ff6666', cells = { {0,0},{1,0},{1,1},{2,1} } },
-  { color = '#6699ff', cells = { {0,0},{0,1},{1,1},{2,1} } },
-  { color = '#ff9933', cells = { {2,0},{0,1},{1,1},{2,1} } },
+  { color = Color3.fromHex('#33ccff'), cells = { {0,0},{1,0},{2,0},{3,0} } },
+  { color = Color3.fromHex('#ffcc00'), cells = { {0,0},{1,0},{0,1},{1,1} } },
+  { color = Color3.fromHex('#cc66ff'), cells = { {0,0},{1,0},{2,0},{1,1} } },
+  { color = Color3.fromHex('#66ff66'), cells = { {1,0},{2,0},{0,1},{1,1} } },
+  { color = Color3.fromHex('#ff6666'), cells = { {0,0},{1,0},{1,1},{2,1} } },
+  { color = Color3.fromHex('#6699ff'), cells = { {0,0},{0,1},{1,1},{2,1} } },
+  { color = Color3.fromHex('#ff9933'), cells = { {2,0},{0,1},{1,1},{2,1} } },
 }
 
 local function reset_board()
@@ -105,22 +106,26 @@ local function reset_board()
   end
 end
 
-local function cell_name(x, y)
-  return 'tetris_cell_' .. x .. '_' .. y
-end
+-- Reload-safe root: drop the previous board before building this one.
+local oldBoard = workspace:FindFirstChild('TetrisBoard')
+if oldBoard then oldBoard:Destroy() end
+local root = Instance.new('Model')
+root.Name = 'TetrisBoard'
+root.Parent = workspace
 
 local function spawn_grid()
   for y = 1, ROWS do
+    parts[y] = {}
     for x = 1, COLS do
-      coreai_world_spawn({
-        prefab = 'cube',
-        name = cell_name(x, y),
-        x = ORIGIN_X + (x - 1) * CELL,
-        y = ORIGIN_Y - (y - 1) * CELL,
-        z = 0,
-        scaleX = 0.92, scaleY = 0.92, scaleZ = 0.92,
-      })
-      coreai_world_set_color(cell_name(x, y), '#101820')
+      local p = Instance.new('Part')
+      p.Name = 'tetris_cell_' .. x .. '_' .. y
+      p.Size = Vector3.new(CELL * 0.92, CELL * 0.92, CELL * 0.92)
+      p.Position = Vector3.new((x - 5.5) * CELL, (9.5 - y) * CELL, 0)
+      p.Color = EMPTY
+      p.Anchored = true
+      p.CanCollide = false
+      p.Parent = root
+      parts[y][x] = p
     end
   end
 end
@@ -183,7 +188,7 @@ end
 local function render()
   for y = 1, ROWS do
     for x = 1, COLS do
-      coreai_world_set_color(cell_name(x, y), board[y][x] or '#101820')
+      parts[y][x].Color = board[y][x] or EMPTY
     end
   end
   if piece then
@@ -191,7 +196,7 @@ local function render()
       local cx = piece.x + piece.cells[i][1]
       local cy = piece.y + piece.cells[i][2]
       if cy >= 1 and cy <= ROWS and cx >= 1 and cx <= COLS then
-        coreai_world_set_color(cell_name(cx, cy), piece.color)
+        parts[cy][cx].Color = piece.color
       end
     end
   end
@@ -203,12 +208,6 @@ local function start_game()
   piece = new_piece()
   fallTimer = 0
   store_set('tetris_started', '1')
-end
-
--- Frame the board: drop the Main Camera straight in front of the grid so the game is always on
--- screen no matter where the host scene left the camera.
-if coreai_world_exists('Main Camera') then
-  coreai_world_change('Main Camera', { x = 0, y = 0, z = -22, rx = 0, ry = 0, rz = 0 })
 end
 
 spawn_grid()
@@ -244,34 +243,42 @@ end)
 
         // A tiny idle/clicker game: left-click the golden cube to earn points, every 10 points stacks a
         // gold coin into a tower, a passive +1/0.5s keeps it alive unattended, and 'r' resets. Uses only
-        // documented globals (input_mouse_button / input_key_down, coreai_world_*, store_*, report).
+        // documented globals (input_mouse_button / input_key_down, the Rbx build surface, store_*, report).
         private const string ClickerLua =
-@"local BTN = 'clicker_button'
+@"local BTN_SIZE = 5 -- studs (~1.4 m)
 local MAX_COINS = 24
 local score = tonumber(store_get('clicker_score')) or 0
 local coins = 0
 local pulse = 0
 local was_down = false
 
--- Frame the scene on the button so the game is always visible in the host scene.
-if coreai_world_exists('Main Camera') then
-  coreai_world_change('Main Camera', { x = 0, y = 2, z = -12, rx = 6, ry = 0, rz = 0 })
-end
+-- Reload-safe root: drop the previous game before building this one.
+local old = workspace:FindFirstChild('ClickerGame')
+if old then old:Destroy() end
+local root = Instance.new('Model')
+root.Name = 'ClickerGame'
+root.Parent = workspace
 
-coreai_world_spawn({ prefab = 'cube', name = BTN, x = 0, y = 2, z = 0, scaleX = 1.5, scaleY = 1.5, scaleZ = 1.5 })
-coreai_world_set_color(BTN, '#FFC400')
+local btn = Instance.new('Part')
+btn.Name = 'clicker_button'
+btn.Size = Vector3.new(BTN_SIZE, BTN_SIZE, BTN_SIZE)
+btn.Position = Vector3.new(0, 7, 0)
+btn.Color = Color3.fromHex('#FFC400')
+btn.Anchored = true
+btn.Parent = root
 
-local function coin_name(i) return 'clicker_coin_' .. i end
+local coin_parts = {}
 
 local function spawn_coin(i)
   if i > MAX_COINS then return end
-  local name = coin_name(i)
-  coreai_world_spawn({
-    prefab = 'cube', name = name,
-    x = -4.0, y = 0.4 + (i - 1) * 0.45, z = 0,
-    scaleX = 0.8, scaleY = 0.35, scaleZ = 0.8,
-  })
-  coreai_world_set_color(name, '#FFD700')
+  local c = Instance.new('Part')
+  c.Name = 'clicker_coin_' .. i
+  c.Size = Vector3.new(2.8, 1.2, 2.8)
+  c.Position = Vector3.new(-14, 1.4 + (i - 1) * 1.6, 0)
+  c.Color = Color3.fromHex('#FFD700')
+  c.Anchored = true
+  c.Parent = root
+  coin_parts[i] = c
 end
 
 local function publish()
@@ -298,7 +305,10 @@ hooks_on('tick', function()
   if down and not was_down then add_points(1) end
   was_down = down
   if input_key_down('r') then
-    for i = 1, coins do coreai_world_destroy(coin_name(i)) end
+    for i = 1, coins do
+      coin_parts[i]:Destroy()
+      coin_parts[i] = nil
+    end
     coins = 0
     score = 0
     publish()
@@ -311,8 +321,8 @@ hooks_every(0.5, function() add_points(1) end)
 -- Click feedback: the button pops on each earn and eases back to rest size.
 hooks_every(0.05, function()
   if pulse > 0 then pulse = pulse - 1 end
-  local s = 1.5 + pulse * 0.07
-  coreai_world_change(BTN, { scaleX = s, scaleY = s, scaleZ = s })
+  local s = BTN_SIZE + pulse * 0.25
+  btn.Size = Vector3.new(s, s, s)
 end)
 ";
 
@@ -322,7 +332,7 @@ end)
         private const string ArenaLua =
 @"local cfg = {
   spawnCount = 5,
-  radius = 6.0,
+  radius = 21.0, -- studs (~6 m)
   interval = 0.25,
 }
 
@@ -334,13 +344,12 @@ local function spawn_wave()
   local count = cfg.spawn_count * wave
   for i = 1, count do
     local angle = (i / count) * math.pi * 2
-    coreai_world_spawn({
-      prefab = 'capsule',
-      name = 'arena_enemy_' .. wave .. '_' .. i,
-      x = math.cos(angle) * cfg.radius,
-      y = 1.0,
-      z = math.sin(angle) * cfg.radius,
-    })
+    local enemy = Instance.new('Part')
+    enemy.Name = 'arena_enemy_' .. wave .. '_' .. i
+    enemy.Size = Vector3.new(3.5, 7, 3.5)
+    enemy.Position = Vector3.new(math.cos(angle) * cfg.radius, 3.5, math.sin(angle) * cfg.radius)
+    enemy.Anchored = true
+    enemy.Parent = workspace
   end
 end
 

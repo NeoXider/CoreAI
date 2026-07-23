@@ -208,7 +208,33 @@ After changing the builder (`Assets/CoreAiUnity/Editor/CoreAiBackendPanelBuilder
 
 ---
 
-## 3. Semantics and caveats
+## 3. Hub AI Settings editor
+
+The runtime **AI Settings** Hub page (see [`../../CoreAIHub/README.md`](../../CoreAIHub/README.md)) hosts a
+UITK editor over the same endpoint registry. Two conveniences reduce guesswork when pointing it at an
+OpenAI-compatible server:
+
+- **Fetch models.** A button on the HTTP backend and in the endpoint editor queries
+  `GET {baseUrl}/models` (`CoreAiBackend.ListModelsAsync`) and lists the advertised model ids in a dropdown,
+  so an exact name can be copied into the model field instead of typed from memory. Local servers (LM Studio,
+  llama.cpp, Ollama's OpenAI shim) all advertise their loaded models here.
+- **Vision override.** An Auto / On / Off dropdown forces the vision/camera gate for a multimodal model whose
+  name the auto-heuristic does not recognise — see [LLM_TOOLS.md § Vision / multimodal](../../CoreAI/Docs/LLM_TOOLS.md).
+
+The endpoint editor itself:
+
+- **Field visibility follows the mode from first render** — HTTP endpoints no longer show LLMUnity-only
+  fields, and an **Advanced** foldout hides secondary fields (Endpoint ID, context window, ports, slots,
+  secret reference, LLMUnity options) so the common case stays a short form.
+- **Placeholder hints** fill empty text fields, and **LLMUnity endpoints pick their model from a GGUF
+  dropdown** rather than a free-text path.
+- **An empty context window means no limit** (rather than falling back to a default budget).
+- **Endpoints are managed through a list with a per-row Remove**, instead of a picker plus one ambiguous
+  Remove button.
+
+---
+
+## 4. Semantics and caveats
 
 - **Takes effect on the next request.** A switch mutates the shared `CoreAISettingsAsset` and hot-swaps the routed primary client inside the live `LlmClientRegistry` (rebuilt via `LlmPipelineInstaller.BuildRoutedPrimaryClient`). **In-flight requests keep the old client** and finish on it; only requests started after the switch use the new backend.
 - **Per-role routing manifest profiles are NOT touched.** Only the **legacy-fallback primary client** is swapped. Roles pinned to explicit `LlmRoutingManifest` profiles keep resolving to those profiles; if you use per-role routing, `CoreAiBackend` changes what the fallback path uses, not your manifest mapping.

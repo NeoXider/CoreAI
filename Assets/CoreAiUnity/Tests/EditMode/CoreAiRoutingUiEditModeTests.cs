@@ -129,7 +129,7 @@ namespace CoreAI.Tests
             FindTextField(root, "Name").value = "Production API";
             FindTextField(root, "Endpoint ID").value = "production";
             FindTextField(root, "Base URL").value = "https://example.test/v1";
-            FindTextField(root, "Model / GGUF").value = "model-1";
+            FindTextField(root, "Model").value = "model-1";
             FindTextField(root, "LLMUnity agent name").value = "QwenAgent";
             FindTextField(root, "Secret reference").value = "OPENAI_PROD";
             TextField sessionKey = FindTextField(root, "Session API key");
@@ -171,7 +171,7 @@ namespace CoreAI.Tests
             HubSettingsPage page = new(routingController: _controller);
             ScrollView root = (ScrollView)page.CreatePageContent();
             DropdownField kind = FindDropdown(root, "Type");
-            Button clearKey = FindButton(root, "Clear saved session key");
+            Button clearKey = FindButton(root, "Clear saved key");
 
             Assert.AreEqual(DisplayStyle.Flex, clearKey.style.display.value);
             kind.SetValueWithoutNotify("LLMUnity");
@@ -191,9 +191,9 @@ namespace CoreAI.Tests
         {
             HubSettingsPage page = new(routingController: _controller);
             ScrollView root = (ScrollView)page.CreatePageContent();
-            DropdownField picker = FindDropdown(root, "Edit endpoint");
-            picker.value = picker.choices[1];
-            InvokePage(page, "LoadSelectedEndpoint");
+            // WHY: the picker dropdown was replaced by a per-row Edit button that loads a specific endpoint;
+            // drive the same load path the row's Edit button calls.
+            InvokePage(page, "LoadEndpointById", "endpoint-a");
 
             TextField id = FindTextField(root, "Endpoint ID");
             Assert.IsFalse(id.enabledSelf);
@@ -210,15 +210,15 @@ namespace CoreAI.Tests
         {
             HubSettingsPage page = new(routingController: _controller);
             ScrollView root = (ScrollView)page.CreatePageContent();
-            DropdownField picker = FindDropdown(root, "Edit endpoint");
-            picker.value = picker.choices[1];
-            InvokePage(page, "LoadSelectedEndpoint");
+            // WHY: removal is now a two-click inline confirm on the endpoint row's own Remove button; the
+            // first click arms it (text -> "Confirm?") without removing, the second click removes.
+            Button rowRemove = FindButton(root, "Remove");
 
-            InvokePage(page, "RemoveEndpoint");
+            InvokePage(page, "RemoveEndpointRow", "endpoint-a", "API A", rowRemove);
             Assert.AreEqual(0, _controller.RemoveCalls);
-            Assert.IsNotNull(FindButton(root, "Confirm remove"));
+            Assert.AreEqual("Confirm?", rowRemove.text);
 
-            InvokePage(page, "RemoveEndpoint");
+            InvokePage(page, "RemoveEndpointRow", "endpoint-a", "API A", rowRemove);
             Assert.AreEqual(1, _controller.RemoveCalls);
             page.OnDestroyed();
         }
@@ -311,10 +311,11 @@ namespace CoreAI.Tests
                 ?.Invoke(target, null);
         }
 
-        private static void InvokePage(HubSettingsPage page, string name)
+        private static void InvokePage(HubSettingsPage page, string name, params object[] args)
         {
-            typeof(HubSettingsPage).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)
-                ?.Invoke(page, null);
+            MethodInfo method = typeof(HubSettingsPage).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(method, "Method not found: " + name);
+            method.Invoke(page, args);
         }
 
         private sealed class FakeController : ICoreAiRoutingUiController

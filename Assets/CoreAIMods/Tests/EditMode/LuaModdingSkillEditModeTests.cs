@@ -28,8 +28,8 @@ namespace CoreAI.Tests.EditMode
 
             string[] required =
             {
-                "coreai_world_spawn", "coreai_world_change", "coreai_world_set_color",
-                "coreai_world_destroy", "coreai_world_list_prefabs",
+                "read_skill('Rbx API')", "Instance.new",
+                "coreai_world_find", "coreai_world_pos", "coreai_world_exists",
                 "unity_find", "unity_set_member", "unity_call",
                 "hooks_every", "hooks_on('tick'", "store_set", "store_get",
                 "events_emit", "mods_export", "mods_get", "mods_call", "mods_list_exports",
@@ -39,6 +39,18 @@ namespace CoreAI.Tests.EditMode
             foreach (string api in required)
             {
                 StringAssert.Contains(api, text, $"skill reference lost coverage of '{api}'");
+            }
+
+            // WHY: the classic build APIs were removed from the sandbox; documenting them again
+            // would make the skill over-promise, so their absence is pinned as hard as coverage.
+            string[] removedBuildApis =
+            {
+                "coreai_world_spawn", "coreai_world_change", "coreai_world_set_color",
+                "coreai_world_destroy", "coreai_world_spawn_batch"
+            };
+            foreach (string api in removedBuildApis)
+            {
+                StringAssert.DoesNotContain(api, text, $"removed build API '{api}' must not be documented");
             }
 
             // The worked example and the failure catalog are the reason this skill exists.
@@ -158,6 +170,61 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual(BuiltInRbxApiSkillText.Instructions, overrideAsset.text);
+        }
+
+        [Test]
+        public void FullLuaInstructions_CoverTheReflectionSurface()
+        {
+            string text = BuiltInFullLuaSkillText.Instructions;
+
+            string[] required =
+            {
+                "unity_list_objects", "unity_find_all", "unity_find_by_tag", "unity_find_by_component",
+                "unity_describe_object", "unity_get_transform", "unity_set_position",
+                "unity_set_rotation_euler", "unity_set_scale", "unity_parent", "unity_get_children",
+                "unity_list_components", "unity_get_member", "unity_set_member", "unity_call",
+                "Success/Output/Error"
+            };
+            foreach (string api in required)
+            {
+                StringAssert.Contains(api, text, $"Full Lua skill reference lost coverage of '{api}'");
+            }
+
+            StringAssert.Contains("```lua", text);
+        }
+
+        [Test]
+        public async Task ReadSkillTool_ReturnsFullLuaInstructions()
+        {
+            SkillSet fullLua = new(
+                BuiltInFullLuaSkillText.SkillName,
+                BuiltInFullLuaSkillText.SkillDescription,
+                BuiltInFullLuaSkillText.Instructions);
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { BuildSkill(), fullLua });
+
+            string json = await ReadAsync(tool, BuiltInFullLuaSkillText.SkillName);
+
+            StringAssert.Contains("\"success\":true", json);
+            StringAssert.Contains("unity_set_member", json);
+        }
+
+        [Test]
+        public void ProgrammerPrompt_PointsAtTheFullLuaSkill()
+        {
+            StringAssert.Contains("read_skill('Full Lua')", BuiltInAgentSystemPromptTexts.Programmer);
+        }
+
+        [Test]
+        public void FullLuaResourcesOverride_WhenPresent_MatchesTheBuiltInText()
+        {
+            UnityEngine.TextAsset overrideAsset =
+                UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/FullLua");
+            if (overrideAsset == null)
+            {
+                Assert.Ignore("No Resources/AgentSkills/FullLua override in this project.");
+            }
+
+            Assert.AreEqual(BuiltInFullLuaSkillText.Instructions, overrideAsset.text);
         }
 
         [Test]

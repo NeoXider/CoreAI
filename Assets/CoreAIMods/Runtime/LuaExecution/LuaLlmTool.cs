@@ -43,7 +43,7 @@ namespace CoreAI.Ai
             "{" +
             "  \"type\": \"object\"," +
             "  \"properties\": {" +
-            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. WorldEdit mode: use coreai_world_list_prefabs, coreai_world_spawn({prefab,name,x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_change(name,{x,y,z,rx,ry,rz,scale,scaleX,scaleY,scaleZ,parent}), coreai_world_set_color, and coreai_world_destroy. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with the smallest real API that matches the host. Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
+            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
             "  }," +
             "  \"required\": [\"code\"]" +
             "}";
