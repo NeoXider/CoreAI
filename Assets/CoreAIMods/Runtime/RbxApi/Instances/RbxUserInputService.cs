@@ -148,19 +148,26 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             // WHY: fire Began in source (device) order; the HashSet is only the O(1) membership test.
-            foreach (int keyCode in _pollBuffer)
+            // HasConnections gate skips the InputObject allocation entirely when nothing listens.
+            if (InputBegan.HasConnections)
             {
-                if (!_previousKeys.Contains(keyCode))
+                foreach (int keyCode in _pollBuffer)
                 {
-                    InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), GameNotProcessed);
+                    if (!_previousKeys.Contains(keyCode))
+                    {
+                        InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), GameNotProcessed);
+                    }
                 }
             }
 
-            foreach (int keyCode in _previousKeys)
+            if (InputEnded.HasConnections)
             {
-                if (!_currentKeys.Contains(keyCode))
+                foreach (int keyCode in _previousKeys)
                 {
-                    InputEnded.Fire(MakeKeyInput(keyCode, "End"), GameNotProcessed);
+                    if (!_currentKeys.Contains(keyCode))
+                    {
+                        InputEnded.Fire(MakeKeyInput(keyCode, "End"), GameNotProcessed);
+                    }
                 }
             }
 
@@ -179,6 +186,12 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
 
                 _previousMouseButtons[button] = down;
+                RbxScriptSignal signal = down ? InputBegan : InputEnded;
+                if (!signal.HasConnections)
+                {
+                    continue;
+                }
+
                 RbxVector2 location = InputSource.GetMouseLocation();
                 var input = new RbxInputObject(
                     FindItemByName("KeyCode", "Unknown"),
@@ -186,14 +199,17 @@ namespace CoreAI.Mods.Rbx.Instances
                     FindItemByName("UserInputState", down ? "Begin" : "End"),
                     new RbxVector3(location.X, location.Y, 0f),
                     RbxVector3.Zero);
-                (down ? InputBegan : InputEnded).Fire(input, GameNotProcessed);
+                signal.Fire(input, GameNotProcessed);
             }
         }
 
         private void StepMouseMovement()
         {
             RbxVector2 location = InputSource.GetMouseLocation();
-            if (_hasPreviousMouseLocation
+            // WHY: HasConnections gate FIRST — a mouse-move frame with no InputChanged listener must
+            // allocate nothing (this runs every frame the mouse moves; the common case has 0 listeners).
+            if (InputChanged.HasConnections
+                && _hasPreviousMouseLocation
                 && (location.X != _previousMouseLocation.X || location.Y != _previousMouseLocation.Y))
             {
                 var input = new RbxInputObject(

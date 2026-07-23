@@ -89,6 +89,11 @@ namespace CoreAI.Mods.Rbx.Binding
             /// <summary>Reused across appearance writes so no MaterialPropertyBlock is allocated per
             /// property change (hot path: a script that recolors/moves a part each frame).</summary>
             public MaterialPropertyBlock PropertyBlock;
+
+            /// <summary>The binder-owned mesh child a shape may create (Cylinder), or null when the
+            /// visual lives on the root (Block/Ball/Wedge). Held by reference, NOT looked up by name,
+            /// so a user-created child that happens to be named "Shape" can never be mistaken for it.</summary>
+            public GameObject ShapeChild;
         }
 
         /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
@@ -381,14 +386,14 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            StripShapeVisual(entry.GameObject);
+            StripShapeVisual(entry);
             switch (normalized)
             {
                 case RbxPartShape.Ball:
                     BuildRootPrimitiveVisual(entry.GameObject, PrimitiveType.Sphere);
                     break;
                 case RbxPartShape.Cylinder:
-                    BuildCylinderVisual(entry.GameObject);
+                    entry.ShapeChild = BuildCylinderVisual(entry.GameObject);
                     break;
                 case RbxPartShape.Wedge:
                     BuildWedgeVisual(entry.GameObject);
@@ -403,13 +408,14 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         // WHY: resolve the renderer/collider from THIS part's own visual — the root for
-        // Block/Ball/Wedge, the Shape child for Cylinder — never GetComponentInChildren, which
-        // descends into nested child parts and would recolor/toggle the wrong object. Cached so
-        // the appearance/collide setters skip the component scan on every write.
+        // Block/Ball/Wedge, or the binder-owned ShapeChild for Cylinder (held by reference, never
+        // found by name) — so neither a nested child part nor a user child named "Shape" can be
+        // mistaken for the visual. Cached so appearance/collide setters skip the scan on every write.
         private static void CacheVisualComponents(BindingEntry entry)
         {
-            Transform child = entry.GameObject.transform.Find(ShapeChildName);
-            Transform visual = child != null ? child : entry.GameObject.transform;
+            Transform visual = entry.ShapeChild != null
+                ? entry.ShapeChild.transform
+                : entry.GameObject.transform;
             entry.Renderer = visual.GetComponent<Renderer>();
             entry.Collider = visual.GetComponent<Collider>();
         }
@@ -422,22 +428,26 @@ namespace CoreAI.Mods.Rbx.Binding
                 : shape;
         }
 
-        /// <summary>Removes the previous shape's mesh/collider (root components and the Shape
-        /// child), keeping the GameObject identity and its Rigidbody untouched.</summary>
-        private static void StripShapeVisual(GameObject gameObject)
+        /// <summary>Removes the previous shape's mesh/collider (root components and the binder-owned
+        /// ShapeChild), keeping the GameObject identity and its Rigidbody untouched.</summary>
+        private static void StripShapeVisual(BindingEntry entry)
         {
             // WHY: destroy synchronously even in Play Mode. ApplyShape rebuilds the visual on the
             // very next lines, and a deferred Object.Destroy would leave the old MeshRenderer alive
             // when AddComponent<MeshRenderer> runs (Renderer is single-per-GameObject → the add
             // fails and returns null) and would let CacheVisualComponents cache soon-fake-null
             // components. These are binder-owned, so DestroyImmediate is legal here.
+            GameObject gameObject = entry.GameObject;
             DestroyNow(gameObject.GetComponent<Collider>());
             DestroyNow(gameObject.GetComponent<MeshRenderer>());
             DestroyNow(gameObject.GetComponent<MeshFilter>());
-            Transform child = gameObject.transform.Find(ShapeChildName);
-            if (child != null)
+            // WHY: destroy the shape child by the OWNED reference, never transform.Find("Shape") — a
+            // mod can legally name one of its own child instances "Shape", and a name lookup would
+            // then destroy the user's object and cache its components as this part's visual.
+            if (entry.ShapeChild != null)
             {
-                DestroyNow(child.gameObject);
+                DestroyNow(entry.ShapeChild);
+                entry.ShapeChild = null;
             }
         }
 
@@ -485,7 +495,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// Size.X studs, while Unity's Cylinder mesh is 2 units tall along local Y. The mesh
         /// lives on a child rotated Z+90 (mesh Y onto part X) with the height halved, so the
         /// root's Size-driven localScale yields correct proportions on every axis.</summary>
-        private static void BuildCylinderVisual(GameObject gameObject)
+        private static GameObject BuildCylinderVisual(GameObject gameObject)
         {
             GameObject child = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             child.name = ShapeChildName;
@@ -493,6 +503,7 @@ namespace CoreAI.Mods.Rbx.Binding
             child.transform.localPosition = Vector3.zero;
             child.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
             child.transform.localScale = new Vector3(1f, 0.5f, 1f);
+            return child;
         }
 
         /// <summary>Roblox Wedge: a right triangular prism (ramp) — full height at the back

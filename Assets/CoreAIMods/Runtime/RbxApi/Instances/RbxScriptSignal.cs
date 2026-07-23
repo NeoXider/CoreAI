@@ -74,6 +74,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// dispatch lands with the MVP2 scheduler.</summary>
         public bool SupportsDispatch { get; }
 
+        /// <summary>True when a live handler is connected. Callers gate per-frame event-object
+        /// construction on this so a mouse-move frame with no InputChanged listener allocates nothing.</summary>
+        public bool HasConnections => SupportsDispatch && _connections.Count > 0;
+
         // TODO: MVP2 — general RbxScriptSignal dispatch replaces the SupportsDispatch split; every
         // signal then connects/fires through the scheduler with deferred-dispatch semantics.
         public RbxScriptConnection Connect(object handler)

@@ -36,6 +36,11 @@ namespace CoreAI.Mods.Rbx.Instances
 
         internal ClassDescriptor Descriptor => _descriptor;
 
+        /// <summary>True for singleton services (UserInputService, Workspace, Lighting, …) — the Lua
+        /// lifecycle bindings refuse to Destroy/Clone these so one mod cannot brick a shared service
+        /// for the whole world. Internal teardown (world destroy) still tears them down directly.</summary>
+        public bool IsService => _descriptor.IsService;
+
         internal void Attach(InstanceRegistry registry, InstanceId id)
         {
             Registry = registry;

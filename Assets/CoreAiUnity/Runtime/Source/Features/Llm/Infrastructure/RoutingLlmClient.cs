@@ -210,7 +210,11 @@ namespace CoreAI.Infrastructure.Llm
                         errorCode = chunk.ErrorCode;
                     }
 
+                    // WHY: count reasoning too — reasoning models (DeepSeek/Qwen) can emit far more
+                    // reasoning than answer, so ignoring it underestimates completion tokens on the
+                    // Token Budget page when the server omits usage.
                     streamedCompletionChars += chunk.Text?.Length ?? 0;
+                    streamedCompletionChars += chunk.ReasoningText?.Length ?? 0;
                     if (!string.IsNullOrEmpty(chunk.Model))
                     {
                         lastSeenModel = chunk.Model;

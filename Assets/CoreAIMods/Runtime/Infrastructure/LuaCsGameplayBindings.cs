@@ -160,15 +160,16 @@ namespace CoreAI.Ai.LuaCs
                 _logicSlots.RegisterApis(registry, ownerModId);
             }
 
-            if ((effective & LuaCapabilities.Full) != 0)
+            if ((effective & LuaCapabilities.Full) != 0 && _full != null)
             {
-                _full?.RegisterGameplayApis(registry);
+                _full.RegisterGameplayApis(registry);
             }
             else
             {
                 // WHY: same actionable-stub treatment for the opt-in Full tier — a mod declaring
-                // "capabilities: Full" under a host ceiling without Full would otherwise quarantine
-                // itself on nil-call errors that never mention the missing grant.
+                // "capabilities: Full" under a host ceiling without Full, OR a composition that grants
+                // Full but never wired the Full surface (_full == null), would otherwise quarantine
+                // itself on nil-call errors that never mention the missing grant/wiring.
                 RegisterWithheldStubs(registry, LuaCsFullUnityRuntimeBindings.ApiNames, FullStubError);
             }
         }

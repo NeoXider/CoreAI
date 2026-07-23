@@ -246,6 +246,31 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         }
 
         [Test]
+        public void ShapeSwitch_DoesNotTouchAUserChildNamed_Shape()
+        {
+            // WHY: the binder must identify its Cylinder mesh child by an owned reference, NOT by the
+            // name "Shape" — a mod can legally name one of its own child parts "Shape", and a name
+            // lookup would destroy the user's object on a shape switch and cache its visual as the part's.
+            RbxInstance parent = CreatePartInWorld();
+            RbxInstance userChild = _registry.Create("Part");
+            userChild.Name = "Shape";
+            userChild.Parent = parent;
+            _binder.SetColor(userChild.Id, RbxColor3.FromRGB(0f, 255f, 0f));
+
+            _binder.SetShape(parent.Id, RbxPartShape.Cylinder);
+            _binder.SetShape(parent.Id, RbxPartShape.Ball);
+            _binder.SetColor(parent.Id, RbxColor3.FromRGB(255f, 0f, 0f));
+
+            GameObject childGo = BoundObject(userChild);
+            Assert.IsTrue(childGo != null, "the user's child named 'Shape' must survive shape switches");
+            var childBlock = new MaterialPropertyBlock();
+            childGo.GetComponent<Renderer>().GetPropertyBlock(childBlock);
+            Assert.AreEqual(0f, childBlock.GetColor("_Color").r, Epsilon,
+                "the user child keeps its own green — the parent recolor targets the parent's own visual");
+            Assert.AreEqual(1f, childBlock.GetColor("_Color").g, Epsilon);
+        }
+
+        [Test]
         public void TransformWrite_AfterShapeAndColor_KeepsAppearance()
         {
             // WHY: split apply — a CFrame/Size write must not wipe the previously applied color,

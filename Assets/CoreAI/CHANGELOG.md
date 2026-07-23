@@ -43,6 +43,15 @@ surface. Plus the reasoning/think-block streaming fix and a per-frame allocation
   fire in device order.
 - **Part appearance/collision** target the part's own visual — a Cylinder shape switch on a part that
   already has nested child parts no longer recolors/toggles the wrong object.
+- **Shape visual identified by an owned reference**, not the child name "Shape" — a mod that names one
+  of its own child instances "Shape" is no longer destroyed (and mistaken for the part's visual) on a
+  shape switch.
+- **Services and the canonical Camera can't be `Destroy()`d or `Clone()`d** from Lua — one mod can no
+  longer brick `UserInputService`/Lighting/etc. for the whole shared world (Destroy errors, Clone → nil).
+- **Full-tier withheld stubs** also register when Full is granted but the Full surface is unwired, so a
+  `unity_*` call raises the actionable error instead of a bare "attempt to call a nil value".
+- **Reasoning promotion (streaming)** is whitespace-aware, matching the non-streaming path — a lone
+  `"\n"` content delta from a reasoning-only model no longer suppresses promoting reasoning to the answer.
 - **Hub AI Settings**: placeholder-over-text fix + Advanced foldout; temperature override defaults off.
 
 ### Performance
@@ -54,6 +63,10 @@ surface. Plus the reasoning/think-block streaming fix and a per-frame allocation
 - **`RbxScriptSignal.Fire`**: reuses the fire-snapshot buffer instead of a per-event `ToArray` copy;
   the input signals pass a cached boxed `false` for `gameProcessedEvent`, so no bool is boxed per event.
 - **`RbxCFrame`**: multiply and equality read the struct's fields directly — no per-op `float[12]`.
+- **Input event objects are gated on `HasConnections`** — a mouse-move frame with no `InputChanged`
+  listener (the common case) allocates no `InputObject`; same gate on key/button edges.
+- **Token estimation counts reasoning output** — when the server omits `usage`, reasoning chars now
+  feed the completion-token estimate so reasoning-heavy models aren't undercounted on the budget page.
 
 ## [6.2.1] - 2026-07-23
 

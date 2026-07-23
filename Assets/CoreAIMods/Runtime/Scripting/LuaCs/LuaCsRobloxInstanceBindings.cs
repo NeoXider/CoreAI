@@ -276,6 +276,13 @@ namespace CoreAI.Ai.LuaCs
             Method("Clone", (_, self) =>
             {
                 context.RequireWorldEdit("Instance:Clone");
+                if (IsProtectedSingleton(self))
+                {
+                    // WHY: services and the canonical Camera are singletons — Roblox marks them
+                    // non-archivable, so Clone yields nil rather than a second live instance.
+                    return LuaValue.Nil;
+                }
+
                 RbxInstance copy = self.Clone();
                 CopyPartSinkState(context.PartSink, self, copy);
                 return context.WrapInstance(copy);
@@ -283,6 +290,17 @@ namespace CoreAI.Ai.LuaCs
             Method("Destroy", (_, self) =>
             {
                 context.RequireWorldEdit("Instance:Destroy");
+                if (IsProtectedSingleton(self))
+                {
+                    // WHY: destroying a shared service (cached once at composition, never re-resolved)
+                    // would brick input/lighting/etc for EVERY mod in the world; the Camera is the
+                    // canonical workspace.CurrentCamera. Roblox locks these against destruction too.
+                    throw RbxError.BadArgument(
+                        self.ClassName + " cannot be destroyed — it is a shared singleton",
+                        "services and workspace.CurrentCamera live for the world's lifetime; "
+                        + "never Destroy them");
+                }
+
                 self.Destroy();
                 return LuaValue.Nil;
             });
@@ -378,6 +396,14 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>DEV-7 at the Lua boundary: destroyed instances read as errors, not tombstones.</summary>
+        // WHY: services (UserInputService/Lighting/Workspace/…) and the canonical Camera are
+        // world-lifetime singletons; the lifecycle bindings refuse to Clone/Destroy them so one mod
+        // cannot brick a shared service for every other mod.
+        private static bool IsProtectedSingleton(RbxInstance instance)
+        {
+            return instance.IsService || instance.ClassName == "Camera";
+        }
+
         private static void ThrowIfDestroyedForLua(RbxInstance instance, string memberName)
         {
             if (instance.IsDestroyed)

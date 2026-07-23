@@ -615,7 +615,10 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             parsedSseDeltas++;
                             string updateText = update?.Text ?? "";
-                            if (!string.IsNullOrEmpty(updateText))
+                            // WHY: whitespace-aware, matching the non-streaming promotion check
+                            // (IsNullOrWhiteSpace) — a lone "\n" content delta from a reasoning-only
+                            // model must NOT suppress promoting the reasoning to the visible answer.
+                            if (!string.IsNullOrWhiteSpace(updateText))
                             {
                                 sawVisibleContentDelta = true;
                             }
