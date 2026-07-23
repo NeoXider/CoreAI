@@ -413,9 +413,13 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 local uis = game:GetService('UserInputService')
                 local okClone, clone = pcall(function() return uis:Clone() end)
                 assert(okClone and clone == nil, 'Clone of a service must return nil')
-                local okDestroy, err = pcall(function() uis:Destroy() end)
+                local okDestroy = pcall(function() uis:Destroy() end)
                 assert(not okDestroy, 'Destroy of a service must error')
-                assert(game:GetService('UserInputService') == uis, 'the service survives the attempt')");
+                local okParent = pcall(function() uis.Parent = nil end)
+                assert(not okParent, 'reparenting a service must error')
+                game:ClearAllChildren()
+                assert(game:GetService('UserInputService') == uis,
+                    'the service survives Destroy/reparent/ClearAllChildren')");
         }
 
         [Test]

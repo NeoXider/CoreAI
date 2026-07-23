@@ -46,8 +46,10 @@ surface. Plus the reasoning/think-block streaming fix and a per-frame allocation
 - **Shape visual identified by an owned reference**, not the child name "Shape" — a mod that names one
   of its own child instances "Shape" is no longer destroyed (and mistaken for the part's visual) on a
   shape switch.
-- **Services and the canonical Camera can't be `Destroy()`d or `Clone()`d** from Lua — one mod can no
-  longer brick `UserInputService`/Lighting/etc. for the whole shared world (Destroy errors, Clone → nil).
+- **Services and the canonical Camera are locked against a mod removing them** — `Destroy()` errors,
+  `Clone()` returns nil, `.Parent = …` errors, and `game:ClearAllChildren()` skips them, so one mod can
+  no longer brick `UserInputService`/Lighting/etc. for the whole shared world. Internal world teardown
+  still tears them down directly.
 - **Full-tier withheld stubs** also register when Full is granted but the Full surface is unwired, so a
   `unity_*` call raises the actionable error instead of a bare "attempt to call a nil value".
 - **Reasoning promotion (streaming)** is whitespace-aware, matching the non-streaming path — a lone

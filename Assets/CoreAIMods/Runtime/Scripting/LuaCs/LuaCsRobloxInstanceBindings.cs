@@ -180,6 +180,15 @@ namespace CoreAI.Ai.LuaCs
                         // WHY: no destroyed pre-check here — the Domain setter raises the exact
                         // D6 PARENT_LOCKED message for destroyed instances.
                         context.RequireWorldEdit("setting Instance.Parent");
+                        if (IsProtectedSingleton(self))
+                        {
+                            // WHY: a service's Parent is locked in Roblox — reparenting (or nil-ing)
+                            // it would detach it so game:GetService stops resolving it for the world.
+                            throw RbxError.BadArgument(
+                                self.ClassName + ".Parent is locked — it is a shared singleton",
+                                "services and workspace.CurrentCamera are fixed for the world's lifetime");
+                        }
+
                         self.Parent = ReadOptionalInstance(value, "Instance.Parent assignment");
                         return LuaValue.Nil;
                     case "Archivable":
@@ -307,7 +316,17 @@ namespace CoreAI.Ai.LuaCs
             Method("ClearAllChildren", (_, self) =>
             {
                 context.RequireWorldEdit("Instance:ClearAllChildren");
-                self.ClearAllChildren();
+                // WHY: game:ClearAllChildren() must not wipe the world's services (Roblox locks
+                // them). GetChildren returns a snapshot, so destroying non-protected children while
+                // iterating is safe; protected singletons (services/Camera) are left intact.
+                foreach (RbxInstance child in self.GetChildren())
+                {
+                    if (!IsProtectedSingleton(child))
+                    {
+                        child.Destroy();
+                    }
+                }
+
                 return LuaValue.Nil;
             });
 
