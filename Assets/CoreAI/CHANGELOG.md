@@ -1,5 +1,26 @@
 # Changelog
 
+## [6.2.1] - 2026-07-23
+
+### Fixed
+
+- Package **lockstep** restored: the 6.0→6.2 version bumps advanced each package's `version` but left the
+  internal `com.neoxider.*` dependency pins at `6.0.0`, so the CI "Package graph (lockstep + deps)" gate
+  failed with 11 mismatches. All six packages now pin the shared version. (supersedes the `v6.2.0` tag,
+  whose published `package.json` files still carried the stale `6.0.0` pins)
+
+### Added
+
+- `tools/bump_version.py` — one command bumps every `Assets/*/package.json` `version` **and** every
+  internal `com.neoxider.*` dependency pin to a target version in lockstep, then self-verifies with the
+  same rule the CI gate enforces (`python tools/bump_version.py 6.2.1`, or `--check` to verify only).
+
+### Docs
+
+- Root **README** audit: corrected the package count (six, including the new **CoreAI MCP Server**
+  package), fixed a wrong tool class name (`WorldCommandTool` → `WorldLlmTool` / `world_command`), and
+  reflected the 6.2.0 features (mod runtime self-heal, vision **Detect** self-probe, Hub sub-tabs).
+
 ## [6.2.0] - 2026-07-23
 
 ### Added
