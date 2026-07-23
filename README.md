@@ -7,7 +7,7 @@
 **CoreAI is a Unity framework for LLM-powered NPCs and agents that call your game code** — function calling, tools, persistent memory, and runtime Lua — running on a **local 4 GB model** or any **OpenAI-compatible API**. No cloud keys required, no scripted dialogue trees.
 
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
-[![EditMode tests](https://img.shields.io/badge/EditMode-1%2C500%2B%20passing-brightgreen)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
+[![EditMode tests](https://img.shields.io/badge/EditMode-2%2C000%2B%20passing-brightgreen)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI%20API-blue)](#-recommended-models)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
@@ -270,7 +270,7 @@ AI doesn't just generate text — it **calls code** for real actions:
 | 🎒 **InventoryTool** | Gets NPC inventory | Merchant AI |
 | ⚙️ **GameConfigTool** | Reads/modifies game configs | Creator AI |
 | 🎭 **SceneLlmTool** | Read and change hierarchy/transform in PlayMode | All Agents |
-| 📸 **CameraLlmTool** | Captures screenshots (Base64 JPEG) for Vision | All Agents |
+| 📸 **CameraLlmTool** | Captures screenshots (Base64 JPEG) for Vision — endpoint image support is **auto-detected** (a one-shot probe), or force it with the **Detect** button in Settings | All Agents |
 
 **Create your own:**
 ```csharp
@@ -381,6 +381,7 @@ Small models (Qwen3.5-2B) sometimes forget the format or case of tool names. Cor
 - ♻️ **Retries on failure** — up to **3 retries** with error feedback injected into chat history so the model self-corrects.
 - 🌐 **Retries HTTP errors** — `429 (Rate Limited)` and `5xx` responses trigger automatic retry with `Retry-After` header support or exponential backoff (**2s → 4s**, configurable in Inspector).
 - ✅ **Checks fenced Lua blocks** immediately.
+- 🩹 **Loaded mods self-heal at runtime** — add the `CoreAiLuaModAutoRepair` component and a mod that starts throwing hands its source + error to the **Programmer**, which rewrites it and `manage_mods reload`s it live (debounced, attempt-capped, so no repair loops).
 
 ```
 Model says: {"name":"MEMORY", ...}
@@ -446,7 +447,7 @@ The repository ships as **five UPM packages**. Only the first two are required; 
 | **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity: orchestration, tools, memory, routing | — |
 | **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), LLM clients (MEAI), MessagePipe, chat UI, tests | `coreai` |
 | **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — Lua-CSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` |
-| **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) | `coreai` + `coreaiunity` |
+| **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) with reusable grouped **sub-tabs** (e.g. Mods + Logs) | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
 
 Mods and Hub are independent optional installs — neither requires the other. When **both** are present, Mods' Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define, adding a Mods page to the Hub window; without Hub installed, that assembly compiles out and Mods works standalone (`execute_lua`/`manage_mods` tools, no Hub UI).
