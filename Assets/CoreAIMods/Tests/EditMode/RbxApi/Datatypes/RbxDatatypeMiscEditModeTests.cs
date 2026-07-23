@@ -150,9 +150,11 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
         public void EnumRegistry_UnknownEnum_RaisesLoudStub()
         {
             var registry = RbxEnumRegistry.CreateWithBuiltins();
-            var ex = Assert.Throws<RobloxApiStubException>(() => registry.Get("KeyCode"));
+            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
+            // until TweenService (MVP8), so it is the loud-stub probe now.
+            var ex = Assert.Throws<RobloxApiStubException>(() => registry.Get("EasingStyle"));
             Assert.AreEqual("NOT_IMPLEMENTED", ex.Code);
-            StringAssert.Contains("Enum.KeyCode", ex.Message);
+            StringAssert.Contains("Enum.EasingStyle", ex.Message);
             StringAssert.Contains("| fix:", ex.Message, "stub errors carry the machine-parsable fix section");
         }
 

@@ -271,6 +271,7 @@ namespace CoreAI.Hub.UI
             body.Add(_localGroup);
 
             _limitsGroup = MakeGroup("Request limits");
+            Foldout advanced = new() { text = "Advanced", value = false };
             _overrideTemperature = new Toggle("Override temperature")
             {
                 tooltip = "When off, the model's default sampling temperature is used. " +
@@ -278,19 +279,20 @@ namespace CoreAI.Hub.UI
             };
             StyleField(_overrideTemperature);
             _overrideTemperature.RegisterValueChangedCallback(_ => UpdateTemperatureInteractivity());
-            _limitsGroup.Add(_overrideTemperature);
+            advanced.Add(_overrideTemperature);
 
             _temperature = new FloatField("Temperature");
             StyleField(_temperature);
-            _limitsGroup.Add(_temperature);
+            advanced.Add(_temperature);
 
             _timeoutSeconds = new IntegerField("HTTP timeout seconds");
             StyleField(_timeoutSeconds);
-            _limitsGroup.Add(_timeoutSeconds);
+            advanced.Add(_timeoutSeconds);
 
             _maxTokens = new IntegerField("Max output tokens");
             StyleField(_maxTokens);
-            _limitsGroup.Add(_maxTokens);
+            advanced.Add(_maxTokens);
+            _limitsGroup.Add(advanced);
             body.Add(_limitsGroup);
 
             VisualElement actions = new();
@@ -1682,6 +1684,10 @@ namespace CoreAI.Hub.UI
             field.RegisterCallback<FocusInEvent>(_ => { focused = true; Refresh(); });
             field.RegisterCallback<FocusOutEvent>(_ => { focused = false; Refresh(); });
             Refresh();
+            // WHY: RefreshFromStatus fills fields via SetValueWithoutNotify, which fires no
+            // ValueChanged event, leaving the hint painted over real text. Polling keeps the
+            // hint in sync no matter how the value was written.
+            field.schedule.Execute(Refresh).Every(200);
         }
 
         private static void StyleField(BaseField<string> field)

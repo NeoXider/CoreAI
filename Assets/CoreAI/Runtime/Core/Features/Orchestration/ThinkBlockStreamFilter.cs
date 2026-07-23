@@ -14,11 +14,27 @@ namespace CoreAI.Ai
         private readonly StringBuilder _buffer = new();
         private bool _insideThink;
 
+        /// <summary>
+        /// Optional sink receiving the hidden reasoning text the moment it is suppressed from the
+        /// visible stream, so hosts can show a live "thinking" section instead of losing the span.
+        /// Null (the default) preserves the original suppress-only behavior.
+        /// </summary>
+        public Action<string> ReasoningSink { get; set; }
+
         /// <summary>Clears buffered partial tags and exits any active hidden-thought block.</summary>
         public void Reset()
         {
             _buffer.Clear();
             _insideThink = false;
+        }
+
+        /// <summary>Forwards one suppressed reasoning span to <see cref="ReasoningSink"/>, if set.</summary>
+        private void EmitReasoning(string hidden)
+        {
+            if (!string.IsNullOrEmpty(hidden))
+            {
+                ReasoningSink?.Invoke(hidden);
+            }
         }
 
         /// <summary>
@@ -46,14 +62,17 @@ namespace CoreAI.Ai
                     int closeIdx = buf.IndexOf(CloseTag, StringComparison.OrdinalIgnoreCase);
                     if (closeIdx >= 0)
                     {
+                        EmitReasoning(buf.Substring(0, closeIdx));
                         _insideThink = false;
                         buf = buf.Substring(closeIdx + CloseTag.Length);
                     }
                     else
                     {
                         // WHY: Keep only a possible closing-tag prefix; all other hidden text stays suppressed.
+                        string keptTail = KeepTailForPossibleTag(buf, CloseTag);
+                        EmitReasoning(buf.Substring(0, buf.Length - keptTail.Length));
                         _buffer.Clear();
-                        _buffer.Append(KeepTailForPossibleTag(buf, CloseTag));
+                        _buffer.Append(keptTail);
                         return visible.ToString();
                     }
                 }
@@ -66,6 +85,7 @@ namespace CoreAI.Ai
                         // WHY: Some OpenAI-compatible reasoning models stream hidden thought text without
                         // the opening tag but still include </think> before the visible answer.
                         // Treat the buffered prefix as hidden and resume after the orphan close tag.
+                        EmitReasoning(buf.Substring(0, closeIdx));
                         buf = buf.Substring(closeIdx + CloseTag.Length);
                         continue;
                     }
@@ -124,6 +144,9 @@ namespace CoreAI.Ai
         {
             if (_insideThink)
             {
+                // WHY: End-of-stream inside an unclosed think block: the buffered tail is still
+                // hidden reasoning (never visible), so surface it to the sink before dropping it.
+                EmitReasoning(_buffer.ToString());
                 _buffer.Clear();
                 return string.Empty;
             }

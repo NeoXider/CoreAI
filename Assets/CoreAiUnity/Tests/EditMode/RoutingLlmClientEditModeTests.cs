@@ -139,6 +139,125 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Client stub emulating an OpenAI-compatible server that returns NO usage object
+        /// (LM Studio commonly omits it, including on the streaming final chunk).
+        /// </summary>
+        private sealed class NoUsageMockLlm : ILlmClient
+        {
+            private readonly string[] _parts;
+
+            public NoUsageMockLlm(params string[] parts)
+            {
+                _parts = parts;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = string.Concat(_parts),
+                    Model = "local-model"
+                });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                foreach (string part in _parts)
+                {
+                    yield return new LlmStreamChunk { Text = part };
+                    await Task.Yield();
+                }
+
+                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty, Model = "local-model" };
+            }
+        }
+
+        [Test]
+        public async Task CompleteAsync_NoServerUsage_PublishesEstimatedNonZeroUsage()
+        {
+            NoUsageMockLlm inner = new("Hello from the local model, a fairly long answer.");
+            FakeRegistry registry = new(inner);
+            CapturingPublisher<LlmUsageReported> usage = new();
+            RoutingLlmClient routing = new(registry, null, null, null, usage);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "X",
+                TraceId = "trace-est",
+                SystemPrompt = new string('s', 400),
+                UserPayload = new string('u', 200)
+            };
+
+            LlmCompletionResult result = await routing.CompleteAsync(request);
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(1, usage.Messages.Count,
+                "A completion without server usage must still publish an estimated LlmUsageReported");
+            LlmUsageReported reported = usage.Messages[0];
+            Assert.Greater(reported.PromptTokens ?? 0, 0, "Estimated prompt tokens must be non-zero");
+            Assert.Greater(reported.CompletionTokens ?? 0, 0, "Estimated completion tokens must be non-zero");
+            Assert.AreEqual(
+                (reported.PromptTokens ?? 0) + (reported.CompletionTokens ?? 0),
+                reported.TotalTokens ?? 0);
+            // ~4 chars/token: 600 prompt chars => 150 tokens.
+            Assert.AreEqual(150, reported.PromptTokens);
+        }
+
+        [Test]
+        public async Task Streaming_NoServerUsageOnFinalChunk_PublishesEstimatedNonZeroUsage()
+        {
+            NoUsageMockLlm inner = new("Hello ", "streamed ", "world, quite a few tokens here.");
+            FakeRegistry registry = new(inner);
+            CapturingPublisher<LlmUsageReported> usage = new();
+            RoutingLlmClient routing = new(registry, null, null, null, usage);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "X",
+                TraceId = "trace-est-stream",
+                UserPayload = new string('u', 120)
+            };
+
+            await foreach (LlmStreamChunk _ in routing.CompleteStreamingAsync(request))
+            {
+            }
+
+            Assert.AreEqual(1, usage.Messages.Count,
+                "A stream without server usage must still publish an estimated LlmUsageReported");
+            LlmUsageReported reported = usage.Messages[0];
+            Assert.IsTrue(reported.Streaming);
+            Assert.IsTrue(reported.Success);
+            Assert.Greater(reported.PromptTokens ?? 0, 0, "Estimated prompt tokens must be non-zero");
+            Assert.Greater(reported.CompletionTokens ?? 0, 0, "Estimated completion tokens must be non-zero");
+            Assert.AreEqual("local-model", reported.Model);
+        }
+
+        [Test]
+        public async Task CompleteAsync_ServerUsagePresent_IsNotOverriddenByEstimate()
+        {
+            StreamingMockLlm inner = new("ok");
+            FakeRegistry registry = new(inner);
+            CapturingPublisher<LlmUsageReported> usage = new();
+            RoutingLlmClient routing = new(registry, null, null, null, usage);
+
+            await routing.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "X",
+                UserPayload = new string('u', 4000)
+            });
+
+            Assert.AreEqual(1, usage.Messages.Count);
+            Assert.AreEqual(10, usage.Messages[0].PromptTokens, "Server-reported usage must win over the estimate");
+            Assert.AreEqual(15, usage.Messages[0].TotalTokens);
+        }
+
         [Test]
         public async Task CompleteAsync_LlmOperationTimeoutException_PublishesTimeout()
         {

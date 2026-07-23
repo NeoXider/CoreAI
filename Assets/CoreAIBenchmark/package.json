@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaibenchmark",
-  "version": "6.2.1",
+  "version": "6.3.0",
   "displayName": "CoreAI Benchmark",
   "unity": "6000.0",
   "description": "LLM game-creation benchmark harness and scenarios for CoreAI: drives execute_lua and world_command through real PlayMode scenarios (G1-G8), grades tool correctness, reasoning, instruction adherence, and determinism, and reports suite/role fitness scores. Depends on com.neoxider.coreai / com.neoxider.coreaiunity / com.neoxider.coreaimods.",
@@ -11,8 +11,8 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreai": "6.2.1",
-    "com.neoxider.coreaiunity": "6.2.1",
-    "com.neoxider.coreaimods": "6.2.1"
+    "com.neoxider.coreai": "6.3.0",
+    "com.neoxider.coreaiunity": "6.3.0",
+    "com.neoxider.coreaimods": "6.3.0"
   }
 }

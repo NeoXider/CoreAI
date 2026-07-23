@@ -21,6 +21,29 @@ namespace CoreAI.Ai.LuaCs
 
         private const int MaxTransactionBuffer = 256;
 
+        /// <summary>
+        /// Global names <see cref="RegisterGameplayApis"/> installs — keep in sync with the
+        /// registrations below. <see cref="LuaCsGameplayBindings"/> uses this list to register
+        /// actionable withheld-capability stubs when the build surface is disabled.
+        /// </summary>
+        public static readonly string[] BuildApiNames =
+        {
+            "coreai_world_spawn",
+            "coreai_world_change",
+            "coreai_world_destroy",
+            "coreai_world_load_scene",
+            "coreai_world_reload_scene",
+            "coreai_world_set_active",
+            "coreai_world_set_color",
+            "coreai_world_spawn_batch",
+            "coreai_world_grid",
+            "coreai_world_begin",
+            "coreai_world_commit",
+            "coreai_world_rollback",
+            "coreai_world_play_animation",
+            "coreai_world_play_sound"
+        };
+
         private readonly IAiGameCommandSink _sink;
         private readonly HashSet<string> _allowedScenes;
 

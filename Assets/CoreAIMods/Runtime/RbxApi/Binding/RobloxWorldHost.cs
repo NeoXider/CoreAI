@@ -18,11 +18,23 @@ namespace CoreAI.Mods.Rbx.Binding
         [Tooltip("Meters per stud (D3, LOCKED default 0.28). Constant for the whole session.")]
         private float _metersPerStud = RobloxSpace.DefaultMetersPerStud;
 
+        [SerializeField]
+        [Tooltip("Camera driven by workspace.CurrentCamera / camera_set_cframe. Empty = Camera.main, " +
+                 "resolved once at Initialize.")]
+        private Camera _camera;
+
         public InstanceRegistry Registry { get; private set; }
 
         public RbxDataModel Game { get; private set; }
 
         public InstanceGameObjectBinder Binder { get; private set; }
+
+        /// <summary>Camera seam for the Lua surface; null when the scene has no camera at all.</summary>
+        public IRobloxCameraRig CameraRig { get; private set; }
+
+        /// <summary>Input seam behind game:GetService("UserInputService"); resolved once at
+        /// Initialize like the camera rig.</summary>
+        public IInputSource InputSource { get; private set; }
 
         public bool IsInitialized => Registry != null;
 
@@ -50,6 +62,13 @@ namespace CoreAI.Mods.Rbx.Binding
             Binder = new InstanceGameObjectBinder(transform);
             Registry = new InstanceRegistry(null, Binder);
             Game = DataModelBootstrap.CreateGame(Registry);
+            // WHY: the camera reference is resolved ONCE here at composition; Lua camera writes
+            // must never pay a scene search per call.
+            Camera sceneCamera = _camera != null ? _camera : Camera.main;
+            CameraRig = sceneCamera != null ? new UnityCameraRig(sceneCamera.transform, Binder) : null;
+            // TODO: com.unity.inputsystem may be removed — the source stays behind IInputSource so
+            // only this composition line changes when the backend is swapped.
+            InputSource = new UnityNewInputSource();
         }
 
         private void OnDestroy()
@@ -60,6 +79,8 @@ namespace CoreAI.Mods.Rbx.Binding
             Game = null;
             Registry = null;
             Binder = null;
+            CameraRig = null;
+            InputSource = null;
         }
     }
 }

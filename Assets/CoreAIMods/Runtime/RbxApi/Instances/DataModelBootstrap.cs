@@ -4,7 +4,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Builds the canonical MVP1 game tree: DataModel root (the scene root, D5 — its whole
     /// subtree mirrors into the backing hierarchy) with Workspace registered as the physical
     /// world root, plus the services so Roblox-shaped paths resolve (roadmap §5.1.3):
-    /// Lighting, ReplicatedStorage, ServerStorage, ServerScriptService, StarterPlayer.
+    /// Lighting, ReplicatedStorage, ServerStorage, ServerScriptService, StarterPlayer,
+    /// UserInputService.
     /// </summary>
     public static class DataModelBootstrap
     {
@@ -18,12 +19,14 @@ namespace CoreAI.Mods.Rbx.Instances
             RbxInstance workspace = registry.Create("Workspace");
             workspace.Parent = game;
             registry.SetWorldRoot(workspace);
+            EnsureCurrentCamera(registry, workspace);
 
             CreateService(registry, game, "Lighting");
             CreateService(registry, game, "ReplicatedStorage");
             CreateService(registry, game, "ServerStorage");
             CreateService(registry, game, "ServerScriptService");
             CreateService(registry, game, "StarterPlayer");
+            CreateService(registry, game, "UserInputService");
             return game;
         }
 
@@ -36,7 +39,29 @@ namespace CoreAI.Mods.Rbx.Instances
             if (workspace != null)
             {
                 registry.SetWorldRoot(workspace);
+                // WHY: snapshots taken before the camera slice have no Camera child; restoring
+                // them must still yield a resolvable workspace.CurrentCamera.
+                EnsureCurrentCamera(registry, workspace);
             }
+
+            // WHY: snapshots taken before the input slice have no UserInputService; restoring
+            // them must still yield a resolvable game:GetService("UserInputService").
+            if (game.FindFirstChildOfClass("UserInputService") == null)
+            {
+                CreateService(registry, game, "UserInputService");
+            }
+        }
+
+        /// <summary>The canonical Camera child workspace.CurrentCamera resolves to.</summary>
+        private static void EnsureCurrentCamera(InstanceRegistry registry, RbxInstance workspace)
+        {
+            if (workspace.FindFirstChildOfClass("Camera") != null)
+            {
+                return;
+            }
+
+            RbxInstance camera = registry.Create("Camera");
+            camera.Parent = workspace;
         }
 
         private static void CreateService(InstanceRegistry registry, RbxDataModel game,

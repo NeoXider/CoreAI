@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using Lua;
@@ -28,6 +29,8 @@ namespace CoreAI.Ai.LuaCs
         private static readonly LuaTable EnumItemMeta = BuildEnumItemMeta();
         private static readonly LuaTable EnumTypeMeta = BuildEnumTypeMeta();
         private static readonly LuaTable SignalMeta = BuildSignalMeta();
+        private static readonly LuaTable ConnectionMeta = BuildConnectionMeta();
+        private static readonly LuaTable InputObjectMeta = BuildInputObjectMeta();
 
         // WHY: enum types/items are interned by the registry; interning the wrappers as well makes
         // raw identity (rawequal) match Roblox in addition to the __eq metamethod.
@@ -50,6 +53,10 @@ namespace CoreAI.Ai.LuaCs
         public static LuaValue Wrap(RbxRandom value) => Box(value, RandomMeta);
 
         public static LuaValue Wrap(RbxScriptSignal value) => Box(value, SignalMeta);
+
+        public static LuaValue Wrap(RbxScriptConnection value) => Box(value, ConnectionMeta);
+
+        public static LuaValue Wrap(RbxInputObject value) => Box(value, InputObjectMeta);
 
         public static LuaValue Wrap(RbxEnumItem item)
         {
@@ -886,7 +893,12 @@ namespace CoreAI.Ai.LuaCs
                 "pass Enum.RotationOrder.XYZ (or another order) at argument " + (index + 1));
         }
 
-        // ---- Signals (inert MVP1 stubs) -----------------------------------------------------
+        // ---- Signals (dispatch-enabled input signals; MVP2 stubs elsewhere) ------------------
+
+        /// <summary>Budget for one synchronous signal-handler call (mirrors the logic-slot
+        /// guard: a broken handler must never stall the frame).</summary>
+        private static readonly CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard SignalHandlerGuard =
+            new(200, 200_000, CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
 
         private static LuaTable BuildSignalMeta()
         {
@@ -897,20 +909,15 @@ namespace CoreAI.Ai.LuaCs
                 string key = ReadString(ctx, 1, "RBXScriptSignal member access");
                 switch (key)
                 {
-                    // WHY: the C# signal methods are themselves the MVP2 loud stubs — calling any
-                    // of these surfaces "signals land in MVP2 (scheduler)" with the exact phase.
+                    // WHY: on non-dispatch signals the C# methods are themselves the MVP2 loud
+                    // stubs — calling them surfaces "signals land in MVP2 (scheduler)" with the
+                    // exact phase; dispatch-enabled signals (UserInputService) connect for real.
                     case "Connect":
                         return new LuaValue(Fn("RBXScriptSignal.Connect", inner =>
-                        {
-                            ReadSignal(inner, 0).Connect(Arg(inner, 1));
-                            return LuaValue.Nil;
-                        }));
+                            ConnectSignal(inner, once: false)));
                     case "Once":
                         return new LuaValue(Fn("RBXScriptSignal.Once", inner =>
-                        {
-                            ReadSignal(inner, 0).Once(Arg(inner, 1));
-                            return LuaValue.Nil;
-                        }));
+                            ConnectSignal(inner, once: true)));
                     case "Wait":
                         return new LuaValue(Fn("RBXScriptSignal.Wait", inner =>
                         {
@@ -928,6 +935,90 @@ namespace CoreAI.Ai.LuaCs
             return Lock(meta);
         }
 
+        private static LuaValue ConnectSignal(LuaFunctionExecutionContext ctx, bool once)
+        {
+            RbxScriptSignal signal = ReadSignal(ctx, 0);
+            string member = once ? "Once" : "Connect";
+            if (!signal.SupportsDispatch)
+            {
+                // WHY: the engine-free signal raises the MVP2 stub itself, keeping the phase text
+                // in one place.
+                if (once)
+                {
+                    signal.Once(Arg(ctx, 1));
+                }
+                else
+                {
+                    signal.Connect(Arg(ctx, 1));
+                }
+
+                return LuaValue.Nil;
+            }
+
+            LuaValue handlerValue = Arg(ctx, 1);
+            if (handlerValue.Type != LuaValueType.Function)
+            {
+                throw RbxError.BadArgument(
+                    signal.SignalName + ":" + member + " expects a function at argument 1",
+                    "pass a handler function, got " + Describe(handlerValue) + " at argument 1");
+            }
+
+            Action<object[]> wrapper =
+                BuildSignalHandler(ctx.State, handlerValue.Read<LuaFunction>(), signal.SignalName);
+            RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
+            return Wrap(connection);
+        }
+
+        /// <summary>
+        /// Wraps a Lua handler into the engine-free <c>Action&lt;object[]&gt;</c> the signal
+        /// stores: marshals fired args, runs the call under the signal budget, and contains
+        /// failures so one broken handler never breaks the input pump or its sibling connections.
+        /// </summary>
+        // TODO: MVP2 — the scheduler replaces this direct call with deferred dispatch and
+        // attributes handler errors to the owning mod's quarantine streak.
+        private static Action<object[]> BuildSignalHandler(LuaState state, LuaFunction handler,
+            string signalName)
+        {
+            return args =>
+            {
+                try
+                {
+                    LuaValue[] luaArgs = new LuaValue[args.Length];
+                    for (int i = 0; i < args.Length; i++)
+                    {
+                        luaArgs[i] = MarshalSignalArg(args[i]);
+                    }
+
+                    SignalHandlerGuard.Execute(state, handler, CancellationToken.None, luaArgs);
+                }
+                catch (Exception ex)
+                {
+                    CoreAI.Logging.Log.Instance.Error(
+                        "[RobloxApi] " + signalName + " handler failed: " + ex.Message);
+                }
+            };
+        }
+
+        /// <summary>Marshals one fired signal argument to Lua (the input events carry
+        /// InputObject + bool today; the datatype set covers the near-term signal corpus).</summary>
+        private static LuaValue MarshalSignalArg(object arg)
+        {
+            switch (arg)
+            {
+                case null: return LuaValue.Nil;
+                case bool b: return b;
+                case double d: return d;
+                case float f: return f;
+                case int i: return i;
+                case string s: return s;
+                case RbxInputObject input: return Wrap(input);
+                case RbxEnumItem item: return Wrap(item);
+                case RbxVector3 v3: return Wrap(v3);
+                case RbxVector2 v2: return Wrap(v2);
+                default: return LuaValue.Nil;
+            }
+        }
+
         private static RbxScriptSignal ReadSignal(LuaFunctionExecutionContext ctx, int index)
         {
             if (TryUnbox(Arg(ctx, index), out RbxScriptSignal signal))
@@ -938,6 +1029,89 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 "signal method expects an RBXScriptSignal as self",
                 "call signal methods with a colon, e.g. part.ChildAdded:Connect(fn)");
+        }
+
+        // ---- RBXScriptConnection -------------------------------------------------------------
+
+        private static LuaTable BuildConnectionMeta()
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("RBXScriptConnection.__index", ctx =>
+            {
+                RbxScriptConnection self = ReadConnection(ctx, 0);
+                string key = ReadString(ctx, 1, "RBXScriptConnection member access");
+                switch (key)
+                {
+                    case "Connected": return self.Connected;
+                    case "Disconnect":
+                        return new LuaValue(Fn("RBXScriptConnection.Disconnect", inner =>
+                        {
+                            ReadConnection(inner, 0).Disconnect();
+                            return LuaValue.Nil;
+                        }));
+                    default:
+                        throw NotAMember(key, "RBXScriptConnection");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("RBXScriptConnection.__newindex",
+                _ => throw ReadOnlyMember("RBXScriptConnection"));
+            meta[Metamethods.ToString] = Fn("RBXScriptConnection.__tostring", _ => "Connection");
+            return Lock(meta);
+        }
+
+        private static RbxScriptConnection ReadConnection(LuaFunctionExecutionContext ctx, int index)
+        {
+            if (TryUnbox(Arg(ctx, index), out RbxScriptConnection connection))
+            {
+                return connection;
+            }
+
+            throw RbxError.BadArgument(
+                "connection method expects an RBXScriptConnection as self",
+                "call connection methods with a colon, e.g. connection:Disconnect()");
+        }
+
+        // ---- InputObject ---------------------------------------------------------------------
+
+        private static LuaTable BuildInputObjectMeta()
+        {
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("InputObject.__index", ctx =>
+            {
+                RbxInputObject self = ReadInputObject(ctx, 0);
+                string key = ReadString(ctx, 1, "InputObject member access");
+                switch (key)
+                {
+                    case "KeyCode": return WrapOrNil(self.KeyCode);
+                    case "UserInputType": return WrapOrNil(self.UserInputType);
+                    case "UserInputState": return WrapOrNil(self.UserInputState);
+                    case "Position": return Wrap(self.Position);
+                    case "Delta": return Wrap(self.Delta);
+                    default:
+                        throw NotAMember(key, "InputObject");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("InputObject.__newindex",
+                _ => throw ReadOnlyMember("InputObject"));
+            meta[Metamethods.ToString] = Fn("InputObject.__tostring", _ => "InputObject");
+            return Lock(meta);
+        }
+
+        private static LuaValue WrapOrNil(RbxEnumItem item)
+        {
+            return item != null ? Wrap(item) : LuaValue.Nil;
+        }
+
+        private static RbxInputObject ReadInputObject(LuaFunctionExecutionContext ctx, int index)
+        {
+            if (TryUnbox(Arg(ctx, index), out RbxInputObject input))
+            {
+                return input;
+            }
+
+            throw RbxError.BadArgument(
+                "InputObject member access expects an InputObject as self",
+                "read fields off the InputObject the input signal passed to your handler");
         }
 
         // ---- Shared errors ------------------------------------------------------------------

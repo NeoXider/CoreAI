@@ -20,7 +20,12 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class AiOrchestrator : IAiOrchestrationService
     {
-        /// <summary>Used when <see cref="ICoreAISettings.EnableConversationHistorySummarization"/> is false so the full transcript stays in the MEAI tail.</summary>
+        /// <summary>
+        /// Legacy sentinel for "no history cap". The orchestrator no longer uses it: even with
+        /// <see cref="ICoreAISettings.EnableConversationHistorySummarization"/> off the recent tail is
+        /// bounded by the policy-computed history budget so long sessions stop growing per-request.
+        /// Kept for diagnostics mirrors (see AgentSessionInspector).
+        /// </summary>
         internal const int UnlimitedHistoryTokenBudget = 2_000_000;
 
         private readonly IAuthorityHost _authority;
@@ -149,20 +154,21 @@ namespace CoreAI.Ai
                     ContextRetryLevel = contextRetryPass
                 };
                 budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                // WHY: Disabling summarization used to switch to an effectively unlimited tail
+                // (UnlimitedHistoryTokenBudget), so every request re-sent the whole transcript and
+                // long sessions got progressively slower until the context window overflowed. The
+                // recent tail is now always bounded by the endpoint-derived policy budget (rolling
+                // truncation drops the oldest turns); summarization off only skips summary generation.
                 int historyBudget = budget.HistoryTokenBudget;
-                if (!_settings.EnableConversationHistorySummarization)
-                {
-                    historyBudget = UnlimitedHistoryTokenBudget;
-                }
-                else if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
+                if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
                 {
                     historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
                 }
 
                 // WHY: On a context-overflow retry pass the policy budget is progressively shrunk
-                // (0.75^retryLevel). The unlimited and fixed-override branches above ignore that shrink,
-                // so without this clamp a retry would rebuild a byte-identical oversized request that
-                // overflows again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
+                // (0.75^retryLevel). The fixed-override branch above ignores that shrink, so without
+                // this clamp a retry would rebuild a byte-identical oversized request that overflows
+                // again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
                 // policy budget makes each retry actually reduce the prompt — also with summarization
                 // disabled, where the retry drops the oldest turns without generating a summary.
                 if (contextRetryPass > 0)
@@ -1012,8 +1018,9 @@ namespace CoreAI.Ai
             if (!_settings.EnableConversationHistorySummarization)
             {
                 // WHY: Summarization off only skips summary generation; roadmap §7 pruning and the
-                // overflow-retry budget clamp must still apply, otherwise pruning silently stops working
-                // and overflow retries rebuild the byte-identical oversized request.
+                // rolling history token budget must still apply, otherwise pruning silently stops
+                // working and the tail grows with session length (progressive per-request latency,
+                // eventual context overflow).
                 ChatMessage[] retained = history;
                 if (buildArgs != null && buildArgs.EnableContextPruning)
                 {

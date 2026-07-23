@@ -91,7 +91,8 @@ namespace CoreAI.Composition
                 {
                     rbxHost.Initialize();
                     robloxApi = new LuaCsRobloxApiBindings(
-                        rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder);
+                        rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
+                        cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource);
                 }
                 else
                 {
@@ -161,7 +162,9 @@ namespace CoreAI.Composition
 
                     if (Application.isPlaying)
                     {
-                        LuaCsModRuntime runtime = container.Resolve<LuaCsModStack>().Runtime;
+                        LuaCsModStack stack = container.Resolve<LuaCsModStack>();
+                        LuaCsModRuntime runtime = stack.Runtime;
+                        LuaCsRobloxApiBindings stackRobloxApi = stack.GameplayBindings.RobloxApi;
 
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
                         tickerHolder[0] = tickerGo;
@@ -189,7 +192,10 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                            tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(runtime);
+                            // WHY: the input pump runs as the driver's pre-tick so UserInputService
+                            // events are fired before mod dispatch each frame.
+                            tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
+                                runtime, stackRobloxApi != null ? stackRobloxApi.PumpInput : (System.Action)null);
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate

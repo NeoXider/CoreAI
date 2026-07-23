@@ -4,12 +4,15 @@ namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
     /// The MVP1 Part rendering surface (ROBLOX_API_ROADMAP.md §5.1.3) as one value bundle:
-    /// CFrame/Size/Color/Anchored/Transparency/CanCollide. Engine-free by design so the Lua
+    /// Shape/CFrame/Size/Color/Anchored/Transparency/CanCollide. Engine-free by design so the Lua
     /// bindings layer can build and push it without touching UnityEngine types; the binder is
     /// the only consumer that converts it (through RobloxSpace, D2).
     /// </summary>
     public struct PartProperties
     {
+        /// <summary>Part.Shape (Enum.PartType); the binder picks the matching primitive.</summary>
+        public RbxPartShape Shape;
+
         /// <summary>World-space CFrame in Roblox coordinates (right-handed, studs).</summary>
         public RbxCFrame CFrame;
 
@@ -35,9 +38,10 @@ namespace CoreAI.Mods.Rbx.Binding
             set => CFrame = RbxCFrame.FromPosition(value) * CFrame.Rotation;
         }
 
-        /// <summary>Roblox Part defaults: 4x1x2 studs, medium stone grey, opaque, collidable.</summary>
+        /// <summary>Roblox Part defaults: Block, 4x1x2 studs, medium stone grey, opaque, collidable.</summary>
         public static PartProperties CreateDefault() => new PartProperties
         {
+            Shape = RbxPartShape.Block,
             CFrame = RbxCFrame.Identity,
             Size = new RbxVector3(4f, 1f, 2f),
             Color = RbxColor3.FromRGB(163f, 162f, 165f),

@@ -1,5 +1,60 @@
 # Changelog
 
+## [6.3.0] - 2026-07-23
+
+MVP1 "Roblox API" completion — a mod can now build, query, clone and destroy an instance tree,
+read keyboard/mouse input, drive the camera, and pick a Part shape, all through the Roblox-1:1 Lua
+surface. Plus the reasoning/think-block streaming fix and a per-frame allocation pass.
+
+### Added
+
+- **UserInputService (Roblox 1:1)** — `game:GetService("UserInputService")` (and a `UserInputService`
+  global aliasing the same instance): `InputBegan`/`InputEnded`/`InputChanged` firing
+  `(InputObject, gameProcessedEvent)` with a real `RBXScriptConnection` (`.Connected`/`:Disconnect()`,
+  `:Once`), the poll surface (`IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`, `MouseBehavior`), and
+  `Enum.KeyCode`/`UserInputType`/`UserInputState`/`MouseBehavior` with exact Roblox names+values. Input
+  reads open at the Read tier. Backed by a swappable `IInputSource` seam (Unity New Input System backend,
+  headless in-memory backend for tests); pumped once per frame by the tick driver before mod dispatch.
+- **`workspace.CurrentCamera`** — a real Camera instance with `CFrame`/`CameraType` (`Enum.CameraType`)/
+  `CameraSubject`, over a swappable camera-rig seam; plus `camera_set_cframe`/`camera_follow` convenience
+  globals. Reads ungated, writes WorldEdit-gated. (Pulled forward for mini-game controls.)
+- **`Part.Shape`** (`Enum.PartType`) — `Ball` (unit sphere), `Cylinder` (axis-corrected mesh child),
+  `Wedge` (custom normalized 1-unit=1-stud ramp mesh + convex collider); `CornerWedge` is accepted but
+  draws as a Block until its mesh lands.
+- **Rbx skill** (`read_skill("Rbx API")`) now documents input, camera and Shape, with a keyboard-driven
+  mini-game example; the `Resources/AgentSkills/RbxApi` override stays byte-identical (pinned test).
+
+### Fixed
+
+- **Reasoning / think-block streaming**: `MeaiOpenAiChatClient` now surfaces `reasoning_content` /
+  `reasoning` deltas as reasoning content (and promotes reasoning to visible content when a model emits
+  no plain content), so reasoning-only models (e.g. qwen3.5-4b) no longer return empty responses. The
+  raw C# SSE parser change also flows to the WebGL fetch transport.
+- **Token budget**: `RoutingLlmClient` estimates usage when the server returns none, so the Token Budget
+  Hub page and statistics populate instead of reading zero.
+- **Long sessions**: history budget no longer collapses to an unlimited branch
+  (`AiOrchestrator`/`AgentSessionInspector`), so summarization/budgeting stays in effect.
+- **`Instance:Clone()`** now deep-copies BasePart part-sink state (Size/CFrame/Color/Anchored/Shape) onto
+  the clone's fresh id, instead of resetting the copy to Part defaults.
+- **FullAccessDemo invisible spawns**: `RobloxWorldHost` is wired into the mods lifetime scope.
+- **Recursive `FindFirstChild`/`FindFirstChildWhichIsA`** now search depth-first (Roblox parity), not
+  level-order.
+- **`GetKeysPressed()`** returns keyboard keys only (gamepad buttons excluded); per-frame input events
+  fire in device order.
+- **Part appearance/collision** target the part's own visual — a Cylinder shape switch on a part that
+  already has nested child parts no longer recolors/toggles the wrong object.
+- **Hub AI Settings**: placeholder-over-text fix + Advanced foldout; temperature override defaults off.
+
+### Performance
+
+- **Binder**: each Part property setter re-applies only its own aspect (a per-frame `CFrame`/`Size` write
+  skips the full re-materialization); Renderer/Collider/Rigidbody refs and the `MaterialPropertyBlock`
+  are cached on the binding entry; the cube/sphere meshes and default material are cached once instead of
+  a `CreatePrimitive`-plus-destroy GameObject per part.
+- **`RbxScriptSignal.Fire`**: reuses the fire-snapshot buffer instead of a per-event `ToArray` copy;
+  the input signals pass a cached boxed `false` for `gameProcessedEvent`, so no bool is boxed per event.
+- **`RbxCFrame`**: multiply and equality read the struct's fields directly — no per-op `float[12]`.
+
 ## [6.2.1] - 2026-07-23
 
 ### Fixed

@@ -28,6 +28,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxInstance _workspace;
         private readonly RbxEnumRegistry _enums;
         private readonly IPartPropertySink _partSink;
+        private readonly IRobloxCameraRig _cameraRig;
+        private readonly RbxUserInputService _userInputService;
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
 
@@ -38,9 +40,16 @@ namespace CoreAI.Ai.LuaCs
         /// Roblox-space <see cref="PartProperties"/> the Lua layer reads back; pass the live
         /// <see cref="InstanceGameObjectBinder"/> (which is both binder and sink) to materialize
         /// parts as GameObjects, or omit it for the headless in-memory default.
+        /// <paramref name="cameraRig"/> backs workspace.CurrentCamera and the camera_* globals;
+        /// pass the host's <see cref="UnityCameraRig"/> to drive the real camera, or omit it for
+        /// the headless in-memory default.
+        /// <paramref name="inputSource"/> backs game:GetService("UserInputService"); pass the
+        /// host's <see cref="UnityNewInputSource"/> to read real devices, or omit it for the
+        /// headless in-memory default (tests drive it directly).
         /// </summary>
         public LuaCsRobloxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
-            RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null)
+            RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
+            IRobloxCameraRig cameraRig = null, IInputSource inputSource = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _game = game ?? DataModelBootstrap.CreateGame(_registry);
@@ -49,7 +58,30 @@ namespace CoreAI.Ai.LuaCs
                              "the game tree has no Workspace child", nameof(game));
             _enums = enums ?? RbxEnumRegistry.CreateWithBuiltins();
             _partSink = partSink ?? new InMemoryPartPropertySink();
+            _cameraRig = cameraRig ?? new InMemoryCameraRig();
             _log = log;
+            // WHY: worlds bootstrapped before the input slice (older snapshots / external trees)
+            // may lack the service; creating it here keeps game:GetService("UserInputService")
+            // resolvable for every world this bindings instance fronts.
+            _userInputService = _game.FindFirstChildOfClass("UserInputService") as RbxUserInputService;
+            if (_userInputService == null
+                && _registry.Catalog.TryGet("UserInputService", out _))
+            {
+                _userInputService = (RbxUserInputService)_registry.Create("UserInputService");
+                _userInputService.Parent = _game;
+            }
+
+            if (_userInputService != null)
+            {
+                _userInputService.AttachEnums(_enums);
+                _userInputService.AttachInputSource(inputSource);
+            }
+            // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
+            if (_enums.TryGet("CameraType", out RbxEnum cameraType)
+                && cameraType.TryGetItem("Custom", out RbxEnumItem custom))
+            {
+                CameraTypeItem = custom;
+            }
         }
 
         /// <summary>The shared instance world every registered script operates on.</summary>
@@ -63,6 +95,51 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Sink that stores BasePart spatial/appearance state the Lua layer reads and writes.</summary>
         public IPartPropertySink PartSink => _partSink;
+
+        /// <summary>Camera seam behind workspace.CurrentCamera and the camera_* globals.</summary>
+        public IRobloxCameraRig CameraRig => _cameraRig;
+
+        /// <summary>The shared UserInputService instance (input signals + poll surface).</summary>
+        public RbxUserInputService UserInputService => _userInputService;
+
+        /// <summary>
+        /// Per-frame input pump: polls the input source, diffs, and fires
+        /// InputBegan/InputEnded/InputChanged. The host composition calls this once per frame
+        /// BEFORE the mod runtime tick so handlers observe this frame's events.
+        /// </summary>
+        // TODO: MVP2 — the general signal scheduler replaces this pump.
+        public void PumpInput()
+        {
+            _userInputService?.Step();
+        }
+
+        /// <summary>Camera.CameraType value shared by every script of this world (state only —
+        /// no behavior is derived from it yet; following is driven by <see cref="CameraSubject"/>).</summary>
+        internal RbxEnumItem CameraTypeItem { get; set; }
+
+        /// <summary>Camera.CameraSubject; non-null while the rig follows it.</summary>
+        internal RbxInstance CameraSubject { get; private set; }
+
+        /// <summary>Shared write path for Camera.CameraSubject and camera_follow: nil stops the
+        /// follow, an instance must have a backing object in the world to be followed.</summary>
+        internal void SetCameraSubject(RbxInstance subject)
+        {
+            if (subject == null)
+            {
+                CameraSubject = null;
+                _cameraRig.StopFollowing();
+                return;
+            }
+
+            if (!_cameraRig.Follow(subject.Id))
+            {
+                throw RbxError.BadArgument(
+                    "camera follow target \"" + subject.GetFullName() + "\" has no backing object",
+                    "parent the instance under Workspace before following it");
+            }
+
+            CameraSubject = subject;
+        }
 
         /// <summary>
         /// Registers the Roblox surface on one script registry at the given capability tier.
@@ -113,12 +190,63 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("Enum", () => LuaCsRobloxDatatypeBindings.BuildEnumGlobal(_enums));
             luaRegistry.RegisterValue("game", () => context.WrapInstance(_game));
             luaRegistry.RegisterValue("workspace", () => context.WrapInstance(_workspace));
+            // WHY: input reads are open at the Read tier (observing input mutates nothing); the
+            // global aliases the same instance game:GetService("UserInputService") resolves.
+            if (_userInputService != null)
+            {
+                luaRegistry.RegisterValue("UserInputService",
+                    () => context.WrapInstance(_userInputService));
+            }
             luaRegistry.RegisterValue("task", () => BuildTaskGlobal(context));
+            // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
+            // capability message instead of "attempt to call a nil value".
+            luaRegistry.RegisterValue("camera_set_cframe",
+                () => new LuaValue(BuildCameraSetCFrame(context)));
+            luaRegistry.RegisterValue("camera_follow",
+                () => new LuaValue(BuildCameraFollow(context)));
 
             if (context.CanWorldEdit)
             {
                 luaRegistry.RegisterValue("Instance", () => BuildInstanceGlobal(context));
             }
+        }
+
+        // ---- camera_* convenience globals ---------------------------------------------------
+
+        private LuaFunction BuildCameraSetCFrame(LuaCsRobloxModContext context)
+        {
+            return Fn("camera_set_cframe", ctx =>
+            {
+                context.RequireWorldEdit("camera_set_cframe");
+                RbxCFrame cframe = ReadCFrame(ctx, 0, "camera_set_cframe");
+                _cameraRig.SetCFrame(cframe);
+                return LuaValue.Nil;
+            });
+        }
+
+        private LuaFunction BuildCameraFollow(LuaCsRobloxModContext context)
+        {
+            return Fn("camera_follow", ctx =>
+            {
+                context.RequireWorldEdit("camera_follow");
+                LuaValue target = Arg(ctx, 0);
+                if (target.Type == LuaValueType.Nil)
+                {
+                    SetCameraSubject(null);
+                    return LuaValue.Nil;
+                }
+
+                if (!TryGetInstance(target, out LuaCsRobloxInstanceProxy proxy))
+                {
+                    throw RbxError.BadArgument(
+                        "camera_follow expects an Instance or nil at argument 1",
+                        "pass a world instance to follow (or nil to stop), got "
+                        + Describe(target) + " at argument 1");
+                }
+
+                SetCameraSubject(proxy.Instance);
+                return LuaValue.Nil;
+            });
         }
 
         // ---- Instance.new -------------------------------------------------------------------

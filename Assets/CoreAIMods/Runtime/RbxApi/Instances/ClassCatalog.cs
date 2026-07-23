@@ -113,6 +113,11 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("Workspace", "WorldRoot", false, false, true));
             catalog.Register(new ClassDescriptor("BasePart", "PVInstance", true, false, false));
             catalog.Register(new ClassDescriptor("Part", "BasePart", false, true, false));
+            // WHY: one canonical Camera per world (bootstrap creates it under Workspace and the
+            // Lua layer routes its CFrame to the camera rig), so scripted creation stays off.
+            // TODO: MVP-later — creatable Cameras with per-instance state once multiple
+            // viewports/cameras are meaningful.
+            catalog.Register(new ClassDescriptor("Camera", "Instance", false, false, false));
             catalog.Register(new ClassDescriptor("ServiceProvider", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("DataModel", "ServiceProvider", false, false, false,
                 descriptor => new RbxDataModel(descriptor)));
@@ -123,6 +128,10 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("ServerStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerScriptService", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("StarterPlayer", "Instance", false, false, true));
+            // WHY: pulled forward from MVP10 for MVP1 mini-game controls (TODO.md pending note);
+            // behavior class carries the input signals + poll surface over the IInputSource seam.
+            catalog.Register(new ClassDescriptor("UserInputService", "Instance", false, false, true,
+                descriptor => new RbxUserInputService(descriptor)));
             return catalog;
         }
     }

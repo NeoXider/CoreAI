@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: LiveMechanicsChatConfig
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Chat.CoreAiChatConfig
   _roleId: Programmer
-  _headerTitle: Game Master AI (Programmer)
+  _headerTitle: Game Master AI
   _welcomeMessage: 'Ask me to create or change game mechanics. I write Lua live:
     damage_formula, attack_interval, loot_formula, spawns...'
   _loadPersistedChatOnStartup: 0

@@ -428,19 +428,16 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         public static RbxCFrame operator *(RbxCFrame a, RbxCFrame b)
         {
-            float[] c = a.GetComponents();
-            float[] d = b.GetComponents();
-            // WHY: GetComponents layout is [x y z r00 r01 r02 r10 r11 r12 r20 r21 r22], so the
-            // rotation block starts at index 3 — the indices below multiply the two 3x3 matrices.
-            float r00 = c[3] * d[3] + c[4] * d[6] + c[5] * d[9];
-            float r01 = c[3] * d[4] + c[4] * d[7] + c[5] * d[10];
-            float r02 = c[3] * d[5] + c[4] * d[8] + c[5] * d[11];
-            float r10 = c[6] * d[3] + c[7] * d[6] + c[8] * d[9];
-            float r11 = c[6] * d[4] + c[7] * d[7] + c[8] * d[10];
-            float r12 = c[6] * d[5] + c[7] * d[8] + c[8] * d[11];
-            float r20 = c[9] * d[3] + c[10] * d[6] + c[11] * d[9];
-            float r21 = c[9] * d[4] + c[10] * d[7] + c[11] * d[10];
-            float r22 = c[9] * d[5] + c[10] * d[8] + c[11] * d[11];
+            // WHY: fields are read directly to avoid the per-op float[12] alloc of GetComponents().
+            float r00 = a._r00 * b._r00 + a._r01 * b._r10 + a._r02 * b._r20;
+            float r01 = a._r00 * b._r01 + a._r01 * b._r11 + a._r02 * b._r21;
+            float r02 = a._r00 * b._r02 + a._r01 * b._r12 + a._r02 * b._r22;
+            float r10 = a._r10 * b._r00 + a._r11 * b._r10 + a._r12 * b._r20;
+            float r11 = a._r10 * b._r01 + a._r11 * b._r11 + a._r12 * b._r21;
+            float r12 = a._r10 * b._r02 + a._r11 * b._r12 + a._r12 * b._r22;
+            float r20 = a._r20 * b._r00 + a._r21 * b._r10 + a._r22 * b._r20;
+            float r21 = a._r20 * b._r01 + a._r21 * b._r11 + a._r22 * b._r21;
+            float r22 = a._r20 * b._r02 + a._r21 * b._r12 + a._r22 * b._r22;
             RbxVector3 pos = a.PointToWorldSpace(b.Position);
             return new RbxCFrame(pos.X, pos.Y, pos.Z, r00, r01, r02, r10, r11, r12, r20, r21, r22);
         }
@@ -460,17 +457,11 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         public bool Equals(RbxCFrame other)
         {
-            float[] a = GetComponents();
-            float[] b = other.GetComponents();
-            for (int i = 0; i < a.Length; i++)
-            {
-                if (a[i] != b[i])
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            // WHY: fields are compared directly to avoid the per-op float[12] alloc of GetComponents().
+            return _x == other._x && _y == other._y && _z == other._z &&
+                   _r00 == other._r00 && _r01 == other._r01 && _r02 == other._r02 &&
+                   _r10 == other._r10 && _r11 == other._r11 && _r12 == other._r12 &&
+                   _r20 == other._r20 && _r21 == other._r21 && _r22 == other._r22;
         }
 
         public override bool Equals(object obj) => obj is RbxCFrame cf && Equals(cf);

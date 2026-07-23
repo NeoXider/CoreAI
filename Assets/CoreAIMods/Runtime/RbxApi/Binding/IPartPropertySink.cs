@@ -28,6 +28,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         void SetCanCollide(InstanceId id, bool canCollide);
 
+        /// <summary>Sets Part.Shape (Enum.PartType); the binder swaps the backing primitive.</summary>
+        void SetShape(InstanceId id, RbxPartShape shape);
+
         /// <summary>Full-state push (bulk restore / Instance.new initialization).</summary>
         void SetPartProperties(InstanceId id, in PartProperties properties);
 

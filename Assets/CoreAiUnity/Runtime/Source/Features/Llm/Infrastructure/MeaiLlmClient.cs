@@ -227,6 +227,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             text = SanitizeAssistantVisibleText(text, request);
+            string reasoningText = ConcatenateAssistantReasoningText(response);
 
             if (string.IsNullOrEmpty(text))
             {
@@ -241,12 +242,19 @@ namespace CoreAI.Infrastructure.Llm
                     Ok = false,
                     Error = "Empty response from LLM",
                     ErrorCode = LlmErrorCode.EmptyResponse,
+                    ReasoningContent = reasoningText,
                     Model = ResolveModelName(),
                     ExecutedToolCalls = functionClient.LastExecutedToolCalls
                 };
             }
 
-            LlmCompletionResult result = new() { Ok = true, Content = text, Model = ResolveModelName() };
+            LlmCompletionResult result = new()
+            {
+                Ok = true,
+                Content = text,
+                ReasoningContent = reasoningText,
+                Model = ResolveModelName()
+            };
             if (response.Usage != null)
             {
                 result.PromptTokens = (int)(response.Usage.InputTokenCount ?? 0);
@@ -663,6 +671,11 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 ThinkBlockStreamFilter thinkFilter = new();
+                // WHY: The filter suppresses inline <think> spans synchronously inside ProcessChunk;
+                // buffering them here lets the iterator re-emit each span as a ReasoningText chunk
+                // right after the call (an iterator cannot yield from inside a callback).
+                List<string> pendingInlineReasoning = new();
+                thinkFilter.ReasoningSink = pendingInlineReasoning.Add;
                 List<string> visibleChunks = new();
                 System.Text.StringBuilder iterationVisible = new();
                 System.Text.StringBuilder rawIterationText = new();
@@ -869,6 +882,14 @@ namespace CoreAI.Infrastructure.Llm
                                         "Native tool call arrived but no MEAI AIFunction is bound for this role; call not executed.");
                                 }
                             }
+                            else if (content is MEAI.TextReasoningContent reasoningContent &&
+                                     !string.IsNullOrEmpty(reasoningContent.Text))
+                            {
+                                // WHY: Provider-side reasoning (delta.reasoning_content) surfaces on a
+                                // dedicated chunk field so the UI can render a collapsible thinking
+                                // section; it never joins Text, keeping the visible answer clean.
+                                yield return new LlmStreamChunk { ReasoningText = reasoningContent.Text };
+                            }
                             else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
                             {
                                 // Providers report usage once per roundtrip (final SSE chunk with
@@ -907,6 +928,16 @@ namespace CoreAI.Infrastructure.Llm
 
                     rawIterationText.Append(raw);
                     string visible = thinkFilter.ProcessChunk(raw);
+                    if (pendingInlineReasoning.Count > 0)
+                    {
+                        foreach (string inlineReasoning in pendingInlineReasoning)
+                        {
+                            yield return new LlmStreamChunk { ReasoningText = inlineReasoning };
+                        }
+
+                        pendingInlineReasoning.Clear();
+                    }
+
                     if (string.IsNullOrEmpty(visible))
                     {
                         continue;
@@ -956,6 +987,16 @@ namespace CoreAI.Infrastructure.Llm
                 cancellationToken.ThrowIfCancellationRequested();
 
                 string tail = thinkFilter.Flush();
+                if (pendingInlineReasoning.Count > 0)
+                {
+                    foreach (string inlineReasoning in pendingInlineReasoning)
+                    {
+                        yield return new LlmStreamChunk { ReasoningText = inlineReasoning };
+                    }
+
+                    pendingInlineReasoning.Clear();
+                }
+
                 if (!string.IsNullOrEmpty(tail))
                 {
                     iterationVisible.Append(tail);
@@ -1615,6 +1656,39 @@ namespace CoreAI.Infrastructure.Llm
         /// OpenAI-style streaming usually fills <see cref="MEAI.ChatResponseUpdate.Text"/>; some stacks only append
         /// <see cref="MEAI.TextContent"/> to <see cref="MEAI.ChatResponseUpdate.Contents"/>.
         /// </summary>
+        /// <summary>
+        /// Concatenates every <see cref="MEAI.TextReasoningContent"/> the provider surfaced on the
+        /// response (DeepSeek/Qwen <c>reasoning_content</c> and stripped inline <c>&lt;think&gt;</c>
+        /// blocks) so <see cref="LlmCompletionResult.ReasoningContent"/> can feed a UI thinking section.
+        /// </summary>
+        private static string ConcatenateAssistantReasoningText(MEAI.ChatResponse response)
+        {
+            if (response?.Messages == null || response.Messages.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            System.Text.StringBuilder sb = new();
+            foreach (MEAI.ChatMessage message in response.Messages)
+            {
+                if (message?.Contents == null)
+                {
+                    continue;
+                }
+
+                foreach (MEAI.AIContent content in message.Contents)
+                {
+                    if (content is MEAI.TextReasoningContent reasoning &&
+                        !string.IsNullOrEmpty(reasoning.Text))
+                    {
+                        sb.Append(reasoning.Text);
+                    }
+                }
+            }
+
+            return sb.ToString();
+        }
+
         private static string GetStreamingUpdateText(MEAI.ChatResponseUpdate update)
         {
             if (!string.IsNullOrEmpty(update.Text))

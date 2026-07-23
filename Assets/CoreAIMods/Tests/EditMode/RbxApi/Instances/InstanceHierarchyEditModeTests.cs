@@ -72,6 +72,41 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
         }
 
         [Test]
+        public void FindFirstChild_RecursiveIsDepthFirst()
+        {
+            // WHY: Roblox recursive FindFirstChild descends into each child before the next
+            // sibling, so a deep descendant of an earlier child beats a later direct child.
+            RbxInstance root = _registry.Create("Folder");
+            RbxInstance first = _registry.Create("Model");
+            RbxInstance deep = _registry.Create("Part");
+            RbxInstance shallow = _registry.Create("Part");
+            first.Name = "First";
+            deep.Name = "Target";
+            shallow.Name = "Target";
+            first.Parent = root;
+            deep.Parent = first;
+            shallow.Parent = root;
+
+            Assert.AreSame(deep, root.FindFirstChild("Target", true));
+            Assert.AreSame(shallow, root.FindFirstChild("Target"));
+        }
+
+        [Test]
+        public void FindFirstChildWhichIsA_RecursiveIsDepthFirst()
+        {
+            RbxInstance root = _registry.Create("Folder");
+            RbxInstance first = _registry.Create("Folder");
+            RbxInstance deep = _registry.Create("Part");
+            RbxInstance shallow = _registry.Create("Part");
+            first.Parent = root;
+            deep.Parent = first;
+            shallow.Parent = root;
+
+            Assert.AreSame(deep, root.FindFirstChildWhichIsA("BasePart", true));
+            Assert.AreSame(shallow, root.FindFirstChildWhichIsA("BasePart"));
+        }
+
+        [Test]
         public void FindFirstChildOfClassAndWhichIsA()
         {
             RbxInstance root = _registry.Create("Folder");

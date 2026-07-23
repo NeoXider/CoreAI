@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
@@ -131,10 +132,21 @@ namespace CoreAI.Ai.LuaCs
 
             // WHY: a composition may keep the WorldEdit capability (the Rbx surface needs it for
             // Instance.new) while withholding the low-level coreai_world_*/component build APIs.
-            if ((effective & LuaCapabilities.WorldEdit) != 0 && _registerWorldEditBuildBindings)
+            if ((effective & LuaCapabilities.WorldEdit) != 0)
             {
-                _world?.RegisterGameplayApis(registry);
-                _components?.RegisterGameplayApis(registry);
+                if (_registerWorldEditBuildBindings)
+                {
+                    _world?.RegisterGameplayApis(registry);
+                    _components?.RegisterGameplayApis(registry);
+                }
+                else
+                {
+                    // WHY: a bare "attempt to call a nil value" feeds the mod's error streak with no
+                    // hint the cause is composition; the stubs answer with an actionable error that
+                    // names the withheld surface and points at the Rbx alternative.
+                    RegisterWithheldStubs(registry, LuaCsWorldRuntimeBindings.BuildApiNames, WorldBuildStubError);
+                    RegisterWithheldStubs(registry, LuaCsComponentRuntimeBindings.BuildApiNames, WorldBuildStubError);
+                }
             }
 
             if ((effective & LuaCapabilities.Gameplay) != 0)
@@ -152,6 +164,43 @@ namespace CoreAI.Ai.LuaCs
             {
                 _full?.RegisterGameplayApis(registry);
             }
+            else
+            {
+                // WHY: same actionable-stub treatment for the opt-in Full tier — a mod declaring
+                // "capabilities: Full" under a host ceiling without Full would otherwise quarantine
+                // itself on nil-call errors that never mention the missing grant.
+                RegisterWithheldStubs(registry, LuaCsFullUnityRuntimeBindings.ApiNames, FullStubError);
+            }
+        }
+
+        /// <summary>
+        /// Registers a throwing stub for every withheld API name so a call raises a typed,
+        /// actionable <see cref="LuaApiWithheldException"/> instead of "attempt to call a nil value".
+        /// </summary>
+        private static void RegisterWithheldStubs(
+            IScriptFunctionRegistry registry,
+            IReadOnlyList<string> apiNames,
+            Func<string, Exception> errorFactory)
+        {
+            for (int i = 0; i < apiNames.Count; i++)
+            {
+                string name = apiNames[i];
+                registry.RegisterVarArgs(name, _ => throw errorFactory(name));
+            }
+        }
+
+        private static Exception WorldBuildStubError(string apiName)
+        {
+            return new LuaApiWithheldException(apiName, LuaCapabilities.WorldEdit,
+                apiName + " requires the WorldEdit build bindings, which are disabled for this mod; " +
+                "use the Rbx API instead (e.g. Instance.new('Part') to spawn, instance:Destroy() to remove).");
+        }
+
+        private static Exception FullStubError(string apiName)
+        {
+            return new LuaApiWithheldException(apiName, LuaCapabilities.Full,
+                apiName + " requires the Full capability, which was not granted to this mod; " +
+                "grant Full to this mod (host opt-in) to use the unity_* reflection APIs.");
         }
 
         public void ResetTransactions()

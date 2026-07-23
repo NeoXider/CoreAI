@@ -23,7 +23,8 @@ namespace CoreAI.Mods.Rbx.Instances
                 { "CollectionService", "MVP8" },
                 { "Debris", "MVP8" },
                 { "DataStoreService", "MVP9" },
-                { "UserInputService", "MVP10" },
+                // WHY: UserInputService left this table when the input slice was pulled into MVP1;
+                // it now resolves as a real service child created by DataModelBootstrap.
                 { "ContextActionService", "MVP10" },
                 { "SoundService", "MVP15" },
                 { "AIService", "a future MVP (reserved)" },

@@ -131,17 +131,16 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxInstance FindFirstChild(string name, bool recursive = false)
         {
             ThrowIfDestroyed("FindFirstChild");
+            // WHY: depth-first (check child, then its whole subtree, then next sibling) matches
+            // Roblox's recursive search order.
             foreach (RbxInstance child in _children)
             {
                 if (string.Equals(child._name, name, System.StringComparison.Ordinal))
                 {
                     return child;
                 }
-            }
 
-            if (recursive)
-            {
-                foreach (RbxInstance child in _children)
+                if (recursive)
                 {
                     RbxInstance found = child.FindFirstChild(name, true);
                     if (found != null)
@@ -171,17 +170,15 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxInstance FindFirstChildWhichIsA(string className, bool recursive = false)
         {
             ThrowIfDestroyed("FindFirstChildWhichIsA");
+            // WHY: depth-first matches Roblox's recursive search order.
             foreach (RbxInstance child in _children)
             {
                 if (child.IsA(className))
                 {
                     return child;
                 }
-            }
 
-            if (recursive)
-            {
-                foreach (RbxInstance child in _children)
+                if (recursive)
                 {
                     RbxInstance found = child.FindFirstChildWhichIsA(className, true);
                     if (found != null)

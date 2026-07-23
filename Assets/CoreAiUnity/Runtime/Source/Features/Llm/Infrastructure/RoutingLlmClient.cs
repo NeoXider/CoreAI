@@ -152,6 +152,8 @@ namespace CoreAI.Infrastructure.Llm
             LlmErrorCode errorCode = LlmErrorCode.None;
             LlmStreamChunk lastUsageChunk = null;
             bool completedPublished = false;
+            int streamedCompletionChars = 0;
+            string lastSeenModel = "";
 
             IAsyncEnumerator<LlmStreamChunk> enumerator =
                 inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
@@ -168,21 +170,21 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         completedPublished = true;
                         PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout", LlmErrorCode.Timeout);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
                         throw;
                     }
                     catch (OperationCanceledException)
                     {
                         completedPublished = true;
                         PublishCompleted(request, capturedMode, capturedGeneration, true, false, "cancelled", LlmErrorCode.Cancelled);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
                         throw;
                     }
                     catch (LlmClientException ex)
                     {
                         completedPublished = true;
                         PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, ex.ErrorCode);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
                         throw;
                     }
                     catch (Exception ex)
@@ -191,7 +193,7 @@ namespace CoreAI.Infrastructure.Llm
                         // completion event at all — subscribers saw a request start and never finish.
                         completedPublished = true;
                         PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, LlmErrorCode.ProviderError);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
                         throw;
                     }
 
@@ -208,6 +210,12 @@ namespace CoreAI.Infrastructure.Llm
                         errorCode = chunk.ErrorCode;
                     }
 
+                    streamedCompletionChars += chunk.Text?.Length ?? 0;
+                    if (!string.IsNullOrEmpty(chunk.Model))
+                    {
+                        lastSeenModel = chunk.Model;
+                    }
+
                     if (chunk.PromptTokens.HasValue ||
                         chunk.CompletionTokens.HasValue ||
                         chunk.TotalTokens.HasValue ||
@@ -222,7 +230,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 completedPublished = true;
                 PublishCompleted(request, capturedMode, capturedGeneration, true, ok, error, errorCode);
-                PublishUsage(request, capturedMode, true, lastUsageChunk, ok);
+                PublishUsage(request, capturedMode, true, lastUsageChunk, ok, streamedCompletionChars, lastSeenModel);
             }
             finally
             {
@@ -234,7 +242,7 @@ namespace CoreAI.Infrastructure.Llm
                     PublishCompleted(request, capturedMode, capturedGeneration, true, false,
                         string.IsNullOrEmpty(error) ? "stream abandoned by consumer" : error,
                         errorCode == LlmErrorCode.None ? LlmErrorCode.Cancelled : errorCode);
-                    PublishUsage(request, capturedMode, true, lastUsageChunk, false);
+                    PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
                 }
 
                 await enumerator.DisposeAsync();
@@ -311,14 +319,32 @@ namespace CoreAI.Infrastructure.Llm
             bool streaming,
             LlmCompletionResult result)
         {
-            if (result == null ||
-                (!result.PromptTokens.HasValue &&
-                 !result.CompletionTokens.HasValue &&
-                 !result.TotalTokens.HasValue &&
-                 result.CacheReadTokens <= 0 &&
-                 result.CacheWriteTokens <= 0))
+            if (result == null)
             {
                 return;
+            }
+
+            int? promptTokens = result.PromptTokens;
+            int? completionTokens = result.CompletionTokens;
+            int? totalTokens = result.TotalTokens;
+            // WHY: providers that synthesize an empty usage object report 0/0/0 with HasValue set —
+            // that is as useless to the budget UI as a missing object, so require meaningful counts.
+            bool hasServerUsage =
+                (promptTokens ?? 0) > 0 ||
+                (completionTokens ?? 0) > 0 ||
+                (totalTokens ?? 0) > 0 ||
+                result.CacheReadTokens > 0 ||
+                result.CacheWriteTokens > 0;
+            if (!hasServerUsage)
+            {
+                // WHY: many local OpenAI-compatible servers (LM Studio in particular) omit `usage`
+                // entirely, so without a fallback the Token Budget page reports all zeros.
+                if (!result.Ok ||
+                    !TryEstimateUsage(request, result.Content?.Length ?? 0,
+                        out promptTokens, out completionTokens, out totalTokens))
+                {
+                    return;
+                }
             }
 
             _usageReportedPublisher?.Publish(new LlmUsageReported(
@@ -327,9 +353,9 @@ namespace CoreAI.Infrastructure.Llm
                 request?.RoutingProfileId,
                 capturedMode,
                 result.Model,
-                result.PromptTokens,
-                result.CompletionTokens,
-                result.TotalTokens,
+                promptTokens,
+                completionTokens,
+                totalTokens,
                 streaming,
                 result.Ok,
                 result.CacheReadTokens,
@@ -341,9 +367,40 @@ namespace CoreAI.Infrastructure.Llm
             LlmExecutionMode capturedMode,
             bool streaming,
             LlmStreamChunk chunk,
-            bool success)
+            bool success,
+            int streamedCompletionChars,
+            string lastSeenModel)
         {
-            if (chunk == null)
+            bool chunkHasServerUsage =
+                chunk != null &&
+                ((chunk.PromptTokens ?? 0) > 0 ||
+                 (chunk.CompletionTokens ?? 0) > 0 ||
+                 (chunk.TotalTokens ?? 0) > 0 ||
+                 chunk.CacheReadTokens > 0 ||
+                 chunk.CacheWriteTokens > 0);
+            if (chunkHasServerUsage)
+            {
+                _usageReportedPublisher?.Publish(new LlmUsageReported(
+                    request?.TraceId,
+                    request?.AgentRoleId,
+                    request?.RoutingProfileId,
+                    capturedMode,
+                    chunk.Model,
+                    chunk.PromptTokens,
+                    chunk.CompletionTokens,
+                    chunk.TotalTokens,
+                    streaming,
+                    success,
+                    chunk.CacheReadTokens,
+                    chunk.CacheWriteTokens));
+                return;
+            }
+
+            // WHY: streaming backends without `usage` on the final chunk (LM Studio commonly omits it
+            // even when include_usage is requested) previously published nothing — Token Budget stayed 0.
+            if (!success ||
+                !TryEstimateUsage(request, streamedCompletionChars,
+                    out int? promptTokens, out int? completionTokens, out int? totalTokens))
             {
                 return;
             }
@@ -353,14 +410,61 @@ namespace CoreAI.Infrastructure.Llm
                 request?.AgentRoleId,
                 request?.RoutingProfileId,
                 capturedMode,
-                chunk.Model,
-                chunk.PromptTokens,
-                chunk.CompletionTokens,
-                chunk.TotalTokens,
+                lastSeenModel,
+                promptTokens,
+                completionTokens,
+                totalTokens,
                 streaming,
-                success,
-                chunk.CacheReadTokens,
-                chunk.CacheWriteTokens));
+                true));
+        }
+
+        /// <summary>
+        /// Estimates token usage from request/response character counts when the server reported none.
+        /// Uses the project-wide ~4 chars/token heuristic (see CalibratingTokenEstimator's Latin weight).
+        /// </summary>
+        // TODO: LlmUsageReported has no "estimated" flag (Core messaging model is outside this change's
+        // scope); add one so budget UIs can badge estimated numbers as approximate.
+        private static bool TryEstimateUsage(
+            LlmCompletionRequest request,
+            int completionChars,
+            out int? promptTokens,
+            out int? completionTokens,
+            out int? totalTokens)
+        {
+            int promptChars = 0;
+            if (request != null)
+            {
+                promptChars += request.SystemPrompt?.Length ?? 0;
+                promptChars += request.UserPayload?.Length ?? 0;
+                if (request.ChatHistory != null)
+                {
+                    foreach (Microsoft.Extensions.AI.ChatMessage message in request.ChatHistory)
+                    {
+                        promptChars += message?.Text?.Length ?? 0;
+                    }
+                }
+            }
+
+            int prompt = EstimateTokensFromChars(promptChars);
+            int completion = EstimateTokensFromChars(completionChars);
+            if (prompt <= 0 && completion <= 0)
+            {
+                promptTokens = null;
+                completionTokens = null;
+                totalTokens = null;
+                return false;
+            }
+
+            promptTokens = prompt;
+            completionTokens = completion;
+            totalTokens = prompt + completion;
+            return true;
+        }
+
+        private static int EstimateTokensFromChars(int chars)
+        {
+            const int estimatedCharsPerToken = 4;
+            return chars <= 0 ? 0 : Math.Max(1, (chars + estimatedCharsPerToken - 1) / estimatedCharsPerToken);
         }
 
         private static bool IsEndpointLevelFailure(LlmErrorCode errorCode)

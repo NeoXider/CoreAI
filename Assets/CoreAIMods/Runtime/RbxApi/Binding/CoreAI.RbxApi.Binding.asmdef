@@ -4,7 +4,8 @@
   "references": [
     "CoreAI.RbxApi.Instances",
     "CoreAI.RbxApi.Datatypes",
-    "CoreAI.RbxApi.Unity"
+    "CoreAI.RbxApi.Unity",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -13,6 +14,12 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_INPUT_SYSTEM"
+    }
+  ],
   "noEngineReferences": false
 }

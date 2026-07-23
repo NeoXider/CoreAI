@@ -67,6 +67,13 @@ namespace CoreAI.Mods.Rbx.Binding
             _properties[id] = properties;
         }
 
+        public void SetShape(InstanceId id, RbxPartShape shape)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.Shape = shape;
+            _properties[id] = properties;
+        }
+
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
             _properties[id] = properties;

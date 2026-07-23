@@ -934,7 +934,9 @@ namespace CoreAI.Tests.EditMode
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            // WHY: With summarization off the tail is still budget-bounded; a window large enough for
+            // the whole transcript must keep every turn verbatim and never emit a summary block.
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 50);
 
             TestSettings settings = new() { EnableConversationHistorySummarization = false };
             AiOrchestrator orchestrator = new(
@@ -977,9 +979,13 @@ namespace CoreAI.Tests.EditMode
 
             AgentMemoryPolicy policy = new();
             policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+            // WHY: The override keeps the first pass wide enough for the full 10-message tail; the
+            // 60-token role window makes the retry-shrunk policy budget clamp below it, so the retry
+            // pass provably drops oldest turns without ever generating a summary.
             TestSettings settings = new()
             {
                 EnableConversationHistorySummarization = false,
+                ConversationHistoryRecentTokenBudgetOverride = 250,
                 MaxContextOverflowRetries = 1
             };
             AiOrchestrator orchestrator = new(
@@ -1040,6 +1046,67 @@ namespace CoreAI.Tests.EditMode
                 "Default MaxRetainedToolResultMessages (3) must prune stale tool results with summarization off.");
             Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("question one")),
                 "Non-tool turns stay intact.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SummarizationDisabled_LongSessionTailStaysBounded()
+        {
+            // WHY: Long-session latency regression: with summarization off the whole transcript used to be
+            // re-sent every request (UnlimitedHistoryTokenBudget), so per-request payload grew without
+            // limit. The tail must saturate at the window-derived budget and stop growing.
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("test_role", true, 2048, false, 10000);
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            HeuristicTokenEstimator estimator = new();
+            int tokensAtMediumSession = 0;
+            foreach (int sessionLength in new[] { 200, 400 })
+            {
+                while (memory.FakeHistory.Count < sessionLength)
+                {
+                    int i = memory.FakeHistory.Count;
+                    memory.FakeHistory.Add(new Ai.ChatMessage
+                    {
+                        Role = i % 2 == 0 ? "user" : "assistant",
+                        Content = $"turn-{i}-".PadRight(120, 'x')
+                    });
+                }
+
+                await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "long session" });
+
+                Assert.IsNotNull(llm.LastRequest);
+                Assert.IsNotNull(llm.LastRequest.ChatHistory);
+                List<Microsoft.Extensions.AI.ChatMessage> tail = llm.LastRequest.ChatHistory
+                    .Where(m => (m.Text ?? "").StartsWith("turn-"))
+                    .ToList();
+                int tailTokens = tail.Sum(m => estimator.EstimateText(m.Text ?? ""));
+
+                Assert.LessOrEqual(tailTokens, 2048,
+                    $"Tail for a {sessionLength}-message session must fit the 2048-token window-derived budget.");
+                Assert.Less(tail.Count, sessionLength,
+                    "Oldest turns must roll out of the tail instead of re-sending the whole transcript.");
+                Assert.IsTrue((tail[tail.Count - 1].Text ?? "").StartsWith($"turn-{sessionLength - 1}-"),
+                    "The newest turn always stays in the tail.");
+                Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"),
+                    "Summarization off must still not emit a summary block.");
+
+                if (sessionLength == 200)
+                {
+                    tokensAtMediumSession = tailTokens;
+                }
+                else
+                {
+                    Assert.LessOrEqual(tailTokens, tokensAtMediumSession,
+                        "Doubling the session length must not grow the per-request tail payload.");
+                }
+            }
         }
 
         private sealed class RecordingContextManager : IConversationContextManager

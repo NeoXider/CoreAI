@@ -13,6 +13,21 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsComponentRuntimeBindings
     {
+        /// <summary>
+        /// Global names <see cref="RegisterGameplayApis"/> installs — keep in sync with the
+        /// registrations below. <see cref="LuaCsGameplayBindings"/> uses this list to register
+        /// actionable withheld-capability stubs when the build surface is disabled.
+        /// </summary>
+        public static readonly string[] BuildApiNames =
+        {
+            "coreai_component_add",
+            "coreai_component_remove",
+            "coreai_component_set_number",
+            "coreai_component_set_bool",
+            "coreai_component_set_text",
+            "coreai_component_set_vector"
+        };
+
         private readonly IAiGameCommandSink _sink;
 
         public LuaCsComponentRuntimeBindings(IAiGameCommandSink sink)

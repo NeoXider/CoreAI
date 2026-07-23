@@ -13,6 +13,12 @@
 
 ## Roblox API ladder (MVP0-MVP17) — foundation items (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`)
 
+> **Pending (2026-07-23):** `UserInputService` pulled into **MVP1** (from MVP10) for mini-game controls,
+> built on the **New Input System** (`com.unity.inputsystem` 1.19.0; `activeInputHandler = 2` Both).
+> **TODO: this dependency may be dropped later** — keep the Lua `UserInputService` behind a swappable
+> input seam (`IInputSource`-style) so the New-Input-System backend can be replaced/removed without
+> touching the Lua-facing API or breaking mods. Legacy `input_*` poll bindings stay for back-compat.
+
 - [x] **1. Engine abstraction seam** *(rung: MVP0)* (2026-07-22) — neutral `CoreAI.Scripting` contracts
       (`IScriptEngine`/`IScriptState`/`IValueMarshaller`/`IScriptFunctionRegistry` +
       `ScriptCallContext`/`IScriptTable`/`IScriptCoroutine`/`IExecutionBudget`/`IScriptExecutionGuard`);

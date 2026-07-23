@@ -19,14 +19,34 @@ namespace CoreAI.Mods.Rbx.Binding
     /// re-parented out of Workspace slides under the inactive service GO and disappears
     /// automatically via Unity's activeInHierarchy. Every spatial conversion goes through
     /// RobloxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
-    /// TODO: MVP1 follow-up — primitives catalog for Ball and the stud-authored
-    /// Wedge/CornerWedge/oriented-Cylinder meshes (currently Block only).
+    /// Shapes: Block maps to the unit cube, Ball to the unit sphere (both directly on the part
+    /// GameObject, localScale = Size * MetersPerStud); Cylinder needs an axis correction, so its
+    /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge uses a custom
+    /// normalized ramp mesh on the root (see <see cref="BuildWedgeVisual"/>).
+    /// TODO: MVP1 follow-up — custom normalized CornerWedge mesh (still falls back to Cube today).
+    /// TODO: MVP1 follow-up — a Part parented under another Part inherits the parent's Size-driven
+    /// localScale (compound world scale); Roblox Size is absolute regardless of ancestry, so parts
+    /// should materialize under an unscaled container (generalize the Cylinder Shape-child pattern).
+    /// TODO: MVP8 — colliders approximate the visual (non-uniform Ball → SphereCollider on the max
+    /// axis; Cylinder → CapsuleCollider with rounded ends); swap to exact colliders with physics.
     /// TODO: MVP8 — per-body gravity force (DEV-6) and reverse physics sync.
     /// </summary>
     public sealed class InstanceGameObjectBinder : IInstanceBackingBinder, IPartPropertySink
     {
         private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
         private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+
+        // WHY: Unity has no wedge primitive, so we author one normalized to 1 unit = 1 stud (the
+        // only stud-authored asset the scale rule allows, §2) and share the single mesh across all
+        // wedge parts — the root's Size-driven localScale carries the dimensions like Block/Ball.
+        private static Mesh _wedgeMesh;
+
+        // WHY: the built-in cube/sphere meshes and the pipeline default material are cached once
+        // (they are shared assets that survive their template's destroy) so a swarm spawning many
+        // parts never pays a CreatePrimitive-plus-destroy GameObject per part.
+        private static Mesh _cubeMesh;
+        private static Mesh _sphereMesh;
+        private static Material _defaultMaterial;
 
         // WHY: storage services and their subtrees are not part of the physical world, so their
         // GameObject materializes inactive (children inherit inactive-in-hierarchy). Workspace and
@@ -51,6 +71,24 @@ namespace CoreAI.Mods.Rbx.Binding
             /// <summary>False only for the DataModel entry, which reuses the host GameObject —
             /// teardown must never destroy, rename, or re-parent it.</summary>
             public bool OwnsGameObject;
+
+            /// <summary>Shape whose visual is currently built; null until the first Apply.</summary>
+            public RbxPartShape? MaterializedShape;
+
+            // WHY: cached on the visual build (ApplyShape) so per-frame property writes skip the
+            // GetComponent scans, and the appearance/collide setters target THIS part's own visual
+            // (root for Block/Ball/Wedge, the Shape child for Cylinder) rather than descending into
+            // nested child parts via GetComponentInChildren. Rebuilt on every shape switch.
+            public Renderer Renderer;
+            public Collider Collider;
+
+            /// <summary>The part's Rigidbody when unanchored; null when anchored. Lives on the root
+            /// regardless of shape, so it survives shape switches.</summary>
+            public Rigidbody Rigidbody;
+
+            /// <summary>Reused across appearance writes so no MaterialPropertyBlock is allocated per
+            /// property change (hot path: a script that recolors/moves a part each frame).</summary>
+            public MaterialPropertyBlock PropertyBlock;
         }
 
         /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
@@ -158,54 +196,61 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.CFrame = cframe;
-            Store(id, properties);
+            Store(id, properties, PartAspect.Transform);
         }
 
         public void SetPosition(InstanceId id, RbxVector3 position)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Position = position;
-            Store(id, properties);
+            Store(id, properties, PartAspect.Transform);
         }
 
         public void SetSize(InstanceId id, RbxVector3 size)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Size = size;
-            Store(id, properties);
+            Store(id, properties, PartAspect.Transform);
         }
 
         public void SetColor(InstanceId id, RbxColor3 color)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Color = color;
-            Store(id, properties);
+            Store(id, properties, PartAspect.Appearance);
         }
 
         public void SetAnchored(InstanceId id, bool anchored)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Anchored = anchored;
-            Store(id, properties);
+            Store(id, properties, PartAspect.Anchored);
         }
 
         public void SetTransparency(InstanceId id, float transparency)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Transparency = Mathf.Clamp01(transparency);
-            Store(id, properties);
+            Store(id, properties, PartAspect.Appearance);
         }
 
         public void SetCanCollide(InstanceId id, bool canCollide)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.CanCollide = canCollide;
-            Store(id, properties);
+            Store(id, properties, PartAspect.CanCollide);
+        }
+
+        public void SetShape(InstanceId id, RbxPartShape shape)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.Shape = shape;
+            Store(id, properties, PartAspect.Full);
         }
 
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
-            Store(id, properties);
+            Store(id, properties, PartAspect.Full);
         }
 
         public bool TryGetPartProperties(InstanceId id, out PartProperties properties)
@@ -220,12 +265,37 @@ namespace CoreAI.Mods.Rbx.Binding
                 : PartProperties.CreateDefault();
         }
 
-        private void Store(InstanceId id, in PartProperties properties)
+        // WHY: a script that moves/recolors a part each frame is the hottest API path, so each
+        // setter re-applies ONLY the aspect it touched instead of re-running the whole
+        // materialization (shape scan + component lookups + a MaterialPropertyBlock alloc) on
+        // every transform write. Full is used at materialization and on shape switches.
+        private enum PartAspect { Full, Transform, Appearance, Anchored, CanCollide }
+
+        private void Store(InstanceId id, in PartProperties properties, PartAspect aspect)
         {
             _partProperties[id] = properties;
-            if (_bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart)
+            if (!_bindings.TryGetValue(id, out BindingEntry entry) || !entry.IsPart)
             {
-                Apply(entry, properties);
+                return;
+            }
+
+            switch (aspect)
+            {
+                case PartAspect.Transform:
+                    ApplyTransform(entry, properties);
+                    break;
+                case PartAspect.Appearance:
+                    ApplyAppearance(entry, properties);
+                    break;
+                case PartAspect.Anchored:
+                    ApplyAnchored(entry, properties.Anchored);
+                    break;
+                case PartAspect.CanCollide:
+                    ApplyCanCollide(entry, properties.CanCollide);
+                    break;
+                default:
+                    Apply(entry, properties);
+                    break;
             }
         }
 
@@ -248,11 +318,10 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             bool isPart = instance.IsA("BasePart");
-            // WHY: CreatePrimitive's built-in cube is authored 1 unit = 1 stud for us, so the
-            // asset rule holds: geometry is never rescaled, only localScale carries the numbers.
-            GameObject gameObject = isPart
-                ? GameObject.CreatePrimitive(PrimitiveType.Cube)
-                : new GameObject();
+            // WHY: parts start as an empty GameObject; OnEnteredWorld runs Apply right after,
+            // and ApplyShape builds the primitive visual for the stored Shape there — one code
+            // path for materialization and later Shape switches.
+            GameObject gameObject = new GameObject();
             gameObject.name = instance.Name;
             gameObject.transform.SetParent(ResolveParentTransform(instance), false);
             gameObject.SetActive(DesiredActiveSelf(instance));
@@ -282,19 +351,233 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static void Apply(BindingEntry entry, in PartProperties properties)
         {
+            ApplyShape(entry, properties.Shape);
+            ApplyTransform(entry, properties);
+            ApplyAppearance(entry, properties);
+            ApplyAnchored(entry, properties.Anchored);
+            ApplyCanCollide(entry, properties.CanCollide);
+        }
+
+        private static void ApplyTransform(BindingEntry entry, in PartProperties properties)
+        {
             Transform transform = entry.GameObject.transform;
             (Vector3 position, Quaternion rotation) = RobloxSpace.ToUnityPose(properties.CFrame);
             transform.SetPositionAndRotation(position, rotation);
+            // WHY: for every shape the part root carries Size * MetersPerStud (D3); shape
+            // primitives are authored so 1 local unit = 1 stud (Cylinder's child corrects
+            // Unity's 2-unit-tall mesh, see BuildCylinderVisual).
             transform.localScale = RobloxSpace.SizeToUnity(properties.Size);
-
-            ApplyAppearance(entry.GameObject, properties);
-            ApplyAnchored(entry.GameObject, properties.Anchored);
-            ApplyCanCollide(entry.GameObject, properties.CanCollide);
         }
 
-        private static void ApplyAppearance(GameObject gameObject, in PartProperties properties)
+        // ---- Shape materialization ----------------------------------------------------------
+
+        private const string ShapeChildName = "Shape";
+
+        private static void ApplyShape(BindingEntry entry, RbxPartShape shape)
         {
-            var renderer = gameObject.GetComponent<Renderer>();
+            RbxPartShape normalized = NormalizeShape(shape);
+            if (entry.MaterializedShape == normalized)
+            {
+                return;
+            }
+
+            StripShapeVisual(entry.GameObject);
+            switch (normalized)
+            {
+                case RbxPartShape.Ball:
+                    BuildRootPrimitiveVisual(entry.GameObject, PrimitiveType.Sphere);
+                    break;
+                case RbxPartShape.Cylinder:
+                    BuildCylinderVisual(entry.GameObject);
+                    break;
+                case RbxPartShape.Wedge:
+                    BuildWedgeVisual(entry.GameObject);
+                    break;
+                default:
+                    BuildRootPrimitiveVisual(entry.GameObject, PrimitiveType.Cube);
+                    break;
+            }
+
+            entry.MaterializedShape = normalized;
+            CacheVisualComponents(entry);
+        }
+
+        // WHY: resolve the renderer/collider from THIS part's own visual — the root for
+        // Block/Ball/Wedge, the Shape child for Cylinder — never GetComponentInChildren, which
+        // descends into nested child parts and would recolor/toggle the wrong object. Cached so
+        // the appearance/collide setters skip the component scan on every write.
+        private static void CacheVisualComponents(BindingEntry entry)
+        {
+            Transform child = entry.GameObject.transform.Find(ShapeChildName);
+            Transform visual = child != null ? child : entry.GameObject.transform;
+            entry.Renderer = visual.GetComponent<Renderer>();
+            entry.Collider = visual.GetComponent<Collider>();
+        }
+
+        // TODO: MVP1 follow-up — custom normalized CornerWedge mesh; it still falls back to Cube.
+        private static RbxPartShape NormalizeShape(RbxPartShape shape)
+        {
+            return shape == RbxPartShape.CornerWedge
+                ? RbxPartShape.Block
+                : shape;
+        }
+
+        /// <summary>Removes the previous shape's mesh/collider (root components and the Shape
+        /// child), keeping the GameObject identity and its Rigidbody untouched.</summary>
+        private static void StripShapeVisual(GameObject gameObject)
+        {
+            // WHY: destroy synchronously even in Play Mode. ApplyShape rebuilds the visual on the
+            // very next lines, and a deferred Object.Destroy would leave the old MeshRenderer alive
+            // when AddComponent<MeshRenderer> runs (Renderer is single-per-GameObject → the add
+            // fails and returns null) and would let CacheVisualComponents cache soon-fake-null
+            // components. These are binder-owned, so DestroyImmediate is legal here.
+            DestroyNow(gameObject.GetComponent<Collider>());
+            DestroyNow(gameObject.GetComponent<MeshRenderer>());
+            DestroyNow(gameObject.GetComponent<MeshFilter>());
+            Transform child = gameObject.transform.Find(ShapeChildName);
+            if (child != null)
+            {
+                DestroyNow(child.gameObject);
+            }
+        }
+
+        /// <summary>Block/Ball: Unity's built-in cube and sphere are 1 unit = 1 stud for us
+        /// (asset rule, §2 — geometry is never rescaled, only localScale carries numbers), so
+        /// their mesh and collider live directly on the part GameObject.</summary>
+        private static void BuildRootPrimitiveVisual(GameObject gameObject, PrimitiveType type)
+        {
+            EnsurePrimitiveCache();
+            var filter = gameObject.AddComponent<MeshFilter>();
+            filter.sharedMesh = type == PrimitiveType.Sphere ? _sphereMesh : _cubeMesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = _defaultMaterial;
+            if (type == PrimitiveType.Sphere)
+            {
+                gameObject.AddComponent<SphereCollider>();
+            }
+            else
+            {
+                gameObject.AddComponent<BoxCollider>();
+            }
+        }
+
+        // WHY: build the cube/sphere primitives once to capture their shared meshes and the
+        // pipeline default material, then discard the templates — the captured assets stay valid
+        // and every later part reuses them with no per-part GameObject churn.
+        private static void EnsurePrimitiveCache()
+        {
+            if (_defaultMaterial != null)
+            {
+                return;
+            }
+
+            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _cubeMesh = cube.GetComponent<MeshFilter>().sharedMesh;
+            _defaultMaterial = cube.GetComponent<MeshRenderer>().sharedMaterial;
+            SafeDestroy(cube);
+
+            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            _sphereMesh = sphere.GetComponent<MeshFilter>().sharedMesh;
+            SafeDestroy(sphere);
+        }
+
+        /// <summary>Roblox Cylinder: the circular axis is the part's local X and the length is
+        /// Size.X studs, while Unity's Cylinder mesh is 2 units tall along local Y. The mesh
+        /// lives on a child rotated Z+90 (mesh Y onto part X) with the height halved, so the
+        /// root's Size-driven localScale yields correct proportions on every axis.</summary>
+        private static void BuildCylinderVisual(GameObject gameObject)
+        {
+            GameObject child = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            child.name = ShapeChildName;
+            child.transform.SetParent(gameObject.transform, false);
+            child.transform.localPosition = Vector3.zero;
+            child.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            child.transform.localScale = new Vector3(1f, 0.5f, 1f);
+        }
+
+        /// <summary>Roblox Wedge: a right triangular prism (ramp) — full height at the back
+        /// (local -Z) sloping to zero at the front (+Z), width along X. The mesh and its convex
+        /// collider live on the root (authored 1 unit = 1 stud), so the Size-driven localScale
+        /// carries proportions like Block/Ball.</summary>
+        private static void BuildWedgeVisual(GameObject gameObject)
+        {
+            Mesh mesh = GetWedgeMesh();
+            var filter = gameObject.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = DefaultLitMaterial();
+            var collider = gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = mesh;
+            collider.convex = true;
+        }
+
+        // WHY: flat-facet wedge — each face gets its own vertices with an explicit outward normal
+        // (shared vertices would smooth-shade the edges). Winding is CCW-outward so Unity renders
+        // each face from the outside. Extents are +-0.5 on every axis (1 unit = 1 stud).
+        private static Mesh GetWedgeMesh()
+        {
+            if (_wedgeMesh != null)
+            {
+                return _wedgeMesh;
+            }
+
+            // WHY: A-F are the six wedge corners — A/B bottom-back, C/D bottom-front, E/F top-back
+            // (the slope runs from edge E-F down to edge C-D). The vertex/normal/triangle arrays
+            // are grouped per face in the order: bottom (verts 0-3), back (4-7), slope (8-11),
+            // left triangle (12-14), right triangle (15-17).
+            Vector3 a = new(-0.5f, -0.5f, -0.5f);
+            Vector3 b = new(0.5f, -0.5f, -0.5f);
+            Vector3 c = new(-0.5f, -0.5f, 0.5f);
+            Vector3 d = new(0.5f, -0.5f, 0.5f);
+            Vector3 e = new(-0.5f, 0.5f, -0.5f);
+            Vector3 f = new(0.5f, 0.5f, -0.5f);
+            Vector3 slopeNormal = new Vector3(0f, 1f, 1f).normalized;
+
+            Vector3[] vertices =
+            {
+                a, b, d, c,
+                a, e, f, b,
+                e, f, d, c,
+                a, c, e,
+                b, f, d,
+            };
+            Vector3[] normals =
+            {
+                Vector3.down, Vector3.down, Vector3.down, Vector3.down,
+                Vector3.back, Vector3.back, Vector3.back, Vector3.back,
+                slopeNormal, slopeNormal, slopeNormal, slopeNormal,
+                Vector3.left, Vector3.left, Vector3.left,
+                Vector3.right, Vector3.right, Vector3.right,
+            };
+            int[] triangles =
+            {
+                0, 1, 2, 0, 2, 3,
+                4, 5, 6, 4, 6, 7,
+                8, 10, 9, 8, 11, 10,
+                12, 13, 14,
+                15, 16, 17,
+            };
+
+            var mesh = new Mesh { name = "CoreAiWedge" };
+            mesh.SetVertices(new List<Vector3>(vertices));
+            mesh.SetNormals(new List<Vector3>(normals));
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            _wedgeMesh = mesh;
+            return _wedgeMesh;
+        }
+
+        // WHY: the wedge reuses the same cached pipeline default material as Block/Ball so it
+        // renders identically before the appearance pass overrides color — no extra template.
+        private static Material DefaultLitMaterial()
+        {
+            EnsurePrimitiveCache();
+            return _defaultMaterial;
+        }
+
+        private static void ApplyAppearance(BindingEntry entry, in PartProperties properties)
+        {
+            Renderer renderer = entry.Renderer;
             if (renderer == null)
             {
                 return;
@@ -302,10 +585,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
             // WHY: MaterialPropertyBlock avoids per-part material instantiation (edit-mode
             // safe, no leaks); both _Color and _BaseColor are set so BiRP and URP shaders read
-            // the same value.
+            // the same value. The block is reused off the entry so no alloc per write.
             float alpha = 1f - Mathf.Clamp01(properties.Transparency);
             var color = new Color(properties.Color.R, properties.Color.G, properties.Color.B, alpha);
-            var block = new MaterialPropertyBlock();
+            MaterialPropertyBlock block = entry.PropertyBlock ??= new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);
             block.SetColor(ColorPropertyId, color);
             block.SetColor(BaseColorPropertyId, color);
@@ -317,34 +600,37 @@ namespace CoreAI.Mods.Rbx.Binding
             renderer.enabled = properties.Transparency < 1f;
         }
 
-        private static void ApplyAnchored(GameObject gameObject, bool anchored)
+        private static void ApplyAnchored(BindingEntry entry, bool anchored)
         {
-            var body = gameObject.GetComponent<Rigidbody>();
             if (anchored)
             {
-                if (body != null)
+                if (entry.Rigidbody != null)
                 {
-                    SafeDestroy(body);
+                    // WHY: immediate — toggling Anchored twice in one frame would otherwise
+                    // AddComponent a second Rigidbody while the deferred-destroyed one still lives.
+                    DestroyNow(entry.Rigidbody);
+                    entry.Rigidbody = null;
                 }
 
                 return;
             }
 
-            if (body == null)
+            if (entry.Rigidbody == null)
             {
-                body = gameObject.AddComponent<Rigidbody>();
+                entry.Rigidbody = entry.GameObject.AddComponent<Rigidbody>();
                 // WHY: DEV-6 — Roblox gravity is applied per-body as a custom force (MVP8);
                 // Unity's global Physics.gravity must never move Roblox parts.
-                body.useGravity = false;
+                entry.Rigidbody.useGravity = false;
             }
         }
 
-        private static void ApplyCanCollide(GameObject gameObject, bool canCollide)
+        private static void ApplyCanCollide(BindingEntry entry, bool canCollide)
         {
-            var collider = gameObject.GetComponent<Collider>();
-            if (collider != null)
+            // WHY: entry.Collider is the part's own visual collider (root for Block/Ball/Wedge, the
+            // Shape child for Cylinder), cached at build — never a nested child part's collider.
+            if (entry.Collider != null)
             {
-                collider.enabled = canCollide;
+                entry.Collider.enabled = canCollide;
             }
         }
 
@@ -360,6 +646,18 @@ namespace CoreAI.Mods.Rbx.Binding
                 Object.Destroy(target);
             }
             else
+            {
+                Object.DestroyImmediate(target);
+            }
+        }
+
+        // WHY: synchronous destroy for binder-owned components/objects that are rebuilt in the same
+        // call (shape swap, Anchored toggle). Deferred Object.Destroy in Play Mode would leave the
+        // old single-per-GameObject component alive for the immediate AddComponent — main-thread
+        // only, which the binder already is.
+        private static void DestroyNow(Object target)
+        {
+            if (target != null)
             {
                 Object.DestroyImmediate(target);
             }

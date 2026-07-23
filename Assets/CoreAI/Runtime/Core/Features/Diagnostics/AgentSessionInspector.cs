@@ -417,11 +417,10 @@ namespace CoreAI.Diagnostics
         private int ResolveHistoryBudget(ContextBudget budget, AgentMemoryPolicy.RoleMemoryConfig roleConfig)
         {
             int historyBudget = budget.HistoryTokenBudget;
-            if (!_settings.EnableConversationHistorySummarization)
-            {
-                historyBudget = AiOrchestrator.UnlimitedHistoryTokenBudget;
-            }
-            else if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
+            // WHY: mirror AiOrchestrator — the history tail is bounded by the policy budget even when
+            // summarization is off (no more UnlimitedHistoryTokenBudget), and the recent-tail override
+            // applies in both modes; otherwise this diagnostic diverges from real orchestrator behavior.
+            if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
             {
                 historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
             }

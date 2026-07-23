@@ -218,9 +218,11 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_Enum_UnknownEnum_RaisesLoudStub()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
-            Exception ex = LoadFails(stack, "m", "local k = Enum.KeyCode");
+            // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
+            // until TweenService (MVP8), so it is the loud-stub probe now.
+            Exception ex = LoadFails(stack, "m", "local k = Enum.EasingStyle");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("Enum.KeyCode", FullText(ex));
+            StringAssert.Contains("Enum.EasingStyle", FullText(ex));
         }
 
         [Test]

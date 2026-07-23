@@ -78,7 +78,7 @@ namespace CoreAI.Tests
             TextField baseUrl = root.Query<TextField>().AtIndex(0);
             TextField apiKey = root.Query<TextField>().AtIndex(1);
             TextField model = root.Query<TextField>().AtIndex(2);
-            Toggle overrideTemp = root.Q<Toggle>();
+            Toggle overrideTemp = FindToggle(root, "Override temperature");
 
             mode.value = "HTTP API";
             baseUrl.value = "http://new/v1";
@@ -121,6 +121,21 @@ namespace CoreAI.Tests
                 if (button.text == text)
                 {
                     return button;
+                }
+            }
+
+            return null;
+        }
+
+        // WHY: query by label, not root.Q<Toggle>() — the Advanced foldout's own expand toggle is a
+        // Toggle too, so the first Toggle in the tree is no longer the Override temperature one.
+        private static Toggle FindToggle(VisualElement root, string label)
+        {
+            foreach (Toggle toggle in root.Query<Toggle>().ToList())
+            {
+                if (toggle.label == label)
+                {
+                    return toggle;
                 }
             }
 

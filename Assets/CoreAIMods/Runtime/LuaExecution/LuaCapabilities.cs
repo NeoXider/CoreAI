@@ -30,7 +30,15 @@ namespace CoreAI.Ai
         /// </summary>
         Full = 1 << 4,
 
-        /// <summary>All standard tiers except <see cref="Full"/> (backward-compatible default).</summary>
+        /// <summary>
+        /// Every standard tier: <see cref="Read"/> | <see cref="Gameplay"/> | <see cref="WorldEdit"/> |
+        /// <see cref="LogicOverride"/>. WARNING: despite the name, All EXCLUDES <see cref="Full"/> —
+        /// Full-tier reflection is opt-in and must be OR-ed in explicitly
+        /// (<c>LuaCapabilities.All | LuaCapabilities.Full</c>). A mod header that declares
+        /// <c>capabilities: All, Full</c> still gets Full masked away unless the host granted it.
+        /// WHY: no duplicate-value alias — a second member with this exact value would make
+        /// ToString()/serialized headers print an unspecified name on IL2CPP/WebGL.
+        /// </summary>
         All = Read | Gameplay | WorldEdit | LogicOverride
     }
 }

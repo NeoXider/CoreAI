@@ -275,6 +275,57 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("FINAL", sb.ToString());
         }
 
+        // ===================== Reasoning sink =====================
+
+        [Test]
+        public void ReasoningSink_SplitTagStreaming_EmitsHiddenSpan()
+        {
+            // The hidden span must surface through the sink even when both tags are split across
+            // chunk boundaries, while the visible output stays clean.
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string visible = FeedChunks(filter, "A<th", "ink>hid", "den</th", "ink>B");
+
+            Assert.AreEqual("AB", visible);
+            Assert.AreEqual("hidden", reasoning.ToString());
+        }
+
+        [Test]
+        public void ReasoningSink_UnclosedThinkAtFlush_EmitsBufferedReasoning()
+        {
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string visible = FeedChunks(filter, "<think>never closed");
+
+            Assert.AreEqual(string.Empty, visible);
+            Assert.AreEqual("never closed", reasoning.ToString());
+        }
+
+        [Test]
+        public void ReasoningSink_OrphanCloseTag_EmitsHiddenPrefix()
+        {
+            ThinkBlockStreamFilter filter = new();
+            StringBuilder reasoning = new();
+            filter.ReasoningSink = s => reasoning.Append(s);
+
+            string visible = filter.ProcessChunk("reasoning text</think>Answer");
+
+            Assert.AreEqual("Answer", visible);
+            Assert.AreEqual("reasoning text", reasoning.ToString());
+        }
+
+        [Test]
+        public void ReasoningSink_NotSet_SuppressOnlyBehaviorUnchanged()
+        {
+            ThinkBlockStreamFilter filter = new();
+            string visible = FeedChunks(filter, "A<think>hidden</think>B");
+            Assert.AreEqual("AB", visible);
+        }
+
         [Test]
         public void ProcessChunk_ThinkInsideThink_NotNested_TreatedAsText()
         {

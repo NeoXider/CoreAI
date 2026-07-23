@@ -29,6 +29,18 @@ pinned and bumped together at the first Roblox-API release commit, with changelo
 entries. `mod.json` `api_version` is a **separate contract line starting at 1**, independent of
 the package version (§MVP5).
 
+**Roblox API parity (LOCKED — user, 2026-07-23):** the Lua-facing API replicates Roblox **1:1** —
+identical class / method / property / event / enum names and semantics — so copy-paste Roblox
+scripts run unchanged. Keyboard/mouse input is Roblox `UserInputService` exactly
+(`InputBegan`/`InputEnded`/`InputChanged`; `InputObject` with `KeyCode`/`UserInputType`/`Position`/
+`Delta`; `Enum.KeyCode`/`Enum.UserInputType`; `IsKeyDown`/`GetKeysPressed`/`GetMouseLocation`/
+`MouseBehavior`). No CoreAI-invented dialect on the Roblox surface. Unity implementations (New Input
+System, primitives, physics, camera) are only **swappable backends behind seams** — the Lua names and
+behavior must match Roblox regardless of backend. **Exception:** FullAccess (the Unity-native
+`unity_*` reflection surface) is a **separate module with its own skill** and may diverge. Legacy
+CoreAI-isms (`input_*` poll, `coreai_world_*`) stay for back-compat but are NOT the canonical Roblox
+surface. Applies to every current and future rung.
+
 ---
 
 ## 1. Principles
@@ -450,15 +462,18 @@ Ordering changes vs. the seed roadmap, with justification:
   a grep for `using Lua;` outside `Scripting/LuaCs/`+`Infrastructure/` adapters returns nothing.
 - **Effort**: M (landed).
 
-### MVP1 — Instance/DataModel core (detail: §5.1) *(core landed; Lua wiring in progress)*
+### MVP1 — Instance/DataModel core (detail: §5.1) *(landed 6.3.0; input slice + camera pulled forward)*
 
 - **Status**: the engine-free datatypes, `InstanceRegistry`/`RbxDataModel` core, the `RobloxSpace`
   conversion boundary, the `IInstanceBackingBinder`/`InstanceGameObjectBinder` materialization
   slice, and the Lua surface (`Instance.new`/`game`/`workspace`, datatype globals, Part spatial
   properties pushed through `IPartPropertySink`) are on disk in
   `Assets/CoreAIMods/Runtime/RobloxApi/` + `Runtime/Scripting/LuaCs/LuaCsRoblox*.cs` and wired by
-  `CoreAiModsInstaller`. Final wiring (datatype-valued attributes, namespace consolidation to
-  `CoreAI.Mods.Rbx.*`) and the full §5.1.8 acceptance-gate sign-off are in progress.
+  `CoreAiModsInstaller`. Shipped in 6.3.0 with the §5.1.8 acceptance gate green (build/query/clone/
+  destroy + RobloxSpace round-trip + golden fixtures + conversion lint), `Part.Shape`
+  (Ball/Cylinder/Wedge meshes; CornerWedge → Block fallback), and — pulled forward from MVP10/§camera —
+  a Roblox-1:1 `UserInputService` slice (behind a swappable `IInputSource` seam) and
+  `workspace.CurrentCamera` (over a swappable camera rig), so mini-games are playable on the MVP1 base.
 - **Goal**: `game`, `workspace`, `Instance.new`, the full navigation/lifecycle member set,
   pure-spec datatypes with the `RobloxSpace` conversion boundary, and the unified identity
   registry.

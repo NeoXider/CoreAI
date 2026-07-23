@@ -18,6 +18,37 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed partial class LuaCsFullUnityRuntimeBindings
     {
+        /// <summary>
+        /// Global names <see cref="RegisterGameplayApis"/> installs — keep in sync with the
+        /// registrations below. <see cref="LuaCsGameplayBindings"/> uses this list to register
+        /// actionable withheld-capability stubs when the Full tier is not granted.
+        /// </summary>
+        public static readonly string[] ApiNames =
+        {
+            "unity_find",
+            "unity_id",
+            "unity_list_objects",
+            "unity_find_all",
+            "unity_find_by_tag",
+            "unity_find_by_component",
+            "unity_describe_object",
+            "unity_set_active",
+            "unity_get_position",
+            "unity_set_position",
+            "unity_get_transform",
+            "unity_set_rotation_euler",
+            "unity_set_scale",
+            "unity_parent",
+            "unity_get_children",
+            "unity_list_components",
+            "unity_list_members",
+            "unity_get_member",
+            "unity_set_member",
+            "unity_call",
+            "unity_add_component",
+            "unity_destroy"
+        };
+
         private static readonly ConcurrentDictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
 
         private static readonly ConcurrentDictionary<(Type type, string member, bool nonPublic), MemberInfo>

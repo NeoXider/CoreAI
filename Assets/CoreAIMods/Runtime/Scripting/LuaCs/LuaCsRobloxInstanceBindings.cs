@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -94,11 +95,11 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal static class LuaCsRobloxInstanceBindings
     {
-        /// <summary>BasePart members still awaiting their own slice: Shape/Material need the
-        /// primitive+material catalog, Orientation/Rotation need Euler decomposition.</summary>
+        /// <summary>BasePart members still awaiting their own slice: Material needs the
+        /// material catalog, Orientation/Rotation need Euler decomposition.</summary>
         private static readonly HashSet<string> UnwiredSpatialProperties = new(StringComparer.Ordinal)
         {
-            "Shape", "Material", "Orientation", "Rotation"
+            "Material", "Orientation", "Rotation"
         };
 
         public static LuaTable BuildInstanceMeta(LuaCsRobloxModContext context)
@@ -134,6 +135,16 @@ namespace CoreAI.Ai.LuaCs
                 if (methods.TryGetValue(key, out LuaValue method))
                 {
                     return method;
+                }
+
+                if (TryReadCamera(context, self, key, out LuaValue cameraValue))
+                {
+                    return cameraValue;
+                }
+
+                if (TryReadUserInput(self, key, out LuaValue inputValue))
+                {
+                    return inputValue;
                 }
 
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
@@ -179,6 +190,16 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 ThrowIfDestroyedForLua(self, key);
+                if (TryWriteCamera(context, self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (TryWriteUserInput(self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
                 if (TryWriteSpatial(context, self, key, value))
                 {
                     return LuaValue.Nil;
@@ -255,7 +276,9 @@ namespace CoreAI.Ai.LuaCs
             Method("Clone", (_, self) =>
             {
                 context.RequireWorldEdit("Instance:Clone");
-                return context.WrapInstance(self.Clone());
+                RbxInstance copy = self.Clone();
+                CopyPartSinkState(context.PartSink, self, copy);
+                return context.WrapInstance(copy);
             });
             Method("Destroy", (_, self) =>
             {
@@ -363,6 +386,43 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        // WHY: RbxInstance.Clone deep-copies identity/attributes/tags, but BasePart spatial and
+        // appearance state lives in the external part sink keyed by id (D2 keeps RbxInstance
+        // engine-free). A Roblox-faithful clone must carry that state to the copy's fresh id, so
+        // walk source and copy in lockstep — Clone preserves archivable child order, so the trees
+        // align — and copy each stored record across.
+        // TODO: MVP2 — move this sink-copy into a registry-level clone seam so completeness no
+        // longer depends on each Clone call site (the registry already owns the binder/sink).
+        private static void CopyPartSinkState(IPartPropertySink sink, RbxInstance source,
+            RbxInstance copy)
+        {
+            if (sink == null || source == null || copy == null)
+            {
+                return;
+            }
+
+            if (sink.TryGetPartProperties(source.Id, out PartProperties properties))
+            {
+                sink.SetPartProperties(copy.Id, in properties);
+            }
+
+            IReadOnlyList<RbxInstance> sourceChildren = source.GetChildren();
+            IReadOnlyList<RbxInstance> copyChildren = copy.GetChildren();
+            int copyIndex = 0;
+            for (int i = 0; i < sourceChildren.Count && copyIndex < copyChildren.Count; i++)
+            {
+                // WHY: Clone drops Archivable == false subtrees, so a non-archivable source child
+                // has no counterpart in the copy — advance only the source side past it.
+                if (!sourceChildren[i].Archivable)
+                {
+                    continue;
+                }
+
+                CopyPartSinkState(sink, sourceChildren[i], copyChildren[copyIndex]);
+                copyIndex++;
+            }
+        }
+
         private static RbxDataModel RequireDataModel(RbxInstance instance, string member)
         {
             if (instance is RbxDataModel dataModel)
@@ -446,7 +506,7 @@ namespace CoreAI.Ai.LuaCs
         // ---- BasePart spatial/appearance (part-property sink) -------------------------------
 
         /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype; throws
-        /// the loud stub for still-unwired members (Shape/Material/Orientation/Rotation).</summary>
+        /// the loud stub for still-unwired members (Material/Orientation/Rotation).</summary>
         private static bool TryReadSpatial(LuaCsRobloxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
@@ -459,6 +519,7 @@ namespace CoreAI.Ai.LuaCs
             PartProperties properties = context.PartSink.GetPartPropertiesOrDefault(self.Id);
             switch (key)
             {
+                case "Shape": value = WrapPartType(context, properties.Shape); return true;
                 case "Position": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Position); return true;
                 case "Size": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Size); return true;
                 case "CFrame": value = LuaCsRobloxDatatypeBindings.Wrap(properties.CFrame); return true;
@@ -491,6 +552,10 @@ namespace CoreAI.Ai.LuaCs
             InstanceId id = self.Id;
             switch (key)
             {
+                case "Shape":
+                    context.RequireWorldEdit("setting " + self.ClassName + ".Shape");
+                    sink.SetShape(id, ReadPartShapeValue(value));
+                    return true;
                 case "Position":
                     context.RequireWorldEdit("setting " + self.ClassName + ".Position");
                     sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
@@ -528,6 +593,228 @@ namespace CoreAI.Ai.LuaCs
 
                     return false;
             }
+        }
+
+        /// <summary>Part.Shape as its interned Enum.PartType item (values match RbxPartShape).</summary>
+        private static LuaValue WrapPartType(LuaCsRobloxModContext context, RbxPartShape shape)
+        {
+            if (context.Bindings.Enums.TryGet("PartType", out RbxEnum partType)
+                && partType.TryGetItem(shape.ToString(), out RbxEnumItem item))
+            {
+                return LuaCsRobloxDatatypeBindings.Wrap(item);
+            }
+
+            return LuaValue.Nil;
+        }
+
+        private static RbxPartShape ReadPartShapeValue(LuaValue value)
+        {
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "PartType")
+            {
+                return (RbxPartShape)item.Value;
+            }
+
+            throw RbxError.BadArgument(
+                "Part.Shape assignment expects an Enum.PartType item",
+                "pass Enum.PartType.Block/Ball/Cylinder/Wedge/CornerWedge, got "
+                + Describe(value));
+        }
+
+        // ---- UserInputService (input signals + poll surface over IInputSource) ---------------
+
+        /// <summary>UserInputService members: the input signals, MouseBehavior, and the poll
+        /// methods. All input READS are open at the Read tier (no capability gate) — observing
+        /// input mutates nothing in the world.</summary>
+        private static bool TryReadUserInput(RbxInstance self, string key, out LuaValue value)
+        {
+            if (!(self is RbxUserInputService service))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "InputBegan":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputBegan);
+                    return true;
+                case "InputEnded":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputEnded);
+                    return true;
+                case "InputChanged":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputChanged);
+                    return true;
+                case "MouseBehavior":
+                    value = service.MouseBehavior != null
+                        ? LuaCsRobloxDatatypeBindings.Wrap(service.MouseBehavior)
+                        : LuaValue.Nil;
+                    return true;
+                case "IsKeyDown":
+                    value = GetUserInputMethods(service).IsKeyDown;
+                    return true;
+                case "GetKeysPressed":
+                    value = GetUserInputMethods(service).GetKeysPressed;
+                    return true;
+                case "GetMouseLocation":
+                    value = GetUserInputMethods(service).GetMouseLocation;
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        // WHY: the poll methods close over `service` only (not the per-mod context) and the world
+        // has one UserInputService, so their Lua wrappers are built once per service and shared —
+        // the skill's flagship loop reads IsKeyDown several times per tick, and a fresh closure per
+        // access would be a per-frame allocation. The weak table drops the cache when the service is.
+        private static readonly ConditionalWeakTable<RbxUserInputService, UserInputMethods> InputMethodCache = new();
+
+        private sealed class UserInputMethods
+        {
+            public LuaValue IsKeyDown;
+            public LuaValue GetKeysPressed;
+            public LuaValue GetMouseLocation;
+        }
+
+        private static UserInputMethods GetUserInputMethods(RbxUserInputService service)
+        {
+            return InputMethodCache.GetValue(service, s => new UserInputMethods
+            {
+                IsKeyDown = new LuaValue(Fn("UserInputService.IsKeyDown", ctx =>
+                {
+                    RbxEnumItem keyCode = ReadKeyCodeArg(ctx, 1, "UserInputService:IsKeyDown");
+                    return s.IsKeyDown(keyCode.Value);
+                })),
+                GetKeysPressed = new LuaValue(Fn("UserInputService.GetKeysPressed", _ =>
+                {
+                    LuaTable list = new();
+                    int index = 1;
+                    foreach (RbxInputObject input in s.GetKeysPressed())
+                    {
+                        list[index++] = LuaCsRobloxDatatypeBindings.Wrap(input);
+                    }
+
+                    return new LuaValue(list);
+                })),
+                GetMouseLocation = new LuaValue(Fn("UserInputService.GetMouseLocation",
+                    _ => LuaCsRobloxDatatypeBindings.Wrap(s.GetMouseLocation()))),
+            });
+        }
+
+        /// <summary>UserInputService.MouseBehavior assignment. Roblox lets any script set it, so
+        /// no capability gate; MVP1 keeps it state-only.
+        /// TODO: apply LockCenter/LockCurrentPosition to the host cursor with the pointer-lock
+        /// slice.</summary>
+        private static bool TryWriteUserInput(RbxInstance self, string key, LuaValue value)
+        {
+            if (!(self is RbxUserInputService service) || key != "MouseBehavior")
+            {
+                return false;
+            }
+
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "MouseBehavior")
+            {
+                service.MouseBehavior = item;
+                return true;
+            }
+
+            throw RbxError.BadArgument(
+                "UserInputService.MouseBehavior assignment expects an Enum.MouseBehavior item",
+                "pass Enum.MouseBehavior.Default/LockCenter/LockCurrentPosition, got "
+                + Describe(value));
+        }
+
+        private static RbxEnumItem ReadKeyCodeArg(LuaFunctionExecutionContext ctx, int index,
+            string what)
+        {
+            if (TryUnbox(Arg(ctx, index), out RbxEnumItem item) && item.EnumType.Name == "KeyCode")
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects an Enum.KeyCode item at argument " + index,
+                "pass e.g. Enum.KeyCode.Space, got " + Describe(Arg(ctx, index))
+                + " at argument " + index);
+        }
+
+        // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------
+
+        /// <summary>workspace.CurrentCamera plus the Camera instance's CFrame (over the rig),
+        /// CameraType, and CameraSubject. Reads are ungated; writes require WorldEdit.</summary>
+        private static bool TryReadCamera(LuaCsRobloxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (key == "CurrentCamera" && self.IsA("Workspace"))
+            {
+                value = context.WrapInstance(self.FindFirstChildOfClass("Camera"));
+                return true;
+            }
+
+            if (self.ClassName != "Camera")
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "CFrame":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(context.Bindings.CameraRig.GetCFrame());
+                    return true;
+                case "CameraType":
+                    RbxEnumItem type = context.Bindings.CameraTypeItem;
+                    value = type != null ? LuaCsRobloxDatatypeBindings.Wrap(type) : LuaValue.Nil;
+                    return true;
+                case "CameraSubject":
+                    value = context.WrapInstance(context.Bindings.CameraSubject);
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        private static bool TryWriteCamera(LuaCsRobloxModContext context, RbxInstance self,
+            string key, LuaValue value)
+        {
+            if (self.ClassName != "Camera")
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "CFrame":
+                    context.RequireWorldEdit("setting Camera.CFrame");
+                    context.Bindings.CameraRig.SetCFrame(
+                        ReadCFrameValue(value, "Camera.CFrame assignment"));
+                    return true;
+                case "CameraType":
+                    context.RequireWorldEdit("setting Camera.CameraType");
+                    context.Bindings.CameraTypeItem = ReadCameraTypeValue(value);
+                    return true;
+                case "CameraSubject":
+                    context.RequireWorldEdit("setting Camera.CameraSubject");
+                    context.Bindings.SetCameraSubject(
+                        ReadOptionalInstance(value, "Camera.CameraSubject assignment"));
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static RbxEnumItem ReadCameraTypeValue(LuaValue value)
+        {
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "CameraType")
+            {
+                return item;
+            }
+
+            throw RbxError.BadArgument(
+                "Camera.CameraType assignment expects an Enum.CameraType item",
+                "pass e.g. Enum.CameraType.Scriptable, got " + Describe(value));
         }
 
         private static RbxVector3 ReadVector3Value(LuaValue value, string what)
@@ -580,13 +867,13 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxError SpatialStub(string property)
         {
-            // WHY: Position/Size/CFrame/Color/Transparency/Anchored/CanCollide are wired to the
-            // part-property sink; Shape/Material need the primitive+material catalog and
+            // WHY: Shape/Position/Size/CFrame/Color/Transparency/Anchored/CanCollide are wired to
+            // the part-property sink; Material needs the material catalog and
             // Orientation/Rotation need Euler decomposition — both later BasePart follow-ups.
             return RbxError.NotImplemented(
                 "BasePart." + property,
-                "the BasePart material/shape + orientation follow-up",
-                "set CFrame/Position/Size/Color/Transparency/Anchored/CanCollide, which are wired now");
+                "the BasePart material + orientation follow-up",
+                "set Shape/CFrame/Position/Size/Color/Transparency/Anchored/CanCollide, which are wired now");
         }
     }
 }

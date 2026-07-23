@@ -63,11 +63,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseSseDataLine_ReasoningOnly_DoesNotEmitAssistantText()
+        public void ParseSseDataLine_ReasoningOnly_EmitsTextReasoningContentNotAssistantText()
         {
+            // A reasoning-only delta (DeepSeek/Qwen delta.reasoning_content with content=null) is a
+            // REAL delta: it must surface as TextReasoningContent (so the empty-stream retry never
+            // fires) while the visible assistant text stays empty.
             const string json = "{\"choices\":[{\"delta\":{\"reasoning_content\":\"think\"}}]}";
             MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(json);
-            Assert.IsNull(u);
+            Assert.IsNotNull(u, "Reasoning-only deltas must parse, not be dropped.");
+            Assert.AreEqual("", u.Text ?? "", "Reasoning must never leak into the visible text.");
+            MEAI.TextReasoningContent reasoning =
+                u.Contents.OfType<MEAI.TextReasoningContent>().Single();
+            Assert.AreEqual("think", reasoning.Text);
+        }
+
+        [Test]
+        public void ParseSseDataLine_ReasoningAlternateSpellings_EmitTextReasoningContent()
+        {
+            const string bareJson = "{\"choices\":[{\"delta\":{\"reasoning\":\"bare\"}}]}";
+            MEAI.ChatResponseUpdate bare = MeaiOpenAiChatClient.ParseSseDataLineForTests(bareJson);
+            Assert.IsNotNull(bare);
+            Assert.AreEqual("bare",
+                bare.Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+
+            const string camelJson = "{\"choices\":[{\"delta\":{\"reasoningContent\":\"camel\"}}]}";
+            MEAI.ChatResponseUpdate camel = MeaiOpenAiChatClient.ParseSseDataLineForTests(camelJson);
+            Assert.IsNotNull(camel);
+            Assert.AreEqual("camel",
+                camel.Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
 
         [Test]
@@ -80,21 +103,66 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseSseDataLine_ReasoningAndContent_EmitsOnlyContent()
+        public void ParseSseDataLine_ReasoningAndContent_EmitsContentAsTextAndReasoningAsReasoning()
         {
             const string json = "{\"choices\":[{\"delta\":{\"reasoning_content\":\"x\",\"content\":\"out\"}}]}";
             MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(json);
             Assert.IsNotNull(u);
-            Assert.AreEqual("out", u.Text);
+            Assert.AreEqual("out", u.Text, "Only content may be visible text.");
+            Assert.AreEqual("x", u.Contents.OfType<MEAI.TextReasoningContent>().Single().Text,
+                "The reasoning delta must ride along as TextReasoningContent, not be dropped.");
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_DoesNotExposeReasoningContent()
+        public void ParseCompletion_EmptyContent_PromotesReasoningToVisibleText()
         {
+            // Reasoning-only model, non-streaming: the answer lives in reasoning_content and content
+            // is empty. The reasoning must surface as TextReasoningContent AND be promoted to the
+            // visible text so the turn never ends as LlmErrorCode.EmptyResponse.
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Hello from reasoning\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("Hello from reasoning", r.Text);
+            Assert.AreEqual("Hello from reasoning",
+                r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+        }
+
+        [Test]
+        public void ParseCompletion_ContentPresent_ReasoningExposedButNotPromoted()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"real answer\",\"reasoning_content\":\"hidden plan\"}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("real answer", r.Text, "Visible text must stay the provider content.");
+            Assert.AreEqual("hidden plan",
+                r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+        }
+
+        [Test]
+        public void ParseCompletion_EmptyContentWithToolCalls_DoesNotPromoteReasoning()
+        {
+            // A tool-call turn with empty content is NOT an empty answer: its reasoning must never
+            // masquerade as visible assistant text next to the executing tool calls.
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"call plan\",\"tool_calls\":[" +
+                "{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"go\",\"arguments\":\"{}\"}}]}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
             Assert.AreEqual("", r.Text);
+            Assert.AreEqual("call plan",
+                r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+            Assert.AreEqual(1, r.Messages[0].Contents.OfType<MEAI.FunctionCallContent>().Count());
+        }
+
+        [Test]
+        public void ParseCompletion_InlineThinkOnlyContent_PromotesThinkTextAndExposesReasoning()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"<think>inline plan</think>\"}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("inline plan", r.Text,
+                "A think-only answer must be promoted instead of surfacing as empty.");
+            Assert.AreEqual("inline plan",
+                r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
 
         [Test]
@@ -107,12 +175,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_DoesNotExposeReasoningContent_CamelCase()
+        public void ParseCompletion_EmptyContent_PromotesReasoningToVisibleText_CamelCase()
         {
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoningContent\":\"Hello camel\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("", r.Text);
+            Assert.AreEqual("Hello camel", r.Text);
+            Assert.AreEqual("Hello camel",
+                r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
 
         [Test]
@@ -203,6 +273,121 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual("AB", string.Concat(parts));
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_ReasoningOnlyStream_PromotesReasoningToNonEmptyAnswer()
+        {
+            // A reasoning-only model (DeepSeek/Qwen style: only delta.reasoning_content, content
+            // stays null) previously parsed ZERO deltas -> empty-stream retry -> non-stream fallback
+            // -> EmptyResponse. Now the reasoning deltas count as real deltas (no retry/fallback:
+            // DoneSentinelTransport throws on any non-streaming call) and the accumulated reasoning
+            // is promoted to one final visible TextContent, so the turn is never empty.
+            const string sse =
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I am \"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n" +
+                "data: [DONE]\n\n";
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new DoneSentinelTransport(sse));
+            List<string> visibleParts = new();
+            StringBuilder reasoningParts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    visibleParts.Add(update.Text);
+                }
+
+                if (update.Contents != null)
+                {
+                    foreach (MEAI.TextReasoningContent trc in
+                             update.Contents.OfType<MEAI.TextReasoningContent>())
+                    {
+                        reasoningParts.Append(trc.Text);
+                    }
+                }
+            }
+
+            Assert.AreEqual("I am thinking", reasoningParts.ToString(),
+                "Every reasoning delta must surface as TextReasoningContent.");
+            Assert.AreEqual("I am thinking", string.Concat(visibleParts).Trim(),
+                "A reasoning-only turn must end with the reasoning promoted to a visible answer.");
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_ReasoningPlusContent_DoesNotPromoteReasoning()
+        {
+            const string sse =
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n" +
+                "data: [DONE]\n\n";
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new DoneSentinelTransport(sse));
+            List<string> visibleParts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    visibleParts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("answer", string.Concat(visibleParts),
+                "When real content arrived, reasoning must stay hidden (no promotion).");
+        }
+
+        [Test]
+        public void FullResponseToSimulatedStreamingUpdates_ReEmitsUsageAsTrailingUpdate()
+        {
+            // WebGL non-native-streaming and the stream->non-stream fallback replay a full response
+            // as simulated updates; without a trailing UsageContent every such turn reported 0 tokens.
+            MEAI.ChatResponse full = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "hi"))
+            {
+                Usage = new MEAI.UsageDetails
+                {
+                    InputTokenCount = 3,
+                    OutputTokenCount = 5,
+                    TotalTokenCount = 8
+                }
+            };
+
+            List<MEAI.ChatResponseUpdate> updates =
+                MeaiOpenAiChatClient.FullResponseToSimulatedStreamingUpdatesForTests(full);
+
+            Assert.AreEqual("hi", string.Concat(updates.Select(u => u.Text ?? "")),
+                "The visible text must still be replayed.");
+            MEAI.UsageContent usage = updates
+                .SelectMany(u => u.Contents ?? new List<MEAI.AIContent>())
+                .OfType<MEAI.UsageContent>()
+                .Single();
+            Assert.AreEqual(3, (int)(usage.Details.InputTokenCount ?? 0));
+            Assert.AreEqual(5, (int)(usage.Details.OutputTokenCount ?? 0));
+            Assert.AreEqual(8, (int)(usage.Details.TotalTokenCount ?? 0));
+            Assert.AreSame(updates.Last(),
+                updates.Single(u => (u.Contents ?? new List<MEAI.AIContent>()).OfType<MEAI.UsageContent>().Any()),
+                "Usage must ride the trailing update, mirroring OpenAI's final include_usage chunk.");
+        }
+
+        [Test]
+        public void FullResponseToSimulatedStreamingUpdates_ReEmitsReasoningContent()
+        {
+            MEAI.ChatResponse full = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent>
+                {
+                    new MEAI.TextReasoningContent("hidden plan"),
+                    new MEAI.TextContent("visible answer")
+                }));
+
+            List<MEAI.ChatResponseUpdate> updates =
+                MeaiOpenAiChatClient.FullResponseToSimulatedStreamingUpdatesForTests(full);
+
+            Assert.AreEqual("visible answer", string.Concat(updates.Select(u => u.Text ?? "")));
+            Assert.AreEqual("hidden plan", updates
+                .SelectMany(u => u.Contents ?? new List<MEAI.AIContent>())
+                .OfType<MEAI.TextReasoningContent>()
+                .Single().Text);
         }
 
         [Test]

@@ -231,6 +231,14 @@ namespace CoreAI.Ai
         /// <summary>Raw model text (or JSON command payload).</summary>
         public string Content { get; set; } = "";
 
+        /// <summary>
+        /// Hidden model reasoning for this completion (provider <c>reasoning_content</c> and/or
+        /// inline <c>&lt;think&gt;</c> blocks). Empty when the model produced none. Kept separate
+        /// from <see cref="Content"/> so hosts can render a collapsible "thinking" section without
+        /// polluting the visible answer.
+        /// </summary>
+        public string ReasoningContent { get; set; } = "";
+
         /// <summary>Failure or cancellation message.</summary>
         public string Error { get; set; } = "";
 
@@ -284,6 +292,13 @@ namespace CoreAI.Ai
     {
         /// <summary>Text delta (may be empty on terminal chunks).</summary>
         public string Text { get; set; } = "";
+
+        /// <summary>
+        /// Hidden reasoning delta (provider <c>reasoning_content</c> or inline <c>&lt;think&gt;</c>
+        /// spans). Never part of <see cref="Text"/>: consumers that only read <see cref="Text"/>
+        /// keep a clean visible answer, while UIs may accumulate this into a "thinking" section.
+        /// </summary>
+        public string ReasoningText { get; set; } = "";
 
         /// <summary><c>true</c> when the stream has finished.</summary>
         public bool IsDone { get; set; }

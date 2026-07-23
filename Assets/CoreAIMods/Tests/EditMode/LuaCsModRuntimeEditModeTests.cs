@@ -470,14 +470,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LuaCs_WorldBuildBindingsDisabled_RemovesBuildApisButKeepsRbxAndQueries()
+        public void LuaCs_WorldBuildBindingsDisabled_StubsBuildApisButKeepsRbxAndQueries()
         {
             MemoryStore store = new();
             FakeCommandSink sink = new();
             // WHY: mirrors CoreAiModsInstaller exactly — WorldEdit capability is granted (so the Rbx
-            // Instance.new build surface stays available), but the coreai_world_* BUILD bindings are skipped
-            // via RegisterWorldEditBuildBindings = false, so the Programmer builds the world only the Roblox
-            // way. Read-gated world queries must survive.
+            // Instance.new build surface stays available), but the coreai_world_* BUILD bindings are replaced
+            // with actionable withheld stubs via RegisterWorldEditBuildBindings = false, so the Programmer
+            // builds the world only the Roblox way. Read-gated world queries must survive.
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
@@ -502,10 +502,12 @@ namespace CoreAI.Tests.EditMode
                 store_set('rbx', (Instance ~= nil) and 'yes' or 'no')",
                 LuaCapabilities.All);
 
-            Assert.AreEqual("no", store.Get("m", "spawn"), "World BUILD API coreai_world_spawn must be removed.");
-            Assert.AreEqual("no", store.Get("m", "change"), "World BUILD API coreai_world_change must be removed.");
-            Assert.AreEqual("no", store.Get("m", "set_color"), "World BUILD API coreai_world_set_color must be removed.");
-            Assert.AreEqual("no", store.Get("m", "destroy"), "World BUILD API coreai_world_destroy must be removed.");
+            // WHY: withheld build APIs resolve to actionable stubs (calling one throws a capability
+            // error — proven in LuaCsWithheldApiStubEditModeTests), so presence probes see a function.
+            Assert.AreEqual("yes", store.Get("m", "spawn"), "coreai_world_spawn must resolve to an actionable stub.");
+            Assert.AreEqual("yes", store.Get("m", "change"), "coreai_world_change must resolve to an actionable stub.");
+            Assert.AreEqual("yes", store.Get("m", "set_color"), "coreai_world_set_color must resolve to an actionable stub.");
+            Assert.AreEqual("yes", store.Get("m", "destroy"), "coreai_world_destroy must resolve to an actionable stub.");
             Assert.AreEqual("yes", store.Get("m", "find"), "Read-only coreai_world_find must remain.");
             Assert.AreEqual("yes", store.Get("m", "pos"), "Read-only coreai_world_pos must remain.");
             Assert.AreEqual("yes", store.Get("m", "exists"), "Read-only coreai_world_exists must remain.");

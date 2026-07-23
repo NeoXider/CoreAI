@@ -245,6 +245,8 @@ namespace CoreAI.Ai.LuaCs
                 case RbxEnum _: return "Enum";
                 case RbxRandom _: return "Random";
                 case RbxScriptSignal _: return "RBXScriptSignal";
+                case RbxScriptConnection _: return "RBXScriptConnection";
+                case RbxInputObject _: return "InputObject";
                 default: return value?.GetType().Name ?? "nil";
             }
         }

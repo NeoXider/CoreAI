@@ -561,6 +561,9 @@ namespace CoreAI.Infrastructure.Llm
                     bool sawNonCommentLine = false;
                     bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
+                    bool sawVisibleContentDelta = false;
+                    bool sawToolCallDelta = false;
+                    StringBuilder accumulatedReasoning = new();
 
                     // WHY: buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
@@ -612,6 +615,22 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             parsedSseDeltas++;
                             string updateText = update?.Text ?? "";
+                            if (!string.IsNullOrEmpty(updateText))
+                            {
+                                sawVisibleContentDelta = true;
+                            }
+
+                            if (update?.Contents != null)
+                            {
+                                foreach (MEAI.AIContent c in update.Contents)
+                                {
+                                    if (c is MEAI.TextReasoningContent trc && !string.IsNullOrEmpty(trc.Text))
+                                    {
+                                        accumulatedReasoning.Append(trc.Text);
+                                    }
+                                }
+                            }
+
                             bool textOnly = !string.IsNullOrEmpty(updateText)
                                             && (update.Contents == null
                                                 || update.Contents.Count == 0
@@ -644,6 +663,7 @@ namespace CoreAI.Infrastructure.Llm
                         if (completedCalls != null)
                         {
                             parsedSseDeltas++;
+                            sawToolCallDelta = true;
                             yield return completedCalls;
                         }
 
@@ -664,6 +684,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (flushed != null)
                     {
                         parsedSseDeltas++;
+                        sawToolCallDelta = true;
                         yield return flushed;
                     }
 
@@ -695,6 +716,22 @@ namespace CoreAI.Infrastructure.Llm
                             LogTag.Llm);
                         fallBackToNonStreaming = true;
                         break;
+                    }
+
+                    if (!sawVisibleContentDelta && !sawToolCallDelta && accumulatedReasoning.Length > 0)
+                    {
+                        // WHY: Never-empty guarantee for reasoning-only turns: the model spent the
+                        // whole turn in reasoning_content and produced no visible content and no tool
+                        // calls. Promote the accumulated reasoning to ONE final visible TextContent so
+                        // the consumer gets an answer instead of an empty stream.
+                        string promotedReasoning = accumulatedReasoning.ToString().Trim();
+                        if (promotedReasoning.Length > 0)
+                        {
+                            _log.Info(
+                                "MeaiOpenAiChatClient: stream carried only reasoning deltas (no visible content, no tool calls) - promoting the accumulated reasoning to the visible answer.",
+                                LogTag.Llm);
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, promotedReasoning);
+                        }
                     }
 
                     yield break;
@@ -1095,32 +1132,52 @@ namespace CoreAI.Infrastructure.Llm
         private static IEnumerable<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdates(
             MEAI.ChatResponse response)
         {
-            if (response?.Messages == null || response.Messages.Count == 0)
+            if (response == null)
             {
                 yield break;
             }
 
-            MEAI.ChatMessage msg = response.Messages[0];
-
-            if (msg.Contents != null && msg.Contents.Count > 0)
+            if (response.Messages != null && response.Messages.Count > 0)
             {
-                foreach (MEAI.AIContent c in EnumerableContents(msg))
+                MEAI.ChatMessage msg = response.Messages[0];
+
+                if (msg.Contents != null && msg.Contents.Count > 0)
                 {
-                    if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    foreach (MEAI.AIContent c in EnumerableContents(msg))
                     {
-                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text);
-                    }
-                    else if (c is MEAI.FunctionCallContent fc)
-                    {
-                        MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "");
-                        u.Contents = new List<MEAI.AIContent> { fc };
-                        yield return u;
+                        if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                        {
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text);
+                        }
+                        else if (c is MEAI.TextReasoningContent rc && !string.IsNullOrEmpty(rc.Text))
+                        {
+                            MEAI.ChatResponseUpdate ru = new(MEAI.ChatRole.Assistant, "");
+                            ru.Contents = new List<MEAI.AIContent> { rc };
+                            yield return ru;
+                        }
+                        else if (c is MEAI.FunctionCallContent fc)
+                        {
+                            MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "");
+                            u.Contents = new List<MEAI.AIContent> { fc };
+                            yield return u;
+                        }
                     }
                 }
+                else if (!string.IsNullOrEmpty(msg.Text))
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text);
+                }
             }
-            else if (!string.IsNullOrEmpty(msg.Text))
+
+            if (response.Usage != null)
             {
-                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text);
+                // WHY: The full response's usage was invisible to streaming consumers on the
+                // WebGL non-native-streaming path and the stream->non-stream fallback, so those
+                // turns reported 0 tokens. Re-emit it as a trailing UsageContent update, mirroring
+                // OpenAI's final stream_options.include_usage chunk.
+                MEAI.ChatResponseUpdate usageUpdate = new(MEAI.ChatRole.Assistant, "");
+                usageUpdate.Contents = new List<MEAI.AIContent> { new MEAI.UsageContent(response.Usage) };
+                yield return usageUpdate;
             }
         }
 
@@ -1414,19 +1471,37 @@ namespace CoreAI.Infrastructure.Llm
 
                 JToken msg = choices[0]?["message"];
                 string content = ParseAssistantMessageVisibleText(msg);
+                string reasoning = ExtractAssistantMessageReasoningText(msg);
 
                 JArray toolCalls = msg?["tool_calls"] as JArray;
+                bool hasToolCalls = toolCalls != null && toolCalls.Count > 0;
 
-                MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, content));
-
-                if (toolCalls != null && toolCalls.Count > 0)
+                if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(reasoning) &&
+                    !hasToolCalls)
                 {
-                    List<MEAI.AIContent> contents = new();
-                    if (!string.IsNullOrEmpty(content))
-                    {
-                        contents.Add(new MEAI.TextContent(content));
-                    }
+                    // WHY: Reasoning-only models (DeepSeek/Qwen) can put the whole answer in
+                    // reasoning_content and leave content empty. Promoting it keeps response.Text
+                    // non-empty so the turn does not surface as LlmErrorCode.EmptyResponse. Tool-call
+                    // turns are exempt: their reasoning must never masquerade as the assistant answer.
+                    content = reasoning.Trim();
+                }
 
+                List<MEAI.AIContent> contents = new();
+                // WHY: the reasoning is ALSO exposed as a TextReasoningContent even when promoted to
+                // the visible answer, so a UI can still render a collapsible thinking section — the
+                // promoted text populates response.Text, the reasoning block feeds the thinking view.
+                if (!string.IsNullOrEmpty(reasoning))
+                {
+                    contents.Add(new MEAI.TextReasoningContent(reasoning));
+                }
+
+                if (!string.IsNullOrEmpty(content))
+                {
+                    contents.Add(new MEAI.TextContent(content));
+                }
+
+                if (hasToolCalls)
+                {
                     foreach (JToken tc in toolCalls)
                     {
                         JObject func = tc["function"] as JObject;
@@ -1441,9 +1516,9 @@ namespace CoreAI.Infrastructure.Llm
 
                         contents.Add(ParseNonStreamingToolCall(tc, func, logger));
                     }
-
-                    response.Messages[0] = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents);
                 }
+
+                MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents));
 
                 if (root["usage"] is JObject usage)
                 {
@@ -1505,6 +1580,68 @@ namespace CoreAI.Infrastructure.Llm
             return System.Text.RegularExpressions.Regex.Replace(text,
                 @"<think>[\s\S]*?</think>\s*", "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+        }
+
+        /// <summary>
+        /// Reads the provider reasoning field from an OpenAI-compatible delta/message object.
+        /// Covers DeepSeek/Qwen <c>reasoning_content</c> plus the <c>reasoning</c> and
+        /// <c>reasoningContent</c> spellings used by other OpenAI-compatible servers.
+        /// </summary>
+        private static string ExtractReasoningFieldText(JObject obj)
+        {
+            if (obj == null)
+            {
+                return "";
+            }
+
+            JToken token = obj["reasoning_content"] ?? obj["reasoning"] ?? obj["reasoningContent"];
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return "";
+            }
+
+            return ExtractMessageContentString(token);
+        }
+
+        /// <summary>
+        /// Extracts the inner text of every inline <c>&lt;think&gt;...&lt;/think&gt;</c> block so
+        /// hidden reasoning stripped from the visible answer can still surface as
+        /// <see cref="MEAI.TextReasoningContent"/> instead of being silently discarded.
+        /// </summary>
+        private static string ExtractInlineThinkText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "";
+            }
+
+            System.Text.RegularExpressions.MatchCollection matches =
+                System.Text.RegularExpressions.Regex.Matches(text,
+                    @"<think>([\s\S]*?)</think>",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (matches.Count == 0)
+            {
+                return "";
+            }
+
+            StringBuilder sb = new();
+            foreach (System.Text.RegularExpressions.Match m in matches)
+            {
+                string inner = m.Groups[1].Value.Trim();
+                if (inner.Length == 0)
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+
+                sb.Append(inner);
+            }
+
+            return sb.ToString();
         }
 
         private static string ExtractMessageContentString(JToken contentToken)
@@ -1580,6 +1717,32 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return "";
+        }
+
+        /// <summary>
+        /// Collects the hidden reasoning of one non-streaming assistant message: the provider
+        /// reasoning field (<c>reasoning_content</c>/<c>reasoning</c>/<c>reasoningContent</c>) plus
+        /// any inline <c>&lt;think&gt;</c> blocks that <see cref="StripRedactedThinkingBlock"/>
+        /// removes from the visible text. Both sources surface as
+        /// <see cref="MEAI.TextReasoningContent"/> so the UI can show a collapsible thinking section.
+        /// </summary>
+        private static string ExtractAssistantMessageReasoningText(JToken msg)
+        {
+            if (msg is not JObject m)
+            {
+                return "";
+            }
+
+            string fieldReasoning = ExtractReasoningFieldText(m);
+            string inlineThink = ExtractInlineThinkText(ExtractMessageContentString(m["content"]));
+            if (string.IsNullOrEmpty(fieldReasoning))
+            {
+                return inlineThink;
+            }
+
+            return string.IsNullOrEmpty(inlineThink)
+                ? fieldReasoning
+                : fieldReasoning + "\n" + inlineThink;
         }
 
         private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw,
@@ -1660,7 +1823,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (delta != null && delta.Type == JTokenType.Object)
                 {
                     JObject deltaObj = (JObject)delta;
-                    _ = deltaObj["reasoning_content"]?.ToString();
+                    string reasoningDelta = ExtractReasoningFieldText(deltaObj);
 
                     string deltaContent = deltaObj["content"]?.ToString();
                     JArray toolCallsArray = deltaObj["tool_calls"] as JArray;
@@ -1681,7 +1844,28 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (!string.IsNullOrEmpty(deltaContent))
                     {
-                        return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, deltaContent);
+                        MEAI.ChatResponseUpdate contentUpdate = new(MEAI.ChatRole.Assistant, deltaContent);
+                        if (!string.IsNullOrEmpty(reasoningDelta))
+                        {
+                            contentUpdate.Contents.Add(new MEAI.TextReasoningContent(reasoningDelta));
+                        }
+
+                        return contentUpdate;
+                    }
+
+                    if (!string.IsNullOrEmpty(reasoningDelta))
+                    {
+                        // WHY: DeepSeek/Qwen reasoning models stream their thinking as
+                        // delta.reasoning_content with content=null. Surfacing it as
+                        // TextReasoningContent (never TextContent) keeps the visible answer clean
+                        // while still counting as a REAL parsed delta, so the empty-stream
+                        // retry/fallback does not fire on a turn that is actively thinking.
+                        MEAI.ChatResponseUpdate reasoningUpdate = new(MEAI.ChatRole.Assistant, "");
+                        reasoningUpdate.Contents = new List<MEAI.AIContent>
+                        {
+                            new MEAI.TextReasoningContent(reasoningDelta)
+                        };
+                        return reasoningUpdate;
                     }
                 }
 
@@ -1814,6 +1998,14 @@ namespace CoreAI.Infrastructure.Llm
         internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson)
         {
             return ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
+        }
+
+        // WHY: / <summary>EditMode tests: simulated streaming updates built from a full response
+        // / (WebGL non-native-streaming and the stream->non-stream fallback path).</summary>
+        internal static List<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdatesForTests(
+            MEAI.ChatResponse response)
+        {
+            return FullResponseToSimulatedStreamingUpdates(response).ToList();
         }
 
         // WHY: / <summary>

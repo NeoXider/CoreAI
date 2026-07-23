@@ -16,21 +16,23 @@ namespace CoreAI.Ai
         /// <summary>One-line catalog description shown before the model decides to read the skill.</summary>
         public const string SkillDescription =
             "Roblox-compatible Lua surface: Instance.new/game/workspace, datatypes " +
-            "(Vector3/CFrame/Color3/UDim/Random), Enum, Part spatial properties, attributes and " +
-            "tags, the CODE|fix error format, and what is not implemented yet. Read before writing " +
-            "any Roblox-style (Rbx) script.";
+            "(Vector3/CFrame/Color3/UDim/Random), Enum, Part spatial properties and Shape, " +
+            "UserInputService (keyboard/mouse), workspace.CurrentCamera, attributes and tags, the " +
+            "CODE|fix error format, and what is not implemented yet. Read before writing any " +
+            "Roblox-style (Rbx) script.";
 
         /// <summary>Full instructions returned by <c>read_skill("Rbx API")</c>.</summary>
         public const string Instructions = @"# CoreAI Rbx (Roblox-compatible) API Reference
 
 A Roblox-style Lua surface layered over the CoreAI mod sandbox: Instance tree, datatypes
-(Vector3/CFrame/Color3/...), and Enum. It runs INSIDE the same mods as the classic API — you
-still load code with manage_mods / execute_lua and can freely mix in hooks_every, store_set,
-coreai_world_*, etc. (read_skill('Lua Modding') covers those). This skill covers only the Rbx
-surface.
+(Vector3/CFrame/Color3/...), Enum, plus input and camera. It runs INSIDE the same mods as the
+classic API — you still load code with manage_mods / execute_lua and can freely mix in
+hooks_every, store_set, coreai_world_*, etc. (read_skill('Lua Modding') covers those). This skill
+covers only the Rbx surface.
 
 Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part properties
-6. Attributes & tags  7. Errors  8. Not implemented  9. Examples
+6. Input (UserInputService)  7. Camera  8. Attributes & tags  9. Errors  10. Not implemented
+11. Examples
 
 ## 1. Space & rules
 
@@ -40,7 +42,8 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
 - One shared world: `game` (DataModel) and `workspace` are globals every mod and every
   execute_lua call see. An instance one mod creates is the same one another mod navigates.
 - Creating or mutating instances needs the WorldEdit capability (persistent mods have it by
-  default). Read-only scripts still get `game`/`workspace`/datatypes but not `Instance`.
+  default). Read-only scripts still get `game`/`workspace`/datatypes and can READ input
+  (UserInputService) and the camera, but not `Instance` or any mutation.
 
 ## 2. Datatypes (immutable value types; assigning a field errors)
 
@@ -73,10 +76,13 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
 
 ## 3. Enum
 
-`Enum.<Type>.<Item>` e.g. `Enum.Material.Wood`, `Enum.PartType.Ball`, `Enum.NormalId.Top`,
-`Enum.Axis.X`, `Enum.RotationOrder.XYZ`. Only these five enum types are registered; any other
-`Enum.X` raises NOT_IMPLEMENTED. Item fields: Name, Value, EnumType. `Enum.GetEnums()`;
-`Enum.Material:GetEnumItems()`. Items compare by identity (`==`).
+`Enum.<Type>.<Item>` e.g. `Enum.Material.Wood`, `Enum.PartType.Ball`, `Enum.KeyCode.Space`,
+`Enum.UserInputType.Keyboard`, `Enum.NormalId.Top`, `Enum.Axis.X`, `Enum.RotationOrder.XYZ`.
+Registered enum types: Material, PartType, CameraType, NormalId, Axis, RotationOrder, KeyCode,
+UserInputType, UserInputState, MouseBehavior. Any other `Enum.X` raises NOT_IMPLEMENTED. Item
+fields: Name, Value, EnumType. `Enum.GetEnums()`; `Enum.Material:GetEnumItems()`. Items compare
+by identity (`==`). Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
+buttons live at 1000+).
 
 ## 4. Instances
 
@@ -84,8 +90,9 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
   Any other name errors. The parent argument is deprecated (logs once); set `.Parent` after
   configuring instead.
 - `game:GetService(""Name"")` — valid services: Workspace, Lighting, ReplicatedStorage,
-  ServerStorage, ServerScriptService, StarterPlayer. Unknown name -> ""X is not a valid Service name"".
-  Also `game:FindService(name)`. `workspace` is `game:GetService(""Workspace"")`.
+  ServerStorage, ServerScriptService, StarterPlayer, UserInputService. Unknown name -> ""X is not
+  a valid Service name"". Also `game:FindService(name)`. `workspace` is
+  `game:GetService(""Workspace"")`.
 - Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
   needs WorldEdit.
 - Navigation: `FindFirstChild(name[,recursive])`, `FindFirstChildOfClass(cls)`,
@@ -93,42 +100,74 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
   `FindFirstAncestorOfClass(cls)`, `FindFirstAncestorWhichIsA(cls)`, `GetChildren()`,
   `GetDescendants()`, `GetFullName()`, `IsA(cls)`, `IsDescendantOf(x)`, `IsAncestorOf(x)`.
   `inst.ChildName` is sugar for an existing child; a missing member errors (use FindFirstChild).
-- Lifecycle: `Clone()`, `Destroy()`, `ClearAllChildren()` (all need WorldEdit). After Destroy,
-  any member access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises
-  PARENT_LOCKED — drop the reference and make a new one.
+- Lifecycle: `Clone()`, `Destroy()`, `ClearAllChildren()` (all need WorldEdit). Clone is a deep
+  copy: name, attributes, tags and (for parts) Size/CFrame/Color/Anchored/Shape carry across;
+  non-Archivable subtrees are skipped and the copy gets fresh ids. After Destroy, any member
+  access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises PARENT_LOCKED
+  — drop the reference and make a new one.
 
 ## 5. Part properties (a Part / any BasePart)
 
 Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector3/CFrame),
-`Color` (Color3), `Transparency` (0..1), `Anchored` (bool), `CanCollide` (bool).
+`Color` (Color3), `Transparency` (0..1), `Anchored` (bool), `CanCollide` (bool),
+`Shape` (Enum.PartType).
 Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation.
-`Shape`, `Material`, `Orientation`, `Rotation` are NOT implemented yet and raise NOT_IMPLEMENTED
-loudly — use CFrame for rotation until then.
+`Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge` (each materializes its
+real mesh); `.CornerWedge` is accepted but currently draws as a Block until its mesh lands.
+`Material`, `Orientation`, `Rotation` are NOT implemented yet and raise NOT_IMPLEMENTED loudly
+— use CFrame for rotation until then.
 
-## 6. Attributes & tags
+## 6. Input (UserInputService)
+
+Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, or use the global
+`UserInputService` (same instance). Reading input is Read-tier — no WorldEdit needed.
+
+- Events (fire `(input, gameProcessedEvent)`): `InputBegan`, `InputEnded`, `InputChanged`.
+  `input` is an InputObject with `.KeyCode` (Enum.KeyCode), `.UserInputType` (Enum.UserInputType),
+  `.UserInputState` (Enum.UserInputState), `.Position` (Vector3), `.Delta` (Vector3).
+  `:Connect(fn)` and `:Once(fn)` return an RBXScriptConnection with `.Connected` and
+  `:Disconnect()`; `:Wait()` is a loud MVP2 stub.
+- Polls: `IsKeyDown(Enum.KeyCode)` -> bool; `GetKeysPressed()` -> array of InputObject;
+  `GetMouseLocation()` -> Vector2 (top-left origin).
+- `MouseBehavior` (read+write, Enum.MouseBehavior: Default/LockCenter/LockCurrentPosition) is
+  stored today; hardware cursor lock lands later.
+
+## 7. Camera
+
+`workspace.CurrentCamera` is the Camera instance. Members: `CFrame` (read+write — the camera
+pose in studs, over the engine camera rig), `CameraType` (Enum.CameraType, read+write),
+`CameraSubject` (an instance to follow, read+write). Reads are ungated; writes need WorldEdit.
+Convenience globals (WorldEdit): `camera_set_cframe(cf)` sets the pose and
+`camera_follow(instance_or_nil)` attaches/clears the follow subject — same effect as writing
+`CurrentCamera.CFrame` / `CurrentCamera.CameraSubject`.
+
+## 8. Attributes & tags
 
 - `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
   Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
   rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit.
 - `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
 
-## 7. Errors
+## 9. Errors
 
 Every failure is a Lua error whose message is `CODE: message | fix: suggestion` (no
 `[mod:...]` prefix). Catch with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE,
 INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED.
 
-## 8. Not implemented (raise NOT_IMPLEMENTED — do not use)
+## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
 - `task.wait/spawn/defer/delay/cancel` — use `hooks_every` for periodic work.
   `task.synchronize/desynchronize` are silent no-ops.
-- Signals (`inst.ChildAdded:Connect`, `:Once`, `:Wait`), `WaitForChild(name)` when the child
-  is absent, `Model:PivotTo/GetPivot`, `Instance.fromExisting` (use `Clone`).
+- Instance-tree signals (`inst.ChildAdded:Connect`, `:Once`, `:Wait`) and `WaitForChild(name)`
+  when the child is absent, `Model:PivotTo/GetPivot`, `Instance.fromExisting` (use `Clone`).
+  NOTE: UserInputService's own events (InputBegan/InputEnded/InputChanged) DO fire — this
+  exclusion is only about instance-tree signals.
+- Part `Material`, `Orientation`, `Rotation` properties (Shape DOES work now — see section 5).
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
   type annotations/casts all work. Plain Lua 5.2 is unaffected.
 
-## 9. Examples
+## 11. Examples
 
 Build a colored tower of parts:
 ```lua
@@ -148,9 +187,36 @@ Read and modify a part (Position keeps rotation; CFrame sets both):
 local p = workspace:FindFirstChild(""Block1"")
 if p then
   p.Transparency = 0.5
+  p.Shape = Enum.PartType.Wedge                           -- a ramp
   p.CFrame = p.CFrame * CFrame.Angles(0, math.pi / 4, 0)  -- rotate 45 deg about Y
   report(tostring(p.Position))                             -- ""x, y, z"" in studs
 end
+```
+
+Drive a part with the keyboard and follow it with the camera (a tiny mini-game loop):
+```lua
+local UIS = game:GetService(""UserInputService"")
+local car = Instance.new(""Part"")
+car.Size = Vector3.new(4, 1, 8)
+car.Position = Vector3.new(0, 1, 0)
+car.Anchored = true
+car.Parent = workspace
+workspace.CurrentCamera.CameraSubject = car             -- camera follows the part
+
+hooks_every(0.03, function()
+  local move = Vector3.zero
+  if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
+  if UIS:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
+  if UIS:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
+  if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
+  car.Position = car.Position + move * 0.5
+end)
+
+UIS.InputBegan:Connect(function(input, gameProcessed)
+  if input.KeyCode == Enum.KeyCode.Space then
+    car.Color = Color3.fromRGB(255, 80, 80)               -- flash on the jump key
+  end
+end)
 ```
 
 Attributes round-trip:
