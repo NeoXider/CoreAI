@@ -115,8 +115,6 @@ MonoBehaviour:
   references:
     version: 2
     RefIds:
-    - rid: -2
-      type: {class: , ns: , asm: }
     - rid: 1398606321248894976
       type: {class: RayTracingRenderPipelineResources, ns: UnityEngine.Rendering.UnifiedRayTracing, asm: Unity.UnifiedRayTracing.Runtime}
       data:
