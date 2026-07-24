@@ -1,5 +1,23 @@
 # Changelog
 
+## [6.3.4] - 2026-07-24
+
+Optimization loop, iteration 2 (perf re-audit → fix → test). Continues past the 6.3.3 guard
+pooling one stack frame higher.
+
+### Performance
+
+- **No per-call closure/delegate on the guarded hot path.** `LuaCsExecutionGuard`'s two call
+  shapes used to wrap the VM call in a `Func<CancellationToken, LuaValue[]>` lambda that captured
+  `state`/`closure`/`function`/`args`, so a display-class + delegate were heap-allocated on **every**
+  guarded call — the same churn 6.3.3's pooled `GuardHook` removed one frame lower, left in place at
+  the boundary. The scaffolding is now split into `BeginGuard`/`EndGuard` and each `Execute` overload
+  inlines its own VM call, so a steady-state timer/event/`mods_call` allocates nothing here. Behavior
+  is identical (re-entrancy, step/time/allocation trips unchanged; covered by the existing
+  sandbox/re-entrancy suite). Deferred to a later iteration (need a Play Mode GC capture first):
+  result-array/boxing on the discard path, per-event `handlers.ToArray()`, and the `System.Object`
+  scripting-seam boxing.
+
 ## [6.3.3] - 2026-07-24
 
 Optimization + correctness pass driven by an adversarial self-audit loop (audit → fix → test → verify),

@@ -141,8 +141,19 @@ namespace CoreAI.Sandbox.LuaCs
                 throw new ArgumentNullException(nameof(closure));
             }
 
-            return ExecuteGuarded(state, ct => state.ExecuteAsync(closure, ct).GetAwaiter().GetResult(),
-                cancellationToken);
+            GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            try
+            {
+                return state.ExecuteAsync(closure, cancellationToken).GetAwaiter().GetResult();
+            }
+            catch (LuaRuntimeException)
+            {
+                throw;
+            }
+            finally
+            {
+                EndGuard(state, installed, hook);
+            }
         }
 
         /// <summary>Calls a Lua-CSharp function synchronously under the guard.</summary>
@@ -163,9 +174,20 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             args ??= Array.Empty<LuaValue>();
-            return ExecuteGuarded(state,
-                ct => state.CallAsync(new LuaValue(function), args.AsSpan(), ct).GetAwaiter().GetResult(),
-                cancellationToken);
+            GuardHook hook = BeginGuard(state, out Stack<GuardHook> installed);
+            try
+            {
+                return state.CallAsync(new LuaValue(function), args.AsSpan(), cancellationToken)
+                    .GetAwaiter().GetResult();
+            }
+            catch (LuaRuntimeException)
+            {
+                throw;
+            }
+            finally
+            {
+                EndGuard(state, installed, hook);
+            }
         }
 
         /// <summary>Runs a loaded Lua-CSharp chunk and reads the first returned value as <typeparamref name="T"/>.</summary>
@@ -175,48 +197,45 @@ namespace CoreAI.Sandbox.LuaCs
             return results.Length == 0 ? default : results[0].Read<T>();
         }
 
-        private LuaValue[] ExecuteGuarded(
-            LuaState state,
-            Func<CancellationToken, LuaValue[]> body,
-            CancellationToken cancellationToken)
+        // WHY: The guard scaffolding is split into Begin/End (not a Func<> body wrapper) so the two call
+        // shapes — Execute(closure) and Execute(function, args) — inline their VM call directly. A delegate
+        // body would capture state/closure/function/args into a fresh display-class + delegate on EVERY
+        // guarded call (timer/event/mods_call at 20 Hz across mods), re-introducing exactly the per-call
+        // heap churn the pooled GuardHook removed one frame lower. Begin rents + arms the hook; End restores
+        // the enclosing hook (or clears) and returns the hook to the pool.
+        private GuardHook BeginGuard(LuaState state, out Stack<GuardHook> installed)
         {
             GuardHook hook = RentHook();
             hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes);
 
-            Stack<GuardHook> installed = InstalledHooks.GetOrCreateValue(state);
+            installed = InstalledHooks.GetOrCreateValue(state);
             installed.Push(hook);
+            state.SetHook(hook.Function, string.Empty, HookInstructionBatch);
+            return hook;
+        }
+
+        private static void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook)
+        {
+            installed.Pop();
             try
             {
-                state.SetHook(hook.Function, string.Empty, HookInstructionBatch);
-                return body(cancellationToken);
-            }
-            catch (LuaRuntimeException)
-            {
-                throw;
-            }
-            finally
-            {
-                installed.Pop();
-                try
+                if (installed.Count > 0)
                 {
-                    if (installed.Count > 0)
-                    {
-                        // WHY: An enclosing guarded call is still running on this state: re-arm ITS hook
-                        // instead of clearing, so the outer step/time/alloc limits stay live.
-                        state.SetHook(installed.Peek().Function, string.Empty, HookInstructionBatch);
-                    }
-                    else
-                    {
-                        state.SetHook(null, string.Empty, 0);
-                    }
+                    // WHY: An enclosing guarded call is still running on this state: re-arm ITS hook
+                    // instead of clearing, so the outer step/time/alloc limits stay live.
+                    state.SetHook(installed.Peek().Function, string.Empty, HookInstructionBatch);
                 }
-                catch
+                else
                 {
-                    /* ignore */
+                    state.SetHook(null, string.Empty, 0);
                 }
+            }
+            catch
+            {
+                /* ignore */
+            }
 
-                ReturnHook(hook);
-            }
+            ReturnHook(hook);
         }
 
         private static GuardHook RentHook()
