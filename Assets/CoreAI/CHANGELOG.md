@@ -1,5 +1,38 @@
 # Changelog
 
+## [6.3.2] - 2026-07-24
+
+Hardening of the 6.3.1 chat/demo fixes after a multi-agent audit, plus the Builder build tool and
+AI-Settings UX fixes — all verified live in Play Mode against a local LM Studio model.
+
+### Fixed
+
+- **Timeout idle-budget is now enforced end-to-end.** `TimeoutLlmClientDecorator` — the outermost
+  per-request timeout — wrapped the whole streamed tool-calling turn in one fixed budget, silently
+  negating 6.3.1's idle timeout for long multi-tool turns. Its streaming path now re-arms on each chunk
+  too, so a steadily-progressing turn is never truncated; only a real stall times out. `OnToolCallFailed`
+  also re-arms the chat idle deadline, and the role match tolerates an absent event role.
+- **Role-switch history no longer leaks or drops answers.** Two bugs in the 6.3.1 per-role transcript
+  cache: persisted-store restore and the welcome message were recorded back into the cache (unbounded
+  growth on repeated switches), and streamed assistant replies were never cached (switching away and back
+  restored the user's turns with no answers). Store restore + welcome are now render-only, and the
+  streamed reply is recorded on completion. (`CoreAiChatPanel`)
+- **The Builder role can build too.** `world_command` is now attached to both Creator and Builder
+  (Builder's system prompt tells the model to use it); registration is idempotent (no duplicate tool
+  name on a rebuilt/shared policy). (`WorldCommandsInstaller`)
+- **Hub AI Settings:** the fetched-model list now writes the picked model into the HTTP model field (a
+  neutral first entry makes the first pick fire), the "Advanced" foldout got a visible header style, and
+  the backend Mode dropdown is not resynced while focused (so an in-progress pick is not clobbered).
+  (`HubSettingsPage`, `CoreAiHubUss.uss`)
+
+### Docs
+
+- New `Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md` (verified role → purpose → tools → capabilities reference);
+  `AGENT_BUILDER.md` (missing `RoleId.Builder`) and `LLM_TOOLS.md` (world_command auto-attached to
+  Creator/Builder; execute_lua/manage_mods/camera rows) corrected.
+- Internal design/research notes moved out of user docs into a dedicated `dev-docs/` folder (multi-chat,
+  mod-instance-ownership, materials research) — user documentation and dev documents are kept separate.
+
 ## [6.3.1] - 2026-07-24
 
 Bug-fix pass on the FullAccess demo and chat, from live-testing the Roblox/Lua mod flow on device.
@@ -17,10 +50,10 @@ Bug-fix pass on the FullAccess demo and chat, from live-testing the Roblox/Lua m
   back cleared the transcript because the panel reloaded only from the per-role persisted store, which the
   live session may not populate. The panel now keeps an in-memory per-role transcript and restores it on
   switch (store still wins when it has data; Clear purges the role's cache too). (`CoreAiChatPanel`)
-- **The Creator role can now build the world.** `world_command` (`WorldLlmTool`) was never attached to any
-  role, though the Creator system prompt tells the model it has it — so "create a castle" fell back to
-  saving a blueprint to memory. It is now wired to the Creator role. The Programmer keeps building through
-  the Lua/Rbx surface. (`WorldCommandsInstaller`)
+- **The Creator and Builder roles can now build the world.** `world_command` (`WorldLlmTool`) was never
+  attached to any role, though both roles' system prompts tell the model to place objects with it — so
+  "create a castle" fell back to saving a blueprint to memory. It is now wired to both the Creator and
+  Builder roles. The Programmer keeps building through the Lua/Rbx surface. (`WorldCommandsInstaller`)
 - **The agent's screenshot capability is discoverable.** The vision capture tool was only named
   `camera_capture`, so a model searching for a "screenshot" tool missed it and fell back to blind
   read-only world queries. Added a `screenshot` alias (same capture) and made both descriptions lead with

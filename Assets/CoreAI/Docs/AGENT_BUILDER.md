@@ -1042,7 +1042,7 @@ var custom   = new AgentBuilder(new RoleId("Blacksmith")) ... ; // custom role
 await CoreAi.AskAsync("Hi", roleId: RoleId.SmartChat);
 ```
 
-Built-in statics: `RoleId.Creator`, `RoleId.Analyzer`, `RoleId.Programmer`, `RoleId.AiNpc`, `RoleId.CoreMechanic`, `RoleId.PlainChat`, `RoleId.SmartChat`, `RoleId.Merchant`. `roleId.IsBuiltIn` tells whether the id matches a built-in role.
+Built-in statics: `RoleId.Creator`, `RoleId.Builder`, `RoleId.Analyzer`, `RoleId.Programmer`, `RoleId.AiNpc`, `RoleId.CoreMechanic`, `RoleId.PlainChat`, `RoleId.SmartChat`, `RoleId.Merchant` (source: `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/RoleId.cs:39-63`; this list previously omitted `RoleId.Builder`, which has existed alongside `Creator` since `BuiltInAgentRoleIds` added the `Builder` role). `roleId.IsBuiltIn` tells whether the id matches a built-in role.
 
 ### CoreAI (static facade)
 

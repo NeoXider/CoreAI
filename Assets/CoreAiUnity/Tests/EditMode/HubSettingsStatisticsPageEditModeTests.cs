@@ -1,3 +1,4 @@
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.Llm;
@@ -94,6 +95,65 @@ namespace CoreAI.Tests
         }
 
         [Test]
+        public void SettingsPage_ModelPicker_SelectingDiscoveredModel_WritesHttpModelField()
+        {
+            HubSettingsPage page = new(_settings);
+            ScrollView root = (ScrollView)page.CreatePageContent();
+
+            DropdownField mode = root.Q<DropdownField>();
+            TextField model = root.Query<TextField>().AtIndex(2);
+            mode.value = "HTTP API";
+
+            DropdownField modelPicker = FindDropdown(root, "Discovered models");
+            Assert.IsNotNull(modelPicker);
+
+            CoreAiModelListResult result = new(true, new[] { "llama-3.1-8b", "qwen3.5-4b" }, "");
+            InvokePrivateStatic(typeof(HubSettingsPage), "PopulateModelPicker", modelPicker, result);
+
+            // The picker must not silently land on a real model without notifying (that was the bug:
+            // the first fetched model used to be pre-selected via SetValueWithoutNotify, so it never
+            // reached HTTP model unless the user reselected a different entry and back).
+            Assert.AreEqual("llama-3.1-8b", modelPicker.choices[1]);
+            Assert.AreNotEqual("llama-3.1-8b", modelPicker.value);
+            Assert.AreEqual("old-model", model.value, "Populating the picker alone must not touch HTTP model.");
+
+            // Picking the first real model — previously a silent no-op — must now reach HTTP model.
+            modelPicker.value = "llama-3.1-8b";
+
+            Assert.AreEqual("llama-3.1-8b", model.value);
+        }
+
+        [Test]
+        public void SettingsPage_RefreshFromStatus_SyncsModeWhenNotFocused()
+        {
+            HubSettingsPage page = new(_settings);
+            ScrollView root = (ScrollView)page.CreatePageContent();
+            DropdownField mode = root.Q<DropdownField>();
+
+            Assert.AreEqual("HTTP API", mode.value);
+
+            // Simulate a stale display (e.g. left over from a prior status) and confirm a normal,
+            // unfocused refresh still re-syncs it from the persisted backend status.
+            mode.SetValueWithoutNotify("Auto");
+            InvokePrivate(page, "RefreshFromStatus");
+
+            Assert.AreEqual("HTTP API", mode.value,
+                "Without focus, RefreshFromStatus must still re-sync Mode from the persisted status.");
+        }
+
+        [Test]
+        public void IsFocusWithin_ReturnsFalse_ForUnattachedElement()
+        {
+            VisualElement element = new();
+
+            bool result = (bool)typeof(HubSettingsPage)
+                .GetMethod("IsFocusWithin", BindingFlags.Static | BindingFlags.NonPublic)
+                .Invoke(null, new object[] { element });
+
+            Assert.IsFalse(result);
+        }
+
+        [Test]
         public void StatisticsPage_ShowsDerivedDiagnosticsAndReset()
         {
             InMemoryAiOrchestrationMetrics metrics = new();
@@ -147,6 +207,25 @@ namespace CoreAI.Tests
             target.GetType()
                 .GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)
                 .Invoke(target, null);
+        }
+
+        private static void InvokePrivateStatic(System.Type type, string method, params object[] args)
+        {
+            type.GetMethod(method, BindingFlags.Static | BindingFlags.NonPublic)
+                .Invoke(null, args);
+        }
+
+        private static DropdownField FindDropdown(VisualElement root, string label)
+        {
+            foreach (DropdownField dropdown in root.Query<DropdownField>().ToList())
+            {
+                if (dropdown.label == label)
+                {
+                    return dropdown;
+                }
+            }
+
+            return null;
         }
     }
 }

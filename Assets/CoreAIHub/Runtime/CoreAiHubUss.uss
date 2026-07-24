@@ -280,3 +280,31 @@
   color: rgb(77, 208, 225);
   -unity-font-style: bold;
 }
+
+/* "Advanced" foldout headers (Request limits, Endpoint editor): the default runtime foldout arrow
+   and label render at low contrast against the dark theme background, so give the header the same
+   accent treatment as the page's other section headers (bold accent text on a subtle highlighted
+   bar) instead of the barely-visible default. */
+.coreai-hub-foldout > .unity-foldout__toggle {
+  margin-top: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  background-color: rgba(17, 160, 181, 0.14);
+  border-left-width: 3px;
+  border-left-color: rgba(77, 208, 225, 0.7);
+  border-radius: 4px;
+}
+
+.coreai-hub-foldout > .unity-foldout__toggle:hover {
+  background-color: rgba(77, 208, 225, 0.24);
+}
+
+.coreai-hub-foldout > .unity-foldout__toggle > .unity-toggle__text {
+  color: rgb(220, 246, 250);
+  font-size: 13px;
+  -unity-font-style: bold;
+}
+
+.coreai-hub-foldout > .unity-foldout__toggle .unity-toggle__checkmark {
+  -unity-background-image-tint-color: rgb(77, 208, 225);
+}

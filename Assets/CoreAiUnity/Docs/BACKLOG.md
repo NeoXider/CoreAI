@@ -62,6 +62,40 @@ Items here are intentionally not active TODO checkboxes.
   add a field shown directly above the on-screen keyboard mirroring what is being typed, so the text is
   visible while the keyboard covers the chat. Deferred (low priority).
 
+## Architecture Hardening (before MVP2 — from the 2026-07-24 architecture audit)
+
+> Macro-architecture is healthy: engine-free portable Core (`noEngineReferences:true`), clean Rbx
+> domain/adapter split, Lua VM inverted out via a child scope, seam+decorator LLM pipeline with fitness
+> tests. The items below are erosion at the outer edges that violates CoreAI's own rules.
+
+- **[HIGH] Kill ambient `CoreAISettings.Instance` / `CoreAISettingsAsset.Instance` reads in runtime
+  services** — §4.1 forbids static service locators, yet `OpenAiChatLlmClient`, `CoreAiChatService`,
+  `VisionSelfProbe`, `LlmUnityAutoDisableIfNoModel`, `CoreAiBackend` pull settings from the static
+  instead of the DI-registered `ICoreAISettings` (the two can diverge — a "works in scene, wrong in
+  test/child-scope" hazard). Inject `ICoreAISettings`; keep the static only as an editor convenience.
+- **[HIGH/MEDIUM] Decide the `CoreAi` static facade's status explicitly** — it's the shipped public
+  entry point but is itself a static service locator that §4.1 bans ("zero escape hatches"). Sanction it
+  as the ONE documented exception AND guarantee no *internal* service resolves through it (internals must
+  use DI), else the single exception becomes the norm.
+- **[MEDIUM] Break up god-classes** — `CoreAiChatPanel` (~3636 LOC MonoBehaviour, 263 members: move
+  view-model logic behind the existing `CoreAiChatService` seam) and `AiOrchestrator` (~1866 LOC, 15
+  ctor deps: extract a context/compaction collaborator + a telemetry facade). Also large:
+  `MeaiOpenAiChatClient`, `MeaiLlmClient`, `LuaCsModRuntime`, `ToolExecutionPolicy`.
+- **[MEDIUM] Reconcile Rbx-vs-Roblox naming at the adapter edge** — domain assemblies are clean `Rbx*`,
+  but binding/scripting public types are still `Roblox*` (`RobloxSpace`, `IRobloxCameraRig`,
+  `RobloxWorldHost`, `LuaCsRobloxApiBindings`, …; ~315 `Roblox` vs ~1152 `Rbx` in Mods). Rename to
+  `Rbx*` or record the exception in the Rbx roadmap the way FullAccess/`unity_*` is recorded.
+- **[MEDIUM] Fitness-test + contract-boundary gaps** — no architecture-fitness test for `CoreAI.Hub.UI`
+  (and it ships no tests at all); Hub pages reach into infrastructure namespaces
+  (`HubSettingsPage` → `CoreAI.Infrastructure.Llm`, `WorldStateHubPage` → `CoreAI.Infrastructure.World`)
+  instead of documented public contracts. Add a Hub fitness test; route through contracts.
+- **[LOW] Fix the rules-doc contradiction** — §3 mandates UniTask over `System.Threading.Tasks.Task`,
+  but §1 mandates an engine-free Core (UniTask needs UnityEngine), so Core correctly uses `async Task`.
+  Scope the "Task banned" rule to the Unity-layer assemblies only.
+- **[LOW] Keep composition roots strictly declarative** — `CoreAILifetimeScope.Configure` writes the two
+  static singletons and mutates `AgentMemoryPolicy` inline in a build callback; §4.3 wants roots free of
+  business logic. (Positive: no `FindObjectsByType` in any installer — §4.2 holds.)
+
 ## Product Ideas
 
 - STT -> Agent -> TTS for NPCs.

@@ -66,7 +66,8 @@ namespace CoreAI.Demos
             body.Add(DemoHubWidgets.MakeBody(
                 "Enable Full Lua on CoreAILifetimeScope so Programmer mods can reach this scene."));
             body.Add(DemoHubWidgets.MakeBody(
-                "Programmer mods reach this cube via unity_find / unity_set_member."));
+                "The scene starts empty. Assign a TargetCube in the inspector (or let a mod spawn one) to " +
+                "reach it via unity_find / unity_set_member; the row below reads '-' until one exists."));
             body.Add(DemoHubWidgets.MakeBody(
                 "Private members need 'Enable Full Lua Private Access' (off by default)."));
 

@@ -58,6 +58,9 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsTrue(
                     HasTool(policy.GetToolsForRole(BuiltInAgentRoleIds.Creator), "world_command"),
                     "Creator must get world_command so it can build/spawn what its system prompt promises.");
+                Assert.IsTrue(
+                    HasTool(policy.GetToolsForRole(BuiltInAgentRoleIds.Builder), "world_command"),
+                    "Builder must get world_command too — its system prompt tells the model to use it.");
             }
             finally
             {

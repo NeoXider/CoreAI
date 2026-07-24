@@ -9,10 +9,17 @@ using CoreAI.Ai;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Portable-core request timeout for an <see cref="ILlmClient"/>. Bounds the total wall-clock of a
-    /// single logical request on BOTH <see cref="CompleteAsync"/> and <see cref="CompleteStreamingAsync"/>
-    /// by cancelling a linked token after <c>timeoutSeconds</c> (read live so a settings hot-swap takes
-    /// effect on the next call). A library timeout — where the injected timer fired but the caller's own
+    /// Portable-core request timeout for an <see cref="ILlmClient"/>. Cancels a linked token after
+    /// <c>timeoutSeconds</c> (read live so a settings hot-swap takes effect on the next call).
+    /// <para>
+    /// <see cref="CompleteAsync"/> bounds the total wall-clock of one non-streaming call.
+    /// <see cref="CompleteStreamingAsync"/> is an IDLE / no-progress budget: because a streamed call is the
+    /// outermost wrapper around the whole tool-calling turn (model → tool calls → model → …), a fixed total
+    /// budget would truncate a healthy long turn once its step durations summed past the timeout. Instead
+    /// each yielded chunk re-arms the deadline, so only a genuine stall (no chunk for the full window) times
+    /// out — matching the idle deadline the Unity <c>CoreAiChatService</c> applies one layer out.
+    /// </para>
+    /// A library timeout — where the injected timer fired but the caller's own
     /// token was NOT cancelled — is surfaced as <see cref="LlmOperationTimeoutException"/> on the
     /// non-streaming path and as a terminal <see cref="LlmErrorCode.Timeout"/> chunk on the streaming path;
     /// a genuine caller cancellation always propagates unchanged.
@@ -175,6 +182,11 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         yield break;
                     }
+
+                    // WHY: idle budget, not a whole-turn one — a streamed call wraps the entire multi-step
+                    // tool-calling turn, so every chunk is progress and re-arms the deadline. Only a real
+                    // stall (no chunk for the full window) fires. Mirrors CoreAiChatService's idle timer.
+                    timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
                     // WHY: A terminal Cancelled chunk may be the inner client's translation of this
                     // decorator's linked-token timeout, so preserve the chunk and correct only its code.

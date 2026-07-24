@@ -7,8 +7,10 @@ can reach arbitrary scene `GameObject`s and components via reflection bindings
 `unity_find_by_component`, `unity_describe_object`, transform/hierarchy setters), when
 **Enable Full Lua Access** is on for the `CoreAILifetimeScope`.
 
-The scene `FullAccessDemo.unity` ships ready to run: the controller auto-creates a
-`TargetCube`, Full access is enabled on the scope, and the prompt buttons load real mods.
+The scene `FullAccessDemo.unity` ships ready to run: Full access is enabled on the scope and the
+prompt buttons load real mods. The scene starts with an **empty world** — nothing is auto-spawned.
+The `unity_*` reflection examples below target a GameObject named `TargetCube`; assign one on the
+`FullAccessHubDemoController` in the inspector (or have a mod spawn it) before running them.
 
 ## Member visibility (public by default)
 

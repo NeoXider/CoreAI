@@ -195,6 +195,7 @@ namespace CoreAI.Chat
             CancellationToken effectiveCt = ct;
             Action<LlmToolCallStarted> onToolStarted = null;
             Action<LlmToolCallCompleted> onToolCompleted = null;
+            Action<LlmToolCallFailed> onToolFailed = null;
             try
             {
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
@@ -204,22 +205,19 @@ namespace CoreAI.Chat
                     deadline = new IdleTimeoutDeadline(timeoutCts, timeoutSec);
                     effectiveCt = timeoutCts.Token;
 
-                    onToolStarted = evt =>
-                    {
-                        if (evt.RoleId == request.RoleId)
-                        {
-                            deadline.Rearm();
-                        }
-                    };
-                    onToolCompleted = evt =>
-                    {
-                        if (evt.RoleId == request.RoleId)
-                        {
-                            deadline.Rearm();
-                        }
-                    };
+                    // WHY: a tool-call for THIS turn's role is progress and re-arms the idle deadline. A
+                    // start, a finish AND a failure all count — a tool that fails right before a long LLM
+                    // step is still activity, not a stall. The role match is lenient on an absent event
+                    // role so an unattributed event never falsely lets the turn time out.
+                    bool Matches(string evtRoleId) =>
+                        string.IsNullOrWhiteSpace(evtRoleId) ||
+                        string.Equals(evtRoleId, request.RoleId, StringComparison.Ordinal);
+                    onToolStarted = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
+                    onToolCompleted = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
+                    onToolFailed = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
                     CoreAi.OnToolCallStarted += onToolStarted;
                     CoreAi.OnToolCallCompleted += onToolCompleted;
+                    CoreAi.OnToolCallFailed += onToolFailed;
                 }
 
                 string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
@@ -244,6 +242,11 @@ namespace CoreAI.Chat
                 if (onToolCompleted != null)
                 {
                     CoreAi.OnToolCallCompleted -= onToolCompleted;
+                }
+
+                if (onToolFailed != null)
+                {
+                    CoreAi.OnToolCallFailed -= onToolFailed;
                 }
 
                 deadline?.Dispose();

@@ -103,28 +103,37 @@ namespace CoreAI.Composition
                 .AsSelf();
 
             RegisterAgentVision(builder);
-            RegisterCreatorWorldTool(builder);
+            RegisterWorldBuildingRolesTool(builder);
         }
 
         /// <summary>
         /// Attaches the native <c>world_command</c> tool (<see cref="WorldLlmTool"/>) to the built-in
-        /// Creator role. <see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Creator"/> tells the model it
-        /// has this tool to spawn/move/manipulate objects; without this wiring the role had no way to
-        /// build anything and fell back to text/memory only. The Programmer role builds through the
-        /// Lua/Rbx surface instead (see <c>CoreAiModsInstaller</c>) and is intentionally left unchanged.
+        /// scene-building chat roles (<see cref="BuiltInAgentRoleIds.Creator"/> and
+        /// <see cref="BuiltInAgentRoleIds.Builder"/>). Both roles' system prompts
+        /// (<see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Creator"/> /
+        /// <see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Builder"/>) tell the model to place objects
+        /// with this tool; without the wiring the roles had no way to build and fell back to text/memory.
+        /// The Programmer role builds through the Lua/Rbx surface instead (see <c>CoreAiModsInstaller</c>)
+        /// and is intentionally left unchanged.
         /// </summary>
-        private static void RegisterCreatorWorldTool(IContainerBuilder builder)
+        private static void RegisterWorldBuildingRolesTool(IContainerBuilder builder)
         {
             builder.RegisterBuildCallback(container =>
             {
                 try
                 {
                     AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Creator,
-                        new WorldLlmTool(
-                            container.Resolve<ICoreAiWorldCommandExecutor>(),
-                            container.Resolve<ICoreAISettings>(),
-                            container.Resolve<IGameLogger>()));
+                    ICoreAiWorldCommandExecutor executor = container.Resolve<ICoreAiWorldCommandExecutor>();
+                    ICoreAISettings settings = container.Resolve<ICoreAISettings>();
+                    IGameLogger logger = container.Resolve<IGameLogger>();
+
+                    // WHY: a fresh tool instance per role — WorldLlmTool is lightweight and AddToolForRole
+                    // keeps a per-role list, so sharing state across roles is neither needed nor desirable.
+                    // The contains-guard keeps the registration idempotent: a duplicate world_command name
+                    // resolves as ambiguous downstream, so a second pass (Play-Mode re-entry, a rebuilt or
+                    // shared policy across scopes) must not append it twice.
+                    AddWorldToolIfMissing(policy, BuiltInAgentRoleIds.Creator, executor, settings, logger);
+                    AddWorldToolIfMissing(policy, BuiltInAgentRoleIds.Builder, executor, settings, logger);
                 }
                 catch (VContainerException)
                 {
@@ -132,6 +141,29 @@ namespace CoreAI.Composition
                     // the world tool is an additive convenience, not a requirement.
                 }
             });
+        }
+
+        /// <summary>
+        /// Adds a fresh <see cref="WorldLlmTool"/> to <paramref name="roleId"/> only when that role does
+        /// not already expose <c>world_command</c>, so repeated registration never produces the ambiguous
+        /// duplicate tool name that would break tool resolution.
+        /// </summary>
+        private static void AddWorldToolIfMissing(
+            AgentMemoryPolicy policy,
+            string roleId,
+            ICoreAiWorldCommandExecutor executor,
+            ICoreAISettings settings,
+            IGameLogger logger)
+        {
+            foreach (ILlmTool existing in policy.GetToolsForRole(roleId))
+            {
+                if (existing != null && existing.Name == "world_command")
+                {
+                    return;
+                }
+            }
+
+            policy.AddToolForRole(roleId, new WorldLlmTool(executor, settings, logger));
         }
 
         /// <summary>

@@ -1612,7 +1612,9 @@ namespace CoreAI.Chat
                 return;
             }
 
-            AddMessage(options.WelcomeMessage, false);
+            // WHY: render-only — the welcome placeholder is not real conversation, so it must not be
+            // recorded into the per-role transcript cache.
+            AppendMessageBubble(options.WelcomeMessage, false);
         }
 
         /// <summary>
@@ -1658,7 +1660,9 @@ namespace CoreAI.Chat
                     continue;
                 }
 
-                AddMessage(text.TrimEnd(), isUser);
+                // WHY: render-only — persisted messages must NOT feed the per-role cache, or every
+                // re-hydrate on a role switch re-appends the whole store into the cache (N -> 2N -> 3N).
+                AppendMessageBubble(text.TrimEnd(), isUser);
             }
         }
 
@@ -2526,6 +2530,10 @@ namespace CoreAI.Chat
                     return null;
                 }
 
+                // WHY: the streamed reply renders through the streaming label, not AddMessage, so record it
+                // into the per-role transcript cache here — otherwise switching agent and back restores the
+                // user's turns with no assistant answers whenever the store is off/opted-out (HIGH #2).
+                RecordRoleTranscriptMessage(ActiveRoleId, fullResponse, false);
                 OnResponseReceived(fullResponse);
                 OnAiResponseCompleted?.Invoke(fullResponse);
                 return fullResponse;

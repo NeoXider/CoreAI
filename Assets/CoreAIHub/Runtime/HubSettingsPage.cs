@@ -54,6 +54,7 @@ namespace CoreAI.Hub.UI
         private DropdownField _visionMode;
         private Button _detectVisionButton;
         private const string ModelPickerPlaceholder = "[ Fetch models to list ]";
+        private const string ModelPickerPickPrompt = "[ Select a model… ]";
         private TextField _ggufModelPath;
         private DropdownField _ggufModel;
         private const string GgufAutoLabel = "[ Auto / Fallback ]";
@@ -226,7 +227,7 @@ namespace CoreAI.Hub.UI
             _modelPicker.tooltip = "Models reported by the server. Pick one to copy it into HTTP model.";
             _modelPicker.RegisterValueChangedCallback(evt =>
             {
-                if (!string.IsNullOrEmpty(evt.newValue) && evt.newValue != ModelPickerPlaceholder)
+                if (IsSelectableModel(evt.newValue))
                 {
                     _model.SetValueWithoutNotify(evt.newValue);
                 }
@@ -272,6 +273,7 @@ namespace CoreAI.Hub.UI
 
             _limitsGroup = MakeGroup("Request limits");
             Foldout advanced = new() { text = "Advanced", value = false };
+            advanced.AddToClassList("coreai-hub-foldout");
             _overrideTemperature = new Toggle("Override temperature")
             {
                 tooltip = "When off, the model's default sampling temperature is used. " +
@@ -378,7 +380,7 @@ namespace CoreAI.Hub.UI
             _endpointModelPicker.tooltip = "Models reported by the server. Pick one to copy it into Model.";
             _endpointModelPicker.RegisterValueChangedCallback(evt =>
             {
-                if (!string.IsNullOrEmpty(evt.newValue) && evt.newValue != ModelPickerPlaceholder)
+                if (IsSelectableModel(evt.newValue))
                 {
                     _endpointModel.SetValueWithoutNotify(evt.newValue);
                 }
@@ -409,6 +411,7 @@ namespace CoreAI.Hub.UI
 
             _endpointAdvanced = new Foldout { text = "Advanced", value = false };
             _endpointAdvanced.AddToClassList("coreai-hub-field");
+            _endpointAdvanced.AddToClassList("coreai-hub-foldout");
 
             _endpointId = new TextField("Endpoint ID")
             {
@@ -1335,6 +1338,12 @@ namespace CoreAI.Hub.UI
             List<string> choices = new();
             if (result.Ok)
             {
+                // WHY: seed a non-model prompt at index 0 rather than the first real model. Selecting it
+                // via SetValueWithoutNotify below fires no ChangeEvent, so if a real model sat at index 0
+                // it would look picked (highlighted in the dropdown) without ever being written into the
+                // target text field — the exact "picking a model does nothing" bug this discovery list
+                // exists to avoid.
+                choices.Add(ModelPickerPickPrompt);
                 foreach (string model in result.Models)
                 {
                     if (!string.IsNullOrWhiteSpace(model))
@@ -1344,14 +1353,23 @@ namespace CoreAI.Hub.UI
                 }
             }
 
-            if (choices.Count == 0)
+            if (choices.Count <= 1)
             {
+                choices.Clear();
                 choices.Add(ModelPickerPlaceholder);
             }
 
             picker.choices = choices;
             picker.SetValueWithoutNotify(choices[0]);
             SetVisible(picker, result.Ok);
+        }
+
+        /// <summary>True when a discovered-models dropdown value is a real model id, not a placeholder/prompt.</summary>
+        private static bool IsSelectableModel(string value)
+        {
+            return !string.IsNullOrEmpty(value)
+                && value != ModelPickerPlaceholder
+                && value != ModelPickerPickPrompt;
         }
 
         private void RefreshFromStatus()
@@ -1364,7 +1382,16 @@ namespace CoreAI.Hub.UI
             CoreAiBackendStatus status = CoreAiBackend.Status;
             CoreAISettingsAsset asset = ResolveSettingsAsset();
 
-            _mode.SetValueWithoutNotify(ModeToOption(status.Mode));
+            // WHY: RefreshFromStatus also runs from OnActivated (every tab re-entry) and from
+            // OnBackendChanged (any external switch), both of which can fire while the user has the
+            // Mode dropdown open mid-pick. Overwriting it there silently reverts their choice before
+            // Apply is even clicked, which reads as "I can't select anything (e.g. Auto) — it snaps
+            // back". Only sync it when it isn't the element currently receiving input.
+            if (!IsFocusWithin(_mode))
+            {
+                _mode.SetValueWithoutNotify(ModeToOption(status.Mode));
+            }
+
             _baseUrl.SetValueWithoutNotify(status.BaseUrl);
             _apiKey.SetValueWithoutNotify("");
             _model.SetValueWithoutNotify(status.Model);
@@ -1713,6 +1740,13 @@ namespace CoreAI.Hub.UI
         private static void StyleFieldBase(VisualElement field)
         {
             field.AddToClassList("coreai-hub-field");
+        }
+
+        /// <summary>True when <paramref name="element"/> or one of its descendants currently has focus.</summary>
+        private static bool IsFocusWithin(VisualElement element)
+        {
+            VisualElement focused = element?.panel?.focusController?.focusedElement as VisualElement;
+            return focused != null && (focused == element || element.Contains(focused));
         }
 
         private static void SetVisible(VisualElement field, bool visible)
