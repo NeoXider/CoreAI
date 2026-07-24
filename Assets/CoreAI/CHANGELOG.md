@@ -1,5 +1,35 @@
 # Changelog
 
+## [6.3.5] - 2026-07-24
+
+Bundled sample mods overhaul — two fixes and two new playable samples, all authored against the
+standard Roblox-style tier (no unity_* / Full) and verified live in Play Mode (load, run, input,
+camera, and disable/unload cleanup).
+
+### Fixed
+
+- **`sample_welcome`** now logs a clear start line and ticks a counter exactly five times (once every
+  two seconds) before pausing, resetting on each (re)load — a cleaner first lesson than the previous
+  forever-every-30s tick.
+- **`sample_camera_pulse` → Colour Pulse** no longer errors into quarantine. It called `unity_find_all`
+  (Full tier); that withheld-capability error unwinds past `pcall`, so the intended graceful-degrade
+  never fired and every tick logged a failure. Rewritten to spawn a Part and pulse its `Color3` via the
+  standard API (`Instance.new` + `Color3.fromHSV`) — works under the default grant, no Full needed.
+
+### Added
+
+- **`sample_lane_racer` (Lane Racer)** — a 3-lane dodging mini-game: steer with A/D (or Left/Right,
+  rising-edge so one press = one lane), weave past oncoming blocks, score as they pass, camera follows
+  the car via `CameraSubject`. Ships disabled; opt in from the Mods tab.
+- **`sample_tetris3d` (Tetris 3D)** — a compact falling-block puzzle in 3D cubes: A/D move, W rotate,
+  S soft-drop, full rows clear, with a visible well frame (floor + walls) and a fixed angled camera set
+  via `CameraType = Scriptable` + `CFrame.lookAt` (demonstrates full Roblox camera control — position
+  *and* angle). Ships disabled; opt in from the Mods tab.
+
+All four samples parent their spawned parts under a mod-owned Folder, so disabling or deleting a sample
+removes everything it created (the runtime's instance-ownership sweep). Bundled-mod delivery is
+version-aware: bumping a sample's header version reseeds it into an existing install's store.
+
 ## [6.3.4] - 2026-07-24
 
 Optimization loop, iteration 2 (perf re-audit → fix → test). Continues past the 6.3.3 guard

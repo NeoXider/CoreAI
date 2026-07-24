@@ -1,63 +1,35 @@
 --[[@coreai
 id: sample_camera_pulse
-name: Camera Colour Pulse (sample)
-version: 1.0.1
+name: Colour Pulse (sample)
+version: 2.0.0
 active: false
-capabilities: All, Full
+capabilities: All
 category: Samples
 author: CoreAI
-description: Opt-in bundled sample. When enabled, gently pulses the main camera background colour every couple of seconds. Ships disabled — enable it from the Hub Mods tab. NEEDS the Full tier - if the host does not grant Full Lua access (CoreAiModsInstaller enableFullLuaAccess), the mod stays idle and reports why instead of erroring.
+description: Opt-in bundled sample. When enabled it spawns a beacon block and smoothly cycles its colour every couple of seconds using only the standard Roblox-style API (Instance.new + Color3.fromHSV). Ships disabled - enable it from the Hub Mods tab. Disabling or deleting the mod removes the beacon automatically.
 ]]
 
--- A richer bundled sample that touches the scene via the Full tier (unity_* reflection). It ships
--- DISABLED (active: false) so it never changes a game's look until the player opts in from the Mods
--- tab. Full-tier reflection is host/singleplayer-only and is stripped for networked clients.
---
--- The header asks for Full, but the host ceiling masks capability grants: under the default
--- composition Full is withheld and every unity_* call raises the withheld-capability error.
--- The tick below wraps the work in pcall and downgrades to a single explanatory report instead of
--- erroring every tick into quarantine.
+-- A bundled sample that stays entirely within the STANDARD tier: it spawns one Part and pulses its
+-- Color3 on a timer. No unity_* reflection and no Full grant, so it works under the default capability
+-- grant (the previous version called unity_find_all, which the host withholds - that error unwinds past
+-- pcall and quarantined the mod). It ships DISABLED (active: false) so it never changes a fresh game
+-- until the player opts in; the beacon it owns is destroyed automatically when the mod is disabled or
+-- unloaded (the runtime sweeps instances a mod created).
 
-local function random_channel()
-    -- WHY: math.random() with no args returns a float in [0,1) for a smooth channel; math.random(0,1)
-    -- would return only the integers 0 or 1, collapsing the palette to 8 hard corner colours.
-    return math.random()
-end
+local beacon = Instance.new("Part")
+beacon.Name = "PulseBeacon"
+beacon.Size = Vector3.new(2, 2, 2)
+beacon.Position = Vector3.new(0, 6, 0)
+beacon.Parent = workspace
 
-local function apply_colour()
-    local cameras = unity_find_all("Camera", 8)
-    for _, cam_id in ipairs(cameras) do
-        local components = unity_list_components(cam_id)
-        for _, comp_name in ipairs(components) do
-            if comp_name == "Camera" then
-                local hex = string.format("#%02x%02x%02x",
-                    math.floor(random_channel() * 255),
-                    math.floor(random_channel() * 255),
-                    math.floor(random_channel() * 255))
-                unity_set_member(cam_id, "Camera", "BackgroundColor", hex)
-                return true
-            end
-        end
-    end
-    return false
-end
-
-local full_tier_unavailable = false
+local hue = 0.0
 
 hooks_every(2.0, function()
-    if full_tier_unavailable then
-        return
-    end
-    local ok, painted = pcall(apply_colour)
-    if not ok then
-        full_tier_unavailable = true
-        report("[camera_pulse] idle: this sample needs the Full capability, which this host does not grant. " ..
-            "Enable Full Lua access (host opt-in) to see it pulse. Details: " .. tostring(painted))
-        return
-    end
-    if painted then
-        report("[camera_pulse] repainted the camera background")
-    end
+    -- WHY: cycle hue in HSV for an even, saturated sweep across the whole colour wheel; stepping the
+    -- RGB channels independently would clump around the eight hard corner colours instead.
+    hue = (hue + 0.13) % 1.0
+    beacon.Color = Color3.fromHSV(hue, 0.85, 1.0)
+    report("[colour_pulse] beacon hue -> " .. string.format("%.2f", hue))
 end)
 
-report("[camera_pulse] loaded (enable me to start pulsing the camera colour; needs the Full tier)")
+report("[colour_pulse] loaded - a colour-cycling beacon is now pulsing in the world.")
