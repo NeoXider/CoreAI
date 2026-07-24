@@ -61,11 +61,10 @@ namespace CoreAI.Hub.UI.Editor
             PanelSettings panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(PanelSettingsPath);
             if (panel == null)
             {
-                string[] found = AssetDatabase.FindAssets("t:PanelSettings");
-                if (found.Length > 0)
-                {
-                    panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(AssetDatabase.GUIDToAssetPath(found[0]));
-                }
+                Debug.LogError(
+                    $"[CoreAI] Missing {PanelSettingsPath}. The Hub needs its own PanelSettings — assign one " +
+                    "to the CoreAiHub UIDocument by hand. Any other project PanelSettings may be the " +
+                    "embedded chat's, and sharing one panel orphans the Hub root.");
             }
 
             document.panelSettings = panel;

@@ -34,18 +34,7 @@ namespace CoreAI.Infrastructure.Llm
                 uwr.timeout = t;
 
                 UnityWebRequestAsyncOperation op = uwr.SendWebRequest();
-                while (!op.isDone)
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        // Tear down the underlying connection before the request is disposed; a bare
-                        // Dispose() while in-flight leaks the native socket/handles until GC finalization.
-                        AbortQuietly(uwr);
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-
-                    await Task.Yield();
-                }
+                await AwaitCompletionAsync(op, uwr, cancellationToken);
 
                 if (cancellationToken.IsCancellationRequested)
                 {
@@ -61,13 +50,66 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     StatusCode = code > 0 ? code : MapFailureToStatus(uwr),
                     BodyText = body,
-                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase)
+                    ResponseHeaders = ReadResponseHeaders(uwr)
                 };
             }
             finally
             {
                 uwr.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Awaits the request through <see cref="UnityWebRequestAsyncOperation.completed"/> instead of
+        /// polling, aborting the in-flight request when <paramref name="cancellationToken"/> fires.
+        /// </summary>
+        private static async Task AwaitCompletionAsync(
+            UnityWebRequestAsyncOperation op,
+            UnityWebRequest uwr,
+            CancellationToken cancellationToken)
+        {
+            TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            op.completed += _ => completion.TrySetResult(true);
+            if (op.isDone)
+            {
+                completion.TrySetResult(true);
+            }
+
+            // WHY: aborting before Dispose tears down the native socket/handles instead of leaking them
+            // until GC finalization.
+            using (cancellationToken.Register(() =>
+                   {
+                       AbortQuietly(uwr);
+                       completion.TrySetCanceled(cancellationToken);
+                   }))
+            {
+                await completion.Task;
+            }
+        }
+
+        /// <summary>
+        /// Copies the response headers off <paramref name="uwr"/>. Without them a <c>429</c> carries no
+        /// <c>Retry-After</c> and every backoff decorator falls back to a blind delay.
+        /// </summary>
+        private static Dictionary<string, IEnumerable<string>> ReadResponseHeaders(UnityWebRequest uwr)
+        {
+            Dictionary<string, IEnumerable<string>> headers =
+                new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> raw = uwr.GetResponseHeaders();
+            if (raw == null)
+            {
+                return headers;
+            }
+
+            foreach (KeyValuePair<string, string> kv in raw)
+            {
+                if (!string.IsNullOrEmpty(kv.Key))
+                {
+                    headers[kv.Key] = new[] { kv.Value ?? "" };
+                }
+            }
+
+            return headers;
         }
 
         private static void AbortQuietly(UnityWebRequest uwr)

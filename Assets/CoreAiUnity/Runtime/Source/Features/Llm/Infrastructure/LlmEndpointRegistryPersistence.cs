@@ -93,12 +93,36 @@ namespace CoreAI.Infrastructure.Llm
 
                 string temp = _path + ".tmp";
                 File.WriteAllText(temp, JsonConvert.SerializeObject(safe, JsonSettings));
-                if (File.Exists(_path))
+
+                try
                 {
-                    File.Delete(_path);
+                    // WHY: delete-then-move leaves a window where a crash loses every endpoint, profile
+                    // and role assignment; File.Replace swaps the file in one step.
+                    if (File.Exists(_path))
+                    {
+                        File.Replace(temp, _path, null);
+                    }
+                    else
+                    {
+                        File.Move(temp, _path);
+                    }
+                }
+                catch
+                {
+                    if (File.Exists(temp))
+                    {
+                        try
+                        {
+                            File.Delete(temp);
+                        }
+                        catch (IOException)
+                        {
+                        }
+                    }
+
+                    throw;
                 }
 
-                File.Move(temp, _path);
                 CoreAiWebGlPersistence.Sync();
             }
         }

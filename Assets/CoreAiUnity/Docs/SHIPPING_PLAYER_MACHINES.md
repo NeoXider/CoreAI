@@ -28,7 +28,7 @@ Notes on the hybrid row:
 **Rules of thumb:**
 
 - Single-player, privacy-sensitive, or offline-capable game → **local GGUF**, optionally with cloud fallback for weak machines.
-- Public WebGL or multiplayer → **server-managed proxy**. Never ship a provider key in a client build; `CoreAI/Validate Production Settings` warns exactly about this (WebGL + `ClientOwnedApi` + non-empty API key).
+- Public WebGL or multiplayer → **server-managed proxy**. Never ship a provider key in a client build; a WebGL build with a non-empty API key in `ClientOwnedApi` / `ClientLimited` / `ServerManagedApi` **fails at build time**, and `CoreAI/Validate Production Settings` reports the same finding on demand.
 - Tooling/dev builds and "bring your own key" power-user features → `ClientOwnedApi` or `ClientLimited`.
 
 ---
@@ -118,7 +118,7 @@ Full support. All four modes work; local GGUF via LLMUnity is validated by the r
 
 ### WebGL
 
-- **No local GGUF.** There is no llama.cpp runtime in the browser build — use an **HTTP API** or, for anything public, the **server-managed proxy** so provider keys never ship in the client (every asset in a WebGL build is downloadable by the player). `CoreAI/Validate Production Settings` enforces the warning.
+- **No local GGUF.** There is no llama.cpp runtime in the browser build — use an **HTTP API** or, for anything public, the **server-managed proxy** so provider keys never ship in the client (every asset in a WebGL build is downloadable by the player). This is enforced as a hard build failure, not a warning: a WebGL build with a non-empty API key in a client mode is aborted by `CoreAIProductionSettingsValidator`.
 - **Build settings that are known to matter** (measured on this repo; see also [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md)): use **Medium managed stripping + OptimizeSize** to avoid the `LLVM ERROR: out of memory` during IL2CPP compile of large generated files. The troubleshooting doc also lists High stripping as an option — Medium + OptimizeSize is the combination verified on this project; higher stripping shrinks output further but strips more aggressively.
 - **`link.xml`:** the package ships `Assets/CoreAiUnity/link.xml` (preserves the `Lua` / `Lua.Annotations` assemblies for source-generated marshalling and reflection-invoked game binding callbacks, plus MessagePipe sink types). Lua-CSharp itself is a managed, AOT-safe VM and needs no interpreter-specific stripping protection. With Medium+ stripping, the CoreAI source assembly additionally needs an **assembly-wide preserve** entry in `link.xml` so reflection-reached types survive.
 - **Streaming:** native SSE via the `fetch` bridge (`WebGlNativeStreaming`, on by default) — ensure CORS and unbuffered `text/event-stream` on your backend route (see [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) and the SSE requirements in [SERVER_MANAGED_PROTOCOL](../../CoreAI/Docs/SERVER_MANAGED_PROTOCOL.md)).
@@ -150,7 +150,7 @@ The low-risk first step on these platforms is the **server-managed proxy** mode:
 - [ ] Picked one mode per platform (table in §1); mixed projects use `LlmRoutingManifest` profiles per role.
 - [ ] Local: one primary bundled model, Model Manager **Build** flags checked, disk/RAM budget confirmed on min-spec hardware.
 - [ ] Degradation ladder tested: unplug the network, delete the model file, and confirm the game still plays (§2.5).
-- [ ] No provider API key in any client build that leaves your control; `CoreAI/Validate Production Settings` run for WebGL.
+- [ ] No provider API key in any client build that leaves your control. Any `CoreAISettings` asset under a `Resources/` folder must have **empty** `apiKey`/`secondaryApiKey` — otherwise the build is aborted on every platform. `CoreAI/Validate Production Settings` run for WebGL.
 - [ ] License verification done for the exact model artifact shipped (§3), notices included.
 - [ ] IL2CPP player build exercised a real tool-calling turn (§4).
 - [ ] Cloud modes: read [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) and fill in the budget worksheet.

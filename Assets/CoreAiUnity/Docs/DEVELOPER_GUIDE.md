@@ -501,7 +501,7 @@ public void ResetBusyStateWithoutCancellation();             // unlock UI withou
 
 **Stock chat template:** default floating size **~650×910** (see `CoreAiChatConfig` / `CoreAiChat.uss`), **vertical scrollbar flush** to the panel’s inner right edge, and optional **`coreai-long-request-hint`** (status under the typing row on long turns) — details in [README_CHAT.md](../Runtime/Source/Features/Chat/README_CHAT.md).
 
-From **0.25.7**, auto-creation of `CoreAISettings.asset` in the Editor (`CoreAIBuildMenu`) runs via **`EditorApplication.delayCall`**: not in the same frame as domain reload, and with an on-disk file check — a cloned `Assets/Resources/CoreAISettings.asset` is not replaced by an empty asset with defaults.
+**Default assets are never created implicitly.** `CoreAIBuildMenu` no longer runs an `[InitializeOnLoadMethod]` bootstrap on editor load, so importing the package never writes into your `Assets/` — least of all a `Resources/CoreAISettings.asset` that would then ship inside your player. Create them explicitly with **`CoreAI/Settings`** (settings asset only) or **`CoreAI/Setup/Create Default Assets`** (settings + prompts + logging + permissions + routing + prefab registry); the scene wizards (`Create Chat Demo Scene`, `Create Bare Scene (advanced)`) call the same code path.
 
 ### Clearing context
 

@@ -5,6 +5,7 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using LLMUnity;
+using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -24,6 +25,9 @@ namespace CoreAI.Tests.PlayMode
         private static bool _initialized;
         private static bool _initializing;
         private static string _error;
+
+        /// <summary>Upper bound for waiting on an initialization already running on another test.</summary>
+        private const float ConcurrentInitializationTimeoutSeconds = 300f;
 
         public static bool IsReady => _initialized && _agent != null && _llm != null && _llm.started;
         public static string Error => _error;
@@ -70,9 +74,21 @@ namespace CoreAI.Tests.PlayMode
 
             if (_initializing)
             {
-                //      
+                //
+                float waitStarted = Time.realtimeSinceStartup;
                 while (_initializing)
                 {
+                    if (Time.realtimeSinceStartup - waitStarted > ConcurrentInitializationTimeoutSeconds)
+                    {
+                        // WHY: a cancelled or crashed initializer leaves _initializing set, and an unbounded
+                        // wait then hangs every later LLM test until the whole run is killed.
+                        _initializing = false;
+                        _error = $"[SharedLlmUnity] A concurrent initialization did not finish within " +
+                                 $"{ConcurrentInitializationTimeoutSeconds:0}s.";
+                        Assert.Fail(_error);
+                        yield break;
+                    }
+
                     yield return null;
                 }
 

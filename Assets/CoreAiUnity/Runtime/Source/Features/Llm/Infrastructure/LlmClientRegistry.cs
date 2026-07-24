@@ -1272,7 +1272,13 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            runtime.HostReleaseTask = ReleaseOwnedHostAfterDrainAsync(runtime);
+            // WHY: BeginActivationLocked reads HostReleaseTask under _gate to chain a new host behind the
+            // old one's teardown; publishing it outside that lock lets an activation start a second
+            // llama.cpp host on the port the previous one still holds.
+            lock (_gate)
+            {
+                runtime.HostReleaseTask = ReleaseOwnedHostAfterDrainAsync(runtime);
+            }
         }
 
         private async Task ReleaseOwnedHostAfterDrainAsync(RuntimeEndpoint runtime)
@@ -1540,7 +1546,20 @@ namespace CoreAI.Infrastructure.Llm
                     return;
                 }
 
-                _persistenceStore.Save(state);
+                try
+                {
+                    _persistenceStore.Save(state);
+                }
+                catch (IOException ex)
+                {
+                    // WHY: the in-memory mutation already happened; letting the write failure escape skips
+                    // the caller's Changed notification and leaves every subscriber on stale state.
+                    _logger.LogWarning(
+                        GameLogFeature.Llm,
+                        "LlmClientRegistry: could not persist the endpoint registry: " + ex.Message);
+                    return;
+                }
+
                 _persistedRevision = revision;
             }
         }

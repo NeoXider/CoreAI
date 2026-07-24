@@ -84,9 +84,8 @@ namespace CoreAI.Hub.UI
         private bool _uiReady;
         private bool _collapsed;
         private bool _missingShellWarned;
+        private bool _missingRootWarned;
 
-        // WHY: cached page instances and their created content, keyed by page id. These survive UI rebuilds —
-        // only the visual tree gets recreated, never the pages themselves.
         private readonly Dictionary<string, IHubPage> _pages = new(StringComparer.Ordinal);
         private readonly Dictionary<string, VisualElement> _pageContent = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _tabButtons = new(StringComparer.Ordinal);
@@ -189,10 +188,17 @@ namespace CoreAI.Hub.UI
         /// <summary>
         /// Idempotent (re)build: clones <see cref="shellUxml"/> into <paramref name="uiRoot"/>, re-queries
         /// the named elements, and rewires everything. Safe to call whenever the panel's rootVisualElement
-        /// changes identity, not just once from OnEnable.
+        /// changes identity, not just once from OnEnable. A shell that has no
+        /// <see cref="RootName"/> element is an authoring error that cannot fix itself, so it is latched
+        /// and never retried.
         /// </summary>
         private void Rebuild(VisualElement uiRoot)
         {
+            if (_missingRootWarned)
+            {
+                return;
+            }
+
             Unwire();
 
             if (shellUxml == null)
@@ -214,6 +220,7 @@ namespace CoreAI.Hub.UI
             if (_root == null)
             {
                 CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] shellUxml is missing the '{RootName}' element.");
+                _missingRootWarned = true;
                 return;
             }
 
@@ -271,8 +278,6 @@ namespace CoreAI.Hub.UI
                 _collapseButton.text = _collapsed ? "+" : "–";
             }
         }
-
-        // ===================== Escape / Hotkeys =====================
 
         /// <summary>
         /// Whether Escape/toggle-hotkey input should be handled right now, given cursor visibility
@@ -403,8 +408,6 @@ namespace CoreAI.Hub.UI
             _boundUiRoot = null;
         }
 
-        // ===================== Registry wiring =====================
-
         private void SubscribeRegistry()
         {
             if (_registry == null)
@@ -449,15 +452,17 @@ namespace CoreAI.Hub.UI
                     DestroyPage(pageId);
                     if (wasActive)
                     {
+                        // WHY: re-activate the same id from the new factory instead of clearing it —
+                        // clearing dropped the user onto the first tab whenever a page they were on
+                        // got re-registered.
                         _activePageId = null;
+                        ActivatePage(pageId);
                     }
                 }
 
                 RebuildTabs();
             });
         }
-
-        // ===================== Tab bar =====================
 
         private void RebuildTabs()
         {
@@ -472,7 +477,6 @@ namespace CoreAI.Hub.UI
             IReadOnlyList<(string pageId, int order)> pages =
                 _registry != null ? _registry.List() : Array.Empty<(string, int)>();
 
-            // WHY: drop cached content/instances for pages that no longer exist.
             PruneRemovedPages(pages);
 
             foreach ((string pageId, int _) in pages)
@@ -496,9 +500,6 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // WHY: preserve the active page if it still exists; otherwise fall back to the first tab. Either
-            // way the active content must be re-parented into _content, since a rebuild may have replaced
-            // it with a fresh (empty) container.
             bool activeStillPresent = _activePageId != null && _tabButtons.ContainsKey(_activePageId);
             if (activeStillPresent)
             {
@@ -545,13 +546,11 @@ namespace CoreAI.Hub.UI
 
         private string ResolveDisplayName(string pageId)
         {
-            // WHY: reuse an already-created page's display name; otherwise use the id until first activation.
             if (_pages.TryGetValue(pageId, out IHubPage cached) && cached != null)
             {
                 return string.IsNullOrEmpty(cached.DisplayName) ? pageId : cached.DisplayName;
             }
 
-            // WHY: peek the factory to read metadata without mounting content.
             if (_registry != null && _registry.TryGet(pageId, out Func<IHubPage> factory) && factory != null)
             {
                 try
@@ -571,8 +570,6 @@ namespace CoreAI.Hub.UI
 
             return pageId;
         }
-
-        // ===================== Page activation =====================
 
         /// <summary>Activates the page with the given id, lazily creating its content on first use.</summary>
         public void ActivatePage(string pageId)
@@ -637,8 +634,9 @@ namespace CoreAI.Hub.UI
             HighlightActiveTab();
         }
 
-        /// <summary>Re-parents the active page's cached content into <see cref="_content"/> without
-        /// touching page lifecycle (used when the same page is already active, incl. after a UI rebuild).</summary>
+        /// <summary>Re-parents the active page's cached content into <see cref="_content"/> and re-applies
+        /// its full-bleed padding, without touching page lifecycle (used when the same page is already
+        /// active, incl. after a UI rebuild that produced a fresh content element).</summary>
         private void RefreshActiveContent()
         {
             if (_content == null)
@@ -647,6 +645,10 @@ namespace CoreAI.Hub.UI
             }
 
             _content.Clear();
+            ApplyFullBleed(
+                _activePageId != null &&
+                _pages.TryGetValue(_activePageId, out IHubPage activePage) &&
+                activePage is IHubFullBleedPage);
             if (_activePageId != null && _pageContent.TryGetValue(_activePageId, out VisualElement content) &&
                 content != null)
             {
@@ -766,8 +768,6 @@ namespace CoreAI.Hub.UI
                 _content.Add(_emptyLabel);
             }
         }
-
-        // ===================== Page lifecycle cleanup =====================
 
         private void DestroyAllPages()
         {

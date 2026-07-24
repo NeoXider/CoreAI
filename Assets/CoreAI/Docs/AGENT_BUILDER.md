@@ -1243,6 +1243,10 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 2. Toggle **Enable Fallback Backend** ✓
 3. Fill **Secondary API Base URL**, **Secondary API Key**, **Secondary Model Name**
 
+> ⚠️ **Secondary API Key** is subject to the same build guard as the primary one: if the
+> `CoreAISettings` asset lives under a `Resources/` folder, a non-empty `secondaryApiKey` **aborts the
+> player build**. Keep it empty on the committed asset and set it at runtime.
+
 **Setup via code:**
 
 ```csharp

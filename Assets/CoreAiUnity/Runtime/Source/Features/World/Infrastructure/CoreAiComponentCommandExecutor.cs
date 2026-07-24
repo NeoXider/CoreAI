@@ -18,6 +18,12 @@ namespace CoreAI.Infrastructure.World
 
         public bool TryExecute(ApplyAiGameCommand cmd)
         {
+            return TryExecute(cmd, out _);
+        }
+
+        public bool TryExecute(ApplyAiGameCommand cmd, out List<string> listedComponents)
+        {
+            listedComponents = new List<string>();
             if (cmd == null || !string.Equals(cmd.CommandTypeId, AiGameCommandTypeIds.ComponentCommand,
                     StringComparison.Ordinal))
             {
@@ -55,7 +61,7 @@ namespace CoreAI.Infrastructure.World
                 case "set":
                     return TrySet(env);
                 case "list_components":
-                    return TryListComponents(env);
+                    return TryListComponents(env, out listedComponents);
                 default:
                     _logger.LogWarning(GameLogFeature.MessagePipe, $"[Component] unknown action '{env.action}'");
                     return false;
@@ -145,8 +151,9 @@ namespace CoreAI.Infrastructure.World
             return true;
         }
 
-        private bool TryListComponents(CoreAiComponentCommandEnvelope env)
+        private bool TryListComponents(CoreAiComponentCommandEnvelope env, out List<string> listedComponents)
         {
+            listedComponents = new List<string>();
             if (!ResolveObject(env.targetName, out GameObject go))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
@@ -164,7 +171,7 @@ namespace CoreAI.Infrastructure.World
                 }
             }
 
-            LastListedComponents = names;
+            listedComponents = names;
             return true;
         }
 
@@ -180,7 +187,5 @@ namespace CoreAI.Infrastructure.World
 
             return false;
         }
-
-        public List<string> LastListedComponents { get; private set; } = new();
     }
 }

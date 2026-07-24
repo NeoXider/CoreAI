@@ -88,7 +88,10 @@ In the **`CoreAISettings`** custom inspector, the **Essentials** block includes 
 
 ### Production validation
 
-Use `CoreAI/Validate Production Settings` before WebGL releases. CoreAI warns when a WebGL build uses `ClientOwnedApi` with a non-empty API key, because public WebGL builds expose client assets. Use `ServerManagedApi` for public WebGL.
+Use `CoreAI/Validate Production Settings` before WebGL releases; it inspects **every** `CoreAISettingsAsset` in the project, not just the first one found. Two build-time guards run automatically on every build and **fail it** (`BuildFailedException`), they are not warnings:
+
+- **Key in a `Resources` asset** (`CoreAIResourcesApiKeyBuildGuard`) — any `CoreAISettingsAsset` under a `Resources/` folder with a non-empty `apiKey`/`secondaryApiKey` aborts the build on **every** platform. Anything under `Resources/` is packed into the player and the string is trivially recoverable. Clear the key on the committed asset and inject it at runtime (environment variable, secure storage, `CoreAiBackend.SetApiKey`).
+- **Key in a WebGL client build** (`CoreAIProductionSettingsValidator`) — a WebGL build with a non-empty API key in `ClientOwnedApi`, `ClientLimited`, or `ServerManagedApi` aborts, because public WebGL builds expose client assets. Use `ServerManagedApi` **without** a client-side key for public WebGL.
 
 ### WebGL streaming (optional)
 

@@ -628,6 +628,12 @@ Open settings: **CoreAI → Settings** and choose your backend:
 | **HTTP API** (LM Studio, OpenAI) | Set `API Base URL` and `API Key` in Settings |
 | **Auto** | CoreAI picks the best available backend automatically |
 
+> ⚠️ Keep `API Key` **empty** on any `CoreAISettings` asset that lives under a `Resources/` folder
+> (the default `Assets/Resources/CoreAISettings.asset` does). `Resources` assets are packed into the
+> player, so a non-empty key there **aborts the build** — inject keys at runtime instead
+> (`CoreAiBackend.SetApiKey`, environment variable, secure storage). See
+> [SHIPPING_PLAYER_MACHINES.md](Assets/CoreAiUnity/Docs/SHIPPING_PLAYER_MACHINES.md).
+
 ### 6. Create your first agent
 
 ```csharp

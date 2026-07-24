@@ -91,6 +91,12 @@ namespace CoreAI.Infrastructure.Llm
             return _inner?.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
         }
 
+        /// <inheritdoc />
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _inner?.SetTools(tools);
+        }
+
         /// <summary>Peels all <see cref="LoggingLlmClientDecorator"/> from the top of the chain.</summary>
         public static ILlmClient Unwrap(ILlmClient client)
         {

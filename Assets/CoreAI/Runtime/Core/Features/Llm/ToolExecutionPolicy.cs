@@ -1041,13 +1041,20 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (waitFor != null && !waitFor.IsCompleted)
                     {
-                        // Serialization ordering: wait for the prior serialized call. Swallow its
-                        // fault/cancellation here (it is observed via its own slot) so chaining never throws.
+                        // Serialization ordering: wait for the prior serialized call. Swallow its fault
+                        // here (it is observed via its own slot) so chaining never throws on a failure.
                         try
                         {
                             await waitFor.ConfigureAwait(false);
                         }
-                        catch
+                        catch (OperationCanceledException)
+                        {
+                            // WHY: The only OCE that escapes ExecuteSingleAsync is outer cancellation
+                            // (per-call timeouts become error results), so swallowing it here would make a
+                            // cancelled predecessor look faulted and let the rest of the chain keep running.
+                            throw;
+                        }
+                        catch (Exception)
                         {
                             /* prior serialized call's outcome handled in its own slot */
                         }
@@ -1488,9 +1495,11 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         await allInFlight.ConfigureAwait(false);
                     }
-                    catch
+                    catch (Exception)
                     {
-                        /* per-call outcomes are read from the slots below */
+                        // WHY: This branch is only reached with an uncancellable token, so there is no outer
+                        // cancellation to propagate, and the mid-stream-abort caller relies on this method
+                        // returning so the turn is still recorded. Per-call outcomes are read from the slots.
                     }
                 }
 

@@ -908,6 +908,28 @@ namespace CoreAI.Ai.LuaCs
         private static readonly CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard SignalHandlerGuard =
             new(200, 200_000, CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
 
+        // The three signal members capture nothing but a compile-time constant and take their
+        // receiver from their own call context, so one instance each is reused for every member
+        // read instead of building a fresh LuaFunction + closure per `sig:Connect(...)`.
+        private static readonly LuaValue SignalConnectFn =
+            new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, once: false)));
+
+        private static readonly LuaValue SignalOnceFn =
+            new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, once: true)));
+
+        private static readonly LuaValue SignalWaitFn = new(Fn("RBXScriptSignal.Wait", inner =>
+        {
+            ReadSignal(inner, 0).Wait();
+            return LuaValue.Nil;
+        }));
+
+        private static readonly LuaValue ConnectionDisconnectFn =
+            new(Fn("RBXScriptConnection.Disconnect", inner =>
+            {
+                ReadConnection(inner, 0).Disconnect();
+                return LuaValue.Nil;
+            }));
+
         private static LuaTable BuildSignalMeta()
         {
             LuaTable meta = new();
@@ -920,18 +942,9 @@ namespace CoreAI.Ai.LuaCs
                     // WHY: on non-dispatch signals the C# methods are themselves the MVP2 loud
                     // stubs — calling them surfaces "signals land in MVP2 (scheduler)" with the
                     // exact phase; dispatch-enabled signals (UserInputService) connect for real.
-                    case "Connect":
-                        return new LuaValue(Fn("RBXScriptSignal.Connect", inner =>
-                            ConnectSignal(inner, once: false)));
-                    case "Once":
-                        return new LuaValue(Fn("RBXScriptSignal.Once", inner =>
-                            ConnectSignal(inner, once: true)));
-                    case "Wait":
-                        return new LuaValue(Fn("RBXScriptSignal.Wait", inner =>
-                        {
-                            ReadSignal(inner, 0).Wait();
-                            return LuaValue.Nil;
-                        }));
+                    case "Connect": return SignalConnectFn;
+                    case "Once": return SignalOnceFn;
+                    case "Wait": return SignalWaitFn;
                     default:
                         throw NotAMember(key, "RBXScriptSignal");
                 }
@@ -1062,12 +1075,7 @@ namespace CoreAI.Ai.LuaCs
                 switch (key)
                 {
                     case "Connected": return self.Connected;
-                    case "Disconnect":
-                        return new LuaValue(Fn("RBXScriptConnection.Disconnect", inner =>
-                        {
-                            ReadConnection(inner, 0).Disconnect();
-                            return LuaValue.Nil;
-                        }));
+                    case "Disconnect": return ConnectionDisconnectFn;
                     default:
                         throw NotAMember(key, "RBXScriptConnection");
                 }

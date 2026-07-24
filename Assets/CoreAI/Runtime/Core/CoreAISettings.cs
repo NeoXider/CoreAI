@@ -5,8 +5,10 @@
     /// </summary>
     public static class CoreAISettings
     {
-        // ARCH-1 fix: lock protects ResetOverrides atomicity and Instance assignment
-        // so parallel test runners or async continuations don't see partial state.
+        // WHY: This lock guards ONLY Instance get/set and serializes concurrent ResetOverrides calls
+        // against each other. The override backing fields below are read and written without it, so a
+        // reader racing ResetOverrides can still observe a partially cleared override set; callers that
+        // need a stable snapshot must not mutate overrides concurrently with reads.
         private static readonly object _lock = new();
 
         /// <summary>
@@ -438,7 +440,8 @@
 
         /// <summary>
         /// Clears all process-level setting overrides so subsequent reads fall back to
-        /// the active <see cref="Instance"/> or the built-in defaults.
+        /// the active <see cref="Instance"/> or the built-in defaults. Not atomic with respect to
+        /// concurrent property reads: only two concurrent resets are serialized against each other.
         /// </summary>
         public static void ResetOverrides()
         {

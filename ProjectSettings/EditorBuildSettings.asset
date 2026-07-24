@@ -11,6 +11,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity
     guid: 0fa1ad60474e1354d87844cc6983a349
+  - enabled: 1
+    path: Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity
+    guid: f59034d50b0ddf34b8161745236be0d0
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

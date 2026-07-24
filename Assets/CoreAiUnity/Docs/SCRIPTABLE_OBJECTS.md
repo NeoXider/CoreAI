@@ -93,4 +93,4 @@ Example: `ItemConfigAsset : ScriptableObject` can expose `ToItemConfig()` return
 
 ## Loading and bootstrap
 
-CoreAI uses editor bootstrap utilities to create default assets when missing. That bootstrap stays in CoreAiUnity. Portable CoreAI code must not load Unity resources or know about asset paths.
+CoreAI uses editor bootstrap utilities to create default assets when missing, but only when invoked explicitly (`CoreAI/Settings`, `CoreAI/Setup/Create Default Assets`, or the scene wizards) — nothing is generated automatically on package import or editor load. That bootstrap stays in CoreAiUnity. Portable CoreAI code must not load Unity resources or know about asset paths.

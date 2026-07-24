@@ -46,6 +46,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
 #if UNITY_EDITOR
+        /// <summary>How long a posted main-thread call may wait to START before it is failed as unpumped.</summary>
+        private const int MainThreadPostStartTimeoutMs = 30000;
+
         /// <summary>
         /// Last <see cref="Application.isPlaying"/> observed alongside the scripted Unity main thread
         /// (<see cref="Thread.ManagedThreadId"/>) (<c>-1</c> = not yet mirrored).
@@ -247,8 +250,10 @@ namespace CoreAI.Infrastructure.Llm
                 cancellationRegistration = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
             }
 
+            TaskCompletionSource<bool> callbackStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
             context.Post(async _ =>
             {
+                callbackStarted.TrySetResult(true);
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -273,6 +278,20 @@ namespace CoreAI.Infrastructure.Llm
             // and ConfigureAwait(false) here is required to avoid deadlocking a main thread that is
             // synchronously blocked (Task.Wait/.Result) waiting on this same call.
 #pragma warning disable CAIU001
+            // WHY: the posted callback is the only thing that completes tcs; if the sync context stops
+            // pumping (domain reload, play-mode exit) an uncancelable token would leave this await hanging
+            // forever. Bound the wait for the callback to START, not for the tool body to finish.
+            Task firstCompleted = await Task.WhenAny(
+                callbackStarted.Task,
+                Task.Delay(MainThreadPostStartTimeoutMs)).ConfigureAwait(false);
+            if (!ReferenceEquals(firstCompleted, callbackStarted.Task))
+            {
+                cancellationRegistration.Dispose();
+                tcs.TrySetException(new TimeoutException(
+                    "UnityMainThreadLlmAsyncMarshaler: the Unity main-thread queue did not start the posted " +
+                    $"LLM call within {MainThreadPostStartTimeoutMs / 1000}s (domain reload or play-mode exit)."));
+            }
+
             return await tcs.Task.ConfigureAwait(false);
 #pragma warning restore CAIU001
         }

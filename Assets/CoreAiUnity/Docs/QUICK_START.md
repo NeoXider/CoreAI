@@ -93,11 +93,16 @@ no-op (with a warning) if `LLM` already exists.
 
 ## 4. Connect An LLM Backend
 
-Open `Resources/CoreAISettings` or create one from:
+Open the settings asset with:
 
 ```text
-Create -> CoreAI -> Core AI Settings
+CoreAI -> Settings
 ```
+
+This selects `Assets/Resources/CoreAISettings.asset` and creates it if it is missing. Nothing is
+generated automatically on package import, so use this menu (or `CoreAI -> Setup -> Create Default
+Assets` for the full default set, or `Create -> CoreAI -> Core AI Settings` to place the asset
+somewhere else and assign it on `CoreAILifetimeScope`).
 
 Then choose an `LLM Mode`.
 
@@ -124,9 +129,17 @@ Use this when the Unity client calls an OpenAI-compatible endpoint directly.
 1. Set `LLM Mode` to `ClientOwnedApi`.
 2. Set `Api Base Url`, for example `http://localhost:1234/v1` for LM Studio.
 3. Set `Model` to the model name exposed by the server.
-4. Set `Api Key` only when the provider requires it.
+4. Set `Api Key` only when the provider requires it — and only for editor/local work.
 
 This is the quickest path for local development with LM Studio.
+
+> ⚠️ **A key in a `Resources` asset breaks builds.** If the `CoreAISettings` asset lives under a
+> `Resources/` folder (the default `Assets/Resources/CoreAISettings.asset` does), a non-empty
+> `Api Key` / `Secondary Api Key` **aborts every player build** — `Resources` assets are packed into
+> the player and the string is recoverable. Even a harmless placeholder such as `lm-studio` fails the
+> build: leave the field empty. Supply real keys at runtime (environment variable, secure storage,
+> `CoreAiBackend.SetApiKey`) or keep the settings asset outside `Resources/` and assign it on
+> `CoreAILifetimeScope`.
 
 ### ClientLimited
 

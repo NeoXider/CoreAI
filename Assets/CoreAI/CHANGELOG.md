@@ -1,5 +1,86 @@
 # Changelog
 
+## [6.8.0] - 2026-07-25
+
+Acts on the 6.7.0 audits: concurrency and cancellation fixes across the core, fail-closed build
+guards, Hub state-machine repairs, and two performance changes reverted for trading a guarantee away.
+
+### Security
+
+- **A provider key inside a `Resources/` settings asset now FAILS the build** instead of logging
+  "Building anyway". Anything under `Resources/` is packed into the player and recoverable from the
+  shipped build, so this is an exposed secret. `CoreAIResourcesApiKeyBuildGuard` reports every
+  offending asset. **Migration:** clear `apiKey`/`secondaryApiKey` on committed `Resources` assets
+  and supply the key at runtime; the repo's own placeholder was cleared.
+- **WebGL key leaks fail the build too.** `CoreAIProductionSettingsValidator` now throws for
+  `ClientOwnedApi`/`ClientLimited`/`ServerManagedApi` with a non-empty key, and inspects every
+  settings asset in the project rather than an arbitrary one. The streaming-config finding stays a
+  warning — no secret is involved.
+
+### Fixed
+
+- **Queue-pump deadlock in `QueuedAiOrchestrator`.** Work was started synchronously while `_lock` was
+  held, and its first statement disposed a cancellation registration, which blocks until a running
+  `CancelPending` callback returns — a callback waiting for that same lock. `Pump()` now claims slots
+  under the lock and starts the work after releasing it, so nothing blocking runs under `_lock`.
+- **`OperationCanceledException` was retried as a provider fault** in `AiOrchestrator` (two sites) and
+  `RetryingStreamingLlmClientDecorator`; caller cancellation now propagates immediately.
+- **`SetTools` silently did nothing** on a chain fronted by `ClientLimitedLlmClientDecorator` or
+  `LoggingLlmClientDecorator`, which never declared it and fell through to the no-op default
+  interface body. `CircuitBreakerLlmClientDecorator` likewise dropped two capability queries. A
+  reflection sweep test now requires every decorator to declare every virtual interface member.
+- **Half-open probe slot leaked** in `CircuitBreakerLlmClientDecorator` when the inner client threw
+  synchronously, wedging the breaker open.
+- **Unbounded static lock tables** in `ISkillStore`/`IAgentMemoryStore` keyed by model-controlled ids
+  leaked for the process lifetime and serialized unrelated store instances against each other; both
+  are now per-store via `ConditionalWeakTable`.
+- **Hub sub-tab lifecycle** did not fire when returning to an already-built tab, **the remove-confirm
+  state machine** lost its armed row on list rebuild, and **applying settings silently downgraded**
+  `ClientLimited`/`ServerManagedApi` to another mode when the user never touched the dropdown.
+- **`Packages/manifest.json` corruption** in `CoreAIDependencyInstaller`: a key under `testables` read
+  as installed, and inserting into an empty dependencies object emitted a trailing comma. The result
+  is now validated as JSON before anything is written.
+- **Endpoint registry saves are atomic** (`File.Replace`), and an `IOException` no longer escapes past
+  `Changed?.Invoke()` and desyncs the UI from the in-memory state.
+- **WebGL had no thread pool** yet `CoreAiChatService` and `CameraLlmTool` awaited
+  `SwitchToThreadPool`, hanging the turn until timeout.
+- **Editor capture leak** in `AgentCameraService`/`CameraLlmTool`, and a **main-thread marshaler hang**
+  when the sync context stops pumping (now a bounded wait with a clear `TimeoutException`).
+- **Editor-load side effect removed:** `CoreAIBuildMenu` no longer auto-creates default assets on
+  domain load. Use `CoreAI/Setup/Create Default Assets` or `CoreAI/Settings`.
+- **PlayMode suite could not finish.** A `[UnityTest]` guard called
+  `Application.CanStreamedLevelBeLoaded`, which reports `false` in the Editor even for a scene that is
+  registered and enabled; the resulting `Assert.Ignore` on the first `MoveNext()` wedged the test
+  runner and blocked all 139 remaining tests. The guard reads Build Settings directly and yields once
+  before skipping; `CoreAiChatDemo` is now registered so the test gives real coverage.
+
+### Changed
+
+- **Breaking (small API surface):** `ICoreAiComponentCommandExecutor.LastListedComponents` is removed in
+  favour of `TryExecute(cmd, out List<string> listedComponents)`. Tool calls run in parallel, so a
+  `list_components` result carried on shared executor state could be overwritten by a concurrent call
+  before its own consumer read it. Implementers of this interface must move the listing to the
+  out-parameter.
+- **The coroutine resume guard** fired its hook on every instruction (4× the main guard's rate) and
+  used a per-resume `Stopwatch`; it now matches the main guard's batch and timestamp accounting, with
+  the same step ceiling.
+- Allocation removed from hot paths: static `Connect`/`Once`/`Wait`/`Disconnect` functions, no
+  per-write string concatenation on spatial property writes, and `Array.Empty<T>()` in the script
+  execution guard.
+
+### Reverted
+
+- **Clock sampling in the Lua execution guard (shipped in 6.7.0) is reverted.** It was documented as
+  "free and risk-free"; it was not. The count hook does not fire during a host call, so a handler of a
+  few hundred instructions that are mostly bindings can blow a per-frame budget while never reaching
+  the sampling threshold — defeating the timeout in the case that matters most. The measured cost of
+  reverting is ~6%. `dev-docs/LUA_PERF_AUDIT_v6.6_2026-07.md` records how to recover it safely by
+  checking the deadline at the host-call boundary.
+- **`RbxScriptSignal.Fire1`/`Fire2` were reverted before shipping.** The reusable argument buffer is
+  incompatible with the MVP2 scheduler's deferred dispatch, where the argument array outlives the
+  `Fire` call, and it saved one array out of N+1. Argument pooling belongs in the scheduler, which
+  owns the lifetime.
+
 ## [6.7.0] - 2026-07-24
 
 Prompt-delivery fix, a measured Lua guard optimization, and a full read-only audit of the Hub, core

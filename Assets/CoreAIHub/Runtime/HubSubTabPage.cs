@@ -52,20 +52,39 @@ namespace CoreAI.Hub.UI
             }
 
             _view = new HubSubTabView(tabs);
+            _view.SelectionChanged += OnSubTabSelected;
             return _view;
+        }
+
+        private void OnSubTabSelected(int index)
+        {
+            if (index >= 0 && index < _children.Count)
+            {
+                ActivateChild(_children[index]);
+            }
+        }
+
+        /// <summary>
+        /// Mirrors the host's per-page lifecycle at the sub-tab level: deactivates the previously active
+        /// child and activates the new one, so a child that subscribes to live data on activation still
+        /// gets its callback. Driven by selection, not by content construction, because sub-tab content is
+        /// cached and built at most once.
+        /// </summary>
+        private void ActivateChild(IHubPage child)
+        {
+            if (ReferenceEquals(_activeChild, child))
+            {
+                return;
+            }
+
+            _activeChild?.OnDeactivated();
+            _activeChild = child;
+            child.OnActivated();
         }
 
         private VisualElement BuildChild(IHubPage child)
         {
-            // WHY: mirror the host's per-page lifecycle at the sub-tab level so a child that subscribes to
-            // live data on activation still gets its callback. The previously-active child is deactivated
-            // first; sub-tab content is cached by HubSubTabView, so each child builds at most once.
-            if (!ReferenceEquals(_activeChild, child))
-            {
-                _activeChild?.OnDeactivated();
-                _activeChild = child;
-                child.OnActivated();
-            }
+            ActivateChild(child);
 
             object content = child.CreatePageContent != null ? child.CreatePageContent() : null;
             return content as VisualElement ?? new Label($"'{child.DisplayName}' produced no UI Toolkit content.");

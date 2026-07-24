@@ -2,6 +2,7 @@
 using System.Collections;
 using CoreAI.Composition;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -24,6 +25,12 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator FullAccessDemo_LoadsWithFullLuaAndTargetCube()
         {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath) == null)
+            {
+                Assert.Ignore($"Demo scene '{ScenePath}' is not present in this project; skipping.");
+                yield break;
+            }
+
             Scene scene = EditorSceneManager.LoadSceneInPlayMode(
                 ScenePath,
                 new LoadSceneParameters(LoadSceneMode.Single));

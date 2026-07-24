@@ -46,7 +46,7 @@ namespace CoreAI.Hub.UI
             title.style.marginBottom = 8f;
             panel.Add(title);
 
-            _statusLabel = new Label("Has saved state: " + (_manager.HasSavedState ? "Yes" : "No"))
+            _statusLabel = new Label("Has saved state: " + (_manager != null && _manager.HasSavedState ? "Yes" : "No"))
             {
                 name = "coreai-hub-worldstate-status"
             };

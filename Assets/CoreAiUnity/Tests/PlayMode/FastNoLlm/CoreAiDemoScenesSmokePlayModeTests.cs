@@ -48,6 +48,10 @@ namespace CoreAI.Tests.PlayMode
             _sharedSettingsSnapshotJson = EditorJsonUtility.ToJson(_sharedSettings);
             _sharedSettings.ConfigureOffline();
 
+            // WHY: the asset is committed to the repo. Leaving it dirty lets any later Save Project (or an
+            // aborted run followed by one) write the test's Offline backend into the developer's file.
+            EditorUtility.ClearDirty(_sharedSettings);
+
             List<string> unexpectedErrors = new();
             string currentScene = "(startup)";
             Application.LogCallback capture = (condition, stackTrace, type) =>
@@ -139,6 +143,14 @@ namespace CoreAI.Tests.PlayMode
             {
                 // In-memory restore only: the asset was never saved, so disk state is untouched.
                 EditorJsonUtility.FromJsonOverwrite(_sharedSettingsSnapshotJson, _sharedSettings);
+                EditorUtility.ClearDirty(_sharedSettings);
+
+                string assetPath = AssetDatabase.GetAssetPath(_sharedSettings);
+                if (!string.IsNullOrEmpty(assetPath))
+                {
+                    // The committed file is the authority; reimport so nothing this run touched survives.
+                    AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+                }
             }
 
             _sharedSettings = null;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -78,21 +79,22 @@ namespace CoreAI.Ai
     public static class AgentMemoryStoreExtensions
     {
         /// <summary>
-        /// Process-wide mutation locks keyed by <c>{store type}:{role id}</c> - the fallback path used only
-        /// when a store does not implement <see cref="IAtomicAgentMemoryStore"/> itself. One entry per
-        /// distinct role id ever mutated through this fallback. Entries are intentionally never evicted: a
-        /// caller could already hold the <see cref="SemaphoreSlim"/> instance fetched from this dictionary
-        /// while a concurrent eviction-then-<c>GetOrAdd</c> for the same key hands a second caller a fresh
-        /// instance, which would silently break the mutual exclusion this lock exists for. In practice the
-        /// key set is bounded by the number of distinct agent roles a host ever creates, which is small
-        /// relative to process lifetime.
+        /// Mutation locks keyed by role id, held <b>per store instance</b> - the fallback path used only
+        /// when a store does not implement <see cref="IAtomicAgentMemoryStore"/> itself. Two independent
+        /// stores (different directories) must not serialize against each other, and the whole table must
+        /// die with the store rather than pinning entries for the process lifetime. Entries within one store
+        /// are intentionally never evicted: a caller could already hold the <see cref="SemaphoreSlim"/>
+        /// fetched from the dictionary while a concurrent eviction-then-<c>GetOrAdd</c> hands a second
+        /// caller a fresh instance, silently breaking the mutual exclusion this lock exists for.
         /// </summary>
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new();
+        private static readonly
+            ConditionalWeakTable<IAgentMemoryStore, ConcurrentDictionary<string, SemaphoreSlim>>
+            MutationLocks = new();
 
         /// <summary>
         /// Atomically loads, mutates, and saves one role state. Stores that can map to a durable file/key
         /// should implement <see cref="IAtomicAgentMemoryStore"/>; the fallback still serializes callers
-        /// process-wide by store type and role id.
+        /// per store instance and role id.
         /// </summary>
         public static async Task<TResult> MutateAsync<TResult>(
             this IAgentMemoryStore store,
@@ -115,8 +117,9 @@ namespace CoreAI.Ai
                 return await atomic.MutateAsync(roleId, mutator, cancellationToken).ConfigureAwait(false);
             }
 
-            string key = $"{store.GetType().FullName}:{roleId ?? ""}";
-            SemaphoreSlim gate = MutationLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+            ConcurrentDictionary<string, SemaphoreSlim> gates = MutationLocks.GetValue(
+                store, _ => new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal));
+            SemaphoreSlim gate = gates.GetOrAdd(roleId ?? "", _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {

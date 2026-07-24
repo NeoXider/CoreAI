@@ -100,6 +100,21 @@ namespace CoreAI.Ai.LuaCs
                     "grant the mod the WorldEdit capability or remove the instance mutation");
             }
         }
+
+        /// <summary>
+        /// WorldEdit check for a property write, taking the class and member separately so the
+        /// description string is built only when the check FAILS. Part property writes run per frame,
+        /// and the eagerly-concatenated description was an allocation on every successful write.
+        /// </summary>
+        public void RequireWorldEditForWrite(string className, string member)
+        {
+            if (CanWorldEdit)
+            {
+                return;
+            }
+
+            RequireWorldEdit("setting " + className + "." + member);
+        }
     }
 
     /// <summary>
@@ -631,41 +646,41 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "Shape":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Shape");
+                    context.RequireWorldEditForWrite(self.ClassName, "Shape");
                     sink.SetShape(id, ReadPartShapeValue(value));
                     return true;
                 case "Position":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Position");
+                    context.RequireWorldEditForWrite(self.ClassName, "Position");
                     sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
                     return true;
                 case "Size":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Size");
+                    context.RequireWorldEditForWrite(self.ClassName, "Size");
                     sink.SetSize(id, ReadVector3Value(value, "Part.Size assignment"));
                     return true;
                 case "CFrame":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".CFrame");
+                    context.RequireWorldEditForWrite(self.ClassName, "CFrame");
                     sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
                     return true;
                 case "Color":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Color");
+                    context.RequireWorldEditForWrite(self.ClassName, "Color");
                     sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
                     return true;
                 case "Transparency":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Transparency");
+                    context.RequireWorldEditForWrite(self.ClassName, "Transparency");
                     sink.SetTransparency(id, ReadNumberValue(value, "Part.Transparency assignment"));
                     return true;
                 case "Anchored":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".Anchored");
+                    context.RequireWorldEditForWrite(self.ClassName, "Anchored");
                     sink.SetAnchored(id, value.ToBoolean());
                     return true;
                 case "CanCollide":
-                    context.RequireWorldEdit("setting " + self.ClassName + ".CanCollide");
+                    context.RequireWorldEditForWrite(self.ClassName, "CanCollide");
                     sink.SetCanCollide(id, value.ToBoolean());
                     return true;
                 default:
                     if (UnwiredSpatialProperties.Contains(key))
                     {
-                        context.RequireWorldEdit("setting " + self.ClassName + "." + key);
+                        context.RequireWorldEditForWrite(self.ClassName, key);
                         throw SpatialStub(key);
                     }
 

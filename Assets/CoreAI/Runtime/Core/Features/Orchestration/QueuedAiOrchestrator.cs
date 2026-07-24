@@ -155,36 +155,75 @@ namespace CoreAI.Ai
             }
         }
 
-        private void TryPumpLocked()
+        /// <summary>
+        /// Claims free concurrency slots under <see cref="_lock"/>, then starts the claimed work
+        /// <b>after</b> the lock is released. Never call this while already holding <see cref="_lock"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY: Starting work inside the lock ran <see cref="RunOneAsync"/> synchronously up to (and, for an
+        /// inner service that completes synchronously, past) its first await while the lock was held. Its
+        /// first statement disposes the pending-cancellation registration, which blocks until a concurrently
+        /// running <c>CancelPending</c> callback returns - and that callback waits for this very lock, so the
+        /// two wedged each other permanently. Slots are claimed (<c>_inFlight++</c>) before the release, so
+        /// the concurrency limit still holds while the start is in flight.
+        /// </remarks>
+        private void Pump()
         {
-            while (_inFlight < _maxConcurrent)
+            List<WorkItem> readyTasks = null;
+            List<StreamWorkItem> readyStreams = null;
+
+            lock (_lock)
             {
-                bool hasTask = _pending.Count > 0;
-                bool hasStream = _streamPending.Count > 0;
-                if (hasTask && (!hasStream || ComesBefore(_pending[0], _streamPending[0])))
+                while (_inFlight < _maxConcurrent)
                 {
-                    WorkItem w = _pending[0];
-                    _pending.RemoveAt(0);
-                    _inFlight++;
+                    bool hasTask = _pending.Count > 0;
+                    bool hasStream = _streamPending.Count > 0;
+                    if (hasTask && (!hasStream || ComesBefore(_pending[0], _streamPending[0])))
+                    {
+                        WorkItem w = _pending[0];
+                        _pending.RemoveAt(0);
+                        _inFlight++;
+                        readyTasks ??= new List<WorkItem>();
+                        readyTasks.Add(w);
+                        continue;
+                    }
+
+                    if (hasStream)
+                    {
+                        StreamWorkItem sw = _streamPending[0];
+                        _streamPending.RemoveAt(0);
+                        _inFlight++;
+                        readyStreams ??= new List<StreamWorkItem>();
+                        readyStreams.Add(sw);
+                        continue;
+                    }
+
+                    break;
+                }
+            }
+
+            if (readyTasks != null)
+            {
+                foreach (WorkItem w in readyTasks)
+                {
                     _ = RunOneAsync(w);
-                    continue;
                 }
+            }
 
-                if (hasStream)
+            if (readyStreams != null)
+            {
+                foreach (StreamWorkItem sw in readyStreams)
                 {
-                    StreamWorkItem sw = _streamPending[0];
-                    _streamPending.RemoveAt(0);
-                    _inFlight++;
                     _ = RunOneStreamingAsync(sw);
-                    continue;
                 }
-
-                break;
             }
         }
 
         private async Task RunOneAsync(WorkItem w)
         {
+            // WHY: This blocks until a concurrently running CancelPending callback returns, and that
+            // callback waits for _lock - so this method must never be started while _lock is held.
+            // See Pump().
             w.PendingCancellation.Dispose();
             CancellationTokenSource linkedCts = null;
             try
@@ -220,13 +259,15 @@ namespace CoreAI.Ai
                 lock (_lock)
                 {
                     _inFlight--;
-                    TryPumpLocked();
                 }
+
+                Pump();
             }
         }
 
         private async Task RunOneStreamingAsync(StreamWorkItem w)
         {
+            // WHY: Blocking dispose - see RunOneAsync. This method must never be started under _lock.
             w.PendingCancellation.Dispose();
             CancellationTokenSource linkedCts = null;
             try
@@ -267,8 +308,9 @@ namespace CoreAI.Ai
                 lock (_lock)
                 {
                     _inFlight--;
-                    TryPumpLocked();
                 }
+
+                Pump();
             }
         }
 
@@ -337,10 +379,7 @@ namespace CoreAI.Ai
 
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_lock)
-            {
-                TryPumpLocked();
-            }
+            Pump();
         }
 
         private long NextSequence()
@@ -447,10 +486,7 @@ namespace CoreAI.Ai
             SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_lock)
-            {
-                TryPumpLocked();
-            }
+            Pump();
         }
 
         private void Enqueue(StreamWorkItem work)
@@ -523,10 +559,7 @@ namespace CoreAI.Ai
             SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_lock)
-            {
-                TryPumpLocked();
-            }
+            Pump();
         }
 
         private void CancelPending(WorkItem work)

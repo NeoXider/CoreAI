@@ -9,7 +9,12 @@ namespace CoreAI.Infrastructure.World
         /// <summary>Attempts to execute and returns whether the operation succeeded.</summary>
         bool TryExecute(ApplyAiGameCommand cmd);
 
-        /// <summary>Most recent component type names returned by a list command.</summary>
-        List<string> LastListedComponents { get; }
+        /// <summary>
+        /// Attempts to execute and returns whether the operation succeeded, yielding the component type
+        /// names of a <c>list_components</c> command through <paramref name="listedComponents"/> (empty for
+        /// every other action). Tool calls run in parallel, so the listing must travel with the call
+        /// instead of through shared executor state.
+        /// </summary>
+        bool TryExecute(ApplyAiGameCommand cmd, out List<string> listedComponents);
     }
 }

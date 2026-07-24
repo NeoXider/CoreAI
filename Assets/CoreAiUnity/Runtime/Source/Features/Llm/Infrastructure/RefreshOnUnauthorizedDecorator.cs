@@ -107,20 +107,6 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (!hasNext)
                     {
-                        if (current != null && current.IsDone && current.ErrorCode == LlmErrorCode.AuthExpired)
-                        {
-                            authExpired = true;
-                        }
-                        else if (current != null)
-                        {
-                            if (!string.IsNullOrEmpty(current.Text))
-                            {
-                                emittedVisibleText = true;
-                            }
-
-                            yield return current;
-                        }
-
                         break;
                     }
 

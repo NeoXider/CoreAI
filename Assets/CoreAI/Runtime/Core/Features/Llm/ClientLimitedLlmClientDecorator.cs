@@ -52,6 +52,12 @@ namespace CoreAI.Infrastructure.Llm
             return _inner?.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
         }
 
+        /// <inheritdoc />
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _inner?.SetTools(tools);
+        }
+
         /// <summary>
         /// Checks local limits and delegates a non-streaming request.
         /// </summary>

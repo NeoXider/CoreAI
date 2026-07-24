@@ -14,7 +14,7 @@ In Unity:
 
 ## 2. Configure the LLM
 
-Select the `CoreAISettings` asset in your `Resources` folder (or create one via **Create → CoreAI → Core AI Settings**).
+Open **CoreAI → Settings** — it selects `Assets/Resources/CoreAISettings.asset` and creates it if it does not exist yet (the asset is never generated automatically on package import). You can also create one via **Create → CoreAI → Core AI Settings** and assign it on `CoreAILifetimeScope`.
 
 Choose one of two options:
 
@@ -31,7 +31,13 @@ Choose one of two options:
 1. Set **Backend Type**: `OpenAiHttp`.
 2. Fill in the **Api Base Url** (e.g., `http://localhost:1234/v1` for LM Studio).
 3. Set the **Model Name** (e.g., `Qwen`).
-4. If using OpenAI — fill in the **Api Key**.
+4. If using OpenAI — fill in the **Api Key** (editor/local work only).
+
+> ⚠️ A non-empty **Api Key** / **Secondary Api Key** on a `CoreAISettings` asset that sits under a
+> `Resources/` folder **aborts every player build** — `Resources` assets ship inside the player and the
+> key is recoverable. Leave the field empty on the committed asset (even a placeholder like `lm-studio`
+> fails the build) and inject real keys at runtime via `CoreAiBackend.SetApiKey`, an environment
+> variable, or secure storage.
 
 > 💡 **Recommendation:** We highly recommend downloading [LM Studio](https://lmstudio.ai), loading a model like Qwen 4B or Gemma 26B, starting the local server, and using the HTTP API mode in Unity. It runs faster and supports multi-processing better.
 

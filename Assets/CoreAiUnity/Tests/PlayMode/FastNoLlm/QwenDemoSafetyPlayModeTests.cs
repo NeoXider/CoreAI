@@ -14,7 +14,13 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator RequestScopedGuard_AllowsExactlyOneParallelSideEffectAndResetsNextTurn()
         {
             Type guardType = Type.GetType(
-                "CoreAI.Demos.QwenDemo.QwenToolTurnGuard, CoreAI.Demos", true);
+                "CoreAI.Demos.QwenDemo.QwenToolTurnGuard, CoreAI.Demos", false);
+            if (guardType == null)
+            {
+                Assert.Ignore("CoreAI.Demos is not present in this project; skipping the Qwen demo guard test.");
+                yield break;
+            }
+
             object guard = Activator.CreateInstance(guardType);
             MethodInfo begin = guardType.GetMethod("BeginTurn");
             MethodInfo claim = guardType.GetMethod("TryClaim");

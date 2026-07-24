@@ -42,6 +42,13 @@ namespace CoreAI.Hub.UI
         private readonly Dictionary<int, VisualElement> _cache = new();
         private int _active = -1;
 
+        /// <summary>
+        /// Raised with the newly selected index whenever the active sub-tab changes, including when the
+        /// content was already built and served from the cache. Hosts use it to run per-sub-tab lifecycle
+        /// (activate/deactivate) independently of content construction.
+        /// </summary>
+        public event Action<int> SelectionChanged;
+
         /// <summary>Creates the view from an ordered set of sub-tabs; the first is selected by default.</summary>
         public HubSubTabView(IEnumerable<SubTab> tabs)
         {
@@ -97,6 +104,8 @@ namespace CoreAI.Hub.UI
             {
                 _buttons[i].EnableInClassList("coreai-hub-tab-active", i == index);
             }
+
+            SelectionChanged?.Invoke(index);
 
             if (!_cache.TryGetValue(index, out VisualElement content))
             {

@@ -181,11 +181,13 @@ namespace CoreAI.Infrastructure.Llm
                 string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
                 cancellationToken.ThrowIfCancellationRequested();
                 await UniTask.SwitchToMainThread(cancellationToken);
-                bool success = _executor.TryExecute(new ApplyAiGameCommand
-                {
-                    CommandTypeId = AiGameCommandTypeIds.ComponentCommand,
-                    JsonPayload = json
-                });
+                bool success = _executor.TryExecute(
+                    new ApplyAiGameCommand
+                    {
+                        CommandTypeId = AiGameCommandTypeIds.ComponentCommand,
+                        JsonPayload = json
+                    },
+                    out List<string> listedComponents);
 
                 if (_settings.LogToolCallResults)
                 {
@@ -195,7 +197,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (success && action == "list_components")
                 {
-                    List<string> components = _executor.LastListedComponents ?? new List<string>();
+                    List<string> components = listedComponents ?? new List<string>();
                     return SerializeResult(true,
                         $"Found {components.Count} components: {string.Join(", ", components)}", action);
                 }

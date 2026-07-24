@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using UnityEditor;
@@ -19,16 +20,21 @@ namespace CoreAI.Editor
         /// <inheritdoc />
         public void OnPreprocessBuild(BuildReport report)
         {
-            CoreAISettingsAsset settings = LoadSettings();
-            if (settings == null)
+            bool webGl = report.summary.platform == BuildTarget.WebGL;
+            foreach (CoreAISettingsAsset settings in LoadAllSettings())
             {
-                return;
-            }
+                string blocker = GetWebGlClientKeyBuildBlocker(settings, webGl);
+                if (!string.IsNullOrEmpty(blocker))
+                {
+                    throw new BuildFailedException(
+                        $"{blocker} (asset: '{AssetDatabase.GetAssetPath(settings)}')");
+                }
 
-            string warning = GetWebGlClientKeyWarning(settings, report.summary.platform == BuildTarget.WebGL);
-            if (!string.IsNullOrEmpty(warning))
-            {
-                Debug.LogWarning(warning);
+                string warning = GetWebGlClientKeyWarning(settings, webGl);
+                if (!string.IsNullOrEmpty(warning))
+                {
+                    Debug.LogWarning(warning);
+                }
             }
         }
 
@@ -38,15 +44,25 @@ namespace CoreAI.Editor
         [MenuItem("CoreAI/Validate Production Settings")]
         public static void ValidateProductionSettings()
         {
-            CoreAISettingsAsset settings = LoadSettings();
-            if (settings == null)
+            List<CoreAISettingsAsset> assets = LoadAllSettings();
+            if (assets.Count == 0)
             {
                 EditorUtility.DisplayDialog("CoreAI Production Settings", "CoreAISettings asset was not found.", "OK");
                 return;
             }
 
             bool webGl = EditorUserBuildSettings.activeBuildTarget == BuildTarget.WebGL;
-            string warning = GetWebGlClientKeyWarning(settings, webGl);
+            List<string> warnings = new();
+            foreach (CoreAISettingsAsset asset in assets)
+            {
+                string assetWarning = GetWebGlClientKeyWarning(asset, webGl);
+                if (!string.IsNullOrEmpty(assetWarning))
+                {
+                    warnings.Add($"{assetWarning} (asset: '{AssetDatabase.GetAssetPath(asset)}')");
+                }
+            }
+
+            string warning = string.Join("\n\n", warnings);
             if (string.IsNullOrEmpty(warning))
             {
                 EditorUtility.DisplayDialog(
@@ -105,16 +121,53 @@ namespace CoreAI.Editor
             return "";
         }
 
-        private static CoreAISettingsAsset LoadSettings()
+        /// <summary>
+        /// Returns the subset of <see cref="GetWebGlClientKeyWarning"/> findings that would ship a provider
+        /// key inside a public WebGL bundle, i.e. the ones that must fail the build. Empty when the build
+        /// may proceed.
+        /// </summary>
+        public static string GetWebGlClientKeyBuildBlocker(CoreAISettingsAsset settings, bool webGlBuild)
         {
-            string[] guids = AssetDatabase.FindAssets("t:CoreAISettingsAsset");
-            if (guids == null || guids.Length == 0)
+            if (settings == null || !webGlBuild || string.IsNullOrWhiteSpace(settings.ApiKey))
             {
-                return CoreAISettingsAsset.Instance;
+                return "";
             }
 
-            string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            return AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(path);
+            bool keyLeakingMode = settings.ExecutionMode is LlmExecutionMode.ClientOwnedApi
+                or LlmExecutionMode.ClientLimited
+                or LlmExecutionMode.ServerManagedApi;
+            return keyLeakingMode ? GetWebGlClientKeyWarning(settings, true) : "";
+        }
+
+        /// <summary>
+        /// Returns every <see cref="CoreAISettingsAsset"/> in the project so validation cannot silently
+        /// pass by inspecting an arbitrary one when several exist.
+        /// </summary>
+        private static List<CoreAISettingsAsset> LoadAllSettings()
+        {
+            List<CoreAISettingsAsset> assets = new();
+            string[] guids = AssetDatabase.FindAssets("t:CoreAISettingsAsset");
+            if (guids != null)
+            {
+                foreach (string guid in guids)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    CoreAISettingsAsset asset = string.IsNullOrEmpty(path)
+                        ? null
+                        : AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(path);
+                    if (asset != null)
+                    {
+                        assets.Add(asset);
+                    }
+                }
+            }
+
+            if (assets.Count == 0 && CoreAISettingsAsset.Instance != null)
+            {
+                assets.Add(CoreAISettingsAsset.Instance);
+            }
+
+            return assets;
         }
     }
 }

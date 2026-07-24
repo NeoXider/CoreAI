@@ -256,6 +256,11 @@ namespace CoreAI.Ai
                 return null;
             }
 
+            if (task == null)
+            {
+                return null;
+            }
+
             RequestBundle bundle = null;
             string roleId;
             string traceId;
@@ -552,8 +557,11 @@ namespace CoreAI.Ai
                             hasNext = await enumerator.MoveNextAsync();
                             current = hasNext ? enumerator.Current : null;
                         }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        catch (OperationCanceledException)
                         {
+                            // WHY: The OCE may carry a token other than the caller's (timeout decorator's
+                            // linked CTS). Falling through to the generic handler would report it as a
+                            // retryable provider fault instead of a cancellation.
                             terminalError = "cancelled";
                             terminalErrorCode = LlmErrorCode.Cancelled;
                             wasCancelled = true;
@@ -700,9 +708,13 @@ namespace CoreAI.Ai
                         {
                             await enumerator.DisposeAsync();
                         }
-                        catch
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                         {
-                            /* swallow */
+                            throw;
+                        }
+                        catch (Exception)
+                        {
+                            /* best-effort teardown of the inner enumerator */
                         }
                     }
 
@@ -867,9 +879,11 @@ namespace CoreAI.Ai
 
                         current = enumerator.Current;
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException)
                     {
-                        throw; // RunTaskAsync distinguishes real cancellation from an empty response
+                        // WHY: RunTaskAsync distinguishes real cancellation from an empty response, and the
+                        // OCE may carry a decorator's linked token rather than the caller's own.
+                        throw;
                     }
                     catch (LlmClientException ex)
                     {

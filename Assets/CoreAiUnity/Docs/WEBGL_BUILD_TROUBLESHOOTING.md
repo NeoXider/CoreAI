@@ -2,6 +2,15 @@
 
 Symptoms and mitigations when **Player → WebGL** fails in a large sample project (e.g. this repo with Roguelite example + CoreAI).
 
+## `[CoreAI] Build aborted: … API key` (BuildFailedException)
+
+CoreAI refuses to build a player that would ship a provider key. Two guards throw `BuildFailedException` before compilation starts:
+
+- **`CoreAIResourcesApiKeyBuildGuard`** — **any platform**: a `CoreAISettings` asset under a `Resources/` folder (default `Assets/Resources/CoreAISettings.asset`) has a non-empty `apiKey` or `secondaryApiKey`. Even a local placeholder (`lm-studio`) fails. `Resources` assets are packed into the player and the string is recoverable.
+- **`CoreAIProductionSettingsValidator`** — **WebGL only**: a non-empty `ApiKey` combined with `ClientOwnedApi`, `ClientLimited`, or `ServerManagedApi`. Every `CoreAISettings` asset in the project is checked, not just one.
+
+**Fix:** clear the key field on the committed asset(s) and supply it at runtime — `CoreAiBackend.SetApiKey`, an environment variable, or secure storage — or move to `ServerManagedApi` with no client-side key. The message names the offending asset path. Run `CoreAI/Validate Production Settings` to see the same findings without starting a build.
+
 ## `LLVM ERROR: out of memory` (clang on `Il2CppGenericMethodPointerTable.c`)
 
 The WebGL toolchain compiles huge generated C files with **clang**. **32-bit** `clang.exe` is limited to ~2–4 GB address space; **Il2CppGenericMethodPointerTable.c** is often very large, so the compiler can exhaust memory even if the machine has free RAM.

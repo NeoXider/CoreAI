@@ -61,8 +61,13 @@ In `CoreAISettings` (Project Settings or the settings asset), set:
 | Field | Value |
 |---|---|
 | **Base URL** | `http://127.0.0.1:8801/v1` (no trailing `/`) |
-| **API Key** | any non-empty placeholder — the bridge ignores it |
+| **API Key** | leave **empty** — the bridge ignores it |
 | **Model** | the model the bridge advertises (must match `-m`, e.g. `sonnet`) |
+
+> ⚠️ Do not park a placeholder key here. If this `CoreAISettings` asset sits under a `Resources/`
+> folder, any non-empty `apiKey`/`secondaryApiKey` **aborts the player build** (`Resources` assets ship
+> inside the player). If your bridge really requires a non-empty header, set it at runtime with
+> `CoreAiBackend.SetApiKey` instead of storing it on the asset.
 
 For tests, set `COREAI_TEST_BASE_URL=http://127.0.0.1:8801/v1` instead.
 

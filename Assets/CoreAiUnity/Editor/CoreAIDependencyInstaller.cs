@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -75,13 +77,22 @@ namespace CoreAI.Editor
 
             foreach ((string key, string url) in RequiredDependencies)
             {
-                if (ManifestContainsKey(updated, key))
+                if (DependenciesSectionContainsKey(updated, key))
                 {
                     alreadyPresent.Add(key);
                     continue;
                 }
 
-                updated = InsertDependency(updated, key, url);
+                if (!TryAddDependency(updated, key, url, out string next))
+                {
+                    EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
+                        $"Adding '{key}' would produce invalid JSON in Packages/manifest.json. " +
+                        "Nothing was written; add the entries manually using the README quick-start table.",
+                        "OK");
+                    return;
+                }
+
+                updated = next;
                 added.Add(key);
             }
 
@@ -128,42 +139,112 @@ namespace CoreAI.Editor
             return !EditorApplication.isCompiling && !EditorApplication.isUpdating;
         }
 
-        private static bool ManifestContainsKey(string manifestText, string key)
+        /// <summary>
+        /// True when <paramref name="key"/> is declared inside the <c>dependencies</c> object of
+        /// <paramref name="manifestText"/>. Scoped to that object so a same-named entry under
+        /// <c>testables</c> or <c>scopedRegistries</c> is not mistaken for an installed dependency.
+        /// </summary>
+        public static bool DependenciesSectionContainsKey(string manifestText, string key)
         {
-            // Match `"key":` on a key boundary so `com.cysharp.messagepipe` does not match
-            // `com.cysharp.messagepipe.vcontainer` and vice versa.
-            string needle = "\"" + key + "\"";
-            int idx = manifestText.IndexOf(needle, StringComparison.Ordinal);
-            if (idx < 0)
+            if (string.IsNullOrEmpty(manifestText) || string.IsNullOrEmpty(key))
             {
                 return false;
             }
 
-            // Resolve and cache required local values.
-            int probe = idx + needle.Length;
-            while (probe < manifestText.Length && char.IsWhiteSpace(manifestText[probe]))
-            {
-                probe++;
-            }
-
-            return probe < manifestText.Length && manifestText[probe] == ':';
-        }
-
-        /// <summary>
-        /// Inserts <c>"key": "url",</c> as the first entry inside the dependencies object.
-        /// Preserves indentation by reading the leading whitespace of the next line.
-        /// </summary>
-        private static string InsertDependency(string manifestText, string key, string url)
-        {
             DependencySectionLocator locator = DependencySectionLocator.TryLocate(manifestText);
             if (!locator.IsValid)
             {
-                return manifestText;
+                return false;
+            }
+
+            // Match `"key":` on a key boundary so `com.cysharp.messagepipe` does not match
+            // `com.cysharp.messagepipe.vcontainer` and vice versa.
+            string needle = "\"" + key + "\"";
+            int scanFrom = locator.DependenciesOpenBraceIndex;
+            while (true)
+            {
+                int idx = manifestText.IndexOf(needle, scanFrom, StringComparison.Ordinal);
+                if (idx < 0 || idx >= locator.DependenciesCloseBraceIndex)
+                {
+                    return false;
+                }
+
+                int probe = idx + needle.Length;
+                while (probe < manifestText.Length && char.IsWhiteSpace(manifestText[probe]))
+                {
+                    probe++;
+                }
+
+                if (probe < manifestText.Length && manifestText[probe] == ':')
+                {
+                    return true;
+                }
+
+                scanFrom = idx + needle.Length;
+            }
+        }
+
+        /// <summary>
+        /// Inserts <c>"key": "url"</c> as the first entry inside the <c>dependencies</c> object of
+        /// <paramref name="manifestText"/>, writing the result to <paramref name="updated"/>. Returns
+        /// <c>false</c> (leaving <paramref name="updated"/> equal to the input) when no dependencies
+        /// object exists or the edited text would not parse as JSON. When the key is already declared the
+        /// text is returned unchanged and the result is <c>true</c>.
+        /// </summary>
+        public static bool TryAddDependency(string manifestText, string key, string url, out string updated)
+        {
+            updated = manifestText;
+            if (string.IsNullOrEmpty(manifestText) || string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+
+            if (DependenciesSectionContainsKey(manifestText, key))
+            {
+                return true;
+            }
+
+            DependencySectionLocator locator = DependencySectionLocator.TryLocate(manifestText);
+            if (!locator.IsValid)
+            {
+                return false;
             }
 
             string indent = locator.DetectIndent(manifestText);
-            string inserted = $"{indent}\"{key}\": \"{url}\",\n";
-            return manifestText.Insert(locator.InsertOffset, inserted);
+            string entry = $"\"{key}\": \"{url}\"";
+            string inserted;
+            if (locator.IsSectionEmpty(manifestText))
+            {
+                // WHY: a trailing comma after the only entry makes manifest.json unparseable and Unity
+                // then refuses to open the project.
+                string lineBreak = manifestText[locator.InsertOffset - 1] == '\n' ? "" : "\n";
+                inserted = lineBreak + indent + entry + "\n";
+            }
+            else
+            {
+                inserted = indent + entry + ",\n";
+            }
+
+            string candidate = manifestText.Insert(locator.InsertOffset, inserted);
+            if (!IsParseableJson(candidate))
+            {
+                return false;
+            }
+
+            updated = candidate;
+            return true;
+        }
+
+        private static bool IsParseableJson(string text)
+        {
+            try
+            {
+                return JsonConvert.DeserializeObject<JObject>(text) != null;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
         }
 
         private static string BuildSummary(List<string> added, List<string> alreadyPresent)
@@ -200,12 +281,14 @@ namespace CoreAI.Editor
             public bool IsValid { get; }
             public int InsertOffset { get; }
             public int DependenciesOpenBraceIndex { get; }
+            public int DependenciesCloseBraceIndex { get; }
 
-            private DependencySectionLocator(int insertOffset, int braceIndex)
+            private DependencySectionLocator(int insertOffset, int braceIndex, int closeBraceIndex)
             {
                 IsValid = true;
                 InsertOffset = insertOffset;
                 DependenciesOpenBraceIndex = braceIndex;
+                DependenciesCloseBraceIndex = closeBraceIndex;
             }
 
             public static DependencySectionLocator TryLocate(string manifestText)
@@ -222,6 +305,11 @@ namespace CoreAI.Editor
                     return default;
                 }
 
+                if (!TryFindMatchingBrace(manifestText, braceIdx, out int closeBraceIdx))
+                {
+                    return default;
+                }
+
                 // Insert just after the opening brace + newline so we end up on a fresh line.
                 int insertOffset = braceIdx + 1;
                 if (insertOffset < manifestText.Length && manifestText[insertOffset] == '\r')
@@ -234,7 +322,70 @@ namespace CoreAI.Editor
                     insertOffset++;
                 }
 
-                return new DependencySectionLocator(insertOffset, braceIdx);
+                return new DependencySectionLocator(insertOffset, braceIdx, closeBraceIdx);
+            }
+
+            /// <summary>True when the dependencies object holds nothing but whitespace.</summary>
+            public bool IsSectionEmpty(string manifestText)
+            {
+                for (int i = DependenciesOpenBraceIndex + 1; i < DependenciesCloseBraceIndex; i++)
+                {
+                    if (!char.IsWhiteSpace(manifestText[i]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            private static bool TryFindMatchingBrace(string text, int openBraceIndex, out int closeBraceIndex)
+            {
+                closeBraceIndex = -1;
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                for (int i = openBraceIndex; i < text.Length; i++)
+                {
+                    char c = text[i];
+                    if (inString)
+                    {
+                        if (escaped)
+                        {
+                            escaped = false;
+                        }
+                        else if (c == '\\')
+                        {
+                            escaped = true;
+                        }
+                        else if (c == '"')
+                        {
+                            inString = false;
+                        }
+
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = true;
+                    }
+                    else if (c == '{')
+                    {
+                        depth++;
+                    }
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            closeBraceIndex = i;
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
             }
 
             public string DetectIndent(string manifestText)

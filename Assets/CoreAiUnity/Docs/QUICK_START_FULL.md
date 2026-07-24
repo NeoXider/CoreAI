@@ -128,8 +128,10 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 
 ### 4.3 Configure CoreAISettings
 
-1. In the Project window find: `Assets/Resources/CoreAISettings.asset`
-2. Or create: **Create → CoreAI → CoreAI Settings**
+1. Open the menu **CoreAI → Settings** — it selects `Assets/Resources/CoreAISettings.asset` and creates
+   it if it does not exist yet. (The asset is never created automatically on package import; use this
+   menu, or **CoreAI → Setup → Create Default Assets** for the whole default set.)
+2. Or create manually: **Create → CoreAI → CoreAI Settings**
 3. In the Inspector configure:
 
 ```
@@ -346,6 +348,12 @@ CoreAISettings → Backend = OpenAiHttp
    API Key: sk-xxxxxxxxxxxxx
    Model: qwen-max
 ```
+
+> ⚠️ **Editor only.** A key typed into `Assets/Resources/CoreAISettings.asset` (or any `CoreAISettings`
+> asset inside a `Resources/` folder) **aborts every player build** — `Resources` assets are packed into
+> the player and the key is recoverable from the shipped bundle. Clear the field before building and
+> inject the key at runtime (`CoreAiBackend.SetApiKey`, environment variable, secure storage), or use
+> `ServerManagedApi` so the key never leaves your backend.
 
 ---
 

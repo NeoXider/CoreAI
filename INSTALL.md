@@ -1,7 +1,7 @@
 # CoreAI — Installation
 
-CoreAI ships as **five UPM packages**. `coreai` + `coreaiunity` are the required base (lockstep semver);
-`coreaimods`, `coreaihub`, and `coreaibenchmark` are independent optional installs on top of the base:
+CoreAI ships as **six UPM packages**. `coreai` + `coreaiunity` are the required base (lockstep semver);
+`coreaimods`, `coreaihub`, `coreaibenchmark`, and `coreaimcp` are optional installs on top of the base:
 
 | Package | What it is | Depends on |
 |---|---|---|
@@ -9,12 +9,14 @@ CoreAI ships as **five UPM packages**. `coreai` + `coreaiunity` are the required
 | `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). | `coreai` |
 | `com.neoxider.coreaimods` | Optional Lua modding layer (Lua-CSharp sandbox, `execute_lua`/`manage_mods` tools, mod runtime). | `coreai` + `coreaiunity` |
 | `com.neoxider.coreaihub` | Optional UI Toolkit Hub window (tabbed Chat/Settings/Statistics/Mods pages). | `coreai` + `coreaiunity` |
-| `com.neoxider.coreaibenchmark` | Dev/test-only LLM game-creation benchmark harness. | `coreai` + `coreaiunity` |
+| `com.neoxider.coreaibenchmark` | Dev/test-only LLM game-creation benchmark harness. | `coreai` + `coreaiunity` + `coreaimods` |
+| `com.neoxider.coreaimcp` | Optional in-game **MCP server** — an external MCP client (Claude Code, …) drives the *running* game over loopback HTTP. Off by default. | `coreaiunity` + `coreaimods` |
 
 Mods and Hub are installed independently — neither requires the other. When both are present, Mods'
 Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define and
 adds a Mods page to the Hub window; without Hub, that assembly compiles out and Mods still works
-standalone through its tools.
+standalone through its tools. Benchmark and MCP both build on Mods, so installing either pulls
+`coreaimods` in as well.
 
 **Install profiles** — jump to the matching section below:
 
@@ -23,7 +25,8 @@ standalone through its tools.
 | **Base** | `coreai` + `coreaiunity` | [§1](#1-install-coreai-base) + [§2](#2-llm-module-microsoftextensionsai-via-nuget) |
 | **+Mods** | Base + `coreaimods` | [§3](#3-mods-module-lua) |
 | **+Hub** | Base + `coreaihub` | [§4](#4-hub-module-ui-toolkit) |
-| **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation) | [§3](#3-mods-module-lua) + [§4](#4-hub-module-ui-toolkit) + [§5](#5-benchmark-module-dev-only) |
+| **+MCP** | Base + `coreaimods` + `coreaimcp` | [§3](#3-mods-module-lua) + [§6](#6-optional-modules-at-a-glance) |
+| **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation, `coreaimcp` for external MCP clients) | [§3](#3-mods-module-lua) + [§4](#4-hub-module-ui-toolkit) + [§5](#5-benchmark-module-dev-only) |
 
 **LLM** (Microsoft.Extensions.AI) is an **optional module within the base**. The core compiles
 without it; features light up automatically when the NuGet package is present. Install only what your game uses.
@@ -193,7 +196,8 @@ local multi-model sweep.
 |---|---|---|---|
 | Mods (Lua) | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — (compiled in by default) | `COREAI_NO_LUA` (soft-disable) |
 | Hub (UI Toolkit) | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` (consumed by Mods' Hub integration) | — |
-| Benchmark | `com.neoxider.coreaibenchmark` | — | dev/test-only, not referenced by runtime code |
+| Benchmark | `com.neoxider.coreaibenchmark` (needs Mods) | — | dev/test-only, not referenced by runtime code |
+| MCP server | `com.neoxider.coreaimcp` (needs Mods) — git URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMcp` | — | off until a `CoreAiMcpServer` component is added to a scene; loopback-only, no auth — see [its README](Assets/CoreAIMcp/README.md) |
 | Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | — |
 | LLM pipeline (MEAI) | NuGet `Microsoft.Extensions.AI` | — (on by default) | `COREAI_NO_LLM` (compile out) |
 

@@ -44,13 +44,18 @@ namespace CoreAI.Scripting.LuaCs
             LuaFunction function = UnwrapCallable(callable);
 
             args ??= Array.Empty<object>();
-            LuaValue[] luaArgs = new LuaValue[args.Length];
+            LuaValue[] luaArgs = args.Length == 0 ? Array.Empty<LuaValue>() : new LuaValue[args.Length];
             for (int i = 0; i < args.Length; i++)
             {
                 luaArgs[i] = LuaCsValueMarshaller.Unbox(args[i]);
             }
 
             LuaValue[] results = _inner.Execute(lua, function, cancellationToken, luaArgs);
+            if (results.Length == 0)
+            {
+                return Array.Empty<object>();
+            }
+
             object[] boxed = new object[results.Length];
             for (int i = 0; i < results.Length; i++)
             {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace CoreAI.Ai
@@ -87,16 +88,17 @@ namespace CoreAI.Ai
     public static class SkillStoreExtensions
     {
         /// <summary>
-        /// Process-wide mutation locks keyed by <c>{store type}:{skill id}</c> - the fallback path used
-        /// only when a store does not implement <see cref="IAtomicSkillStore"/> itself. One entry per
-        /// distinct skill id ever mutated through this fallback. Entries are intentionally never evicted: a
-        /// caller could already hold the <see cref="SemaphoreSlim"/> instance fetched from this dictionary
-        /// while a concurrent eviction-then-<c>GetOrAdd</c> for the same key hands a second caller a fresh
-        /// instance, which would silently break the mutual exclusion this lock exists for. In practice the
-        /// key set is bounded by the number of distinct skills an agent has authored on this install, which
-        /// is small relative to process lifetime.
+        /// Mutation locks keyed by skill id, held <b>per store instance</b> - the fallback path used only
+        /// when a store does not implement <see cref="IAtomicSkillStore"/> itself. Two independent stores
+        /// (different directories) must not serialize against each other, and the whole table must die with
+        /// the store rather than pinning a model-controlled id set for the process lifetime. Entries within
+        /// one store are intentionally never evicted: a caller could already hold the
+        /// <see cref="SemaphoreSlim"/> fetched from the dictionary while a concurrent
+        /// eviction-then-<c>GetOrAdd</c> hands a second caller a fresh instance, silently breaking the
+        /// mutual exclusion this lock exists for.
         /// </summary>
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> MutationLocks = new();
+        private static readonly ConditionalWeakTable<ISkillStore, ConcurrentDictionary<string, SemaphoreSlim>>
+            MutationLocks = new();
 
         public static TResult Mutate<TResult>(
             this ISkillStore store,
@@ -119,8 +121,9 @@ namespace CoreAI.Ai
             }
 
             string skillId = (id ?? "").Trim();
-            string key = $"{store.GetType().FullName}:{skillId}";
-            SemaphoreSlim gate = MutationLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+            ConcurrentDictionary<string, SemaphoreSlim> gates = MutationLocks.GetValue(
+                store, _ => new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal));
+            SemaphoreSlim gate = gates.GetOrAdd(skillId, _ => new SemaphoreSlim(1, 1));
             gate.Wait();
             try
             {

@@ -64,6 +64,13 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>Per-resume wall-clock budget (ms) for a mod-created raw Lua coroutine.</summary>
         public const int CoroutineResumeTimeoutMs = 1000;
 
+        // Sampling window for the coroutine hook, matching LuaCsExecutionGuard: each fire charges this
+        // many instructions to the step budget, so the same ceiling holds, and it stays tight enough for
+        // the allocation backstop below to catch a doubling concat bomb.
+        // TODO: pool the hook the way LuaCsExecutionGuard.RentHook does — it still allocates a
+        // LuaFunction plus its capture per resume.
+        private const int CoroutineHookInstructionBatch = 4;
+
         // WHY: The native coroutine library runs a coroutine body on a CHILD LuaState that does NOT inherit
         // LuaCsExecutionGuard's step/time/alloc hook, so an unbounded loop inside a resumed coroutine
         // (e.g. `local co=coroutine.create(function() while true do end end); coroutine.resume(co)`) would
@@ -149,7 +156,12 @@ namespace CoreAI.Sandbox.LuaCs
             if (canResume)
             {
                 long steps = 0;
-                System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                // WHY: raw timestamp + a precomputed ticks budget, not a Stopwatch instance and not
+                // ElapsedMilliseconds — same reason as LuaCsExecutionGuard.GuardHook. The clock is read on
+                // every fire, also for that type's reason: the hook does not fire during a host call, so
+                // sampling it lets a binding-heavy body miss the deadline check entirely.
+                long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+                long timeoutTicks = (long)CoroutineResumeTimeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
                 // WHY: Mirror LuaCsExecutionGuard's allocation backstop on the coroutine's child state. Step and
                 // time caps do NOT catch a doubling concat bomb (`s = s .. s`): it runs only a handful of VM
                 // opcodes yet allocates to OOM, and plain concatenation has no library call site to cap. Trip on
@@ -160,7 +172,7 @@ namespace CoreAI.Sandbox.LuaCs
 
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
-                    steps++;
+                    steps += CoroutineHookInstructionBatch;
                     if (steps > CoroutineResumeStepBudget)
                     {
                         throw new LuaRuntimeException(hctx.State,
@@ -168,7 +180,7 @@ namespace CoreAI.Sandbox.LuaCs
                                 $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({CoroutineResumeStepBudget})"));
                     }
 
-                    if (sw.ElapsedMilliseconds > CoroutineResumeTimeoutMs)
+                    if (System.Diagnostics.Stopwatch.GetTimestamp() - startTimestamp > timeoutTicks)
                     {
                         throw new LuaRuntimeException(hctx.State,
                             new TimeoutException($"Lua coroutine resume exceeded {CoroutineResumeTimeoutMs} ms."));
@@ -190,7 +202,7 @@ namespace CoreAI.Sandbox.LuaCs
 
                 try
                 {
-                    coroutineState.SetHook(hook, string.Empty, 1);
+                    coroutineState.SetHook(hook, string.Empty, CoroutineHookInstructionBatch);
                     armed = true;
                 }
                 catch

@@ -428,12 +428,29 @@ namespace CoreAI.Vision
             {
                 camera.targetTexture = previousTarget;
                 RenderTexture.active = previousActive;
-                if (tex != null)
-                {
-                    UnityEngine.Object.Destroy(tex);
-                }
+                DestroyCaptureObject(tex);
+                DestroyCaptureObject(rt);
+            }
+        }
 
-                UnityEngine.Object.Destroy(rt);
+        /// <summary>
+        /// Releases a transient capture texture. <see cref="UnityEngine.Object.Destroy(UnityEngine.Object)"/>
+        /// is deferred and play-mode-only, so edit-mode callers would leak every capture.
+        /// </summary>
+        private static void DestroyCaptureObject(UnityEngine.Object target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(target);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(target);
             }
         }
 

@@ -141,6 +141,12 @@ namespace CoreAI.Vision
                     $"[VisionSelfProbe] Probe timed out after {(timeoutSeconds <= 0 ? 30 : timeoutSeconds)}s.");
                 return false;
             }
+            catch (OperationCanceledException)
+            {
+                // WHY: a caller cancel is not a "text-only model" verdict; swallowing it here would let
+                // DetectAndApplyAsync persist VisionSupportMode.Off and disable the camera path for good.
+                throw;
+            }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[VisionSelfProbe] Probe failed: {ex.Message}");
@@ -149,15 +155,38 @@ namespace CoreAI.Vision
         }
 
         /// <summary>
+        /// <see cref="ProbeAsync"/> plus an explicit "was it cancelled" answer, so callers that persist the
+        /// outcome can leave the stored setting untouched instead of recording a cancel as "no vision".
+        /// </summary>
+        private async Task<(bool VisionOk, bool Cancelled)> ProbeWithCancellationAsync(
+            int timeoutSeconds, CancellationToken ct)
+        {
+            try
+            {
+                return (await ProbeAsync(timeoutSeconds, ct), false);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, true);
+            }
+        }
+
+        /// <summary>
         /// Runs <see cref="ProbeAsync"/> and persists the outcome into <paramref name="asset"/> as an
         /// explicit <see cref="VisionSupportMode.On"/> / <see cref="VisionSupportMode.Off"/>, replacing
         /// the Auto model-name heuristic with the measured answer. Null-tolerant: with a <c>null</c>
         /// asset the probe still runs and the detected mode is returned without being persisted.
+        /// A cancelled probe writes nothing and returns the asset's current mode.
         /// </summary>
         public async Task<VisionSupportMode> DetectAndApplyAsync(
             CoreAISettingsAsset asset, int timeoutSeconds = 30, CancellationToken ct = default)
         {
-            bool visionOk = await ProbeAsync(timeoutSeconds, ct);
+            (bool visionOk, bool cancelled) = await ProbeWithCancellationAsync(timeoutSeconds, ct);
+            if (cancelled)
+            {
+                return asset != null ? asset.VisionSupport : VisionSupportMode.Off;
+            }
+
             VisionSupportMode mode = visionOk ? VisionSupportMode.On : VisionSupportMode.Off;
             asset?.SetVisionSupport(mode);
             return mode;

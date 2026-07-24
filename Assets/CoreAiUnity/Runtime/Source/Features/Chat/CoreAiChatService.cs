@@ -675,7 +675,11 @@ namespace CoreAI.Chat
             }
             finally
             {
+#if !UNITY_WEBGL || UNITY_EDITOR
+                // WHY: WebGL has no ThreadPool, so awaiting SwitchToThreadPool there never resumes and the
+                // camera turn hangs until the request timeout.
                 await UniTask.SwitchToThreadPool();
+#endif
             }
 
             return await SendUserImageMessageAsync(prompt, image, roleId, ct);

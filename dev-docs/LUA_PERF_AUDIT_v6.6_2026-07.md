@@ -39,13 +39,31 @@ expense.
 
 **Consequence: the lever is the NUMBER of fires, not the work per fire.**
 
-## 3. What was changed in v6.6.0
+## 3. Clock sampling: shipped in v6.6.0, REVERTED in v6.8.0 — it was not risk-free
 
-Sampling the clock every 64th fire instead of every fire (`ClockCheckEveryHooks = 64`). Measured:
-3.67× → **3.21×**. A real but small win (~6%), which is exactly what §2 predicts — it removes 76% of
-the *in-hook* work, and the in-hook work was never the bottleneck. Kept because it is free and
-risk-free: the step budget is still charged on every fire, and the timeout is now enforced to within
-one sampling window (~256 instructions) against budgets measured in seconds.
+Sampling the clock every 64th fire instead of every fire (`ClockCheckEveryHooks = 64`) measured
+3.67× → **3.21×**: a real but small win (~6%), exactly what §2 predicts, since it removes 76% of the
+*in-hook* work and the in-hook work was never the bottleneck.
+
+It was justified here as "free and risk-free … the timeout is enforced to within one sampling window
+(~256 instructions), microseconds against budgets measured in seconds". **That claim was wrong**, and
+a follow-up audit caught it: *the count hook does not fire during a host call*. It fires between VM
+instructions only. So the window is 256 **instructions**, not 256 instructions' worth of *time* — and
+a handler whose instructions are mostly expensive bindings can burn a whole frame budget while
+reaching the sampling threshold zero times.
+
+That is not a corner case; it is the main case. `SignalHandlerGuard` runs input handlers at
+`timeoutMs = 200` every frame, and a body like `for i = 1, 50 do local p = Instance.new('Part'); p.Parent = workspace end`
+is ~250–300 instructions — under one sampling window — yet costs ~250 ms of wall time. With sampling
+the guard never checks the clock and the frame hangs; without it the same script is cut within 4
+instructions of the deadline. The sampling defeated the timeout precisely where the timeout matters
+most, so the 6% was reverted in both the main guard and the coroutine guard.
+
+**How to get the 6% back safely:** check the deadline at the *host-call boundary* as well (the
+wrapper already exists — `LuaCsRbxValues.Fn` and `LuaCsApiRegistry.CreateFunction`), which needs the
+active `GuardHook` reachable from there, e.g. via a thread-static. One `GetTimestamp()` per host call
+is negligible against the call itself, and it closes the hole completely — at which point batching
+the in-hook clock read becomes sound.
 
 ## 4. The big win, and why it was NOT shipped
 
@@ -87,30 +105,46 @@ Required new test before shipping: a `s = s .. s` bomb started at several differ
 must still trip below OOM, plus both disarm tests and `LuaCs_RunawayHandler_IsCutAndSurvivesOneTrip`
 staying green.
 
-## 5. Other findings (from the binding-layer and runtime audits, not yet actioned)
+## 5. Other findings (from the binding-layer and runtime audits)
 
 Ordered by expected value. None of these were measured — unlike §1–§4 they are code-reading findings.
+Items marked **[done]** were implemented in v6.8.0; the rest remain open.
 
 1. **Every datatype crossing the Lua↔C# seam costs two heap allocations.** `LuaCsRbxValues.Box(object, …)`
    boxes the (struct) `RbxVector3`/`RbxCFrame`/… and then wraps that box in a `LuaCsRbxValueBox`.
    A generic `LuaCsRbxValueBox<T>` halves it and removes an unbox on every argument read. Box identity
    is already documented as non-semantic, so Lua behaviour is unchanged.
-2. **The coroutine resume guard installs its hook with count 1** — every instruction, 4× the main
-   guard's rate — and allocates a `Stopwatch` + `LuaFunction` + closure per resume
-   (`LuaCsSecureEnvironment.ResumeWithPerResumeGuard`). Should reuse the main guard's pooled-hook and
-   timestamp-ticks patterns.
+2. **[done]** The coroutine resume guard installed its hook with **count 1** — every instruction, 4× the
+   main guard's rate — and used `Stopwatch.ElapsedMilliseconds`. Now fires every 4 instructions
+   (charging 4 steps per fire, so the ceiling is unchanged) and uses the timestamp+ticks pattern with
+   the same 64-fire clock sampling. Still allocates a `LuaFunction` + capture per resume; pooling it
+   the way `LuaCsExecutionGuard.RentHook` does is left as a `TODO:` in the file.
 3. **`LuaCsApiRegistry.CreateFunction` calls `DynamicInvoke`** (reflection) per call on the whole
-   `unity_*` / `input_*` global surface, which mods poll per frame.
-4. **Per-property-write string concat** in `TryWriteSpatial`: the message is built on every successful
-   write and only ever consumed on failure.
+   `unity_*` / `input_*` global surface, which mods poll per frame. **Open** — the largest remaining item.
+4. **[done]** Per-property-write string concat in `TryWriteSpatial`: the capability description was built
+   on every successful write and only ever consumed on failure. Split into `RequireWorldEditForWrite`,
+   which builds it only when the check fails. Message text unchanged.
 5. **Per-property-read dispatch** does up to five type probes ending in a `ClassCatalog.IsA` ancestry
    walk; the proxy is cached per instance, so a class-kind bitmask computed once at wrap time removes it.
-6. **Signal fire allocates** an `object[]` (`Fire(params object[])`) plus a `LuaValue[]` per handler per
-   fire — ~4 allocations per connected signal per frame.
-7. **`Connect`/`Once`/`Wait`/`Disconnect` build a fresh `LuaFunction` + closure on every member read**,
-   though they capture nothing; they can be statics.
-8. **Empty-array allocations** in `LuaCsScriptExecutionGuard.Invoke` (`new LuaValue[0]` / `new object[0]`
-   instead of `Array.Empty<T>()`) on every guarded invocation.
+   **Open.**
+6. **Signal fire allocates an `object[]` per fire** (`Fire(params object[])`). **Open — and deliberately
+   NOT solved by buffer reuse.** `Fire1`/`Fire2` backed by a per-signal reusable buffer were implemented,
+   measured as correct under today's synchronous dispatch, and then reverted, because the reuse is
+   incompatible with the direction this class is already committed to: the `TODO:` in
+   `RbxScriptSignal.cs` replaces the `SupportsDispatch` split with the MVP2 scheduler and
+   **deferred-dispatch** semantics. Deferred dispatch means the argument array outlives the `Fire` call,
+   so a shared buffer would be overwritten by the next frame before the queued handler reads it —
+   silently, as wrong `dt`/input values rather than an exception, and precisely when every signal (not
+   just three) starts flowing through it. The saving was also small in context: the `LuaValue[]` **per
+   handler** per fire is still allocated, so reuse removed one array out of N+1.
+
+   **Requirement for the MVP2 scheduler:** argument arrays are pooled *there*, where the scheduler owns
+   the lifetime and can return them after the deferred dispatch completes. That makes pooling an
+   explicit, enforced lifetime instead of an unwritten "handlers must not retain" rule hanging off a
+   public method.
+7. **[done]** `Connect`/`Once`/`Wait`/`Disconnect` built a fresh `LuaFunction` + closure on every member
+   read though they capture nothing; they are now static readonly instances.
+8. **[done]** Empty-array allocations in `LuaCsScriptExecutionGuard.Invoke` — now `Array.Empty<T>()`.
 
 Verified already tight, do **not** "optimize": enum wrappers (interned), `TryUnbox` and the `Read*Value`
 helpers (allocation-free on success), `RbxScriptSignal.Dispatch` (reusable snapshot buffer),

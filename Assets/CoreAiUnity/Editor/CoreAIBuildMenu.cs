@@ -120,50 +120,10 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Schedules default CoreAI asset bootstrap after the Unity editor finishes loading.
+        /// Creates missing default CoreAI settings, prompt, logging, permission, routing, and prefab assets.
+        /// Explicit by design: importing the package must never write into the consumer's <c>Assets/</c>,
+        /// least of all a <c>Resources/CoreAISettings.asset</c> that then ships inside their player.
         /// </summary>
-        [InitializeOnLoadMethod]
-        private static void AutoCreateDefaultAssetsOnLoad()
-        {
-            EditorApplication.delayCall += TryAutoCreateDefaultCoreAiAssetsWhenEditorReady;
-        }
-
-        private static void TryAutoCreateDefaultCoreAiAssetsWhenEditorReady()
-        {
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
-            {
-                EditorApplication.delayCall += TryAutoCreateDefaultCoreAiAssetsWhenEditorReady;
-                return;
-            }
-
-            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
-            {
-                return;
-            }
-
-            // Resolve and cache required local values.
-            string onDisk = Path.Combine(Application.dataPath, "Resources", "CoreAISettings.asset");
-            if (File.Exists(onDisk))
-            {
-                AssetDatabase.ImportAsset(CoreAiSettingsPath, ImportAssetOptions.ForceSynchronousImport);
-                if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
-                {
-                    return;
-                }
-            }
-
-            CoreAISettingsAsset existing = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
-            if (existing != null)
-            {
-                CoreAIEditorLog.Log(
-                    $"CoreAISettings already exists at: {AssetDatabase.GetAssetPath(existing)}. Skipping auto-create.");
-                return;
-            }
-
-            CreateDefaultAssets();
-        }
-
-        /// <summary>Creates missing default CoreAI settings, prompt, logging, permission, routing, and prefab assets.</summary>
         [MenuItem("CoreAI/Setup/Create Default Assets", priority = 2)]
         public static void CreateDefaultAssets()
         {

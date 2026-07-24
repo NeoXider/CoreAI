@@ -116,8 +116,11 @@ namespace CoreAI.Infrastructure.Llm
                             hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
                             current = hasNext ? enumerator.Current : null;
                         }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        catch (OperationCanceledException)
                         {
+                            // WHY: The OCE may carry a token other than the caller's (timeout decorator's
+                            // linked CTS, per-read idle timer). Retrying it would re-open the stream against
+                            // a backend that just timed out, so all cancellation propagates unchanged.
                             throw;
                         }
                         catch (Exception ex)

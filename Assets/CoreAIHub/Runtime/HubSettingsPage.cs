@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
-using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
 using CoreAI.Infrastructure.Llm;
@@ -100,6 +99,9 @@ namespace CoreAI.Hub.UI
         private Label _routingStatus;
         private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
         private CancellationTokenSource _routingCts;
+        private CancellationTokenSource _pageCts;
+        private bool _pageDestroyed;
+        private LlmExecutionMode _liveMode = LlmExecutionMode.Auto;
         private string _editingEndpointId = "";
         private bool _clearSessionKey;
         private string _removeConfirmEndpointId = "";
@@ -155,6 +157,24 @@ namespace CoreAI.Hub.UI
             {
             }
             _routingCts = null;
+            try
+            {
+                _pageCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            try
+            {
+                _pageCts?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _pageCts = null;
+            _pageDestroyed = true;
             if (_subscribed)
             {
                 CoreAiBackend.OnBackendChanged -= HandleBackendChanged;
@@ -162,9 +182,26 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        /// <summary>
+        /// Token cancelled when the page is destroyed, so no in-flight request outlives the UI it writes
+        /// back into. Already cancelled once the page has been destroyed.
+        /// </summary>
+        private CancellationToken PageToken()
+        {
+            if (_pageDestroyed)
+            {
+                return new CancellationToken(true);
+            }
+
+            _pageCts ??= new CancellationTokenSource();
+            return _pageCts.Token;
+        }
+
         private object BuildContent()
         {
             _uiSynchronizationContext = SynchronizationContext.Current;
+            _pageDestroyed = false;
+            _pageCts ??= new CancellationTokenSource();
             ScrollView scroll = HubPageWidgets.CreatePage(DisplayName, out VisualElement body);
             scroll.AddToClassList("coreai-hub-page");
             body.AddToClassList("coreai-hub-page-body");
@@ -611,8 +648,14 @@ namespace CoreAI.Hub.UI
         private void RebuildEndpointList(IReadOnlyList<LlmEndpointSnapshot> endpoints)
         {
             _endpointListContainer.Clear();
+
+            // WHY: every row button is recreated here, so the armed "Confirm?" button reference is now
+            // detached; drop it and re-arm the rebuilt row, otherwise the pending id survived behind a
+            // button labelled "Remove" and the next single click deleted without confirmation.
+            _pendingRemoveButton = null;
             if (endpoints == null || endpoints.Count == 0)
             {
+                _removeConfirmEndpointId = "";
                 return;
             }
 
@@ -639,9 +682,21 @@ namespace CoreAI.Hub.UI
 
                 row.Add(MakeButton("Edit", () => LoadEndpointById(endpointId)));
                 Button remove = MakeButton("Remove", null);
+                if (!string.IsNullOrEmpty(_removeConfirmEndpointId) &&
+                    string.Equals(endpointId, _removeConfirmEndpointId, StringComparison.Ordinal))
+                {
+                    remove.text = "Confirm?";
+                    _pendingRemoveButton = remove;
+                }
+
                 remove.clicked += () => RemoveEndpointRow(endpointId, name, remove);
                 row.Add(remove);
                 _endpointListContainer.Add(row);
+            }
+
+            if (_pendingRemoveButton == null)
+            {
+                _removeConfirmEndpointId = "";
             }
         }
 
@@ -802,6 +857,10 @@ namespace CoreAI.Hub.UI
             {
                 _endpointOperationStatus.text = "Endpoint operation cancelled.";
             }
+            catch (Exception ex)
+            {
+                _endpointOperationStatus.text = "Could not save the endpoint: " + ex.Message;
+            }
             finally
             {
                 SetEndpointBusy(false);
@@ -815,9 +874,7 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // WHY: Two-click inline confirm on the row's own button — no separate confirm dialog, and the
-            // pending state is bound to the specific row so it cannot act on the wrong endpoint.
-            if (!string.Equals(_removeConfirmEndpointId, endpointId, StringComparison.Ordinal))
+            if (DecideRemoveAction(_removeConfirmEndpointId, endpointId) == RemoveAction.Arm)
             {
                 ResetRemoveConfirm();
                 _removeConfirmEndpointId = endpointId;
@@ -835,7 +892,7 @@ namespace CoreAI.Hub.UI
             SetEndpointBusy(true);
             try
             {
-                CoreAiRoutingUiResult result = await _routingController.RemoveEndpointAsync(endpointId);
+                CoreAiRoutingUiResult result = await _routingController.RemoveEndpointAsync(endpointId, PageToken());
                 if (result.Ok && string.Equals(_editingEndpointId, endpointId, StringComparison.Ordinal))
                 {
                     ClearEndpointEditor();
@@ -844,10 +901,41 @@ namespace CoreAI.Hub.UI
                 RefreshEndpointManagement();
                 _endpointOperationStatus.text = result.Ok ? "Removed '" + displayName + "'." : result.Message;
             }
+            catch (OperationCanceledException)
+            {
+                _endpointOperationStatus.text = "Endpoint removal cancelled.";
+            }
+            catch (Exception ex)
+            {
+                _endpointOperationStatus.text = "Could not remove '" + displayName + "': " + ex.Message;
+            }
             finally
             {
                 SetEndpointBusy(false);
             }
+        }
+
+        /// <summary>What a click on a row's Remove button should do.</summary>
+        internal enum RemoveAction
+        {
+            /// <summary>Arm the two-click confirm on this row.</summary>
+            Arm,
+
+            /// <summary>The same row is already armed: perform the removal.</summary>
+            Commit
+        }
+
+        /// <summary>
+        /// Two-click inline confirm decision: a click only commits when the confirm is armed for exactly the
+        /// clicked endpoint, so a list rebuild or a click on another row can never delete without a confirm.
+        /// Pure so EditMode tests can cover every arm/commit/switch-row sequence without a live panel.
+        /// </summary>
+        internal static RemoveAction DecideRemoveAction(string armedEndpointId, string clickedEndpointId)
+        {
+            return !string.IsNullOrEmpty(clickedEndpointId) &&
+                   string.Equals(armedEndpointId, clickedEndpointId, StringComparison.Ordinal)
+                ? RemoveAction.Commit
+                : RemoveAction.Arm;
         }
 
         private void ResetRemoveConfirm()
@@ -1053,11 +1141,6 @@ namespace CoreAI.Hub.UI
             return "Unavailable";
         }
 
-        private string ResolveSelectedEndpointId()
-        {
-            return _editingEndpointId ?? "";
-        }
-
         private static string UniqueLabel(string label, IReadOnlyDictionary<string, string> existing)
         {
             string candidate = label;
@@ -1162,6 +1245,10 @@ namespace CoreAI.Hub.UI
                 case LlmExecutionMode.Auto:
                     live = CoreAiBackend.ApplyAuto();
                     break;
+                case LlmExecutionMode.ClientLimited:
+                case LlmExecutionMode.ServerManagedApi:
+                    live = ApplyPreservedHttpMode(mode, _overrideTemperature.value);
+                    break;
                 default:
                     bool overrideTemp = _overrideTemperature.value;
                     live = CoreAiBackend.ApplyHttpApi(
@@ -1181,6 +1268,50 @@ namespace CoreAI.Hub.UI
             _health.text = "";
         }
 
+        /// <summary>
+        /// Applies the HTTP fields while keeping a ClientLimited / ServerManagedApi backend on its own
+        /// execution mode: <see cref="CoreAiBackend.ApplyHttpApi"/> always rewrites the mode to
+        /// ClientOwnedApi, which silently downgraded these backends on any Apply.
+        /// </summary>
+        private bool ApplyPreservedHttpMode(LlmExecutionMode mode, bool overrideTemperature)
+        {
+            CoreAISettingsAsset asset = ResolveSettingsAsset();
+            if (asset == null)
+            {
+                return false;
+            }
+
+            string baseUrl = (_baseUrl.value ?? "").Trim();
+            string model = (_model.value ?? "").Trim();
+            string key = ResolveApiKey();
+            float temperature = overrideTemperature ? Mathf.Clamp(_temperature.value, 0f, 2f) : asset.Temperature;
+            int timeoutSeconds = _timeoutSeconds.value <= 0 ? asset.RequestTimeoutSeconds : _timeoutSeconds.value;
+            int maxTokens = _maxTokens.value <= 0 ? asset.MaxTokens : _maxTokens.value;
+
+            if (mode == LlmExecutionMode.ServerManagedApi)
+            {
+                asset.ConfigureServerManagedApi(
+                    baseUrl, model, key, temperature, timeoutSeconds, maxTokens, overrideTemperature);
+            }
+            else
+            {
+                asset.ConfigureClientLimited(
+                    baseUrl,
+                    key,
+                    model,
+                    asset.MaxClientLimitedRequestsPerSession,
+                    asset.MaxClientLimitedPromptChars,
+                    temperature,
+                    timeoutSeconds,
+                    maxTokens,
+                    overrideTemperature);
+            }
+
+            // HACK: CoreAiBackend exposes no mode-preserving apply, so re-set the (already written) model
+            // through it purely to hot-swap the live client and raise OnBackendChanged.
+            return CoreAiBackend.SetModel(model);
+        }
+
         private async void TestBackend()
         {
             if (_busy)
@@ -1193,7 +1324,7 @@ namespace CoreAI.Hub.UI
             _health.text = "Testing backend...";
             try
             {
-                CoreAiBackendHealth health = await CoreAiBackend.VerifyAsync(30);
+                CoreAiBackendHealth health = await CoreAiBackend.VerifyAsync(30, PageToken());
                 _health.text = health.Ok
                     ? string.Format(
                         CultureInfo.InvariantCulture,
@@ -1202,6 +1333,14 @@ namespace CoreAI.Hub.UI
                         Value(health.Model),
                         health.LatencyMs)
                     : "Health failed: " + Value(health.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                _health.text = "Backend test cancelled.";
+            }
+            catch (Exception ex)
+            {
+                _health.text = "Health failed: " + ex.Message;
             }
             finally
             {
@@ -1231,12 +1370,20 @@ namespace CoreAI.Hub.UI
             {
                 // TODO: verify live that the probe round-trips through the active backend and that the
                 // detected mode survives an Apply/RefreshFromStatus cycle in the Hub UI.
-                VisionSupportMode mode = await new VisionSelfProbe().DetectAndApplyAsync(asset);
+                VisionSupportMode mode = await new VisionSelfProbe().DetectAndApplyAsync(asset, 30, PageToken());
                 _visionMode?.SetValueWithoutNotify(VisionModeToOption(mode));
                 _modelFetchStatus.text = mode == VisionSupportMode.On
                     ? "Vision detected: the model read the test image. Vision set to On."
                     : "Vision not detected: the model could not read the test image. Vision set to Off " +
                       "(see Console for details).";
+            }
+            catch (OperationCanceledException)
+            {
+                _modelFetchStatus.text = "Vision detection cancelled.";
+            }
+            catch (Exception ex)
+            {
+                _modelFetchStatus.text = "Vision detection failed: " + ex.Message;
             }
             finally
             {
@@ -1264,7 +1411,8 @@ namespace CoreAI.Hub.UI
             _modelFetchStatus.text = "Fetching models…";
             try
             {
-                CoreAiModelListResult result = await CoreAiBackend.ListModelsAsync(baseUrl, ResolveApiKey());
+                CoreAiModelListResult result = await CoreAiBackend.ListModelsAsync(
+                    baseUrl, ResolveApiKey(), 15, PageToken());
                 PopulateModelPicker(_modelPicker, result);
                 _modelFetchStatus.text = result.Ok
                     ? string.Format(
@@ -1272,6 +1420,14 @@ namespace CoreAI.Hub.UI
                         "Found {0} model(s). Pick one to copy it into HTTP model.",
                         result.Models.Count)
                     : "Could not list models: " + Value(result.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                _modelFetchStatus.text = "Model fetch cancelled.";
+            }
+            catch (Exception ex)
+            {
+                _modelFetchStatus.text = "Could not list models: " + ex.Message;
             }
             finally
             {
@@ -1300,7 +1456,7 @@ namespace CoreAI.Hub.UI
             try
             {
                 CoreAiModelListResult result = await CoreAiBackend.ListModelsAsync(
-                    baseUrl, _endpointSessionKey?.value ?? "");
+                    baseUrl, _endpointSessionKey?.value ?? "", 15, PageToken());
                 PopulateModelPicker(_endpointModelPicker, result);
                 _endpointOperationStatus.text = result.Ok
                     ? string.Format(
@@ -1308,6 +1464,14 @@ namespace CoreAI.Hub.UI
                         "Found {0} model(s). Pick one to copy it into Model.",
                         result.Models.Count)
                     : "Could not list models: " + Value(result.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                _endpointOperationStatus.text = "Model fetch cancelled.";
+            }
+            catch (Exception ex)
+            {
+                _endpointOperationStatus.text = "Could not list models: " + ex.Message;
             }
             finally
             {
@@ -1381,6 +1545,7 @@ namespace CoreAI.Hub.UI
 
             CoreAiBackendStatus status = CoreAiBackend.Status;
             CoreAISettingsAsset asset = ResolveSettingsAsset();
+            _liveMode = status.Mode;
 
             // WHY: RefreshFromStatus also runs from OnActivated (every tab re-entry) and from
             // OnBackendChanged (any external switch), both of which can fire while the user has the
@@ -1433,7 +1598,7 @@ namespace CoreAI.Hub.UI
             }
 
             LlmExecutionMode mode = SelectedMode();
-            bool http = mode == LlmExecutionMode.ClientOwnedApi;
+            bool http = IsHttpMode(mode);
             bool local = mode == LlmExecutionMode.LocalModel;
             SetVisible(_httpGroup, http);
             SetVisible(_localGroup, local);
@@ -1482,7 +1647,21 @@ namespace CoreAI.Hub.UI
 
         private LlmExecutionMode SelectedMode()
         {
-            return _mode != null ? OptionToMode(_mode.value) : LlmExecutionMode.Auto;
+            return ResolveSelectedMode(_mode?.value, _liveMode);
+        }
+
+        /// <summary>
+        /// Maps the Mode dropdown selection back to an execution mode, keeping <paramref name="liveMode"/>
+        /// when the user did not move the dropdown off the option that represents it. The dropdown folds
+        /// ClientOwnedApi / ClientLimited / ServerManagedApi onto one "HTTP API" entry, so without this an
+        /// Apply on an unrelated field would silently downgrade a ClientLimited or ServerManagedApi backend
+        /// to ClientOwnedApi.
+        /// </summary>
+        internal static LlmExecutionMode ResolveSelectedMode(string option, LlmExecutionMode liveMode)
+        {
+            return string.Equals(option, ModeToOption(liveMode), StringComparison.Ordinal)
+                ? liveMode
+                : OptionToMode(option);
         }
 
         private string ResolveApiKey()
@@ -1502,7 +1681,15 @@ namespace CoreAI.Hub.UI
             return _settings as CoreAISettingsAsset ?? CoreAISettingsAsset.Instance;
         }
 
-        private static string ModeToOption(LlmExecutionMode mode)
+        /// <summary>True for every execution mode the "HTTP API" dropdown entry stands for.</summary>
+        internal static bool IsHttpMode(LlmExecutionMode mode)
+        {
+            return mode == LlmExecutionMode.ClientOwnedApi ||
+                   mode == LlmExecutionMode.ClientLimited ||
+                   mode == LlmExecutionMode.ServerManagedApi;
+        }
+
+        internal static string ModeToOption(LlmExecutionMode mode)
         {
             switch (mode)
             {
@@ -1519,7 +1706,7 @@ namespace CoreAI.Hub.UI
             }
         }
 
-        private static LlmExecutionMode OptionToMode(string option)
+        internal static LlmExecutionMode OptionToMode(string option)
         {
             if (string.Equals(option, ModeOptions[1], StringComparison.Ordinal))
             {
@@ -1541,13 +1728,18 @@ namespace CoreAI.Hub.UI
 
         private VisionSupportMode SelectedVisionMode()
         {
-            string value = _visionMode?.value;
-            if (string.Equals(value, VisionOptions[1], StringComparison.Ordinal))
+            return OptionToVisionMode(_visionMode?.value);
+        }
+
+        /// <summary>Inverse of <see cref="VisionModeToOption"/>: every vision option maps back to its mode.</summary>
+        internal static VisionSupportMode OptionToVisionMode(string option)
+        {
+            if (string.Equals(option, VisionOptions[1], StringComparison.Ordinal))
             {
                 return VisionSupportMode.On;
             }
 
-            if (string.Equals(value, VisionOptions[2], StringComparison.Ordinal))
+            if (string.Equals(option, VisionOptions[2], StringComparison.Ordinal))
             {
                 return VisionSupportMode.Off;
             }
@@ -1555,7 +1747,7 @@ namespace CoreAI.Hub.UI
             return VisionSupportMode.Auto;
         }
 
-        private static string VisionModeToOption(VisionSupportMode mode)
+        internal static string VisionModeToOption(VisionSupportMode mode)
         {
             switch (mode)
             {

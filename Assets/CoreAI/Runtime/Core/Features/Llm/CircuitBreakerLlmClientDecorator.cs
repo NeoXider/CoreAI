@@ -72,6 +72,16 @@ namespace CoreAI.Infrastructure.Llm
             return _inner.SupportsNativeToolCallingForRole(agentRoleId);
         }
 
+        public bool SupportsNativeToolCallingForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner.SupportsNativeToolCallingForRole(agentRoleId, routingProfileId);
+        }
+
+        public int? ResolveContextWindowTokensForRole(string agentRoleId, string routingProfileId)
+        {
+            return _inner.ResolveContextWindowTokensForRole(agentRoleId, routingProfileId);
+        }
+
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {
             _inner.SetTools(tools);
@@ -148,10 +158,14 @@ namespace CoreAI.Infrastructure.Llm
             bool streamEnded = false;
             bool classified = false;
 
-            IAsyncEnumerator<LlmStreamChunk> e =
-                _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            IAsyncEnumerator<LlmStreamChunk> e = null;
             try
             {
+                // WHY: Acquired inside the try so a synchronous throw from the inner client still runs the
+                // finally that releases the half-open probe slot, instead of wedging the breaker open.
+                e = _inner.CompleteStreamingAsync(request, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+
                 while (true)
                 {
                     LlmStreamChunk chunk;
@@ -204,7 +218,10 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                await e.DisposeAsync().ConfigureAwait(false);
+                if (e != null)
+                {
+                    await e.DisposeAsync().ConfigureAwait(false);
+                }
 
                 // WHY: Classify in the finally so the breaker state also updates when the consumer
                 // abandons the await-foreach early (user stop): a stream that already produced a
