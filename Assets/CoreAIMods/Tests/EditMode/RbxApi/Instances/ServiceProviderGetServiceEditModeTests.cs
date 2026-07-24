@@ -56,9 +56,11 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
         [Test]
         public void GetService_PlannedService_RaisesLoudStubNamingThePhase()
         {
-            RbxError runService = Assert.Throws<RbxError>(() => _game.GetService("RunService"));
-            Assert.AreEqual(RbxErrorCode.NotImplemented, runService.Code);
-            StringAssert.Contains("MVP2", runService.RawMessage);
+            // WHY: RunService is now implemented (Heartbeat/Stepped/RenderStepped); HttpService is the
+            // remaining MVP2-gated planned service that still raises the loud phase-naming stub.
+            RbxError httpService = Assert.Throws<RbxError>(() => _game.GetService("HttpService"));
+            Assert.AreEqual(RbxErrorCode.NotImplemented, httpService.Code);
+            StringAssert.Contains("MVP2", httpService.RawMessage);
 
             RbxError tween = Assert.Throws<RbxError>(() => _game.GetService("TweenService"));
             StringAssert.Contains("MVP8", tween.RawMessage);

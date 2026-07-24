@@ -54,6 +54,14 @@ namespace CoreAI.Ai.LuaCs
 
         public static LuaValue Wrap(RbxScriptSignal value) => Box(value, SignalMeta);
 
+        /// <summary>
+        /// Wraps a dispatch-enabled signal carrying the acting mod context so <c>Connect</c>/<c>Once</c>
+        /// can record the returned connection for teardown (RunService/UserInputService reads use this;
+        /// the MVP2-stub signals stay context-free since connecting them throws before a connection exists).
+        /// </summary>
+        public static LuaValue Wrap(RbxScriptSignal value, LuaCsRobloxModContext owner) =>
+            new LuaValue(new LuaCsRobloxValueBox(value, SignalMeta, owner));
+
         public static LuaValue Wrap(RbxScriptConnection value) => Box(value, ConnectionMeta);
 
         public static LuaValue Wrap(RbxInputObject value) => Box(value, InputObjectMeta);
@@ -966,6 +974,17 @@ namespace CoreAI.Ai.LuaCs
             Action<object[]> wrapper =
                 BuildSignalHandler(ctx.State, handlerValue.Read<LuaFunction>(), signal.SignalName);
             RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
+
+            // WHY: attribute the connection to the mod that opened it so composition teardown can
+            // Disconnect it on unload/reload/quarantine — otherwise the per-frame handler keeps firing
+            // against the torn-down mod one frame later (INSTANCE_DESTROYED). The owner rides on the
+            // signal box (RunService/UserInputService reads wrap with context); a context-free wrap or a
+            // mod-less one-off records nothing.
+            if (Arg(ctx, 0).TryRead(out LuaCsRobloxValueBox signalBox) && signalBox.SignalOwner != null)
+            {
+                signalBox.SignalOwner.TrackConnection(connection);
+            }
+
             return Wrap(connection);
         }
 

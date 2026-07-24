@@ -132,6 +132,10 @@ namespace CoreAI.Mods.Rbx.Instances
             // behavior class carries the input signals + poll surface over the IInputSource seam.
             catalog.Register(new ClassDescriptor("UserInputService", "Instance", false, false, true,
                 descriptor => new RbxUserInputService(descriptor)));
+            // WHY: RunService pulled forward for the per-frame game loop (Heartbeat/Stepped/
+            // RenderStepped); behavior class fires the signals from the host's per-frame Step pump.
+            catalog.Register(new ClassDescriptor("RunService", "Instance", false, false, true,
+                descriptor => new RbxRunService(descriptor)));
             return catalog;
         }
     }

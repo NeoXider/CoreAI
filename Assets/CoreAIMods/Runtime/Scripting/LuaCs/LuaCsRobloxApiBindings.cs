@@ -30,6 +30,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly IPartPropertySink _partSink;
         private readonly IRobloxCameraRig _cameraRig;
         private readonly RbxUserInputService _userInputService;
+        private readonly RbxRunService _runService;
+        private readonly ModConnectionRegistry _connections;
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
 
@@ -49,9 +51,11 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public LuaCsRobloxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
-            IRobloxCameraRig cameraRig = null, IInputSource inputSource = null)
+            IRobloxCameraRig cameraRig = null, IInputSource inputSource = null,
+            ModConnectionRegistry connections = null)
         {
             _registry = registry ?? new InstanceRegistry();
+            _connections = connections ?? new ModConnectionRegistry();
             _game = game ?? DataModelBootstrap.CreateGame(_registry);
             _workspace = _game.FindFirstChildOfClass("Workspace")
                          ?? throw new ArgumentException(
@@ -75,6 +79,16 @@ namespace CoreAI.Ai.LuaCs
             {
                 _userInputService.AttachEnums(_enums);
                 _userInputService.AttachInputSource(inputSource);
+            }
+
+            // WHY: same rationale as UserInputService — worlds bootstrapped before the game-loop
+            // slice may lack RunService; create it here so game:GetService("RunService") and the
+            // per-frame Heartbeat pump resolve for every world this bindings instance fronts.
+            _runService = _game.FindFirstChildOfClass("RunService") as RbxRunService;
+            if (_runService == null && _registry.Catalog.TryGet("RunService", out _))
+            {
+                _runService = (RbxRunService)_registry.Create("RunService");
+                _runService.Parent = _game;
             }
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
             if (_enums.TryGet("CameraType", out RbxEnum cameraType)
@@ -102,6 +116,16 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>The shared UserInputService instance (input signals + poll surface).</summary>
         public RbxUserInputService UserInputService => _userInputService;
 
+        /// <summary>The shared RunService instance (Heartbeat/Stepped/RenderStepped signals).</summary>
+        public RbxRunService RunService => _runService;
+
+        /// <summary>
+        /// Ledger of the signal connections mods open through <c>Connect</c>/<c>Once</c>. The
+        /// composition disconnects a mod's connections on <c>ModTearingDown</c> so its per-frame
+        /// handlers stop after unload/reload/quarantine.
+        /// </summary>
+        public ModConnectionRegistry Connections => _connections;
+
         /// <summary>
         /// Per-frame input pump: polls the input source, diffs, and fires
         /// InputBegan/InputEnded/InputChanged. The host composition calls this once per frame
@@ -111,6 +135,19 @@ namespace CoreAI.Ai.LuaCs
         public void PumpInput()
         {
             _userInputService?.Step();
+        }
+
+        /// <summary>
+        /// Per-frame pump carrying the frame delta: runs the input pump then fires the RunService
+        /// game-loop signals (Heartbeat/Stepped/RenderStepped) with <paramref name="dt"/>. The host
+        /// composition calls this once per frame BEFORE the mod runtime tick so handlers observe
+        /// this frame's events and per-frame loops advance on the frame clock.
+        /// </summary>
+        // TODO: MVP2 — the general signal scheduler replaces this pump.
+        public void PumpFrame(float dt)
+        {
+            _userInputService?.Step();
+            _runService?.Step(dt);
         }
 
         /// <summary>Camera.CameraType value shared by every script of this world (state only —

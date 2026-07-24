@@ -125,19 +125,30 @@ namespace CoreAI.Composition
                 RegisterWorldEditBuildBindings = false
                 });
 
-                // WHY (audit H1): an unloaded mod must not leak the Rbx instances it created. The ownership
-                // ledger tags every Instance.new with its owner mod id; on UNLOAD sweep GetOwnedBy(modId)
-                // and destroy each so the backing GameObjects go with the mod. NOT on Reload (same owner id
-                // — the replacement keeps them) nor Quarantine (objects must survive the auto-repair
-                // reload). GetOwnedBy returns a snapshot, so destroying while it prunes the registry is
-                // safe; RbxInstance.Destroy() is idempotent.
-                if (rbxHost?.Registry != null)
+                // WHY (audit H1): an unloaded mod must not leak the Rbx instances it created, nor keep its
+                // signal connections firing after teardown. This single ModTearingDown handler releases both
+                // in the safe order: connections FIRST, instance sweep SECOND, so no still-connected handler
+                // fires against a just-destroyed instance (INSTANCE_DESTROYED) during the sweep.
+                //
+                // Connections: mod-owned Connect/Once handles are Disconnected on EVERY reason — Unload,
+                // Reload, AND Quarantine — because unlike instances the re-run chunk re-Connects fresh
+                // handlers on reload, so the stale ones must always be dropped. Disconnect is idempotent.
+                //
+                // Instances: swept only on UNLOAD — NOT on Reload (same owner id — the replacement keeps
+                // them) nor Quarantine (objects must survive the auto-repair reload). GetOwnedBy returns a
+                // snapshot, so destroying while it prunes the registry is safe; RbxInstance.Destroy() is
+                // idempotent.
                 {
-                    CoreAI.Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost.Registry;
+                    CoreAI.Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = robloxApi?.Connections;
+                    CoreAI.Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost?.Registry;
                     Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
                     {
-                        if (reason != LuaModTeardownReason.Unload)
+                        // WHY: disconnect BEFORE the instance sweep so a Heartbeat/InputBegan handler is
+                        // already dead when its owning instances are destroyed below.
+                        ownedConnections?.DisconnectOwnedBy(modId);
+
+                        if (ownedRegistry == null || reason != LuaModTeardownReason.Unload)
                         {
                             return;
                         }
@@ -226,10 +237,11 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                            // WHY: the input pump runs as the driver's pre-tick so UserInputService
-                            // events are fired before mod dispatch each frame.
+                            // WHY: the per-frame pump runs as the driver's pre-tick so UserInputService
+                            // events and the RunService game-loop signals (Heartbeat/Stepped/
+                            // RenderStepped) fire with the frame delta before mod dispatch each frame.
                             tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
-                                runtime, stackRobloxApi != null ? stackRobloxApi.PumpInput : (System.Action)null);
+                                runtime, stackRobloxApi != null ? stackRobloxApi.PumpFrame : (System.Action<float>)null);
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate

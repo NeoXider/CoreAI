@@ -328,7 +328,8 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_GetService_PlannedService_RaisesPhaseNamingStub()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
-            Exception ex = LoadFails(stack, "m", "game:GetService('RunService')");
+            // WHY: RunService is implemented now; HttpService is still an MVP2-gated planned service.
+            Exception ex = LoadFails(stack, "m", "game:GetService('HttpService')");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
             StringAssert.Contains("MVP2", FullText(ex));
         }

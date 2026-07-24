@@ -105,7 +105,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Maximum table nesting marshalled across mods by <c>mods_get</c>/<c>mods_call</c>.</summary>
         public const int CrossModTableDepth = 4;
 
-        /// <summary>Shortest accepted <c>hooks_every</c> interval, so timers cannot degenerate into per-instruction spam.</summary>
+        /// <summary>Fallback timer cadence used where a slot needs a default interval. NOTE: this is NOT a
+        /// hard floor for <c>hooks_every</c> anymore — a timer fires at most once per <see cref="Tick"/>
+        /// (once per frame), so a smaller/zero interval is a safe per-frame loop, not per-instruction spam.</summary>
         public const double MinTimerIntervalSeconds = 0.05;
 
         /// <summary>
@@ -1349,11 +1351,20 @@ namespace CoreAI.Ai.LuaCs
             {
                 double seconds = call.GetNumber(0);
                 object fn = ReadFunction(call, 1);
-                if (fn == null || double.IsNaN(seconds) || double.IsInfinity(seconds) ||
-                    seconds < MinTimerIntervalSeconds)
+                if (fn == null)
                 {
-                    throw new ArgumentException(
-                        $"hooks_every: interval must be >= {MinTimerIntervalSeconds}s and fn required.");
+                    throw new ArgumentException("hooks_every: a function is required as the second argument.");
+                }
+
+                // WHY: A timer fires at most ONCE per Tick (see TickTimers — DueIn resets to the full
+                // interval, never catches up), and Tick runs once per frame, so a sub-frame interval is a
+                // per-frame loop (the RunService.Heartbeat equivalent), NOT per-instruction spam. So we no
+                // longer REJECT a small/zero interval — we clamp it to 0 ("every frame") and let the mod
+                // scale motion by time_delta() for smooth, frame-rate-independent movement. A negative,
+                // NaN, or infinite interval is treated as 0.
+                if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0d)
+                {
+                    seconds = 0d;
                 }
 
                 if (mod.Timers.Count >= DefaultMaxTimersPerMod)

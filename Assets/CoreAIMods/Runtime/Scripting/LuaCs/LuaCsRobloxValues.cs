@@ -15,15 +15,24 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal sealed class LuaCsRobloxValueBox : ILuaUserData
     {
-        public LuaCsRobloxValueBox(object value, LuaTable metatable)
+        public LuaCsRobloxValueBox(object value, LuaTable metatable,
+            LuaCsRobloxModContext signalOwner = null)
         {
             Value = value;
             Metatable = metatable;
+            SignalOwner = signalOwner;
         }
 
         public object Value { get; }
 
         public LuaTable Metatable { get; set; }
+
+        /// <summary>
+        /// For a dispatch-enabled <see cref="RbxScriptSignal"/> box, the mod context whose
+        /// <c>Connect</c>/<c>Once</c> connections are tracked for teardown; null for context-free
+        /// wraps and one-off execution (no connection ownership to record).
+        /// </summary>
+        public LuaCsRobloxModContext SignalOwner { get; }
 
         public Span<LuaValue> UserValues => Span<LuaValue>.Empty;
     }

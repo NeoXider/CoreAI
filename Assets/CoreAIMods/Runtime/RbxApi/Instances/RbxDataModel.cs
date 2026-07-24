@@ -16,7 +16,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private static readonly Dictionary<string, string> PlannedServices =
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                { "RunService", "MVP2" },
+                // WHY: RunService left this table when the per-frame game loop was pulled forward;
+                // it now resolves as a real service child created by DataModelBootstrap.
                 { "HttpService", "MVP2" },
                 { "Players", "MVP8" },
                 { "TweenService", "MVP8" },

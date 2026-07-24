@@ -27,6 +27,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "ServerScriptService");
             CreateService(registry, game, "StarterPlayer");
             CreateService(registry, game, "UserInputService");
+            CreateService(registry, game, "RunService");
             return game;
         }
 
@@ -49,6 +50,13 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("UserInputService") == null)
             {
                 CreateService(registry, game, "UserInputService");
+            }
+
+            // WHY: snapshots taken before the game-loop slice have no RunService; restoring
+            // them must still yield a resolvable game:GetService("RunService").
+            if (game.FindFirstChildOfClass("RunService") == null)
+            {
+                CreateService(registry, game, "RunService");
             }
         }
 

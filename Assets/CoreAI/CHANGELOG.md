@@ -1,5 +1,45 @@
 # Changelog
 
+## [6.4.0] - 2026-07-24
+
+Roblox-idiomatic game loop and pure-Roblox sample mods. The bundled samples were rewritten to use
+only the Roblox API (so their Lua imports/exports 1:1 with Roblox), which required implementing the
+per-frame hook Roblox games are built on.
+
+### Added
+
+- **`RunService.Heartbeat` — the Roblox per-frame loop.** `game:GetService("RunService")` now resolves
+  (RunService left the MVP2 stub list) and exposes `Heartbeat`, `Stepped`, `RenderStepped` dispatching
+  signals, pumped once per frame with the frame delta: `RunService.Heartbeat:Connect(function(dt) ... end)`.
+  `dt` arrives as a real Lua number, so motion scales by seconds and is smooth/frame-rate independent.
+  (`RbxRunService`, wired through the tick driver's per-frame pump.)
+
+### Changed
+
+- **Bundled samples rewritten in pure Roblox API** — `RunService.Heartbeat` instead of `hooks_every`,
+  `print` instead of `report`, plain locals instead of `store_*`. So a sample's Lua is portable to/from
+  Roblox. Lane Racer and Tetris 3D now move by `dt` (smooth), have correct camera framing (world +X =
+  screen right, so A/D aren't mirrored), Anchored gameplay parts (no physics jitter), scatter the wreck
+  on loss, and restart on R/Space. The buggy Full-tier `sample_camera_pulse` was removed.
+- **`hooks_every` no longer rejects a sub-frame interval.** A timer fires at most once per frame anyway
+  (never catches up), so a small/zero interval is a safe per-frame loop, not spam — it is clamped to 0
+  ("every frame") instead of throwing. `hooks_every`/`report`/`store_*` remain a pre-MVP stopgap; new
+  mods should use the Roblox idioms above. (`LuaCsModRuntime`)
+
+### Fixed
+
+- **Mod-owned signal connections are disconnected on unload/reload/quarantine.** A connection a mod made
+  (`RunService.Heartbeat:Connect`, `UserInputService.InputBegan:Connect`, …) used to keep firing against
+  the torn-down mod after unload (an `INSTANCE_DESTROYED` log). A `ModConnectionRegistry` now tracks
+  connections by owning mod and `ModTearingDown` disconnects them *before* the instance sweep, so unload
+  is clean. (covered by `RobloxSignalConnectionTeardownEditModeTests`)
+
+### Docs
+
+- The Rbx API skill (both `Resources/AgentSkills/RbxApi.txt` and `BuiltInRbxApiSkillText`) now teaches
+  `RunService.Heartbeat` as the game loop, lists RunService as a service, and carries a camera-framing +
+  controls recipe so AI-authored mods don't mirror left/right.
+
 ## [6.3.5] - 2026-07-24
 
 Bundled sample mods overhaul — two fixes and two new playable samples, all authored against the

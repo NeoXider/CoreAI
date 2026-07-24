@@ -90,7 +90,7 @@ buttons live at 1000+).
   Any other name errors. The parent argument is deprecated (logs once); set `.Parent` after
   configuring instead.
 - `game:GetService(""Name"")` — valid services: Workspace, Lighting, ReplicatedStorage,
-  ServerStorage, ServerScriptService, StarterPlayer, UserInputService. Unknown name -> ""X is not
+  ServerStorage, ServerScriptService, StarterPlayer, UserInputService, RunService. Unknown name -> ""X is not
   a valid Service name"". Also `game:FindService(name)`. `workspace` is
   `game:GetService(""Workspace"")`.
 - Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
@@ -141,6 +141,29 @@ Convenience globals (WorldEdit): `camera_set_cframe(cf)` sets the pose and
 `camera_follow(instance_or_nil)` attaches/clears the follow subject — same effect as writing
 `CurrentCamera.CFrame` / `CurrentCamera.CameraSubject`.
 
+### Camera framing & controls — READ THIS before making a playable mod
+
+`CameraSubject` only FOLLOWS a part's POSITION; it keeps whatever direction the rig is already
+facing, so you do NOT control the viewing angle with it. For any game where the player expects
+""press D = move right on screen"", take manual control of the angle:
+`CurrentCamera.CameraType = Enum.CameraType.Scriptable` then `CurrentCamera.CFrame =
+CFrame.lookAt(eye, target)`.
+
+CRITICAL rule that trips people up (it behaves the SAME in real Roblox — it is not an engine bug):
+the camera's orientation decides which world axis shows up on screen-left vs screen-right. If your
+player moves along world +X but your camera looks in a direction where +X is on its LEFT, then D
+(which you coded as +X) visibly moves the car LEFT and the controls feel reversed. Two safe fixes:
+- **Frame the camera so +X is on screen-right.** A camera placed on the -Z side looking toward +Z
+  (e.g. `CFrame.lookAt(Vector3.new(0, 9, 14), Vector3.new(0, 2, -18))`) keeps world +X on the right,
+  so `A = -X = left`, `D = +X = right` feel correct. Verify by moving the player +X and checking it
+  goes right on screen.
+- **Or derive movement from the camera:** move along `CurrentCamera.CFrame.RightVector` (right) and
+  `-CurrentCamera.CFrame.LookVector` is forward — then movement always matches the view no matter how
+  the camera is angled.
+Anchor gameplay parts (`part.Anchored = true`) unless you WANT physics: an unanchored Part falls
+under gravity and a dense stack shoves itself apart. Drive the whole game from one
+`RunService.Heartbeat:Connect(function(dt) ... end)` and scale motion by `dt`.
+
 ## 8. Attributes & tags
 
 - `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
@@ -156,7 +179,8 @@ INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED.
 
 ## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
-- `task.wait/spawn/defer/delay/cancel` — use `hooks_every` for periodic work.
+- `task.wait/spawn/defer/delay/cancel` — use `RunService.Heartbeat:Connect(function(dt) ... end)`
+  for a per-frame loop (accumulate `dt` for periodic work).
   `task.synchronize/desynchronize` are silent no-ops.
 - Instance-tree signals (`inst.ChildAdded:Connect`, `:Once`, `:Wait`) and `WaitForChild(name)`
   when the child is absent, `Model:PivotTo/GetPivot`, `Instance.fromExisting` (use `Clone`).
@@ -201,15 +225,19 @@ car.Size = Vector3.new(4, 1, 8)
 car.Position = Vector3.new(0, 1, 0)
 car.Anchored = true
 car.Parent = workspace
-workspace.CurrentCamera.CameraSubject = car             -- camera follows the part
+workspace.CurrentCamera.CameraSubject = car             -- camera follows the part (position only)
 
-hooks_every(0.03, function()
+-- The game loop is RunService.Heartbeat — the Roblox per-frame hook. dt is the frame delta in
+-- seconds; multiply speeds by dt so motion is smooth and frame-rate independent (studs per second).
+local RunService = game:GetService(""RunService"")
+local SPEED = 12                                         -- studs per second
+RunService.Heartbeat:Connect(function(dt)
   local move = Vector3.zero
   if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
   if UIS:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
   if UIS:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
   if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
-  car.Position = car.Position + move * 0.5
+  car.Position = car.Position + move * SPEED * dt
 end)
 
 UIS.InputBegan:Connect(function(input, gameProcessed)

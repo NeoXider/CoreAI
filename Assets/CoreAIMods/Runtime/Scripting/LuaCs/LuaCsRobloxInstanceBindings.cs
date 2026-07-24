@@ -73,6 +73,15 @@ namespace CoreAI.Ai.LuaCs
             return proxy;
         }
 
+        /// <summary>
+        /// Records a signal connection this mod opened against the shared connection ledger so the
+        /// composition disconnects it on teardown. No-op for the ownerless one-off surface (no mod id).
+        /// </summary>
+        public void TrackConnection(CoreAI.Mods.Rbx.Instances.RbxScriptConnection connection)
+        {
+            Bindings.Connections?.Track(OwnerModId, connection);
+        }
+
         public void RequireWorldEdit(string what)
         {
             if (!CanWorldEdit)
@@ -142,9 +151,14 @@ namespace CoreAI.Ai.LuaCs
                     return cameraValue;
                 }
 
-                if (TryReadUserInput(self, key, out LuaValue inputValue))
+                if (TryReadUserInput(context, self, key, out LuaValue inputValue))
                 {
                     return inputValue;
+                }
+
+                if (TryReadRunService(context, self, key, out LuaValue runValue))
+                {
+                    return runValue;
                 }
 
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
@@ -670,7 +684,8 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>UserInputService members: the input signals, MouseBehavior, and the poll
         /// methods. All input READS are open at the Read tier (no capability gate) — observing
         /// input mutates nothing in the world.</summary>
-        private static bool TryReadUserInput(RbxInstance self, string key, out LuaValue value)
+        private static bool TryReadUserInput(LuaCsRobloxModContext context, RbxInstance self, string key,
+            out LuaValue value)
         {
             if (!(self is RbxUserInputService service))
             {
@@ -681,13 +696,13 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "InputBegan":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputBegan);
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputBegan, context);
                     return true;
                 case "InputEnded":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputEnded);
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputEnded, context);
                     return true;
                 case "InputChanged":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputChanged);
+                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputChanged, context);
                     return true;
                 case "MouseBehavior":
                     value = service.MouseBehavior != null
@@ -782,6 +797,36 @@ namespace CoreAI.Ai.LuaCs
                 what + " expects an Enum.KeyCode item at argument " + index,
                 "pass e.g. Enum.KeyCode.Space, got " + Describe(Arg(ctx, index))
                 + " at argument " + index);
+        }
+
+        // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------
+
+        /// <summary>RunService members: the Heartbeat/Stepped/RenderStepped signals. Reads are open
+        /// at the Read tier — connecting a per-frame handler observes the loop, it mutates nothing.</summary>
+        private static bool TryReadRunService(LuaCsRobloxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            if (!(self is RbxRunService runService))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Heartbeat":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.Heartbeat, context);
+                    return true;
+                case "Stepped":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.Stepped, context);
+                    return true;
+                case "RenderStepped":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.RenderStepped, context);
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
         }
 
         // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------

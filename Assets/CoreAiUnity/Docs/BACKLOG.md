@@ -61,6 +61,11 @@ Items here are intentionally not active TODO checkboxes.
 - **Mobile chat input preview above the keyboard.** On phones, typing into the chat field is awkward —
   add a field shown directly above the on-screen keyboard mirroring what is being typed, so the text is
   visible while the keyboard covers the chat. Deferred (low priority).
+- **"Execute Lua" tab in the Hub Mods panel.** Add a second tab next to the mod list where a user can
+  write a one-off Lua script in a text field and run it immediately against the live world (a scratchpad
+  for quick experiments / debugging without creating a persistent mod). Route it through the same
+  one-off `execute_lua` executor the Programmer agent uses; show the result/errors inline. Requested
+  2026-07-24.
 
 ## Architecture Hardening (before MVP2 — from the 2026-07-24 architecture audit)
 

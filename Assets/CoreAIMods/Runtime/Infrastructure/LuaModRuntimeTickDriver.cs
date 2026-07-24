@@ -14,12 +14,13 @@ namespace CoreAI.Infrastructure.Lua
     public sealed class LuaModRuntimeTickDriver : MonoBehaviour
     {
         private ILuaModRuntime _runtime;
-        private System.Action _preTick;
+        private System.Action<float> _preTick;
 
         /// <summary>Attaches the runtime this driver ticks every frame, plus an optional
-        /// pre-tick pump (the Roblox input pump) that must observe device state before mod
-        /// dispatch so handlers see this frame's events.</summary>
-        public void Initialize(ILuaModRuntime runtime, System.Action preTick = null)
+        /// pre-tick pump (the Roblox input + RunService pump) that must observe device state and
+        /// fire the per-frame signals before mod dispatch, carrying this frame's delta so
+        /// RunService.Heartbeat handlers receive it.</summary>
+        public void Initialize(ILuaModRuntime runtime, System.Action<float> preTick = null)
         {
             _runtime = runtime;
             _preTick = preTick;
@@ -27,8 +28,11 @@ namespace CoreAI.Infrastructure.Lua
 
         private void Update()
         {
-            _preTick?.Invoke();
-            _runtime?.Tick(Time.deltaTime);
+            // WHY: one delta for both the pre-tick pump (RunService.Step wants the frame delta) and
+            // the runtime tick, so the game loop and mod timers advance on the same clock.
+            float dt = Time.deltaTime;
+            _preTick?.Invoke(dt);
+            _runtime?.Tick(dt);
         }
     }
 }
