@@ -1,5 +1,13 @@
 # Changelog
 
+## [6.4.1] - 2026-07-24
+
+### Docs
+
+- The Rbx API skill examples now use `print(...)` instead of the CoreAI-only `report(...)` — the last
+  non-Roblox call a model could copy out of the skill. Caught by the post-6.4.0 Roblox-conformance
+  re-audit; the shipped samples and runtime were already clean. (`RbxApi.txt`, `BuiltInRbxApiSkillText`)
+
 ## [6.4.0] - 2026-07-24
 
 Roblox-idiomatic game loop and pure-Roblox sample mods. The bundled samples were rewritten to use

@@ -213,7 +213,7 @@ if p then
   p.Transparency = 0.5
   p.Shape = Enum.PartType.Wedge                           -- a ramp
   p.CFrame = p.CFrame * CFrame.Angles(0, math.pi / 4, 0)  -- rotate 45 deg about Y
-  report(tostring(p.Position))                             -- ""x, y, z"" in studs
+  print(tostring(p.Position))                             -- ""x, y, z"" in studs
 end
 ```
 
@@ -255,19 +255,19 @@ m:SetAttribute(""Score"", 10)
 m:SetAttribute(""Spawn"", Vector3.new(1, 2, 3))
 m:AddTag(""Enemy"")
 m.Parent = workspace
-report(m:GetAttribute(""Team"") .. "" "" .. tostring(m:GetAttribute(""Score"")))
-report(tostring(m:HasTag(""Enemy"")))  -- true
+print(m:GetAttribute(""Team"") .. "" "" .. tostring(m:GetAttribute(""Score"")))
+print(tostring(m:HasTag(""Enemy"")))  -- true
 ```
 
 Error handling with pcall:
 ```lua
 local ok, err = pcall(function() return Instance.new(""Banana"") end)
-if not ok then report(err) end   -- ""BAD_ARGUMENT: Unable to create ... | fix: ... Part ...""
+if not ok then print(err) end   -- ""BAD_ARGUMENT: Unable to create ... | fix: ... Part ...""
 
 local part = Instance.new(""Part""); part.Parent = workspace
 part:Destroy()
 local ok2, err2 = pcall(function() return part.Position end)
-if not ok2 then report(err2) end  -- ""INSTANCE_DESTROYED: ... | fix: ...""
+if not ok2 then print(err2) end  -- ""INSTANCE_DESTROYED: ... | fix: ...""
 ```";
     }
 }
