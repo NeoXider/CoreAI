@@ -225,13 +225,7 @@ namespace CoreAI.Hub.UI
             _modelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
             StyleField(_modelPicker);
             _modelPicker.tooltip = "Models reported by the server. Pick one to copy it into HTTP model.";
-            _modelPicker.RegisterValueChangedCallback(evt =>
-            {
-                if (IsSelectableModel(evt.newValue))
-                {
-                    _model.SetValueWithoutNotify(evt.newValue);
-                }
-            });
+            _modelPicker.RegisterValueChangedCallback(evt => CopyPickedModelInto(_model, evt.newValue));
             SetVisible(_modelPicker, false);
             _httpGroup.Add(_modelPicker);
 
@@ -378,13 +372,7 @@ namespace CoreAI.Hub.UI
             _endpointModelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
             StyleField(_endpointModelPicker);
             _endpointModelPicker.tooltip = "Models reported by the server. Pick one to copy it into Model.";
-            _endpointModelPicker.RegisterValueChangedCallback(evt =>
-            {
-                if (IsSelectableModel(evt.newValue))
-                {
-                    _endpointModel.SetValueWithoutNotify(evt.newValue);
-                }
-            });
+            _endpointModelPicker.RegisterValueChangedCallback(evt => CopyPickedModelInto(_endpointModel, evt.newValue));
             SetVisible(_endpointModelPicker, false);
             endpointGroup.Add(_endpointModelPicker);
 
@@ -1362,6 +1350,18 @@ namespace CoreAI.Hub.UI
             picker.choices = choices;
             picker.SetValueWithoutNotify(choices[0]);
             SetVisible(picker, result.Ok);
+        }
+
+        // WHY: The picker-to-model copy lives here (not inline in the RegisterValueChangedCallback lambda)
+        // so it can be exercised by an EditMode test: a detached DropdownField dispatches no ChangeEvent
+        // (event delivery needs an attached panel), so the test drives this exact logic directly instead
+        // of setting picker.value on an off-panel element. A placeholder/prompt is never copied.
+        private static void CopyPickedModelInto(TextField target, string pickedValue)
+        {
+            if (target != null && IsSelectableModel(pickedValue))
+            {
+                target.SetValueWithoutNotify(pickedValue);
+            }
         }
 
         /// <summary>True when a discovered-models dropdown value is a real model id, not a placeholder/prompt.</summary>

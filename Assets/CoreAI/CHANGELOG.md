@@ -1,5 +1,41 @@
 # Changelog
 
+## [6.3.3] - 2026-07-24
+
+Optimization + correctness pass driven by an adversarial self-audit loop (audit → fix → test → verify),
+with a Roblox-idiomatic mod-ownership cleanup and vision default change.
+
+### Fixed
+
+- **Mod-owned instances are destroyed when the mod unloads (no leaks).** Objects a mod spawns via the Rbx
+  API (`Instance.new(...)` → `workspace`) are tagged with the mod's id in the registry; unloading the mod
+  (Disable *or* Delete — both route through `RuntimeUnload` → `ModTearingDown`(Unload)) now sweeps
+  `InstanceRegistry.GetOwnedBy(modId)` and `Destroy()`s each, releasing the backing GameObjects. Reload and
+  quarantine intentionally do **not** sweep. (`CoreAiModsInstaller`; covered by
+  `UnloadMod_DestroysInstancesTheModOwned`)
+- **Streamed tool-call replay can no longer double-execute side-effecting tools.** In `MeaiLlmClient`, the
+  text-extracted tool path did not add its executed calls to `streamedExecutedCallCount`, so a
+  later-roundtrip transport failure threw bare and let the fallback client replay the same turn — running
+  `world_command`/`execute_lua` twice. It now finalizes-and-reports like the native path.
+
+### Changed
+
+- **Vision support defaults to On under `Auto`.** `Auto` now assumes a model is vision-capable unless its
+  name matches a known text-only utility marker (embeddings, rerankers, whisper/tts, moderation, guard),
+  so local vision models (e.g. `qwen3.5-4b-mtp`) get camera frames without a manual toggle.
+  (`VisionCapability`; test `IsEnabled_AutoDefaultsOn_ExceptUtilityModels`)
+
+### Performance
+
+- **Guard hot path is now zero-allocation and sampled.** `LuaCsExecutionGuard.ExecuteGuarded` no longer
+  allocates a `LuaFunction` + capture closure + `Stopwatch` on every guarded call (hundreds/sec at 20 Hz
+  across mods on the single-threaded WebGL Boehm GC); it rents a poolable `GuardHook` (built once, re-armed
+  per call) from a `[ThreadStatic]` pool and times out via `Stopwatch.GetTimestamp()` against a precomputed
+  ticks budget. The instruction hook now fires once per 4 instructions (was every instruction), cutting the
+  per-instruction GC/timestamp reads 4× while keeping the same step ceiling and an allocation-bomb peak
+  within ~one doubling of the budget. Re-entrant (`mods_call`) nesting rents a distinct hook so counters
+  never clobber. (tests: step/timeout/normal-handler under the sampled hook)
+
 ## [6.3.2] - 2026-07-24
 
 Hardening of the 6.3.1 chat/demo fixes after a multi-agent audit, plus the Builder build tool and

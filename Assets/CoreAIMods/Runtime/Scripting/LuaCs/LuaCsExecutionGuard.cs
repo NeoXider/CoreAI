@@ -26,16 +26,26 @@ namespace CoreAI.Sandbox.LuaCs
     /// <summary>
     /// Runs Lua-CSharp chunks/functions with timeout, instruction-step, and total-allocation limits.
     /// <para>
-    /// The allocation budget is checked on every instruction inside the same hook used for the step
-    /// count and timeout вЂ” <see cref="GC.GetTotalMemory(bool)"/> is a cheap heap-size counter
-    /// read, not a GC pass, so it costs about as much as the timeout's <c>Stopwatch</c> read already
-    /// performed on the same hot path. A coarser sampling interval was considered and rejected:
-    /// concatenation-doubling (<c>s = s .. s</c>) grows exponentially, so a handful of loop iterations
-    /// can jump from megabytes to gigabytes, and any interval wide enough to matter for performance is
-    /// also wide enough to miss the attack before the next sample point. This is the only defense
-    /// against allocation bombs built from plain string concatenation: that is ordinary VM opcodes with
-    /// no library call site to cap, unlike <c>string.rep</c>/<c>string.format</c>/<c>table.concat</c>,
-    /// which are capped directly in <see cref="LuaCsSecureEnvironment"/>.
+    /// All three limits are enforced from a single count-hook installed via <see cref="LuaState.SetHook"/>.
+    /// The hook fires every <see cref="HookInstructionBatch"/> instructions (not every instruction): a
+    /// count hook pays a wall-clock read and a <see cref="GC.GetTotalMemory(bool)"/> heap read on each
+    /// fire, and at 20 Hz timers across several mods that is hundreds of guarded calls per second on a
+    /// single-threaded WebGL Boehm GC, so sampling divides that fixed per-instruction cost by the batch.
+    /// </para>
+    /// <para>
+    /// The batch is deliberately SMALL. Step and time are linear budgets, so a wider window would only
+    /// delay their trip by at most one batch — negligible against 200k steps / 2 s. The allocation
+    /// budget is different: concatenation-doubling (<c>s = s .. s</c>) grows exponentially, so each
+    /// batch of unchecked instructions multiplies the heap. A wide window (e.g. 128–256) both misses a
+    /// short bomb entirely — a doubling loop is only a few instructions per iteration, so a 128-wide
+    /// window can sample zero times before the loop finishes — and, on an unbounded loop, lets the heap
+    /// overshoot the budget by ~2^(window/iterationSize) before the first sample, i.e. straight to
+    /// out-of-memory. A batch of <see cref="HookInstructionBatch"/> keeps at most ~one doubling between
+    /// samples, so the peak heap stays within a small constant factor of the budget, matching the
+    /// per-instruction guarantee this backstop replaced. This is the only defense against allocation
+    /// bombs built from plain string concatenation: that is ordinary VM opcodes with no library call
+    /// site to cap, unlike <c>string.rep</c>/<c>string.format</c>/<c>table.concat</c>, which are capped
+    /// directly in <see cref="LuaCsSecureEnvironment"/>.
     /// </para>
     /// </summary>
     public sealed class LuaCsExecutionGuard
@@ -75,10 +85,27 @@ namespace CoreAI.Sandbox.LuaCs
         // WHY: Guarded execution can re-enter on the SAME LuaState (mods_call: a self-call, or A calls B
         // which calls back into A): a nested finally that simply cleared the hook would disarm the
         // limits the still-running outer call depends on, letting the rest of the outer chunk run
-        // unlimited (sandbox escape). Track the installed hooks per state — shared across guard
-        // instances via this static table — so a nested guard restores the previous hook on exit and
-        // the hook is only fully uninstalled when the outermost guarded call unwinds.
-        private static readonly ConditionalWeakTable<LuaState, Stack<LuaFunction>> InstalledHooks = new();
+        // unlimited (sandbox escape). Track the installed guard states per state — shared across guard
+        // instances via this static table — so a nested guard restores the previous state's hook on exit
+        // and the hook is only fully uninstalled when the outermost guarded call unwinds. The stack holds
+        // the per-call GuardHook (each with its OWN counters), so restoring the outer hook restores its
+        // live step/time/alloc budget, never the inner call's exhausted one.
+        private static readonly ConditionalWeakTable<LuaState, Stack<GuardHook>> InstalledHooks = new();
+
+        // WHY: Sampling window — the count-hook fires once per this many VM instructions. Kept small on
+        // purpose: it must stay tight enough that an exponential concat bomb cannot overshoot the
+        // allocation budget by more than ~one doubling between samples (see the type doc). Each hook fire
+        // charges this many instructions to the step budget, so the SAME max-instruction limit holds.
+        private const int HookInstructionBatch = 4;
+
+        // WHY: Zero steady-state allocation. ExecuteGuarded ran hundreds of times per second would
+        // otherwise allocate a fresh LuaFunction + capture closure + Stopwatch on EVERY call, churning
+        // the single-threaded WebGL Boehm GC. Instead each call rents a reusable GuardHook (its
+        // LuaFunction/delegate built once) from this thread-local pool and returns it on unwind, so
+        // after warm-up the guard allocates nothing per call. Thread-local because rent/return run only
+        // on the synchronous calling thread (body() blocks via GetResult), while the hook itself closes
+        // directly over its GuardHook and so is thread-agnostic when the async VM migrates pool threads.
+        [ThreadStatic] private static Stack<GuardHook> _hookPool;
 
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
@@ -153,74 +180,14 @@ namespace CoreAI.Sandbox.LuaCs
             Func<CancellationToken, LuaValue[]> body,
             CancellationToken cancellationToken)
         {
-            Stopwatch sw = Stopwatch.StartNew();
-            long steps = 0;
-            long maxSteps = _maxSteps < 1 ? 1 : _maxSteps;
-            int timeoutMs = _timeoutMs < 1 ? 1 : _timeoutMs;
-            long maxAllocatedBytes = _maxAllocatedBytes;
+            GuardHook hook = RentHook();
+            hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes);
 
-            // WHY: Allocation accounting uses GC.GetTotalMemory(false) (managed-heap size, no collection):
-            // Unity's Mono does NOT implement GC.GetAllocatedBytesForCurrentThread вЂ” it returns 0
-            // unconditionally (verified empirically), so a thread-local counter can never fire here.
-            // Heap total is process-wide and therefore noisy (other systems allocate concurrently) and
-            // can shrink when a collection runs mid-execution, but an allocation bomb overwhelms both
-            // effects within a few doublings, which is exactly the pattern this backstop exists for.
-            // It is also thread-agnostic, so the async VM migrating between pool threads is harmless.
-            long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
-
-            LuaFunction hook = new("coreai_instruction_guard", (ctx, ct) =>
-            {
-                steps++;
-                if (steps > maxSteps)
-                {
-                    throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException(
-                            $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({maxSteps})"));
-                }
-
-                if (sw.ElapsedMilliseconds > timeoutMs)
-                {
-                    throw new LuaRuntimeException(ctx.State,
-                        new TimeoutException($"Lua exceeded {timeoutMs} ms."));
-                }
-
-                // WHY: Allocation-bomb backstop: string.rep/string.format/table.concat are capped at their
-                // library call sites, but plain concatenation (s = s .. s) has no such call site to
-                // intercept вЂ” it is ordinary VM opcodes. Checking total thread allocations between
-                // instructions is the only place this hook can catch that pattern.
-                if (maxAllocatedBytes > 0)
-                {
-                    // WHY: Trip on the CHEAP process-heap reading, with NO forced-GC "confirmation". A forced
-                    // GC.GetTotalMemory(true) measured against a garbage-inclusive baseline UNDER-counts (the
-                    // baseline's own collectible garbage is freed by the forced GC), so the trip fired late and
-                    // a doubling bomb reached true OutOfMemory before it was cut. The cheap reading grows
-                    // monotonically with a retained buffer, so it trips promptly. NOTE this is a PER-CALL,
-                    // first-growth backstop, not a cross-call cumulative limiter: GC.GetTotalMemory reports the
-                    // COMMITTED heap high-water mark, so the FIRST oversized call grows the heap and trips, but
-                    // later calls reuse that committed space and their per-call delta no longer crosses the
-                    // budget (empirically a mod bombing every call trips ~once, even with a forced GC between
-                    // calls). Downstream (LuaCsModRuntime) charges the trip to the ordinary consecutive-error
-                    // streak, which a success resets — so the lone trip is forgiven, and a mod that keeps
-                    // allocating within the committed envelope is bounded by the step/time budgets instead.
-                    // Classify by TYPE (LuaMemoryBudgetException as the CLR cause) — unforgeable and pcall-safe —
-                    // for the trip's log label, while the outer type stays LuaRuntimeException for the contract.
-                    long allocated = GC.GetTotalMemory(false) - allocBaseline;
-                    if (allocated > maxAllocatedBytes)
-                    {
-                        throw new LuaRuntimeException(ctx.State,
-                            new LuaMemoryBudgetException(
-                                $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({maxAllocatedBytes} bytes)"));
-                    }
-                }
-
-                return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
-            });
-
-            Stack<LuaFunction> installed = InstalledHooks.GetOrCreateValue(state);
+            Stack<GuardHook> installed = InstalledHooks.GetOrCreateValue(state);
             installed.Push(hook);
             try
             {
-                state.SetHook(hook, string.Empty, 1);
+                state.SetHook(hook.Function, string.Empty, HookInstructionBatch);
                 return body(cancellationToken);
             }
             catch (LuaRuntimeException)
@@ -236,7 +203,7 @@ namespace CoreAI.Sandbox.LuaCs
                     {
                         // WHY: An enclosing guarded call is still running on this state: re-arm ITS hook
                         // instead of clearing, so the outer step/time/alloc limits stay live.
-                        state.SetHook(installed.Peek(), string.Empty, 1);
+                        state.SetHook(installed.Peek().Function, string.Empty, HookInstructionBatch);
                     }
                     else
                     {
@@ -247,6 +214,123 @@ namespace CoreAI.Sandbox.LuaCs
                 {
                     /* ignore */
                 }
+
+                ReturnHook(hook);
+            }
+        }
+
+        private static GuardHook RentHook()
+        {
+            Stack<GuardHook> pool = _hookPool;
+            return pool != null && pool.Count > 0 ? pool.Pop() : new GuardHook();
+        }
+
+        private static void ReturnHook(GuardHook hook)
+        {
+            (_hookPool ??= new Stack<GuardHook>()).Push(hook);
+        }
+
+        /// <summary>
+        /// A poolable, reusable instruction hook: its <see cref="LuaFunction"/> (and the delegate it
+        /// wraps) is built ONCE and re-armed by <see cref="Reset"/> at the top of every guarded call, so
+        /// steady-state execution allocates nothing. The mutable budget state lives in fields rather than
+        /// a per-call capture closure, and each in-flight (re-entrant) call rents a distinct instance, so
+        /// a nested call never clobbers the outer call's counters.
+        /// </summary>
+        private sealed class GuardHook
+        {
+            /// <summary>The reusable Lua-CSharp hook function; its identity is stable across calls.</summary>
+            public readonly LuaFunction Function;
+
+            private long _steps;
+            private long _maxSteps;
+            private long _startTimestamp;
+            private long _timeoutTicks;
+            private int _timeoutMs;
+            private long _maxAllocatedBytes;
+            private long _allocBaseline;
+
+            public GuardHook()
+            {
+                Function = new LuaFunction("coreai_instruction_guard", Hook);
+            }
+
+            /// <summary>Re-arms a fresh per-call budget onto this reusable hook.</summary>
+            public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes)
+            {
+                _steps = 0;
+                _maxSteps = maxSteps < 1 ? 1 : maxSteps;
+                _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
+
+                // WHY: Timeout via raw Stopwatch.GetTimestamp() (a long) + a precomputed ticks budget,
+                // NOT a Stopwatch instance — the reference-type Stopwatch was a per-call heap allocation
+                // on this hot path. Comparing two longs on each hook is allocation-free. The division is
+                // done once here, not per hook.
+                _startTimestamp = Stopwatch.GetTimestamp();
+                _timeoutTicks = (long)_timeoutMs * Stopwatch.Frequency / 1000;
+
+                _maxAllocatedBytes = maxAllocatedBytes;
+
+                // WHY: Allocation accounting uses GC.GetTotalMemory(false) (managed-heap size, no
+                // collection): Unity's Mono does NOT implement GC.GetAllocatedBytesForCurrentThread — it
+                // returns 0 unconditionally (verified empirically), so a thread-local counter can never
+                // fire here. Heap total is process-wide and therefore noisy (other systems allocate
+                // concurrently) and can shrink when a collection runs mid-execution, but an allocation
+                // bomb overwhelms both effects within a few doublings, which is exactly the pattern this
+                // backstop exists for. It is also thread-agnostic, so the async VM migrating between pool
+                // threads is harmless.
+                _allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
+            }
+
+            private System.Threading.Tasks.ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
+            {
+                // WHY: The hook fires once per HookInstructionBatch instructions, so charge that many
+                // steps per fire — the SAME max-instruction ceiling is enforced, just checked in batches.
+                _steps += HookInstructionBatch;
+                if (_steps > _maxSteps)
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new InvalidOperationException(
+                            $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})"));
+                }
+
+                if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                {
+                    throw new LuaRuntimeException(ctx.State,
+                        new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
+                }
+
+                // WHY: Allocation-bomb backstop: string.rep/string.format/table.concat are capped at their
+                // library call sites, but plain concatenation (s = s .. s) has no such call site to
+                // intercept — it is ordinary VM opcodes. Checking total allocations between instruction
+                // batches is the only place this hook can catch that pattern; the batch is kept small so
+                // the exponential growth cannot overshoot the budget by more than ~one doubling.
+                if (_maxAllocatedBytes > 0)
+                {
+                    // WHY: Trip on the CHEAP process-heap reading, with NO forced-GC "confirmation". A forced
+                    // GC.GetTotalMemory(true) measured against a garbage-inclusive baseline UNDER-counts (the
+                    // baseline's own collectible garbage is freed by the forced GC), so the trip fired late and
+                    // a doubling bomb reached true OutOfMemory before it was cut. The cheap reading grows
+                    // monotonically with a retained buffer, so it trips promptly. NOTE this is a PER-CALL,
+                    // first-growth backstop, not a cross-call cumulative limiter: GC.GetTotalMemory reports the
+                    // COMMITTED heap high-water mark, so the FIRST oversized call grows the heap and trips, but
+                    // later calls reuse that committed space and their per-call delta no longer crosses the
+                    // budget (empirically a mod bombing every call trips ~once, even with a forced GC between
+                    // calls). Downstream (LuaCsModRuntime) charges the trip to the ordinary consecutive-error
+                    // streak, which a success resets — so the lone trip is forgiven, and a mod that keeps
+                    // allocating within the committed envelope is bounded by the step/time budgets instead.
+                    // Classify by TYPE (LuaMemoryBudgetException as the CLR cause) — unforgeable and pcall-safe —
+                    // for the trip's log label, while the outer type stays LuaRuntimeException for the contract.
+                    long allocated = GC.GetTotalMemory(false) - _allocBaseline;
+                    if (allocated > _maxAllocatedBytes)
+                    {
+                        throw new LuaRuntimeException(ctx.State,
+                            new LuaMemoryBudgetException(
+                                $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_maxAllocatedBytes} bytes)"));
+                    }
+                }
+
+                return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
             }
         }
     }

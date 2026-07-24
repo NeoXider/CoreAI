@@ -118,9 +118,14 @@ namespace CoreAI.Tests
             Assert.AreEqual("old-model", model.value, "Populating the picker alone must not touch HTTP model.");
 
             // Picking the first real model — previously a silent no-op — must now reach HTTP model.
-            modelPicker.value = "llama-3.1-8b";
-
+            // WHY: a detached DropdownField dispatches no ChangeEvent (event delivery needs an attached
+            // panel), so drive the exact copy the picker's callback runs instead of setting picker.value.
+            InvokePrivateStatic(typeof(HubSettingsPage), "CopyPickedModelInto", model, "llama-3.1-8b");
             Assert.AreEqual("llama-3.1-8b", model.value);
+
+            // The picker must still refuse to copy a non-model prompt into HTTP model.
+            InvokePrivateStatic(typeof(HubSettingsPage), "CopyPickedModelInto", model, modelPicker.choices[0]);
+            Assert.AreEqual("llama-3.1-8b", model.value, "Selecting the prompt entry must not overwrite HTTP model.");
         }
 
         [Test]

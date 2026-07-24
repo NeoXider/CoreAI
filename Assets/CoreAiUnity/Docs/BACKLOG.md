@@ -96,6 +96,59 @@ Items here are intentionally not active TODO checkboxes.
   static singletons and mutates `AgentMemoryPolicy` inline in a build callback; §4.3 wants roots free of
   business logic. (Positive: no `FindObjectsByType` in any installer — §4.2 holds.)
 
+## Performance (before MVP2 — from the 2026-07-24 perf audit)
+
+> All prior optimizations verified still holding (binder per-aspect apply, cached components + reused
+> MaterialPropertyBlock, cached primitive meshes, `RbxScriptSignal.Fire` reuse, `RbxCFrame` struct fields,
+> input gating on `HasConnections`). The remaining cost moved UPSTREAM of the binder, into the guard /
+> marshalling boundary every Lua handler call crosses. All findings cite v6.3.2.
+
+- **[HIGH] Per-guarded-call allocation storm** — `LuaCsExecutionGuard.ExecuteGuarded` (`:156,:171`) and
+  `LuaCsScriptExecutionGuard.Invoke` (`:47,:54,:57`) allocate PER CALL: a fresh `LuaFunction` hook + its
+  capture closure, `Stopwatch.StartNew()` (ref type), `new LuaValue[]`/`new object[]`, and a box per
+  returned `LuaValue`. At `MinTimerIntervalSeconds = 0.05` a `hooks_on("tick")` fires at 20 Hz, so a
+  couple of timers/handlers = hundreds of allocs/sec → periodic GC stutter on the single-threaded WebGL
+  Boehm GC. Fix: one reusable hook whose closure holds a resettable mutable state object (re-entrancy is
+  already covered by `InstalledHooks`); `Stopwatch.GetTimestamp()` (long) instead of `StartNew()`;
+  thread-static scratch `LuaValue[]` buffers by arity; skip building `boxed[]` when results are discarded.
+- **[HIGH] Per-instruction guard overhead** — the hook is installed with count = 1
+  (`LuaCsExecutionGuard.cs:223`), so it runs on EVERY VM instruction, each paying
+  `sw.ElapsedMilliseconds` + `GC.GetTotalMemory(false)` (`:207`). A few-thousand-instruction handler pays
+  that thousands of times/frame; on IL2CPP this ~multiplies interpreter cost. Fix: sample — install with
+  count ≈ 128–256 and scale the step budget, or read `GC.GetTotalMemory` every Nth hook. A doubling
+  alloc-bomb still trips within one window, so detection latency is unaffected; per-instruction cost
+  drops ~100×.
+- **[MEDIUM] Per-event-dispatch churn** — `LuaCsModRuntime.DispatchPendingEvents` (`:1020,:1037`):
+  `handlers.ToArray()` per dispatched event + `params object[2]` per handler invoke. Reuse a per-mod
+  scratch snapshot list; add a 2-arg `InvokeGuarded` overload avoiding the params array.
+- **[MEDIUM] Var-args marshalling boxes every `LuaValue`** — `LuaCsValueMarshaller.Box` at the
+  `RegisterVarArgs` surfaces (`hooks_on`, `events_emit`, `mods_export/call`, `print`). Typed accessors and
+  the `part.CFrame=` write path already avoid it. Prefer typed accessors; longer-term a `LuaValue`-typed
+  fast path on the seam.
+- **[MEDIUM] SSE streaming parses a full `JObject` per token** — `MeaiOpenAiChatClient` (`:614,:1754,
+  :1811`) does `line+"\n"` → `Split('\n')` → `JObject.Parse` per delta + per-delta LINQ. Network-bound,
+  but token-rate JObject churn can hitch the chat UI on WebGL. Parse the single line directly with a
+  lightweight reader for the common `choices[0].delta.content` shape; fall back to `JObject.Parse` only
+  for tool-call/usage chunks.
+- **[MEDIUM] Camera capture stalls the main thread** — `CameraLlmTool.CaptureCameraJpeg` (`:91-128`)
+  allocates a `RenderTexture`+`Texture2D` per call, `ReadPixels` (GPU→CPU sync stall) + `EncodeToJPG` +
+  `ToBase64String`, all on the main thread. On-demand, but each vision capture visibly hitches the frame.
+  Pool the offscreen targets; use `AsyncGPUReadback` where supported.
+- **[LOW] `RbxCFrame.GetComponents()`/`ToString()`** allocate arrays — fine unless a mod polls them per
+  frame.
+
+## Roblox-API parity (blocks MVP — no CoreAI-own Lua API)
+
+- **Replace the CoreAI-own mod Lua layer with Roblox idioms.** Cross-script sharing must move from the
+  bespoke `mods_export`/`mods_get`/`mods_call`/`mods_list_exports` + `hooks_every`/`events_emit` to
+  Roblox's `require(ModuleScript)` (shared functions/variables), `BindableEvent`/`BindableFunction`
+  (in-place events), and `RemoteEvent`/`RemoteFunction` (networked) + `_G`/shared. The `mods_*` surface is
+  a stopgap; the AI skill and docs must teach the Roblox way, not `mods_*`. Until MVP, do NOT add new
+  CoreAI-own Lua APIs — implement the Roblox equivalent.
+- **Bidirectional Roblox↔CoreAI import/export (maps + mods).** A Roblox place/map/mod must import into
+  CoreAI and a CoreAI map/mod export back, so content works identically in both. Drives format /
+  serialization choices (instance tree, scripts, assets); keep portability a first-class constraint.
+
 ## Product Ideas
 
 - STT -> Agent -> TTS for NPCs.

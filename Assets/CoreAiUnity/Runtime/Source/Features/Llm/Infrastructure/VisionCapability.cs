@@ -10,9 +10,21 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public static class VisionCapability
     {
+        // WHY: model ids that are clearly NOT chat models — embeddings, audio, rerank, moderation. In
+        // Auto mode these are the only ids treated as text-only; everything else defaults to vision ON,
+        // because modern local/chat models are overwhelmingly multimodal and a text-only turn never
+        // attaches an image regardless (vision only matters once the camera path is actually used).
+        private static readonly string[] NonVisionUtilityMarkers =
+        {
+            "embed", "embedding", "nomic-embed", "-bge", "gte-", "e5-",
+            "rerank", "reranker",
+            "whisper", "tts", "text-to-speech", "speech",
+            "moderation", "-guard"
+        };
+
         // Substrings of OpenAI-compatible / common provider model ids that ship vision today. Matched
-        // case-insensitively against the configured model name. Kept conservative: when unsure, Auto
-        // returns false so a text-only model never receives an image part it cannot parse.
+        // case-insensitively against the configured model name. Used by the explicit "Detect vision"
+        // name heuristic; Auto mode no longer relies on it (Auto defaults ON — see IsEnabled).
         private static readonly string[] VisionModelMarkers =
         {
             "gpt-4o", // gpt-4o, gpt-4o-mini (multimodal)
@@ -40,7 +52,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Resolves the effective vision capability for the given mode and model name.
         /// <see cref="VisionSupportMode.On"/> / <see cref="VisionSupportMode.Off"/> are explicit;
-        /// <see cref="VisionSupportMode.Auto"/> defers to <see cref="ModelLooksVisionCapable"/>.
+        /// <see cref="VisionSupportMode.Auto"/> defaults to ON and only treats obvious non-chat utility
+        /// models (embeddings/audio/rerank/moderation, see <see cref="AutoAssumesVisionCapable"/>) as
+        /// text-only — so a multimodal local model whose name isn't in the marker list still gets vision.
         /// </summary>
         public static bool IsEnabled(VisionSupportMode mode, string modelName)
         {
@@ -51,8 +65,30 @@ namespace CoreAI.Infrastructure.Llm
                 case VisionSupportMode.Off:
                     return false;
                 default:
-                    return ModelLooksVisionCapable(modelName);
+                    return AutoAssumesVisionCapable(modelName);
             }
+        }
+
+        /// <summary>
+        /// Auto-mode resolution: vision is ON by default, disabled only when the model name identifies a
+        /// non-chat utility model (embeddings, audio, rerank, moderation). An empty name defaults to ON.
+        /// </summary>
+        public static bool AutoAssumesVisionCapable(string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return true;
+            }
+
+            foreach (string marker in NonVisionUtilityMarkers)
+            {
+                if (modelName.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

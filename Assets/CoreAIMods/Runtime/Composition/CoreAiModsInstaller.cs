@@ -99,7 +99,7 @@ namespace CoreAI.Composition
                     robloxApi = new LuaCsRobloxApiBindings();
                 }
 
-                return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
                 Logger = c.Resolve<IGameLogger>(),
                 LuaScriptVersions = c.ResolveOrDefault<ILuaScriptVersionStore>(),
@@ -124,6 +124,40 @@ namespace CoreAI.Composition
                 // because Instance.new requires it.
                 RegisterWorldEditBuildBindings = false
                 });
+
+                // WHY (audit H1): an unloaded mod must not leak the Rbx instances it created. The ownership
+                // ledger tags every Instance.new with its owner mod id; on UNLOAD sweep GetOwnedBy(modId)
+                // and destroy each so the backing GameObjects go with the mod. NOT on Reload (same owner id
+                // — the replacement keeps them) nor Quarantine (objects must survive the auto-repair
+                // reload). GetOwnedBy returns a snapshot, so destroying while it prunes the registry is
+                // safe; RbxInstance.Destroy() is idempotent.
+                if (rbxHost?.Registry != null)
+                {
+                    CoreAI.Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost.Registry;
+                    Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
+                    luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
+                    {
+                        if (reason != LuaModTeardownReason.Unload)
+                        {
+                            return;
+                        }
+
+                        foreach (CoreAI.Mods.Rbx.Instances.RbxInstance owned in ownedRegistry.GetOwnedBy(modId))
+                        {
+                            try
+                            {
+                                owned?.Destroy();
+                            }
+                            catch (System.Exception ex)
+                            {
+                                teardownLog?.Warn(
+                                    $"[CoreAiMods] Destroying an instance owned by unloaded mod '{modId}' failed: {ex.Message}");
+                            }
+                        }
+                    };
+                }
+
+                return luaCsStack;
             }, Lifetime.Singleton);
 
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)

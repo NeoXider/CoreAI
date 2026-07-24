@@ -127,6 +127,50 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
             }
         }
 
+        [Test]
+        public void UnloadMod_DestroysInstancesTheModOwned()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RobloxWorldHost");
+            RobloxWorldHost host = hostGo.AddComponent<RobloxWorldHost>();
+            host.Initialize();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            builder.RegisterInstance(host);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                runtime.LoadMod("leaker",
+                    "local p = Instance.new('Part') p.Name = 'LeakPart' p.Parent = workspace");
+
+                RbxInstance part = host.Registry.WorldRoot.FindFirstChild("LeakPart");
+                Assert.IsNotNull(part, "the mod's Instance.new('Part') must exist while the mod is loaded");
+                InstanceId partId = part.Id;
+                Assert.IsTrue(host.Binder.TryGetBoundObject(partId, out _),
+                    "the part must be materialized as a GameObject while the mod is loaded");
+                Assert.AreEqual(1, host.Registry.GetOwnedBy("leaker").Count,
+                    "the created instance must be tagged as owned by the mod");
+
+                // WHY: Unload routes through TeardownModEffects(Unload) -> ModTearingDown -> the installer's
+                // ownership sweep, so the mod's instances (and their GameObjects) must be destroyed — no leak.
+                Assert.IsTrue(runtime.UnloadMod("leaker"));
+
+                Assert.IsFalse(host.Binder.TryGetBoundObject(partId, out _),
+                    "unloading the mod must release the backing GameObject of the instance it owned");
+                Assert.IsNull(host.Registry.WorldRoot.FindFirstChild("LeakPart"),
+                    "the destroyed part must no longer be in the world tree after unload");
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(hostGo);
+            }
+        }
+
         /// <summary>Minimal registrations the LuaCsModStack factory resolves (mirrors the proven
         /// bootstrap in LuaModsLlmToolEditModeTests): required IGameLogger + IAiGameCommandSink, plus
         /// the ResolveOrDefault conveniences and the world-command executors the installer expects.</summary>

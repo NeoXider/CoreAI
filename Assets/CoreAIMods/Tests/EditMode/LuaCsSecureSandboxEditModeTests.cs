@@ -201,5 +201,73 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(200000, (int)result[0].Read<double>(),
                 "A normal, non-adversarial 100KB-class string script must not be blocked by the budget.");
         }
+
+        [Test]
+        [Timeout(15000)]
+        public void StepBudget_Overrun_IsCut_AfterSamplingHookScalesSteps()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // The instruction hook now fires every HookInstructionBatch instructions (sampling) and charges
+            // that batch to the step counter, so the SAME max-instruction ceiling is enforced. A loop far
+            // longer than the 5,000-step budget must still be cut — if the batch scaling regressed (steps no
+            // longer accumulate), the hook would under-count and the loop would run to completion, returning
+            // normally and failing this Assert.Throws instead of hanging (the loop is finite).
+            LuaCsExecutionGuard guard = new(timeoutMs: 60_000, maxSteps: 5_000, maxAllocatedBytes: 0);
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state,
+                    "local x = 0\n" +
+                    "for i = 1, 5000000 do x = x + 1 end\n" +
+                    "return x",
+                    guard));
+
+            Assert.IsTrue(ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS"),
+                $"Expected the sampled step budget to cut the over-budget loop, got: {ex.Message}");
+        }
+
+        [Test]
+        [Timeout(15000)]
+        public void Timeout_Overrun_IsCut_ByWallClockRegardlessOfSampling()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // Time is wall-clock, read from Stopwatch.GetTimestamp() on each sampled hook, so sampling does
+            // not weaken it. A huge step budget forces the TIME budget to be the one that trips. A regression
+            // that broke the GetTimestamp/ticks-budget math would let the busy loop run unbounded and this
+            // [Timeout] test would fail — the signal.
+            LuaCsExecutionGuard guard = new(timeoutMs: 150, maxSteps: 5_000_000_000L, maxAllocatedBytes: 0);
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+                env.RunChunk(state,
+                    "local x = 0\n" +
+                    "while true do x = x + 1 end\n" +
+                    "return x",
+                    guard));
+
+            Assert.IsTrue(ex.Message.Contains("exceeded"),
+                $"Expected the wall-clock timeout to cut the infinite loop, got: {ex.Message}");
+        }
+
+        [Test]
+        [Timeout(15000)]
+        public void NormalShortHandler_UnderGuard_CompletesAndReturns()
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            // A well-behaved short handler (the 20 Hz tick shape the guard is on) must pass cleanly under a
+            // tight-but-sufficient budget: none of the sampled step/time/alloc limits may trip a normal call.
+            LuaCsExecutionGuard guard = new(timeoutMs: 2_000, maxSteps: 200_000);
+            LuaValue[] result = env.RunChunk(state,
+                "local x = 0\n" +
+                "for i = 1, 100 do x = x + i end\n" +
+                "return x",
+                guard);
+
+            Assert.IsTrue(result.Length > 0, "A normal short handler must return its result under the guard.");
+            Assert.AreEqual(5050, (int)result[0].Read<double>(),
+                "The guarded short handler must compute the correct result, unaffected by the sampling hook.");
+        }
     }
 }

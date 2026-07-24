@@ -658,9 +658,10 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Whether the configured model can receive images. <see cref="VisionSupportMode.On"/> /
-        /// <see cref="VisionSupportMode.Off"/> are explicit; <see cref="VisionSupportMode.Auto"/> infers
-        /// from <see cref="ModelName"/> via <see cref="VisionCapability.ModelLooksVisionCapable"/>. Both the
-        /// host send path (<c>CoreAiChatService.AskWithCameraAsync</c>) and gated tool registration check this.
+        /// <see cref="VisionSupportMode.Off"/> are explicit; <see cref="VisionSupportMode.Auto"/> defaults
+        /// to ON and only treats obvious utility models (embeddings/audio/rerank) as text-only
+        /// (<see cref="VisionCapability.AutoAssumesVisionCapable"/>). Both the host send path
+        /// (<c>CoreAiChatService.AskWithCameraAsync</c>) and gated tool registration check this.
         /// </summary>
         public bool IsVisionEnabled => VisionCapability.IsEnabled(visionSupport, ModelName);
 

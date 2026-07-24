@@ -1272,6 +1272,13 @@ namespace CoreAI.Infrastructure.Llm
                         await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     TrimStreamingToolCallHistory(chatMessages);
+
+                    // WHY: mirror the native path's streamedExecutedCallCount bump for text-extracted tool
+                    // calls too — these ran through ExecuteBatchAsync and may have mutated the world, so a
+                    // later-roundtrip transport failure (line ~821) must finalize-and-report (graded
+                    // failure WITH traces) instead of a bare throw that lets the fallback/retry decorators
+                    // replay the original request and double-execute a side-effecting tool.
+                    streamedExecutedCallCount += toolCalls.Count;
                     if (!batch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;

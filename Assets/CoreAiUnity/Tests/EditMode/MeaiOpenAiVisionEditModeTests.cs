@@ -102,10 +102,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void IsEnabled_AutoDefersToModelHeuristic()
+        public void IsEnabled_AutoDefaultsOn_ExceptUtilityModels()
         {
+            // Auto is ON by default now, including chat models whose name isn't a known vision marker
+            // (e.g. local qwen builds LM Studio reports as multimodal).
             Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.Auto, "gpt-4o"));
-            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Auto, "gpt-3.5-turbo"));
+            Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.Auto, "gpt-3.5-turbo"));
+            Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.Auto, "qwen3.5-4b-mtp"));
+            Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.Auto, ""));
+
+            // Only obvious non-chat utility models are treated as text-only under Auto.
+            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Auto, "text-embedding-3-small"));
+            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Auto, "nomic-embed-text-v1.5"));
+            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Auto, "whisper-large-v3"));
         }
 
         [Test]
