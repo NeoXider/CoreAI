@@ -11,7 +11,7 @@ lives in `Assets/CoreAiUnity/Runtime/Source/Features/Vision/`:
 | --- | --- |
 | `CoreAiAgentCamera.cs` | Opt-in marker `MonoBehaviour` that makes a camera agent-controllable. |
 | `AgentCameraService.cs` | Ownership resolution, marker gating, rate limiting, and the capture/render pipeline. |
-| `CameraLlmTool.cs` | One `ILlmTool` (`camera`) exposing `camera_capture` / `camera_look` / `camera_list`. |
+| `CameraLlmTool.cs` | One `ILlmTool` (`camera`) exposing `camera_capture` (alias `screenshot`) / `camera_look` / `camera_list`. |
 
 ---
 
@@ -100,6 +100,7 @@ One `ILlmTool` named **`camera`** (`IAIFunctionsLlmTool`) expanding to three nat
 | Function | Purpose | Params |
 | --- | --- | --- |
 | `camera_capture` | Screenshot a camera (read-only). | `cameraName?` (defaults to own/main), `maxSize?` (long edge px). |
+| `screenshot` | Alias of `camera_capture` — same behavior under the literal name models search for. | same as `camera_capture`. |
 | `camera_look` | Move/rotate the agent's **own** (marked) camera. | `cameraName?`, `posX/Y/Z?`, `rotX/Y/Z?` (euler), `lookAt?` (target GameObject name). |
 | `camera_list` | List cameras: name, isMain, marked, movable, pose. | — |
 

@@ -7,6 +7,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
+using CoreAI.Messaging;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -168,6 +169,14 @@ namespace CoreAI.Chat
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
         /// so WebGL builds do not rely on thread-pool timers.
+        /// <para>
+        /// The deadline is an IDLE/no-progress budget, not a whole-turn one: a turn is
+        /// LLM -> tool calls -> LLM -> ... and durations of successive steps must not accumulate into a
+        /// single cancellation. Every <see cref="CoreAi.OnToolCallStarted"/>/<see cref="CoreAi.OnToolCallCompleted"/>
+        /// for <paramref name="request"/>'s <c>RoleId</c> re-arms the deadline, so a turn with many quick
+        /// tool calls keeps running as long as each individual step stays under
+        /// <see cref="ICoreAISettings.LlmRequestTimeoutSeconds"/>; only a real stall still times out.
+        /// </para>
         /// Exceptions are NOT swallowed; callers (e.g. <c>CoreAiChatPanel</c>) are responsible
         /// for catching and displaying errors to the user.
         /// </remarks>
@@ -182,17 +191,35 @@ namespace CoreAI.Chat
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
-            IDisposable timerHandle = null;
+            IdleTimeoutDeadline deadline = null;
             CancellationToken effectiveCt = ct;
+            Action<LlmToolCallStarted> onToolStarted = null;
+            Action<LlmToolCallCompleted> onToolCompleted = null;
             try
             {
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timerHandle = timeoutCts.CancelAfterSlim(
-                        TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
+                    deadline = new IdleTimeoutDeadline(timeoutCts, timeoutSec);
                     effectiveCt = timeoutCts.Token;
+
+                    onToolStarted = evt =>
+                    {
+                        if (evt.RoleId == request.RoleId)
+                        {
+                            deadline.Rearm();
+                        }
+                    };
+                    onToolCompleted = evt =>
+                    {
+                        if (evt.RoleId == request.RoleId)
+                        {
+                            deadline.Rearm();
+                        }
+                    };
+                    CoreAi.OnToolCallStarted += onToolStarted;
+                    CoreAi.OnToolCallCompleted += onToolCompleted;
                 }
 
                 string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
@@ -209,7 +236,17 @@ namespace CoreAI.Chat
             }
             finally
             {
-                timerHandle?.Dispose();
+                if (onToolStarted != null)
+                {
+                    CoreAi.OnToolCallStarted -= onToolStarted;
+                }
+
+                if (onToolCompleted != null)
+                {
+                    CoreAi.OnToolCallCompleted -= onToolCompleted;
+                }
+
+                deadline?.Dispose();
                 timeoutCts?.Dispose();
             }
         }
@@ -238,6 +275,12 @@ namespace CoreAI.Chat
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
         /// and cancellation is propagated to the underlying async enumerator.
+        /// <para>
+        /// The deadline is an IDLE/no-progress budget: every yielded chunk re-arms it, so a
+        /// steadily-streaming multi-tool-call turn is never cancelled purely because per-step durations
+        /// add up past <see cref="ICoreAISettings.LlmRequestTimeoutSeconds"/>; only a real stall (no chunk
+        /// for the full window) still times out.
+        /// </para>
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             AiTaskRequest request,
@@ -251,7 +294,7 @@ namespace CoreAI.Chat
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
-            IDisposable timerHandle = null;
+            IdleTimeoutDeadline deadline = null;
             CancellationToken effectiveCt = ct;
             IAsyncEnumerator<LlmStreamChunk> streamEnumerator = null;
             try
@@ -260,8 +303,7 @@ namespace CoreAI.Chat
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timerHandle = timeoutCts.CancelAfterSlim(
-                        TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
+                    deadline = new IdleTimeoutDeadline(timeoutCts, timeoutSec);
                     effectiveCt = timeoutCts.Token;
                 }
 
@@ -285,6 +327,7 @@ namespace CoreAI.Chat
                             break;
                         }
 
+                        deadline?.Rearm();
                         yield return streamEnumerator.Current;
                     }
                 }
@@ -298,7 +341,7 @@ namespace CoreAI.Chat
             }
             finally
             {
-                timerHandle?.Dispose();
+                deadline?.Dispose();
                 timeoutCts?.Dispose();
             }
         }
@@ -734,6 +777,57 @@ namespace CoreAI.Chat
             {
                 timerHandle?.Dispose();
                 timeoutCts?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// An idle/no-progress deadline on <paramref name="cts"/>: re-arming disposes the previous
+        /// <c>CancelAfterSlim</c> handle and schedules a fresh one, so callers can push the cancellation
+        /// point out on every sign of progress (a streamed chunk, a tool-call start/finish) instead of
+        /// covering a whole multi-step turn with one fixed budget.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Rearm"/> is best-effort: <c>CancelAfterSlim</c> registers on the UniTask PlayerLoop
+        /// and re-arming may run off the main thread (tool-call events and stream continuations can arrive
+        /// on a threadpool thread), so failures are swallowed — worst case the previous deadline stands,
+        /// which is still correct, just less generous.
+        /// </remarks>
+        private sealed class IdleTimeoutDeadline : IDisposable
+        {
+            private readonly CancellationTokenSource _cts;
+            private readonly float _timeoutSec;
+            private readonly object _gate = new();
+            private IDisposable _handle;
+
+            public IdleTimeoutDeadline(CancellationTokenSource cts, float timeoutSec)
+            {
+                _cts = cts;
+                _timeoutSec = timeoutSec;
+                _handle = cts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec), DelayType.Realtime);
+            }
+
+            public void Rearm()
+            {
+                try
+                {
+                    lock (_gate)
+                    {
+                        _handle?.Dispose();
+                        _handle = _cts.CancelAfterSlim(TimeSpan.FromSeconds(_timeoutSec), DelayType.Realtime);
+                    }
+                }
+                catch
+                {
+                    // WHY: a failed re-arm must never break or cancel the turn.
+                }
+            }
+
+            public void Dispose()
+            {
+                lock (_gate)
+                {
+                    _handle?.Dispose();
+                }
             }
         }
     }

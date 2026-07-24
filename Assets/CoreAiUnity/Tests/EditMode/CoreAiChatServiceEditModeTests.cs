@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
+using CoreAI.Messaging;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -418,6 +419,168 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        // ===================== Idle/no-progress timeout (whole-turn budget fix) =====================
+
+        /// <summary>
+        /// Regression: the timeout used to cover the whole turn, so several quick chunks whose durations
+        /// add up past <c>LlmRequestTimeoutSeconds</c> would cancel a perfectly healthy stream. Each yielded
+        /// chunk must re-arm the deadline, so only a real stall (no chunk for the full window) should time out.
+        /// </summary>
+        [UnityTest]
+        [Timeout(20000)]
+        public IEnumerator SendMessageStreamingAsync_SteadyChunksExceedingTotalWindow_DoesNotTimeOut()
+        {
+            float previousTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+            try
+            {
+                // 6 chunks * 80ms = ~480ms total, well past the 300ms idle window — but no single gap
+                // between chunks exceeds it, so the turn must complete without LlmOperationTimeoutException.
+                DelayedChunkOrchestrator orchestrator = new(
+                    new[] { "a", "b", "c", "d", "e", "f" }, TimeSpan.FromMilliseconds(80));
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.3f };
+                CoreAiChatService service = new(orchestrator, settings: settings);
+
+                List<string> received = new();
+                Exception failure = null;
+
+                async Task DriveAsync()
+                {
+                    try
+                    {
+                        await foreach (LlmStreamChunk chunk in service.SendMessageStreamingAsync("hi", "TestRole"))
+                        {
+                            if (!string.IsNullOrEmpty(chunk.Text))
+                            {
+                                received.Add(chunk.Text);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                }
+
+                Task drive = DriveAsync();
+
+                float deadline = Time.realtimeSinceStartup + 15f;
+                while (!drive.IsCompleted && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(drive.IsCompleted, "streaming should finish in real time while the game is paused.");
+                Assert.IsNull(failure, $"expected no timeout, got: {failure}");
+                CollectionAssert.AreEqual(new[] { "a", "b", "c", "d", "e", "f" }, received);
+            }
+            finally
+            {
+                Time.timeScale = previousTimeScale;
+            }
+        }
+
+        /// <summary>
+        /// A real stall (no chunk for the full idle window) must still time out — the per-chunk rearm must
+        /// not mask a genuinely stuck stream.
+        /// </summary>
+        [UnityTest]
+        [Timeout(20000)]
+        public IEnumerator SendMessageStreamingAsync_StallsAfterFirstChunk_ThrowsLlmOperationTimeoutException()
+        {
+            float previousTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+            try
+            {
+                StallAfterFirstChunkOrchestrator orchestrator = new();
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.2f };
+                CoreAiChatService service = new(orchestrator, settings: settings);
+
+                Exception failure = null;
+
+                async Task DriveAsync()
+                {
+                    try
+                    {
+                        await foreach (LlmStreamChunk _ in service.SendMessageStreamingAsync("hi", "TestRole"))
+                        {
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                }
+
+                Task drive = DriveAsync();
+
+                float deadline = Time.realtimeSinceStartup + 15f;
+                while (!drive.IsCompleted && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(drive.IsCompleted, "streaming should finish in real time while the game is paused.");
+                Assert.IsInstanceOf<LlmOperationTimeoutException>(failure);
+            }
+            finally
+            {
+                Time.timeScale = previousTimeScale;
+            }
+        }
+
+        /// <summary>
+        /// Regression (non-streaming path): a multi-tool-call turn whose steps add up past
+        /// <c>LlmRequestTimeoutSeconds</c> must not be cancelled — <see cref="CoreAi.OnToolCallStarted"/> and
+        /// <see cref="CoreAi.OnToolCallCompleted"/> for the request's RoleId must re-arm the deadline.
+        /// </summary>
+        [UnityTest]
+        [Timeout(20000)]
+        public IEnumerator SendMessageAsync_ToolCallProgressExceedingTotalWindow_DoesNotTimeOut()
+        {
+            float previousTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+            try
+            {
+                // 4 steps * 100ms = ~400ms total, past the 250ms idle window — but each individual gap
+                // between tool-call events stays under it.
+                ToolCallProgressOrchestrator orchestrator = new(steps: 4, delayPerStep: TimeSpan.FromMilliseconds(100));
+                StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.25f };
+                CoreAiChatService service = new(orchestrator, settings: settings);
+
+                string result = null;
+                Exception failure = null;
+
+                async Task DriveAsync()
+                {
+                    try
+                    {
+                        result = await service.SendMessageAsync("hi", "TestRole");
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                }
+
+                Task drive = DriveAsync();
+
+                float deadline = Time.realtimeSinceStartup + 15f;
+                while (!drive.IsCompleted && Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                }
+
+                Assert.IsTrue(drive.IsCompleted, "should finish in real time while the game is paused.");
+                Assert.IsNull(failure, $"expected no timeout, got: {failure}");
+                Assert.AreEqual("done", result);
+            }
+            finally
+            {
+                Time.timeScale = previousTimeScale;
+            }
+        }
+
         // ===================== Helpers =====================
 
         private sealed class StubSettings : ICoreAISettings
@@ -640,6 +803,106 @@ namespace CoreAI.Tests.EditMode
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+        }
+
+        /// <summary>Streams <paramref name="chunks"/> with a fixed real-time delay before each one.</summary>
+        private sealed class DelayedChunkOrchestrator : IAiOrchestrationService
+        {
+            private readonly string[] _chunks;
+            private readonly TimeSpan _delayBetweenChunks;
+
+            public DelayedChunkOrchestrator(string[] chunks, TimeSpan delayBetweenChunks)
+            {
+                _chunks = chunks;
+                _delayBetweenChunks = delayBetweenChunks;
+            }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                foreach (string c in _chunks)
+                {
+                    await Task.Delay(_delayBetweenChunks, ct);
+                    yield return new LlmStreamChunk { Text = c };
+                }
+
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+        }
+
+        /// <summary>Yields one immediate chunk, then stalls forever — the idle timeout must still fire.</summary>
+        private sealed class StallAfterFirstChunkOrchestrator : IAiOrchestrationService
+        {
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                yield return new LlmStreamChunk { Text = "first" };
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Simulates a multi-tool-call turn on the non-streaming path: fires
+        /// <see cref="CoreAi.OnToolCallStarted"/>/<see cref="CoreAi.OnToolCallCompleted"/> for
+        /// <see cref="AiTaskRequest.RoleId"/> around each simulated step, with a real-time delay per step.
+        /// </summary>
+        private sealed class ToolCallProgressOrchestrator : IAiOrchestrationService
+        {
+            private readonly int _steps;
+            private readonly TimeSpan _delayPerStep;
+
+            public ToolCallProgressOrchestrator(int steps, TimeSpan delayPerStep)
+            {
+                _steps = steps;
+                _delayPerStep = delayPerStep;
+            }
+
+            public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                for (int i = 0; i < _steps; i++)
+                {
+                    CoreAi.NotifyToolCallStarted(new LlmToolCallStarted("trace", request.RoleId, $"tool{i}", "{}"));
+                    await Task.Delay(_delayPerStep, ct);
+                    CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(
+                        "trace", request.RoleId, $"tool{i}", "{}", "{}", _delayPerStep.TotalMilliseconds));
+                }
+
+                return "done";
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                CancellationToken ct = default)
+            {
+                throw new NotSupportedException();
             }
 
             public void CancelTasks(string scopeId)

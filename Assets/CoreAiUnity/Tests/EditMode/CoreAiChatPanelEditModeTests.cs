@@ -590,6 +590,83 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Regression: switching the active agent/role cleared <see cref="CoreAiChatPanel.MessageScroll"/>
+        /// and reloaded only from the persisted store (per-role opt-in), so a live, unpersisted
+        /// conversation was lost the moment the user switched away and back. The panel now keeps an
+        /// in-memory per-role transcript cache that <c>HydrateStartupMessagesFromStore</c> falls back to.
+        /// </summary>
+        [Test]
+        public void HydrateStartupMessagesFromStore_RoleSwitch_RestoresPriorRoleTranscriptFromCache()
+        {
+            GameObject go = new("CoreAiChatPanel_RoleTranscriptCache_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                panel.SetRuntimeOptions(new CoreAiChatOptions { WelcomeMessage = "" });
+                SetPrivateField(panel, "MessageScroll", CreateAttachedMessageScroll(out panelHost, out panelSettings));
+                SetPrivateField(panel, "_activeRoleId", "RoleA");
+
+                panel.AddMessage("hello from A", true);
+                panel.AddMessage("hi, I'm A", false);
+                Assert.AreEqual(2, GetMessageScrollChildCount(panel), "RoleA messages rendered");
+
+                SetPrivateField(panel, "_activeRoleId", "RoleB");
+                InvokePrivate(panel, "HydrateStartupMessagesFromStore");
+                Assert.AreEqual(0, GetMessageScrollChildCount(panel),
+                    "RoleB has no persisted history, no cache yet, and no configured welcome message");
+
+                SetPrivateField(panel, "_activeRoleId", "RoleA");
+                InvokePrivate(panel, "HydrateStartupMessagesFromStore");
+
+                Assert.AreEqual(2, GetMessageScrollChildCount(panel),
+                    "RoleA transcript must be restored from the in-memory cache");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
+            }
+        }
+
+        [Test]
+        public void ClearChat_RemovesRoleFromTranscriptCache_SwitchBackDoesNotResurrectClearedMessages()
+        {
+            GameObject go = new("CoreAiChatPanel_ClearChat_CacheReset_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                panel.SetRuntimeOptions(new CoreAiChatOptions { WelcomeMessage = "" });
+                SetPrivateField(panel, "MessageScroll", CreateAttachedMessageScroll(out panelHost, out panelSettings));
+                SetPrivateField(panel, "_activeRoleId", "RoleA");
+
+                panel.AddMessage("hello from A", true);
+                Assert.AreEqual(1, GetMessageScrollChildCount(panel));
+
+                panel.ClearChat(true, false);
+                Assert.AreEqual(0, GetMessageScrollChildCount(panel), "cleared");
+
+                SetPrivateField(panel, "_activeRoleId", "RoleB");
+                InvokePrivate(panel, "HydrateStartupMessagesFromStore");
+                SetPrivateField(panel, "_activeRoleId", "RoleA");
+                InvokePrivate(panel, "HydrateStartupMessagesFromStore");
+
+                Assert.AreEqual(0, GetMessageScrollChildCount(panel),
+                    "a cleared role must not resurrect its old messages from the in-memory cache");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
+            }
+        }
+
         private static void SetPrivateField<T>(CoreAiChatPanel panel, string fieldName, T value)
         {
             typeof(CoreAiChatPanel)
@@ -620,6 +697,32 @@ namespace CoreAI.Tests.EditMode
             return (T)typeof(CoreAiChatPanel)
                 .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
                 .GetValue(panel);
+        }
+
+        /// <summary>
+        /// <see cref="ScrollView.schedule"/> (used by <c>ScrollToBottom</c>) needs a real panel, so message
+        /// bubbles can't be rendered into a detached <see cref="ScrollView"/> in EditMode — attach one the
+        /// same way <see cref="CreateAttachedLongRequestHint"/> does.
+        /// </summary>
+        private static ScrollView CreateAttachedMessageScroll(out GameObject panelHost, out PanelSettings panelSettings)
+        {
+            panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
+            panelHost = new GameObject("CoreAiChatPanel_MessageScroll_PanelHost_Test");
+            panelHost.SetActive(false);
+            UIDocument document = panelHost.AddComponent<UIDocument>();
+            document.panelSettings = panelSettings;
+            panelHost.SetActive(true);
+
+            ScrollView scroll = new();
+            document.rootVisualElement.Add(scroll);
+            return scroll;
+        }
+
+        private static int GetMessageScrollChildCount(CoreAiChatPanel panel)
+        {
+            return (int)typeof(CoreAiChatPanel)
+                .GetMethod("GetMessageScrollChildCount", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(panel, null);
         }
 
         private static void InvokePrivate(CoreAiChatPanel panel, string methodName)

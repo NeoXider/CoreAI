@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.World;
@@ -18,6 +20,49 @@ namespace CoreAI.Tests.EditMode
         {
             public void Publish(ApplyAiGameCommand command)
             {
+            }
+        }
+
+        private static bool HasTool(IReadOnlyList<ILlmTool> tools, string name)
+        {
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool != null && tool.Name == name)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [Test]
+        public void RegisterWorldCommands_AttachesWorldCommandTool_ToCreatorRole()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
+                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+                builder.RegisterInstance<ICoreAISettings>(settings);
+
+                builder.RegisterWorldCommands(registry);
+
+                using IObjectResolver container = builder.Build();
+                AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+
+                Assert.IsTrue(
+                    HasTool(policy.GetToolsForRole(BuiltInAgentRoleIds.Creator), "world_command"),
+                    "Creator must get world_command so it can build/spawn what its system prompt promises.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(settings);
             }
         }
 

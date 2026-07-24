@@ -13,11 +13,12 @@ using UnityEngine;
 namespace CoreAI.Vision
 {
     /// <summary>
-    /// Agent-vision tool: lets an LLM agent SEE the game (<c>camera_capture</c>), move its OWN camera
-    /// (<c>camera_look</c>), and enumerate cameras (<c>camera_list</c>). One <see cref="ILlmTool"/> named
-    /// <c>camera</c> expanding to three native MEAI functions. Capture is always read-only-safe on any
-    /// camera; movement is gated by the opt-in <see cref="CoreAiAgentCamera"/> marker so the player's
-    /// camera is never hijacked. See <c>Docs/CoreAI/agent-vision.md</c>.
+    /// Agent-vision tool: lets an LLM agent SEE the game (<c>camera_capture</c>, aliased as <c>screenshot</c>
+    /// for discoverability), move its OWN camera (<c>camera_look</c>), and enumerate cameras
+    /// (<c>camera_list</c>). One <see cref="ILlmTool"/> named <c>camera</c> expanding to four native MEAI
+    /// functions. Capture is always read-only-safe on any camera; movement is gated by the opt-in
+    /// <see cref="CoreAiAgentCamera"/> marker so the player's camera is never hijacked. See
+    /// <c>Docs/CoreAI/agent-vision.md</c>.
     /// </summary>
     public sealed class CameraLlmTool : IAIFunctionsLlmTool
     {
@@ -50,9 +51,23 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_capture",
                     Description =
-                        "Take a screenshot from a camera and return a compact JSON result with a text summary " +
-                        "and a base64 image data URL. Defaults to your own camera, else the main camera. Does " +
-                        "NOT move the camera."
+                        "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
+                        "Returns a compact JSON result with a text summary and a base64 image data URL. " +
+                        "Defaults to your own camera, else the main camera. Does NOT move the camera."
+                });
+
+            // WHY: models that search tools by the literal word "screenshot" miss camera_capture, so this
+            // alias exposes the identical capture behavior under a name that matches that search intent.
+            yield return AIFunctionFactory.Create(
+                (Func<string, int, CancellationToken, Task<string>>)CaptureCameraAsync,
+                new AIFunctionFactoryOptions
+                {
+                    Name = "screenshot",
+                    Description =
+                        "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
+                        "Alias for camera_capture: returns a compact JSON result with a text summary and a " +
+                        "base64 image data URL. Defaults to your own camera, else the main camera. Does NOT " +
+                        "move the camera."
                 });
 
             yield return AIFunctionFactory.Create(

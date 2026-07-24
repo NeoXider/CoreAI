@@ -180,10 +180,13 @@ namespace CoreAI.Ai.Hub
                 pickingMode = PickingMode.Ignore
             };
             _highlightOverlay.style.position = Position.Absolute;
-            // WHY: UI Toolkit lays out absolute children relative to the parent's content box (padding
-            // already applied), so a zero inset with zero own-padding lines the overlay text up with the
-            // input's glyphs; both share the inherited font and the field's 13px size, and both wrap at
-            // the same content width (WhiteSpace.Normal).
+            // WHY: UI Toolkit positions absolute children relative to the parent's padding box, not its
+            // content box, so a zero inset lands the overlay flush against the input's border — ignoring
+            // the input's own left/top padding (see HubModWidgets.StyleCodeField). That left the overlay
+            // (the only visible text; the real glyphs are made transparent below) rendered further left
+            // than the real text would be, and the clipped first ~character was cropped by the input's
+            // border. Giving the overlay the same padding as the input lines its text up with where the
+            // real glyphs would render, regardless of that box-model detail.
             _highlightOverlay.style.left = 0f;
             _highlightOverlay.style.top = 0f;
             _highlightOverlay.style.right = 0f;
@@ -192,10 +195,10 @@ namespace CoreAI.Ai.Hub
             _highlightOverlay.style.marginRight = 0f;
             _highlightOverlay.style.marginTop = 0f;
             _highlightOverlay.style.marginBottom = 0f;
-            _highlightOverlay.style.paddingLeft = 0f;
-            _highlightOverlay.style.paddingRight = 0f;
-            _highlightOverlay.style.paddingTop = 0f;
-            _highlightOverlay.style.paddingBottom = 0f;
+            _highlightOverlay.style.paddingLeft = 10f;
+            _highlightOverlay.style.paddingRight = 10f;
+            _highlightOverlay.style.paddingTop = 8f;
+            _highlightOverlay.style.paddingBottom = 8f;
             _highlightOverlay.style.whiteSpace = WhiteSpace.Normal;
             _highlightOverlay.style.unityTextAlign = TextAnchor.UpperLeft;
             _highlightOverlay.style.color = codeTextColor;

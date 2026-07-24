@@ -44,6 +44,24 @@ Items here are intentionally not active TODO checkboxes.
 > `WebGlLuaSelfTest` demo and `SecureLuaEnvironment.TryRunSelfTest` for an in-player smoke test. Remaining open
 > question: binary-size impact and how a host can prune unused bindings for the smallest web build.
 
+## Skill System (before MVP2)
+
+- **Multi-file skills the model can browse structurally.** Today one `SkillSet` = one `Instructions`
+  string, and `read_skill(name)` returns the whole blob. Add a third disclosure level like Claude Code
+  (a main doc + `references/*` read lazily): a skill assembled from several files/sections, the model
+  SEES the whole structure (index/table of contents) up front, and READS only the file/section it needs
+  on demand (e.g. `read_skill_section(name, section)` or a sub-doc index). Lets big references (the Rbx
+  API skill is already large) load in pieces instead of one dump.
+- **Skill self-improvement.** A mechanism for a skill to update/augment its own instructions from
+  experience (learned corrections, new patterns the agent discovered at runtime). Design after the
+  multi-file work; both land before MVP2.
+
+## UX / Mobile
+
+- **Mobile chat input preview above the keyboard.** On phones, typing into the chat field is awkward —
+  add a field shown directly above the on-screen keyboard mirroring what is being typed, so the text is
+  visible while the keyboard covers the chat. Deferred (low priority).
+
 ## Product Ideas
 
 - STT -> Agent -> TTS for NPCs.

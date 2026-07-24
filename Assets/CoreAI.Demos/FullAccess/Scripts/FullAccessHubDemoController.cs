@@ -18,13 +18,13 @@ namespace CoreAI.Demos
     /// Host for the Full Access demo Hub. Builds a <see cref="HubPageRegistry"/> and registers the three
     /// UI Toolkit demo pages (Full Access info, Full-mode mod, Lua platform) alongside the built-in
     /// Chat / Settings / Statistics pages and the live Mods page, then assigns the registry to the sibling
-    /// <see cref="CoreAiHubWindow"/>. It also preserves the behavior the old IMGUI controllers owned:
-    /// auto-creating the scene <c>TargetCube</c> and enabling the chat agent dropdown at startup.
+    /// <see cref="CoreAiHubWindow"/>. It also enables the chat agent dropdown at startup.
     /// </summary>
     [RequireComponent(typeof(CoreAiHubWindow))]
     public sealed class FullAccessHubDemoController : MonoBehaviour
     {
-        [Tooltip("Object the LLM / mods manipulate via unity_* APIs. Auto-created as 'TargetCube' when empty.")]
+        [Tooltip("Optional object the LLM / mods manipulate via unity_* APIs. Assign one to expose it as " +
+                 "'TargetCube'; nothing is auto-created, so the scene starts with an empty world.")]
         [SerializeField]
         private Transform targetCube;
 
@@ -46,7 +46,7 @@ namespace CoreAI.Demos
 
         private void Awake()
         {
-            EnsureTargetCube();
+            NormalizeAssignedTargetCube();
 
             Registry = new HubPageRegistry();
             Registry.Register(
@@ -92,21 +92,14 @@ namespace CoreAI.Demos
             yield return EnableAgentDropdownWhenReady();
         }
 
-        private void EnsureTargetCube()
+        private void NormalizeAssignedTargetCube()
         {
-            // Guarantee unity_find('TargetCube') resolves to something even on a bare scene, so the demo
-            // works out of the box once Full Lua access is enabled on the scope.
-            if (targetCube == null)
+            // WHY: the scene starts with an empty world — no cube is auto-spawned in the center. A target is
+            // used only when one is explicitly assigned in the inspector; the Full-tier unity_* demo and the
+            // agent create their own objects, and FullAccessInfoHubPage tolerates a null target.
+            if (targetCube != null && targetCube.name != "TargetCube")
             {
-                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(cube);
-                cube.name = "TargetCube";
-                cube.transform.position = new Vector3(0f, 0.5f, 0f);
-                targetCube = cube.transform;
-            }
-            else if (targetCube.name != "TargetCube")
-            {
-                // The prompts and mods refer to it by name; keep find-by-name reliable.
+                // The prompts and mods refer to it by name; keep find-by-name reliable when assigned.
                 targetCube.name = "TargetCube";
             }
         }

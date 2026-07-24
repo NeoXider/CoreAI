@@ -1,5 +1,37 @@
 # Changelog
 
+## [6.3.1] - 2026-07-24
+
+Bug-fix pass on the FullAccess demo and chat, from live-testing the Roblox/Lua mod flow on device.
+
+### Fixed
+
+- **Chat turn timeout no longer accumulates over consecutive tool calls.** The chat request timeout
+  (`LlmRequestTimeoutSeconds`) was a single deadline over the whole multi-step turn
+  (LLM → tool calls → LLM → …), so a turn that made several quick tool calls in a row was cancelled even
+  though every individual request was fast. It is now an **idle / no-progress** deadline: each streamed
+  chunk (streaming path) and each `OnToolCallStarted`/`OnToolCallCompleted` for the turn's role
+  (non-streaming path) re-arms it, so only a genuine stall times out. Per-request transport/decorator
+  timeouts are unchanged. (`CoreAiChatService`)
+- **Switching the chat agent/role no longer wipes the conversation.** Switching Programmer → Creator →
+  back cleared the transcript because the panel reloaded only from the per-role persisted store, which the
+  live session may not populate. The panel now keeps an in-memory per-role transcript and restores it on
+  switch (store still wins when it has data; Clear purges the role's cache too). (`CoreAiChatPanel`)
+- **The Creator role can now build the world.** `world_command` (`WorldLlmTool`) was never attached to any
+  role, though the Creator system prompt tells the model it has it — so "create a castle" fell back to
+  saving a blueprint to memory. It is now wired to the Creator role. The Programmer keeps building through
+  the Lua/Rbx surface. (`WorldCommandsInstaller`)
+- **The agent's screenshot capability is discoverable.** The vision capture tool was only named
+  `camera_capture`, so a model searching for a "screenshot" tool missed it and fell back to blind
+  read-only world queries. Added a `screenshot` alias (same capture) and made both descriptions lead with
+  "Take a screenshot … to SEE the current scene". (`CameraLlmTool`)
+- **FullAccess demo starts with an empty world** — the demo no longer auto-spawns a `TargetCube` in the
+  center on startup; a target is used only if one is assigned in the inspector (the info page tolerates
+  none). (`FullAccessHubDemoController`)
+- **Hub Mods tab: Lua code is no longer clipped on the left.** The syntax-highlight overlay was positioned
+  against the input's padding box with zero inset, cropping the first character of every line; it now
+  carries the same padding as the input so text lines up. (`HubModEditorPage`)
+
 ## [6.3.0] - 2026-07-23
 
 MVP1 "Roblox API" completion — a mod can now build, query, clone and destroy an instance tree,

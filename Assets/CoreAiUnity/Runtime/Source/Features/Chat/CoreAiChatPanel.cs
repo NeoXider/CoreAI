@@ -621,6 +621,14 @@ namespace CoreAI.Chat
         private readonly Dictionary<string, string> _profileIdByLabel = new(StringComparer.Ordinal);
         private const string AutomaticApiProfileLabel = "Automatic / agent default";
 
+        /// <summary>
+        /// Per-role rendered transcript, kept in memory regardless of store persistence. Switching agents
+        /// clears <see cref="MessageScroll"/> and reloads only from the persisted store, which is per-role
+        /// opt-in (<see cref="ICoreAiChatOptions.LoadPersistedChatOnStartup"/>); without this cache a
+        /// live, unpersisted conversation is lost the moment the user switches away and back.
+        /// </summary>
+        private readonly Dictionary<string, List<(string Text, bool IsUser)>> _roleTranscriptCache = new();
+
         /// <summary>The role currently driving the chat — the runtime-switched role when agent switching is
         /// active, otherwise the configured role. Used for history hydration, tool-call display, and stop/clear
         /// so switching agents re-targets the whole panel, not just outgoing requests.</summary>
@@ -1585,6 +1593,14 @@ namespace CoreAI.Chat
 
             TryAppendPersistedChatHistoryFromStore();
             if (GetMessageScrollChildCount() > 0)
+            {
+                ScrollToBottom();
+                return;
+            }
+
+            // WHY: the store may be unavailable or per-role opted out of LoadPersistedChatOnStartup — the
+            // in-memory cache still has this role's live session dialogue from before the last switch.
+            if (TryRestoreRoleTranscriptFromCache(ActiveRoleId))
             {
                 ScrollToBottom();
                 return;
@@ -2875,11 +2891,64 @@ namespace CoreAI.Chat
                 text = ClampAssistantForRender(text);
             }
 
+            AppendMessageBubble(text, isUser);
+            RecordRoleTranscriptMessage(ActiveRoleId, text, isUser);
+        }
+
+        /// <summary>
+        /// Renders one message bubble. Split out of <see cref="AddMessage"/> so per-role cache restore
+        /// (<see cref="TryRestoreRoleTranscriptFromCache"/>) can re-render already-recorded, already-filtered
+        /// text without appending duplicate entries back into <see cref="_roleTranscriptCache"/>.
+        /// </summary>
+        private void AppendMessageBubble(string text, bool isUser)
+        {
             HideTypingIndicator();
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
             MessageScroll.Add(bubble);
             ScrollToBottom();
+        }
+
+        private void RecordRoleTranscriptMessage(string roleId, string text, bool isUser)
+        {
+            if (string.IsNullOrEmpty(roleId))
+            {
+                return;
+            }
+
+            if (!_roleTranscriptCache.TryGetValue(roleId, out List<(string Text, bool IsUser)> messages))
+            {
+                messages = new List<(string Text, bool IsUser)>();
+                _roleTranscriptCache[roleId] = messages;
+            }
+
+            messages.Add((text, isUser));
+        }
+
+        /// <summary>
+        /// Re-renders <paramref name="roleId"/>'s cached transcript (if any) into the already-cleared
+        /// <see cref="MessageScroll"/>. Returns false when there is nothing cached, so callers can fall
+        /// back to the welcome message.
+        /// </summary>
+        private bool TryRestoreRoleTranscriptFromCache(string roleId)
+        {
+            if (MessageScroll == null || string.IsNullOrEmpty(roleId))
+            {
+                return false;
+            }
+
+            if (!_roleTranscriptCache.TryGetValue(roleId, out List<(string Text, bool IsUser)> messages) ||
+                messages.Count == 0)
+            {
+                return false;
+            }
+
+            foreach ((string text, bool isUser) in messages)
+            {
+                AppendMessageBubble(text, isUser);
+            }
+
+            return true;
         }
 
         private static bool IsToolLifecycleNotification(string text)
@@ -3505,6 +3574,9 @@ namespace CoreAI.Chat
                 }
 
                 string roleId = ActiveRoleId;
+                // WHY: keep the in-memory cache consistent with the now-empty scroll, otherwise switching
+                // away and back would resurrect the cleared conversation.
+                _roleTranscriptCache.Remove(roleId);
 
                 // WHY: the CoreAi facade may have no live scope; fall back to clearing history through
                 // the chat service so the visible transcript and persisted history stay in sync.

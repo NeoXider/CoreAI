@@ -4,6 +4,7 @@ using CoreAI.Audit;
 using CoreAI.Config;
 using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Config;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
@@ -102,6 +103,35 @@ namespace CoreAI.Composition
                 .AsSelf();
 
             RegisterAgentVision(builder);
+            RegisterCreatorWorldTool(builder);
+        }
+
+        /// <summary>
+        /// Attaches the native <c>world_command</c> tool (<see cref="WorldLlmTool"/>) to the built-in
+        /// Creator role. <see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Creator"/> tells the model it
+        /// has this tool to spawn/move/manipulate objects; without this wiring the role had no way to
+        /// build anything and fell back to text/memory only. The Programmer role builds through the
+        /// Lua/Rbx surface instead (see <c>CoreAiModsInstaller</c>) and is intentionally left unchanged.
+        /// </summary>
+        private static void RegisterCreatorWorldTool(IContainerBuilder builder)
+        {
+            builder.RegisterBuildCallback(container =>
+            {
+                try
+                {
+                    AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Creator,
+                        new WorldLlmTool(
+                            container.Resolve<ICoreAiWorldCommandExecutor>(),
+                            container.Resolve<ICoreAISettings>(),
+                            container.Resolve<IGameLogger>()));
+                }
+                catch (VContainerException)
+                {
+                    // WHY: Minimal containers (tests, headless tools) may omit the orchestration services;
+                    // the world tool is an additive convenience, not a requirement.
+                }
+            });
         }
 
         /// <summary>
