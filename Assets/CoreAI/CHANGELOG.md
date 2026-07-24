@@ -1,5 +1,49 @@
 # Changelog
 
+## [6.7.0] - 2026-07-24
+
+Prompt-delivery fix, a measured Lua guard optimization, and a full read-only audit of the Hub, core
+and Unity packages.
+
+### Fixed
+
+- **Built-in agent prompts never reached a Unity host.** `AgentPromptsInstaller` chains the
+  `Resources/AgentPrompts/System` provider *ahead* of the built-in one, so a prompt shipped there
+  permanently shadows its C# const — and the package shipped copies of seven built-in prompts. The
+  shipped `Programmer.txt` had already drifted: it was missing the "answer plain questions directly —
+  do NOT call `read_skill` or any tool for those" rule, the `report()/logic_*` globals list, and the
+  `Forbidden: io, os, require, load, loadfile, dofile, debug` line. Every Unity host was therefore
+  running an older Programmer prompt than the code said. The eight shadowing/dead assets are deleted
+  (`PlayerChat.txt` was dead outright — the role id became `PlainChat`), leaving
+  `DeveloperSampleAgent.txt`, which has no const. `Resources/AgentPrompts/System` is now purely the
+  consumer's override slot, as its own doc comment says. A new test,
+  `NoBuiltInRolePromptIsShadowedByAShippedResourceCopy`, fails if such a copy is reintroduced —
+  replacing two sibling tests that checked the const and the `.txt` separately and never that they
+  agree, which is why the drift went unnoticed.
+
+### Changed
+
+- **Lua execution guard: the wall clock is now sampled every 64th hook fire instead of every fire.**
+  Measured on this Editor's Mono, `Stopwatch.GetTimestamp()` costs ~44 ns against ~14 ns for the heap
+  read, i.e. it was ~76% of the work done inside a hook that fires every 4 VM instructions. The step
+  budget is still charged on every fire, so a runaway is cut exactly as before; the timeout is now
+  enforced to within one sampling window (~256 instructions) against budgets measured in seconds.
+  Guarded-execution overhead: 3.67× → 3.21× versus an unguarded VM.
+
+### Docs
+
+- `dev-docs/LUA_PERF_AUDIT_v6.6_2026-07.md` — measured Lua performance audit. Two findings worth
+  reading: the published Luau comparison was measured **without** the execution guard and therefore
+  understates the real gap by ~3.7×; and the guard's cost is dominated by the *number* of hook fires
+  (~600 ns per fire, the VM's async hook dispatch), not by the work inside the hook. Raising
+  `HookInstructionBatch` to 64 was measured at **1.21×** overhead (a 2.65× speedup) but deliberately
+  **not** shipped — the small batch is load-bearing for the allocation-bomb backstop. The document
+  specifies the adaptive-batch design that would capture the win safely, and the tests it needs.
+- `dev-docs/CODE_AUDIT_v6.6_2026-07.md` — read-only audit of `CoreAIHub`, `CoreAI` and `CoreAiUnity`:
+  correctness leads (a lock-ordering deadlock in `QueuedAiOrchestrator`, `OperationCanceledException`
+  retried as a provider fault, build guards that fail open, a non-atomic endpoint-registry save),
+  architecture-rule violations, and the highest-value missing tests. Backlog, not fixed.
+
 ## [6.6.0] - 2026-07-24
 
 `Roblox`→`Rbx` identifier cleanup across the C# codebase, plus two test/doc fixes carried over from 6.5.0.

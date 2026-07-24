@@ -98,6 +98,11 @@ namespace CoreAI.Sandbox.LuaCs
         // charges this many instructions to the step budget, so the SAME max-instruction limit holds.
         private const int HookInstructionBatch = 4;
 
+        // Hook fires between two wall-clock samples: the timeout is therefore enforced to within
+        // ClockCheckEveryHooks * HookInstructionBatch instructions. Only the ALLOCATION sampler needs the
+        // tight batch above (see the type doc); time is a linear budget measured in seconds.
+        private const int ClockCheckEveryHooks = 64;
+
         // WHY: Zero steady-state allocation. ExecuteGuarded ran hundreds of times per second would
         // otherwise allocate a fresh LuaFunction + capture closure + Stopwatch on EVERY call, churning
         // the single-threaded WebGL Boehm GC. Instead each call rents a reusable GuardHook (its
@@ -270,6 +275,7 @@ namespace CoreAI.Sandbox.LuaCs
             private int _timeoutMs;
             private long _maxAllocatedBytes;
             private long _allocBaseline;
+            private int _sinceClockCheck;
 
             public GuardHook()
             {
@@ -280,6 +286,7 @@ namespace CoreAI.Sandbox.LuaCs
             public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes)
             {
                 _steps = 0;
+                _sinceClockCheck = 0;
                 _maxSteps = maxSteps < 1 ? 1 : maxSteps;
                 _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
 
@@ -315,10 +322,21 @@ namespace CoreAI.Sandbox.LuaCs
                             $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})"));
                 }
 
-                if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                // WHY: The clock is sampled every ClockCheckEveryHooks fires, not every fire. Measured on
+                // this Editor's Mono, Stopwatch.GetTimestamp() costs ~44 ns against ~14 ns for the heap
+                // read below — it was ~76% of the hook's cost, and the hook fires every 4 instructions.
+                // The timeout is now enforced to within the wall time of one sampling window (~256
+                // instructions): microseconds for ordinary Lua work against budgets measured in seconds.
+                // A runaway loop executes millions of instructions, so it is still cut promptly, and the
+                // STEP budget above is charged on EVERY fire and is unaffected by this sampling.
+                if (++_sinceClockCheck >= ClockCheckEveryHooks)
                 {
-                    throw new LuaRuntimeException(ctx.State,
-                        new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
+                    _sinceClockCheck = 0;
+                    if (Stopwatch.GetTimestamp() - _startTimestamp > _timeoutTicks)
+                    {
+                        throw new LuaRuntimeException(ctx.State,
+                            new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
+                    }
                 }
 
                 // WHY: Allocation-bomb backstop: string.rep/string.format/table.concat are capped at their

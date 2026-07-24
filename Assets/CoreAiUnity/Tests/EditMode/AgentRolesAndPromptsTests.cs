@@ -82,28 +82,23 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(prompt.Contains("unity_create_primitive"));
         }
 
+        /// <summary>
+        /// The Resources layer is the CONSUMER's override slot and is chained ahead of the built-in
+        /// prompts, so a default prompt shipped there permanently shadows its C# const: edits to the
+        /// const would then never reach a Unity host. Shipping such a copy once let the Programmer
+        /// prompt drift silently (the shipped text lost the "answer plain questions directly, do NOT
+        /// call read_skill" rule), which is what this test exists to prevent recurring.
+        /// </summary>
         [Test]
-        public void ProgrammerResourcePrompt_PointsAtSkillsAndOmitsWorldBuildPrimitives()
+        public void NoBuiltInRolePromptIsShadowedByAShippedResourceCopy()
         {
-            TextAsset asset = Resources.Load<TextAsset>("AgentPrompts/System/Programmer");
-
-            Assert.IsNotNull(asset);
-            string prompt = asset.text;
-            StringAssert.Contains("read_skill('Rbx API')", prompt);
-            StringAssert.Contains("read_skill('Full Lua')", prompt);
-            StringAssert.Contains("coreai_world_find", prompt);
-            StringAssert.Contains("coreai_world_pos", prompt);
-            Assert.IsFalse(prompt.Contains("coreai_world_spawn"));
-            Assert.IsFalse(prompt.Contains("coreai_world_change"));
-            Assert.IsFalse(prompt.Contains("coreai_world_set_color"));
-            Assert.IsFalse(prompt.Contains("coreai_world_destroy"));
-            Assert.IsFalse(prompt.Contains("unity_list_objects"));
-            Assert.IsFalse(prompt.Contains("unity_set_member"));
-            StringAssert.Contains("Success/Output/Error", prompt);
-            StringAssert.Contains("print()", prompt);
-            StringAssert.Contains("GameObject.Find", prompt);
-            Assert.IsFalse(prompt.Contains("Light.intensity"));
-            Assert.IsFalse(prompt.Contains("unity_create_primitive"));
+            foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
+            {
+                TextAsset shipped = Resources.Load<TextAsset>("AgentPrompts/System/" + roleId);
+                Assert.IsNull(shipped,
+                    $"Resources/AgentPrompts/System/{roleId}.txt ships a copy of a built-in prompt and " +
+                    "shadows BuiltInAgentSystemPromptTexts. Edit the C# const instead and delete the asset.");
+            }
         }
 
         [Test]
