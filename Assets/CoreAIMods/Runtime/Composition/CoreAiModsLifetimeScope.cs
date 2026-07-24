@@ -39,11 +39,11 @@ namespace CoreAI.Composition
         private ScriptableObject blacklistPolicy;
 
         [Header("Rbx world")]
-        [Tooltip("Optional scene RobloxWorldHost. When set, the Rbx API (Instance.new/Part properties) " +
+        [Tooltip("Optional scene RbxWorldHost. When set, the Rbx API (Instance.new/Part properties) " +
                  "materializes parts as GameObjects under the host via its binder; when empty, the Rbx " +
                  "world is headless in-memory.")]
         [SerializeField]
-        private Mods.Rbx.Binding.RobloxWorldHost robloxWorldHost;
+        private Mods.Rbx.Binding.RbxWorldHost robloxWorldHost;
 
         [Header("Mod store")]
         [Tooltip("Optional namespace for this composition's persisted mods. Empty = the shared default " +

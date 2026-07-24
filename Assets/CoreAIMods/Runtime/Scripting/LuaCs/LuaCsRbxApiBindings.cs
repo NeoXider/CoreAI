@@ -6,7 +6,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
-using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;
+using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -21,14 +21,14 @@ namespace CoreAI.Ai.LuaCs
     /// <see cref="IScriptFunctionRegistry"/> seam; value globals use the Lua-CSharp registry's
     /// engine-specific value escape hatch, which is why this class lives in the adapter layer.
     /// </summary>
-    public sealed class LuaCsRobloxApiBindings
+    public sealed class LuaCsRbxApiBindings
     {
         private readonly InstanceRegistry _registry;
         private readonly RbxDataModel _game;
         private readonly RbxInstance _workspace;
         private readonly RbxEnumRegistry _enums;
         private readonly IPartPropertySink _partSink;
-        private readonly IRobloxCameraRig _cameraRig;
+        private readonly IRbxCameraRig _cameraRig;
         private readonly RbxUserInputService _userInputService;
         private readonly RbxRunService _runService;
         private readonly IClickPickSource _pickSource;
@@ -54,9 +54,9 @@ namespace CoreAI.Ai.LuaCs
         /// host's <see cref="UnityNewInputSource"/> to read real devices, or omit it for the
         /// headless in-memory default (tests drive it directly).
         /// </summary>
-        public LuaCsRobloxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
+        public LuaCsRbxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
-            IRobloxCameraRig cameraRig = null, IInputSource inputSource = null,
+            IRbxCameraRig cameraRig = null, IInputSource inputSource = null,
             ModConnectionRegistry connections = null, IClickPickSource pickSource = null)
         {
             _registry = registry ?? new InstanceRegistry();
@@ -119,7 +119,7 @@ namespace CoreAI.Ai.LuaCs
         public IPartPropertySink PartSink => _partSink;
 
         /// <summary>Camera seam behind workspace.CurrentCamera and the camera_* globals.</summary>
-        public IRobloxCameraRig CameraRig => _cameraRig;
+        public IRbxCameraRig CameraRig => _cameraRig;
 
         /// <summary>The shared UserInputService instance (input signals + poll surface).</summary>
         public RbxUserInputService UserInputService => _userInputService;
@@ -286,7 +286,7 @@ namespace CoreAI.Ai.LuaCs
             if (!(registry is LuaCsApiRegistry luaRegistry))
             {
                 throw new ArgumentException(
-                    "LuaCsRobloxApiBindings requires the Lua-CSharp registry adapter; a second " +
+                    "LuaCsRbxApiBindings requires the Lua-CSharp registry adapter; a second " +
                     "engine ships its own Roblox binding adapter next to it.", nameof(registry));
             }
 
@@ -298,17 +298,17 @@ namespace CoreAI.Ai.LuaCs
                 : OriginTag.FromConsole(
                     "session-" + Interlocked.Increment(ref _consoleInvocationCounter));
 
-            LuaCsRobloxModContext context =
-                new LuaCsRobloxModContext(this, capabilities, ownerModId, originTag);
+            LuaCsRbxModContext context =
+                new LuaCsRbxModContext(this, capabilities, ownerModId, originTag);
 
-            luaRegistry.RegisterValue("Vector3", LuaCsRobloxDatatypeBindings.BuildVector3Global);
-            luaRegistry.RegisterValue("Vector2", LuaCsRobloxDatatypeBindings.BuildVector2Global);
-            luaRegistry.RegisterValue("CFrame", LuaCsRobloxDatatypeBindings.BuildCFrameGlobal);
-            luaRegistry.RegisterValue("Color3", LuaCsRobloxDatatypeBindings.BuildColor3Global);
-            luaRegistry.RegisterValue("UDim", LuaCsRobloxDatatypeBindings.BuildUDimGlobal);
-            luaRegistry.RegisterValue("UDim2", LuaCsRobloxDatatypeBindings.BuildUDim2Global);
-            luaRegistry.RegisterValue("Random", LuaCsRobloxDatatypeBindings.BuildRandomGlobal);
-            luaRegistry.RegisterValue("Enum", () => LuaCsRobloxDatatypeBindings.BuildEnumGlobal(_enums));
+            luaRegistry.RegisterValue("Vector3", LuaCsRbxDatatypeBindings.BuildVector3Global);
+            luaRegistry.RegisterValue("Vector2", LuaCsRbxDatatypeBindings.BuildVector2Global);
+            luaRegistry.RegisterValue("CFrame", LuaCsRbxDatatypeBindings.BuildCFrameGlobal);
+            luaRegistry.RegisterValue("Color3", LuaCsRbxDatatypeBindings.BuildColor3Global);
+            luaRegistry.RegisterValue("UDim", LuaCsRbxDatatypeBindings.BuildUDimGlobal);
+            luaRegistry.RegisterValue("UDim2", LuaCsRbxDatatypeBindings.BuildUDim2Global);
+            luaRegistry.RegisterValue("Random", LuaCsRbxDatatypeBindings.BuildRandomGlobal);
+            luaRegistry.RegisterValue("Enum", () => LuaCsRbxDatatypeBindings.BuildEnumGlobal(_enums));
             luaRegistry.RegisterValue("game", () => context.WrapInstance(_game));
             luaRegistry.RegisterValue("workspace", () => context.WrapInstance(_workspace));
             // WHY: input reads are open at the Read tier (observing input mutates nothing); the
@@ -334,7 +334,7 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- camera_* convenience globals ---------------------------------------------------
 
-        private LuaFunction BuildCameraSetCFrame(LuaCsRobloxModContext context)
+        private LuaFunction BuildCameraSetCFrame(LuaCsRbxModContext context)
         {
             return Fn("camera_set_cframe", ctx =>
             {
@@ -345,7 +345,7 @@ namespace CoreAI.Ai.LuaCs
             });
         }
 
-        private LuaFunction BuildCameraFollow(LuaCsRobloxModContext context)
+        private LuaFunction BuildCameraFollow(LuaCsRbxModContext context)
         {
             return Fn("camera_follow", ctx =>
             {
@@ -357,7 +357,7 @@ namespace CoreAI.Ai.LuaCs
                     return LuaValue.Nil;
                 }
 
-                if (!TryGetInstance(target, out LuaCsRobloxInstanceProxy proxy))
+                if (!TryGetInstance(target, out LuaCsRbxInstanceProxy proxy))
                 {
                     throw RbxError.BadArgument(
                         "camera_follow expects an Instance or nil at argument 1",
@@ -372,7 +372,7 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- Instance.new -------------------------------------------------------------------
 
-        private LuaValue BuildInstanceGlobal(LuaCsRobloxModContext context)
+        private LuaValue BuildInstanceGlobal(LuaCsRbxModContext context)
         {
             LuaTable t = new();
             t["new"] = Fn("Instance.new", ctx =>
@@ -388,12 +388,12 @@ namespace CoreAI.Ai.LuaCs
                     {
                         context.HasLoggedInstanceNewParentDeprecation = true;
                         _log?.Invoke(
-                            "[RobloxApi] Instance.new(\"" + className + "\", parent) — the parent " +
+                            "[RbxApi] Instance.new(\"" + className + "\", parent) — the parent " +
                             "argument is deprecated by Roblox; set instance.Parent after " +
                             "configuring the instance instead. (Logged once per mod.)");
                     }
 
-                    if (!TryGetInstance(parentValue, out LuaCsRobloxInstanceProxy parent))
+                    if (!TryGetInstance(parentValue, out LuaCsRbxInstanceProxy parent))
                     {
                         instance.Destroy();
                         throw RbxError.BadArgument(
@@ -414,7 +414,7 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- task.* (MVP2 scheduler stubs) --------------------------------------------------
 
-        private LuaValue BuildTaskGlobal(LuaCsRobloxModContext context)
+        private LuaValue BuildTaskGlobal(LuaCsRbxModContext context)
         {
             LuaTable t = new();
             // TODO: MVP2 — ModScheduler + TaskLibrary replace these stubs.
@@ -432,7 +432,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     context.HasLoggedParallelNoOp = true;
                     _log?.Invoke(
-                        "[RobloxApi] task.synchronize/desynchronize are no-ops: CoreAI mods run " +
+                        "[RbxApi] task.synchronize/desynchronize are no-ops: CoreAI mods run " +
                         "single-threaded (DEV-5). (Logged once per mod.)");
                 }
 

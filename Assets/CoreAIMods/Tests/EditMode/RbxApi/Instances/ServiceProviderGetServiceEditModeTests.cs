@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>ServiceProvider semantics on the DataModel: registered container services
     /// resolve; planned services are loud NOT_IMPLEMENTED stubs naming their phase; unknown

@@ -5,34 +5,34 @@ using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
+namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
     /// <summary>
     /// Architecture-fitness tests for the Roblox datatypes Domain slice
     /// (ARCHITECTURE_RULES.md §5, mirroring ScriptingSeamHonestyEditModeTests):
-    /// the Datatypes assembly stays engine-free, and RobloxSpace remains THE single
+    /// the Datatypes assembly stays engine-free, and RbxSpace remains THE single
     /// Roblox-to-Unity conversion boundary (ROBLOX_API_ROADMAP.md D2 lint rule).
     /// </summary>
     [TestFixture]
-    public sealed class RobloxDatatypesFitnessEditModeTests
+    public sealed class RbxDatatypesFitnessEditModeTests
     {
         private static readonly Regex UnityUsing = new(
             @"^\s*using\s+(static\s+)?UnityEngine(\s*;|\s*\.)|(?<![\w.])UnityEngine\s*\.",
             RegexOptions.Compiled);
 
-        private static string RobloxApiRoot =>
+        private static string RbxApiRoot =>
             Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi");
 
         [Test]
         public void DatatypesDomain_HasNoUnityEngineReferences()
         {
-            string datatypesRoot = Path.Combine(RobloxApiRoot, "Datatypes");
+            string datatypesRoot = Path.Combine(RbxApiRoot, "Datatypes");
             Assert.IsTrue(Directory.Exists(datatypesRoot), $"Datatypes folder not found: {datatypesRoot}");
 
             List<string> offenders = ScanForUnityUsage(datatypesRoot, excluded: System.Array.Empty<string>());
             Assert.IsEmpty(offenders,
                 "The Roblox datatypes Domain must stay engine-free (ARCHITECTURE_RULES.md §1); " +
-                "move engine-touching code into the RobloxApi/Unity adapter:\n" +
+                "move engine-touching code into the RbxApi/Unity adapter:\n" +
                 string.Join("\n", offenders));
         }
 
@@ -40,7 +40,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
         public void DatatypesAsmdef_DeclaresEngineFreeDomain()
         {
             string asmdefPath = Path.Combine(
-                RobloxApiRoot, "Datatypes", "CoreAI.RbxApi.Datatypes.asmdef");
+                RbxApiRoot, "Datatypes", "CoreAI.RbxApi.Datatypes.asmdef");
             Assert.IsTrue(File.Exists(asmdefPath), $"asmdef not found: {asmdefPath}");
 
             string json = File.ReadAllText(asmdefPath);
@@ -64,27 +64,27 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
         }
 
         /// <summary>
-        /// The D2 lint rule (RobloxSpaceUsageLintTests in the roadmap): nothing in the RobloxApi
+        /// The D2 lint rule (RbxSpaceUsageLintTests in the roadmap): nothing in the RbxApi
         /// layer outside the Unity adapter folder may touch UnityEngine types, so no second
         /// Z-flip or scale factor can sneak in (the design's primary failure mode).
         /// </summary>
         [Test]
         public void D2_RobloxSpaceIsTheOnlyConversionBoundary()
         {
-            Assert.IsTrue(Directory.Exists(RobloxApiRoot), $"RobloxApi folder not found: {RobloxApiRoot}");
+            Assert.IsTrue(Directory.Exists(RbxApiRoot), $"RbxApi folder not found: {RbxApiRoot}");
 
-            // WHY: the roadmap allows exactly two engine-touching homes — the RobloxSpace
+            // WHY: the roadmap allows exactly two engine-touching homes — the RbxSpace
             // adapter (Unity/) and the GameObject binder's single call sites (Binding/, MVP1
-            // task 7); everything else in the RobloxApi layer stays engine-free.
+            // task 7); everything else in the RbxApi layer stays engine-free.
             var allowed = new[]
             {
-                NormalizeDir(Path.Combine(RobloxApiRoot, "Unity")),
-                NormalizeDir(Path.Combine(RobloxApiRoot, "Binding"))
+                NormalizeDir(Path.Combine(RbxApiRoot, "Unity")),
+                NormalizeDir(Path.Combine(RbxApiRoot, "Binding"))
             };
-            List<string> offenders = ScanForUnityUsage(RobloxApiRoot, allowed);
+            List<string> offenders = ScanForUnityUsage(RbxApiRoot, allowed);
             Assert.IsEmpty(offenders,
-                "Only the RobloxApi/Unity adapter (RobloxSpace + future binder) may use " +
-                "UnityEngine types — all spatial conversion goes through RobloxSpace (D2):\n" +
+                "Only the RbxApi/Unity adapter (RbxSpace + future binder) may use " +
+                "UnityEngine types — all spatial conversion goes through RbxSpace (D2):\n" +
                 string.Join("\n", offenders));
         }
 

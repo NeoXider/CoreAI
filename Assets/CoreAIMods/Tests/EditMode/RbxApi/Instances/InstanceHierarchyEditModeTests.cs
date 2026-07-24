@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Navigation and hierarchy rules (§5.1.8 items 3 and 4, R6.10) plus GetFullName.</summary>
     [TestFixture]

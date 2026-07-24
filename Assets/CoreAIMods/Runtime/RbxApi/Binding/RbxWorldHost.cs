@@ -5,18 +5,18 @@ using UnityEngine;
 namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
-    /// Scene entry point owning one Roblox world: configures RobloxSpace, wires the
+    /// Scene entry point owning one Roblox world: configures RbxSpace, wires the
     /// GameObject binder into a fresh InstanceRegistry, and bootstraps the canonical game
     /// tree. Explicit entry-point component per ARCHITECTURE_RULES.md §2 — no static
     /// singleton, no scene reflection; composition roots reference it directly and read
     /// <see cref="Registry"/>/<see cref="Game"/>/<see cref="Binder"/>.
     /// </summary>
     [ExecuteAlways]
-    public sealed class RobloxWorldHost : MonoBehaviour
+    public sealed class RbxWorldHost : MonoBehaviour
     {
         [SerializeField]
         [Tooltip("Meters per stud (D3, LOCKED default 0.28). Constant for the whole session.")]
-        private float _metersPerStud = RobloxSpace.DefaultMetersPerStud;
+        private float _metersPerStud = RbxSpace.DefaultMetersPerStud;
 
         [SerializeField]
         [Tooltip("Camera driven by workspace.CurrentCamera / camera_set_cframe. Empty = Camera.main, " +
@@ -30,7 +30,7 @@ namespace CoreAI.Mods.Rbx.Binding
         public InstanceGameObjectBinder Binder { get; private set; }
 
         /// <summary>Camera seam for the Lua surface; null when the scene has no camera at all.</summary>
-        public IRobloxCameraRig CameraRig { get; private set; }
+        public IRbxCameraRig CameraRig { get; private set; }
 
         /// <summary>Click-pick seam behind ClickDetector.MouseClick; null when the scene has no
         /// camera (nothing to raycast through).</summary>
@@ -62,7 +62,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            RobloxSpace.Configure(_metersPerStud);
+            RbxSpace.Configure(_metersPerStud);
             Binder = new InstanceGameObjectBinder(transform);
             Registry = new InstanceRegistry(null, Binder);
             Game = DataModelBootstrap.CreateGame(Registry);

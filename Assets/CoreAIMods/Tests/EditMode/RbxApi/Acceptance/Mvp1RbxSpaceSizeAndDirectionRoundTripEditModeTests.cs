@@ -3,24 +3,24 @@ using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
+namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
     /// <summary>
-    /// MVP1 acceptance round trips (§5.1.8 item 10) for the RobloxSpace members the position/
-    /// CFrame suite (RobloxSpaceRoundTripEditModeTests) does not cover: sizes (scaled, NO
+    /// MVP1 acceptance round trips (§5.1.8 item 10) for the RbxSpace members the position/
+    /// CFrame suite (RbxSpaceRoundTripEditModeTests) does not cover: sizes (scaled, NO
     /// mirror), directions (mirrored, NO scale), scalar lengths/accelerations, velocities, and
     /// the combined pose starting from the Unity side — property-style over seeded random
     /// spreads at both locked scales.
     /// </summary>
     [TestFixture]
-    public sealed class Mvp1RobloxSpaceSizeAndDirectionRoundTripEditModeTests
+    public sealed class Mvp1RbxSpaceSizeAndDirectionRoundTripEditModeTests
     {
         private const float Epsilon = 1e-3f;
 
         [TearDown]
         public void RestoreDefaultScale()
         {
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
 
         // ---- Sizes: stud <-> meter, no mirror ------------------------------------------------
@@ -29,12 +29,12 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         [TestCase(1f)]
         public void SizeRoundTrip_RobloxFirst(float scale)
         {
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(2026);
             for (int i = 0; i < 200; i++)
             {
                 var size = new RbxVector3(NextExtent(rng), NextExtent(rng), NextExtent(rng));
-                RbxVector3 roundTrip = RobloxSpace.SizeFromUnity(RobloxSpace.SizeToUnity(size));
+                RbxVector3 roundTrip = RbxSpace.SizeFromUnity(RbxSpace.SizeToUnity(size));
                 Assert.IsTrue(roundTrip.FuzzyEq(size, Epsilon), $"{size} -> {roundTrip} at scale {scale}");
             }
         }
@@ -43,12 +43,12 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         [TestCase(1f)]
         public void SizeRoundTrip_UnityFirst(float scale)
         {
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(6202);
             for (int i = 0; i < 200; i++)
             {
                 var size = new Vector3(NextExtent(rng), NextExtent(rng), NextExtent(rng));
-                Vector3 roundTrip = RobloxSpace.SizeToUnity(RobloxSpace.SizeFromUnity(size));
+                Vector3 roundTrip = RbxSpace.SizeToUnity(RbxSpace.SizeFromUnity(size));
                 Assert.Less((roundTrip - size).magnitude, Epsilon, $"{size} -> {roundTrip} at scale {scale}");
             }
         }
@@ -58,9 +58,9 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         {
             // WHY: sizes are extents, not positions — a mirrored size axis would turn every
             // Part inside-out. The z component must keep its sign in both directions.
-            RobloxSpace.ResetForTests(0.28f);
-            Assert.Greater(RobloxSpace.SizeToUnity(new RbxVector3(1f, 2f, 3f)).z, 0f);
-            Assert.Greater(RobloxSpace.SizeFromUnity(new Vector3(1f, 2f, 3f)).Z, 0f);
+            RbxSpace.ResetForTests(0.28f);
+            Assert.Greater(RbxSpace.SizeToUnity(new RbxVector3(1f, 2f, 3f)).z, 0f);
+            Assert.Greater(RbxSpace.SizeFromUnity(new Vector3(1f, 2f, 3f)).Z, 0f);
         }
 
         // ---- Directions: mirror, no scale ---------------------------------------------------
@@ -69,16 +69,16 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         [TestCase(1f)]
         public void DirectionRoundTrip_PreservesUnitLength_AtAnyScale(float scale)
         {
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(31337);
             for (int i = 0; i < 200; i++)
             {
                 RbxVector3 direction = new RbxVector3(
                     NextCoord(rng), NextCoord(rng), NextCoord(rng)).Unit;
-                Vector3 unity = RobloxSpace.DirectionToUnity(direction);
+                Vector3 unity = RbxSpace.DirectionToUnity(direction);
                 Assert.AreEqual(1f, unity.magnitude, Epsilon,
                     "directions must not pick up the stud scale");
-                RbxVector3 roundTrip = RobloxSpace.DirectionFromUnity(unity);
+                RbxVector3 roundTrip = RbxSpace.DirectionFromUnity(unity);
                 Assert.IsTrue(roundTrip.FuzzyEq(direction, Epsilon),
                     $"{direction} -> {roundTrip} at scale {scale}");
                 Assert.AreEqual(-direction.Z, unity.z, Epsilon, "chirality mirror on z only");
@@ -91,12 +91,12 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         [TestCase(1f)]
         public void VelocityRoundTrip_BothDirections(float scale)
         {
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(90210);
             for (int i = 0; i < 100; i++)
             {
                 var v = new RbxVector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
-                Assert.IsTrue(RobloxSpace.VelocityFromUnity(RobloxSpace.VelocityToUnity(v))
+                Assert.IsTrue(RbxSpace.VelocityFromUnity(RbxSpace.VelocityToUnity(v))
                     .FuzzyEq(v, Epsilon));
             }
         }
@@ -105,15 +105,15 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         [TestCase(1f)]
         public void LengthAndAccelerationRoundTrip(float scale)
         {
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(404);
             for (int i = 0; i < 100; i++)
             {
                 float studs = NextCoord(rng);
                 Assert.AreEqual(studs,
-                    RobloxSpace.LengthFromUnity(RobloxSpace.LengthToUnity(studs)), Epsilon);
+                    RbxSpace.LengthFromUnity(RbxSpace.LengthToUnity(studs)), Epsilon);
                 Assert.AreEqual(studs,
-                    RobloxSpace.AccelerationFromUnity(RobloxSpace.AccelerationToUnity(studs)),
+                    RbxSpace.AccelerationFromUnity(RbxSpace.AccelerationToUnity(studs)),
                     Epsilon);
             }
         }
@@ -126,15 +126,15 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         {
             // WHY: the CFrame suite proves Roblox->Unity->Roblox; a host object handed to a mod
             // takes the opposite path (FromUnity then ToUnityPose), so both closures are locked.
-            RobloxSpace.ResetForTests(scale);
+            RbxSpace.ResetForTests(scale);
             var rng = new System.Random(112);
             for (int i = 0; i < 100; i++)
             {
                 var position = new Vector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
                 Quaternion rotation = Quaternion.Euler(
                     NextAngle(rng), NextAngle(rng), NextAngle(rng));
-                RbxCFrame cf = RobloxSpace.FromUnity(position, rotation);
-                (Vector3 outPosition, Quaternion outRotation) = RobloxSpace.ToUnityPose(cf);
+                RbxCFrame cf = RbxSpace.FromUnity(position, rotation);
+                (Vector3 outPosition, Quaternion outRotation) = RbxSpace.ToUnityPose(cf);
                 Assert.Less((outPosition - position).magnitude, Epsilon,
                     $"iteration {i}: {position} -> {outPosition} at scale {scale}");
                 Assert.Less(Quaternion.Angle(rotation, outRotation), 0.05f,

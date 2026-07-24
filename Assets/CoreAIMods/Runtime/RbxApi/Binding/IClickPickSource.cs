@@ -7,7 +7,7 @@ namespace CoreAI.Mods.Rbx.Binding
     /// Click-pick seam for the Lua surface (ClickDetector.MouseClick): given a mouse screen
     /// position in Roblox convention (pixels, top-left origin), resolve the world instance under
     /// the cursor via a camera ray. Signatures are engine-free so the bindings layer never touches
-    /// UnityEngine types (D2 lint) — mirrors <see cref="IRobloxCameraRig"/>; the Unity adapter
+    /// UnityEngine types (D2 lint) — mirrors <see cref="IRbxCameraRig"/>; the Unity adapter
     /// converts the screen point, raycasts the physics world, and maps the hit collider back to an
     /// <see cref="InstanceId"/>.
     /// </summary>

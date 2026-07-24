@@ -15,10 +15,10 @@ namespace CoreAI.Infrastructure.Lua
     ///   <item>a bundled mod not yet in the store is <b>installed</b> (source + manifest, stamped
     ///   <see cref="LuaModManifest.Origin"/>/<see cref="LuaModManifest.SeededVersion"/>/
     ///   <see cref="LuaModManifest.SeededHash"/>);</item>
-    ///   <item>a newer bundled version <b>updates</b> a previously seeded, <em>unmodified</em> entry
-    ///   (the player's enabled/disabled choice is preserved);</item>
-    ///   <item>if the player edited the mod since it was seeded, the update is <b>not</b> forced вЂ” the
-    ///   entry is flagged <see cref="LuaModManifest.UpdateAvailable"/> instead;</item>
+    ///   <item>a strictly-newer bundled version <b>updates</b> a previously seeded entry — including one
+    ///   the player edited (bundled samples are canonical, so "bump the header version and it ships"),
+    ///   while the player's enabled/disabled choice is preserved and the prior source is retained in the
+    ///   store's revision history so a local edit is recoverable, not lost;</item>
     ///   <item>a same-or-older bundled version, or a user-authored mod that happens to share an id, is
     ///   <b>skipped</b>.</item>
     /// </list>

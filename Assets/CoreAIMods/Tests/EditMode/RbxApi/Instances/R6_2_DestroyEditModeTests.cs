@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Destroy semantics per R6.2/D6 at registry level (§5.1.8 item 6): parent nil and
     /// locked, recursive child destroy, record unregistered, tombstone reads (DEV-7).</summary>

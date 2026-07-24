@@ -2,12 +2,12 @@ using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
+namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
     /// <summary>
     /// Hand-verified golden fixtures pinning CFrame math to documented Roblox behavior:
     /// right-handed, LookVector = -Z (ROBLOX_API_ROADMAP.md D1, §5.1.1
-    /// RobloxSpaceGoldenFixtureTests half concerning pure CFrame chirality).
+    /// RbxSpaceGoldenFixtureTests half concerning pure CFrame chirality).
     /// </summary>
     [TestFixture]
     public sealed class RbxCFrameGoldenFixtureEditModeTests

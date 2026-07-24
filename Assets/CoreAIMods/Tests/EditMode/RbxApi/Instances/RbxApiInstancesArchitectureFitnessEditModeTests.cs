@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>
     /// Architecture-fitness tripwire (ARCHITECTURE_RULES.md §5, mirrors
@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Instances
     /// noEngineReferences: true with no assembly references.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxApiInstancesArchitectureFitnessEditModeTests
+    public sealed class RbxApiInstancesArchitectureFitnessEditModeTests
     {
         private static readonly Regex EngineUsing = new(
             @"^\s*using\s+(static\s+)?Unity(Engine|Editor)(\s*;|\s*\.)|\bUnity(Engine|Editor)\s*\.",

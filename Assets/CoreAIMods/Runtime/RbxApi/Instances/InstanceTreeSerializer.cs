@@ -8,7 +8,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Captures and restores instance subtrees with stable ids (roadmap §2, world file; Q3
     /// resolved: no remap table, ever). Capture is deterministic — preorder tree walk, sorted
     /// attributes and tags — so capture→restore→capture is byte-identical. The MVP3 world-file
-    /// serializer encodes these DTOs via RobloxJson; this class owns only the tree↔DTO mapping.
+    /// serializer encodes these DTOs via RbxJson; this class owns only the tree↔DTO mapping.
     /// </summary>
     public static class InstanceTreeSerializer
     {

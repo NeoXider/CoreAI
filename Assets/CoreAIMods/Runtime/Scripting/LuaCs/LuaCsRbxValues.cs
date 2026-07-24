@@ -13,10 +13,10 @@ namespace CoreAI.Ai.LuaCs
     /// the shared per-kind metatable; the box itself is a dumb holder so wrappers may be created
     /// freely (value identity is provided by <c>__eq</c> comparing the unwrapped values).
     /// </summary>
-    internal sealed class LuaCsRobloxValueBox : ILuaUserData
+    internal sealed class LuaCsRbxValueBox : ILuaUserData
     {
-        public LuaCsRobloxValueBox(object value, LuaTable metatable,
-            LuaCsRobloxModContext signalOwner = null)
+        public LuaCsRbxValueBox(object value, LuaTable metatable,
+            LuaCsRbxModContext signalOwner = null)
         {
             Value = value;
             Metatable = metatable;
@@ -32,7 +32,7 @@ namespace CoreAI.Ai.LuaCs
         /// <c>Connect</c>/<c>Once</c> connections are tracked for teardown; null for context-free
         /// wraps and one-off execution (no connection ownership to record).
         /// </summary>
-        public LuaCsRobloxModContext SignalOwner { get; }
+        public LuaCsRbxModContext SignalOwner { get; }
 
         public Span<LuaValue> UserValues => Span<LuaValue>.Empty;
     }
@@ -42,9 +42,9 @@ namespace CoreAI.Ai.LuaCs
     /// reference). Holds the live instance plus the owning mod context so member dispatch can
     /// enforce capabilities and attribute created children to the right owner.
     /// </summary>
-    internal sealed class LuaCsRobloxInstanceProxy : ILuaUserData
+    internal sealed class LuaCsRbxInstanceProxy : ILuaUserData
     {
-        public LuaCsRobloxInstanceProxy(RbxInstance instance, LuaCsRobloxModContext context,
+        public LuaCsRbxInstanceProxy(RbxInstance instance, LuaCsRbxModContext context,
             LuaTable metatable)
         {
             Instance = instance;
@@ -54,7 +54,7 @@ namespace CoreAI.Ai.LuaCs
 
         public RbxInstance Instance { get; }
 
-        public LuaCsRobloxModContext Context { get; }
+        public LuaCsRbxModContext Context { get; }
 
         public LuaTable Metatable { get; set; }
 
@@ -63,11 +63,11 @@ namespace CoreAI.Ai.LuaCs
 
     /// <summary>
     /// Shared plumbing for the Roblox Lua surface: guarded host functions that convert
-    /// <see cref="RbxError"/>/<see cref="RobloxApiStubException"/> into Lua errors preserving the
+    /// <see cref="RbxError"/>/<see cref="RbxApiStubException"/> into Lua errors preserving the
     /// §5.2.7 machine-parsable message verbatim, plus typed argument readers whose BAD_ARGUMENT
     /// fixes name the expected type and position.
     /// </summary>
-    internal static class LuaCsRobloxLua
+    internal static class LuaCsRbxLua
     {
         /// <summary>Builds a host function whose body may throw Roblox-layer errors.</summary>
         public static LuaFunction Fn(string name, Func<LuaFunctionExecutionContext, LuaValue> body)
@@ -121,12 +121,12 @@ namespace CoreAI.Ai.LuaCs
 
         public static LuaValue Box(object value, LuaTable metatable)
         {
-            return new LuaValue(new LuaCsRobloxValueBox(value, metatable));
+            return new LuaValue(new LuaCsRbxValueBox(value, metatable));
         }
 
         public static bool TryUnbox<T>(LuaValue value, out T result)
         {
-            if (value.TryRead(out LuaCsRobloxValueBox box) && box.Value is T typed)
+            if (value.TryRead(out LuaCsRbxValueBox box) && box.Value is T typed)
             {
                 result = typed;
                 return true;
@@ -136,7 +136,7 @@ namespace CoreAI.Ai.LuaCs
             return false;
         }
 
-        public static bool TryGetInstance(LuaValue value, out LuaCsRobloxInstanceProxy proxy)
+        public static bool TryGetInstance(LuaValue value, out LuaCsRbxInstanceProxy proxy)
         {
             return value.TryRead(out proxy) && proxy != null;
         }
@@ -231,12 +231,12 @@ namespace CoreAI.Ai.LuaCs
                 case LuaValueType.Table: return "table";
                 case LuaValueType.Function: return "function";
                 default:
-                    if (value.TryRead(out LuaCsRobloxValueBox box))
+                    if (value.TryRead(out LuaCsRbxValueBox box))
                     {
                         return DatatypeName(box.Value);
                     }
 
-                    return value.TryRead(out LuaCsRobloxInstanceProxy _) ? "Instance" : "userdata";
+                    return value.TryRead(out LuaCsRbxInstanceProxy _) ? "Instance" : "userdata";
             }
         }
 

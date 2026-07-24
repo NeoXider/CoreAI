@@ -6,7 +6,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using Lua;
 using Lua.Runtime;
-using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;
+using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -17,7 +17,7 @@ namespace CoreAI.Ai.LuaCs
     /// deterministic <c>Random</c>. Values cross the seam as tagged userdata with shared locked
     /// metatables (§5.1.5); the metatables are capability-free so they are process-wide statics.
     /// </summary>
-    internal static class LuaCsRobloxDatatypeBindings
+    internal static class LuaCsRbxDatatypeBindings
     {
         private static readonly LuaTable Vector3Meta = BuildVector3Meta();
         private static readonly LuaTable Vector2Meta = BuildVector2Meta();
@@ -34,7 +34,7 @@ namespace CoreAI.Ai.LuaCs
 
         // WHY: enum types/items are interned by the registry; interning the wrappers as well makes
         // raw identity (rawequal) match Roblox in addition to the __eq metamethod.
-        private static readonly ConditionalWeakTable<object, LuaCsRobloxValueBox> EnumWrappers = new();
+        private static readonly ConditionalWeakTable<object, LuaCsRbxValueBox> EnumWrappers = new();
 
         // ---- Wrap entry points --------------------------------------------------------------
 
@@ -59,8 +59,8 @@ namespace CoreAI.Ai.LuaCs
         /// can record the returned connection for teardown (RunService/UserInputService reads use this;
         /// the MVP2-stub signals stay context-free since connecting them throws before a connection exists).
         /// </summary>
-        public static LuaValue Wrap(RbxScriptSignal value, LuaCsRobloxModContext owner) =>
-            new LuaValue(new LuaCsRobloxValueBox(value, SignalMeta, owner));
+        public static LuaValue Wrap(RbxScriptSignal value, LuaCsRbxModContext owner) =>
+            new LuaValue(new LuaCsRbxValueBox(value, SignalMeta, owner));
 
         public static LuaValue Wrap(RbxScriptConnection value) => Box(value, ConnectionMeta);
 
@@ -69,13 +69,13 @@ namespace CoreAI.Ai.LuaCs
         public static LuaValue Wrap(RbxEnumItem item)
         {
             return new LuaValue(EnumWrappers.GetValue(item,
-                key => new LuaCsRobloxValueBox(key, EnumItemMeta)));
+                key => new LuaCsRbxValueBox(key, EnumItemMeta)));
         }
 
         public static LuaValue Wrap(RbxEnum enumType)
         {
             return new LuaValue(EnumWrappers.GetValue(enumType,
-                key => new LuaCsRobloxValueBox(key, EnumTypeMeta)));
+                key => new LuaCsRbxValueBox(key, EnumTypeMeta)));
         }
 
         // ---- Constructor globals (fresh tables per state) -----------------------------------
@@ -980,7 +980,7 @@ namespace CoreAI.Ai.LuaCs
             // against the torn-down mod one frame later (INSTANCE_DESTROYED). The owner rides on the
             // signal box (RunService/UserInputService reads wrap with context); a context-free wrap or a
             // mod-less one-off records nothing.
-            if (Arg(ctx, 0).TryRead(out LuaCsRobloxValueBox signalBox) && signalBox.SignalOwner != null)
+            if (Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox) && signalBox.SignalOwner != null)
             {
                 signalBox.SignalOwner.TrackConnection(connection);
             }
@@ -1013,7 +1013,7 @@ namespace CoreAI.Ai.LuaCs
                 catch (Exception ex)
                 {
                     CoreAI.Logging.Log.Instance.Error(
-                        "[RobloxApi] " + signalName + " handler failed: " + ex.Message);
+                        "[RbxApi] " + signalName + " handler failed: " + ex.Message);
                 }
             };
         }

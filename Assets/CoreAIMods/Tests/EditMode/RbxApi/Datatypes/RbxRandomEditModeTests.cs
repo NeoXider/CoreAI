@@ -3,7 +3,7 @@ using System.Linq;
 using CoreAI.Mods.Rbx.Datatypes;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
+namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
     /// <summary>
     /// Deterministic Random per the architecture rules (§3: RNG behind reproducible seams)
@@ -114,9 +114,9 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
         public void EmptyIntervals_RaiseBadArgument()
         {
             var rng = new RbxRandom(1);
-            var intEx = Assert.Throws<RobloxApiStubException>(() => rng.NextInteger(3, 1));
+            var intEx = Assert.Throws<RbxApiStubException>(() => rng.NextInteger(3, 1));
             Assert.AreEqual("BAD_ARGUMENT", intEx.Code);
-            var numEx = Assert.Throws<RobloxApiStubException>(() => rng.NextNumber(3.0, 1.0));
+            var numEx = Assert.Throws<RbxApiStubException>(() => rng.NextNumber(3.0, 1.0));
             Assert.AreEqual("BAD_ARGUMENT", numEx.Code);
         }
 

@@ -33,7 +33,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>
     /// Serializable record of one instance — the MVP3 world-file data model (roadmap §2, world
     /// file): stable ids from day one, owner/origin ledger metadata, tags and attributes.
-    /// Plain DTO by design; the JSON encoding arrives with RobloxJson (MVP2/MVP3).
+    /// Plain DTO by design; the JSON encoding arrives with RbxJson (MVP2/MVP3).
     /// </summary>
     [Serializable]
     public sealed class InstanceSnapshot

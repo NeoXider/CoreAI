@@ -4,12 +4,12 @@ using CoreAI.Mods.Rbx.Instances;
 namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
-    /// Engine-free <see cref="IRobloxCameraRig"/>: stores the camera pose in pure Roblox space
+    /// Engine-free <see cref="IRbxCameraRig"/>: stores the camera pose in pure Roblox space
     /// and records the follow target with no Unity camera behind it. The headless/solo default
     /// and the test double, mirroring <see cref="InMemoryPartPropertySink"/> for the camera seam
     /// so scripts drive the camera through the same API whether or not a live camera is wired.
     /// </summary>
-    public sealed class InMemoryCameraRig : IRobloxCameraRig
+    public sealed class InMemoryCameraRig : IRbxCameraRig
     {
         private RbxCFrame _cframe = RbxCFrame.Identity;
 

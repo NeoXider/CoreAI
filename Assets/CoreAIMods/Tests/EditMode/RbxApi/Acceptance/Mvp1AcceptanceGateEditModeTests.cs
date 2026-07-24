@@ -5,7 +5,7 @@ using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
+namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
     /// <summary>
     /// The MVP1 acceptance gate (ROBLOX_API_ROADMAP.md §5.1.8 headline): "a mod can build,

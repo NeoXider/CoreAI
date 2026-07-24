@@ -164,7 +164,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Newer_version_does_not_overwrite_player_edits_but_flags_update_available()
+        public void Newer_version_supersedes_local_edits_and_ships_the_canonical_bundle()
         {
             MemStore store = new();
             FakeSource v1 = new();
@@ -179,10 +179,12 @@ namespace CoreAI.Tests.EditMode
             v2.Add("welcome", "2.0.0", body: "report('v2')");
             BundledModSeeder.SeedResult r = new BundledModSeeder(store, new IBundledModSource[] { v2 }).Seed();
 
-            Assert.AreEqual(1, r.FlaggedForUpdate);
-            Assert.IsTrue(store.ManifestOf("welcome").UpdateAvailable);
-            StringAssert.Contains("my tweak", store.SourceOf("welcome"), "player edits must be preserved");
-            StringAssert.DoesNotContain("v2", store.SourceOf("welcome"));
+            // A strictly-newer bundled version is canonical and ships, superseding the local edit (the prior
+            // source stays recoverable from the store's revision history — not asserted by this in-memory fake).
+            Assert.AreEqual(1, r.Updated);
+            StringAssert.Contains("v2", store.SourceOf("welcome"));
+            Assert.AreEqual("2.0.0", store.ManifestOf("welcome").SeededVersion);
+            Assert.IsFalse(store.ManifestOf("welcome").UpdateAvailable);
         }
 
         [Test]

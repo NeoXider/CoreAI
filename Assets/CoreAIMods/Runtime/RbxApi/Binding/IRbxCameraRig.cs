@@ -7,9 +7,9 @@ namespace CoreAI.Mods.Rbx.Binding
     /// Camera seam for the Lua surface (workspace.CurrentCamera / camera_set_cframe /
     /// camera_follow): pose in Roblox space (studs, right-handed) plus a follow attachment.
     /// Signatures are engine-free so the bindings layer never touches UnityEngine types
-    /// (D2 lint); the Unity adapter converts through RobloxSpace.
+    /// (D2 lint); the Unity adapter converts through RbxSpace.
     /// </summary>
-    public interface IRobloxCameraRig
+    public interface IRbxCameraRig
     {
         /// <summary>Current camera pose as a Roblox-space CFrame.</summary>
         RbxCFrame GetCFrame();

@@ -6,12 +6,12 @@ using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Binding
+namespace CoreAI.Tests.EditMode.RbxApi.Binding
 {
     /// <summary>
     /// Unity materialization per D5/D3 (§5.1.8 items 2 and 11), mirroring the
     /// BackingBinderSeamEditModeTests contract with real GameObjects: hierarchy mirroring,
-    /// deactivate-not-destroy, destroy cleanup, name sync, and the golden RobloxSpace
+    /// deactivate-not-destroy, destroy cleanup, name sync, and the golden RbxSpace
     /// conversions at the locked 0.28 scale.
     /// </summary>
     [TestFixture]
@@ -27,7 +27,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         [SetUp]
         public void SetUp()
         {
-            RobloxSpace.ResetForTests(0.28f);
+            RbxSpace.ResetForTests(0.28f);
             _root = new GameObject("BinderTestRoot");
             _binder = new InstanceGameObjectBinder(_root.transform);
             _registry = new InstanceRegistry(null, _binder);
@@ -39,7 +39,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         {
             _game.Destroy();
             Object.DestroyImmediate(_root);
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
 
         private RbxInstance CreatePartInWorld()
@@ -271,7 +271,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
             _binder.SetCFrame(part.Id, cframe);
 
             Vector3 forward = BoundObject(part).transform.forward;
-            Vector3 expected = RobloxSpace.DirectionToUnity(cframe.LookVector);
+            Vector3 expected = RbxSpace.DirectionToUnity(cframe.LookVector);
             Assert.AreEqual(expected.x, forward.x, Epsilon);
             Assert.AreEqual(expected.y, forward.y, Epsilon);
             Assert.AreEqual(expected.z, forward.z, Epsilon);
@@ -283,7 +283,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         {
             // WHY: §5.1.8 item 11 — switching 0.28 <-> 1:1 touches zero assets; the same
             // binder code path must yield stud-numeric localScale at 1:1.
-            RobloxSpace.ResetForTests(1f);
+            RbxSpace.ResetForTests(1f);
             var root = new GameObject("OneToOneRoot");
             try
             {

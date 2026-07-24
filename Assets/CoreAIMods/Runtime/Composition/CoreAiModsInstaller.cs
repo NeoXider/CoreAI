@@ -80,24 +80,24 @@ namespace CoreAI.Composition
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
             builder.Register(c =>
             {
-                // WHY: a scene that references a RobloxWorldHost on its CoreAiModsLifetimeScope gets a
+                // WHY: a scene that references a RbxWorldHost on its CoreAiModsLifetimeScope gets a
                 // VISIBLE Rbx world - the host's registry/game/binder back the Lua surface, so
                 // Instance.new('Part') materializes a GameObject. Without a host the world stays
                 // headless in-memory (same API, no rendering). Initialize() is idempotent and safe
                 // before Awake ordering.
-                CoreAI.Mods.Rbx.Binding.RobloxWorldHost rbxHost = c.ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RobloxWorldHost>();
-                LuaCsRobloxApiBindings robloxApi;
+                CoreAI.Mods.Rbx.Binding.RbxWorldHost rbxHost = c.ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RbxWorldHost>();
+                LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
                     rbxHost.Initialize();
-                    robloxApi = new LuaCsRobloxApiBindings(
+                    rbxApi = new LuaCsRbxApiBindings(
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
                         pickSource: rbxHost.PickSource);
                 }
                 else
                 {
-                    robloxApi = new LuaCsRobloxApiBindings();
+                    rbxApi = new LuaCsRbxApiBindings();
                 }
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -119,7 +119,7 @@ namespace CoreAI.Composition
                 // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
                 // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
                 // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
-                RobloxApi = robloxApi,
+                RbxApi = rbxApi,
                 // WHY: the Programmer builds worlds via the Rbx surface and Lua mechanics, not the
                 // low-level coreai_world_* primitives; the WorldEdit capability itself stays granted
                 // because Instance.new requires it.
@@ -140,7 +140,7 @@ namespace CoreAI.Composition
                 // snapshot, so destroying while it prunes the registry is safe; RbxInstance.Destroy() is
                 // idempotent.
                 {
-                    CoreAI.Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = robloxApi?.Connections;
+                    CoreAI.Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = rbxApi?.Connections;
                     CoreAI.Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost?.Registry;
                     Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
@@ -214,7 +214,7 @@ namespace CoreAI.Composition
                     {
                         LuaCsModStack stack = container.Resolve<LuaCsModStack>();
                         LuaCsModRuntime runtime = stack.Runtime;
-                        LuaCsRobloxApiBindings stackRobloxApi = stack.GameplayBindings.RobloxApi;
+                        LuaCsRbxApiBindings stackRbxApi = stack.GameplayBindings.RbxApi;
 
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
                         tickerHolder[0] = tickerGo;
@@ -246,7 +246,7 @@ namespace CoreAI.Composition
                             // events and the RunService game-loop signals (Heartbeat/Stepped/
                             // RenderStepped) fire with the frame delta before mod dispatch each frame.
                             tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
-                                runtime, stackRobloxApi != null ? stackRobloxApi.PumpFrame : (System.Action<float>)null);
+                                runtime, stackRbxApi != null ? stackRbxApi.PumpFrame : (System.Action<float>)null);
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate

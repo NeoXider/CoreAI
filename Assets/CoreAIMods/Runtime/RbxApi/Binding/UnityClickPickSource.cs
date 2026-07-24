@@ -8,12 +8,12 @@ namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
     /// Unity adapter of <see cref="IClickPickSource"/> over the rendering camera and the GameObject
-    /// binder, resolved once at composition (RobloxWorldHost) — no scene searches in the pick path.
+    /// binder, resolved once at composition (RbxWorldHost) — no scene searches in the pick path.
     /// Mirrors <see cref="UnityCameraRig"/>: converts the Roblox top-left screen point to the
     /// camera's bottom-left screen space, casts a ray, and maps the nearest collider back to a world
     /// instance through <see cref="InstanceGameObjectBinder.TryGetInstanceId"/> (walking up the hit
     /// transform's ancestry so a Cylinder's Shape child or a nested visual still resolves to its
-    /// part). Distance is reported in studs through <see cref="RobloxSpace"/> (D2, this file is in
+    /// part). Distance is reported in studs through <see cref="RbxSpace"/> (D2, this file is in
     /// the lint-allowed Binding folder).
     /// </summary>
     public sealed class UnityClickPickSource : IClickPickSource
@@ -65,7 +65,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 if (_binder.TryGetInstanceId(t.gameObject, out InstanceId id))
                 {
                     hitId = id;
-                    distanceStuds = RobloxSpace.LengthFromUnity(hit.distance);
+                    distanceStuds = RbxSpace.LengthFromUnity(hit.distance);
                     return true;
                 }
             }

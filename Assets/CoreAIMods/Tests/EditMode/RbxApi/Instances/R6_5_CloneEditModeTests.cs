@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Clone per R6.5/D8 (§5.1.8 item 5): deep copy, Archivable rules, fresh ids,
     /// attributes and tags copy, clone parent is nil.</summary>

@@ -8,7 +8,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
     /// (ROBLOX_API_ROADMAP.md D1, LOCKED). Stored row-major; the matrix columns are the
     /// world-space axis vectors: column 0 = RightVector, column 1 = UpVector,
     /// column 2 = ZVector (so LookVector = -ZVector). World point = R * local + Position.
-    /// No Unity types appear here — conversion happens only in the RobloxSpace adapter.
+    /// No Unity types appear here — conversion happens only in the RbxSpace adapter.
     /// </summary>
     public readonly struct RbxCFrame : IEquatable<RbxCFrame>
     {
@@ -126,7 +126,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 case RbxRotationOrder.ZXY: return z * x * y;
                 case RbxRotationOrder.ZYX: return z * y * x;
                 default:
-                    throw RobloxApiStubException.BadArgument(
+                    throw RbxApiStubException.BadArgument(
                         $"Unknown RotationOrder '{order}'.",
                         "pass one of Enum.RotationOrder.XYZ/XZY/YZX/YXZ/ZXY/ZYX");
             }
@@ -381,7 +381,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             ZVector.FuzzyEq(other.ZVector, epsilon);
 
         /// <summary>
-        /// Rotation as quaternion components (x, y, z, w). Public because the RobloxSpace
+        /// Rotation as quaternion components (x, y, z, w). Public because the RbxSpace
         /// adapter needs it for the single-boundary handedness conversion.
         /// </summary>
         public (float qx, float qy, float qz, float qw) ToQuaternion()

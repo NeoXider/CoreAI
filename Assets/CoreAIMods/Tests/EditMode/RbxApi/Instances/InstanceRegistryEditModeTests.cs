@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Registry identity invariants per roadmap §3.3: one record per instance, any
     /// key resolves to the same record, ownership sweeps, and creation rules.</summary>

@@ -6,14 +6,14 @@ using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
+namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
     /// <summary>
     /// MVP1 golden fixture (§5.1.8): one canonical tree — a Folder with a Block, a Ball and a
     /// Wedge Part — built through the Lua surface, asserted against the expected registry
     /// records (unique server-partition ids in insertion order, owner attribution) and the
-    /// expected RobloxSpace-transposed Unity transforms; rebuilt at 1:1 to prove a scale switch
-    /// touches only the RobloxSpace constant, and rebuilt twice to prove id determinism.
+    /// expected RbxSpace-transposed Unity transforms; rebuilt at 1:1 to prove a scale switch
+    /// touches only the RbxSpace constant, and rebuilt twice to prove id determinism.
     /// </summary>
     [TestFixture]
     public sealed class Mvp1GoldenTreeFixtureEditModeTests

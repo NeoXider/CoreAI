@@ -12,19 +12,19 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using Newtonsoft.Json.Linq;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
+namespace CoreAI.Tests.EditMode.RbxApi.LiveCheck
 {
     /// <summary>
     /// Engine-free, NUnit-free driver for the Roblox MVP1 "does a real 4B model write working Lua
     /// against our surface" live check. Deliberately shared verbatim between the EditMode test
-    /// (<c>RobloxApi4BLiveCheckEditModeTests</c>) and the out-of-Unity console harness in the
+    /// (<c>RbxApi4BLiveCheckEditModeTests</c>) and the out-of-Unity console harness in the
     /// scratchpad, so the two exercise the identical prompt/execute/assert path against the same
-    /// production stack (<see cref="LuaCsModRuntimeFactory"/> + <see cref="LuaCsRobloxApiBindings"/>
+    /// production stack (<see cref="LuaCsModRuntimeFactory"/> + <see cref="LuaCsRbxApiBindings"/>
     /// + the real one-off <c>execute_lua</c> executor). Nothing here depends on UnityEngine at
     /// runtime — the Roblox world is the in-memory <see cref="InstanceRegistry"/> with no binder,
     /// so it runs under net8 too.
     /// </summary>
-    public static class RobloxApi4BLiveCheckRunner
+    public static class RbxApi4BLiveCheckRunner
     {
         public const string DefaultBaseUrl = "http://127.0.0.1:1234/v1";
         // WHY: the -mtp build emits answer tokens via multi-token prediction — far faster to first
@@ -124,7 +124,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
             public string Title;
             public string UserTask;
             /// <summary>Returns (ok, detail). Inspects the real world + executor output.</summary>
-            public Func<LuaCsRobloxApiBindings, LuaTool.LuaResult, (bool ok, string detail)> Verify;
+            public Func<LuaCsRbxApiBindings, LuaTool.LuaResult, (bool ok, string detail)> Verify;
         }
 
         public static IReadOnlyList<Scenario> Scenarios()
@@ -292,7 +292,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
 
                 // Fresh world per attempt so a retry is a clean re-attempt, not a diff against a
                 // half-built tree from the first try.
-                LuaCsRobloxApiBindings roblox = new();
+                LuaCsRbxApiBindings roblox = new();
                 LuaCsModStack stack = BuildStack(roblox);
 
                 LuaTool.LuaResult exec = await stack.ToolExecutor
@@ -342,27 +342,27 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
         public static async Task<LuaTool.LuaResult> RunLuaOnceAsync(
             string lua, CancellationToken cancellationToken = default)
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             return await stack.ToolExecutor.ExecuteAsync(lua, cancellationToken).ConfigureAwait(false);
         }
 
         // ---- Stack + HTTP + extraction helpers ------------------------------------------------
 
-        private static LuaCsModStack BuildStack(LuaCsRobloxApiBindings roblox)
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox)
         {
             // WorldEdit is part of LuaCapabilities.All, which is what production grants; Instance.new
-            // is only installed on the WorldEdit tier (see LuaCsRobloxApiBindings.Register).
+            // is only installed on the WorldEdit tier (see LuaCsRbxApiBindings.Register).
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new SilentGameLogger(),
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
         }
 
-        private static RbxInstance Workspace(LuaCsRobloxApiBindings roblox)
+        private static RbxInstance Workspace(LuaCsRbxApiBindings roblox)
         {
             return roblox.Game.FindFirstChildOfClass("Workspace");
         }
@@ -492,7 +492,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
             return s == null ? "<null>" : "'" + s.Replace("\n", " ").Replace("\r", " ") + "'";
         }
 
-        static RobloxApi4BLiveCheckRunner()
+        static RbxApi4BLiveCheckRunner()
         {
             _ = CultureInfo.InvariantCulture;
         }

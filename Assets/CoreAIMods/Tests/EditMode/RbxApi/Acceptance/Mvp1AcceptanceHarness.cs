@@ -8,7 +8,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
+namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
     /// <summary>
     /// Shared world for the MVP1 acceptance-gate suite (ROBLOX_API_ROADMAP.md §5.1.8): a real
@@ -26,20 +26,20 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
 
         public RbxDataModel Game { get; }
 
-        public LuaCsRobloxApiBindings Bindings { get; }
+        public LuaCsRbxApiBindings Bindings { get; }
 
         public LuaCsModStack Stack { get; }
 
         public Mvp1AcceptanceMemoryStore Store { get; }
 
-        public Mvp1AcceptanceWorld(float metersPerStud = RobloxSpace.DefaultMetersPerStud)
+        public Mvp1AcceptanceWorld(float metersPerStud = RbxSpace.DefaultMetersPerStud)
         {
-            RobloxSpace.ResetForTests(metersPerStud);
+            RbxSpace.ResetForTests(metersPerStud);
             Root = new GameObject("Mvp1AcceptanceRoot");
             Binder = new InstanceGameObjectBinder(Root.transform);
             Registry = new InstanceRegistry(null, Binder);
             Game = DataModelBootstrap.CreateGame(Registry);
-            Bindings = new LuaCsRobloxApiBindings(Registry, Game, partSink: Binder);
+            Bindings = new LuaCsRbxApiBindings(Registry, Game, partSink: Binder);
             Store = new Mvp1AcceptanceMemoryStore();
             Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -47,7 +47,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
                 ModStore = Store,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = Bindings
+                RbxApi = Bindings
             });
         }
 
@@ -65,7 +65,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         {
             Game.Destroy();
             UnityEngine.Object.DestroyImmediate(Root);
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
     }
 

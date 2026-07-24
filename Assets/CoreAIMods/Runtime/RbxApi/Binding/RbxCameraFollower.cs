@@ -8,7 +8,7 @@ namespace CoreAI.Mods.Rbx.Binding
     /// camera. The camera is never parented under the target, so destroying the followed part
     /// can never take the camera with it — a lost target simply stops the follow.
     /// </summary>
-    public sealed class RobloxCameraFollower : MonoBehaviour
+    public sealed class RbxCameraFollower : MonoBehaviour
     {
         public Transform Target { get; set; }
 

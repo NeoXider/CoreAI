@@ -6,7 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// Proof that mod-owned signal connections are Disconnected on teardown: a Heartbeat handler that
@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
     /// cleans up the connection instead of leaving it to fire one more frame against the torn-down mod.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxSignalConnectionTeardownEditModeTests
+    public sealed class RbxSignalConnectionTeardownEditModeTests
     {
         private SynchronizationContext _savedContext;
 
@@ -96,17 +96,17 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         /// CoreAiModsInstaller installs: disconnect a mod's connections on every reason, KEEPING the
         /// current generation on Reload (the replacement chunk has already re-Connected by then).
         /// </summary>
-        private static LuaCsModStack BuildWiredStack(out LuaCsRobloxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             var connections = new ModConnectionRegistry();
-            roblox = new LuaCsRobloxApiBindings(connections: connections);
+            roblox = new LuaCsRbxApiBindings(connections: connections);
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
                 ModStore = store,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
 
             stack.Runtime.ModTearingDown += (modId, reason) => connections.DisconnectOwnedBy(
@@ -118,7 +118,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Heartbeat_Connection_StopsFiring_AfterModUnload()
         {
             var store = new MemoryStore();
-            LuaCsModStack stack = BuildWiredStack(out LuaCsRobloxApiBindings roblox, store);
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
 
             stack.Runtime.LoadMod("m", @"
                 local rs = game:GetService('RunService')
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Reload_KeepsNewConnection_AndDropsOldGeneration()
         {
             var store = new MemoryStore();
-            LuaCsModStack stack = BuildWiredStack(out LuaCsRobloxApiBindings roblox, store);
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
 
             // WHY: each handler read-modify-writes the SHARED store key, so two live handlers advance it
             // by two per frame and one by exactly one — the value alone distinguishes "old gen still

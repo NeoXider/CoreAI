@@ -51,7 +51,7 @@ namespace CoreAI.Ai.LuaCs
         /// game/workspace). One shared instance means every mod and the one-off executor operate on
         /// the same instance world. Null = the Roblox globals are not installed.
         /// </summary>
-        public LuaCsRobloxApiBindings RobloxApi;
+        public LuaCsRbxApiBindings RbxApi;
 
         /// <summary>
         /// When false, the low-level WorldEdit build/edit APIs (<c>coreai_world_spawn</c>/... and the
@@ -189,7 +189,7 @@ namespace CoreAI.Ai.LuaCs
                 fullBlacklistPolicy: options.FullBlacklistPolicy,
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
                 capabilities: options.Capabilities,
-                robloxApi: options.RobloxApi,
+                rbxApi: options.RbxApi,
                 registerWorldEditBuildBindings: options.RegisterWorldEditBuildBindings);
 
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single

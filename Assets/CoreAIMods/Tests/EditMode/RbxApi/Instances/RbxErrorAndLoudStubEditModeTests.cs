@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>The §5.2.7 error contract (stable wire names, format, fix hints) and the
     /// §5.1.6 loud-stub inventory that belongs to the registry slice (§5.1.8 item 13):

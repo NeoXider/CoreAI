@@ -24,7 +24,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsWorldQueryBindings _worldQuery;
         private readonly LuaCsFullUnityRuntimeBindings _full;
         private readonly LuaCsInputRuntimeBindings _input;
-        private readonly LuaCsRobloxApiBindings _roblox;
+        private readonly LuaCsRbxApiBindings _roblox;
         private readonly bool _registerWorldEditBuildBindings;
         private readonly LuaCsLogicSlots _logicSlots = new();
 
@@ -39,7 +39,7 @@ namespace CoreAI.Ai.LuaCs
             IFullLuaAccessBlacklistPolicy fullBlacklistPolicy = null,
             bool allowNonPublicFullMembers = false,
             LuaCapabilities capabilities = LuaCapabilities.All,
-            LuaCsRobloxApiBindings robloxApi = null,
+            LuaCsRbxApiBindings rbxApi = null,
             bool registerWorldEditBuildBindings = true)
             : this(
                 logger,
@@ -56,7 +56,7 @@ namespace CoreAI.Ai.LuaCs
                 capabilities,
                 new LuaCsInputRuntimeBindings(),
                 new LuaCsDefaultRuntimeBindings(),
-                robloxApi,
+                rbxApi,
                 registerWorldEditBuildBindings)
         {
         }
@@ -72,7 +72,7 @@ namespace CoreAI.Ai.LuaCs
             LuaCapabilities capabilities = LuaCapabilities.All,
             LuaCsInputRuntimeBindings input = null,
             LuaCsDefaultRuntimeBindings defaultBindings = null,
-            LuaCsRobloxApiBindings robloxApi = null,
+            LuaCsRbxApiBindings rbxApi = null,
             bool registerWorldEditBuildBindings = true)
         {
             _capabilities = capabilities;
@@ -85,12 +85,12 @@ namespace CoreAI.Ai.LuaCs
             _worldQuery = worldQuery;
             _full = full;
             _input = input;
-            _roblox = robloxApi;
+            _roblox = rbxApi;
             _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
         }
 
         /// <summary>Optional Roblox API surface shared by every mod and the one-off executor.</summary>
-        public LuaCsRobloxApiBindings RobloxApi => _roblox;
+        public LuaCsRbxApiBindings RbxApi => _roblox;
 
         public LuaCapabilities Capabilities => _capabilities;
 

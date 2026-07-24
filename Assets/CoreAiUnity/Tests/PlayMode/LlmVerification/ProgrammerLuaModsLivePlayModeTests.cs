@@ -192,7 +192,7 @@ namespace CoreAI.Tests.PlayMode
                 Log = Log.Instance,
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
-                RobloxApi = new LuaCsRobloxApiBindings()
+                RbxApi = new LuaCsRbxApiBindings()
             });
 
             AgentMemoryPolicy policy = new();

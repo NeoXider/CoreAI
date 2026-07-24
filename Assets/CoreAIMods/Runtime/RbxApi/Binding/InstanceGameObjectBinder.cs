@@ -12,13 +12,13 @@ namespace CoreAI.Mods.Rbx.Binding
     /// GameObject; services parent under it; Folder/Model/Part nest under their instance parents.
     /// Semantics per D5: materialize on entering the scene (DataModel) subtree, DEACTIVATE (not
     /// destroy) on detach so re-parenting stays cheap, destroy on Destroy. Parts become unit-cube
-    /// primitives scaled by Size * RobloxSpace.MetersPerStud (asset rule, §2 — assets are never
+    /// primitives scaled by Size * RbxSpace.MetersPerStud (asset rule, §2 — assets are never
     /// rescaled, only numbers convert); services/Folder/Model become empty transforms. Storage
     /// services (ReplicatedStorage etc.) materialize INACTIVE so their subtrees never render or
     /// collide, mirroring Roblox where only Workspace content is the physical world; a Part
     /// re-parented out of Workspace slides under the inactive service GO and disappears
     /// automatically via Unity's activeInHierarchy. Every spatial conversion goes through
-    /// RobloxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
+    /// RbxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
     /// Shapes: Block maps to the unit cube, Ball to the unit sphere (both directly on the part
     /// GameObject, localScale = Size * MetersPerStud); Cylinder needs an axis correction, so its
     /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge uses a custom
@@ -198,7 +198,7 @@ namespace CoreAI.Mods.Rbx.Binding
             _bindings.Remove(record.Id);
             _partProperties.Remove(record.Id);
             // WHY: the DataModel's backing object is the host GameObject — teardown releases the
-            // materialized children but never the host itself (RobloxWorldHost owns its lifecycle).
+            // materialized children but never the host itself (RbxWorldHost owns its lifecycle).
             if (entry.OwnsGameObject)
             {
                 SafeDestroy(entry.GameObject);
@@ -394,12 +394,12 @@ namespace CoreAI.Mods.Rbx.Binding
         private static void ApplyTransform(BindingEntry entry, in PartProperties properties)
         {
             Transform transform = entry.GameObject.transform;
-            (Vector3 position, Quaternion rotation) = RobloxSpace.ToUnityPose(properties.CFrame);
+            (Vector3 position, Quaternion rotation) = RbxSpace.ToUnityPose(properties.CFrame);
             transform.SetPositionAndRotation(position, rotation);
             // WHY: for every shape the part root carries Size * MetersPerStud (D3); shape
             // primitives are authored so 1 local unit = 1 stud (Cylinder's child corrects
             // Unity's 2-unit-tall mesh, see BuildCylinderVisual).
-            transform.localScale = RobloxSpace.SizeToUnity(properties.Size);
+            transform.localScale = RbxSpace.SizeToUnity(properties.Size);
         }
 
         // ---- Shape materialization ----------------------------------------------------------

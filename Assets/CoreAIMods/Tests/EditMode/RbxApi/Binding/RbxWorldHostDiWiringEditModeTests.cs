@@ -14,30 +14,30 @@ using NUnit.Framework;
 using UnityEngine;
 using VContainer;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Binding
+namespace CoreAI.Tests.EditMode.RbxApi.Binding
 {
     /// <summary>
-    /// Proves the CoreAiModsInstaller DI seam end-to-end: when a <see cref="RobloxWorldHost"/> is
+    /// Proves the CoreAiModsInstaller DI seam end-to-end: when a <see cref="RbxWorldHost"/> is
     /// registered in the container, <c>RegisterCoreAiMods</c>' LuaCsModStack factory resolves it and
     /// builds the Rbx Lua surface over the host's registry/game with the host binder as part sink, so
     /// one-off <c>execute_lua</c> Instance.new('Part') materializes a real GameObject under the host
     /// transform (golden 0.28 pose). Without a host the same Lua stays headless in-memory.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxWorldHostDiWiringEditModeTests
+    public sealed class RbxWorldHostDiWiringEditModeTests
     {
         private const float Epsilon = 1e-4f;
 
         // WHY: the Lua-CSharp runtime bridges its async VM to a synchronous call site; detaching Unity's
         // SynchronizationContext lets VM continuations complete on the thread pool instead of deadlocking
-        // the blocked main thread (mirrors RobloxApiLuaBindingsEditModeTests).
+        // the blocked main thread (mirrors RbxApiLuaBindingsEditModeTests).
         private SynchronizationContext _savedContext;
         private CoreAISettingsAsset _settings;
 
         [SetUp]
         public void SetUp()
         {
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
             _savedContext = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(null);
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
@@ -48,15 +48,15 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         {
             SynchronizationContext.SetSynchronizationContext(_savedContext);
             Object.DestroyImmediate(_settings);
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
 
         [Test]
         public void HostRegistered_LuaPartMaterializesGameObject()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
-            GameObject hostGo = new("RobloxWorldHost");
-            RobloxWorldHost host = hostGo.AddComponent<RobloxWorldHost>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
             host.Initialize();
 
             ContainerBuilder builder = new();
@@ -104,7 +104,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
 
             ContainerBuilder builder = new();
             RegisterMinimalModStack(builder, registry);
-            // WHY: no RegisterInstance(host) — ResolveOrDefault<RobloxWorldHost>() yields null, so the
+            // WHY: no RegisterInstance(host) — ResolveOrDefault<RbxWorldHost>() yields null, so the
             // factory builds an in-memory Rbx surface with no part sink and nothing materializes.
 
             IObjectResolver container = builder.Build();
@@ -131,8 +131,8 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         public void UnloadMod_DestroysInstancesTheModOwned()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
-            GameObject hostGo = new("RobloxWorldHost");
-            RobloxWorldHost host = hostGo.AddComponent<RobloxWorldHost>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
             host.Initialize();
 
             ContainerBuilder builder = new();

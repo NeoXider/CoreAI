@@ -7,17 +7,17 @@ using UnityEngine;
 namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
-    /// Unity adapter of <see cref="IRobloxCameraRig"/> over one camera Transform, resolved once
-    /// at composition (RobloxWorldHost) — no scene searches in hot paths. Pose conversion goes
-    /// through RobloxSpace (D2, this file is inside the lint-allowed Binding folder). Follow
+    /// Unity adapter of <see cref="IRbxCameraRig"/> over one camera Transform, resolved once
+    /// at composition (RbxWorldHost) — no scene searches in hot paths. Pose conversion goes
+    /// through RbxSpace (D2, this file is inside the lint-allowed Binding folder). Follow
     /// resolves the target's backing GameObject through the binder and drives a
-    /// <see cref="RobloxCameraFollower"/> on the camera.
+    /// <see cref="RbxCameraFollower"/> on the camera.
     /// </summary>
-    public sealed class UnityCameraRig : IRobloxCameraRig
+    public sealed class UnityCameraRig : IRbxCameraRig
     {
         private readonly Transform _camera;
         private readonly InstanceGameObjectBinder _binder;
-        private readonly RobloxCameraFollower _follower;
+        private readonly RbxCameraFollower _follower;
 
         /// <summary><paramref name="binder"/> may be null for pose-only rigs; Follow then always
         /// reports the target as missing.</summary>
@@ -30,10 +30,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
             _camera = camera;
             _binder = binder;
-            _follower = camera.GetComponent<RobloxCameraFollower>();
+            _follower = camera.GetComponent<RbxCameraFollower>();
             if (_follower == null)
             {
-                _follower = camera.gameObject.AddComponent<RobloxCameraFollower>();
+                _follower = camera.gameObject.AddComponent<RbxCameraFollower>();
             }
 
             _follower.enabled = false;
@@ -41,12 +41,12 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public RbxCFrame GetCFrame()
         {
-            return RobloxSpace.FromUnity(_camera.position, _camera.rotation);
+            return RbxSpace.FromUnity(_camera.position, _camera.rotation);
         }
 
         public void SetCFrame(in RbxCFrame cframe)
         {
-            (Vector3 position, Quaternion rotation) = RobloxSpace.ToUnityPose(cframe);
+            (Vector3 position, Quaternion rotation) = RbxSpace.ToUnityPose(cframe);
             _camera.SetPositionAndRotation(position, rotation);
             if (_follower.enabled && _follower.Target != null)
             {

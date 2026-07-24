@@ -102,7 +102,7 @@ namespace CoreAI.Tests.EditMode
                 CommandSink = sink,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = new LuaCsRobloxApiBindings(),
+                RbxApi = new LuaCsRbxApiBindings(),
                 RegisterWorldEditBuildBindings = registerWorldEditBuildBindings
             });
         }

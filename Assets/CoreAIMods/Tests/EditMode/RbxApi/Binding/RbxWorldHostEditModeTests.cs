@@ -4,22 +4,22 @@ using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Binding
+namespace CoreAI.Tests.EditMode.RbxApi.Binding
 {
     /// <summary>Scene entry point wiring: one host = one registry + binder + game tree,
     /// no statics (ARCHITECTURE_RULES.md §2).</summary>
     [TestFixture]
-    public sealed class RobloxWorldHostEditModeTests
+    public sealed class RbxWorldHostEditModeTests
     {
         private GameObject _hostGo;
-        private RobloxWorldHost _host;
+        private RbxWorldHost _host;
 
         [SetUp]
         public void SetUp()
         {
-            RobloxSpace.ResetForTests();
-            _hostGo = new GameObject("RobloxWorldHost");
-            _host = _hostGo.AddComponent<RobloxWorldHost>();
+            RbxSpace.ResetForTests();
+            _hostGo = new GameObject("RbxWorldHost");
+            _host = _hostGo.AddComponent<RbxWorldHost>();
             _host.Initialize();
         }
 
@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
                 Object.DestroyImmediate(_hostGo);
             }
 
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
 
         [Test]

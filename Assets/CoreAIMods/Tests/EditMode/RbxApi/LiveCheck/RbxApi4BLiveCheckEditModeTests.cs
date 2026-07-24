@@ -2,17 +2,17 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
+namespace CoreAI.Tests.EditMode.RbxApi.LiveCheck
 {
     /// <summary>
     /// LIVE check (environment-gated, never fails CI): proves a real small model — the local
     /// LM Studio <c>qwen_qwen3.5-4b</c> by default — can write working Lua against the Roblox MVP1
     /// surface as wired in production. Each test builds the REAL mod stack
-    /// (<c>LuaCsModRuntimeFactory</c> + <c>LuaCsRobloxApiBindings</c> with WorldEdit), asks the model
+    /// (<c>LuaCsModRuntimeFactory</c> + <c>LuaCsRbxApiBindings</c> with WorldEdit), asks the model
     /// with a MINIMAL honest skill excerpt, runs the returned Lua through the real one-off
     /// <c>execute_lua</c> executor, and asserts on ACTUAL world state via the registry. One
     /// error-fed retry per scenario probes whether our <c>CODE | fix</c> error format helps the 4B
-    /// self-correct. The whole flow lives in <see cref="RobloxApi4BLiveCheckRunner"/> so the
+    /// self-correct. The whole flow lives in <see cref="RbxApi4BLiveCheckRunner"/> so the
     /// out-of-Unity console harness runs the identical path.
     ///
     /// <para>Self-skips via <see cref="Assert.Ignore(string)"/> when the endpoint/model is
@@ -26,13 +26,13 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
     // model answered — a 4B reasoning model can burn several minutes in reasoning_content per call,
     // and a scenario is up to two calls. 30 min covers 2 x 600s HTTP timeouts plus execution.
     [Timeout(1_800_000)]
-    public sealed class RobloxApi4BLiveCheckEditModeTests
+    public sealed class RbxApi4BLiveCheckEditModeTests
     {
         private SynchronizationContext _savedContext;
 
         /// <summary>Detach Unity's SynchronizationContext so the executor's awaited continuations
         /// complete on the thread pool rather than deadlocking the editor thread (same hazard the
-        /// sibling RobloxApiLuaBindingsEditModeTests guards against).</summary>
+        /// sibling RbxApiLuaBindingsEditModeTests guards against).</summary>
         [SetUp]
         public void DetachSynchronizationContext()
         {
@@ -54,7 +54,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
 
         private static async Task RequireEndpointAsync()
         {
-            (bool available, string reason) = await RobloxApi4BLiveCheckRunner.ProbeAsync();
+            (bool available, string reason) = await RbxApi4BLiveCheckRunner.ProbeAsync();
             if (!available)
             {
                 Assert.Ignore(
@@ -85,12 +85,12 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LiveCheck
         {
             await RequireEndpointAsync();
 
-            RobloxApi4BLiveCheckRunner.Scenario scenario =
-                RobloxApi4BLiveCheckRunner.Scenarios()[index];
-            RobloxApi4BLiveCheckRunner.ScenarioResult result =
-                await RobloxApi4BLiveCheckRunner.RunScenarioAsync(scenario);
+            RbxApi4BLiveCheckRunner.Scenario scenario =
+                RbxApi4BLiveCheckRunner.Scenarios()[index];
+            RbxApi4BLiveCheckRunner.ScenarioResult result =
+                await RbxApi4BLiveCheckRunner.RunScenarioAsync(scenario);
 
-            TestContext.WriteLine(RobloxApi4BLiveCheckRunner.FormatTranscript(result));
+            TestContext.WriteLine(RbxApi4BLiveCheckRunner.FormatTranscript(result));
 
             Assert.IsTrue(result.Passed,
                 $"4B failed scenario '{scenario.Id}' after {result.Attempts.Count} attempt(s). " +

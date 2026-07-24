@@ -54,7 +54,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (min > max)
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "NextNumber interval is empty.",
                     $"pass max >= min (got min={min}, max={max})");
             }
@@ -67,7 +67,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (min > max)
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "NextInteger interval is empty.",
                     $"pass max >= min (got min={min}, max={max})");
             }
@@ -109,7 +109,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (list == null)
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "Shuffle expects a table.",
                     "pass an array-like table at argument 1");
             }

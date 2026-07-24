@@ -6,7 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// Proof of the ClickDetector wiring through the REAL mod runtime for the parts that do not need
@@ -16,7 +16,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
     /// MaxActivationDistance round-trips, and a mod's MouseClick connection is dropped on unload.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxClickDetectorLuaBindingsEditModeTests
+    public sealed class RbxClickDetectorLuaBindingsEditModeTests
     {
         private SynchronizationContext _savedContext;
 
@@ -92,7 +92,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             }
         }
 
-        private static LuaCsModStack BuildStack(LuaCsRobloxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -100,16 +100,16 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 ModStore = store,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
         }
 
         /// <summary>Same wiring as the CoreAiModsInstaller / the connection-teardown fixture: a shared
         /// ledger plus the ModTearingDown sweep that disconnects a mod's connections on unload.</summary>
-        private static LuaCsModStack BuildWiredStack(out LuaCsRobloxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             var connections = new ModConnectionRegistry();
-            roblox = new LuaCsRobloxApiBindings(connections: connections);
+            roblox = new LuaCsRbxApiBindings(connections: connections);
             LuaCsModStack stack = BuildStack(roblox, store);
             stack.Runtime.ModTearingDown += (modId, reason) => connections.DisconnectOwnedBy(
                 modId, keepCurrentGeneration: reason == LuaModTeardownReason.Reload);
@@ -118,7 +118,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
 
         // WHY: the pick pump resolves the clicked part's ClickDetector child from C#; the tests fire
         // that same signal directly (the raycast that selects it is a Play Mode concern).
-        private static RbxClickDetector FindClickDetector(LuaCsRobloxApiBindings roblox)
+        private static RbxClickDetector FindClickDetector(LuaCsRbxApiBindings roblox)
         {
             foreach (RbxInstance descendant in roblox.Game.GetDescendants())
             {
@@ -134,7 +134,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_ClickDetector_IsCreatable_AndParentsUnderPart()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -159,7 +159,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_ClickDetector_MaxActivationDistance_DefaultsTo32_AndRoundTrips()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -176,7 +176,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_ClickDetector_MouseClick_ConnectHandler_FiresOnHostFire()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -208,7 +208,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void ClickDetector_MouseClick_Connection_IsDropped_OnModUnload()
         {
             var store = new MemoryStore();
-            LuaCsModStack stack = BuildWiredStack(out LuaCsRobloxApiBindings roblox, store);
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
 
             stack.Runtime.LoadMod("m", @"
                 local part = Instance.new('Part')

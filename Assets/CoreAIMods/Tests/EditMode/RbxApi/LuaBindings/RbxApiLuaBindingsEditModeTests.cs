@@ -11,7 +11,7 @@ using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// End-to-end proof of the Roblox MVP1 Lua surface (roadmap §5.1.3) through the REAL mod
@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
     /// capability gating. Test names cite rule ids where one applies (§6.6).
     /// </summary>
     [TestFixture]
-    public sealed class RobloxApiLuaBindingsEditModeTests
+    public sealed class RbxApiLuaBindingsEditModeTests
     {
         private SynchronizationContext _savedContext;
 
@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             }
         }
 
-        private static LuaCsModStack BuildStack(LuaCsRobloxApiBindings roblox,
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox,
             MemoryStore store = null, LuaCapabilities caps = LuaCapabilities.All)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -106,7 +106,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 ModStore = store ?? new MemoryStore(),
                 Capabilities = caps,
                 OneOffCapabilities = caps,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
         }
 
@@ -126,7 +126,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Vector3_ConstructorsOperatorsAndTostring()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local p = Vector3.new(1, 2, 3)
                 assert(p.X == 1 and p.Y == 2 and p.Z == 3)
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_CFrame_MathMatchesPureSpec()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local function near(a, b) return math.abs(a - b) < 1e-4 end
                 local cf = CFrame.new(0, 5, 0) * CFrame.Angles(0, math.pi / 2, 0)
@@ -176,7 +176,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Color3_UDim2_Vector2_ConstructorsAndMembers()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local c = Color3.fromRGB(255, 0, 0)
                 assert(c.R == 1 and c.G == 0 and c.B == 0)
@@ -200,7 +200,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Enum_AccessIdentityAndGetEnumItems()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 assert(Enum.Material.Wood.Value == 512)
                 assert(Enum.Material.Wood.Name == 'Wood')
@@ -217,7 +217,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Enum_UnknownEnum_RaisesLoudStub()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
             // until TweenService (MVP8), so it is the loud-stub probe now.
             Exception ex = LoadFails(stack, "m", "local k = Enum.EasingStyle");
@@ -228,7 +228,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Enum_UnknownItem_RaisesBadArgument()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", "local k = Enum.Material.Bogus");
             StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
             StringAssert.Contains("'Bogus' is not a valid member of Enum.Material", FullText(ex));
@@ -237,7 +237,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Random_DeterministicFromSeed()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local a = Random.new(42)
                 local b = Random.new(42)
@@ -261,7 +261,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_InstanceNew_CreatesParentsAndNavigates()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("m", @"
                 local f = Instance.new('Folder')
@@ -295,7 +295,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_InstanceNew_DeprecatedParentArgument_WorksAndLogsOnce()
         {
             List<string> log = new();
-            LuaCsRobloxApiBindings roblox = new(log: log.Add);
+            LuaCsRbxApiBindings roblox = new(log: log.Add);
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("m", @"
                 local a = Instance.new('Folder', workspace)
@@ -318,7 +318,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_InstanceNew_NonCreatableClass_RaisesRobloxErrorShape()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", "Instance.new('Workspace')");
             StringAssert.Contains("Unable to create an Instance of type 'Workspace'", FullText(ex));
             StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
@@ -327,7 +327,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_GetService_PlannedService_RaisesPhaseNamingStub()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: RunService is implemented now; HttpService is still an MVP2-gated planned service.
             Exception ex = LoadFails(stack, "m", "game:GetService('HttpService')");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
@@ -337,7 +337,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_GetService_UnknownService_RaisesExactRobloxText()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", "game:GetService('Bogus')");
             StringAssert.Contains("Bogus is not a valid Service name", FullText(ex));
             StringAssert.Contains("UNKNOWN_SERVICE", FullText(ex));
@@ -346,7 +346,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_UnknownMember_RaisesValidMemberError()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", "local x = workspace.NoSuchChildHere");
             StringAssert.Contains(
                 "NoSuchChildHere is not a valid member of Workspace \"Workspace\"", FullText(ex));
@@ -355,7 +355,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_ModOwnership_OriginTagAndOwnerRecorded()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("mymod", @"
                 local f = Instance.new('Folder')
@@ -378,7 +378,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_OneOffExecutor_GetsConsoleOrigin()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             LuaTool.LuaResult result = stack.ToolExecutor
                 .ExecuteAsync("local f = Instance.new('Folder', workspace) f.Name = 'FromConsole'",
@@ -397,7 +397,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_CapabilityGating_ReadTierHasNoInstanceNewAndCannotMutate()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCapabilities readOnly =
                 LuaCapabilities.Read | LuaCapabilities.Gameplay | LuaCapabilities.LogicOverride;
             LuaCsModStack stack = BuildStack(roblox, caps: readOnly);
@@ -414,7 +414,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_R6_7_R6_8_AttributesAndTags_RoundTrip()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local f = Instance.new('Folder', workspace)
                 f:SetAttribute('Health', 100)
@@ -440,7 +440,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_AttributeTable_RejectedWithBadArgument()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m",
                 "Instance.new('Folder'):SetAttribute('Data', { x = 1 })");
             StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
@@ -452,7 +452,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         {
             // WHY: the mod's own store is the read-back channel, matching the runtime harness style.
             MemoryStore store = new();
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings(), store);
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
             stack.Runtime.LoadMod("m", @"
                 local f = Instance.new('Folder', workspace)
                 f:Destroy()
@@ -469,7 +469,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_R6_5_Clone_DeepCopiesWithFreshIdentity()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("m", @"
                 local src = Instance.new('Folder', workspace)
@@ -493,7 +493,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_BasePartSpatialWrites_ReflectInPartProperties()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("m", @"
                 local p = Instance.new('Part')
@@ -520,7 +520,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_BasePartCFrame_SetsBoth_Position_SetKeepsOrientation()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("m", @"
                 local function near(a, b) return math.abs(a - b) < 1e-4 end
@@ -540,7 +540,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_BasePartPreset_SetInCSharp_ReadableFromLua()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             RbxInstance part = roblox.Registry.Create("Part");
             part.Name = "Preset";
@@ -563,7 +563,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_BasePartUnwiredProperty_RaisesLoudStub()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", @"
                 local p = Instance.new('Part')
                 p.Material = Enum.Material.Wood");
@@ -578,14 +578,14 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             // double-conversion: the GameObject lands at the 0.28-scaled, Z-mirrored pose while the
             // Lua/registry side keeps pure Roblox-space studs (mirrors PositionGolden in the binder
             // tests, driven end-to-end through the Lua surface).
-            RobloxSpace.ResetForTests(0.28f);
+            RbxSpace.ResetForTests(0.28f);
             var root = new GameObject("GoldenRoot");
             try
             {
                 var binder = new InstanceGameObjectBinder(root.transform);
                 var registry = new InstanceRegistry(null, binder);
                 RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-                var roblox = new LuaCsRobloxApiBindings(registry, game, partSink: binder);
+                var roblox = new LuaCsRbxApiBindings(registry, game, partSink: binder);
                 LuaCsModStack stack = BuildStack(roblox);
 
                 RbxInstance part = registry.Create("Part");
@@ -612,14 +612,14 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             finally
             {
                 UnityEngine.Object.DestroyImmediate(root);
-                RobloxSpace.ResetForTests();
+                RbxSpace.ResetForTests();
             }
         }
 
         [Test]
         public void Lua_R6_7_DatatypeAttribute_Vector3RoundTrip()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 local f = Instance.new('Folder', workspace)
                 f:SetAttribute('Spawn', Vector3.new(1, 2, 3))
@@ -636,7 +636,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_UnsupportedDatatypeAttribute_RejectedWithSupportedList()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m",
                 "Instance.new('Folder'):SetAttribute('Bad', CFrame.new(1, 2, 3))");
             StringAssert.Contains("BAD_ARGUMENT", FullText(ex));
@@ -647,7 +647,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_SignalConnect_LoudStubNamesMvp2()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m",
                 "workspace.ChildAdded:Connect(function() end)");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
@@ -657,7 +657,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_TaskWait_LoudStubNamesMvp2_AndParallelSwitchesAreNoOps()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("noop", @"
                 task.synchronize()
                 task.desynchronize()");
@@ -671,7 +671,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_WaitForChild_AbsentChild_LoudStubNamesMvp2()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRobloxApiBindings());
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", "workspace:WaitForChild('NeverThere')");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
             StringAssert.Contains("MVP2", FullText(ex));
@@ -683,7 +683,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_TwoMods_ShareOneInstanceWorld()
         {
-            LuaCsRobloxApiBindings roblox = new();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox);
             stack.Runtime.LoadMod("producer", @"
                 local f = Instance.new('Folder', workspace)

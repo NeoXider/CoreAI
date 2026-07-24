@@ -130,7 +130,7 @@ GameObject:
   - component: {fileID: 237133908}
   - component: {fileID: 237133907}
   m_Layer: 0
-  m_Name: RobloxWorldHost
+  m_Name: RbxWorldHost
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -147,7 +147,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d5b50e8f2f11475ba0d27f38feea1340, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: CoreAI.RbxApi.Binding::CoreAI.Mods.Rbx.Binding.RobloxWorldHost
+  m_EditorClassIdentifier: CoreAI.RbxApi.Binding::CoreAI.Mods.Rbx.Binding.RbxWorldHost
   _metersPerStud: 0.28
 --- !u!4 &237133908
 Transform:

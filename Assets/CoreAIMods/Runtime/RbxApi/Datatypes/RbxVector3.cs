@@ -6,7 +6,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
     /// <summary>
     /// Pure-spec Roblox Vector3 (right-handed coordinate system; ROBLOX_API_ROADMAP.md D1).
     /// Components are 32-bit floats like Roblox's native type. No Unity types appear here —
-    /// conversion happens only in the RobloxSpace adapter.
+    /// conversion happens only in the RbxSpace adapter.
     /// </summary>
     public readonly struct RbxVector3 : IEquatable<RbxVector3>
     {
@@ -32,7 +32,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (normalId == null || normalId.EnumType.Name != "NormalId")
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "Vector3.FromNormalId expects an Enum.NormalId.",
                     "pass Enum.NormalId.Front (or another NormalId item) at argument 1");
             }
@@ -46,7 +46,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 case "Bottom": return new RbxVector3(0f, -1f, 0f);
                 case "Front": return new RbxVector3(0f, 0f, -1f);
                 default:
-                    throw RobloxApiStubException.BadArgument(
+                    throw RbxApiStubException.BadArgument(
                         $"Unknown NormalId '{normalId.Name}'.",
                         "use one of Right/Top/Back/Left/Bottom/Front");
             }
@@ -57,7 +57,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (axis == null || axis.EnumType.Name != "Axis")
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "Vector3.FromAxis expects an Enum.Axis.",
                     "pass Enum.Axis.X (or Y/Z) at argument 1");
             }
@@ -68,7 +68,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 case "Y": return YAxis;
                 case "Z": return ZAxis;
                 default:
-                    throw RobloxApiStubException.BadArgument(
+                    throw RbxApiStubException.BadArgument(
                         $"Unknown Axis '{axis.Name}'.",
                         "use Enum.Axis.X, Enum.Axis.Y or Enum.Axis.Z");
             }

@@ -2,7 +2,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Stable-id serialization (roadmap §2 world file, Q3, §3.3): capture → restore →
     /// capture is identical, ids never remap, and the allocator never re-issues restored ids.</summary>

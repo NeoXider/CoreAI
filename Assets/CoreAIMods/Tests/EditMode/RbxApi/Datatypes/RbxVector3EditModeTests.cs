@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Datatypes;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
+namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
     /// <summary>Golden fixtures for the pure-spec Vector3 (ROBLOX_API_ROADMAP.md §5.1.8 item 9).</summary>
     [TestFixture]

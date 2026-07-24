@@ -6,7 +6,7 @@ namespace CoreAI.Mods.Rbx.Binding
     /// The MVP1 Part rendering surface (ROBLOX_API_ROADMAP.md §5.1.3) as one value bundle:
     /// Shape/CFrame/Size/Color/Anchored/Transparency/CanCollide. Engine-free by design so the Lua
     /// bindings layer can build and push it without touching UnityEngine types; the binder is
-    /// the only consumer that converts it (through RobloxSpace, D2).
+    /// the only consumer that converts it (through RbxSpace, D2).
     /// </summary>
     public struct PartProperties
     {

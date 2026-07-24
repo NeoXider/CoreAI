@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Datatypes;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
+namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
     /// <summary>Golden fixtures for Vector2, Color3, UDim/UDim2 and the Enum registry.</summary>
     [TestFixture]
@@ -152,7 +152,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
             var registry = RbxEnumRegistry.CreateWithBuiltins();
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
             // until TweenService (MVP8), so it is the loud-stub probe now.
-            var ex = Assert.Throws<RobloxApiStubException>(() => registry.Get("EasingStyle"));
+            var ex = Assert.Throws<RbxApiStubException>(() => registry.Get("EasingStyle"));
             Assert.AreEqual("NOT_IMPLEMENTED", ex.Code);
             StringAssert.Contains("Enum.EasingStyle", ex.Message);
             StringAssert.Contains("| fix:", ex.Message, "stub errors carry the machine-parsable fix section");
@@ -162,7 +162,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Datatypes
         public void Enum_UnknownItem_RaisesBadArgument()
         {
             var registry = RbxEnumRegistry.CreateWithBuiltins();
-            var ex = Assert.Throws<RobloxApiStubException>(() => _ = registry.Get("Material")["Adamantium"]);
+            var ex = Assert.Throws<RbxApiStubException>(() => _ = registry.Get("Material")["Adamantium"]);
             Assert.AreEqual("BAD_ARGUMENT", ex.Code);
         }
 

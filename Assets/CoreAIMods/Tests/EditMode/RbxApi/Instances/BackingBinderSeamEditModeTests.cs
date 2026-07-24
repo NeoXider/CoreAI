@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Backing-object seam per D5 (§5.1.8 items 1–2 at registry level): unparented
     /// instances have no backing; entering the DataModel (scene) subtree materializes — the whole

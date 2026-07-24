@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>§5.1.8 item 15 / roadmap §3.3: the id space is partitioned by the authority
     /// bit; the two spaces never collide; the wire-marshal guard rejects locally-assigned ids.</summary>

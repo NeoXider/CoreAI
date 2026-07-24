@@ -11,18 +11,18 @@ using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// Camera control from Lua (MVP1 mini-game enabler) end-to-end through the real mod
     /// runtime: workspace.CurrentCamera resolves to the canonical Camera instance whose CFrame
-    /// drives a fabricated Unity camera through <see cref="UnityCameraRig"/> (RobloxSpace
+    /// drives a fabricated Unity camera through <see cref="UnityCameraRig"/> (RbxSpace
     /// transposition, D2), the camera_set_cframe/camera_follow convenience globals, and the
     /// WorldEdit gate on every camera write (reads stay open). Plus the Lua-level Part.Shape
     /// write over Enum.PartType materializing through the GameObject binder.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxCameraLuaBindingsEditModeTests
+    public sealed class RbxCameraLuaBindingsEditModeTests
     {
         private const float Epsilon = 1e-4f;
 
@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             // SynchronizationContext so VM continuations complete on the thread pool.
             _savedContext = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(null);
-            RobloxSpace.ResetForTests(0.28f);
+            RbxSpace.ResetForTests(0.28f);
             _root = new GameObject("CameraTestRoot");
             _cameraGo = new GameObject("FabricatedCamera");
             _cameraGo.AddComponent<Camera>();
@@ -48,7 +48,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         {
             UnityEngine.Object.DestroyImmediate(_cameraGo);
             UnityEngine.Object.DestroyImmediate(_root);
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 
@@ -101,7 +101,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             public InstanceGameObjectBinder Binder;
             public InstanceRegistry Registry;
             public RbxDataModel Game;
-            public LuaCsRobloxApiBindings Roblox;
+            public LuaCsRbxApiBindings Roblox;
             public UnityCameraRig Rig;
             public LuaCsModStack Stack;
         }
@@ -114,7 +114,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             world.Registry = new InstanceRegistry(null, world.Binder);
             world.Game = DataModelBootstrap.CreateGame(world.Registry);
             world.Rig = new UnityCameraRig(_cameraGo.transform, world.Binder);
-            world.Roblox = new LuaCsRobloxApiBindings(
+            world.Roblox = new LuaCsRbxApiBindings(
                 world.Registry, world.Game, partSink: world.Binder, cameraRig: world.Rig);
             world.Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -122,7 +122,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 ModStore = new MemoryStore(),
                 Capabilities = caps,
                 OneOffCapabilities = caps,
-                RobloxApi = world.Roblox
+                RbxApi = world.Roblox
             });
             return world;
         }
@@ -220,7 +220,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             RbxInstance part = world.Game.FindFirstChildOfClass("Workspace").FindFirstChild("Hero");
             Assert.IsTrue(world.Binder.TryGetBoundObject(part.Id, out GameObject partGo));
 
-            var follower = _cameraGo.GetComponent<RobloxCameraFollower>();
+            var follower = _cameraGo.GetComponent<RbxCameraFollower>();
             Assert.IsNotNull(follower, "camera_follow must attach the follower to the camera");
             Assert.IsTrue(follower.enabled);
             Assert.AreSame(partGo.transform, follower.Target);

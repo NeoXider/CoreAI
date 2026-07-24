@@ -5,7 +5,7 @@ using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Binding
+namespace CoreAI.Tests.EditMode.RbxApi.Binding
 {
     /// <summary>
     /// Part.Shape materialization (MVP1 shape slice): Ball maps to Unity's unit sphere and
@@ -28,7 +28,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         [SetUp]
         public void SetUp()
         {
-            RobloxSpace.ResetForTests(0.28f);
+            RbxSpace.ResetForTests(0.28f);
             _root = new GameObject("ShapeTestRoot");
             _binder = new InstanceGameObjectBinder(_root.transform);
             _registry = new InstanceRegistry(null, _binder);
@@ -40,7 +40,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Binding
         {
             _game.Destroy();
             Object.DestroyImmediate(_root);
-            RobloxSpace.ResetForTests();
+            RbxSpace.ResetForTests();
         }
 
         private RbxInstance CreatePartInWorld()

@@ -6,7 +6,7 @@ namespace CoreAI.Mods.Rbx.Spatial
     /// <summary>
     /// THE single conversion boundary between Roblox space and Unity space
     /// (ROBLOX_API_ROADMAP.md D2/D3, LOCKED). Nothing else in the Roblox API layer may
-    /// convert — enforced by RobloxSpaceUsageLintTests.
+    /// convert — enforced by RbxSpaceUsageLintTests.
     ///
     /// Mapping: Roblox is right-handed with LookVector = -Z; Unity is left-handed with
     /// forward = +Z. The bridge is the Z-mirror S = diag(1, 1, -1):
@@ -14,7 +14,7 @@ namespace CoreAI.Mods.Rbx.Spatial
     ///   rotation:  R_unity = S * R_rbx * S, i.e. quaternion (qx, qy, qz, qw) -> (-qx, -qy, qz, qw)
     /// Documented visible artifact: mod-space z = -Unity z.
     /// </summary>
-    public static class RobloxSpace
+    public static class RbxSpace
     {
         /// <summary>Default scale: 1 stud = 0.28 m (D3, LOCKED — Roblox game-feel parity).</summary>
         public const float DefaultMetersPerStud = 0.28f;
@@ -43,7 +43,7 @@ namespace CoreAI.Mods.Rbx.Spatial
             if (_configured && !ScaleMath.Approximately(_metersPerStud, metersPerStud))
             {
                 throw new InvalidOperationException(
-                    $"RobloxSpace scale is already configured to {_metersPerStud} m/stud for this " +
+                    $"RbxSpace scale is already configured to {_metersPerStud} m/stud for this " +
                     "session; changing it mid-session would mis-scale every live instance.");
             }
 

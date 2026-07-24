@@ -8,20 +8,20 @@ using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
+namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
     /// <summary>
-    /// MVP1 conversion lint (§5.1.8 item 10, "usage lint clean"): RobloxSpace is THE single
+    /// MVP1 conversion lint (§5.1.8 item 10, "usage lint clean"): RbxSpace is THE single
     /// stud/meter/chirality boundary. Complements the engine-reference fitness test
-    /// (RobloxDatatypesFitnessEditModeTests) with a source-level scan — no raw scale literal
-    /// and no MetersPerStud/StudsPerMeter arithmetic anywhere outside RobloxSpace.cs — plus a
-    /// semantic check that the binder's output is bit-for-bit RobloxSpace's output.
+    /// (RbxDatatypesFitnessEditModeTests) with a source-level scan — no raw scale literal
+    /// and no MetersPerStud/StudsPerMeter arithmetic anywhere outside RbxSpace.cs — plus a
+    /// semantic check that the binder's output is bit-for-bit RbxSpace's output.
     /// </summary>
     [TestFixture]
     public sealed class Mvp1ConversionLintEditModeTests
     {
         // WHY: 0.28 and its inverse 3.5714… are the numerals a shortcut conversion would use;
-        // any occurrence in code (not comments/strings) outside RobloxSpace.cs is a second
+        // any occurrence in code (not comments/strings) outside RbxSpace.cs is a second
         // conversion site — the design's primary failure mode (D2/D3).
         private static readonly Regex RawScaleLiteral = new(
             @"(?<![\w.])(0\.28|3\.5714\d*)f?(?![\w.])", RegexOptions.Compiled);
@@ -30,7 +30,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         // even when the named constant is used. Reading the constant (defaults, tooltips,
         // equality checks) stays legal; arithmetic does not.
         private static readonly Regex ScaleArithmetic = new(
-            @"(MetersPerStud|StudsPerMeter)\s*[*/]|[*/]\s*(RobloxSpace\s*\.\s*)?(Default)?(MetersPerStud|StudsPerMeter)",
+            @"(MetersPerStud|StudsPerMeter)\s*[*/]|[*/]\s*(RbxSpace\s*\.\s*)?(Default)?(MetersPerStud|StudsPerMeter)",
             RegexOptions.Compiled);
 
         private static readonly Regex BlockCommentRegex = new(
@@ -52,7 +52,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         }
 
         private static bool IsRobloxSpaceFile(string path) =>
-            Path.GetFileName(path) == "RobloxSpace.cs";
+            Path.GetFileName(path) == "RbxSpace.cs";
 
         private static string CodeOnly(string source)
         {
@@ -83,8 +83,8 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
             }
 
             Assert.IsEmpty(offenders,
-                "raw stud-scale literals outside RobloxSpace.cs are a second conversion site "
-                + "(D3 — the scale lives ONLY in the RobloxSpace constant):\n"
+                "raw stud-scale literals outside RbxSpace.cs are a second conversion site "
+                + "(D3 — the scale lives ONLY in the RbxSpace constant):\n"
                 + string.Join("\n", offenders));
         }
 
@@ -109,8 +109,8 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
             }
 
             Assert.IsEmpty(offenders,
-                "stud<->meter arithmetic outside RobloxSpace.cs bypasses the single conversion "
-                + "boundary (D2) — call RobloxSpace.*ToUnity/*FromUnity instead:\n"
+                "stud<->meter arithmetic outside RbxSpace.cs bypasses the single conversion "
+                + "boundary (D2) — call RbxSpace.*ToUnity/*FromUnity instead:\n"
                 + string.Join("\n", offenders));
         }
 
@@ -118,9 +118,9 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
         public void Lint_BinderOutput_IsExactlyRobloxSpaceOutput()
         {
             // WHY: the semantic half of the lint — for a spread of poses/sizes the GameObject
-            // the binder produces must equal RobloxSpace's own numbers exactly, proving the
+            // the binder produces must equal RbxSpace's own numbers exactly, proving the
             // binder delegates instead of re-deriving (a hand-rolled copy would drift here).
-            RobloxSpace.ResetForTests(0.28f);
+            RbxSpace.ResetForTests(0.28f);
             var root = new GameObject("LintRoot");
             try
             {
@@ -139,15 +139,15 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
                     binder.SetCFrame(part.Id, cf);
                     binder.SetSize(part.Id, size);
 
-                    (Vector3 expectedPos, Quaternion expectedRot) = RobloxSpace.ToUnityPose(cf);
-                    Vector3 expectedScale = RobloxSpace.SizeToUnity(size);
+                    (Vector3 expectedPos, Quaternion expectedRot) = RbxSpace.ToUnityPose(cf);
+                    Vector3 expectedScale = RbxSpace.SizeToUnity(size);
 
                     Assert.Less((partGo.transform.position - expectedPos).magnitude, 1e-4f,
-                        $"iteration {i}: binder position diverged from RobloxSpace");
+                        $"iteration {i}: binder position diverged from RbxSpace");
                     Assert.Less(Quaternion.Angle(partGo.transform.rotation, expectedRot), 0.01f,
-                        $"iteration {i}: binder rotation diverged from RobloxSpace");
+                        $"iteration {i}: binder rotation diverged from RbxSpace");
                     Assert.Less((partGo.transform.localScale - expectedScale).magnitude, 1e-4f,
-                        $"iteration {i}: binder scale diverged from RobloxSpace");
+                        $"iteration {i}: binder scale diverged from RbxSpace");
                 }
 
                 game.Destroy();
@@ -155,7 +155,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.Acceptance
             finally
             {
                 Object.DestroyImmediate(root);
-                RobloxSpace.ResetForTests();
+                RbxSpace.ResetForTests();
             }
         }
 

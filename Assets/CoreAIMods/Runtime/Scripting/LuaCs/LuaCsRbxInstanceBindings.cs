@@ -6,7 +6,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using Lua;
 using Lua.Runtime;
-using static CoreAI.Ai.LuaCs.LuaCsRobloxLua;
+using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -15,12 +15,12 @@ namespace CoreAI.Ai.LuaCs
     /// attribution (owner mod id + origin tag for the instance ledger), the proxy cache that keeps
     /// one Lua identity per <see cref="RbxInstance"/>, and per-mod once-only diagnostics flags.
     /// </summary>
-    internal sealed class LuaCsRobloxModContext
+    internal sealed class LuaCsRbxModContext
     {
         private readonly Dictionary<RbxInstance, LuaValue> _proxyCache = new();
         private readonly LuaTable _instanceMeta;
 
-        public LuaCsRobloxModContext(LuaCsRobloxApiBindings bindings, LuaCapabilities capabilities,
+        public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag)
         {
             Bindings = bindings;
@@ -32,10 +32,10 @@ namespace CoreAI.Ai.LuaCs
             // (BuildMod runs before the reload teardown), letting teardown disconnect only the previous
             // generation and keep this chunk's connections. Mirrors the logic-slot keepState exclusion.
             ConnectionGeneration = bindings.Connections?.BeginGeneration(ownerModId) ?? 0;
-            _instanceMeta = LuaCsRobloxInstanceBindings.BuildInstanceMeta(this);
+            _instanceMeta = LuaCsRbxInstanceBindings.BuildInstanceMeta(this);
         }
 
-        public LuaCsRobloxApiBindings Bindings { get; }
+        public LuaCsRbxApiBindings Bindings { get; }
 
         public LuaCapabilities Capabilities { get; }
 
@@ -77,7 +77,7 @@ namespace CoreAI.Ai.LuaCs
                 return cached;
             }
 
-            LuaValue proxy = new LuaValue(new LuaCsRobloxInstanceProxy(instance, this, _instanceMeta));
+            LuaValue proxy = new LuaValue(new LuaCsRbxInstanceProxy(instance, this, _instanceMeta));
             _proxyCache[instance] = proxy;
             return proxy;
         }
@@ -111,7 +111,7 @@ namespace CoreAI.Ai.LuaCs
     /// INSTANCE_DESTROYED (the tombstone exception applies only inside destruction-queued handlers,
     /// which arrive with the MVP2 signal system).
     /// </summary>
-    internal static class LuaCsRobloxInstanceBindings
+    internal static class LuaCsRbxInstanceBindings
     {
         /// <summary>BasePart members still awaiting their own slice: Material needs the
         /// material catalog, Orientation/Rotation need Euler decomposition.</summary>
@@ -120,7 +120,7 @@ namespace CoreAI.Ai.LuaCs
             "Material", "Orientation", "Rotation"
         };
 
-        public static LuaTable BuildInstanceMeta(LuaCsRobloxModContext context)
+        public static LuaTable BuildInstanceMeta(LuaCsRbxModContext context)
         {
             Dictionary<string, LuaValue> methods = BuildMethods(context);
 
@@ -137,17 +137,17 @@ namespace CoreAI.Ai.LuaCs
                     case "ClassName": return self.ClassName;
                     case "Parent": return context.WrapInstance(self.Parent);
                     case "Archivable": return self.Archivable;
-                    case "ChildAdded": return LuaCsRobloxDatatypeBindings.Wrap(self.ChildAdded);
-                    case "ChildRemoved": return LuaCsRobloxDatatypeBindings.Wrap(self.ChildRemoved);
+                    case "ChildAdded": return LuaCsRbxDatatypeBindings.Wrap(self.ChildAdded);
+                    case "ChildRemoved": return LuaCsRbxDatatypeBindings.Wrap(self.ChildRemoved);
                     case "DescendantAdded":
-                        return LuaCsRobloxDatatypeBindings.Wrap(self.DescendantAdded);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantAdded);
                     case "DescendantRemoving":
-                        return LuaCsRobloxDatatypeBindings.Wrap(self.DescendantRemoving);
-                    case "Destroying": return LuaCsRobloxDatatypeBindings.Wrap(self.Destroying);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantRemoving);
+                    case "Destroying": return LuaCsRbxDatatypeBindings.Wrap(self.Destroying);
                     case "AncestryChanged":
-                        return LuaCsRobloxDatatypeBindings.Wrap(self.AncestryChanged);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged);
                     case "AttributeChanged":
-                        return LuaCsRobloxDatatypeBindings.Wrap(self.AttributeChanged);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged);
                 }
 
                 if (methods.TryGetValue(key, out LuaValue method))
@@ -254,15 +254,15 @@ namespace CoreAI.Ai.LuaCs
             });
 
             meta[Metamethods.Eq] = Fn("Instance.__eq", ctx =>
-                TryGetInstance(Arg(ctx, 0), out LuaCsRobloxInstanceProxy a)
-                && TryGetInstance(Arg(ctx, 1), out LuaCsRobloxInstanceProxy b)
+                TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy a)
+                && TryGetInstance(Arg(ctx, 1), out LuaCsRbxInstanceProxy b)
                 && ReferenceEquals(a.Instance, b.Instance));
 
             meta[Metamethods.ToString] = Fn("Instance.__tostring", ctx => Self(ctx, context).Name);
             return Lock(meta);
         }
 
-        private static Dictionary<string, LuaValue> BuildMethods(LuaCsRobloxModContext context)
+        private static Dictionary<string, LuaValue> BuildMethods(LuaCsRbxModContext context)
         {
             Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal);
 
@@ -407,9 +407,9 @@ namespace CoreAI.Ai.LuaCs
 
                 return new LuaValue(table);
             });
-            Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRobloxDatatypeBindings.Wrap(
+            Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
                 self.GetAttributeChangedSignal(ReadString(ctx, 1, "GetAttributeChangedSignal"))));
-            Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRobloxDatatypeBindings.Wrap(
+            Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
                 self.GetPropertyChangedSignal(ReadString(ctx, 1, "GetPropertyChangedSignal"))));
 
             // ---- ServiceProvider (DataModel) ----
@@ -435,9 +435,9 @@ namespace CoreAI.Ai.LuaCs
             return methods;
         }
 
-        private static RbxInstance Self(LuaFunctionExecutionContext ctx, LuaCsRobloxModContext context)
+        private static RbxInstance Self(LuaFunctionExecutionContext ctx, LuaCsRbxModContext context)
         {
-            if (TryGetInstance(Arg(ctx, 0), out LuaCsRobloxInstanceProxy proxy))
+            if (TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy proxy))
             {
                 return proxy.Instance;
             }
@@ -521,7 +521,7 @@ namespace CoreAI.Ai.LuaCs
                 return null;
             }
 
-            if (TryGetInstance(value, out LuaCsRobloxInstanceProxy proxy))
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy proxy))
             {
                 return proxy.Instance;
             }
@@ -531,7 +531,7 @@ namespace CoreAI.Ai.LuaCs
                 "pass an Instance, got " + Describe(value));
         }
 
-        private static LuaValue WrapList(LuaCsRobloxModContext context,
+        private static LuaValue WrapList(LuaCsRbxModContext context,
             IReadOnlyList<RbxInstance> instances)
         {
             LuaTable table = new();
@@ -551,10 +551,10 @@ namespace CoreAI.Ai.LuaCs
                 case string s: return s;
                 case bool b: return b;
                 case double d: return d;
-                case RbxVector3 v3: return LuaCsRobloxDatatypeBindings.Wrap(v3);
-                case RbxVector2 v2: return LuaCsRobloxDatatypeBindings.Wrap(v2);
-                case RbxColor3 c: return LuaCsRobloxDatatypeBindings.Wrap(c);
-                case RbxUDim u: return LuaCsRobloxDatatypeBindings.Wrap(u);
+                case RbxVector3 v3: return LuaCsRbxDatatypeBindings.Wrap(v3);
+                case RbxVector2 v2: return LuaCsRbxDatatypeBindings.Wrap(v2);
+                case RbxColor3 c: return LuaCsRbxDatatypeBindings.Wrap(c);
+                case RbxUDim u: return LuaCsRbxDatatypeBindings.Wrap(u);
                 default: return LuaValue.Nil;
             }
         }
@@ -585,7 +585,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype; throws
         /// the loud stub for still-unwired members (Material/Orientation/Rotation).</summary>
-        private static bool TryReadSpatial(LuaCsRobloxModContext context, RbxInstance self, string key,
+        private static bool TryReadSpatial(LuaCsRbxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
             if (!self.IsA("BasePart"))
@@ -598,10 +598,10 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "Shape": value = WrapPartType(context, properties.Shape); return true;
-                case "Position": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Position); return true;
-                case "Size": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Size); return true;
-                case "CFrame": value = LuaCsRobloxDatatypeBindings.Wrap(properties.CFrame); return true;
-                case "Color": value = LuaCsRobloxDatatypeBindings.Wrap(properties.Color); return true;
+                case "Position": value = LuaCsRbxDatatypeBindings.Wrap(properties.Position); return true;
+                case "Size": value = LuaCsRbxDatatypeBindings.Wrap(properties.Size); return true;
+                case "CFrame": value = LuaCsRbxDatatypeBindings.Wrap(properties.CFrame); return true;
+                case "Color": value = LuaCsRbxDatatypeBindings.Wrap(properties.Color); return true;
                 case "Transparency": value = properties.Transparency; return true;
                 case "Anchored": value = properties.Anchored; return true;
                 case "CanCollide": value = properties.CanCollide; return true;
@@ -618,7 +618,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Writes a wired BasePart property through the sink (Roblox Part semantics:
         /// setting Position keeps orientation, setting CFrame sets both).</summary>
-        private static bool TryWriteSpatial(LuaCsRobloxModContext context, RbxInstance self, string key,
+        private static bool TryWriteSpatial(LuaCsRbxModContext context, RbxInstance self, string key,
             LuaValue value)
         {
             if (!self.IsA("BasePart"))
@@ -674,12 +674,12 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Part.Shape as its interned Enum.PartType item (values match RbxPartShape).</summary>
-        private static LuaValue WrapPartType(LuaCsRobloxModContext context, RbxPartShape shape)
+        private static LuaValue WrapPartType(LuaCsRbxModContext context, RbxPartShape shape)
         {
             if (context.Bindings.Enums.TryGet("PartType", out RbxEnum partType)
                 && partType.TryGetItem(shape.ToString(), out RbxEnumItem item))
             {
-                return LuaCsRobloxDatatypeBindings.Wrap(item);
+                return LuaCsRbxDatatypeBindings.Wrap(item);
             }
 
             return LuaValue.Nil;
@@ -703,7 +703,7 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>UserInputService members: the input signals, MouseBehavior, and the poll
         /// methods. All input READS are open at the Read tier (no capability gate) — observing
         /// input mutates nothing in the world.</summary>
-        private static bool TryReadUserInput(LuaCsRobloxModContext context, RbxInstance self, string key,
+        private static bool TryReadUserInput(LuaCsRbxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
             if (!(self is RbxUserInputService service))
@@ -715,17 +715,17 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "InputBegan":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputBegan, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(service.InputBegan, context);
                     return true;
                 case "InputEnded":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputEnded, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(service.InputEnded, context);
                     return true;
                 case "InputChanged":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(service.InputChanged, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(service.InputChanged, context);
                     return true;
                 case "MouseBehavior":
                     value = service.MouseBehavior != null
-                        ? LuaCsRobloxDatatypeBindings.Wrap(service.MouseBehavior)
+                        ? LuaCsRbxDatatypeBindings.Wrap(service.MouseBehavior)
                         : LuaValue.Nil;
                     return true;
                 case "IsKeyDown":
@@ -771,13 +771,13 @@ namespace CoreAI.Ai.LuaCs
                     int index = 1;
                     foreach (RbxInputObject input in s.GetKeysPressed())
                     {
-                        list[index++] = LuaCsRobloxDatatypeBindings.Wrap(input);
+                        list[index++] = LuaCsRbxDatatypeBindings.Wrap(input);
                     }
 
                     return new LuaValue(list);
                 })),
                 GetMouseLocation = new LuaValue(Fn("UserInputService.GetMouseLocation",
-                    _ => LuaCsRobloxDatatypeBindings.Wrap(s.GetMouseLocation()))),
+                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseLocation()))),
             });
         }
 
@@ -822,7 +822,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>RunService members: the Heartbeat/Stepped/RenderStepped signals. Reads are open
         /// at the Read tier — connecting a per-frame handler observes the loop, it mutates nothing.</summary>
-        private static bool TryReadRunService(LuaCsRobloxModContext context, RbxInstance self, string key,
+        private static bool TryReadRunService(LuaCsRbxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
             if (!(self is RbxRunService runService))
@@ -834,13 +834,13 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "Heartbeat":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.Heartbeat, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.Heartbeat, context);
                     return true;
                 case "Stepped":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.Stepped, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.Stepped, context);
                     return true;
                 case "RenderStepped":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(runService.RenderStepped, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(runService.RenderStepped, context);
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -854,7 +854,7 @@ namespace CoreAI.Ai.LuaCs
         /// MaxActivationDistance. Signal reads carry the mod context so the returned connection is
         /// tracked for teardown (like RunService/UserInputService); reads are open at the Read tier —
         /// connecting a click handler observes the world, it mutates nothing.</summary>
-        private static bool TryReadClickDetector(LuaCsRobloxModContext context, RbxInstance self,
+        private static bool TryReadClickDetector(LuaCsRbxModContext context, RbxInstance self,
             string key, out LuaValue value)
         {
             if (!(self is RbxClickDetector detector))
@@ -866,13 +866,13 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "MouseClick":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseClick, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(detector.MouseClick, context);
                     return true;
                 case "MouseHoverEnter":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseHoverEnter, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(detector.MouseHoverEnter, context);
                     return true;
                 case "MouseHoverLeave":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseHoverLeave, context);
+                    value = LuaCsRbxDatatypeBindings.Wrap(detector.MouseHoverLeave, context);
                     return true;
                 case "MaxActivationDistance":
                     value = detector.MaxActivationDistance;
@@ -885,7 +885,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>ClickDetector.MaxActivationDistance assignment (studs). Roblox lets any script set
         /// it, but it mutates shared world state, so it takes the WorldEdit gate like part properties.</summary>
-        private static bool TryWriteClickDetector(LuaCsRobloxModContext context, RbxInstance self,
+        private static bool TryWriteClickDetector(LuaCsRbxModContext context, RbxInstance self,
             string key, LuaValue value)
         {
             if (!(self is RbxClickDetector detector) || key != "MaxActivationDistance")
@@ -902,7 +902,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>workspace.CurrentCamera plus the Camera instance's CFrame (over the rig),
         /// CameraType, and CameraSubject. Reads are ungated; writes require WorldEdit.</summary>
-        private static bool TryReadCamera(LuaCsRobloxModContext context, RbxInstance self,
+        private static bool TryReadCamera(LuaCsRbxModContext context, RbxInstance self,
             string key, out LuaValue value)
         {
             if (key == "CurrentCamera" && self.IsA("Workspace"))
@@ -920,11 +920,11 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "CFrame":
-                    value = LuaCsRobloxDatatypeBindings.Wrap(context.Bindings.CameraRig.GetCFrame());
+                    value = LuaCsRbxDatatypeBindings.Wrap(context.Bindings.CameraRig.GetCFrame());
                     return true;
                 case "CameraType":
                     RbxEnumItem type = context.Bindings.CameraTypeItem;
-                    value = type != null ? LuaCsRobloxDatatypeBindings.Wrap(type) : LuaValue.Nil;
+                    value = type != null ? LuaCsRbxDatatypeBindings.Wrap(type) : LuaValue.Nil;
                     return true;
                 case "CameraSubject":
                     value = context.WrapInstance(context.Bindings.CameraSubject);
@@ -935,7 +935,7 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private static bool TryWriteCamera(LuaCsRobloxModContext context, RbxInstance self,
+        private static bool TryWriteCamera(LuaCsRbxModContext context, RbxInstance self,
             string key, LuaValue value)
         {
             if (self.ClassName != "Camera")

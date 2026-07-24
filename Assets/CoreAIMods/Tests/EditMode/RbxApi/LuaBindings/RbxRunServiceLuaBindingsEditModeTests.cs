@@ -6,7 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// End-to-end proof of the RunService game-loop slice through the REAL mod runtime: the
@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
     /// <c>RunService.Heartbeat:Connect(function(dt) ... end)</c> is the idiomatic per-frame loop.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxRunServiceLuaBindingsEditModeTests
+    public sealed class RbxRunServiceLuaBindingsEditModeTests
     {
         private SynchronizationContext _savedContext;
 
@@ -91,7 +91,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             }
         }
 
-        private static LuaCsModStack BuildStack(LuaCsRobloxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -99,14 +99,14 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 ModStore = store,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
         }
 
         [Test]
         public void Lua_RunService_Heartbeat_FiresOncePerFrameWithNumericDelta()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -136,7 +136,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_RunService_GetService_ResolvesRealService()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -148,7 +148,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void CSharp_RunService_Step_FiresHeartbeatWithDelta()
         {
-            var roblox = new LuaCsRobloxApiBindings();
+            var roblox = new LuaCsRbxApiBindings();
             RbxRunService service = roblox.RunService;
             Assert.IsNotNull(service);
 

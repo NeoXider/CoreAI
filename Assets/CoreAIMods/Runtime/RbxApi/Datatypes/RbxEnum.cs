@@ -81,7 +81,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
                     return item;
                 }
 
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     $"'{itemName}' is not a valid member of Enum.{Name}.",
                     $"call Enum.{Name}:GetEnumItems() to list valid items");
             }
@@ -253,7 +253,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
             // TODO: MVP2+ — each service MVP registers its own enums (SignalBehavior in MVP2,
             // EasingStyle in MVP8, ...); until then unknown access stays a loud stub.
-            throw RobloxApiStubException.NotImplemented(
+            throw RbxApiStubException.NotImplemented(
                 $"Enum.{enumName}",
                 "the MVP phase that ships its service",
                 $"use one of the registered enums ({string.Join(", ", _enums.Keys)}) until then");

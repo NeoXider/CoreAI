@@ -3,7 +3,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Attributes per R6.7 (§5.1.8 item 7): set/get/enumerate, nil removes, name
     /// validation verbatim, unsupported types rejected with BAD_ARGUMENT.</summary>

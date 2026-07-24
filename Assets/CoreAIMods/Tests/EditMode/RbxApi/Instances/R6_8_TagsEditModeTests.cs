@@ -1,7 +1,7 @@
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Tags per R6.8 (§5.1.8 item 8): add/remove/has/list on Instance plus the
     /// CollectionService GetTagged substrate.</summary>

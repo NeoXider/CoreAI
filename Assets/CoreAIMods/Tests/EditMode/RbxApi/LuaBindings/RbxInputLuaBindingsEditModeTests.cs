@@ -6,7 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
+namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
     /// <summary>
     /// End-to-end proof of the MVP1 UserInputService slice through the REAL mod runtime with the
@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
     /// lifecycle, MouseBehavior, and Enum.KeyCode/UserInputType Roblox value parity.
     /// </summary>
     [TestFixture]
-    public sealed class RobloxInputLuaBindingsEditModeTests
+    public sealed class RbxInputLuaBindingsEditModeTests
     {
         private SynchronizationContext _savedContext;
 
@@ -91,7 +91,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             }
         }
 
-        private static LuaCsModStack BuildStack(LuaCsRobloxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 ModStore = store,
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
-                RobloxApi = roblox
+                RbxApi = roblox
             });
         }
 
@@ -115,7 +115,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_IsKeyDown_ReflectsSourceState()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             source.PressKey(KeyE);
@@ -133,7 +133,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_GetKeysPressed_ReturnsInputObjectsForHeldKeys()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             source.PressKey(KeyA);
@@ -155,7 +155,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         {
             var source = new InMemoryInputSource();
             source.SetMouseLocation(120f, 45f);
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -169,7 +169,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_InputBegan_FiresWithKeyCodeAndUserInputType()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -195,7 +195,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_InputEnded_FiresOnRelease()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -220,7 +220,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         {
             var source = new InMemoryInputSource();
             source.SetMouseLocation(10f, 20f);
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -244,7 +244,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         {
             var source = new InMemoryInputSource();
             source.SetMouseLocation(100f, 50f);
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -269,7 +269,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_GamepadButton_FiresAsGamepad1()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -290,7 +290,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void Lua_UserInputService_Connection_DisconnectStopsDelivery()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             var store = new MemoryStore();
             LuaCsModStack stack = BuildStack(roblox, store);
 
@@ -319,7 +319,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_UserInputService_MouseBehavior_DefaultAndAssignment()
         {
-            var roblox = new LuaCsRobloxApiBindings(inputSource: new InMemoryInputSource());
+            var roblox = new LuaCsRbxApiBindings(inputSource: new InMemoryInputSource());
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -332,7 +332,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_Enum_KeyCodeAndUserInputType_ValuesMatchRoblox()
         {
-            var roblox = new LuaCsRobloxApiBindings(inputSource: new InMemoryInputSource());
+            var roblox = new LuaCsRbxApiBindings(inputSource: new InMemoryInputSource());
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -353,7 +353,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_UserInputService_GetServiceAndGlobal_AreSameInstance()
         {
-            var roblox = new LuaCsRobloxApiBindings(inputSource: new InMemoryInputSource());
+            var roblox = new LuaCsRbxApiBindings(inputSource: new InMemoryInputSource());
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -369,7 +369,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void CSharp_UserInputService_StepDiff_FiresBeganOncePerHold()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             RbxUserInputService service = roblox.UserInputService;
             Assert.IsNotNull(service);
 
@@ -388,7 +388,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void CSharp_GetKeysPressed_ExcludesGamepadButtons()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             RbxUserInputService service = roblox.UserInputService;
 
             source.PressKey(KeyA);
@@ -404,7 +404,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         [Test]
         public void Lua_UserInputService_CannotBeDestroyedOrCloned()
         {
-            var roblox = new LuaCsRobloxApiBindings(inputSource: new InMemoryInputSource());
+            var roblox = new LuaCsRbxApiBindings(inputSource: new InMemoryInputSource());
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             // WHY: destroying a shared service would brick input for every mod; cloning would fork a
@@ -426,7 +426,7 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
         public void CSharp_GetKeysPressed_FromInputBeganHandler_DoesNotCorruptThePump()
         {
             var source = new InMemoryInputSource();
-            var roblox = new LuaCsRobloxApiBindings(inputSource: source);
+            var roblox = new LuaCsRbxApiBindings(inputSource: source);
             RbxUserInputService service = roblox.UserInputService;
 
             // WHY: a handler polling GetKeysPressed() mid-dispatch must not throw "collection

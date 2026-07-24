@@ -5,7 +5,7 @@ namespace CoreAI.Mods.Rbx.Instances
 {
     /// <summary>
     /// Engine-free input poll seam behind <see cref="RbxUserInputService"/> (mirrors the
-    /// <c>IRobloxCameraRig</c> pattern): implementations report the CURRENT device state each
+    /// <c>IRbxCameraRig</c> pattern): implementations report the CURRENT device state each
     /// frame and the service derives this-frame began/ended by diffing successive polls, so a
     /// backend never has to track edge state. Key identity is the Roblox <c>Enum.KeyCode</c>
     /// VALUE (letters 97..122, gamepad buttons 1000+), which keeps the contract engine-neutral.

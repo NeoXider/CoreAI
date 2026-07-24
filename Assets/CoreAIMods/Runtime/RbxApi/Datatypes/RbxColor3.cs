@@ -47,7 +47,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         {
             if (string.IsNullOrEmpty(hex))
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     "Color3.fromHex expects a hex string.",
                     "pass a string like \"#FF7800\" at argument 1");
             }
@@ -61,7 +61,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             if (s.Length != 6 ||
                 !int.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int rgb))
             {
-                throw RobloxApiStubException.BadArgument(
+                throw RbxApiStubException.BadArgument(
                     $"'{hex}' is not a valid hex color.",
                     "use 3 or 6 hex digits, e.g. \"#F80\" or \"#FF7800\"");
             }

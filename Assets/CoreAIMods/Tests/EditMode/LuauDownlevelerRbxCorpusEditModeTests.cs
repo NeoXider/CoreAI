@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode
     /// The snippets are original, written in the typical tutorial style — no Roblox code is copied.
     /// </summary>
     [TestFixture]
-    public sealed class LuauDownlevelerRobloxCorpusEditModeTests
+    public sealed class LuauDownlevelerRbxCorpusEditModeTests
     {
         private SynchronizationContext _savedContext;
 

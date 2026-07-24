@@ -5,7 +5,7 @@ namespace CoreAI.Mods.Rbx.Binding
 {
     /// <summary>
     /// One-way property push for the MVP1 Part surface: the Lua bindings layer calls these
-    /// when a script writes a Part property; the binder converts through RobloxSpace and
+    /// when a script writes a Part property; the binder converts through RbxSpace and
     /// updates the backing GameObject. Signatures are engine-free (Roblox datatypes + ids
     /// only) so callers never touch UnityEngine types (D2 lint). Reverse sync (Unity physics
     /// writing back into registry state) is out of scope until the physics rung.

@@ -117,16 +117,21 @@ namespace CoreAI.Tests.EditMode
         private static LuaCsModStack BuildStack(
             ILuaModStore store = null,
             IAiGameCommandSink sink = null,
-            LuaCapabilities caps = LuaCapabilities.All)
+            LuaCapabilities caps = LuaCapabilities.All,
+            int handlerMaxSteps = 0,
+            int handlerTimeoutMs = 0)
         {
-            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            LuaCsModStackOptions options = new()
             {
                 Logger = new FakeGameLogger(),
                 CommandSink = sink,
                 ModStore = store,
                 Capabilities = caps,
                 OneOffCapabilities = caps
-            });
+            };
+            if (handlerMaxSteps > 0) options.HandlerMaxSteps = handlerMaxSteps;
+            if (handlerTimeoutMs > 0) options.HandlerTimeoutMs = handlerTimeoutMs;
+            return LuaCsModRuntimeFactory.Create(options);
         }
 
         [Test]
@@ -311,7 +316,9 @@ namespace CoreAI.Tests.EditMode
         public void LuaCs_ModsCall_SelfCall_CannotDisarmHandlerGuard()
         {
             MemoryStore store = new();
-            LuaCsModStack stack = BuildStack(store);
+            // Tight per-handler budget so the over-budget loop is cut fast: this proves the outer guard is
+            // still armed after the nested mods_call, independent of the Roblox-parity default budget.
+            LuaCsModStack stack = BuildStack(store, handlerMaxSteps: 5000, handlerTimeoutMs: 100);
             stack.Runtime.LoadMod("m", @"
                 mods_export('noop', function() return 1 end)
                 hooks_on('go', function()
@@ -335,7 +342,8 @@ namespace CoreAI.Tests.EditMode
         public void LuaCs_ModsCall_IndirectCycle_CannotDisarmHandlerGuard()
         {
             MemoryStore store = new();
-            LuaCsModStack stack = BuildStack(store);
+            // Tight per-handler budget (see SelfCall test): the A->B->A cycle must not disarm A's outer guard.
+            LuaCsModStack stack = BuildStack(store, handlerMaxSteps: 5000, handlerTimeoutMs: 100);
             stack.Runtime.LoadMod("a", @"
                 mods_export('noop', function() return 1 end)
                 hooks_on('go', function()
@@ -487,7 +495,7 @@ namespace CoreAI.Tests.EditMode
                 OneOffCapabilities = LuaCapabilities.All,
                 // WHY: wire the Rbx surface so the test proves it SURVIVES the flag — the whole point is that
                 // dropping the coreai_world_* build bindings must not take Instance.new down with them.
-                RobloxApi = new LuaCsRobloxApiBindings(),
+                RbxApi = new LuaCsRbxApiBindings(),
                 RegisterWorldEditBuildBindings = false
             });
 

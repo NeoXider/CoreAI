@@ -1,5 +1,30 @@
 # Changelog
 
+## [6.6.0] - 2026-07-24
+
+`Roblox`→`Rbx` identifier cleanup across the C# codebase, plus two test/doc fixes carried over from 6.5.0.
+
+### Changed
+
+- **"Roblox" removed from C# identifiers (naming convention: `Rbx`, not `Roblox`).** Renamed every C#
+  type, interface, member, test class and test namespace that carried `Roblox` in its name to the `Rbx`
+  form — `RobloxSpace`→`RbxSpace`, `RobloxWorldHost`→`RbxWorldHost`, `RobloxCameraFollower`→`RbxCameraFollower`,
+  `IRobloxCameraRig`→`IRbxCameraRig`, `RobloxApiStubException`→`RbxApiStubException`, `LuaCsRoblox*`→`LuaCsRbx*`,
+  the `RobloxApi` member/namespace leaf→`RbxApi`, and all `Roblox*EditModeTests`/`RobloxApi4BLiveCheck*`
+  → `Rbx*`. 25 source files renamed (`.cs`+`.meta`, GUIDs preserved); the three affected demo scenes
+  updated. The word "Roblox" is intentionally kept where it names the actual platform — comments, XML
+  docs, the agent skill text, loud-stub/log messages, and test-method descriptions that assert Roblox
+  parity — so the Roblox-compatibility story stays legible. Pure rename: no behaviour change.
+
+### Fixed
+
+- **Two tests reconciled with 6.5.0 behaviour changes.** The `LuaCs_ModsCall_*_CannotDisarmHandlerGuard`
+  guard tests now pin a tight per-handler step/time budget instead of relying on the (now Roblox-parity)
+  default, so they still prove the outer guard survives a nested `mods_call`. The bundled-seeder test and
+  the `BundledModSeeder` class doc were updated to match the shipped "a strictly-newer bundled version is
+  canonical and ships, superseding a local edit (prior source kept in the store's revision history)"
+  policy. Full EditMode suite green (2395/2395).
+
 ## [6.5.0] - 2026-07-24
 
 3D click-picking, a playable block-clicker sample, Roblox-parity execution budgets, and reliable

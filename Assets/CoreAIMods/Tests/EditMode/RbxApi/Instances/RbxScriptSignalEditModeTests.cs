@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
-namespace CoreAI.Tests.EditMode.RobloxApi.Instances
+namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>
     /// Dispatch-enabled <see cref="RbxScriptSignal"/> semantics that the reused fire-snapshot must

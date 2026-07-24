@@ -9,7 +9,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
     /// The mod/script/line prefix is added by the error formatter upstream (MVP1 task 10);
     /// this exception only carries the machine fields.
     /// </summary>
-    public sealed class RobloxApiStubException : InvalidOperationException
+    public sealed class RbxApiStubException : InvalidOperationException
     {
         /// <summary>Stable machine code, e.g. "NOT_IMPLEMENTED" or "BAD_ARGUMENT".</summary>
         public string Code { get; }
@@ -17,7 +17,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// <summary>One actionable suggestion, present tense.</summary>
         public string Fix { get; }
 
-        public RobloxApiStubException(string code, string message, string fix)
+        public RbxApiStubException(string code, string message, string fix)
             : base($"{code}: {message} | fix: {fix}")
         {
             Code = code;
@@ -25,18 +25,18 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>Creates the standard NOT_IMPLEMENTED stub error naming the roadmap phase.</summary>
-        public static RobloxApiStubException NotImplemented(string what, string phase, string fix)
+        public static RbxApiStubException NotImplemented(string what, string phase, string fix)
         {
-            return new RobloxApiStubException(
+            return new RbxApiStubException(
                 "NOT_IMPLEMENTED",
                 $"{what} is planned for {phase}.",
                 fix);
         }
 
         /// <summary>Creates the standard BAD_ARGUMENT error naming the expected type/position.</summary>
-        public static RobloxApiStubException BadArgument(string message, string fix)
+        public static RbxApiStubException BadArgument(string message, string fix)
         {
-            return new RobloxApiStubException("BAD_ARGUMENT", message, fix);
+            return new RbxApiStubException("BAD_ARGUMENT", message, fix);
         }
     }
 }
