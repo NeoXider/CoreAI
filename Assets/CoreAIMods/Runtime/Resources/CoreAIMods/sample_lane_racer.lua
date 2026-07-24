@@ -1,7 +1,7 @@
 --[[@coreai
 id: sample_lane_racer
 name: Lane Racer (sample)
-version: 2.0.0
+version: 2.1.0
 active: false
 capabilities: All
 category: Samples
@@ -38,7 +38,9 @@ car.Anchored = true
 car.Parent = root
 
 local lane = 2
-car.Position = Vector3.new(LANE_X[lane], 1, 0)
+local carX = LANE_X[lane]                 -- visual X, eased toward the target lane for a smooth slide
+local LANE_EASE = 12                       -- higher = snappier lane changes
+car.Position = Vector3.new(carX, 1, 0)
 
 local cam = workspace.CurrentCamera
 cam.CameraType = Enum.CameraType.Scriptable
@@ -86,8 +88,9 @@ end
 local function restart()
     clear_obstacles()
     lane, score, spawnTimer, alive = 2, 0, 0, true
+    carX = LANE_X[lane]
     car.Anchored = true
-    car.Position = Vector3.new(LANE_X[lane], 1, 0)
+    car.Position = Vector3.new(carX, 1, 0)
     print("[lane_racer] restarted - go!")
 end
 
@@ -109,7 +112,9 @@ RunService.Heartbeat:Connect(function(dt)
     if left and not prevLeft then lane = math.max(1, lane - 1) end
     if right and not prevRight then lane = math.min(3, lane + 1) end
     prevLeft, prevRight = left, right
-    car.Position = Vector3.new(LANE_X[lane], 1, 0)
+    -- Ease the visual X toward the target lane so the car slides instead of teleporting.
+    carX = carX + (LANE_X[lane] - carX) * math.min(1, dt * LANE_EASE)
+    car.Position = Vector3.new(carX, 1, 0)
 
     -- Advance blocks toward the car by dt (smooth); recycle passed ones, detect a same-lane hit.
     for i = #obstacles, 1, -1 do

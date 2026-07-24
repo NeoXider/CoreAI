@@ -118,9 +118,11 @@ namespace CoreAI.Sandbox.LuaCs
         /// instruction. Defaults to <see cref="DefaultMaxAllocatedBytesBudget"/> (256MB).
         /// <c>&lt;= 0</c> disables the check.
         /// </param>
+        // WHY: Roblox parity — a Luau script is only terminated after ~10 s of continuous execution, so the
+        // guard's defaults match that (wall-clock is the real limiter; maxSteps is a high secondary net).
         public LuaCsExecutionGuard(
-            int timeoutMs = 2000,
-            long maxSteps = 200_000,
+            int timeoutMs = 10_000,
+            long maxSteps = 50_000_000,
             long maxAllocatedBytes = DefaultMaxAllocatedBytesBudget)
         {
             _timeoutMs = timeoutMs;

@@ -160,19 +160,13 @@ namespace CoreAI.Infrastructure.Lua
                 return Outcome.Skipped;
             }
 
-            bool userEdited = !string.IsNullOrEmpty(existing.SeededHash) &&
-                              !string.Equals(Fnv1a(existingSource ?? ""), existing.SeededHash,
-                                  StringComparison.Ordinal);
-
-            if (userEdited)
-            {
-                // WHY: Respect the player's edits: keep their source, just surface that an update exists.
-                existing.UpdateAvailable = true;
-                _store.Save(id, existingSource, existing);
-                return Outcome.Flagged;
-            }
-
-            // WHY: Update in place, preserving the player's enabled/disabled choice.
+            // WHY: A strictly-newer BUNDLED version always wins so "bump the header version and it ships"
+            // is reliable — the old symptom was a sample silently sticking on its previous version because
+            // it had once been opened/edited (which changes its hash and used to downgrade the update to a
+            // no-op "UpdateAvailable" flag). Bundled samples are canonical, and the store keeps the prior
+            // source as a revision (recoverable from the mod's history), so this preserves any local edit
+            // rather than losing it. A same-or-older version is still skipped (the guard above), and a
+            // non-bundled user mod sharing the id is still never touched (the empty-Origin guard above).
             LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
             _store.Save(id, mod.Source, updated);
             return Outcome.Updated;

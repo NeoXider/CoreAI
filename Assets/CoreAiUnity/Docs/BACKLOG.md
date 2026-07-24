@@ -67,6 +67,18 @@ Items here are intentionally not active TODO checkboxes.
   one-off `execute_lua` executor the Programmer agent uses; show the result/errors inline. Requested
   2026-07-24.
 
+## Rbx API gaps surfaced by the sample games (2026-07-24)
+
+- **3D picking: `workspace:Raycast`, `Camera:ScreenPointToRay`/`ViewportPointToRay`, and `ClickDetector`.**
+  None exist yet, so a mod cannot tell WHICH 3D part the mouse clicked — the Block Clicker sample had to
+  drive its upgrade blocks with the U/P keys instead of clicking them. Needed for any point-and-click 3D
+  game. (`UserInputService` already gives mouse position + button state.)
+- **Physics velocity for parts** (`AssemblyLinearVelocity` / a `BodyVelocity`-like impulse). Today a burst
+  effect (Tetris line-clear, racer crash) is hand-animated in Heartbeat because there is no way to fling an
+  unanchored part with an initial velocity.
+- **`RunService` newer aliases** `PreSimulation`/`PostSimulation`/`PreRender` (Roblox renamed
+  Stepped/Heartbeat/RenderStepped); the classic names work, add the aliases for full parity.
+
 ## Architecture Hardening (before MVP2 — from the 2026-07-24 architecture audit)
 
 > Macro-architecture is healthy: engine-free portable Core (`noEngineReferences:true`), clean Rbx

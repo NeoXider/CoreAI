@@ -89,8 +89,19 @@ Every substantial feature ships as up to three assemblies with references pointi
 
 - Naming enforced via `.editorconfig` analyzers: `I`-prefix on interfaces at
   `severity = error`; PascalCase public members; `_camelCase` private fields.
-- Comments: XML `<summary>` on public types/members, `WHY:` for non-obvious decisions,
-  `TODO:`/`HACK:` tags; all English; no restating-the-code comments.
+- Comments: XML `<summary>` on public types/members; `TODO:`/`HACK:` tags; all English; no
+  restating-the-code comments.
+  - **`WHY:` is the rare exception, not the default.** Most changes need NO inline comment — clear
+    names and small methods carry the intent. Add a `WHY:` only when a reader would otherwise be
+    misled or "fix" the code back to a subtly-wrong version: a non-obvious ordering constraint, a
+    workaround for an external quirk, a deliberate deviation from the obvious approach. Do **not**
+    add a `WHY:` for every edit, and never write one that just restates what the code, the method
+    signature, or an adjacent doc already says (e.g. "// set X to 10 for Roblox parity" next to a
+    constant already XML-documented as Roblox parity) — delete it instead. If in doubt, leave it out.
+    <!-- TODO: one-time cleanup refactor pass — strip the over-applied/redundant `WHY:` comments that
+         accumulated across the mods/RbxApi code (keep only genuinely non-obvious ones). Do this after
+         the pending commit, alongside the Roblox->Rbx identifier rename (see BACKLOG). -->
+
 - Folder-per-feature, layer-per-subfolder. One README per feature explaining purpose,
   layer map, and any recorded deviations.
 - Loud stubs: unimplemented API surface throws the stable stub-error format from the

@@ -92,7 +92,8 @@ namespace CoreAI.Composition
                     rbxHost.Initialize();
                     robloxApi = new LuaCsRobloxApiBindings(
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
-                        cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource);
+                        cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
+                        pickSource: rbxHost.PickSource);
                 }
                 else
                 {
@@ -145,8 +146,12 @@ namespace CoreAI.Composition
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
                     {
                         // WHY: disconnect BEFORE the instance sweep so a Heartbeat/InputBegan handler is
-                        // already dead when its owning instances are destroyed below.
-                        ownedConnections?.DisconnectOwnedBy(modId);
+                        // already dead when its owning instances are destroyed below. On RELOAD the
+                        // replacement chunk has ALREADY re-Connected (BuildMod runs before this teardown),
+                        // so keep the current generation and drop only the outgoing chunk's connections;
+                        // Unload/Quarantine have no new chunk and disconnect everything.
+                        ownedConnections?.DisconnectOwnedBy(
+                            modId, keepCurrentGeneration: reason == LuaModTeardownReason.Reload);
 
                         if (ownedRegistry == null || reason != LuaModTeardownReason.Unload)
                         {

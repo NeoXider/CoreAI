@@ -32,6 +32,10 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Camera seam for the Lua surface; null when the scene has no camera at all.</summary>
         public IRobloxCameraRig CameraRig { get; private set; }
 
+        /// <summary>Click-pick seam behind ClickDetector.MouseClick; null when the scene has no
+        /// camera (nothing to raycast through).</summary>
+        public IClickPickSource PickSource { get; private set; }
+
         /// <summary>Input seam behind game:GetService("UserInputService"); resolved once at
         /// Initialize like the camera rig.</summary>
         public IInputSource InputSource { get; private set; }
@@ -66,6 +70,9 @@ namespace CoreAI.Mods.Rbx.Binding
             // must never pay a scene search per call.
             Camera sceneCamera = _camera != null ? _camera : Camera.main;
             CameraRig = sceneCamera != null ? new UnityCameraRig(sceneCamera.transform, Binder) : null;
+            // WHY: ClickDetector picking rays through the SAME rendering camera; no camera means no
+            // pick source, and the bindings fall back to the headless no-op.
+            PickSource = sceneCamera != null ? new UnityClickPickSource(sceneCamera, Binder) : null;
             // TODO: com.unity.inputsystem may be removed — the source stays behind IInputSource so
             // only this composition line changes when the backend is swapped.
             InputSource = new UnityNewInputSource();
@@ -80,6 +87,7 @@ namespace CoreAI.Mods.Rbx.Binding
             Registry = null;
             Binder = null;
             CameraRig = null;
+            PickSource = null;
             InputSource = null;
         }
     }

@@ -68,8 +68,9 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsModRuntime : ILuaModRuntime
     {
-        public const int DefaultHandlerTimeoutMs = 500;
-        public const long DefaultHandlerMaxSteps = 100_000;
+        // WHY: ~10 s matches Luau's script watchdog so a mod handler is not cut sooner than a Roblox one.
+        public const int DefaultHandlerTimeoutMs = 10_000;
+        public const long DefaultHandlerMaxSteps = 50_000_000;
         public const int DefaultMaxMods = 32;
         public const int DefaultMaxHandlersPerMod = 64;
         public const int DefaultMaxTimersPerMod = 16;
@@ -1728,7 +1729,7 @@ namespace CoreAI.Ai.LuaCs
                 if (_mods.TryGetValue(modId, out Mod mod))
                 {
                     source = mod.Source;
-                    manifest = BuildManifest(modId, mod.Caps, true);
+                    manifest = BuildManifest(modId, mod.Source ?? "", mod.Caps, true);
                 }
             }
 
@@ -1739,7 +1740,7 @@ namespace CoreAI.Ai.LuaCs
                     if (_sourceStore.TryLoad(modId, out string storedSource, out LuaModManifest storedManifest))
                     {
                         source = storedSource;
-                        manifest = storedManifest ?? BuildManifest(modId, LuaCapabilities.None, false);
+                        manifest = storedManifest ?? BuildManifest(modId, storedSource ?? "", LuaCapabilities.None, false);
                     }
                 }
                 catch (Exception ex)
@@ -1857,7 +1858,12 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                _sourceStore.Save(modId, source, BuildManifest(modId, caps, true));
+                // WHY: Carry over the seed lineage (Origin/Seeded*) from the existing manifest so a runtime
+                // load/reload never blanks it — otherwise a bundled sample loaded at runtime would look
+                // user-authored to the next seed pass and stop auto-updating.
+                LuaModManifest existing = null;
+                try { _sourceStore.TryLoad(modId, out _, out existing); } catch { existing = null; }
+                _sourceStore.Save(modId, source, BuildManifest(modId, source ?? "", caps, true, existing));
             }
             catch (Exception ex)
             {
@@ -1866,20 +1872,33 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Builds a manifest for the given mod with its capability set rendered as a string. The
-        /// <see cref="LuaModManifest.Version"/> is auto-derived from the revision count tracked in the version
-        /// store (number of recorded revisions; "1" for a freshly seeded mod, blank when no history exists), so
-        /// each edit through load/reload advances the persisted and exported version without the caller managing it.
+        /// Builds a manifest for the given mod from its <c>--[[@coreai ... ]]</c> header (name, description,
+        /// category, tags, author) with its capability set rendered as a string. <see cref="LuaModManifest.Version"/>
+        /// prefers the header's authored version (e.g. <c>1.2.0</c>) so the Mods card shows the real version;
+        /// it falls back to the revision count from the version store only when the header omits a version.
+        /// The seed lineage (<see cref="LuaModManifest.Origin"/>/<see cref="LuaModManifest.SeededVersion"/>/
+        /// <see cref="LuaModManifest.SeededHash"/>) is carried over from <paramref name="existing"/> when present.
         /// </summary>
-        private LuaModManifest BuildManifest(string id, LuaCapabilities caps, bool active)
+        private LuaModManifest BuildManifest(string id, string source, LuaCapabilities caps, bool active,
+            LuaModManifest existing = null)
         {
+            LuaModHeader header = LuaModHeader.Parse(source ?? "", id);
+            string version = string.IsNullOrWhiteSpace(header.Version) ? CurrentVersionString(id) : header.Version;
             return new LuaModManifest
             {
                 Id = id,
-                Name = id,
+                Name = string.IsNullOrWhiteSpace(header.Name) ? id : header.Name,
+                Description = header.Description ?? "",
+                Category = header.Category ?? "",
+                Tags = header.Tags ?? "",
+                Author = header.Author ?? "",
                 Capabilities = caps.ToString(),
                 Active = active,
-                Version = CurrentVersionString(id)
+                Version = version,
+                Origin = existing?.Origin ?? "",
+                SeededVersion = existing?.SeededVersion ?? "",
+                SeededHash = existing?.SeededHash ?? "",
+                UpdateAvailable = existing?.UpdateAvailable ?? false
             };
         }
 

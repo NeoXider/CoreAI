@@ -27,6 +27,11 @@ namespace CoreAI.Ai.LuaCs
             Capabilities = capabilities;
             OwnerModId = ownerModId;
             OriginTag = originTag;
+            // WHY: stamp this load's connection generation BEFORE the mod chunk runs, so every Connect
+            // the chunk makes is tracked under it. On reload a fresh context bumps the generation first
+            // (BuildMod runs before the reload teardown), letting teardown disconnect only the previous
+            // generation and keep this chunk's connections. Mirrors the logic-slot keepState exclusion.
+            ConnectionGeneration = bindings.Connections?.BeginGeneration(ownerModId) ?? 0;
             _instanceMeta = LuaCsRobloxInstanceBindings.BuildInstanceMeta(this);
         }
 
@@ -39,6 +44,10 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Ledger origin recorded on created instances (mod:&lt;id&gt; / console:&lt;n&gt;).</summary>
         public string OriginTag { get; }
+
+        /// <summary>This load's connection-ownership generation; connections opened by this context's
+        /// chunk are tracked under it so a reload teardown keeps them and drops the prior generation.</summary>
+        public int ConnectionGeneration { get; }
 
         /// <summary>Deprecation note for Instance.new(className, parent) fires once per mod.</summary>
         public bool HasLoggedInstanceNewParentDeprecation { get; set; }
@@ -79,7 +88,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void TrackConnection(CoreAI.Mods.Rbx.Instances.RbxScriptConnection connection)
         {
-            Bindings.Connections?.Track(OwnerModId, connection);
+            Bindings.Connections?.Track(OwnerModId, ConnectionGeneration, connection);
         }
 
         public void RequireWorldEdit(string what)
@@ -161,6 +170,11 @@ namespace CoreAI.Ai.LuaCs
                     return runValue;
                 }
 
+                if (TryReadClickDetector(context, self, key, out LuaValue clickValue))
+                {
+                    return clickValue;
+                }
+
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
                 {
                     return spatial;
@@ -219,6 +233,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 if (TryWriteUserInput(self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (TryWriteClickDetector(context, self, key, value))
                 {
                     return LuaValue.Nil;
                 }
@@ -827,6 +846,56 @@ namespace CoreAI.Ai.LuaCs
                     value = LuaValue.Nil;
                     return false;
             }
+        }
+
+        // ---- ClickDetector (MouseClick over the host pick pump) ------------------------------
+
+        /// <summary>ClickDetector members: the MouseClick/MouseHoverEnter/MouseHoverLeave signals and
+        /// MaxActivationDistance. Signal reads carry the mod context so the returned connection is
+        /// tracked for teardown (like RunService/UserInputService); reads are open at the Read tier —
+        /// connecting a click handler observes the world, it mutates nothing.</summary>
+        private static bool TryReadClickDetector(LuaCsRobloxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (!(self is RbxClickDetector detector))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "MouseClick":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseClick, context);
+                    return true;
+                case "MouseHoverEnter":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseHoverEnter, context);
+                    return true;
+                case "MouseHoverLeave":
+                    value = LuaCsRobloxDatatypeBindings.Wrap(detector.MouseHoverLeave, context);
+                    return true;
+                case "MaxActivationDistance":
+                    value = detector.MaxActivationDistance;
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        /// <summary>ClickDetector.MaxActivationDistance assignment (studs). Roblox lets any script set
+        /// it, but it mutates shared world state, so it takes the WorldEdit gate like part properties.</summary>
+        private static bool TryWriteClickDetector(LuaCsRobloxModContext context, RbxInstance self,
+            string key, LuaValue value)
+        {
+            if (!(self is RbxClickDetector detector) || key != "MaxActivationDistance")
+            {
+                return false;
+            }
+
+            context.RequireWorldEdit("setting ClickDetector.MaxActivationDistance");
+            detector.MaxActivationDistance = ReadNumberValue(value, "ClickDetector.MaxActivationDistance");
+            return true;
         }
 
         // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------

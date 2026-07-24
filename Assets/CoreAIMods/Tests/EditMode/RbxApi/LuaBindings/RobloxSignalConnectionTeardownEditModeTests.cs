@@ -91,14 +91,15 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             }
         }
 
-        [Test]
-        public void Heartbeat_Connection_StopsFiring_AfterModUnload()
+        /// <summary>
+        /// Builds a stack wired to a shared connection ledger and the same ModTearingDown teardown the
+        /// CoreAiModsInstaller installs: disconnect a mod's connections on every reason, KEEPING the
+        /// current generation on Reload (the replacement chunk has already re-Connected by then).
+        /// </summary>
+        private static LuaCsModStack BuildWiredStack(out LuaCsRobloxApiBindings roblox, MemoryStore store)
         {
             var connections = new ModConnectionRegistry();
-            // WHY: wire the bindings to a shared connection ledger exactly like the composition does, so
-            // Connect records the handle and teardown can disconnect it.
-            var roblox = new LuaCsRobloxApiBindings(connections: connections);
-            var store = new MemoryStore();
+            roblox = new LuaCsRobloxApiBindings(connections: connections);
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
@@ -108,9 +109,16 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
                 RobloxApi = roblox
             });
 
-            // WHY: mirror the CoreAiModsInstaller teardown wiring — disconnect a mod's connections on
-            // every teardown reason.
-            stack.Runtime.ModTearingDown += (modId, _) => connections.DisconnectOwnedBy(modId);
+            stack.Runtime.ModTearingDown += (modId, reason) => connections.DisconnectOwnedBy(
+                modId, keepCurrentGeneration: reason == LuaModTeardownReason.Reload);
+            return stack;
+        }
+
+        [Test]
+        public void Heartbeat_Connection_StopsFiring_AfterModUnload()
+        {
+            var store = new MemoryStore();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRobloxApiBindings roblox, store);
 
             stack.Runtime.LoadMod("m", @"
                 local rs = game:GetService('RunService')
@@ -139,6 +147,53 @@ namespace CoreAI.Tests.EditMode.RobloxApi.LuaBindings
             // WHY: no further increments — the disconnected handler never fires against the torn-down mod.
             Assert.AreEqual("3", store.Get("m", "n"),
                 "Heartbeat must not fire after the mod is unloaded");
+        }
+
+        [Test]
+        public void Reload_KeepsNewConnection_AndDropsOldGeneration()
+        {
+            var store = new MemoryStore();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRobloxApiBindings roblox, store);
+
+            // WHY: each handler read-modify-writes the SHARED store key, so two live handlers advance it
+            // by two per frame and one by exactly one — the value alone distinguishes "old gen still
+            // firing" (double-count) from "new gen inert" (no growth) from correct (one per frame).
+            const string bump = @"
+                local rs = game:GetService('RunService')
+                rs.Heartbeat:Connect(function()
+                    store_set('n', tostring((tonumber(store_get('n')) or 0) + 1))
+                end)";
+
+            // WHY: generation 1 — the outgoing chunk. Its Heartbeat handler must be gone after reload.
+            stack.Runtime.LoadMod("m", bump);
+
+            roblox.PumpFrame(0.1f);
+            roblox.PumpFrame(0.1f);
+            Assert.AreEqual("2", store.Get("m", "n"), "gen-1 handler fires once per frame while loaded");
+
+            // WHY: reload with a chunk that ALSO connects Heartbeat (generation 2). The reload teardown
+            // must disconnect only gen-1 and keep gen-2 live, so the game loop keeps running.
+            stack.Runtime.ReloadMod("m", bump);
+
+            // WHY: the reloaded chunk's connection survives the teardown (not left inert).
+            Assert.IsTrue(roblox.RunService.Heartbeat.HasConnections,
+                "the reloaded chunk's Heartbeat connection survives the reload teardown");
+
+            roblox.PumpFrame(0.1f);
+            roblox.PumpFrame(0.1f);
+
+            // WHY: n grows by exactly one per frame after reload — the reloaded connection STILL fires
+            // (would stay at 2 if the fix disconnected the new chunk's own connection), and the old
+            // generation does NOT also fire (would jump by two per frame if it were double-counted).
+            Assert.AreEqual("4", store.Get("m", "n"),
+                "the reloaded mod's Heartbeat keeps firing exactly once per frame");
+
+            Assert.IsTrue(stack.Runtime.UnloadMod("m"), "the mod unloads");
+            Assert.IsFalse(roblox.RunService.Heartbeat.HasConnections,
+                "unloading after a reload disconnects the surviving connection too");
+
+            roblox.PumpFrame(0.1f);
+            Assert.AreEqual("4", store.Get("m", "n"), "no Heartbeat fires after the final unload");
         }
     }
 }

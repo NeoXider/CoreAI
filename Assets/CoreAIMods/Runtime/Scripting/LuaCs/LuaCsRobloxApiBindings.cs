@@ -31,9 +31,14 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRobloxCameraRig _cameraRig;
         private readonly RbxUserInputService _userInputService;
         private readonly RbxRunService _runService;
+        private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
+
+        // WHY: ClickDetector fires on the RISING edge of MouseButton1 (one click = one fire), so the
+        // previous frame's held state is kept to detect the press transition in the per-frame pump.
+        private bool _mouseButton1Down;
 
         /// <summary>
         /// Creates the bindings over an existing world, or bootstraps a fresh MVP1 game tree when
@@ -52,10 +57,13 @@ namespace CoreAI.Ai.LuaCs
         public LuaCsRobloxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
             IRobloxCameraRig cameraRig = null, IInputSource inputSource = null,
-            ModConnectionRegistry connections = null)
+            ModConnectionRegistry connections = null, IClickPickSource pickSource = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
+            // WHY: no camera/physics behind the headless default, so clicks resolve to nothing until
+            // a live UnityClickPickSource is wired at composition (mirrors the camera-rig default).
+            _pickSource = pickSource ?? new InMemoryClickPickSource();
             _game = game ?? DataModelBootstrap.CreateGame(_registry);
             _workspace = _game.FindFirstChildOfClass("Workspace")
                          ?? throw new ArgumentException(
@@ -119,6 +127,10 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>The shared RunService instance (Heartbeat/Stepped/RenderStepped signals).</summary>
         public RbxRunService RunService => _runService;
 
+        /// <summary>Camera-ray seam behind ClickDetector.MouseClick (headless in-memory by default,
+        /// the composition attaches the engine-backed source once).</summary>
+        public IClickPickSource PickSource => _pickSource;
+
         /// <summary>
         /// Ledger of the signal connections mods open through <c>Connect</c>/<c>Once</c>. The
         /// composition disconnects a mod's connections on <c>ModTearingDown</c> so its per-frame
@@ -148,6 +160,78 @@ namespace CoreAI.Ai.LuaCs
         {
             _userInputService?.Step();
             _runService?.Step(dt);
+            PumpClicks();
+        }
+
+        /// <summary>
+        /// Per-frame click pick: on the RISING edge of MouseButton1 (one fire per click), casts a
+        /// camera ray through the mouse position, resolves the nearest world instance, and fires the
+        /// MouseClick of a ClickDetector CHILD of that part when the hit is within its
+        /// MaxActivationDistance. Only the single nearest ray hit fires, so clicking one part never
+        /// fires another part's detector, and clicking empty space fires nothing. Every step is
+        /// null-guarded, so the headless default (no camera/physics) is a silent no-op.
+        /// </summary>
+        // TODO: MVP2 — MouseHoverEnter/MouseHoverLeave once the pick pump tracks the hovered part
+        // across frames; today only MouseClick is driven.
+        private void PumpClicks()
+        {
+            if (_userInputService == null || _pickSource == null)
+            {
+                return;
+            }
+
+            IInputSource input = _userInputService.InputSource;
+            if (input == null)
+            {
+                return;
+            }
+
+            // WHY: edge-detect against last frame's held state so a held button fires once, not every
+            // frame — Roblox delivers one MouseClick per press.
+            bool down = input.IsMouseButtonDown(0);
+            bool rising = down && !_mouseButton1Down;
+            _mouseButton1Down = down;
+            if (!rising)
+            {
+                return;
+            }
+
+            RbxVector2 location = input.GetMouseLocation();
+            if (!_pickSource.TryPick(location, out InstanceId hitId, out double distanceStuds)
+                || !_registry.TryGet(hitId, out RbxInstance hit)
+                || hit.IsDestroyed)
+            {
+                return;
+            }
+
+            RbxClickDetector detector = FindClickDetector(hit);
+            if (detector == null || detector.IsDestroyed)
+            {
+                return;
+            }
+
+            // WHY: gate on MaxActivationDistance (studs from the camera) exactly like Roblox — a click
+            // farther than the detector's range does not activate it — and skip the fire when nothing
+            // listens so an unlistened detector boxes nothing.
+            if (distanceStuds <= detector.MaxActivationDistance && detector.MouseClick.HasConnections)
+            {
+                detector.MouseClick.Fire();
+            }
+        }
+
+        // WHY: Roblox parents a ClickDetector UNDER the clickable part, so the hit part's direct
+        // children are searched for the first ClickDetector; a part with no detector is inert.
+        private static RbxClickDetector FindClickDetector(RbxInstance part)
+        {
+            foreach (RbxInstance child in part.GetChildren())
+            {
+                if (child is RbxClickDetector detector)
+                {
+                    return detector;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>Camera.CameraType value shared by every script of this world (state only —

@@ -136,6 +136,11 @@ namespace CoreAI.Mods.Rbx.Instances
             // RenderStepped); behavior class fires the signals from the host's per-frame Step pump.
             catalog.Register(new ClassDescriptor("RunService", "Instance", false, false, true,
                 descriptor => new RbxRunService(descriptor)));
+            // WHY: ClickDetector is a normal creatable Instance (superclass Instance, NOT a service) —
+            // a mod does Instance.new("ClickDetector") and parents it under a Part; the behavior class
+            // carries the MouseClick signal the host pick pump fires when that part is clicked.
+            catalog.Register(new ClassDescriptor("ClickDetector", "Instance", false, true, false,
+                descriptor => new RbxClickDetector(descriptor)));
             return catalog;
         }
     }

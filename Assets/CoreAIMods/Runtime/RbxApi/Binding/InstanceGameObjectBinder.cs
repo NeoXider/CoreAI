@@ -119,6 +119,34 @@ namespace CoreAI.Mods.Rbx.Binding
             return false;
         }
 
+        /// <summary>
+        /// Reverse of <see cref="TryGetBoundObject"/>: the world instance whose backing GameObject is
+        /// <paramref name="gameObject"/> (used by the click-pick source to map a raycast hit back to
+        /// an <see cref="InstanceId"/>). A part's own visual and collider sit on this GameObject
+        /// (Block/Ball/Wedge) or a binder-owned Shape child (Cylinder), so the pick source walks up
+        /// the hit transform's ancestry calling this until a bound object matches.
+        /// </summary>
+        // WHY: linear scan — a click is a per-click (not per-frame) event and the bound set is the
+        // live part count, so a reverse dictionary is not worth the extra bookkeeping on every
+        // create/destroy/reparent.
+        public bool TryGetInstanceId(GameObject gameObject, out InstanceId id)
+        {
+            if (gameObject != null)
+            {
+                foreach (KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+                {
+                    if (ReferenceEquals(pair.Value.GameObject, gameObject))
+                    {
+                        id = pair.Key;
+                        return true;
+                    }
+                }
+            }
+
+            id = InstanceId.None;
+            return false;
+        }
+
         // ---- IInstanceBackingBinder (D5/D6) -------------------------------------------------
 
         public void OnEnteredWorld(InstanceRecord record)

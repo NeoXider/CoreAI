@@ -12,8 +12,12 @@ namespace CoreAI.Sandbox.LuaCs
     /// </summary>
     public sealed class LuaCsSecureEnvironment
     {
-        /// <summary>Maximum instruction budget for one-shot Lua script execution.</summary>
-        public const int OneShotHardLimitSteps = 500_000;
+        /// <summary>
+        /// Maximum instruction budget for one-shot Lua script execution. Sized for Roblox parity: paired with
+        /// the guard's ~10 s wall-clock timeout (which is the real limiter), a build/setup script gets the same
+        /// headroom a Luau script does before "exhausted allowed execution time".
+        /// </summary>
+        public const int OneShotHardLimitSteps = 50_000_000;
 
         /// <summary>Maximum length of a string that <c>string.rep</c> may build.</summary>
         public const int MaxStringRepLength = 1_000_000;

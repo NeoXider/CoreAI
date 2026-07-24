@@ -86,9 +86,13 @@ buttons live at 1000+).
 
 ## 4. Instances
 
-- `Instance.new(""Class""[, parent])` — creatable classes are ONLY ""Part"", ""Folder"", ""Model"".
-  Any other name errors. The parent argument is deprecated (logs once); set `.Parent` after
-  configuring instead.
+- `Instance.new(""Class""[, parent])` — creatable classes are ""Part"", ""Folder"", ""Model"",
+  ""ClickDetector"". Any other name errors. The parent argument is deprecated (logs once); set
+  `.Parent` after configuring instead.
+- `ClickDetector` — parent one under a Part to make that 3D part clickable:
+  `local cd = Instance.new(""ClickDetector""); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
+  MouseClick fires (no args) when the user clicks THAT part with the mouse and it is within
+  `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
 - `game:GetService(""Name"")` — valid services: Workspace, Lighting, ReplicatedStorage,
   ServerStorage, ServerScriptService, StarterPlayer, UserInputService, RunService. Unknown name -> ""X is not
   a valid Service name"". Also `game:FindService(name)`. `workspace` is

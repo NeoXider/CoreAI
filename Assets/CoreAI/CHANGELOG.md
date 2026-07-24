@@ -1,5 +1,56 @@
 # Changelog
 
+## [6.5.0] - 2026-07-24
+
+3D click-picking, a playable block-clicker sample, Roblox-parity execution budgets, and reliable
+mod versioning/delivery.
+
+### Added
+
+- **`ClickDetector` — Roblox-1:1 3D click-picking.** `Instance.new("ClickDetector")` parented to a Part
+  makes that part clickable: `cd.MouseClick:Connect(function() ... end)` fires only when the actual part
+  under the cursor is clicked (nearest raycast hit within `MaxActivationDistance`, default 32 studs) —
+  empty space and other blocks fire nothing. Engine-free `RbxClickDetector` + an `IClickPickSource` seam
+  (`UnityClickPickSource` raycast adapter, `InMemoryClickPickSource` headless default), pumped on the
+  MouseButton1 rising edge; the idle per-frame path is allocation-free.
+- **`sample_clicker` — a playable 3D block clicker (pure Roblox API).** Click the gold block to mine;
+  click the upgrade blocks to buy (green pop on purchase, red flash when you can't afford, so a gray
+  block still gives feedback). Coins and each upgrade's price are physical tier blocks; the passive
+  upgrade block grows with its level and pulses green each time it earns. Ships disabled.
+
+### Changed
+
+- **Execution budgets raised to Roblox parity (~10 s).** A Luau script is only terminated after ~10 s of
+  continuous execution, so a CoreAI mod is no longer cut sooner: one-shot and mod-handler wall-clock
+  timeouts are now 10 s (were 2 s / 500 ms) with a high step ceiling as a secondary net. Mods run under
+  the same headroom a Roblox script gets. (`IExecutionBudget`, `LuaCsExecutionGuard`,
+  `LuaCsSecureEnvironment`, `LuaCsModRuntime`)
+- **Lane Racer → 2.1.0, Tetris 3D → 3.0.0** — smooth per-frame lerped motion (no teleport), visible
+  spawn drop-in, and the line-clear/crash scatter.
+
+### Fixed
+
+- **Mod card shows the authored header version, not a revision count.** A mod persisted via load/reload
+  used to show its version as the number of stored revisions ("v3"); the manifest now takes `Version`
+  (and `Name`/`Description`/`Category`) from the mod's `--[[@coreai ... version: ]]` header, falling back
+  to the revision count only when the header omits a version. The seed lineage (Origin/Seeded*) is carried
+  over so a runtime load never blanks it. (`LuaCsModRuntime.BuildManifest`)
+- **A strictly-newer bundled version always ships.** A sample that had been opened/edited used to stick on
+  its old version (the update downgraded to an "UpdateAvailable" flag); a newer bundled version now updates
+  in place, with the prior source kept as a recoverable revision. (`BundledModSeeder`)
+- **The Hub no longer collapses when you press Space.** The collapse ("–") button was focusable, so the
+  game's Space (jump/action) triggered its NavigationSubmit and closed the Hub; it is now pointer-only.
+  (`CoreAiHubWindow`)
+- **Click-pick Y-flip is consistent under non-fullscreen cameras** — the pick ray now flips against
+  `Screen.height` (matching the input source) instead of `Camera.pixelHeight`. (`UnityClickPickSource`)
+
+### Docs
+
+- Added the CoreAI-vs-Luau VM micro-benchmark results (`dev-docs/LUA_VM_BENCHMARK_PLAN.md`): Luau's
+  interpreter is ~5–43× faster than the Lua-CSharp interpreter and ~7–127× with `--!native`; the gap is
+  architectural (native register VM + JIT vs a managed C# interpreter), which is why mods stay thin.
+- Sharpened the comment rule: `WHY:` is the rare exception, not a per-edit default. (`ARCHITECTURE_RULES.md`)
+
 ## [6.4.1] - 2026-07-24
 
 ### Docs

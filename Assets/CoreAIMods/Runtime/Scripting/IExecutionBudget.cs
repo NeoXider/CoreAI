@@ -20,10 +20,12 @@ namespace CoreAI.Scripting
     /// <summary>Immutable <see cref="IExecutionBudget"/> with the historical sandbox defaults.</summary>
     public sealed class ExecutionBudget : IExecutionBudget
     {
-        // WHY: Defaults mirror the Lua-CSharp guard's long-standing values so swapping call sites from the
-        // concrete guard to the seam cannot silently change any budget.
-        public const int DefaultTimeoutMs = 2000;
-        public const long DefaultMaxSteps = 200_000;
+        // WHY: Budgets are aligned to Roblox parity — Roblox terminates a script after ~10 s of continuous
+        // (non-yielding) execution ("exhausted allowed execution time"), so a CoreAI mod must not be cut
+        // sooner than a Luau script doing the same work. The wall-clock timeout is the real limiter; MaxSteps
+        // is a high secondary net so the ~10 s clock (checked by the guard hook) trips first on a runaway.
+        public const int DefaultTimeoutMs = 10_000;
+        public const long DefaultMaxSteps = 50_000_000;
         public const long DefaultMaxAllocatedBytes = 256 * 1024 * 1024;
 
         public ExecutionBudget(

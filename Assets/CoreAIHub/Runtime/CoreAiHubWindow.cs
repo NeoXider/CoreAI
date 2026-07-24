@@ -224,6 +224,9 @@ namespace CoreAI.Hub.UI
             if (_collapseButton != null)
             {
                 _collapseButton.clicked += ToggleCollapsed;
+                // WHY: it is a pointer affordance only — a focusable Button fires clicked on the Space/Enter
+                // NavigationSubmit, so once it held focus the game's Space (jump/action) collapsed the Hub.
+                _collapseButton.focusable = false;
             }
 
             _root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
