@@ -72,6 +72,16 @@ namespace CoreAI.Ai.LuaCs
             _partSink = partSink ?? new InMemoryPartPropertySink();
             _cameraRig = cameraRig ?? new InMemoryCameraRig();
             _log = log;
+            if (registry == null || partSink == null)
+            {
+                _log?.Invoke(
+                    "[CoreAI.RbxApi] Headless mode: " +
+                    (registry == null ? "no InstanceRegistry " : "") +
+                    (partSink == null ? "no part materialiser (InstanceGameObjectBinder)" : "") +
+                    " — Instance.new creates data-model instances but nothing renders in the scene. " +
+                    "If this is a player build, check link.xml preserves CoreAI.RbxApi.* assemblies and that " +
+                    "RbxWorldHost is wired on CoreAiModsLifetimeScope.");
+            }
             // WHY: worlds bootstrapped before the input slice (older snapshots / external trees)
             // may lack the service; creating it here keeps game:GetService("UserInputService")
             // resolvable for every world this bindings instance fronts.

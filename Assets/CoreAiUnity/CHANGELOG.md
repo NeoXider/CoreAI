@@ -6,12 +6,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
-- **EditMode test preprocessor mismatch in `LlmUnityActivationLogEditModeTests`.** Tests that call
-  `LlmEndpointClientFactory.ApplyNativeConfiguration`/`NativeConfigurationMatches` and
-  `LlmUnityActivationCoordinator` were guarded by `#if COREAI_HAS_LLMUNITY` but the symbols themselves
-  live in `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM`. On WebGL or no-LLM builds the
-  tests compiled but the symbols were absent (CS0117 / CS0103). The two affected tests now share the
-  tighter guard.
+- **Mods silently produced no visible objects in Standalone/Android/WebGL builds.** IL2CPP managed
+      stripping removed the entire Roblox API binding layer (`CoreAI.RbxApi.{Instances,Datatypes,
+      Binding,Unity}`) and VContainer internals (`BuilderCallbackDisposable`), so the mods DI
+      container never built and `Instance.new`/`workspace` mutations were no-ops. Added all five
+      assemblies to `link.xml`.
+- **Headless-mode warnings added.** `CoreAiModsInstaller`, `LuaCsRbxApiBindings`, and
+      `InstanceGameObjectBinder` now log clear warnings when the Roblox world host is missing or
+      the binder falls back to in-memory defaults, instead of silently degrading.
 
 ## [6.0.0] - 2026-07-22
 

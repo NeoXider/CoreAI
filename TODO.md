@@ -265,6 +265,35 @@
       request-local and `ToolExecutionPolicy.Reset()` intentionally clears it.
 - [ ] Full-tier Lua queries: move recursive `unity_list_objects` / `unity_find_all` /
       `unity_find_by_tag` / `unity_find_by_component` implementations onto the shared budgeted walker.
+- [ ] **WebGL build: `LlamaLib.GetPlatform()` throws on Emscripten/WASM.** LLMUnity's native
+      llama.cpp wrapper uses `RuntimeInformation.IsOSPlatform` which does not recognise WebGL/Emscripten
+      (`Unix 3.1.39.0`). `CoreAiWebGlLlmUnitySceneGuard` disables scene-placed `LLM` objects, but
+      any programmatic `new LlamaLib()` / `LLMService()` path still hits `GetPlatform()` and crashes.
+      **Fix:** either add an Emscripten/WASM branch to `LlamaLib.GetPlatform()` upstream, or ensure
+      all LLMUnity construction paths in CoreAI are gated behind `#if !UNITY_WEBGL`.
+- [ ] **Hub: log text should be copyable.** The Hub log viewer (Mod Logs / diagnostics) does not
+      allow selecting/copying text. Add text selection support so users can copy error messages and
+      diagnostics.
+- [ ] **WebGL build: Hub has no Mods tab.** The Mods/Logs sub-tabs are missing from the Hub window
+      on WebGL. Likely the `HubModsPages` registration is gated behind `COREAI_HAS_LUA` or
+      `COREAI_HAS_HUB` which is not set for the WebGL scripting defines, or the mods composition
+      module is not present in the WebGL scene hierarchy. Investigate and restore the Mods tab.
+- [x] **Builds: enabled mods do not create or spawn anything.** Mods load and enable successfully in
+      the Editor but `Instance.new` / `workspace` / world mutations produce no visible objects in both
+      Windows Standalone and Android builds (works fine in Editor Play Mode). Likely the
+      `InstanceGameObjectBinder` (Roblox→Unity materialisation layer) is IL2CPP-stripped, not composed
+      in the build scene hierarchy, or the `RobloxWorldHost`→binder wiring is Editor-only. Investigate
+      the build-time DI composition, `link.xml` coverage for the binder types, and whether
+      `IInstanceBackingBinder` registration survives into builds.
+      **Fixed:** added `CoreAI.RbxApi.{Instances,Datatypes,Binding,Unity}` + `VContainer` to
+      `link.xml`; the root cause was IL2CPP stripping the entire mods DI container
+      (`BuilderCallbackDisposable`) and all Roblox API types.
+- [x] **WebGL build: VContainer `BuilderCallbackDisposable` constructor stripped by IL2CPP.** The
+      `internal` VContainer class `BuilderCallbackDisposable` loses its constructor under WebGL IL2CPP
+      managed code stripping, so `CoreAiModsLifetimeScope.Configure()` → `RegisterDisposeCallback()`
+      → VContainer build fails → `Container` stays null → `CoreAiDemoScope.ResolveModsContainer` throws
+      "missing or not initialized". **Fixed:** added `<assembly fullname="VContainer" preserve="all"/>`
+      to `link.xml`.
 - [ ] Durability: WebGL sync after `WorldStateManager.Reset`; recoverable two-phase audit rotation;
       surface audit worker failures during runtime rather than only at Dispose/testing flush.
 - [x] `allowedLuaScenes` contract pinned as deliberately permissive when empty (any Build Settings scene),

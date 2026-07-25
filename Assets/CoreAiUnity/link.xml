@@ -43,4 +43,17 @@
     <!-- Lua-CSharp reflection-invokes the game binding callbacks registered on LuaCsApiRegistry; keep
          the mod assembly so those delegates/closures survive Medium+ stripping on AOT players. -->
     <assembly fullname="CoreAI.Mods" preserve="all"/>
+
+    <!-- Roblox API: engine-free domain assemblies referenced via VContainer reflection and lambda
+         captures in the mods DI factory. IL2CPP Medium+ strips them otherwise, so mods load but
+         Instance.new / workspace / world mutations silently produce nothing in Standalone/Android. -->
+    <assembly fullname="CoreAI.RbxApi.Instances" preserve="all"/>
+    <assembly fullname="CoreAI.RbxApi.Datatypes" preserve="all"/>
+    <assembly fullname="CoreAI.RbxApi.Binding" preserve="all"/>
+    <assembly fullname="CoreAI.RbxApi.Unity" preserve="all"/>
+
+    <!-- VContainer DI runtime: BuilderCallbackDisposable (internal) and TypeAnalyzer lose their
+         constructors under IL2CPP stripping, so CoreAiModsLifetimeScope.Configure() throws
+         "Type does not found injectable constructor" and the entire mods container never builds. -->
+    <assembly fullname="VContainer" preserve="all"/>
 </linker>

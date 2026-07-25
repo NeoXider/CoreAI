@@ -164,11 +164,20 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            entry = CreateEntry(record.Instance);
-            _bindings.Add(record.Id, entry);
-            if (entry.IsPart)
+            try
             {
-                Apply(entry, GetPartPropertiesOrDefault(record.Id));
+                entry = CreateEntry(record.Instance);
+                _bindings.Add(record.Id, entry);
+                if (entry.IsPart)
+                {
+                    Apply(entry, GetPartPropertiesOrDefault(record.Id));
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError(
+                    $"[CoreAI.RbxApi] Failed to materialize '{record.Instance.Name}' " +
+                    $"(class={record.Instance.ClassName}, id={record.Id}): {ex.Message}");
             }
         }
 

@@ -97,7 +97,10 @@ namespace CoreAI.Composition
                 }
                 else
                 {
-                    rbxApi = new LuaCsRbxApiBindings();
+                    Logging.Log.Instance.Warn(
+                        "[CoreAiMods] No RbxWorldHost in scene — mods run headless (Instance.new / workspace mutations produce no GameObjects). " +
+                        "Add a RbxWorldHost component to the scene and wire it on CoreAiModsLifetimeScope to enable visible world building.");
+                    rbxApi = new LuaCsRbxApiBindings(log: msg => Logging.Log.Instance.Warn(msg));
                 }
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
