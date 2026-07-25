@@ -2,6 +2,17 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [Unreleased]
+
+### Fixed
+
+- **EditMode test preprocessor mismatch in `LlmUnityActivationLogEditModeTests`.** Tests that call
+  `LlmEndpointClientFactory.ApplyNativeConfiguration`/`NativeConfigurationMatches` and
+  `LlmUnityActivationCoordinator` were guarded by `#if COREAI_HAS_LLMUNITY` but the symbols themselves
+  live in `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM`. On WebGL or no-LLM builds the
+  tests compiled but the symbols were absent (CS0117 / CS0103). The two affected tests now share the
+  tighter guard.
+
 ## [6.0.0] - 2026-07-22
 
 ### Changed

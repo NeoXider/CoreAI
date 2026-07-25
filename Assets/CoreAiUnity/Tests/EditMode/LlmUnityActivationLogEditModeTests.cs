@@ -192,7 +192,9 @@ namespace CoreAI.Tests.EditMode
             StringAssert.DoesNotContain("agent.Warmup", source);
             StringAssert.Contains("FindObjectsInactive.Include", source);
         }
+#endif
 
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
         [Test]
         public void NativeConfiguration_AppliesAndFingerprintsParallelSlotsAndContext()
         {
