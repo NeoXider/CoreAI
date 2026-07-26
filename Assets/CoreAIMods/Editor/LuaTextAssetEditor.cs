@@ -21,10 +21,10 @@ namespace CoreAI.Editor
 
         public override VisualElement CreateInspectorGUI()
         {
-            var textAsset = (TextAsset)target;
+            TextAsset textAsset = (TextAsset)target;
             string assetPath = AssetDatabase.GetAssetPath(textAsset);
 
-            var root = new VisualElement();
+            VisualElement root = new();
 
             if (!LuaAssetPaths.HasLuaExtension(assetPath))
             {
@@ -32,12 +32,12 @@ namespace CoreAI.Editor
                 return root;
             }
 
-            var title = new Label(Path.GetFileName(assetPath));
+            Label title = new(Path.GetFileName(assetPath));
             title.style.unityFontStyleAndWeight = FontStyle.Bold;
             title.style.marginBottom = 4f;
             root.Add(title);
 
-            var view = new LuaSyntaxHighlightView();
+            LuaSyntaxHighlightView view = new();
             view.SetSource(textAsset.text);
             view.Root.style.height = ViewHeight;
             view.Root.style.flexGrow = 0f;
@@ -50,11 +50,11 @@ namespace CoreAI.Editor
         // area) without depending on Unity's internal TextAssetInspector type.
         private static VisualElement BuildPlainTextView(TextAsset textAsset)
         {
-            var field = new TextField { multiline = true, value = textAsset.text, isReadOnly = true };
+            TextField field = new() { multiline = true, value = textAsset.text, isReadOnly = true };
             field.style.height = ViewHeight;
             field.style.whiteSpace = WhiteSpace.Normal;
 
-            var input = field.Q(className: "unity-text-field__input");
+            VisualElement input = field.Q(className: "unity-text-field__input");
             if (input != null)
             {
                 input.style.flexGrow = 1f;

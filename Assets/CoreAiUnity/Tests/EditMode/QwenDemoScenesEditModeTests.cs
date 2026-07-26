@@ -180,8 +180,10 @@ namespace CoreAI.Tests.EditMode
                     BindingFlags.Instance | BindingFlags.NonPublic));
                 Assert.IsNotNull(controller.GetType().GetField("_ready",
                     BindingFlags.Instance | BindingFlags.NonPublic));
-                Assert.IsNull(FindInRoots<LLM>(roots), "CoreAI must create and configure the LLMUnity host at runtime.");
-                Assert.IsNull(FindInRoots<LLMAgent>(roots), "CoreAI must create and configure the LLMAgent at runtime.");
+                Assert.IsNull(FindInRoots<LLM>(roots),
+                    "CoreAI must create and configure the LLMUnity host at runtime.");
+                Assert.IsNull(FindInRoots<LLMAgent>(roots),
+                    "CoreAI must create and configure the LLMAgent at runtime.");
 
                 CoreAISettingsAsset settings = scope.Settings;
                 Assert.IsNotNull(settings, "Standalone Qwen demo must assign dedicated settings.");

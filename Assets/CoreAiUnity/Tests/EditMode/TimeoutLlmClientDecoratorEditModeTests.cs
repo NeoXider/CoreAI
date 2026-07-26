@@ -190,7 +190,7 @@ namespace CoreAI.Tests.EditMode
         {
             private static readonly LlmToolCallTrace[] Traces =
             {
-                new LlmToolCallTrace("mutator", true, 1d, "native", "done")
+                new("mutator", true, 1d, "native", "done")
             };
 
             public async Task<LlmCompletionResult> CompleteAsync(

@@ -106,8 +106,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [Test]
         public void Lua_RunService_Heartbeat_FiresOncePerFrameWithNumericDelta()
         {
-            var roblox = new LuaCsRbxApiBindings();
-            var store = new MemoryStore();
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
             LuaCsModStack stack = BuildStack(roblox, store);
 
             stack.Runtime.LoadMod("m", @"
@@ -136,7 +136,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [Test]
         public void Lua_RunService_GetService_ResolvesRealService()
         {
-            var roblox = new LuaCsRbxApiBindings();
+            LuaCsRbxApiBindings roblox = new();
             LuaCsModStack stack = BuildStack(roblox, new MemoryStore());
 
             stack.Runtime.LoadMod("m", @"
@@ -148,7 +148,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [Test]
         public void CSharp_RunService_Step_FiresHeartbeatWithDelta()
         {
-            var roblox = new LuaCsRbxApiBindings();
+            LuaCsRbxApiBindings roblox = new();
             RbxRunService service = roblox.RunService;
             Assert.IsNotNull(service);
 

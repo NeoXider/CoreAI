@@ -381,6 +381,5 @@ namespace CoreAI.Tests.EditMode
                 "calibration field must carry the last roundtrip's prompt size");
             Assert.AreEqual(terminal.PromptTokens + terminal.CompletionTokens, terminal.TotalTokens);
         }
-
     }
 }

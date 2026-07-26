@@ -1740,7 +1740,8 @@ namespace CoreAI.Ai.LuaCs
                     if (_sourceStore.TryLoad(modId, out string storedSource, out LuaModManifest storedManifest))
                     {
                         source = storedSource;
-                        manifest = storedManifest ?? BuildManifest(modId, storedSource ?? "", LuaCapabilities.None, false);
+                        manifest = storedManifest ??
+                                   BuildManifest(modId, storedSource ?? "", LuaCapabilities.None, false);
                     }
                 }
                 catch (Exception ex)
@@ -1862,7 +1863,15 @@ namespace CoreAI.Ai.LuaCs
                 // load/reload never blanks it — otherwise a bundled sample loaded at runtime would look
                 // user-authored to the next seed pass and stop auto-updating.
                 LuaModManifest existing = null;
-                try { _sourceStore.TryLoad(modId, out _, out existing); } catch { existing = null; }
+                try
+                {
+                    _sourceStore.TryLoad(modId, out _, out existing);
+                }
+                catch
+                {
+                    existing = null;
+                }
+
                 _sourceStore.Save(modId, source, BuildManifest(modId, source ?? "", caps, true, existing));
             }
             catch (Exception ex)

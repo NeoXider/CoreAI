@@ -79,8 +79,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void R6_7_UnsupportedValueTypesAreRejectedNamingTheType()
         {
-            RbxError error = Assert.Throws<RbxError>(
-                () => _part.SetAttribute("Bad", new object()));
+            RbxError error = Assert.Throws<RbxError>(() => _part.SetAttribute("Bad", new object()));
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
             StringAssert.Contains("Object", error.RawMessage);
             StringAssert.Contains("fix:", error.Message);

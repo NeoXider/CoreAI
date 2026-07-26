@@ -34,7 +34,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>Null object for hosts that bind nothing (headless tests, storage-only trees).</summary>
     public sealed class NullInstanceBackingBinder : IInstanceBackingBinder
     {
-        public static readonly NullInstanceBackingBinder Instance = new NullInstanceBackingBinder();
+        public static readonly NullInstanceBackingBinder Instance = new();
 
         public void OnEnteredWorld(InstanceRecord record)
         {

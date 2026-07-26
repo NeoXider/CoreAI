@@ -38,6 +38,9 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxVector3 Delta { get; }
 
         /// <summary>Roblox tostring format for InputObjects.</summary>
-        public override string ToString() => "InputObject";
+        public override string ToString()
+        {
+            return "InputObject";
+        }
     }
 }

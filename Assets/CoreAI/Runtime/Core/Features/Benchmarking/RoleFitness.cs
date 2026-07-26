@@ -200,7 +200,7 @@ namespace CoreAI.Benchmarking
                 }
                 else if (kv.Key != Speed)
                 {
-            // WHY: A scoring dimension this run never measured (e.g. a single-group run).
+                    // WHY: A scoring dimension this run never measured (e.g. a single-group run).
                     missing.Add(Label(kv.Key));
                 }
             }

@@ -64,7 +64,10 @@ namespace CoreAI.Tests.PlayMode
         {
             public event Action Changed;
 
-            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints() => Array.Empty<LlmEndpointSnapshot>();
+            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints()
+            {
+                return Array.Empty<LlmEndpointSnapshot>();
+            }
 
             public IReadOnlyList<LlmRuntimeProfile> GetProfiles()
             {
@@ -79,7 +82,10 @@ namespace CoreAI.Tests.PlayMode
                 };
             }
 
-            public string GetProfileForRole(string roleId) => "profile-fast";
+            public string GetProfileForRole(string roleId)
+            {
+                return "profile-fast";
+            }
 
             public CoreAiRoutingUiResult AssignProfileToRole(string roleId, string profileId)
             {

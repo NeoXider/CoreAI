@@ -1,3 +1,4 @@
+using System.Text;
 using System.Threading;
 using CoreAI.Infrastructure.Luau;
 using Lua;
@@ -37,7 +38,7 @@ namespace CoreAI.Tests.EditMode
         /// WHY: the standalone LuaSyntaxTree.Parse API rejects chunks that begin with a comment
         /// (library quirk); DoStringAsync is the path mods actually go through.
         /// </summary>
-        static void AssertParsesUnderLuaCs(string lua)
+        private static void AssertParsesUnderLuaCs(string lua)
         {
             LuaState state = LuaState.Create();
             state.OpenBasicLibrary();
@@ -57,10 +58,10 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        static DownlevelResult AssertDownlevelsAndParses(string luau)
+        private static DownlevelResult AssertDownlevelsAndParses(string luau)
         {
             DownlevelResult result = LuauDownleveler.Process(luau, "corpus");
-            var sb = new System.Text.StringBuilder();
+            StringBuilder sb = new();
             foreach (DownlevelDiagnostic d in result.Diagnostics)
             {
                 sb.Append(d).Append('\n');

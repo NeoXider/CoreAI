@@ -15,12 +15,9 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InstanceRegistry
     {
-        private readonly Dictionary<InstanceId, InstanceRecord> _byId =
-            new Dictionary<InstanceId, InstanceRecord>();
-        private readonly Dictionary<uint, InstanceRecord> _byNetId =
-            new Dictionary<uint, InstanceRecord>();
-        private readonly Dictionary<string, InstanceRecord> _byWorldName =
-            new Dictionary<string, InstanceRecord>(StringComparer.Ordinal);
+        private readonly Dictionary<InstanceId, InstanceRecord> _byId = new();
+        private readonly Dictionary<uint, InstanceRecord> _byNetId = new();
+        private readonly Dictionary<string, InstanceRecord> _byWorldName = new(StringComparer.Ordinal);
         private readonly IInstanceBackingBinder _binder;
 
         private RbxInstance _worldRoot;
@@ -144,7 +141,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             instance.Attach(this, id);
-            var record = new InstanceRecord(id, instance, ownerModId, originTag);
+            InstanceRecord record = new(id, instance, ownerModId, originTag);
             _byId.Add(id, record);
             Registered?.Invoke(record);
             return instance;
@@ -247,7 +244,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Hot-reload teardown sweep (roadmap §3.3 / MVP5).</summary>
         public IReadOnlyList<RbxInstance> GetOwnedBy(string modId)
         {
-            var result = new List<RbxInstance>();
+            List<RbxInstance> result = new();
             foreach (InstanceRecord record in _byId.Values)
             {
                 if (string.Equals(record.OwnerModId, modId, StringComparison.Ordinal))
@@ -304,7 +301,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 // is how a Part dragged Workspace->ReplicatedStorage slides under the inactive
                 // service GO and disappears from the physical world without leaving the tree.
                 if (isInScene && _byId.TryGetValue(instance.Id, out InstanceRecord record)
-                    && record.IsMaterialized)
+                              && record.IsMaterialized)
                 {
                     _binder.OnReparented(record);
                 }

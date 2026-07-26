@@ -70,7 +70,10 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class MemoryStore : ILlmEndpointRegistryStore
         {
-            public LlmEndpointRegistryState Load() => new();
+            public LlmEndpointRegistryState Load()
+            {
+                return new LlmEndpointRegistryState();
+            }
 
             public void Save(LlmEndpointRegistryState state)
             {
@@ -79,7 +82,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class HistoryMemoryStore : IAgentMemoryStore
         {
-            private readonly List<Ai.ChatMessage> _history = new();
+            private readonly List<ChatMessage> _history = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {
@@ -102,10 +105,10 @@ namespace CoreAI.Tests.EditMode
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
-                _history.Add(new Ai.ChatMessage { Role = role, Content = content });
+                _history.Add(new ChatMessage { Role = role, Content = content });
             }
 
-            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
                 return _history.ToArray();
             }
@@ -127,7 +130,10 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class TestSettings : ICoreAISettings
@@ -188,8 +194,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task MidConversationEndpointSwitch_PreservesHistoryAndFollowsTheNewEndpoint()
         {
-            CapturingClient endpointA = new("Understood: velvet.", nativeTools: false);
-            CapturingClient endpointB = new("The code word is velvet.", nativeTools: true);
+            CapturingClient endpointA = new("Understood: velvet.", false);
+            CapturingClient endpointB = new("The code word is velvet.", true);
             LlmClientRegistry registry = new(
                 GameLoggerUnscopedFallback.Instance,
                 _registrySettings,

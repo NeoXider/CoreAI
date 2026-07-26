@@ -18,7 +18,10 @@ namespace CoreAI.Demos.QwenDemo
     public static class QwenDemoState
     {
         /// <summary>Unity hot reload may restore a null serialized string as empty.</summary>
-        public static bool HasBlockingError(string error) => !string.IsNullOrWhiteSpace(error);
+        public static bool HasBlockingError(string error)
+        {
+            return !string.IsNullOrWhiteSpace(error);
+        }
     }
 
     /// <summary>
@@ -225,7 +228,10 @@ namespace CoreAI.Demos.QwenDemo
             log = new Rect(margin, margin + topHeight + gap, panelWidth, logHeight);
         }
 
-        public static bool StackActionButtons(float panelWidth) => panelWidth < 430f;
+        public static bool StackActionButtons(float panelWidth)
+        {
+            return panelWidth < 430f;
+        }
     }
 
     /// <summary>Validates the hard contract shared by the two ToolsOnly demos.</summary>
@@ -352,7 +358,7 @@ namespace CoreAI.Demos.QwenDemo
         private static object FindLlmHost()
         {
             Type llmType = null;
-            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 llmType = assembly.GetType("LLMUnity.LLM", false);
                 if (llmType != null)
@@ -455,7 +461,7 @@ namespace CoreAI.Demos.QwenDemo
             }
 
             Shader sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            Material m = new Material(sh);
+            Material m = new(sh);
             m.SetFloat("_Surface", 1f);
             if (m.HasProperty("_Blend"))
             {
@@ -532,7 +538,7 @@ namespace CoreAI.Demos.QwenDemo
 
         public static TextMesh Label(Transform parent, string text, Color color, float y)
         {
-            GameObject lgo = new GameObject("label");
+            GameObject lgo = new("label");
             lgo.transform.SetParent(parent, false);
             lgo.transform.localPosition = Vector3.up * y;
             TextMesh tm = lgo.AddComponent<TextMesh>();

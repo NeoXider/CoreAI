@@ -11,7 +11,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InMemoryInputSource : IInputSource
     {
-        private readonly HashSet<int> _pressedKeys = new HashSet<int>();
+        private readonly HashSet<int> _pressedKeys = new();
         private readonly bool[] _mouseButtons = new bool[3];
         private RbxVector2 _mouseLocation;
 

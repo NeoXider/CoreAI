@@ -24,7 +24,10 @@ namespace CoreAI.Mcp.Tests
 
         private sealed class StubScreenshot : IScreenshotSource
         {
-            public string CaptureBase64Png(int maxResolution) => "AAAA";
+            public string CaptureBase64Png(int maxResolution)
+            {
+                return "AAAA";
+            }
         }
 
         private static McpToolRegistry BuildMinimal(
@@ -34,20 +37,20 @@ namespace CoreAI.Mcp.Tests
         {
             return CoreAiMcpToolProvider.Build(
                 executor,
-                modRuntime: null,
-                settings: null,
-                logger: null,
-                modCapabilities: LuaCapabilities.All,
-                logService: null,
-                worldTool: null,
-                skills: skills,
-                screenshotSource: screenshot);
+                null,
+                null,
+                null,
+                LuaCapabilities.All,
+                null,
+                null,
+                skills,
+                screenshot);
         }
 
         [Test]
         public void Screenshot_AbsentWhenNoSource()
         {
-            McpToolRegistry registry = BuildMinimal(executor: new StubExecutor(), screenshot: null);
+            McpToolRegistry registry = BuildMinimal(new StubExecutor(), screenshot: null);
 
             Assert.IsFalse(registry.Contains("screenshot"), "screenshot must be omitted without a source.");
             Assert.IsTrue(registry.Contains("execute_lua"));
@@ -56,7 +59,7 @@ namespace CoreAI.Mcp.Tests
         [Test]
         public void Screenshot_PresentWhenSourceSupplied()
         {
-            McpToolRegistry registry = BuildMinimal(executor: new StubExecutor(), screenshot: new StubScreenshot());
+            McpToolRegistry registry = BuildMinimal(new StubExecutor(), screenshot: new StubScreenshot());
 
             Assert.IsTrue(registry.Contains("screenshot"));
         }
@@ -64,7 +67,7 @@ namespace CoreAI.Mcp.Tests
         [Test]
         public void WorldCommand_AbsentWhenNoWorldTool()
         {
-            McpToolRegistry registry = BuildMinimal(executor: new StubExecutor());
+            McpToolRegistry registry = BuildMinimal(new StubExecutor());
 
             Assert.IsFalse(registry.Contains("world_command"));
         }
@@ -72,21 +75,21 @@ namespace CoreAI.Mcp.Tests
         [Test]
         public void ReadSkill_AbsentWhenNoSkills_PresentWhenSupplied()
         {
-            McpToolRegistry without = BuildMinimal(executor: new StubExecutor(), skills: new List<SkillSet>());
+            McpToolRegistry without = BuildMinimal(new StubExecutor(), new List<SkillSet>());
             Assert.IsFalse(without.Contains("read_skill"));
 
             List<SkillSet> skills = new()
             {
                 SkillSet.FromTextContent("Lua Modding", "desc", "instructions")
             };
-            McpToolRegistry with = BuildMinimal(executor: new StubExecutor(), skills: skills);
+            McpToolRegistry with = BuildMinimal(new StubExecutor(), skills);
             Assert.IsTrue(with.Contains("read_skill"));
         }
 
         [Test]
         public void ExecuteLua_AbsentWhenNoExecutor()
         {
-            McpToolRegistry registry = BuildMinimal(executor: null);
+            McpToolRegistry registry = BuildMinimal(null);
 
             Assert.IsFalse(registry.Contains("execute_lua"));
             Assert.AreEqual(0, registry.Count);

@@ -43,31 +43,31 @@ namespace CoreAI.Composition
 #endif
 
             builder.Register(c =>
-            {
+                {
 #if COREAI_NO_LLM
                 // WHY: the probe implementations are stripped with the LLM module; the endpoint
                 // factory rejects HTTP/LLMUnity activation before any probe would be consulted.
                 ILlmEndpointReadinessProbe readinessProbe = null;
 #else
-                ILlmEndpointReadinessProbe readinessProbe = c.Resolve<ILlmEndpointReadinessProbe>();
+                    ILlmEndpointReadinessProbe readinessProbe = c.Resolve<ILlmEndpointReadinessProbe>();
 #endif
-                LlmClientRegistry reg = new(
-                    c.Resolve<IGameLogger>(),
-                    settings,
-                    c.Resolve<IAgentMemoryStore>(),
-                    new FileLlmEndpointRegistryStore(),
-                    new LlmEndpointClientFactory(
-                        settings,
+                    LlmClientRegistry reg = new(
                         c.Resolve<IGameLogger>(),
+                        settings,
                         c.Resolve<IAgentMemoryStore>(),
-                        readinessProbe));
-                ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
-                    c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
+                        new FileLlmEndpointRegistryStore(),
+                        new LlmEndpointClientFactory(
+                            settings,
+                            c.Resolve<IGameLogger>(),
+                            c.Resolve<IAgentMemoryStore>(),
+                            readinessProbe));
+                    ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
+                        c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
 
-                reg.SetLegacyFallback(primaryClient);
-                reg.ApplyManifest(routingManifest);
-                return reg;
-            }, Lifetime.Singleton)
+                    reg.SetLegacyFallback(primaryClient);
+                    reg.ApplyManifest(routingManifest);
+                    return reg;
+                }, Lifetime.Singleton)
                 .As<ILlmClientRegistry>()
                 .As<ILlmRoutingController>()
                 .As<ILlmEndpointRegistry>()

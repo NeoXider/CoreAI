@@ -129,8 +129,16 @@ namespace CoreAI.Tests.EditMode
                 Capabilities = caps,
                 OneOffCapabilities = caps
             };
-            if (handlerMaxSteps > 0) options.HandlerMaxSteps = handlerMaxSteps;
-            if (handlerTimeoutMs > 0) options.HandlerTimeoutMs = handlerTimeoutMs;
+            if (handlerMaxSteps > 0)
+            {
+                options.HandlerMaxSteps = handlerMaxSteps;
+            }
+
+            if (handlerTimeoutMs > 0)
+            {
+                options.HandlerTimeoutMs = handlerTimeoutMs;
+            }
+
             return LuaCsModRuntimeFactory.Create(options);
         }
 
@@ -226,7 +234,7 @@ namespace CoreAI.Tests.EditMode
         {
             LuaCsModStack stack = BuildStack();
             bool healthySubscriberRan = false;
-            stack.Runtime.ModSourceLoaded += (_, _, _) => throw new System.InvalidOperationException("boom");
+            stack.Runtime.ModSourceLoaded += (_, _, _) => throw new InvalidOperationException("boom");
             stack.Runtime.ModSourceLoaded += (_, _, _) => healthySubscriberRan = true;
 
             Assert.DoesNotThrow(() => stack.Runtime.LoadMod("a", "hooks_on('noop', function() end)"),
@@ -514,8 +522,10 @@ namespace CoreAI.Tests.EditMode
             // error — proven in LuaCsWithheldApiStubEditModeTests), so presence probes see a function.
             Assert.AreEqual("yes", store.Get("m", "spawn"), "coreai_world_spawn must resolve to an actionable stub.");
             Assert.AreEqual("yes", store.Get("m", "change"), "coreai_world_change must resolve to an actionable stub.");
-            Assert.AreEqual("yes", store.Get("m", "set_color"), "coreai_world_set_color must resolve to an actionable stub.");
-            Assert.AreEqual("yes", store.Get("m", "destroy"), "coreai_world_destroy must resolve to an actionable stub.");
+            Assert.AreEqual("yes", store.Get("m", "set_color"),
+                "coreai_world_set_color must resolve to an actionable stub.");
+            Assert.AreEqual("yes", store.Get("m", "destroy"),
+                "coreai_world_destroy must resolve to an actionable stub.");
             Assert.AreEqual("yes", store.Get("m", "find"), "Read-only coreai_world_find must remain.");
             Assert.AreEqual("yes", store.Get("m", "pos"), "Read-only coreai_world_pos must remain.");
             Assert.AreEqual("yes", store.Get("m", "exists"), "Read-only coreai_world_exists must remain.");
@@ -689,7 +699,7 @@ namespace CoreAI.Tests.EditMode
                     end
                 end)");
 
-            for (int i = 0; i < (LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2) + 2; i++)
+            for (int i = 0; i < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2 + 2; i++)
             {
                 stack.Runtime.EmitEvent("poke", "");
                 stack.Runtime.Tick(0);
@@ -925,7 +935,7 @@ namespace CoreAI.Tests.EditMode
 
             // The quarantined export must be suspended: repeated cross-mod calls all fail with the
             // quarantine error, and must never escalate the healthy caller's streak into quarantine.
-            for (int i = 0; i < (LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2) + 2; i++)
+            for (int i = 0; i < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine * 2 + 2; i++)
             {
                 stack.Runtime.EmitEvent("use", "");
                 stack.Runtime.Tick(0);

@@ -21,9 +21,15 @@ namespace CoreAI.Tests.EditMode
         {
             public LlmEndpointRegistryState State { get; set; } = new();
 
-            public LlmEndpointRegistryState Load() => State;
+            public LlmEndpointRegistryState Load()
+            {
+                return State;
+            }
 
-            public void Save(LlmEndpointRegistryState state) => State = state;
+            public void Save(LlmEndpointRegistryState state)
+            {
+                State = state;
+            }
         }
 
         private sealed class FakeFactory : ILlmEndpointClientFactory
@@ -429,7 +435,8 @@ namespace CoreAI.Tests.EditMode
             long currentGeneration = registry.ResolveRouteForRole("Chat", "").Generation;
             Assert.AreNotEqual(staleGeneration, currentGeneration, "Replacement must advance the generation.");
 
-            registry.ReportRouteFailure("cloud", staleGeneration, LlmErrorCode.AuthExpired, "401 from the old generation");
+            registry.ReportRouteFailure("cloud", staleGeneration, LlmErrorCode.AuthExpired,
+                "401 from the old generation");
             Assert.AreEqual("", registry.GetEndpoints().Single().Error,
                 "A late failure from the replaced generation must not degrade its successor.");
 

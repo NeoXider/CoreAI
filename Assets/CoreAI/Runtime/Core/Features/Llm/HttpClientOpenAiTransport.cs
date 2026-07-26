@@ -29,20 +29,20 @@ namespace CoreAI.Infrastructure.Llm
         /// <see cref="HttpClient.Timeout"/> (which is not thread-safe to change after first use).
         /// </summary>
         private static readonly Lazy<HttpClient> s_boundedLoopbackClient =
-            new(() => CreateSharedHttpClient(bypassProxy: true));
+            new(() => CreateSharedHttpClient(true));
 
         private static readonly Lazy<HttpClient> s_boundedExternalClient =
-            new(() => CreateSharedHttpClient(bypassProxy: false));
+            new(() => CreateSharedHttpClient(false));
 
         /// <summary>
         /// Shared <see cref="HttpClient"/> for SSE streaming requests. Streams are typically long-lived, so
         /// the client timeout is disabled and stall detection is left to the caller via cancellation.
         /// </summary>
         private static readonly Lazy<HttpClient> s_streamingLoopbackClient =
-            new(() => CreateSharedHttpClient(bypassProxy: true));
+            new(() => CreateSharedHttpClient(true));
 
         private static readonly Lazy<HttpClient> s_streamingExternalClient =
-            new(() => CreateSharedHttpClient(bypassProxy: false));
+            new(() => CreateSharedHttpClient(false));
 
         private static HttpClient CreateSharedHttpClient(bool bypassProxy)
         {

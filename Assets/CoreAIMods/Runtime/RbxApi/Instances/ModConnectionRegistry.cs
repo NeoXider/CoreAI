@@ -38,10 +38,8 @@ namespace CoreAI.Mods.Rbx.Instances
             public RbxScriptConnection Connection { get; }
         }
 
-        private readonly Dictionary<string, List<Entry>> _byMod =
-            new Dictionary<string, List<Entry>>(StringComparer.Ordinal);
-        private readonly Dictionary<string, int> _currentGeneration =
-            new Dictionary<string, int>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<Entry>> _byMod = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _currentGeneration = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Advances a mod's generation counter and returns the new value. Called once per load/reload
@@ -88,7 +86,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Snapshot of the live connections currently owned by a mod (empty when none).</summary>
         public IReadOnlyList<RbxScriptConnection> GetOwnedBy(string modId)
         {
-            var result = new List<RbxScriptConnection>();
+            List<RbxScriptConnection> result = new();
             if (modId != null && _byMod.TryGetValue(modId, out List<Entry> list))
             {
                 foreach (Entry entry in list)

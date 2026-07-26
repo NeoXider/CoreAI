@@ -15,7 +15,6 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class CoreAiChatPanelStopPlayModeTests
     {
-
         [UnityTearDown]
         public IEnumerator UnloadLoadedScenes()
         {
@@ -23,6 +22,7 @@ namespace CoreAI.Tests.PlayMode
             // rest of the PlayMode run.
             yield return PlayModeSceneSandbox.UnloadToEmptyScene();
         }
+
         private sealed class PanelHarness : CoreAiChatPanel
         {
             public void AssignTest(CoreAiChatConfig cfg, CoreAiChatService svc)

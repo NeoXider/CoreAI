@@ -42,12 +42,16 @@ namespace CoreAI.Ai
     /// <summary>Shared status policy used by .NET and Unity HTTP adapters.</summary>
     public static class LlmEndpointReadinessPolicy
     {
-        public static bool IsHandlerReached(long status) =>
-            status is >= 200 and < 500 &&
-            status is not (>= 300 and < 400) &&
-            status is not 401 and not 403 and not 404;
+        public static bool IsHandlerReached(long status)
+        {
+            return status is >= 200 and < 500 &&
+                   status is not (>= 300 and < 400) &&
+                   status is not 401 and not 403 and not 404;
+        }
 
-        public static bool ShouldTryCompletions(long modelsStatus) =>
-            modelsStatus is 404 or 405;
+        public static bool ShouldTryCompletions(long modelsStatus)
+        {
+            return modelsStatus is 404 or 405;
+        }
     }
 }

@@ -221,13 +221,25 @@ namespace CoreAI.Tests.EditMode
                 });
             }
 
-            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints() => _endpoints;
+            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints()
+            {
+                return _endpoints;
+            }
 
-            public IReadOnlyList<LlmRuntimeProfile> GetProfiles() => Array.Empty<LlmRuntimeProfile>();
+            public IReadOnlyList<LlmRuntimeProfile> GetProfiles()
+            {
+                return Array.Empty<LlmRuntimeProfile>();
+            }
 
-            public string GetProfileForRole(string roleId) => "";
+            public string GetProfileForRole(string roleId)
+            {
+                return "";
+            }
 
-            public CoreAiRoutingUiResult AssignProfileToRole(string roleId, string profileId) => new(true);
+            public CoreAiRoutingUiResult AssignProfileToRole(string roleId, string profileId)
+            {
+                return new CoreAiRoutingUiResult(true);
+            }
 
             public Task<CoreAiRoutingUiResult> SaveEndpointAsync(
                 LlmEndpointDescriptor endpoint,

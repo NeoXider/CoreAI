@@ -11,7 +11,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
     {
         private static InstanceRegistry BuildSourceRegistry(out RbxDataModel game)
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             game = DataModelBootstrap.CreateGame(registry);
 
             RbxInstance model = registry.Create("Model", "mod_a", OriginTag.FromMod("mod_a"));
@@ -39,8 +39,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             InstanceRegistry source = BuildSourceRegistry(out RbxDataModel game);
             InstanceTreeSnapshot first = InstanceTreeSerializer.Capture(game);
 
-            var target = new InstanceRegistry();
-            var restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(first, target);
+            InstanceRegistry target = new();
+            RbxDataModel restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(first, target);
             DataModelBootstrap.AttachWorldRoot(target, restoredGame);
             InstanceTreeSnapshot second = InstanceTreeSerializer.Capture(restoredGame);
 
@@ -76,8 +76,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             RbxInstance sourceModel = source.WorldRoot.FindFirstChild("Rig");
             InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(game);
 
-            var target = new InstanceRegistry();
-            var restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, target);
+            InstanceRegistry target = new();
+            RbxDataModel restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, target);
             DataModelBootstrap.AttachWorldRoot(target, restoredGame);
 
             Assert.IsTrue(target.TryGet(sourceModel.Id, out RbxInstance restoredModel));
@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void DatatypeAttributes_SurviveCaptureRestoreWithStableStringRoundTrip()
         {
-            var source = new InstanceRegistry();
+            InstanceRegistry source = new();
             RbxDataModel game = DataModelBootstrap.CreateGame(source);
             RbxInstance part = source.Create("Part");
             part.Name = "Node";
@@ -109,8 +109,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
 
             InstanceTreeSnapshot first = InstanceTreeSerializer.Capture(game);
 
-            var target = new InstanceRegistry();
-            var restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(first, target);
+            InstanceRegistry target = new();
+            RbxDataModel restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(first, target);
             DataModelBootstrap.AttachWorldRoot(target, restoredGame);
 
             Assert.IsTrue(target.TryGet(part.Id, out RbxInstance restored));
@@ -151,7 +151,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                 }
             }
 
-            var target = new InstanceRegistry();
+            InstanceRegistry target = new();
             InstanceTreeSerializer.Restore(snapshot, target);
             RbxInstance fresh = target.Create("Part");
             Assert.Greater(fresh.Id.Value, maxRestored);

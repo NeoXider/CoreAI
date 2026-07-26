@@ -18,8 +18,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>Color3.fromRGB(0..255) — integer channels scaled to 0..1.</summary>
-        public static RbxColor3 FromRGB(float r = 0f, float g = 0f, float b = 0f) =>
-            new RbxColor3(r / 255f, g / 255f, b / 255f);
+        public static RbxColor3 FromRGB(float r = 0f, float g = 0f, float b = 0f)
+        {
+            return new RbxColor3(r / 255f, g / 255f, b / 255f);
+        }
 
         /// <summary>Color3.fromHSV(hue, saturation, value) — all in 0..1.</summary>
         public static RbxColor3 FromHSV(float h, float s, float v)
@@ -32,12 +34,42 @@ namespace CoreAI.Mods.Rbx.Datatypes
             float m = v - c;
 
             float r, g, b;
-            if (sector < 1f) { r = c; g = x; b = 0f; }
-            else if (sector < 2f) { r = x; g = c; b = 0f; }
-            else if (sector < 3f) { r = 0f; g = c; b = x; }
-            else if (sector < 4f) { r = 0f; g = x; b = c; }
-            else if (sector < 5f) { r = x; g = 0f; b = c; }
-            else { r = c; g = 0f; b = x; }
+            if (sector < 1f)
+            {
+                r = c;
+                g = x;
+                b = 0f;
+            }
+            else if (sector < 2f)
+            {
+                r = x;
+                g = c;
+                b = 0f;
+            }
+            else if (sector < 3f)
+            {
+                r = 0f;
+                g = c;
+                b = x;
+            }
+            else if (sector < 4f)
+            {
+                r = 0f;
+                g = x;
+                b = c;
+            }
+            else if (sector < 5f)
+            {
+                r = x;
+                g = 0f;
+                b = c;
+            }
+            else
+            {
+                r = c;
+                g = 0f;
+                b = x;
+            }
 
             return new RbxColor3(r + m, g + m, b + m);
         }
@@ -69,10 +101,13 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return FromRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
         }
 
-        public RbxColor3 Lerp(RbxColor3 goal, float alpha) => new RbxColor3(
-            R + (goal.R - R) * alpha,
-            G + (goal.G - G) * alpha,
-            B + (goal.B - B) * alpha);
+        public RbxColor3 Lerp(RbxColor3 goal, float alpha)
+        {
+            return new RbxColor3(
+                R + (goal.R - R) * alpha,
+                G + (goal.G - G) * alpha,
+                B + (goal.B - B) * alpha);
+        }
 
         /// <summary>Color3:ToHSV() — (hue, saturation, value) in 0..1.</summary>
         public (float h, float s, float v) ToHSV()
@@ -117,15 +152,36 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return string.Format(CultureInfo.InvariantCulture, "{0:X2}{1:X2}{2:X2}", r, g, b);
         }
 
-        public static bool operator ==(RbxColor3 a, RbxColor3 b) => a.Equals(b);
-        public static bool operator !=(RbxColor3 a, RbxColor3 b) => !a.Equals(b);
+        public static bool operator ==(RbxColor3 a, RbxColor3 b)
+        {
+            return a.Equals(b);
+        }
 
-        public bool Equals(RbxColor3 other) => R == other.R && G == other.G && B == other.B;
-        public override bool Equals(object obj) => obj is RbxColor3 c && Equals(c);
-        public override int GetHashCode() => HashCode.Combine(R, G, B);
+        public static bool operator !=(RbxColor3 a, RbxColor3 b)
+        {
+            return !a.Equals(b);
+        }
+
+        public bool Equals(RbxColor3 other)
+        {
+            return R == other.R && G == other.G && B == other.B;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is RbxColor3 c && Equals(c);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(R, G, B);
+        }
 
         /// <summary>Roblox tostring format: "r, g, b".</summary>
-        public override string ToString() => string.Format(
-            CultureInfo.InvariantCulture, "{0}, {1}, {2}", R, G, B);
+        public override string ToString()
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture, "{0}, {1}, {2}", R, G, B);
+        }
     }
 }

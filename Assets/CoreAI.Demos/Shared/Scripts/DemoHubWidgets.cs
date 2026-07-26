@@ -146,7 +146,7 @@ namespace CoreAI.Demos
         public static Button MakeButton(string text, Action onClick)
         {
             Button button = new(onClick) { text = text };
-            StyleButton(button, primary: false);
+            StyleButton(button, false);
             return button;
         }
 
@@ -154,7 +154,7 @@ namespace CoreAI.Demos
         public static Button MakePrimaryButton(string text, Action onClick)
         {
             Button button = new(onClick) { text = text };
-            StyleButton(button, primary: true);
+            StyleButton(button, true);
             return button;
         }
 

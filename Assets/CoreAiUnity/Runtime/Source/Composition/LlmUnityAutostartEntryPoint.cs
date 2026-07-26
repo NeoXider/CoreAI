@@ -190,6 +190,7 @@ namespace CoreAI.Composition
                         Error = "Endpoint readiness probe threw a transport exception."
                     };
                 }
+
                 if (result.IsReady)
                 {
                     _logger.LogInfo(
@@ -245,7 +246,6 @@ namespace CoreAI.Composition
 
             _lifetime.Dispose();
         }
-
     }
 }
 #endif

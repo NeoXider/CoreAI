@@ -26,6 +26,7 @@ namespace CoreAI.Mods.Rbx.Binding
 #if COREAI_HAS_INPUT_SYSTEM
         private static readonly (Key Key, int KeyCode)[] KeyMap = BuildKeyMap();
         private static readonly Dictionary<int, Key> KeyByKeyCode = BuildKeyByKeyCode();
+
         private static readonly (int KeyCode, Func<Gamepad, ButtonControl> Button)[] GamepadMap =
         {
             (1000, pad => pad.buttonWest), (1001, pad => pad.buttonNorth),
@@ -124,7 +125,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static (Key, int)[] BuildKeyMap()
         {
-            var map = new List<(Key, int)>
+            List<(Key, int)> map = new()
             {
                 (Key.Space, 32), (Key.Enter, 13), (Key.Tab, 9), (Key.Backquote, 96),
                 (Key.Quote, 39), (Key.Semicolon, 59), (Key.Comma, 44), (Key.Period, 46),
@@ -168,7 +169,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static Dictionary<int, Key> BuildKeyByKeyCode()
         {
-            var byKeyCode = new Dictionary<int, Key>();
+            Dictionary<int, Key> byKeyCode = new();
             foreach ((Key key, int keyCode) in KeyMap)
             {
                 byKeyCode[keyCode] = key;

@@ -205,7 +205,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, calls.Count, "Both tool calls must survive; only the bad one degrades.");
 
             MEAI.FunctionCallContent good = calls.Single(c => c.Name == "good");
-            Assert.AreEqual(1L, System.Convert.ToInt64(good.Arguments["a"]));
+            Assert.AreEqual(1L, Convert.ToInt64(good.Arguments["a"]));
             Assert.IsFalse(good.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests));
 
             MEAI.FunctionCallContent bad = calls.Single(c => c.Name == "bad");

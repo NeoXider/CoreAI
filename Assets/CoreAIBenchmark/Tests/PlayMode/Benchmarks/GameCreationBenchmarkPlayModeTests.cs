@@ -442,7 +442,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             if (!ShouldRequireScenarioResults(BenchmarkProgress.StopRequested, report.Results.Count))
             {
-                Debug.LogWarning("[Benchmark] Stop requested before any scenario completed; empty partial report saved.");
+                Debug.LogWarning(
+                    "[Benchmark] Stop requested before any scenario completed; empty partial report saved.");
                 yield break;
             }
 

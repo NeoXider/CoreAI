@@ -132,8 +132,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _binder.SetColor(part.Id, RbxColor3.FromRGB(255f, 0f, 0f));
 
             Transform child = BoundObject(part).transform.Find("Shape");
-            var renderer = child.GetComponent<Renderer>();
-            var block = new MaterialPropertyBlock();
+            Renderer renderer = child.GetComponent<Renderer>();
+            MaterialPropertyBlock block = new();
             renderer.GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").r, Epsilon);
 
@@ -159,7 +159,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(1f, mesh.bounds.size.y, Epsilon);
             Assert.AreEqual(1f, mesh.bounds.size.z, Epsilon);
 
-            var collider = partGo.GetComponent<MeshCollider>();
+            MeshCollider collider = partGo.GetComponent<MeshCollider>();
             Assert.IsNotNull(collider, "Wedge collides through a convex mesh collider");
             Assert.IsTrue(collider.convex);
             Assert.IsNull(partGo.GetComponent<BoxCollider>(), "no leftover box collider");
@@ -178,7 +178,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _binder.SetColor(part.Id, RbxColor3.FromRGB(0f, 0f, 255f));
 
             GameObject partGo = BoundObject(part);
-            var block = new MaterialPropertyBlock();
+            MaterialPropertyBlock block = new();
             partGo.GetComponent<Renderer>().GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").b, Epsilon);
 
@@ -211,12 +211,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _binder.SetColor(parent.Id, RbxColor3.FromRGB(255f, 0f, 0f));
 
             Transform shapeChild = BoundObject(parent).transform.Find("Shape");
-            var parentBlock = new MaterialPropertyBlock();
+            MaterialPropertyBlock parentBlock = new();
             shapeChild.GetComponent<Renderer>().GetPropertyBlock(parentBlock);
             Assert.AreEqual(1f, parentBlock.GetColor("_Color").r, Epsilon,
                 "the parent cylinder's own visual receives the color");
 
-            var childBlock = new MaterialPropertyBlock();
+            MaterialPropertyBlock childBlock = new();
             BoundObject(child).GetComponent<Renderer>().GetPropertyBlock(childBlock);
             Color childColor = childBlock.GetColor("_Color");
             Assert.AreEqual(0f, childColor.r, Epsilon,
@@ -237,7 +237,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _binder.SetCanCollide(part.Id, false);
 
             GameObject partGo = BoundObject(part);
-            var block = new MaterialPropertyBlock();
+            MaterialPropertyBlock block = new();
             partGo.GetComponent<Renderer>().GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").g, Epsilon,
                 "color lands on the rebuilt sphere renderer");
@@ -263,7 +263,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
 
             GameObject childGo = BoundObject(userChild);
             Assert.IsTrue(childGo != null, "the user's child named 'Shape' must survive shape switches");
-            var childBlock = new MaterialPropertyBlock();
+            MaterialPropertyBlock childBlock = new();
             childGo.GetComponent<Renderer>().GetPropertyBlock(childBlock);
             Assert.AreEqual(0f, childBlock.GetColor("_Color").r, Epsilon,
                 "the user child keeps its own green — the parent recolor targets the parent's own visual");
@@ -280,7 +280,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _binder.SetSize(part.Id, new RbxVector3(2f, 2f, 2f));
 
             GameObject partGo = BoundObject(part);
-            var block = new MaterialPropertyBlock();
+            MaterialPropertyBlock block = new();
             partGo.GetComponent<Renderer>().GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").b, Epsilon,
                 "a Size write leaves the color intact");
@@ -302,7 +302,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.IsNotNull(partGo.GetComponent<SphereCollider>());
             Assert.IsNull(partGo.GetComponent<BoxCollider>(), "the old collider is swapped out");
 
-            var block = new MaterialPropertyBlock();
+            MaterialPropertyBlock block = new();
             partGo.GetComponent<Renderer>().GetPropertyBlock(block);
             Assert.AreEqual(1f, block.GetColor("_Color").g, Epsilon,
                 "appearance must be re-applied onto the rebuilt visual");

@@ -311,7 +311,8 @@ namespace CoreAI.Tests.EditMode
 
             try
             {
-                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting = () => throw new IOException("simulated crash");
+                FileLuaScriptVersionStore.BeforeAtomicReplaceForTesting =
+                    () => throw new IOException("simulated crash");
                 store.RecordSuccessfulExecution("k", "v2");
             }
             finally

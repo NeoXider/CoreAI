@@ -122,9 +122,11 @@ namespace CoreAI.Vision
                 {
                     Debug.LogWarning(
                         "[VisionSelfProbe] Probe request failed: " +
-                        (result == null ? "null result" : string.IsNullOrEmpty(result.Error)
-                            ? "unknown error"
-                            : result.Error));
+                        (result == null
+                            ? "null result"
+                            : string.IsNullOrEmpty(result.Error)
+                                ? "unknown error"
+                                : result.Error));
                     return false;
                 }
 

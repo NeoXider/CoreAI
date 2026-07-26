@@ -121,7 +121,10 @@ namespace CoreAI.Infrastructure.Llm
                 _supportsNativeTools = endpoint.Descriptor.Kind != LlmEndpointKind.Offline;
             }
 
-            public bool SupportsNativeToolCallingForRole(string agentRoleId) => _supportsNativeTools;
+            public bool SupportsNativeToolCallingForRole(string agentRoleId)
+            {
+                return _supportsNativeTools;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -156,8 +159,8 @@ namespace CoreAI.Infrastructure.Llm
                     cancellationToken.ThrowIfCancellationRequested();
                     TaskCompletionSource<bool> cancelled = new(
                         TaskCreationOptions.RunContinuationsAsynchronously);
-                    using CancellationTokenRegistration registration = cancellationToken.Register(
-                        () => cancelled.TrySetResult(true));
+                    using CancellationTokenRegistration registration =
+                        cancellationToken.Register(() => cancelled.TrySetResult(true));
                     await Task.WhenAny(activation, cancelled.Task);
                     cancellationToken.ThrowIfCancellationRequested();
                 }
@@ -264,7 +267,8 @@ namespace CoreAI.Infrastructure.Llm
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
             _persistenceStore = persistenceStore;
-            _endpointClientFactory = endpointClientFactory ?? new LlmEndpointClientFactory(settings, logger, memoryStore);
+            _endpointClientFactory =
+                endpointClientFactory ?? new LlmEndpointClientFactory(settings, logger, memoryStore);
             _secretProvider = secretProvider ?? new EnvironmentSecretProvider();
             RestoreRuntimeState();
         }
@@ -702,8 +706,8 @@ namespace CoreAI.Infrastructure.Llm
                     Mode = EndpointMode(copy.Kind)
                 };
                 bool stageReplacement = copy.Active &&
-                    _runtimeEndpoints.TryGetValue(id, out RuntimeEndpoint existing) &&
-                    existing.Descriptor.Active && existing.State == LlmEndpointLifecycleState.Ready;
+                                        _runtimeEndpoints.TryGetValue(id, out RuntimeEndpoint existing) &&
+                                        existing.Descriptor.Active && existing.State == LlmEndpointLifecycleState.Ready;
                 if (stageReplacement)
                 {
                     _pendingEndpoints[id] = runtime;
@@ -722,6 +726,7 @@ namespace CoreAI.Infrastructure.Llm
                     _runtimeEndpoints[id] = runtime;
                     _pendingEndpoints.Remove(id);
                 }
+
                 if (!_runtimeProfiles.ContainsKey(id))
                 {
                     _runtimeProfiles[id] = new LlmRuntimeProfile
@@ -855,12 +860,14 @@ namespace CoreAI.Infrastructure.Llm
                     runtime.ActivationCancellation?.Cancel();
                     release = runtime;
                 }
+
                 if (_pendingEndpoints.TryGetValue(id, out RuntimeEndpoint pending))
                 {
                     pending.ActivationCancellation?.Cancel();
                     _pendingEndpoints.Remove(id);
                     pendingRelease = pending;
                 }
+
                 removed = _runtimeEndpoints.Remove(id);
                 foreach (string profileId in _runtimeProfiles.Values
                              .Where(p => string.Equals(p.EndpointId, id, StringComparison.Ordinal))
@@ -900,7 +907,9 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (profile == null || profile.Validate().Count > 0)
             {
-                throw new ArgumentException(profile == null ? "Profile is null." : string.Join(" ", profile.Validate()));
+                throw new ArgumentException(profile == null
+                    ? "Profile is null."
+                    : string.Join(" ", profile.Validate()));
             }
 
             lock (_gate)
@@ -1108,8 +1117,10 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 if (_runtimeEndpoints.TryGetValue(profile.EndpointId, out RuntimeEndpoint runtime) &&
-                    runtime.Descriptor.Active && runtime.ActivationTask != null && !runtime.ActivationTask.IsCompleted &&
-                    runtime.State is LlmEndpointLifecycleState.StartingNative or LlmEndpointLifecycleState.WaitingForHttp)
+                    runtime.Descriptor.Active && runtime.ActivationTask != null &&
+                    !runtime.ActivationTask.IsCompleted &&
+                    runtime.State is LlmEndpointLifecycleState.StartingNative
+                        or LlmEndpointLifecycleState.WaitingForHttp)
                 {
                     endpoint = runtime;
                     return true;
@@ -1208,7 +1219,7 @@ namespace CoreAI.Infrastructure.Llm
                     snapshot = ToSnapshot(runtime);
                 }
                 else if (failure is OperationCanceledException ||
-                         !runtime.Descriptor.Active && !runtime.Descriptor.KeepWarm)
+                         (!runtime.Descriptor.Active && !runtime.Descriptor.KeepWarm))
                 {
                     runtime.State = LlmEndpointLifecycleState.Inactive;
                     runtime.Error = "";
@@ -1261,6 +1272,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 SaveRuntimeState();
             }
+
             Changed?.Invoke();
             return snapshot;
         }
@@ -1394,8 +1406,8 @@ namespace CoreAI.Infrastructure.Llm
             cancellationToken.ThrowIfCancellationRequested();
             TaskCompletionSource<bool> cancelled = new(
                 TaskCreationOptions.RunContinuationsAsynchronously);
-            using CancellationTokenRegistration registration = cancellationToken.Register(
-                () => cancelled.TrySetResult(true));
+            using CancellationTokenRegistration registration =
+                cancellationToken.Register(() => cancelled.TrySetResult(true));
             Task completed = await Task.WhenAny(activation, cancelled.Task).ConfigureAwait(false);
             if (completed == cancelled.Task)
             {

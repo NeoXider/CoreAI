@@ -211,7 +211,7 @@ namespace CoreAI.Tests.EditMode
                 ModelEntry entry = new()
                 {
                     ModelName = modelName,
-                    FolderPath = modelFolder,
+                    FolderPath = modelFolder
                 };
 
                 // Only .prefab files that live directly in the model folder (skip the Materials subfolder
@@ -244,7 +244,7 @@ namespace CoreAI.Tests.EditMode
                     {
                         AssetPath = assetPath,
                         FileName = Path.GetFileName(assetPath),
-                        WriteTimeUtc = writeTime,
+                        WriteTimeUtc = writeTime
                     });
                 }
 
@@ -328,7 +328,7 @@ namespace CoreAI.Tests.EditMode
                     Model = model,
                     Instance = instance,
                     Bounds = ComputeBounds(instance),
-                    Score = ParseScore(instance),
+                    Score = ParseScore(instance)
                 });
             }
 

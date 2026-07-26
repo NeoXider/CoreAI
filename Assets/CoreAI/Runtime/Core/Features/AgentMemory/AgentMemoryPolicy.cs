@@ -35,8 +35,10 @@ namespace CoreAI.Ai
                 if (_roleSkillCatalogs.TryGetValue(roleId, out MutableSkillCatalog catalog))
                 {
                     replacement.RemoveAll(tool => tool != null &&
-                        (string.Equals(tool.Name, "read_skill", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(tool.Name, "call_skill_tool", StringComparison.OrdinalIgnoreCase)));
+                                                  (string.Equals(tool.Name, "read_skill",
+                                                       StringComparison.OrdinalIgnoreCase) ||
+                                                   string.Equals(tool.Name, "call_skill_tool",
+                                                       StringComparison.OrdinalIgnoreCase)));
                     replacement.Add(ReadSkillLlmTool.Create(catalog));
                     replacement.Add(CallSkillToolLlmTool.Create(catalog));
                 }
@@ -124,7 +126,7 @@ namespace CoreAI.Ai
         {
             if (string.IsNullOrWhiteSpace(roleId))
             {
-                return System.Array.Empty<SkillSet>();
+                return Array.Empty<SkillSet>();
             }
 
             roleId = roleId.Trim();
@@ -136,7 +138,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            return System.Array.Empty<SkillSet>();
+            return Array.Empty<SkillSet>();
         }
 
         /// <summary>Registers a runtime context provider for a single role.</summary>

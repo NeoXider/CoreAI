@@ -24,27 +24,41 @@ namespace CoreAI.Mods.Rbx.Datatypes
             float r10, float r11, float r12,
             float r20, float r21, float r22)
         {
-            _x = x; _y = y; _z = z;
-            _r00 = r00; _r01 = r01; _r02 = r02;
-            _r10 = r10; _r11 = r11; _r12 = r12;
-            _r20 = r20; _r21 = r21; _r22 = r22;
+            _x = x;
+            _y = y;
+            _z = z;
+            _r00 = r00;
+            _r01 = r01;
+            _r02 = r02;
+            _r10 = r10;
+            _r11 = r11;
+            _r12 = r12;
+            _r20 = r20;
+            _r21 = r21;
+            _r22 = r22;
         }
 
         // ---- Construction ------------------------------------------------------------
 
-        public static RbxCFrame Identity => new RbxCFrame(
+        public static RbxCFrame Identity => new(
             0f, 0f, 0f,
             1f, 0f, 0f,
             0f, 1f, 0f,
             0f, 0f, 1f);
 
-        public static RbxCFrame FromPosition(float x, float y, float z) => new RbxCFrame(
-            x, y, z,
-            1f, 0f, 0f,
-            0f, 1f, 0f,
-            0f, 0f, 1f);
+        public static RbxCFrame FromPosition(float x, float y, float z)
+        {
+            return new RbxCFrame(
+                x, y, z,
+                1f, 0f, 0f,
+                0f, 1f, 0f,
+                0f, 0f, 1f);
+        }
 
-        public static RbxCFrame FromPosition(RbxVector3 pos) => FromPosition(pos.X, pos.Y, pos.Z);
+        public static RbxCFrame FromPosition(RbxVector3 pos)
+        {
+            return FromPosition(pos.X, pos.Y, pos.Z);
+        }
 
         /// <summary>
         /// CFrame.new(x, y, z, qX, qY, qZ, qW) — position + quaternion; non-unit quaternions
@@ -53,7 +67,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         public static RbxCFrame FromQuaternion(float x, float y, float z, float qx, float qy, float qz, float qw)
         {
             float m = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
-            qx /= m; qy /= m; qz /= m; qw /= m;
+            qx /= m;
+            qy /= m;
+            qz /= m;
+            qw /= m;
 
             return new RbxCFrame(
                 x, y, z,
@@ -99,7 +116,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// <summary>
         /// Deprecated CFrame.new(pos, lookAt) overload — kept because tutorial-corpus scripts use it.
         /// </summary>
-        public static RbxCFrame FromPositionLookAt(RbxVector3 pos, RbxVector3 lookAt) => LookAt(pos, lookAt);
+        public static RbxCFrame FromPositionLookAt(RbxVector3 pos, RbxVector3 lookAt)
+        {
+            return LookAt(pos, lookAt);
+        }
 
         /// <summary>CFrame.fromMatrix(pos, vX, vY, vZ?) — vZ defaults to vX:Cross(vY).Unit.</summary>
         public static RbxCFrame FromMatrix(RbxVector3 pos, RbxVector3 vX, RbxVector3 vY, RbxVector3? vZ = null)
@@ -133,18 +153,28 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>CFrame.fromEulerAnglesXYZ == CFrame.Angles.</summary>
-        public static RbxCFrame FromEulerAnglesXYZ(float rx, float ry, float rz) =>
-            FromEulerAngles(rx, ry, rz, RbxRotationOrder.XYZ);
+        public static RbxCFrame FromEulerAnglesXYZ(float rx, float ry, float rz)
+        {
+            return FromEulerAngles(rx, ry, rz, RbxRotationOrder.XYZ);
+        }
 
         /// <summary>CFrame.Angles(rx, ry, rz) — alias of fromEulerAnglesXYZ.</summary>
-        public static RbxCFrame Angles(float rx, float ry, float rz) => FromEulerAnglesXYZ(rx, ry, rz);
+        public static RbxCFrame Angles(float rx, float ry, float rz)
+        {
+            return FromEulerAnglesXYZ(rx, ry, rz);
+        }
 
         /// <summary>CFrame.fromEulerAnglesYXZ == CFrame.fromOrientation.</summary>
-        public static RbxCFrame FromEulerAnglesYXZ(float rx, float ry, float rz) =>
-            FromEulerAngles(rx, ry, rz, RbxRotationOrder.YXZ);
+        public static RbxCFrame FromEulerAnglesYXZ(float rx, float ry, float rz)
+        {
+            return FromEulerAngles(rx, ry, rz, RbxRotationOrder.YXZ);
+        }
 
         /// <summary>CFrame.fromOrientation(rx, ry, rz) — alias of fromEulerAnglesYXZ.</summary>
-        public static RbxCFrame FromOrientation(float rx, float ry, float rz) => FromEulerAnglesYXZ(rx, ry, rz);
+        public static RbxCFrame FromOrientation(float rx, float ry, float rz)
+        {
+            return FromEulerAnglesYXZ(rx, ry, rz);
+        }
 
         /// <summary>CFrame.fromAxisAngle(v, r) — rotation of r radians around unit axis v.</summary>
         public static RbxCFrame FromAxisAngle(RbxVector3 axis, float angle)
@@ -189,12 +219,14 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return FromAxisAngle(axis, MathF.Atan2(axis.Magnitude, dot));
         }
 
-        private static RbxCFrame FromAxes(RbxVector3 pos, RbxVector3 x, RbxVector3 y, RbxVector3 z) =>
-            new RbxCFrame(
+        private static RbxCFrame FromAxes(RbxVector3 pos, RbxVector3 x, RbxVector3 y, RbxVector3 z)
+        {
+            return new RbxCFrame(
                 pos.X, pos.Y, pos.Z,
                 x.X, y.X, z.X,
                 x.Y, y.Y, z.Y,
                 x.Z, y.Z, z.Z);
+        }
 
         private static RbxCFrame RotationX(float t)
         {
@@ -216,30 +248,33 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         // ---- Components --------------------------------------------------------------
 
-        public RbxVector3 Position => new RbxVector3(_x, _y, _z);
+        public RbxVector3 Position => new(_x, _y, _z);
         public float X => _x;
         public float Y => _y;
         public float Z => _z;
 
         /// <summary>The rotation-only copy (position zero).</summary>
-        public RbxCFrame Rotation => new RbxCFrame(
+        public RbxCFrame Rotation => new(
             0f, 0f, 0f, _r00, _r01, _r02, _r10, _r11, _r12, _r20, _r21, _r22);
 
-        public RbxVector3 XVector => new RbxVector3(_r00, _r10, _r20);
-        public RbxVector3 YVector => new RbxVector3(_r01, _r11, _r21);
-        public RbxVector3 ZVector => new RbxVector3(_r02, _r12, _r22);
+        public RbxVector3 XVector => new(_r00, _r10, _r20);
+        public RbxVector3 YVector => new(_r01, _r11, _r21);
+        public RbxVector3 ZVector => new(_r02, _r12, _r22);
 
         public RbxVector3 RightVector => XVector;
         public RbxVector3 UpVector => YVector;
 
         /// <summary>Forward direction: the negated Z column (right-handed Roblox convention).</summary>
-        public RbxVector3 LookVector => new RbxVector3(-_r02, -_r12, -_r22);
+        public RbxVector3 LookVector => new(-_r02, -_r12, -_r22);
 
         /// <summary>GetComponents(): (x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22).</summary>
-        public float[] GetComponents() => new[]
+        public float[] GetComponents()
         {
-            _x, _y, _z, _r00, _r01, _r02, _r10, _r11, _r12, _r20, _r21, _r22
-        };
+            return new[]
+            {
+                _x, _y, _z, _r00, _r01, _r02, _r10, _r11, _r12, _r20, _r21, _r22
+            };
+        }
 
         // ---- Transformations ---------------------------------------------------------
 
@@ -256,13 +291,23 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 _r02, _r12, _r22);
         }
 
-        public RbxCFrame ToWorldSpace(RbxCFrame cf) => this * cf;
-        public RbxCFrame ToObjectSpace(RbxCFrame cf) => Inverse() * cf;
+        public RbxCFrame ToWorldSpace(RbxCFrame cf)
+        {
+            return this * cf;
+        }
 
-        public RbxVector3 PointToWorldSpace(RbxVector3 p) => new RbxVector3(
-            _r00 * p.X + _r01 * p.Y + _r02 * p.Z + _x,
-            _r10 * p.X + _r11 * p.Y + _r12 * p.Z + _y,
-            _r20 * p.X + _r21 * p.Y + _r22 * p.Z + _z);
+        public RbxCFrame ToObjectSpace(RbxCFrame cf)
+        {
+            return Inverse() * cf;
+        }
+
+        public RbxVector3 PointToWorldSpace(RbxVector3 p)
+        {
+            return new RbxVector3(
+                _r00 * p.X + _r01 * p.Y + _r02 * p.Z + _x,
+                _r10 * p.X + _r11 * p.Y + _r12 * p.Z + _y,
+                _r20 * p.X + _r21 * p.Y + _r22 * p.Z + _z);
+        }
 
         public RbxVector3 PointToObjectSpace(RbxVector3 p)
         {
@@ -273,15 +318,21 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 _r02 * dx + _r12 * dy + _r22 * dz);
         }
 
-        public RbxVector3 VectorToWorldSpace(RbxVector3 v) => new RbxVector3(
-            _r00 * v.X + _r01 * v.Y + _r02 * v.Z,
-            _r10 * v.X + _r11 * v.Y + _r12 * v.Z,
-            _r20 * v.X + _r21 * v.Y + _r22 * v.Z);
+        public RbxVector3 VectorToWorldSpace(RbxVector3 v)
+        {
+            return new RbxVector3(
+                _r00 * v.X + _r01 * v.Y + _r02 * v.Z,
+                _r10 * v.X + _r11 * v.Y + _r12 * v.Z,
+                _r20 * v.X + _r21 * v.Y + _r22 * v.Z);
+        }
 
-        public RbxVector3 VectorToObjectSpace(RbxVector3 v) => new RbxVector3(
-            _r00 * v.X + _r10 * v.Y + _r20 * v.Z,
-            _r01 * v.X + _r11 * v.Y + _r21 * v.Z,
-            _r02 * v.X + _r12 * v.Y + _r22 * v.Z);
+        public RbxVector3 VectorToObjectSpace(RbxVector3 v)
+        {
+            return new RbxVector3(
+                _r00 * v.X + _r10 * v.Y + _r20 * v.Z,
+                _r01 * v.X + _r11 * v.Y + _r21 * v.Z,
+                _r02 * v.X + _r12 * v.Y + _r22 * v.Z);
+        }
 
         /// <summary>Position lerp + shortest-path rotation slerp (Roblox CFrame:Lerp).</summary>
         public RbxCFrame Lerp(RbxCFrame goal, float alpha)
@@ -293,7 +344,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
             float dot = ax * bx + ay * by + az * bz + aw * bw;
             if (dot < 0f)
             {
-                bx = -bx; by = -by; bz = -bz; bw = -bw;
+                bx = -bx;
+                by = -by;
+                bz = -bz;
+                bw = -bw;
                 dot = -dot;
             }
 
@@ -349,7 +403,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>ToOrientation() — alias of ToEulerAnglesYXZ (Roblox parity).</summary>
-        public (float rx, float ry, float rz) ToOrientation() => ToEulerAnglesYXZ();
+        public (float rx, float ry, float rz) ToOrientation()
+        {
+            return ToEulerAnglesYXZ();
+        }
 
         /// <summary>Rotation as (unit axis, angle in radians); identity yields (xAxis, 0).</summary>
         public (RbxVector3 axis, float angle) ToAxisAngle()
@@ -374,11 +431,13 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return 2f * MathF.Acos(Math.Clamp(dot, 0f, 1f));
         }
 
-        public bool FuzzyEq(RbxCFrame other, float epsilon = 1e-5f) =>
-            Position.FuzzyEq(other.Position, epsilon) &&
-            XVector.FuzzyEq(other.XVector, epsilon) &&
-            YVector.FuzzyEq(other.YVector, epsilon) &&
-            ZVector.FuzzyEq(other.ZVector, epsilon);
+        public bool FuzzyEq(RbxCFrame other, float epsilon = 1e-5f)
+        {
+            return Position.FuzzyEq(other.Position, epsilon) &&
+                   XVector.FuzzyEq(other.XVector, epsilon) &&
+                   YVector.FuzzyEq(other.YVector, epsilon) &&
+                   ZVector.FuzzyEq(other.ZVector, epsilon);
+        }
 
         /// <summary>
         /// Rotation as quaternion components (x, y, z, w). Public because the RbxSpace
@@ -443,17 +502,33 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>CFrame * Vector3 — transforms the point into world space.</summary>
-        public static RbxVector3 operator *(RbxCFrame cf, RbxVector3 p) => cf.PointToWorldSpace(p);
+        public static RbxVector3 operator *(RbxCFrame cf, RbxVector3 p)
+        {
+            return cf.PointToWorldSpace(p);
+        }
 
         /// <summary>CFrame + Vector3 — world-space translation (rotation unchanged).</summary>
-        public static RbxCFrame operator +(RbxCFrame cf, RbxVector3 v) => new RbxCFrame(
-            cf._x + v.X, cf._y + v.Y, cf._z + v.Z,
-            cf._r00, cf._r01, cf._r02, cf._r10, cf._r11, cf._r12, cf._r20, cf._r21, cf._r22);
+        public static RbxCFrame operator +(RbxCFrame cf, RbxVector3 v)
+        {
+            return new RbxCFrame(
+                cf._x + v.X, cf._y + v.Y, cf._z + v.Z,
+                cf._r00, cf._r01, cf._r02, cf._r10, cf._r11, cf._r12, cf._r20, cf._r21, cf._r22);
+        }
 
-        public static RbxCFrame operator -(RbxCFrame cf, RbxVector3 v) => cf + (-v);
+        public static RbxCFrame operator -(RbxCFrame cf, RbxVector3 v)
+        {
+            return cf + (-v);
+        }
 
-        public static bool operator ==(RbxCFrame a, RbxCFrame b) => a.Equals(b);
-        public static bool operator !=(RbxCFrame a, RbxCFrame b) => !a.Equals(b);
+        public static bool operator ==(RbxCFrame a, RbxCFrame b)
+        {
+            return a.Equals(b);
+        }
+
+        public static bool operator !=(RbxCFrame a, RbxCFrame b)
+        {
+            return !a.Equals(b);
+        }
 
         public bool Equals(RbxCFrame other)
         {
@@ -464,13 +539,19 @@ namespace CoreAI.Mods.Rbx.Datatypes
                    _r20 == other._r20 && _r21 == other._r21 && _r22 == other._r22;
         }
 
-        public override bool Equals(object obj) => obj is RbxCFrame cf && Equals(cf);
+        public override bool Equals(object obj)
+        {
+            return obj is RbxCFrame cf && Equals(cf);
+        }
 
-        public override int GetHashCode() => HashCode.Combine(
-            HashCode.Combine(_x, _y, _z),
-            HashCode.Combine(_r00, _r01, _r02, _r10),
-            HashCode.Combine(_r11, _r12, _r20, _r21),
-            _r22);
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(
+                HashCode.Combine(_x, _y, _z),
+                HashCode.Combine(_r00, _r01, _r02, _r10),
+                HashCode.Combine(_r11, _r12, _r20, _r21),
+                _r22);
+        }
 
         /// <summary>Roblox tostring format: all 12 components comma-separated.</summary>
         public override string ToString()

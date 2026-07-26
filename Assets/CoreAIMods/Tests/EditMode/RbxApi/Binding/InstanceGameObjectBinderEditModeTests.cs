@@ -60,8 +60,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         /// <paramref name="leaf"/>, so it can be compared against RbxInstance.GetFullName.</summary>
         private string TransformPathBelowHost(Transform leaf)
         {
-            var names = new List<string>();
-            for (Transform current = leaf; current != null && current != _root.transform;
+            List<string> names = new();
+            for (Transform current = leaf;
+                 current != null && current != _root.transform;
                  current = current.parent)
             {
                 names.Add(current.name);
@@ -284,11 +285,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             // WHY: §5.1.8 item 11 — switching 0.28 <-> 1:1 touches zero assets; the same
             // binder code path must yield stud-numeric localScale at 1:1.
             RbxSpace.ResetForTests(1f);
-            var root = new GameObject("OneToOneRoot");
+            GameObject root = new("OneToOneRoot");
             try
             {
-                var binder = new InstanceGameObjectBinder(root.transform);
-                var registry = new InstanceRegistry(null, binder);
+                InstanceGameObjectBinder binder = new(root.transform);
+                InstanceRegistry registry = new(null, binder);
                 RbxDataModel game = DataModelBootstrap.CreateGame(registry);
                 RbxInstance part = registry.Create("Part");
                 part.Parent = registry.WorldRoot;
@@ -315,8 +316,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             RbxInstance part = CreatePartInWorld();
             _binder.SetColor(part.Id, RbxColor3.FromRGB(255f, 128f, 0f));
 
-            var renderer = BoundObject(part).GetComponent<Renderer>();
-            var block = new MaterialPropertyBlock();
+            Renderer renderer = BoundObject(part).GetComponent<Renderer>();
+            MaterialPropertyBlock block = new();
             renderer.GetPropertyBlock(block);
             Color color = block.GetColor("_Color");
             Assert.AreEqual(1f, color.r, Epsilon);
@@ -329,8 +330,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         public void Transparency_SetsAlphaAndHidesAtOne()
         {
             RbxInstance part = CreatePartInWorld();
-            var renderer = BoundObject(part).GetComponent<Renderer>();
-            var block = new MaterialPropertyBlock();
+            Renderer renderer = BoundObject(part).GetComponent<Renderer>();
+            MaterialPropertyBlock block = new();
 
             _binder.SetTransparency(part.Id, 0.25f);
             renderer.GetPropertyBlock(block);
@@ -347,7 +348,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             RbxInstance part = CreatePartInWorld();
             GameObject partGo = BoundObject(part);
 
-            var body = partGo.GetComponent<Rigidbody>();
+            Rigidbody body = partGo.GetComponent<Rigidbody>();
             Assert.IsNotNull(body, "default Anchored=false needs a Rigidbody");
             Assert.IsFalse(body.useGravity, "DEV-6: per-body gravity only, never Unity global");
 
@@ -362,7 +363,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         public void CanCollide_TogglesTheCollider()
         {
             RbxInstance part = CreatePartInWorld();
-            var collider = BoundObject(part).GetComponent<Collider>();
+            Collider collider = BoundObject(part).GetComponent<Collider>();
             Assert.IsTrue(collider.enabled);
 
             _binder.SetCanCollide(part.Id, false);

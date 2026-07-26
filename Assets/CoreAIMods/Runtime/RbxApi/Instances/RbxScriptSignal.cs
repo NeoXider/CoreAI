@@ -82,12 +82,12 @@ namespace CoreAI.Mods.Rbx.Instances
         // signal then connects/fires through the scheduler with deferred-dispatch semantics.
         public RbxScriptConnection Connect(object handler)
         {
-            return ConnectCore(handler, once: false, member: "Connect");
+            return ConnectCore(handler, false, "Connect");
         }
 
         public RbxScriptConnection Once(object handler)
         {
-            return ConnectCore(handler, once: true, member: "Once");
+            return ConnectCore(handler, true, "Once");
         }
 
         // TODO: MVP2 — RbxScriptSignal:Wait() needs the scheduler's coroutine yield even for
@@ -184,7 +184,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "before connecting");
             }
 
-            var connection = new RbxScriptConnection(this, action, once);
+            RbxScriptConnection connection = new(this, action, once);
             _connections.Add(connection);
             return connection;
         }

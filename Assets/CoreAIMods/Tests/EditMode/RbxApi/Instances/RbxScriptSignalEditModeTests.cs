@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
     {
         private static RbxScriptSignal DispatchSignal()
         {
-            return new RbxScriptSignal("Test.Signal", supportsDispatch: true);
+            return new RbxScriptSignal("Test.Signal", true);
         }
 
         [Test]
@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         public void Fire_InvokesConnectionsInOrder()
         {
             RbxScriptSignal signal = DispatchSignal();
-            var order = new List<int>();
+            List<int> order = new();
             signal.Connect((Action<object[]>)(_ => order.Add(1)));
             signal.Connect((Action<object[]>)(_ => order.Add(2)));
             signal.Connect((Action<object[]>)(_ => order.Add(3)));

@@ -28,7 +28,8 @@ namespace CoreAI.Scripting
         IScriptExecutionGuard CreateGuard(IExecutionBudget budget = null);
 
         /// <summary>Creates a budgeted coroutine from a script function on the owning state.</summary>
-        IScriptCoroutine CreateCoroutine(IScriptState ownerState, object callable, IExecutionBudget resumeBudget = null);
+        IScriptCoroutine CreateCoroutine(IScriptState ownerState, object callable,
+            IExecutionBudget resumeBudget = null);
 
         /// <summary>
         /// Loads and runs a source chunk on the state under <paramref name="guard"/> (null = the

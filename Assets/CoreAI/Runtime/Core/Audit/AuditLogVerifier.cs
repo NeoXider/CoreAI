@@ -125,9 +125,9 @@ namespace CoreAI.Audit
                     chainResetCount++;
                     if (!first)
                     {
-                        CoreAI.Logging.Log.Instance.Warn(
+                        Logging.Log.Instance.Warn(
                             $"[AuditLogVerifier] ChainReset encountered mid-file at line {lineCount} (seq {seq}) — possible tail truncation.",
-                            CoreAI.Logging.LogTag.Core);
+                            Logging.LogTag.Core);
                     }
 
                     prevHash = "";
@@ -165,7 +165,8 @@ namespace CoreAI.Audit
         /// <see cref="AuditEntryKind.RotationAnchor"/> whose embedded <c>prevHash</c> equals the
         /// previous file's final line hash — i.e. the set is linked, not just individually valid.
         /// </summary>
-        public static AuditVerifyResult VerifyChainedSet(IReadOnlyList<string> filePathsInChronologicalOrder, string hmacKey = null)
+        public static AuditVerifyResult VerifyChainedSet(IReadOnlyList<string> filePathsInChronologicalOrder,
+            string hmacKey = null)
         {
             string expectedAnchorHash = null;
             long totalLines = 0;

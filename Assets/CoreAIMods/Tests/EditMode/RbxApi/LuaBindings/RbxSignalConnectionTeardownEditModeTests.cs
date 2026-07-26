@@ -98,7 +98,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         /// </summary>
         private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox, MemoryStore store)
         {
-            var connections = new ModConnectionRegistry();
+            ModConnectionRegistry connections = new();
             roblox = new LuaCsRbxApiBindings(connections: connections);
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -110,14 +110,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             });
 
             stack.Runtime.ModTearingDown += (modId, reason) => connections.DisconnectOwnedBy(
-                modId, keepCurrentGeneration: reason == LuaModTeardownReason.Reload);
+                modId, reason == LuaModTeardownReason.Reload);
             return stack;
         }
 
         [Test]
         public void Heartbeat_Connection_StopsFiring_AfterModUnload()
         {
-            var store = new MemoryStore();
+            MemoryStore store = new();
             LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
 
             stack.Runtime.LoadMod("m", @"
@@ -152,7 +152,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [Test]
         public void Reload_KeepsNewConnection_AndDropsOldGeneration()
         {
-            var store = new MemoryStore();
+            MemoryStore store = new();
             LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
 
             // WHY: each handler read-modify-writes the SHARED store key, so two live handlers advance it

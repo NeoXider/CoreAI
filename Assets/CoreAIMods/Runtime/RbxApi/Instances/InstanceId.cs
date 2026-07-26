@@ -32,19 +32,40 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>True when the id was allocated locally without server authority (top bit set).</summary>
         public bool IsLocallyAssigned => IsValid && (Value & AuthorityBit) != 0UL;
 
-        public bool Equals(InstanceId other) => Value == other.Value;
+        public bool Equals(InstanceId other)
+        {
+            return Value == other.Value;
+        }
 
-        public override bool Equals(object obj) => obj is InstanceId other && Equals(other);
+        public override bool Equals(object obj)
+        {
+            return obj is InstanceId other && Equals(other);
+        }
 
-        public override int GetHashCode() => Value.GetHashCode();
+        public override int GetHashCode()
+        {
+            return Value.GetHashCode();
+        }
 
-        public int CompareTo(InstanceId other) => Value.CompareTo(other.Value);
+        public int CompareTo(InstanceId other)
+        {
+            return Value.CompareTo(other.Value);
+        }
 
-        public static bool operator ==(InstanceId left, InstanceId right) => left.Value == right.Value;
+        public static bool operator ==(InstanceId left, InstanceId right)
+        {
+            return left.Value == right.Value;
+        }
 
-        public static bool operator !=(InstanceId left, InstanceId right) => left.Value != right.Value;
+        public static bool operator !=(InstanceId left, InstanceId right)
+        {
+            return left.Value != right.Value;
+        }
 
-        public override string ToString() => Value.ToString();
+        public override string ToString()
+        {
+            return Value.ToString();
+        }
     }
 
     /// <summary>Which identity space an id is allocated in (§3.3 authority partition).</summary>
@@ -71,7 +92,8 @@ namespace CoreAI.Mods.Rbx.Instances
             if (id.IsLocallyAssigned)
             {
                 throw new RbxError(RbxErrorCode.NotAuthority,
-                    "locally-assigned InstanceId " + id.Value + " cannot cross the wire; only server-assigned ids replicate",
+                    "locally-assigned InstanceId " + id.Value +
+                    " cannot cross the wire; only server-assigned ids replicate",
                     "create the instance on the server (or wait for the server-assigned id) before marshalling it");
             }
         }

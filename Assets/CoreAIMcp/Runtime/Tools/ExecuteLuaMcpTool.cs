@@ -63,7 +63,7 @@ namespace CoreAI.Mcp.Tools
 
             return new McpToolResult(
                 new[] { McpContent.CreateText(payload) },
-                isError: result == null || !result.Success);
+                result == null || !result.Success);
         }
     }
 }

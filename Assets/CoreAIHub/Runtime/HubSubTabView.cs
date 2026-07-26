@@ -142,7 +142,7 @@ namespace CoreAI.Hub.UI
             }
             catch (Exception ex)
             {
-                CoreAI.Logging.Log.Instance.Error(
+                Logging.Log.Instance.Error(
                     $"[HubSubTabView] Sub-tab '{tab.Title}' content factory threw: {ex}");
                 Label error = new($"'{tab.Title}' failed to load: {ex.Message}");
                 error.style.color = new Color(1f, 0.5f, 0.5f, 1f);

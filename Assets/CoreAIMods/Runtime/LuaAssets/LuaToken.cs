@@ -18,6 +18,9 @@ namespace CoreAI.LuaAssets
             Length = length;
         }
 
-        public string GetText(string source) => source.Substring(Start, Length);
+        public string GetText(string source)
+        {
+            return source.Substring(Start, Length);
+        }
     }
 }

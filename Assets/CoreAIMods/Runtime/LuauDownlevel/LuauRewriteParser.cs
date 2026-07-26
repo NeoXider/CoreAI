@@ -24,9 +24,9 @@ namespace CoreAI.Infrastructure.Luau
         }
 
         public readonly string Source;
-        public readonly List<SourceEdit> Edits = new List<SourceEdit>();
-        public readonly List<DownlevelDiagnostic> Diagnostics = new List<DownlevelDiagnostic>();
-        public readonly List<RewriteNote> Notes = new List<RewriteNote>();
+        public readonly List<SourceEdit> Edits = new();
+        public readonly List<DownlevelDiagnostic> Diagnostics = new();
+        public readonly List<RewriteNote> Notes = new();
         public int TempCounter;
 
         public sealed class RewriteNote
@@ -63,35 +63,35 @@ namespace CoreAI.Infrastructure.Luau
     /// </summary>
     internal sealed class LuauRewriteParser
     {
-        static readonly HashSet<string> Keywords = new HashSet<string>
+        private static readonly HashSet<string> Keywords = new()
         {
             "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
         };
 
-        static readonly HashSet<string> CompoundOps = new HashSet<string>
+        private static readonly HashSet<string> CompoundOps = new()
         {
             "+=", "-=", "*=", "/=", "//=", "%=", "^=", "..="
         };
 
-        readonly RewriteContext _ctx;
-        readonly List<LuauToken> _toks;
-        int _i;
-        int _funcDepth;
-        int _pendingEqPos = -1;
-        readonly List<LoopFrame> _loops = new List<LoopFrame>();
-        readonly List<int> _ifExprFuncDepths = new List<int>();
-        readonly List<bool> _ifExprUnsupported = new List<bool>();
+        private readonly RewriteContext _ctx;
+        private readonly List<LuauToken> _toks;
+        private int _i;
+        private int _funcDepth;
+        private int _pendingEqPos = -1;
+        private readonly List<LoopFrame> _loops = new();
+        private readonly List<int> _ifExprFuncDepths = new();
+        private readonly List<bool> _ifExprUnsupported = new();
 
-        sealed class LoopFrame
+        private sealed class LoopFrame
         {
             public bool Barrier;
             public bool IsRepeat;
-            public readonly List<LuauToken> Continues = new List<LuauToken>();
-            public readonly List<LuauToken> Breaks = new List<LuauToken>();
+            public readonly List<LuauToken> Continues = new();
+            public readonly List<LuauToken> Breaks = new();
         }
 
-        enum SuffixKind
+        private enum SuffixKind
         {
             Name,
             Dot,
@@ -100,7 +100,7 @@ namespace CoreAI.Infrastructure.Luau
             Paren
         }
 
-        struct SuffixedInfo
+        private struct SuffixedInfo
         {
             public int Start;
             public int End;
@@ -127,7 +127,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void ParseInterpolationExpression()
+        private void ParseInterpolationExpression()
         {
             ParseExpr();
             if (Cur.Kind != LuauTokenKind.Eof)
@@ -136,15 +136,15 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        LuauToken Cur => _toks[_i];
+        private LuauToken Cur => _toks[_i];
 
-        LuauToken Peek(int offset)
+        private LuauToken Peek(int offset)
         {
             int i = _i + offset;
             return i < _toks.Count ? _toks[i] : _toks[_toks.Count - 1];
         }
 
-        void Advance()
+        private void Advance()
         {
             if (_i < _toks.Count - 1)
             {
@@ -152,27 +152,27 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        static bool Is(LuauToken t, LuauTokenKind kind, string text)
+        private static bool Is(LuauToken t, LuauTokenKind kind, string text)
         {
             return t.Kind == kind && t.Text == text;
         }
 
-        static bool IsPunct(LuauToken t, string text)
+        private static bool IsPunct(LuauToken t, string text)
         {
             return t.Kind == LuauTokenKind.Punct && t.Text == text;
         }
 
-        static bool IsName(LuauToken t, string text)
+        private static bool IsName(LuauToken t, string text)
         {
             return t.Kind == LuauTokenKind.Name && t.Text == text;
         }
 
-        void Throw(string message)
+        private void Throw(string message)
         {
             throw new LuauDownlevelException(message, Cur.Line, Cur.Column);
         }
 
-        LuauToken ExpectPunct(string text)
+        private LuauToken ExpectPunct(string text)
         {
             if (!IsPunct(Cur, text))
             {
@@ -184,7 +184,7 @@ namespace CoreAI.Infrastructure.Luau
             return t;
         }
 
-        LuauToken ExpectKeyword(string text)
+        private LuauToken ExpectKeyword(string text)
         {
             if (!IsName(Cur, text))
             {
@@ -196,7 +196,7 @@ namespace CoreAI.Infrastructure.Luau
             return t;
         }
 
-        LuauToken ExpectIdentifier()
+        private LuauToken ExpectIdentifier()
         {
             if (Cur.Kind != LuauTokenKind.Name || Keywords.Contains(Cur.Text))
             {
@@ -208,7 +208,7 @@ namespace CoreAI.Infrastructure.Luau
             return t;
         }
 
-        void ConsumeEquals()
+        private void ConsumeEquals()
         {
             if (_pendingEqPos >= 0)
             {
@@ -219,28 +219,28 @@ namespace CoreAI.Infrastructure.Luau
             ExpectPunct("=");
         }
 
-        bool AtEquals()
+        private bool AtEquals()
         {
             return _pendingEqPos >= 0 || IsPunct(Cur, "=");
         }
 
-        void AddEdit(int start, int end, string text)
+        private void AddEdit(int start, int end, string text)
         {
             _ctx.Edits.Add(new SourceEdit { Start = start, End = end, Seq = _ctx.Edits.Count, Text = text });
         }
 
-        void ReplaceToken(LuauToken t, string text)
+        private void ReplaceToken(LuauToken t, string text)
         {
             AddEdit(t.Start, t.End, text);
         }
 
-        void Insert(int pos, string text)
+        private void Insert(int pos, string text)
         {
             AddEdit(pos, pos, text);
         }
 
         /// <summary>Deletes a span while re-emitting its newlines so following lines keep their numbers.</summary>
-        void DeleteKeepNewlines(int start, int end)
+        private void DeleteKeepNewlines(int start, int end)
         {
             int newlines = 0;
             for (int i = start; i < end; i++)
@@ -254,7 +254,7 @@ namespace CoreAI.Infrastructure.Luau
             AddEdit(start, end, newlines == 0 ? "" : new string('\n', newlines));
         }
 
-        bool SpanHasChar(int start, int end, char c)
+        private bool SpanHasChar(int start, int end, char c)
         {
             for (int i = start; i < end; i++)
             {
@@ -270,12 +270,12 @@ namespace CoreAI.Infrastructure.Luau
         // WHY: temp names use the '__luau_t' prefix on the assumption that user code never declares an
         // identifier with it; the counter is shared across the whole chunk so every generated temp is
         // unique. A colliding user identifier would shadow a temp and is treated as out of contract.
-        string NextTemp()
+        private string NextTemp()
         {
             return "__luau_t" + _ctx.TempCounter++;
         }
 
-        void EmitStringRewrite(LuauToken t)
+        private void EmitStringRewrite(LuauToken t)
         {
             if (t.StringRewrite != null)
             {
@@ -284,7 +284,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void Warn(string message, LuauToken at)
+        private void Warn(string message, LuauToken at)
         {
             _ctx.Diagnostics.Add(new DownlevelDiagnostic(DownlevelSeverity.Warning, message, at.Line, at.Column));
         }
@@ -295,9 +295,9 @@ namespace CoreAI.Infrastructure.Luau
         /// Insertions sitting exactly at <paramref name="start"/> are excluded: they belong to the
         /// construct preceding the span.
         /// </summary>
-        string GetRewrittenText(int start, int end)
+        private string GetRewrittenText(int start, int end)
         {
-            var slice = new List<SourceEdit>();
+            List<SourceEdit> slice = new();
             for (int i = 0; i < _ctx.Edits.Count; i++)
             {
                 SourceEdit e = _ctx.Edits[i];
@@ -308,7 +308,7 @@ namespace CoreAI.Infrastructure.Luau
             }
 
             slice.Sort(CompareEdits);
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             int pos = start;
             for (int i = 0; i < slice.Count; i++)
             {
@@ -348,7 +348,7 @@ namespace CoreAI.Infrastructure.Luau
 
         // ---------------------------------------------------------------- statements
 
-        void ParseBlock()
+        private void ParseBlock()
         {
             while (!IsBlockEnd())
             {
@@ -356,7 +356,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        bool IsBlockEnd()
+        private bool IsBlockEnd()
         {
             LuauToken t = Cur;
             if (t.Kind == LuauTokenKind.Eof)
@@ -368,7 +368,7 @@ namespace CoreAI.Infrastructure.Luau
                    (t.Text == "end" || t.Text == "until" || t.Text == "else" || t.Text == "elseif");
         }
 
-        void ParseStatement()
+        private void ParseStatement()
         {
             LuauToken t = Cur;
             if (IsPunct(t, ";"))
@@ -485,7 +485,7 @@ namespace CoreAI.Infrastructure.Luau
             ParseExprStatement();
         }
 
-        bool IsTypeStatementAhead(int offset)
+        private bool IsTypeStatementAhead(int offset)
         {
             LuauToken name = Peek(offset + 1);
             if (name.Kind != LuauTokenKind.Name || Keywords.Contains(name.Text))
@@ -497,7 +497,7 @@ namespace CoreAI.Infrastructure.Luau
             return IsPunct(after, "=") || IsPunct(after, "<");
         }
 
-        void ParseTypeStatement(LuauToken startTok, bool isExport)
+        private void ParseTypeStatement(LuauToken startTok, bool isExport)
         {
             if (isExport)
             {
@@ -517,7 +517,7 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("type declaration", startTok);
         }
 
-        static bool CanExtendExpression(LuauToken t)
+        private static bool CanExtendExpression(LuauToken t)
         {
             if (t.Kind == LuauTokenKind.String || t.Kind == LuauTokenKind.InterpString)
             {
@@ -545,7 +545,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        LoopFrame EnclosingLoop()
+        private LoopFrame EnclosingLoop()
         {
             if (_loops.Count == 0)
             {
@@ -556,22 +556,22 @@ namespace CoreAI.Infrastructure.Luau
             return top.Barrier ? null : top;
         }
 
-        bool HasEnclosingLoop()
+        private bool HasEnclosingLoop()
         {
             return EnclosingLoop() != null;
         }
 
-        void HandleBreak(LuauToken t)
+        private void HandleBreak(LuauToken t)
         {
             EnclosingLoop()?.Breaks.Add(t);
         }
 
-        void HandleContinue(LuauToken t)
+        private void HandleContinue(LuauToken t)
         {
             EnclosingLoop()?.Continues.Add(t);
         }
 
-        void ParseIfStatement()
+        private void ParseIfStatement()
         {
             Advance();
             ParseExpr();
@@ -594,7 +594,7 @@ namespace CoreAI.Infrastructure.Luau
             ExpectKeyword("end");
         }
 
-        void ParseWhileStatement()
+        private void ParseWhileStatement()
         {
             Advance();
             ParseExpr();
@@ -606,7 +606,7 @@ namespace CoreAI.Infrastructure.Luau
             FinalizeDoLoop(frame, doTok, endTok);
         }
 
-        void ParseForStatement()
+        private void ParseForStatement()
         {
             Advance();
             ExpectIdentifier();
@@ -644,7 +644,7 @@ namespace CoreAI.Infrastructure.Luau
             FinalizeDoLoop(frame, doTok, endTok);
         }
 
-        void ParseRepeatStatement()
+        private void ParseRepeatStatement()
         {
             LuauToken repeatTok = Cur;
             Advance();
@@ -657,19 +657,19 @@ namespace CoreAI.Infrastructure.Luau
             FinalizeRepeatLoop(frame, repeatTok, untilTok, condStart, condEnd);
         }
 
-        LoopFrame PushLoop(bool isRepeat)
+        private LoopFrame PushLoop(bool isRepeat)
         {
-            var frame = new LoopFrame { IsRepeat = isRepeat };
+            LoopFrame frame = new() { IsRepeat = isRepeat };
             _loops.Add(frame);
             return frame;
         }
 
-        void PopLoop()
+        private void PopLoop()
         {
             _loops.RemoveAt(_loops.Count - 1);
         }
 
-        void FinalizeDoLoop(LoopFrame frame, LuauToken doTok, LuauToken endTok)
+        private void FinalizeDoLoop(LoopFrame frame, LuauToken doTok, LuauToken endTok)
         {
             if (frame.Continues.Count == 0)
             {
@@ -706,7 +706,8 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("continue", frame.Continues[0]);
         }
 
-        void FinalizeRepeatLoop(LoopFrame frame, LuauToken repeatTok, LuauToken untilTok, int condStart, int condEnd)
+        private void FinalizeRepeatLoop(LoopFrame frame, LuauToken repeatTok, LuauToken untilTok, int condStart,
+            int condEnd)
         {
             if (frame.Continues.Count == 0)
             {
@@ -741,7 +742,7 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("continue", frame.Continues[0]);
         }
 
-        void ParseFuncName()
+        private void ParseFuncName()
         {
             ExpectIdentifier();
             while (IsPunct(Cur, "."))
@@ -757,7 +758,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        int ParseFuncBody()
+        private int ParseFuncBody()
         {
             _funcDepth++;
             _loops.Add(new LoopFrame { Barrier = true });
@@ -812,7 +813,7 @@ namespace CoreAI.Infrastructure.Luau
             return endTok.End;
         }
 
-        void ParseLocalStatement()
+        private void ParseLocalStatement()
         {
             Advance();
             if (IsName(Cur, "function"))
@@ -843,7 +844,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void ParseReturnStatement()
+        private void ParseReturnStatement()
         {
             Advance();
             if (!IsBlockEnd() && !IsPunct(Cur, ";"))
@@ -857,7 +858,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void MaybeStripAnnotation()
+        private void MaybeStripAnnotation()
         {
             if (!IsPunct(Cur, ":"))
             {
@@ -871,7 +872,7 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("type annotation", colon);
         }
 
-        void ParseExprStatement()
+        private void ParseExprStatement()
         {
             SuffixedInfo info = ParseSuffixedExpr();
             LuauToken t = Cur;
@@ -910,7 +911,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void RequireAssignable(SuffixedInfo info)
+        private void RequireAssignable(SuffixedInfo info)
         {
             if (info.LastKind == SuffixKind.Call || info.LastKind == SuffixKind.Paren)
             {
@@ -918,7 +919,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void ParseCompoundAssignment(SuffixedInfo target, LuauToken opTok)
+        private void ParseCompoundAssignment(SuffixedInfo target, LuauToken opTok)
         {
             RequireAssignable(target);
             Advance();
@@ -990,7 +991,7 @@ namespace CoreAI.Infrastructure.Luau
 
         // ---------------------------------------------------------------- expressions
 
-        int ParseExprList()
+        private int ParseExprList()
         {
             int end = ParseExpr();
             while (IsPunct(Cur, ","))
@@ -1002,12 +1003,12 @@ namespace CoreAI.Infrastructure.Luau
             return end;
         }
 
-        int ParseExpr()
+        private int ParseExpr()
         {
             return ParseBinExpr(0).End;
         }
 
-        static int BinaryPrecedence(LuauToken t)
+        private static int BinaryPrecedence(LuauToken t)
         {
             if (t.Kind == LuauTokenKind.Name)
             {
@@ -1055,17 +1056,17 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        static bool IsRightAssociative(LuauToken t)
+        private static bool IsRightAssociative(LuauToken t)
         {
             return IsPunct(t, "..") || IsPunct(t, "^");
         }
 
-        bool IsUnaryOp(LuauToken t)
+        private bool IsUnaryOp(LuauToken t)
         {
             return IsName(t, "not") || IsPunct(t, "-") || IsPunct(t, "#");
         }
 
-        (int Start, int End) ParseBinExpr(int limit)
+        private (int Start, int End) ParseBinExpr(int limit)
         {
             const int UnaryPrecedence = 7;
             int start = Cur.Start;
@@ -1105,7 +1106,7 @@ namespace CoreAI.Infrastructure.Luau
             return (start, end);
         }
 
-        int ParseSimpleExpr()
+        private int ParseSimpleExpr()
         {
             LuauToken t = Cur;
             int end;
@@ -1179,7 +1180,7 @@ namespace CoreAI.Infrastructure.Luau
         /// generated closure (the closure has no varargs), so the enclosing if-expression is marked
         /// unsupported and left unrewritten rather than emitting broken code.
         /// </summary>
-        void MarkVarargUnsupportedIfInsideIfExpression(LuauToken t)
+        private void MarkVarargUnsupportedIfInsideIfExpression(LuauToken t)
         {
             for (int i = _ifExprFuncDepths.Count - 1; i >= 0; i--)
             {
@@ -1191,7 +1192,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        int ParseIfExpression(LuauToken ifTok)
+        private int ParseIfExpression(LuauToken ifTok)
         {
             int editMark = _ctx.Edits.Count;
             ReplaceToken(ifTok, "(function() if");
@@ -1224,7 +1225,9 @@ namespace CoreAI.Infrastructure.Luau
                 // edit this if-expression produced and pass the original construct through with a
                 // diagnostic rather than emitting code that fails to parse under Lua 5.2.
                 _ctx.Edits.RemoveRange(editMark, _ctx.Edits.Count - editMark);
-                Warn("'...' (varargs) inside an if-then-else expression is unsupported; the construct was left unchanged", ifTok);
+                Warn(
+                    "'...' (varargs) inside an if-then-else expression is unsupported; the construct was left unchanged",
+                    ifTok);
                 return end;
             }
 
@@ -1237,7 +1240,7 @@ namespace CoreAI.Infrastructure.Luau
         /// multi-value tail call or <c>...</c> to a single result, matching Luau's if-expression
         /// semantics (darklua expands all results; parenthesizing is the cheap correct fix).
         /// </summary>
-        void WrapIfExpressionBranch()
+        private void WrapIfExpressionBranch()
         {
             ReplaceToken(ExpectKeyword("then"), "then return");
             int branchStart = Cur.Start;
@@ -1246,7 +1249,7 @@ namespace CoreAI.Infrastructure.Luau
             Insert(end, ")");
         }
 
-        int ParseTableConstructor()
+        private int ParseTableConstructor()
         {
             ExpectPunct("{");
             while (!IsPunct(Cur, "}"))
@@ -1283,9 +1286,9 @@ namespace CoreAI.Infrastructure.Luau
             return close.End;
         }
 
-        SuffixedInfo ParseSuffixedExpr()
+        private SuffixedInfo ParseSuffixedExpr()
         {
-            var info = new SuffixedInfo();
+            SuffixedInfo info = new();
             LuauToken t = Cur;
             info.Start = t.Start;
             if (t.Kind == LuauTokenKind.Name && !Keywords.Contains(t.Text))
@@ -1352,13 +1355,13 @@ namespace CoreAI.Infrastructure.Luau
             return info;
         }
 
-        static bool IsCallArgsStart(LuauToken t)
+        private static bool IsCallArgsStart(LuauToken t)
         {
             return IsPunct(t, "(") || IsPunct(t, "{") ||
                    t.Kind == LuauTokenKind.String || t.Kind == LuauTokenKind.InterpString;
         }
 
-        int ParseCallArgs()
+        private int ParseCallArgs()
         {
             LuauToken t = Cur;
             if (IsPunct(t, "("))
@@ -1392,7 +1395,7 @@ namespace CoreAI.Infrastructure.Luau
 
         // ---------------------------------------------------------------- interpolation
 
-        void RewriteInterpolatedString(LuauToken tok)
+        private void RewriteInterpolatedString(LuauToken tok)
         {
             AddEdit(tok.Start, tok.Start + 1, "(\"");
             List<LuauInterpPart> parts = tok.InterpParts;
@@ -1411,7 +1414,7 @@ namespace CoreAI.Infrastructure.Luau
                 {
                     AddEdit(part.Start - 1, part.Start, "\" .. tostring(");
                     AddEdit(part.End, part.End + 1, ") .. \"");
-                    var sub = new LuauRewriteParser(_ctx, part.Tokens);
+                    LuauRewriteParser sub = new(_ctx, part.Tokens);
                     sub.ParseInterpolationExpression();
                 }
             }
@@ -1425,10 +1428,10 @@ namespace CoreAI.Infrastructure.Luau
         /// <c>\{</c> lose their Luau-only escapes, a bare <c>"</c> gains one. Returns null when the
         /// text is already valid as-is.
         /// </summary>
-        string EscapeInterpText(int start, int end)
+        private string EscapeInterpText(int start, int end)
         {
             string src = _ctx.Source;
-            var sb = new StringBuilder(end - start + 4);
+            StringBuilder sb = new(end - start + 4);
             bool changed = false;
             int i = start;
             while (i < end)
@@ -1472,7 +1475,7 @@ namespace CoreAI.Infrastructure.Luau
         /// function types, typeof) and returns the character offset just past it. Nothing inside a
         /// type is rewritten — the whole span is deleted by the caller.
         /// </summary>
-        int SkipType()
+        private int SkipType()
         {
             if (IsPunct(Cur, "|") || IsPunct(Cur, "&"))
             {
@@ -1506,10 +1509,10 @@ namespace CoreAI.Infrastructure.Luau
             return end;
         }
 
-        int SkipTypeAtom()
+        private int SkipTypeAtom()
         {
             LuauToken t = Cur;
-            if (t.Kind == LuauTokenKind.Name && !Keywords.Contains(t.Text) ||
+            if ((t.Kind == LuauTokenKind.Name && !Keywords.Contains(t.Text)) ||
                 IsName(t, "nil") || IsName(t, "true") || IsName(t, "false"))
             {
                 bool isTypeof = t.Text == "typeof";
@@ -1566,7 +1569,7 @@ namespace CoreAI.Infrastructure.Luau
             if (IsPunct(t, "..."))
             {
                 Advance();
-                if (Cur.Kind == LuauTokenKind.Name && !Keywords.Contains(Cur.Text) ||
+                if ((Cur.Kind == LuauTokenKind.Name && !Keywords.Contains(Cur.Text)) ||
                     Cur.Kind == LuauTokenKind.String || IsPunct(Cur, "{") || IsPunct(Cur, "("))
                 {
                     return SkipTypeAtom();
@@ -1579,7 +1582,7 @@ namespace CoreAI.Infrastructure.Luau
             return 0;
         }
 
-        int SkipBalancedPunct(string open, string close)
+        private int SkipBalancedPunct(string open, string close)
         {
             ExpectPunct(open);
             int depth = 1;
@@ -1612,7 +1615,7 @@ namespace CoreAI.Infrastructure.Luau
         /// <c>Foo&lt;T&gt;=x</c>) is split: the '&gt;' closes the list and the '=' is remembered for
         /// the next <see cref="ConsumeEquals"/>.
         /// </summary>
-        int SkipBalancedAngles()
+        private int SkipBalancedAngles()
         {
             ExpectPunct("<");
             int depth = 1;

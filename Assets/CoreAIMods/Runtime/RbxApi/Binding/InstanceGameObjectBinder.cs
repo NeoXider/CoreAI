@@ -52,16 +52,14 @@ namespace CoreAI.Mods.Rbx.Binding
         // GameObject materializes inactive (children inherit inactive-in-hierarchy). Workspace and
         // Lighting stay active. Roblox's service set is fixed, so an explicit list is honest here.
         private static readonly HashSet<string> InactiveServiceClasses =
-            new HashSet<string>(System.StringComparer.Ordinal)
+            new(System.StringComparer.Ordinal)
             {
                 "ReplicatedStorage", "ServerStorage", "ServerScriptService", "StarterPlayer"
             };
 
         private readonly Transform _worldParent;
-        private readonly Dictionary<InstanceId, BindingEntry> _bindings =
-            new Dictionary<InstanceId, BindingEntry>();
-        private readonly Dictionary<InstanceId, PartProperties> _partProperties =
-            new Dictionary<InstanceId, PartProperties>();
+        private readonly Dictionary<InstanceId, BindingEntry> _bindings = new();
+        private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
         private sealed class BindingEntry
         {
@@ -311,7 +309,14 @@ namespace CoreAI.Mods.Rbx.Binding
         // setter re-applies ONLY the aspect it touched instead of re-running the whole
         // materialization (shape scan + component lookups + a MaterialPropertyBlock alloc) on
         // every transform write. Full is used at materialization and on shape switches.
-        private enum PartAspect { Full, Transform, Appearance, Anchored, CanCollide }
+        private enum PartAspect
+        {
+            Full,
+            Transform,
+            Appearance,
+            Anchored,
+            CanCollide
+        }
 
         private void Store(InstanceId id, in PartProperties properties, PartAspect aspect)
         {
@@ -363,7 +368,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: parts start as an empty GameObject; OnEnteredWorld runs Apply right after,
             // and ApplyShape builds the primitive visual for the stored Shape there — one code
             // path for materialization and later Shape switches.
-            GameObject gameObject = new GameObject();
+            GameObject gameObject = new();
             gameObject.name = instance.Name;
             gameObject.transform.SetParent(ResolveParentTransform(instance), false);
             gameObject.SetActive(DesiredActiveSelf(instance));
@@ -494,9 +499,9 @@ namespace CoreAI.Mods.Rbx.Binding
         private static void BuildRootPrimitiveVisual(GameObject gameObject, PrimitiveType type)
         {
             EnsurePrimitiveCache();
-            var filter = gameObject.AddComponent<MeshFilter>();
+            MeshFilter filter = gameObject.AddComponent<MeshFilter>();
             filter.sharedMesh = type == PrimitiveType.Sphere ? _sphereMesh : _cubeMesh;
-            var renderer = gameObject.AddComponent<MeshRenderer>();
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = _defaultMaterial;
             if (type == PrimitiveType.Sphere)
             {
@@ -550,11 +555,11 @@ namespace CoreAI.Mods.Rbx.Binding
         private static void BuildWedgeVisual(GameObject gameObject)
         {
             Mesh mesh = GetWedgeMesh();
-            var filter = gameObject.AddComponent<MeshFilter>();
+            MeshFilter filter = gameObject.AddComponent<MeshFilter>();
             filter.sharedMesh = mesh;
-            var renderer = gameObject.AddComponent<MeshRenderer>();
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = DefaultLitMaterial();
-            var collider = gameObject.AddComponent<MeshCollider>();
+            MeshCollider collider = gameObject.AddComponent<MeshCollider>();
             collider.sharedMesh = mesh;
             collider.convex = true;
         }
@@ -587,7 +592,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 a, e, f, b,
                 e, f, d, c,
                 a, c, e,
-                b, f, d,
+                b, f, d
             };
             Vector3[] normals =
             {
@@ -595,7 +600,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 Vector3.back, Vector3.back, Vector3.back, Vector3.back,
                 slopeNormal, slopeNormal, slopeNormal, slopeNormal,
                 Vector3.left, Vector3.left, Vector3.left,
-                Vector3.right, Vector3.right, Vector3.right,
+                Vector3.right, Vector3.right, Vector3.right
             };
             int[] triangles =
             {
@@ -603,10 +608,10 @@ namespace CoreAI.Mods.Rbx.Binding
                 4, 5, 6, 4, 6, 7,
                 8, 10, 9, 8, 11, 10,
                 12, 13, 14,
-                15, 16, 17,
+                15, 16, 17
             };
 
-            var mesh = new Mesh { name = "CoreAiWedge" };
+            Mesh mesh = new() { name = "CoreAiWedge" };
             mesh.SetVertices(new List<Vector3>(vertices));
             mesh.SetNormals(new List<Vector3>(normals));
             mesh.SetTriangles(triangles, 0);
@@ -635,7 +640,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // safe, no leaks); both _Color and _BaseColor are set so BiRP and URP shaders read
             // the same value. The block is reused off the entry so no alloc per write.
             float alpha = 1f - Mathf.Clamp01(properties.Transparency);
-            var color = new Color(properties.Color.R, properties.Color.G, properties.Color.B, alpha);
+            Color color = new(properties.Color.R, properties.Color.G, properties.Color.B, alpha);
             MaterialPropertyBlock block = entry.PropertyBlock ??= new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);
             block.SetColor(ColorPropertyId, color);

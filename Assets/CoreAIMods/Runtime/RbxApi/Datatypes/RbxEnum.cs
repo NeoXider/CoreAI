@@ -22,7 +22,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>Roblox tostring format: "Enum.&lt;Type&gt;.&lt;Item&gt;".</summary>
-        public override string ToString() => $"Enum.{EnumType.Name}.{Name}";
+        public override string ToString()
+        {
+            return $"Enum.{EnumType.Name}.{Name}";
+        }
     }
 
     /// <summary>
@@ -31,11 +34,9 @@ namespace CoreAI.Mods.Rbx.Datatypes
     /// </summary>
     public sealed class RbxEnum
     {
-        private readonly List<RbxEnumItem> _items = new List<RbxEnumItem>();
-        private readonly Dictionary<string, RbxEnumItem> _byName =
-            new Dictionary<string, RbxEnumItem>(StringComparer.Ordinal);
-        private readonly Dictionary<int, RbxEnumItem> _byValue =
-            new Dictionary<int, RbxEnumItem>();
+        private readonly List<RbxEnumItem> _items = new();
+        private readonly Dictionary<string, RbxEnumItem> _byName = new(StringComparer.Ordinal);
+        private readonly Dictionary<int, RbxEnumItem> _byValue = new();
 
         public string Name { get; }
 
@@ -49,7 +50,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             Name = name ?? throw new ArgumentNullException(nameof(name));
             foreach ((string itemName, int value) in items)
             {
-                var item = new RbxEnumItem(itemName, value, this);
+                RbxEnumItem item = new(itemName, value, this);
                 _items.Add(item);
                 _byName.Add(itemName, item);
                 // WHY: first declaration wins on duplicate values so by-value lookup stays
@@ -62,14 +63,21 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>GetEnumItems() — items in declaration order.</summary>
-        public IReadOnlyList<RbxEnumItem> GetEnumItems() => _items;
+        public IReadOnlyList<RbxEnumItem> GetEnumItems()
+        {
+            return _items;
+        }
 
-        public bool TryGetItem(string itemName, out RbxEnumItem item) =>
-            _byName.TryGetValue(itemName, out item);
+        public bool TryGetItem(string itemName, out RbxEnumItem item)
+        {
+            return _byName.TryGetValue(itemName, out item);
+        }
 
         /// <summary>By-value lookup (input events resolve Enum.KeyCode items from raw values).</summary>
-        public bool TryGetItemByValue(int value, out RbxEnumItem item) =>
-            _byValue.TryGetValue(value, out item);
+        public bool TryGetItemByValue(int value, out RbxEnumItem item)
+        {
+            return _byValue.TryGetValue(value, out item);
+        }
 
         /// <summary>Indexer used by the Lua `Enum.Type.Item` path; unknown item is a hard error.</summary>
         public RbxEnumItem this[string itemName]
@@ -88,7 +96,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>Roblox tostring format: "Enum.&lt;Type&gt;".</summary>
-        public override string ToString() => $"Enum.{Name}";
+        public override string ToString()
+        {
+            return $"Enum.{Name}";
+        }
     }
 
     /// <summary>
@@ -100,13 +111,12 @@ namespace CoreAI.Mods.Rbx.Datatypes
     /// </summary>
     public sealed class RbxEnumRegistry
     {
-        private readonly Dictionary<string, RbxEnum> _enums =
-            new Dictionary<string, RbxEnum>(StringComparer.Ordinal);
+        private readonly Dictionary<string, RbxEnum> _enums = new(StringComparer.Ordinal);
 
         /// <summary>Creates a registry pre-seeded with the MVP1 enum set.</summary>
         public static RbxEnumRegistry CreateWithBuiltins()
         {
-            var registry = new RbxEnumRegistry();
+            RbxEnumRegistry registry = new();
             registry.Register(new RbxEnum("Material",
                 ("Plastic", 256), ("SmoothPlastic", 272), ("Neon", 288),
                 ("Wood", 512), ("WoodPlanks", 528),
@@ -152,7 +162,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// Roblox value ranges.</summary>
         private static RbxEnum CreateKeyCode()
         {
-            var items = new List<(string name, int value)>
+            List<(string name, int value)> items = new()
             {
                 ("Unknown", 0), ("Backspace", 8), ("Tab", 9), ("Clear", 12), ("Return", 13),
                 ("Pause", 19), ("Escape", 27), ("Space", 32), ("QuotedDouble", 34), ("Hash", 35),
@@ -240,8 +250,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
             _enums[rbxEnum.Name] = rbxEnum;
         }
 
-        public bool TryGet(string enumName, out RbxEnum rbxEnum) =>
-            _enums.TryGetValue(enumName, out rbxEnum);
+        public bool TryGet(string enumName, out RbxEnum rbxEnum)
+        {
+            return _enums.TryGetValue(enumName, out rbxEnum);
+        }
 
         /// <summary>Lua `Enum.X` path; unknown enum raises the roadmap's loud stub (§5.1.6).</summary>
         public RbxEnum Get(string enumName)
@@ -260,6 +272,9 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>Enum:GetEnums() analog — all registered enum types.</summary>
-        public IReadOnlyCollection<RbxEnum> GetEnums() => _enums.Values;
+        public IReadOnlyCollection<RbxEnum> GetEnums()
+        {
+            return _enums.Values;
+        }
     }
 }

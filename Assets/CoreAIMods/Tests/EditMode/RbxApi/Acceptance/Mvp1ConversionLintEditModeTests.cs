@@ -7,6 +7,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
+using Random = System.Random;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
@@ -51,8 +52,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             return Directory.GetFiles(RuntimeRoot, "*.cs", SearchOption.AllDirectories);
         }
 
-        private static bool IsRobloxSpaceFile(string path) =>
-            Path.GetFileName(path) == "RbxSpace.cs";
+        private static bool IsRobloxSpaceFile(string path)
+        {
+            return Path.GetFileName(path) == "RbxSpace.cs";
+        }
 
         private static string CodeOnly(string source)
         {
@@ -65,7 +68,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void Lint_NoRawScaleLiteralOutsideRobloxSpace()
         {
             Assert.IsTrue(Directory.Exists(RuntimeRoot), $"runtime root not found: {RuntimeRoot}");
-            var offenders = new List<string>();
+            List<string> offenders = new();
             foreach (string file in RuntimeSources())
             {
                 if (IsRobloxSpaceFile(file))
@@ -91,7 +94,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void Lint_NoScaleArithmeticOutsideRobloxSpace()
         {
-            var offenders = new List<string>();
+            List<string> offenders = new();
             foreach (string file in RuntimeSources())
             {
                 if (IsRobloxSpaceFile(file))
@@ -121,21 +124,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             // the binder produces must equal RbxSpace's own numbers exactly, proving the
             // binder delegates instead of re-deriving (a hand-rolled copy would drift here).
             RbxSpace.ResetForTests(0.28f);
-            var root = new GameObject("LintRoot");
+            GameObject root = new("LintRoot");
             try
             {
-                var binder = new InstanceGameObjectBinder(root.transform);
-                var registry = new InstanceRegistry(null, binder);
+                InstanceGameObjectBinder binder = new(root.transform);
+                InstanceRegistry registry = new(null, binder);
                 RbxDataModel game = DataModelBootstrap.CreateGame(registry);
                 RbxInstance part = registry.Create("Part");
                 part.Parent = registry.WorldRoot;
                 Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject partGo));
 
-                var rng = new System.Random(58);
+                Random rng = new(58);
                 for (int i = 0; i < 50; i++)
                 {
                     RbxCFrame cf = RandomCFrame(rng);
-                    var size = new RbxVector3(NextExtent(rng), NextExtent(rng), NextExtent(rng));
+                    RbxVector3 size = new(NextExtent(rng), NextExtent(rng), NextExtent(rng));
                     binder.SetCFrame(part.Id, cf);
                     binder.SetSize(part.Id, size);
 
@@ -159,14 +162,20 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
-        private static float NextCoord(System.Random rng) =>
-            (float)(rng.NextDouble() * 500.0 - 250.0);
+        private static float NextCoord(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 500.0 - 250.0);
+        }
 
-        private static float NextExtent(System.Random rng) =>
-            (float)(rng.NextDouble() * 64.0 + 0.05);
+        private static float NextExtent(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 64.0 + 0.05);
+        }
 
-        private static float NextAngle(System.Random rng) =>
-            (float)(rng.NextDouble() * 720.0 - 360.0);
+        private static float NextAngle(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 720.0 - 360.0);
+        }
 
         private static RbxCFrame RandomCFrame(System.Random rng)
         {

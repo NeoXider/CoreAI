@@ -102,12 +102,15 @@ namespace CoreAI.Infrastructure.Llm
                     : "Endpoint readiness probe failed: " + (webRequest.error ?? "network error"));
         }
 
-        private static LlmEndpointReadinessResult Failed(int statusCode, string error) => new()
+        private static LlmEndpointReadinessResult Failed(int statusCode, string error)
         {
-            IsReady = false,
-            StatusCode = statusCode,
-            Error = error ?? ""
-        };
+            return new LlmEndpointReadinessResult
+            {
+                IsReady = false,
+                StatusCode = statusCode,
+                Error = error ?? ""
+            };
+        }
 
         private static Uri BuildRoute(Uri baseUri, string route)
         {

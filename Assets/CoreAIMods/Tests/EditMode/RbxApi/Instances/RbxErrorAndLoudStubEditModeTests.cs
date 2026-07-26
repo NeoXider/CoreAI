@@ -30,7 +30,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void Format_MatchesTheSelfRepairContract()
         {
-            var error = new RbxError(RbxErrorCode.NotImplemented,
+            RbxError error = new(RbxErrorCode.NotImplemented,
                 "TweenService:Create is planned for MVP8.",
                 "animate manually with RunService.Heartbeat + lerp until then",
                 "speed_pad", "server/main.lua", 12);
@@ -57,7 +57,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void SignalConnect_IsALoudStubNamingMvp2()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
             RbxError connect = Assert.Throws<RbxError>(() => part.ChildAdded.Connect(null));
@@ -74,7 +74,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void SignalProperties_ExistAsInertHookPoints()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
             Assert.IsNotNull(part.ChildAdded);

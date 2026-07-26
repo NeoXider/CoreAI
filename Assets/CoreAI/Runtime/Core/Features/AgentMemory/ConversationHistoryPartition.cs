@@ -175,19 +175,22 @@ namespace CoreAI.Ai
             {
                 // WHY: A marker was written by this code and is authoritative; falling through to bullet
                 // matching here would reintroduce duplicate-text false positives the marker exists to fix.
-                int markerFold = FindFoldStartFromMarker(markerHashes, history, splitExclusive, out bool anyHashMatched);
+                int markerFold =
+                    FindFoldStartFromMarker(markerHashes, history, splitExclusive, out bool anyHashMatched);
                 probe = anyHashMatched ? ConversationFoldProbeResult.Marker : ConversationFoldProbeResult.NoMatch;
                 return markerFold;
             }
 
-            int finalLineFold = FindFoldStartByFinalLine(existingSummary, history, splitExclusive, out bool finalLineMatched);
+            int finalLineFold =
+                FindFoldStartByFinalLine(existingSummary, history, splitExclusive, out bool finalLineMatched);
             if (finalLineMatched)
             {
                 probe = ConversationFoldProbeResult.LegacyFinalLine;
                 return finalLineFold;
             }
 
-            int substringFold = FindFoldStartBySubstring(existingSummary, history, splitExclusive, out bool substringMatched);
+            int substringFold =
+                FindFoldStartBySubstring(existingSummary, history, splitExclusive, out bool substringMatched);
             if (substringMatched)
             {
                 probe = ConversationFoldProbeResult.LegacySubstring;

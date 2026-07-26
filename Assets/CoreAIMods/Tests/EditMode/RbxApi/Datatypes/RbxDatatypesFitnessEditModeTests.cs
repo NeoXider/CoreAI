@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
@@ -29,7 +30,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             string datatypesRoot = Path.Combine(RbxApiRoot, "Datatypes");
             Assert.IsTrue(Directory.Exists(datatypesRoot), $"Datatypes folder not found: {datatypesRoot}");
 
-            List<string> offenders = ScanForUnityUsage(datatypesRoot, excluded: System.Array.Empty<string>());
+            List<string> offenders = ScanForUnityUsage(datatypesRoot, System.Array.Empty<string>());
             Assert.IsEmpty(offenders,
                 "The Roblox datatypes Domain must stay engine-free (ARCHITECTURE_RULES.md §1); " +
                 "move engine-touching code into the RbxApi/Unity adapter:\n" +
@@ -53,7 +54,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void DatatypesAssembly_ReferencesNoUnityAssemblies()
         {
-            var assembly = typeof(CoreAI.Mods.Rbx.Datatypes.RbxVector3).Assembly;
+            Assembly assembly = typeof(CoreAI.Mods.Rbx.Datatypes.RbxVector3).Assembly;
             string[] unityRefs = assembly.GetReferencedAssemblies()
                 .Where(a => a.Name.StartsWith("UnityEngine") || a.Name.StartsWith("UnityEditor"))
                 .Select(a => a.Name)
@@ -76,7 +77,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             // WHY: the roadmap allows exactly two engine-touching homes — the RbxSpace
             // adapter (Unity/) and the GameObject binder's single call sites (Binding/, MVP1
             // task 7); everything else in the RbxApi layer stays engine-free.
-            var allowed = new[]
+            string[] allowed = new[]
             {
                 NormalizeDir(Path.Combine(RbxApiRoot, "Unity")),
                 NormalizeDir(Path.Combine(RbxApiRoot, "Binding"))
@@ -90,7 +91,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 
         private static List<string> ScanForUnityUsage(string root, string[] excluded)
         {
-            var offenders = new List<string>();
+            List<string> offenders = new();
             foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
             {
                 string normalized = Path.GetFullPath(file).Replace('\\', '/');
@@ -113,7 +114,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             return offenders;
         }
 
-        private static string NormalizeDir(string path) =>
-            Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/') + "/";
+        private static string NormalizeDir(string path)
+        {
+            return Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/') + "/";
+        }
     }
 }

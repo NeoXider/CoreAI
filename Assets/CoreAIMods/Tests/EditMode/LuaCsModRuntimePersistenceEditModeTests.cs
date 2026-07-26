@@ -127,7 +127,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>In-memory <see cref="CoreAI.Logging.ILog"/> capturing per-level messages for assertions.</summary>
-        private sealed class FakeLog : CoreAI.Logging.ILog
+        private sealed class FakeLog : Logging.ILog
         {
             public readonly List<string> Warnings = new();
             public readonly List<string> Errors = new();
@@ -322,14 +322,14 @@ namespace CoreAI.Tests.EditMode
             FakeSourceStore store = new();
             LuaCsModRuntime importRuntime = NewRuntime(store);
             Assert.IsTrue(importRuntime.ImportMod(bundle, LuaCapabilities.All | LuaCapabilities.Full,
-                allowFull: false));
+                false));
             Assert.AreEqual(LuaCapabilities.None,
                 importRuntime.ListMods()[0].Capabilities & LuaCapabilities.Full,
                 "Imported mod must load without Full when the host did not opt in.");
 
             // Restart: a fresh runtime rehydrates from the SAME store under a host-wide allowFull=TRUE.
             LuaCsModRuntime restarted = NewRuntime(store);
-            restarted.RehydrateFromStore(LuaCapabilities.All | LuaCapabilities.Full, allowFull: true);
+            restarted.RehydrateFromStore(LuaCapabilities.All | LuaCapabilities.Full, true);
             Assert.IsTrue(restarted.IsLoaded("shared"));
             Assert.AreEqual(LuaCapabilities.None,
                 restarted.ListMods()[0].Capabilities & LuaCapabilities.Full,

@@ -350,7 +350,8 @@ namespace CoreAI.Infrastructure.Llm
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
                 $"LLM < traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
-                $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}", LogTag.Llm);
+                $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}",
+                LogTag.Llm);
 
             return result;
         }
@@ -706,7 +707,8 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _logger.Info(
                         $"LLM < (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
-                        $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}", LogTag.Llm);
+                        $"  content ({content.Length} chars): {ResponseContentPreview(content, ResponsePreviewChars)}",
+                        LogTag.Llm);
                 }
             }
         }

@@ -30,10 +30,10 @@ namespace CoreAI.Infrastructure.Luau
     /// </summary>
     internal sealed class LuauLexer
     {
-        readonly string _s;
-        int _p;
-        int _line;
-        int _lineStart;
+        private readonly string _s;
+        private int _p;
+        private int _line;
+        private int _lineStart;
 
         public LuauLexer(string source)
         {
@@ -45,7 +45,7 @@ namespace CoreAI.Infrastructure.Luau
 
         public List<LuauToken> LexAll()
         {
-            var tokens = new List<LuauToken>();
+            List<LuauToken> tokens = new();
             if (_s.Length > 1 && _s[0] == '#' && _s[1] == '!')
             {
                 while (_p < _s.Length && _s[_p] != '\n')
@@ -65,7 +65,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        LuauToken Next()
+        private LuauToken Next()
         {
             SkipTrivia();
             int start = _p;
@@ -126,12 +126,12 @@ namespace CoreAI.Infrastructure.Luau
             throw new LuauDownlevelException($"unexpected character '{c}'", line, col);
         }
 
-        static LuauToken Make(LuauTokenKind kind, string text, int start, int end, int line, int col)
+        private static LuauToken Make(LuauTokenKind kind, string text, int start, int end, int line, int col)
         {
             return new LuauToken { Kind = kind, Text = text, Start = start, End = end, Line = line, Column = col };
         }
 
-        void SkipTrivia()
+        private void SkipTrivia()
         {
             while (_p < _s.Length)
             {
@@ -170,7 +170,7 @@ namespace CoreAI.Infrastructure.Luau
         }
 
         /// <summary>Returns the '=' count of a long-bracket opener at <paramref name="pos"/>, or -1 when not one.</summary>
-        int LongBracketLevel(int pos)
+        private int LongBracketLevel(int pos)
         {
             if (pos >= _s.Length || _s[pos] != '[')
             {
@@ -188,7 +188,7 @@ namespace CoreAI.Infrastructure.Luau
             return i < _s.Length && _s[i] == '[' ? level : -1;
         }
 
-        void SkipLongBracket(int level, string what)
+        private void SkipLongBracket(int level, string what)
         {
             int line = _line;
             int col = _p - _lineStart + 1;
@@ -232,7 +232,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        void LexQuotedString(char quote)
+        private void LexQuotedString(char quote)
         {
             int line = _line;
             int col = _p - _lineStart + 1;
@@ -278,7 +278,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        LuauToken LexNumber(int start, int line, int col)
+        private LuauToken LexNumber(int start, int line, int col)
         {
             bool sawUnderscore = false;
             bool isBinary = false;
@@ -387,9 +387,9 @@ namespace CoreAI.Infrastructure.Luau
             return tok;
         }
 
-        LuauToken LexInterpString(int start, int line, int col)
+        private LuauToken LexInterpString(int start, int line, int col)
         {
-            var parts = new List<LuauInterpPart>();
+            List<LuauInterpPart> parts = new();
             _p++;
             int textStart = _p;
             while (true)
@@ -419,7 +419,8 @@ namespace CoreAI.Infrastructure.Luau
                 {
                     parts.Add(new LuauInterpPart { IsExpr = false, Start = textStart, End = _p });
                     _p++;
-                    var tok = Make(LuauTokenKind.InterpString, _s.Substring(start, _p - start), start, _p, line, col);
+                    LuauToken tok = Make(LuauTokenKind.InterpString, _s.Substring(start, _p - start), start, _p, line,
+                        col);
                     tok.InterpParts = parts;
                     return tok;
                 }
@@ -428,7 +429,7 @@ namespace CoreAI.Infrastructure.Luau
                     parts.Add(new LuauInterpPart { IsExpr = false, Start = textStart, End = _p });
                     _p++;
                     int exprStart = _p;
-                    var exprTokens = new List<LuauToken>();
+                    List<LuauToken> exprTokens = new();
                     int depth = 0;
                     while (true)
                     {
@@ -447,7 +448,8 @@ namespace CoreAI.Infrastructure.Luau
                             if (depth == 0)
                             {
                                 exprTokens.Add(Make(LuauTokenKind.Eof, "<eof>", t.Start, t.Start, t.Line, t.Column));
-                                parts.Add(new LuauInterpPart { IsExpr = true, Start = exprStart, End = t.Start, Tokens = exprTokens });
+                                parts.Add(new LuauInterpPart
+                                    { IsExpr = true, Start = exprStart, End = t.Start, Tokens = exprTokens });
                                 textStart = t.End;
                                 break;
                             }
@@ -465,7 +467,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        string MatchPunct()
+        private string MatchPunct()
         {
             char c = _s[_p];
             char c1 = _p + 1 < _s.Length ? _s[_p + 1] : '\0';
@@ -473,14 +475,38 @@ namespace CoreAI.Infrastructure.Luau
             switch (c)
             {
                 case '.':
-                    if (c1 == '.' && c2 == '.') return "...";
-                    if (c1 == '.' && c2 == '=') return "..=";
-                    if (c1 == '.') return "..";
+                    if (c1 == '.' && c2 == '.')
+                    {
+                        return "...";
+                    }
+
+                    if (c1 == '.' && c2 == '=')
+                    {
+                        return "..=";
+                    }
+
+                    if (c1 == '.')
+                    {
+                        return "..";
+                    }
+
                     return ".";
                 case '/':
-                    if (c1 == '/' && c2 == '=') return "//=";
-                    if (c1 == '/') return "//";
-                    if (c1 == '=') return "/=";
+                    if (c1 == '/' && c2 == '=')
+                    {
+                        return "//=";
+                    }
+
+                    if (c1 == '/')
+                    {
+                        return "//";
+                    }
+
+                    if (c1 == '=')
+                    {
+                        return "/=";
+                    }
+
                     return "/";
                 case '=': return c1 == '=' ? "==" : "=";
                 case '~': return c1 == '=' ? "~=" : null;
@@ -516,7 +542,7 @@ namespace CoreAI.Infrastructure.Luau
         /// rewritten literal (quotes included) or null when nothing had to change; malformed
         /// <c>\u{...}</c> is left verbatim for the VM to reject.
         /// </summary>
-        static string ConvertLuauStringEscapes(string text)
+        private static string ConvertLuauStringEscapes(string text)
         {
             if (text.IndexOf('\\') < 0)
             {
@@ -577,12 +603,12 @@ namespace CoreAI.Infrastructure.Luau
             return sb?.ToString();
         }
 
-        static bool IsLuaWhitespace(char c)
+        private static bool IsLuaWhitespace(char c)
         {
             return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
         }
 
-        static int HexValue(char c)
+        private static int HexValue(char c)
         {
             if (c >= '0' && c <= '9')
             {
@@ -592,7 +618,7 @@ namespace CoreAI.Infrastructure.Luau
             return (c >= 'a' ? c - 'a' : c - 'A') + 10;
         }
 
-        static void AppendUtf8DecimalEscapes(StringBuilder sb, int cp)
+        private static void AppendUtf8DecimalEscapes(StringBuilder sb, int cp)
         {
             if (cp <= 0x7F)
             {
@@ -618,7 +644,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        static void AppendByte(StringBuilder sb, int b)
+        private static void AppendByte(StringBuilder sb, int b)
         {
             sb.Append('\\').Append(b.ToString("D3", CultureInfo.InvariantCulture));
         }

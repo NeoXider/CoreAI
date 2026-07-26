@@ -39,15 +39,18 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <summary>Roblox Part defaults: Block, 4x1x2 studs, medium stone grey, opaque, collidable.</summary>
-        public static PartProperties CreateDefault() => new PartProperties
+        public static PartProperties CreateDefault()
         {
-            Shape = RbxPartShape.Block,
-            CFrame = RbxCFrame.Identity,
-            Size = new RbxVector3(4f, 1f, 2f),
-            Color = RbxColor3.FromRGB(163f, 162f, 165f),
-            Anchored = false,
-            Transparency = 0f,
-            CanCollide = true
-        };
+            return new PartProperties
+            {
+                Shape = RbxPartShape.Block,
+                CFrame = RbxCFrame.Identity,
+                Size = new RbxVector3(4f, 1f, 2f),
+                Color = RbxColor3.FromRGB(163f, 162f, 165f),
+                Anchored = false,
+                Transparency = 0f,
+                CanCollide = true
+            };
+        }
     }
 }

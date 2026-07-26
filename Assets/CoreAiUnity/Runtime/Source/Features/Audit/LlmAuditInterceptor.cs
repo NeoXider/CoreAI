@@ -18,7 +18,8 @@ namespace CoreAI.Features.Audit
 
             if (!GlobalMessagePipe.IsInitialized)
             {
-                Debug.LogWarning("[LlmAuditInterceptor] MessagePipe is not initialized; LLM audit events will not be captured.");
+                Debug.LogWarning(
+                    "[LlmAuditInterceptor] MessagePipe is not initialized; LLM audit events will not be captured.");
                 return;
             }
 

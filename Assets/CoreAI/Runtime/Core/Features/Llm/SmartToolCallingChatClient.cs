@@ -136,6 +136,7 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 LastRoundtripUsage = capSummary.Usage;
                             }
+
                             AttachCumulativeUsage(capSummary, cumulativeUsage);
                             return capSummary;
                         }
@@ -338,6 +339,7 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 LastRoundtripUsage = errorSummary.Usage;
                             }
+
                             AttachCumulativeUsage(errorSummary, cumulativeUsage);
                             return errorSummary;
                         }

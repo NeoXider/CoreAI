@@ -11,7 +11,7 @@ namespace CoreAI.Mods.Rbx.Instances
     {
         public static RbxDataModel CreateGame(InstanceRegistry registry)
         {
-            var game = (RbxDataModel)registry.Create("DataModel");
+            RbxDataModel game = (RbxDataModel)registry.Create("DataModel");
             // WHY: the scene root is set before children are parented so the DataModel binds to
             // the host GameObject first and every service/part nests under it as it enters.
             registry.SetSceneRoot(game);

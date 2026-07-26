@@ -19,7 +19,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Cap_SourceOverLimit_IsTruncatedAndFlagged()
         {
-            string source = new string('a', 5000);
+            string source = new('a', 5000);
             LuaSourceCap.Result result = LuaSourceCap.Cap(source, 1000);
 
             Assert.IsTrue(result.WasTruncated);
@@ -32,7 +32,7 @@ namespace CoreAI.Tests.EditMode
         {
             // WHY: a newline sits well past halfway through the cap, so the cut should land there
             // rather than mid-line.
-            string longLine = new string('a', 100);
+            string longLine = new('a', 100);
             string source = longLine + "\n" + new string('b', 5000);
 
             LuaSourceCap.Result result = LuaSourceCap.Cap(source, 200);

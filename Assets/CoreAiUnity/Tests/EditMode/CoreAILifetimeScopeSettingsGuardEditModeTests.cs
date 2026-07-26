@@ -14,8 +14,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void EnsureSettingsPresent_Null_ThrowsActionableMessage()
         {
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-                () => CoreAILifetimeScope.EnsureSettingsPresent(null));
+            InvalidOperationException ex =
+                Assert.Throws<InvalidOperationException>(() => CoreAILifetimeScope.EnsureSettingsPresent(null));
 
             StringAssert.Contains("CoreAISettings", ex.Message,
                 "The failure must name the missing asset so the fix is obvious.");

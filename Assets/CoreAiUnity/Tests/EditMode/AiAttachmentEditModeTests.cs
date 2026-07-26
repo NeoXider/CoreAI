@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
     {
         private static readonly byte[] Png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
 
-        private static object WireContentFor(Microsoft.Extensions.AI.ChatMessage message)
+        private static object WireContentFor(ChatMessage message)
         {
             return MeaiOpenAiChatClient.BuildOpenAiMessageContent(message.Text, message.Contents);
         }
@@ -101,7 +101,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("just text", WireContentFor(emptyCase));
             // Same wire content as constructing a plain MEAI text message directly.
             Assert.AreEqual(
-                MeaiOpenAiChatClient.BuildOpenAiMessageContent("just text", new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, "just text").Contents),
+                MeaiOpenAiChatClient.BuildOpenAiMessageContent("just text",
+                    new ChatMessage(ChatRole.User, "just text").Contents),
                 WireContentFor(nullCase));
         }
 
@@ -114,7 +115,8 @@ namespace CoreAI.Tests.EditMode
                 "fix this", new List<AiAttachment> { AiAttachment.FromFile("level.lua", lua) });
 
             object content = WireContentFor(msg);
-            Assert.IsInstanceOf<string>(content, "Text-only attachment must stay a plain string, not multimodal parts.");
+            Assert.IsInstanceOf<string>(content,
+                "Text-only attachment must stay a plain string, not multimodal parts.");
             string text = (string)content;
             StringAssert.Contains("fix this", text);
             StringAssert.Contains("--- attached file: level.lua (application/x-lua) ---", text);

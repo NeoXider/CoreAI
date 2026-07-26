@@ -14,7 +14,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public Vector3 Offset { get; set; }
 
-        private void LateUpdate() => Apply();
+        private void LateUpdate()
+        {
+            Apply();
+        }
 
         /// <summary>One follow step; public so EditMode tests can tick without a player loop.</summary>
         public void Apply()

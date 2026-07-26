@@ -10,8 +10,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InMemoryInstanceBackingBinder : IInstanceBackingBinder
     {
-        private readonly HashSet<InstanceId> _materialized = new HashSet<InstanceId>();
-        private readonly List<string> _events = new List<string>();
+        private readonly HashSet<InstanceId> _materialized = new();
+        private readonly List<string> _events = new();
 
         /// <summary>Ids with a live (materialized) fake backing object.</summary>
         public IReadOnlyCollection<InstanceId> Materialized => _materialized;
@@ -20,7 +20,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// "reparent:5", "rename:5".</summary>
         public IReadOnlyList<string> Events => _events;
 
-        public bool IsMaterialized(InstanceId id) => _materialized.Contains(id);
+        public bool IsMaterialized(InstanceId id)
+        {
+            return _materialized.Contains(id);
+        }
 
         public void OnEnteredWorld(InstanceRecord record)
         {

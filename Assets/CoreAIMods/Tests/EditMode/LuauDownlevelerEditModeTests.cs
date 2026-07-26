@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using CoreAI.Infrastructure.Luau;
 using NUnit.Framework;
 
@@ -12,7 +13,7 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class LuauDownlevelerEditModeTests
     {
-        static DownlevelResult ProcessOk(string luau)
+        private static DownlevelResult ProcessOk(string luau)
         {
             DownlevelResult result = LuauDownleveler.Process(luau);
             Assert.IsFalse(result.HasErrors,
@@ -20,9 +21,9 @@ namespace CoreAI.Tests.EditMode
             return result;
         }
 
-        static string DescribeDiagnostics(DownlevelResult result)
+        private static string DescribeDiagnostics(DownlevelResult result)
         {
-            var parts = new System.Text.StringBuilder();
+            StringBuilder parts = new();
             foreach (DownlevelDiagnostic d in result.Diagnostics)
             {
                 parts.Append(d).Append("; ");
@@ -31,14 +32,14 @@ namespace CoreAI.Tests.EditMode
             return parts.ToString();
         }
 
-        static void AssertRewrites(string luau, string expectedLua)
+        private static void AssertRewrites(string luau, string expectedLua)
         {
             DownlevelResult result = ProcessOk(luau);
             Assert.IsTrue(result.Changed, "Expected a rewrite for: " + luau);
             Assert.AreEqual(expectedLua, result.LuaSource);
         }
 
-        static void AssertUnchanged(string source)
+        private static void AssertUnchanged(string source)
         {
             DownlevelResult result = LuauDownleveler.Process(source);
             Assert.IsFalse(result.HasErrors, "Unexpected errors: " + DescribeDiagnostics(result));
@@ -84,7 +85,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConstructLikeTextInsideLongStringsAndComments_IsNotRewritten()
         {
-            AssertUnchanged("-- x += 1 and `tick {a}` and continue\nlocal doc = [[\ncounter += 1\ncontinue\n`interp {x}`\n]]\n--[[ y //= 2 ]]\nprint(doc)");
+            AssertUnchanged(
+                "-- x += 1 and `tick {a}` and continue\nlocal doc = [[\ncounter += 1\ncontinue\n`interp {x}`\n]]\n--[[ y //= 2 ]]\nprint(doc)");
         }
 
         [Test]
@@ -349,7 +351,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(warned, "Expected a warning about 'continue' outside a loop.");
         }
 
-        static int CountOccurrences(string text, string needle)
+        private static int CountOccurrences(string text, string needle)
         {
             int count = 0;
             int index = 0;

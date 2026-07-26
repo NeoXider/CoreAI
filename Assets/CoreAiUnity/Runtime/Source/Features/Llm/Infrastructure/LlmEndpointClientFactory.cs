@@ -168,7 +168,6 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken,
             LLMAgent agent)
         {
-
             LLM llm = agent.llm != null ? agent.llm : agent.GetComponent<LLM>();
             if (llm == null)
             {
@@ -316,6 +315,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _ = releaseOwnedHostAsync();
                 }
+
                 throw;
             }
         }
@@ -329,8 +329,8 @@ namespace CoreAI.Infrastructure.Llm
             {
                 TaskCompletionSource<bool> cancelled = new(
                     TaskCreationOptions.RunContinuationsAsynchronously);
-                using CancellationTokenRegistration registration = cancellationToken.Register(
-                    () => cancelled.TrySetResult(true));
+                using CancellationTokenRegistration registration =
+                    cancellationToken.Register(() => cancelled.TrySetResult(true));
                 await Task.WhenAny(readiness, cancelled.Task);
                 cancellationToken.ThrowIfCancellationRequested();
             }
@@ -576,7 +576,10 @@ namespace CoreAI.Infrastructure.Llm
 
     internal static class LlmUnityActivationLog
     {
-        public static long StartTimer() => Stopwatch.GetTimestamp();
+        public static long StartTimer()
+        {
+            return Stopwatch.GetTimestamp();
+        }
 
         public static long ElapsedMilliseconds(long startTimestamp)
         {
@@ -584,29 +587,41 @@ namespace CoreAI.Infrastructure.Llm
             return Math.Max(0L, (long)Math.Round(ticks * 1000d / Stopwatch.Frequency));
         }
 
-        public static string NativeStarted(LlmUnityActivationLogContext context) =>
-            Format("native_startup", "started", context, null, null);
+        public static string NativeStarted(LlmUnityActivationLogContext context)
+        {
+            return Format("native_startup", "started", context, null, null);
+        }
 
-        public static string NativeSucceeded(LlmUnityActivationLogContext context, long durationMs) =>
-            Format("native_startup", "succeeded", context, durationMs, null);
+        public static string NativeSucceeded(LlmUnityActivationLogContext context, long durationMs)
+        {
+            return Format("native_startup", "succeeded", context, durationMs, null);
+        }
 
         public static string NativeFailed(
             LlmUnityActivationLogContext context,
             long durationMs,
-            Exception error) =>
-            Format("native_startup", "failed", context, durationMs, error);
+            Exception error)
+        {
+            return Format("native_startup", "failed", context, durationMs, error);
+        }
 
-        public static string ReadinessStarted(LlmUnityActivationLogContext context) =>
-            Format("http_readiness", "started", context, null, null);
+        public static string ReadinessStarted(LlmUnityActivationLogContext context)
+        {
+            return Format("http_readiness", "started", context, null, null);
+        }
 
-        public static string ReadinessSucceeded(LlmUnityActivationLogContext context, long durationMs) =>
-            Format("http_readiness", "succeeded", context, durationMs, null);
+        public static string ReadinessSucceeded(LlmUnityActivationLogContext context, long durationMs)
+        {
+            return Format("http_readiness", "succeeded", context, durationMs, null);
+        }
 
         public static string ReadinessFailed(
             LlmUnityActivationLogContext context,
             long durationMs,
-            Exception error) =>
-            Format("http_readiness", "failed", context, durationMs, error);
+            Exception error)
+        {
+            return Format("http_readiness", "failed", context, durationMs, error);
+        }
 
         private static string Format(
             string phase,

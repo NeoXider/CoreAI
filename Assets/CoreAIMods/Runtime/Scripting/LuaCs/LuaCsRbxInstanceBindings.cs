@@ -77,7 +77,7 @@ namespace CoreAI.Ai.LuaCs
                 return cached;
             }
 
-            LuaValue proxy = new LuaValue(new LuaCsRbxInstanceProxy(instance, this, _instanceMeta));
+            LuaValue proxy = new(new LuaCsRbxInstanceProxy(instance, this, _instanceMeta));
             _proxyCache[instance] = proxy;
             return proxy;
         }
@@ -86,7 +86,7 @@ namespace CoreAI.Ai.LuaCs
         /// Records a signal connection this mod opened against the shared connection ledger so the
         /// composition disconnects it on teardown. No-op for the ownerless one-off surface (no mod id).
         /// </summary>
-        public void TrackConnection(CoreAI.Mods.Rbx.Instances.RbxScriptConnection connection)
+        public void TrackConnection(RbxScriptConnection connection)
         {
             Bindings.Connections?.Track(OwnerModId, ConnectionGeneration, connection);
         }
@@ -586,10 +586,26 @@ namespace CoreAI.Ai.LuaCs
                     // WHY: attributes accept the datatype subset the contract serializes; other
                     // userdata/tables/functions are rejected. Naming the Lua-side type and the exact
                     // supported list keeps the BAD_ARGUMENT fix actionable and Roblox-parity honest.
-                    if (TryUnbox(value, out RbxVector3 v3)) return v3;
-                    if (TryUnbox(value, out RbxVector2 v2)) return v2;
-                    if (TryUnbox(value, out RbxColor3 c)) return c;
-                    if (TryUnbox(value, out RbxUDim u)) return u;
+                    if (TryUnbox(value, out RbxVector3 v3))
+                    {
+                        return v3;
+                    }
+
+                    if (TryUnbox(value, out RbxVector2 v2))
+                    {
+                        return v2;
+                    }
+
+                    if (TryUnbox(value, out RbxColor3 c))
+                    {
+                        return c;
+                    }
+
+                    if (TryUnbox(value, out RbxUDim u))
+                    {
+                        return u;
+                    }
+
                     throw RbxError.BadArgument(
                         "attribute value of type " + Describe(value) + " is not supported",
                         "pass a string, boolean, number, Vector3, Vector2, Color3, or UDim at argument 2");
@@ -612,14 +628,30 @@ namespace CoreAI.Ai.LuaCs
             PartProperties properties = context.PartSink.GetPartPropertiesOrDefault(self.Id);
             switch (key)
             {
-                case "Shape": value = WrapPartType(context, properties.Shape); return true;
-                case "Position": value = LuaCsRbxDatatypeBindings.Wrap(properties.Position); return true;
-                case "Size": value = LuaCsRbxDatatypeBindings.Wrap(properties.Size); return true;
-                case "CFrame": value = LuaCsRbxDatatypeBindings.Wrap(properties.CFrame); return true;
-                case "Color": value = LuaCsRbxDatatypeBindings.Wrap(properties.Color); return true;
-                case "Transparency": value = properties.Transparency; return true;
-                case "Anchored": value = properties.Anchored; return true;
-                case "CanCollide": value = properties.CanCollide; return true;
+                case "Shape":
+                    value = WrapPartType(context, properties.Shape);
+                    return true;
+                case "Position":
+                    value = LuaCsRbxDatatypeBindings.Wrap(properties.Position);
+                    return true;
+                case "Size":
+                    value = LuaCsRbxDatatypeBindings.Wrap(properties.Size);
+                    return true;
+                case "CFrame":
+                    value = LuaCsRbxDatatypeBindings.Wrap(properties.CFrame);
+                    return true;
+                case "Color":
+                    value = LuaCsRbxDatatypeBindings.Wrap(properties.Color);
+                    return true;
+                case "Transparency":
+                    value = properties.Transparency;
+                    return true;
+                case "Anchored":
+                    value = properties.Anchored;
+                    return true;
+                case "CanCollide":
+                    value = properties.CanCollide;
+                    return true;
                 default:
                     if (UnwiredSpatialProperties.Contains(key))
                     {
@@ -792,7 +824,7 @@ namespace CoreAI.Ai.LuaCs
                     return new LuaValue(list);
                 })),
                 GetMouseLocation = new LuaValue(Fn("UserInputService.GetMouseLocation",
-                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseLocation()))),
+                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseLocation())))
             });
         }
 
@@ -830,7 +862,7 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects an Enum.KeyCode item at argument " + index,
                 "pass e.g. Enum.KeyCode.Space, got " + Describe(Arg(ctx, index))
-                + " at argument " + index);
+                                                     + " at argument " + index);
         }
 
         // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------

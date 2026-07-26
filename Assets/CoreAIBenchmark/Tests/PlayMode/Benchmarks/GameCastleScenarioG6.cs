@@ -126,7 +126,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     run.ToolCalls >= 1 && run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
                     true,
                     dimension: BenchmarkDimension.ToolCorrectness,
-                    detail: $"{run.ToolCalls} calls, {run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
+                    detail:
+                    $"{run.ToolCalls} calls, {run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
             }
         }
 

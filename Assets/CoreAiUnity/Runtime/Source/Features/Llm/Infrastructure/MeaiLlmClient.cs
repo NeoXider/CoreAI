@@ -840,6 +840,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             await policy.CompleteStreamedTurnAsync(streamedTurn, CancellationToken.None);
                         }
+
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming transport failed after {streamedExecutedCallCount} tool call(s) " +
                             "started mid-stream; finalizing the partial turn instead of abandoning it " +
@@ -1574,7 +1575,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-/// <summary>
+        /// <summary>
         /// Stamps the terminal chunk's <see cref="LlmStreamChunk.LastRoundtripPromptTokens"/> from the
         /// final roundtrip's usage. PromptTokens stays the whole-turn CUMULATIVE sum so
         /// Prompt + Completion == Total holds for every LlmUsageReported consumer; the prompt-size

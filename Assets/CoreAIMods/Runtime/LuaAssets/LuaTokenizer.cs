@@ -457,11 +457,24 @@ namespace CoreAI.LuaAssets
             return true;
         }
 
-        private static bool IsWhitespace(char c) => c == ' ' || c == '\t' || c == '\r' || c == '\n';
-        private static bool IsIdentStart(char c) => char.IsLetter(c) || c == '_';
-        private static bool IsIdentPart(char c) => char.IsLetterOrDigit(c) || c == '_';
+        private static bool IsWhitespace(char c)
+        {
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+        }
 
-        private static bool IsHexDigit(char c) =>
-            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        private static bool IsIdentStart(char c)
+        {
+            return char.IsLetter(c) || c == '_';
+        }
+
+        private static bool IsIdentPart(char c)
+        {
+            return char.IsLetterOrDigit(c) || c == '_';
+        }
+
+        private static bool IsHexDigit(char c)
+        {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        }
     }
 }

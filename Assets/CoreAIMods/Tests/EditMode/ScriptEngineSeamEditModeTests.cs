@@ -102,10 +102,10 @@ namespace CoreAI.Tests.EditMode
 
             // WHY: A second ToPortable pass over the rebuilt value proves the deep copy is lossless for
             // the portable subset (nil/boolean/number/string/table).
-            var pairs = (List<KeyValuePair<object, object>>)m.ToPortable(rebuilt, 4);
+            List<KeyValuePair<object, object>> pairs = (List<KeyValuePair<object, object>>)m.ToPortable(rebuilt, 4);
             Assert.AreEqual(1d, Find(pairs, "a"));
             Assert.AreEqual("x", Find(pairs, "b"));
-            var nested = (List<KeyValuePair<object, object>>)Find(pairs, "c");
+            List<KeyValuePair<object, object>> nested = (List<KeyValuePair<object, object>>)Find(pairs, "c");
             Assert.AreEqual(2d, Find(nested, 1d));
             Assert.AreEqual(true, Find(nested, 2d));
         }
@@ -117,8 +117,7 @@ namespace CoreAI.Tests.EditMode
             IScriptState state = engine.CreateState();
             object[] results = engine.RunChunk(state, "return { l1 = { l2 = { l3 = { 1 } } } }");
 
-            ArgumentException ex = Assert.Throws<ArgumentException>(
-                () => engine.Marshaller.ToPortable(results[0], 2));
+            ArgumentException ex = Assert.Throws<ArgumentException>(() => engine.Marshaller.ToPortable(results[0], 2));
             StringAssert.Contains("nest at most 2 levels", ex.Message);
         }
 
@@ -235,7 +234,7 @@ namespace CoreAI.Tests.EditMode
             object[] fn = engine.RunChunk(state,
                 "return function() local x = 0; for i = 1, 1000000 do x = x + 1 end; return x end");
 
-            IScriptExecutionGuard guard = engine.CreateGuard(new ExecutionBudget(timeoutMs: 5000, maxSteps: 5_000));
+            IScriptExecutionGuard guard = engine.CreateGuard(new ExecutionBudget(5000, 5_000));
             Exception ex = Assert.Catch<Exception>(() => guard.Invoke(state, fn[0]),
                 "An over-budget function must be cut by the seam guard.");
             StringAssert.Contains("EXCEEDED_HARD_LIMIT_STEPS", ex.Message);

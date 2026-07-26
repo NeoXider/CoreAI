@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LargeBody_IsTruncated()
         {
-            string body = new string('x', 4000);
+            string body = new('x', 4000);
             string log = MeaiOpenAiChatClient.FormatHttpErrorForLog(500, body);
 
             Assert.Less(log.Length, 1000, "large provider error body must be truncated in logs");
@@ -96,11 +96,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ThrownException_Message_TruncatesHugeJsonProviderMessage()
         {
-            string huge = new string('z', 3000);
+            string huge = new('z', 3000);
             string body = "{\"error\":{\"message\":\"" + huge + "\"}}";
             LlmClientException ex = MeaiOpenAiChatClient.BuildHttpExceptionForTests(500, body);
 
-            Assert.Less(ex.Message.Length, 1000, "a huge provider error.message must be truncated in the exception message");
+            Assert.Less(ex.Message.Length, 1000,
+                "a huge provider error.message must be truncated in the exception message");
             StringAssert.DoesNotContain(huge, ex.Message);
         }
     }

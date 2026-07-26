@@ -209,12 +209,33 @@ namespace CoreAI.Chat
                     // start, a finish AND a failure all count — a tool that fails right before a long LLM
                     // step is still activity, not a stall. The role match is lenient on an absent event
                     // role so an unattributed event never falsely lets the turn time out.
-                    bool Matches(string evtRoleId) =>
-                        string.IsNullOrWhiteSpace(evtRoleId) ||
-                        string.Equals(evtRoleId, request.RoleId, StringComparison.Ordinal);
-                    onToolStarted = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
-                    onToolCompleted = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
-                    onToolFailed = evt => { if (Matches(evt.RoleId)) deadline.Rearm(); };
+                    bool Matches(string evtRoleId)
+                    {
+                        return string.IsNullOrWhiteSpace(evtRoleId) ||
+                               string.Equals(evtRoleId, request.RoleId, StringComparison.Ordinal);
+                    }
+
+                    onToolStarted = evt =>
+                    {
+                        if (Matches(evt.RoleId))
+                        {
+                            deadline.Rearm();
+                        }
+                    };
+                    onToolCompleted = evt =>
+                    {
+                        if (Matches(evt.RoleId))
+                        {
+                            deadline.Rearm();
+                        }
+                    };
+                    onToolFailed = evt =>
+                    {
+                        if (Matches(evt.RoleId))
+                        {
+                            deadline.Rearm();
+                        }
+                    };
                     CoreAi.OnToolCallStarted += onToolStarted;
                     CoreAi.OnToolCallCompleted += onToolCompleted;
                     CoreAi.OnToolCallFailed += onToolFailed;

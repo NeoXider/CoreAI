@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         /// <summary>Materialized world (binder + fabricated camera rig) behind a real mod stack.</summary>
         private World BuildWorld(LuaCapabilities caps = LuaCapabilities.All)
         {
-            var world = new World();
+            World world = new();
             world.Binder = new InstanceGameObjectBinder(_root.transform);
             world.Registry = new InstanceRegistry(null, world.Binder);
             world.Game = DataModelBootstrap.CreateGame(world.Registry);
@@ -220,7 +220,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             RbxInstance part = world.Game.FindFirstChildOfClass("Workspace").FindFirstChild("Hero");
             Assert.IsTrue(world.Binder.TryGetBoundObject(part.Id, out GameObject partGo));
 
-            var follower = _cameraGo.GetComponent<RbxCameraFollower>();
+            RbxCameraFollower follower = _cameraGo.GetComponent<RbxCameraFollower>();
             Assert.IsNotNull(follower, "camera_follow must attach the follower to the camera");
             Assert.IsTrue(follower.enabled);
             Assert.AreSame(partGo.transform, follower.Target);

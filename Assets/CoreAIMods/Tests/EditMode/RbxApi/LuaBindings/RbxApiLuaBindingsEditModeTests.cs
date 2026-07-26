@@ -579,13 +579,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // Lua/registry side keeps pure Roblox-space studs (mirrors PositionGolden in the binder
             // tests, driven end-to-end through the Lua surface).
             RbxSpace.ResetForTests(0.28f);
-            var root = new GameObject("GoldenRoot");
+            GameObject root = new("GoldenRoot");
             try
             {
-                var binder = new InstanceGameObjectBinder(root.transform);
-                var registry = new InstanceRegistry(null, binder);
+                InstanceGameObjectBinder binder = new(root.transform);
+                InstanceRegistry registry = new(null, binder);
                 RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-                var roblox = new LuaCsRbxApiBindings(registry, game, partSink: binder);
+                LuaCsRbxApiBindings roblox = new(registry, game, partSink: binder);
                 LuaCsModStack stack = BuildStack(roblox);
 
                 RbxInstance part = registry.Create("Part");

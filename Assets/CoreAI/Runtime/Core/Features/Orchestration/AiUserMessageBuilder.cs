@@ -75,7 +75,8 @@ namespace CoreAI.Ai
                     default:
                         throw new ArgumentException(
                             $"Attachment '{DescribeName(attachment)}' has unsupported media type '{mediaType}'. " +
-                            "Supported categories: images (" + string.Join(", ", AiAttachment.SupportedImageMediaTypes) +
+                            "Supported categories: images (" +
+                            string.Join(", ", AiAttachment.SupportedImageMediaTypes) +
                             ") sent to vision-capable models, and UTF-8 text-like files (text/*, " +
                             string.Join(", ", AiAttachment.SupportedTextMediaTypes) +
                             ") inlined into the prompt. Audio, video, meshes and arbitrary binary are not supported.");
@@ -167,7 +168,7 @@ namespace CoreAI.Ai
                 offset = 3;
             }
 
-            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false)
+            return new UTF8Encoding(false, false)
                 .GetString(data, offset, data.Length - offset);
         }
 

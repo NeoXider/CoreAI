@@ -85,11 +85,14 @@ namespace CoreAI.Composition
                 // Instance.new('Part') materializes a GameObject. Without a host the world stays
                 // headless in-memory (same API, no rendering). Initialize() is idempotent and safe
                 // before Awake ordering.
-                CoreAI.Mods.Rbx.Binding.RbxWorldHost rbxHost = c.ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RbxWorldHost>();
+                Mods.Rbx.Binding.RbxWorldHost rbxHost = c.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
                 LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
                     rbxHost.Initialize();
+                    Debug.Log(
+                        $"[CoreAiMods] RbxWorldHost resolved — registry has {rbxHost.Registry.Count} instances, " +
+                        $"binder bound count={rbxHost.Binder.BoundCount}.");
                     rbxApi = new LuaCsRbxApiBindings(
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
@@ -97,36 +100,39 @@ namespace CoreAI.Composition
                 }
                 else
                 {
-                    Logging.Log.Instance.Warn(
-                        "[CoreAiMods] No RbxWorldHost in scene — mods run headless (Instance.new / workspace mutations produce no GameObjects). " +
-                        "Add a RbxWorldHost component to the scene and wire it on CoreAiModsLifetimeScope to enable visible world building.");
-                    rbxApi = new LuaCsRbxApiBindings(log: msg => Logging.Log.Instance.Warn(msg));
+                    Debug.LogError(
+                        "[CoreAiMods] RbxWorldHost NOT resolved — mods run headless. " +
+                        "Instance.new / workspace mutations produce no GameObjects. " +
+                        "Check: (1) RbxWorldHost component exists in the scene, " +
+                        "(2) CoreAiModsLifetimeScope.robloxWorldHost is wired to it, " +
+                        "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.");
+                    rbxApi = new LuaCsRbxApiBindings(log: msg => Debug.LogWarning("[CoreAI.RbxApi] " + msg));
                 }
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
-                Logger = c.Resolve<IGameLogger>(),
-                LuaScriptVersions = c.ResolveOrDefault<ILuaScriptVersionStore>(),
-                DataOverlayVersions = c.ResolveOrDefault<IDataOverlayVersionStore>(),
-                CommandSink = c.Resolve<IAiGameCommandSink>(),
-                PrefabRegistry = c.ResolveOrDefault<ICoreAiPrefabRegistry>(),
-                AllowedScenes = allowedLuaScenes,
-                FullBlacklistPolicy = fullLuaBlacklistPolicy,
-                AllowNonPublicFullMembers = enableFullLuaPrivateAccess,
-                ModStore = c.ResolveOrDefault<ILuaModStore>(),
-                ModSourceStore = c.ResolveOrDefault<ILuaModSourceStore>(),
-                Log = c.ResolveOrDefault<Logging.ILog>(),
-                ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
-                Capabilities = scriptCapabilities,
-                OneOffCapabilities = oneOffCapabilities,
-                // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
-                // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
-                // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
-                RbxApi = rbxApi,
-                // WHY: the Programmer builds worlds via the Rbx surface and Lua mechanics, not the
-                // low-level coreai_world_* primitives; the WorldEdit capability itself stays granted
-                // because Instance.new requires it.
-                RegisterWorldEditBuildBindings = false
+                    Logger = c.Resolve<IGameLogger>(),
+                    LuaScriptVersions = c.ResolveOrDefault<ILuaScriptVersionStore>(),
+                    DataOverlayVersions = c.ResolveOrDefault<IDataOverlayVersionStore>(),
+                    CommandSink = c.Resolve<IAiGameCommandSink>(),
+                    PrefabRegistry = c.ResolveOrDefault<ICoreAiPrefabRegistry>(),
+                    AllowedScenes = allowedLuaScenes,
+                    FullBlacklistPolicy = fullLuaBlacklistPolicy,
+                    AllowNonPublicFullMembers = enableFullLuaPrivateAccess,
+                    ModStore = c.ResolveOrDefault<ILuaModStore>(),
+                    ModSourceStore = c.ResolveOrDefault<ILuaModSourceStore>(),
+                    Log = c.ResolveOrDefault<Logging.ILog>(),
+                    ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
+                    Capabilities = scriptCapabilities,
+                    OneOffCapabilities = oneOffCapabilities,
+                    // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
+                    // the same InstanceRegistry/game/workspace, so an instance a mod creates is the one the
+                    // console navigates (roadmap §5.1.3). Opt-in per stack; wired here for production.
+                    RbxApi = rbxApi,
+                    // WHY: the Programmer builds worlds via the Rbx surface and Lua mechanics, not the
+                    // low-level coreai_world_* primitives; the WorldEdit capability itself stays granted
+                    // because Instance.new requires it.
+                    RegisterWorldEditBuildBindings = false
                 });
 
                 // WHY (audit H1): an unloaded mod must not leak the Rbx instances it created, nor keep its
@@ -143,8 +149,8 @@ namespace CoreAI.Composition
                 // snapshot, so destroying while it prunes the registry is safe; RbxInstance.Destroy() is
                 // idempotent.
                 {
-                    CoreAI.Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = rbxApi?.Connections;
-                    CoreAI.Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost?.Registry;
+                    Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = rbxApi?.Connections;
+                    Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost?.Registry;
                     Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
                     {
@@ -154,14 +160,14 @@ namespace CoreAI.Composition
                         // so keep the current generation and drop only the outgoing chunk's connections;
                         // Unload/Quarantine have no new chunk and disconnect everything.
                         ownedConnections?.DisconnectOwnedBy(
-                            modId, keepCurrentGeneration: reason == LuaModTeardownReason.Reload);
+                            modId, reason == LuaModTeardownReason.Reload);
 
                         if (ownedRegistry == null || reason != LuaModTeardownReason.Unload)
                         {
                             return;
                         }
 
-                        foreach (CoreAI.Mods.Rbx.Instances.RbxInstance owned in ownedRegistry.GetOwnedBy(modId))
+                        foreach (Mods.Rbx.Instances.RbxInstance owned in ownedRegistry.GetOwnedBy(modId))
                         {
                             try
                             {

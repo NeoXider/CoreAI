@@ -115,7 +115,7 @@ namespace CoreAI.Ai
                 throw new ArgumentException("Image attachment requires non-empty Data.", nameof(data));
             }
 
-            return new AiAttachment(fileName, mediaType, data, uri: null);
+            return new AiAttachment(fileName, mediaType, data, null);
         }
 
         /// <summary>Creates an image attachment that references a URI (vision-capable models only).</summary>
@@ -126,7 +126,7 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(uri));
             }
 
-            return new AiAttachment(fileName, mediaType, data: null, uri);
+            return new AiAttachment(fileName, mediaType, null, uri);
         }
 
         /// <summary>
@@ -141,7 +141,7 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(data));
             }
 
-            return new AiAttachment(fileName, mediaType, data, uri: null);
+            return new AiAttachment(fileName, mediaType, data, null);
         }
 
         /// <summary>
@@ -291,10 +291,10 @@ namespace CoreAI.Ai
 
             if (bytes < 1024 * 1024)
             {
-                return (bytes / 1024) + " KB";
+                return bytes / 1024 + " KB";
             }
 
-            return (bytes / (1024 * 1024)) + " MB";
+            return bytes / (1024 * 1024) + " MB";
         }
     }
 }

@@ -134,7 +134,7 @@ namespace CoreAI.Tests.EditMode
             LuaCsModRuntime runtime = new(sourceStore: store);
             // Host grant includes Full, but allowFull is false — the default Mods tab wiring.
             IHubModService service = new LuaCsModRuntimeHubService(
-                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, allowFull: false);
+                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, false);
 
             Assert.IsTrue(service.ImportMod(bundle), "Import of a valid bundle must succeed.");
             Assert.IsTrue(runtime.IsLoaded("shared"));
@@ -151,7 +151,7 @@ namespace CoreAI.Tests.EditMode
             LuaCsModRuntime runtime = new(sourceStore: store);
             // Explicit host opt-in (allowFullTier=true) — trusted/first-party/singleplayer content only.
             IHubModService service = new LuaCsModRuntimeHubService(
-                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, allowFull: true);
+                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, true);
 
             Assert.IsTrue(service.ImportMod(bundle));
             Assert.AreEqual(LuaCapabilities.Full, runtime.ListMods()[0].Capabilities & LuaCapabilities.Full,

@@ -16,9 +16,8 @@ namespace CoreAI.Mods.Rbx.Instances
     public class RbxInstance
     {
         private readonly ClassDescriptor _descriptor;
-        private readonly List<RbxInstance> _children = new List<RbxInstance>();
-        private readonly Dictionary<string, object> _attributes =
-            new Dictionary<string, object>(System.StringComparer.Ordinal);
+        private readonly List<RbxInstance> _children = new();
+        private readonly Dictionary<string, object> _attributes = new(System.StringComparer.Ordinal);
         private Dictionary<string, RbxScriptSignal> _signals;
 
         private string _name;
@@ -249,7 +248,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public IReadOnlyList<RbxInstance> GetDescendants()
         {
             ThrowIfDestroyed("GetDescendants");
-            var result = new List<RbxInstance>();
+            List<RbxInstance> result = new();
             CollectDescendants(result);
             return result;
         }
@@ -299,7 +298,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public virtual string GetFullName()
         {
             ThrowIfDestroyed("GetFullName");
-            var names = new List<string>();
+            List<string> names = new();
             for (RbxInstance current = this; current != null; current = current._parent)
             {
                 if (current is RbxDataModel)
@@ -385,7 +384,7 @@ namespace CoreAI.Mods.Rbx.Instances
             // TODO: MVP2 — enqueue Destroying/AncestryChanged on the deferred queue and
             // disconnect all connections (R5.7/R5.12); signals are inert in MVP1.
 
-            var childrenCopy = _children.ToArray();
+            RbxInstance[] childrenCopy = _children.ToArray();
             _children.Clear();
             foreach (RbxInstance child in childrenCopy)
             {
@@ -400,7 +399,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public void ClearAllChildren()
         {
             ThrowIfDestroyed("ClearAllChildren");
-            var childrenCopy = _children.ToArray();
+            RbxInstance[] childrenCopy = _children.ToArray();
             foreach (RbxInstance child in childrenCopy)
             {
                 child.Destroy();
@@ -511,6 +510,9 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        public override string ToString() => _name;
+        public override string ToString()
+        {
+            return _name;
+        }
     }
 }

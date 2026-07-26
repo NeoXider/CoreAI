@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
@@ -31,7 +32,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             b.Parent = folder;
             c.Parent = folder;
 
-            var children = folder.GetChildren();
+            IReadOnlyList<RbxInstance> children = folder.GetChildren();
             Assert.AreEqual(3, children.Count);
             Assert.AreSame(a, children[0]);
             Assert.AreSame(b, children[1]);
@@ -49,7 +50,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             part.Parent = model;
             sibling.Parent = root;
 
-            var descendants = root.GetDescendants();
+            IReadOnlyList<RbxInstance> descendants = root.GetDescendants();
             Assert.AreEqual(3, descendants.Count);
             Assert.AreSame(model, descendants[0]);
             Assert.AreSame(part, descendants[1]);

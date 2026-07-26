@@ -20,10 +20,23 @@ namespace CoreAI.Tests.EditMode.Audit
         {
             private readonly System.Text.StringBuilder _warnings = new();
             public string Warnings => _warnings.ToString();
-            public void Debug(string message, string tag = null) { }
-            public void Info(string message, string tag = null) { }
-            public void Warn(string message, string tag = null) => _warnings.AppendLine(message);
-            public void Error(string message, string tag = null) { }
+
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                _warnings.AppendLine(message);
+            }
+
+            public void Error(string message, string tag = null)
+            {
+            }
         }
 
         [SetUp]
@@ -237,7 +250,8 @@ namespace CoreAI.Tests.EditMode.Audit
             AuditEntry reset = AuditEntry.ForChainReset(0, "system", "intentional reset");
             string preimage = JsonConvert.SerializeObject(reset);
             string hash = AuditHash.Chain("", preimage);
-            File.AppendAllText(writer.FilePath, JsonConvert.SerializeObject(reset.WithHash(hash)) + Environment.NewLine);
+            File.AppendAllText(writer.FilePath,
+                JsonConvert.SerializeObject(reset.WithHash(hash)) + Environment.NewLine);
 
             ILog originalLog = Log.Instance;
             CapturingLog capturingLog = new();

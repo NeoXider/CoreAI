@@ -16,9 +16,15 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Followed instance recorded by the last successful Follow; null when idle.</summary>
         public InstanceId? FollowTarget { get; private set; }
 
-        public RbxCFrame GetCFrame() => _cframe;
+        public RbxCFrame GetCFrame()
+        {
+            return _cframe;
+        }
 
-        public void SetCFrame(in RbxCFrame cframe) => _cframe = cframe;
+        public void SetCFrame(in RbxCFrame cframe)
+        {
+            _cframe = cframe;
+        }
 
         public bool Follow(InstanceId id)
         {
@@ -26,6 +32,9 @@ namespace CoreAI.Mods.Rbx.Binding
             return true;
         }
 
-        public void StopFollowing() => FollowTarget = null;
+        public void StopFollowing()
+        {
+            FollowTarget = null;
+        }
     }
 }

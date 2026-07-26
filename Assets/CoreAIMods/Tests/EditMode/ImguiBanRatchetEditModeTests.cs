@@ -33,7 +33,7 @@ namespace CoreAI.Tests.EditMode
             "CoreAIHub/Runtime",
             "CoreAIMods/Runtime",
             "CoreAiUnity/Runtime",
-            "CoreAI.Demos",
+            "CoreAI.Demos"
         };
 
         // WHY: Editor IMGUI is allowed; these roots are only reported, never failed.
@@ -42,7 +42,7 @@ namespace CoreAI.Tests.EditMode
             "CoreAI/Editor",
             "CoreAIHub/Editor",
             "CoreAIMods/Editor",
-            "CoreAiUnity/Editor",
+            "CoreAiUnity/Editor"
         };
 
         // ------------------------------------------------------------------------------------------
@@ -56,21 +56,21 @@ namespace CoreAI.Tests.EditMode
         private static readonly HashSet<string> Whitelist = new(System.StringComparer.OrdinalIgnoreCase)
         {
             // --- CoreAI.Demos: legacy OnGUI demo controllers (to be rebuilt on the shared DemoPanel) ---
-            "CoreAI.Demos/DirectorAi/Scripts/DirectorAiDemoController.cs",                            // OnGUI overlay + GUIStyle labels
-            "CoreAI.Demos/LiveMechanics/Scripts/LiveMechanicsDemoController.cs",                      // OnGUI GUILayout live-tuning panel
-            "CoreAI.Demos/LiveMechanicsMods/Scripts/LiveMechanicsModsChatPersistenceController.cs",  // large OnGUI GUILayout chat panel
-            "CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs",                                  // OnGUI GUILayout mod list panel
-            "CoreAI.Demos/ModdableUnits/Scripts/ModdableUnitsDemoController.cs",                      // OnGUI GUILayout unit panel
-            "CoreAI.Demos/QwenDemo/GenieDemo.cs",                                                     // OnGUI GUILayout genie prompt demo
-            "CoreAI.Demos/QwenDemo/SpellcraftDemo.cs",                                                // OnGUI GUILayout spellcraft demo
-            "CoreAI.Demos/Skills/Scripts/SkillsDemoController.cs",                                    // OnGUI GUILayout skills panel
-            "CoreAI.Demos/WebGlLuaSelfTest/WebGlLuaSelfTest.cs",                                      // OnGUI WebGL self-test HUD
-            "CoreAI.Demos/WorldCommands/Scripts/WorldCommandsDemoController.cs",                      // OnGUI GUILayout world-commands panel
+            "CoreAI.Demos/DirectorAi/Scripts/DirectorAiDemoController.cs", // OnGUI overlay + GUIStyle labels
+            "CoreAI.Demos/LiveMechanics/Scripts/LiveMechanicsDemoController.cs", // OnGUI GUILayout live-tuning panel
+            "CoreAI.Demos/LiveMechanicsMods/Scripts/LiveMechanicsModsChatPersistenceController.cs", // large OnGUI GUILayout chat panel
+            "CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs", // OnGUI GUILayout mod list panel
+            "CoreAI.Demos/ModdableUnits/Scripts/ModdableUnitsDemoController.cs", // OnGUI GUILayout unit panel
+            "CoreAI.Demos/QwenDemo/GenieDemo.cs", // OnGUI GUILayout genie prompt demo
+            "CoreAI.Demos/QwenDemo/SpellcraftDemo.cs", // OnGUI GUILayout spellcraft demo
+            "CoreAI.Demos/Skills/Scripts/SkillsDemoController.cs", // OnGUI GUILayout skills panel
+            "CoreAI.Demos/WebGlLuaSelfTest/WebGlLuaSelfTest.cs", // OnGUI WebGL self-test HUD
+            "CoreAI.Demos/WorldCommands/Scripts/WorldCommandsDemoController.cs", // OnGUI GUILayout world-commands panel
 
             // --- CoreAiUnity runtime diagnostics overlays (dev-only OnGUI HUDs) ---
-            "CoreAiUnity/Runtime/Source/Features/Dashboard/Presentation/AiDashboardPresenter.cs",    // OnGUI GUI.* dashboard presenter
-            "CoreAiUnity/Runtime/Source/Features/Diagnostics/CoreAiTokenBudgetOverlay.cs",           // OnGUI GUILayout token-budget overlay
-            "CoreAiUnity/Runtime/Source/Features/Diagnostics/OrchestrationDashboard.cs",             // OnGUI GUILayout orchestration dashboard
+            "CoreAiUnity/Runtime/Source/Features/Dashboard/Presentation/AiDashboardPresenter.cs", // OnGUI GUI.* dashboard presenter
+            "CoreAiUnity/Runtime/Source/Features/Diagnostics/CoreAiTokenBudgetOverlay.cs", // OnGUI GUILayout token-budget overlay
+            "CoreAiUnity/Runtime/Source/Features/Diagnostics/OrchestrationDashboard.cs" // OnGUI GUILayout orchestration dashboard
         };
 
         [Test]

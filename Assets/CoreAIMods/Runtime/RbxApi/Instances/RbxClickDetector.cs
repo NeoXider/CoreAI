@@ -22,17 +22,17 @@ namespace CoreAI.Mods.Rbx.Instances
         // TODO: pass the clicking player once a Players service lands.
         /// <summary>Fires (no args) when the owning part is clicked within MaxActivationDistance.</summary>
         public RbxScriptSignal MouseClick { get; } =
-            new RbxScriptSignal("ClickDetector.MouseClick", supportsDispatch: true);
+            new("ClickDetector.MouseClick", true);
 
         /// <summary>Fires when the cursor enters the owning part's hover range. Parity hook; the
         /// MVP pick pump does not fire it yet.</summary>
         public RbxScriptSignal MouseHoverEnter { get; } =
-            new RbxScriptSignal("ClickDetector.MouseHoverEnter", supportsDispatch: true);
+            new("ClickDetector.MouseHoverEnter", true);
 
         /// <summary>Fires when the cursor leaves the owning part's hover range. Parity hook; the
         /// MVP pick pump does not fire it yet.</summary>
         public RbxScriptSignal MouseHoverLeave { get; } =
-            new RbxScriptSignal("ClickDetector.MouseHoverLeave", supportsDispatch: true);
+            new("ClickDetector.MouseHoverLeave", true);
 
         /// <summary>Roblox ClickDetector.MaxActivationDistance (studs, default 32): a click farther
         /// than this from the camera does not fire MouseClick.</summary>

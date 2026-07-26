@@ -111,7 +111,7 @@ namespace CoreAI.Tests.EditMode
         public void WorldBuildBindingsDisabled_CallingWorldDestroy_ThrowsActionableError_NotNilCall()
         {
             FakeCommandSink sink = new();
-            LuaCsModStack stack = BuildStack(sink, registerWorldEditBuildBindings: false);
+            LuaCsModStack stack = BuildStack(sink, false);
 
             Exception ex = Assert.Catch(() =>
                 stack.Runtime.LoadMod("m", "coreai_world_destroy('victim')", LuaCapabilities.All));
@@ -132,7 +132,7 @@ namespace CoreAI.Tests.EditMode
         public void FullNotGranted_CallingUnityFindAll_ThrowsActionableError_NamingFullCapability()
         {
             FakeCommandSink sink = new();
-            LuaCsModStack stack = BuildStack(sink, registerWorldEditBuildBindings: true);
+            LuaCsModStack stack = BuildStack(sink, true);
 
             // WHY: the mod asks for All | Full but the host ceiling (All) masks Full away — the exact
             // trap sample_camera_pulse hits under the default composition.

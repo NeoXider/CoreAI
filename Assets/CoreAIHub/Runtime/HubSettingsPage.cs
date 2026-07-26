@@ -156,6 +156,7 @@ namespace CoreAI.Hub.UI
             catch (ObjectDisposedException)
             {
             }
+
             _routingCts = null;
             try
             {
@@ -406,7 +407,8 @@ namespace CoreAI.Hub.UI
             endpointModelDiscovery.Add(_endpointFetchModelsButton);
             endpointGroup.Add(endpointModelDiscovery);
 
-            _endpointModelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
+            _endpointModelPicker =
+                new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
             StyleField(_endpointModelPicker);
             _endpointModelPicker.tooltip = "Models reported by the server. Pick one to copy it into Model.";
             _endpointModelPicker.RegisterValueChangedCallback(evt => CopyPickedModelInto(_endpointModel, evt.newValue));
@@ -427,7 +429,8 @@ namespace CoreAI.Hub.UI
             endpointGroup.Add(_endpointSessionKey);
 
             _endpointClearSessionKeyButton = MakeButton("Clear saved key", ClearSessionKey);
-            _endpointClearSessionKeyButton.tooltip = "Explicitly forget the in-memory key for this endpoint. Leaving the field blank preserves it.";
+            _endpointClearSessionKeyButton.tooltip =
+                "Explicitly forget the in-memory key for this endpoint. Leaving the field blank preserves it.";
             endpointGroup.Add(_endpointClearSessionKeyButton);
 
             _endpointActive = new Toggle("Active") { value = true };
@@ -751,9 +754,11 @@ namespace CoreAI.Hub.UI
                     _endpointActive.SetValueWithoutNotify(endpoint.Active);
                     _endpointKeepWarm.SetValueWithoutNotify(endpoint.KeepWarm);
                     _endpointOperationStatus.text = "Editing '" + (string.IsNullOrWhiteSpace(endpoint.DisplayName)
-                        ? endpoint.EndpointId
-                        : endpoint.DisplayName) + "'. State: " + snapshot.State +
-                        (string.IsNullOrWhiteSpace(snapshot.Error) ? "" : " — " + snapshot.Error);
+                                                        ? endpoint.EndpointId
+                                                        : endpoint.DisplayName) + "'. State: " + snapshot.State +
+                                                    (string.IsNullOrWhiteSpace(snapshot.Error)
+                                                        ? ""
+                                                        : " — " + snapshot.Error);
                     RefreshEndpointEditorVisibility();
                     RefreshEndpointManagement();
                     return;
@@ -782,7 +787,8 @@ namespace CoreAI.Hub.UI
             _clearSessionKey = false;
             _endpointActive.SetValueWithoutNotify(true);
             _endpointKeepWarm.SetValueWithoutNotify(false);
-            _endpointOperationStatus.text = "New endpoint. Endpoint ID is derived from the name unless set in Advanced.";
+            _endpointOperationStatus.text =
+                "New endpoint. Endpoint ID is derived from the name unless set in Advanced.";
             RefreshEndpointEditorVisibility();
             RefreshEndpointManagement();
         }
@@ -801,6 +807,7 @@ namespace CoreAI.Hub.UI
             {
                 validation = "Endpoint ID already exists. Select it to edit, or choose a different ID.";
             }
+
             if (!string.IsNullOrEmpty(validation))
             {
                 _endpointOperationStatus.text = validation;
@@ -837,7 +844,9 @@ namespace CoreAI.Hub.UI
                     ? enteredKey
                     : _clearSessionKey
                         ? ""
-                        : string.IsNullOrEmpty(enteredKey) ? null : enteredKey;
+                        : string.IsNullOrEmpty(enteredKey)
+                            ? null
+                            : enteredKey;
                 CoreAiRoutingUiResult result = await _routingController.SaveEndpointAsync(
                     endpoint,
                     sessionKey,
@@ -1035,7 +1044,7 @@ namespace CoreAI.Hub.UI
         private IEnumerable<string> ExistingEndpointIds()
         {
             foreach (LlmEndpointSnapshot snapshot in _routingController?.GetEndpoints() ??
-                     Array.Empty<LlmEndpointSnapshot>())
+                                                     Array.Empty<LlmEndpointSnapshot>())
             {
                 if (!string.IsNullOrWhiteSpace(snapshot?.Descriptor?.EndpointId))
                 {
@@ -1060,6 +1069,7 @@ namespace CoreAI.Hub.UI
             {
                 SetVisible(_endpointModelPicker, false);
             }
+
             SetVisible(_endpointGgufModel, local);
             SetVisible(_endpointPort, local);
             SetVisible(_endpointGpuLayers, local);
@@ -1532,8 +1542,8 @@ namespace CoreAI.Hub.UI
         private static bool IsSelectableModel(string value)
         {
             return !string.IsNullOrEmpty(value)
-                && value != ModelPickerPlaceholder
-                && value != ModelPickerPickPrompt;
+                   && value != ModelPickerPlaceholder
+                   && value != ModelPickerPickPrompt;
         }
 
         private void RefreshFromStatus()
@@ -1627,7 +1637,7 @@ namespace CoreAI.Hub.UI
             {
                 string profileName = profileId;
                 foreach (LlmRuntimeProfile profile in _routingController.GetProfiles() ??
-                         Array.Empty<LlmRuntimeProfile>())
+                                                      Array.Empty<LlmRuntimeProfile>())
                 {
                     if (string.Equals(profile?.ProfileId, profileId, StringComparison.Ordinal))
                     {
@@ -1892,16 +1902,25 @@ namespace CoreAI.Hub.UI
             // never sits on top of the text caret (an empty focused field would otherwise hide where
             // the cursor is).
             bool focused = false;
+
             void Refresh()
             {
-                hint.style.display = (!focused && string.IsNullOrEmpty(field.value))
+                hint.style.display = !focused && string.IsNullOrEmpty(field.value)
                     ? DisplayStyle.Flex
                     : DisplayStyle.None;
             }
 
             field.RegisterValueChangedCallback(_ => Refresh());
-            field.RegisterCallback<FocusInEvent>(_ => { focused = true; Refresh(); });
-            field.RegisterCallback<FocusOutEvent>(_ => { focused = false; Refresh(); });
+            field.RegisterCallback<FocusInEvent>(_ =>
+            {
+                focused = true;
+                Refresh();
+            });
+            field.RegisterCallback<FocusOutEvent>(_ =>
+            {
+                focused = false;
+                Refresh();
+            });
             Refresh();
             // WHY: RefreshFromStatus fills fields via SetValueWithoutNotify, which fires no
             // ValueChanged event, leaving the hint painted over real text. Polling keeps the

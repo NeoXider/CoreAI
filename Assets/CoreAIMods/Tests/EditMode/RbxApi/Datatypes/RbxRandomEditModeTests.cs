@@ -15,8 +15,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void SameSeed_ProducesIdenticalSequence()
         {
-            var a = new RbxRandom(42);
-            var b = new RbxRandom(42);
+            RbxRandom a = new(42);
+            RbxRandom b = new(42);
             for (int i = 0; i < 100; i++)
             {
                 Assert.AreEqual(a.NextNumber(), b.NextNumber());
@@ -27,8 +27,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void DifferentSeeds_ProduceDifferentSequences()
         {
-            var a = new RbxRandom(1);
-            var b = new RbxRandom(2);
+            RbxRandom a = new(1);
+            RbxRandom b = new(2);
             bool anyDifferent = false;
             for (int i = 0; i < 16 && !anyDifferent; i++)
             {
@@ -42,22 +42,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void Seed_IsFlooredToInteger_DocsParity()
         {
             // WHY: Roblox docs — seeds 0 and 0.99 produce identical generators.
-            var zero = new RbxRandom(0.0);
-            var almostOne = new RbxRandom(0.99);
+            RbxRandom zero = new(0.0);
+            RbxRandom almostOne = new(0.99);
             for (int i = 0; i < 32; i++)
             {
                 Assert.AreEqual(zero.NextNumber(), almostOne.NextNumber());
             }
 
-            var negative = new RbxRandom(-1.01);
-            var minusTwo = new RbxRandom(-2.0);
+            RbxRandom negative = new(-1.01);
+            RbxRandom minusTwo = new(-2.0);
             Assert.AreEqual(minusTwo.NextNumber(), negative.NextNumber(), "floor(-1.01) == -2");
         }
 
         [Test]
         public void Clone_ContinuesIdenticallyAndIndependently()
         {
-            var original = new RbxRandom(7);
+            RbxRandom original = new(7);
             original.NextNumber();
             RbxRandom clone = original.Clone();
 
@@ -74,8 +74,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void NextInteger_BothBoundsInclusive()
         {
-            var rng = new RbxRandom(123);
-            var seen = new HashSet<long>();
+            RbxRandom rng = new(123);
+            HashSet<long> seen = new();
             for (int i = 0; i < 400; i++)
             {
                 long value = rng.NextInteger(1, 3);
@@ -90,14 +90,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void NextInteger_SingleValueInterval()
         {
-            var rng = new RbxRandom(5);
+            RbxRandom rng = new(5);
             Assert.AreEqual(9, rng.NextInteger(9, 9));
         }
 
         [Test]
         public void NextNumber_StaysInRange()
         {
-            var rng = new RbxRandom(99);
+            RbxRandom rng = new(99);
             for (int i = 0; i < 200; i++)
             {
                 double v = rng.NextNumber();
@@ -113,18 +113,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void EmptyIntervals_RaiseBadArgument()
         {
-            var rng = new RbxRandom(1);
-            var intEx = Assert.Throws<RbxApiStubException>(() => rng.NextInteger(3, 1));
+            RbxRandom rng = new(1);
+            RbxApiStubException intEx = Assert.Throws<RbxApiStubException>(() => rng.NextInteger(3, 1));
             Assert.AreEqual("BAD_ARGUMENT", intEx.Code);
-            var numEx = Assert.Throws<RbxApiStubException>(() => rng.NextNumber(3.0, 1.0));
+            RbxApiStubException numEx = Assert.Throws<RbxApiStubException>(() => rng.NextNumber(3.0, 1.0));
             Assert.AreEqual("BAD_ARGUMENT", numEx.Code);
         }
 
         [Test]
         public void NextUnitVector_IsUnitLengthAndDeterministic()
         {
-            var a = new RbxRandom(2026);
-            var b = new RbxRandom(2026);
+            RbxRandom a = new(2026);
+            RbxRandom b = new(2026);
             for (int i = 0; i < 50; i++)
             {
                 RbxVector3 v = a.NextUnitVector();

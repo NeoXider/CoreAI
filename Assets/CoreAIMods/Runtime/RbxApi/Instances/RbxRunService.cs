@@ -21,15 +21,15 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Fires (deltaTime) each frame after physics, before rendering — the idiomatic
         /// per-frame game-loop hook.</summary>
         public RbxScriptSignal Heartbeat { get; } =
-            new RbxScriptSignal("RunService.Heartbeat", supportsDispatch: true);
+            new("RunService.Heartbeat", true);
 
         /// <summary>Fires (accumulatedTime, deltaTime) each frame before physics.</summary>
         public RbxScriptSignal Stepped { get; } =
-            new RbxScriptSignal("RunService.Stepped", supportsDispatch: true);
+            new("RunService.Stepped", true);
 
         /// <summary>Fires (deltaTime) each frame before the screen renders.</summary>
         public RbxScriptSignal RenderStepped { get; } =
-            new RbxScriptSignal("RunService.RenderStepped", supportsDispatch: true);
+            new("RunService.RenderStepped", true);
 
         /// <summary>
         /// Per-frame pump: fires Stepped, then Heartbeat, then RenderStepped with the frame delta.

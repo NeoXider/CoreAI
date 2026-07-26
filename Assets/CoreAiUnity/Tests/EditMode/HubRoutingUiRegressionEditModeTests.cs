@@ -119,8 +119,15 @@ namespace CoreAI.Tests.EditMode
             public LlmEndpointSnapshot Snapshot { get; set; }
             public Exception SaveException { get; set; }
 
-            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints() => Array.Empty<LlmEndpointSnapshot>();
-            public IReadOnlyList<LlmRuntimeProfile> GetProfiles() => Array.Empty<LlmRuntimeProfile>();
+            public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints()
+            {
+                return Array.Empty<LlmEndpointSnapshot>();
+            }
+
+            public IReadOnlyList<LlmRuntimeProfile> GetProfiles()
+            {
+                return Array.Empty<LlmRuntimeProfile>();
+            }
 
             public Task<LlmEndpointSnapshot> AddOrUpdateEndpointAsync(
                 LlmEndpointDescriptor descriptor,
@@ -139,22 +146,43 @@ namespace CoreAI.Tests.EditMode
                 string endpointId,
                 bool active,
                 bool keepWarm = false,
-                CancellationToken cancellationToken = default) => Task.FromResult(Snapshot);
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(Snapshot);
+            }
 
             public Task<bool> RemoveEndpointAsync(
                 string endpointId,
                 LlmEndpointRemovalMode mode = LlmEndpointRemovalMode.Drain,
                 string replacementEndpointId = null,
-                CancellationToken cancellationToken = default) => Task.FromResult(false);
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(false);
+            }
 
             public void AddOrUpdateProfile(LlmRuntimeProfile profile)
             {
             }
 
-            public bool RemoveProfile(string profileId, string replacementProfileId = null) => false;
-            public void AssignRoleProfile(string rolePattern, string profileId, int sortOrder = 0) => Changed?.Invoke();
-            public bool ClearRoleProfile(string rolePattern) => false;
-            public string GetRoleProfile(string roleId) => "";
+            public bool RemoveProfile(string profileId, string replacementProfileId = null)
+            {
+                return false;
+            }
+
+            public void AssignRoleProfile(string rolePattern, string profileId, int sortOrder = 0)
+            {
+                Changed?.Invoke();
+            }
+
+            public bool ClearRoleProfile(string rolePattern)
+            {
+                return false;
+            }
+
+            public string GetRoleProfile(string roleId)
+            {
+                return "";
+            }
         }
     }
 }

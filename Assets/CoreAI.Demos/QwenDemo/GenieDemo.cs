@@ -101,6 +101,7 @@ namespace CoreAI.Demos.QwenDemo
             {
                 return;
             }
+
             if (this == null)
             {
                 return;
@@ -166,12 +167,13 @@ namespace CoreAI.Demos.QwenDemo
                         GameObject c = QwenFx.Prim(PrimitiveType.Sphere, _root, p, Vector3.one * 0.28f,
                             new Color(1f, 0.84f, 0.2f), null, true);
                         StartCoroutine(QwenFx.MoveTo(c.transform, new Vector3(p.x, 0.3f, p.z), 9f));
-                        UnityEngine.Object.Destroy(c, 4f);
+                        Destroy(c, 4f);
                     }
 
                     QwenFx.Ring(this, _root, Vector3.zero, new Color(1f, 0.84f, 0.2f), 3f, 0.5f);
                 });
             }
+
             return $"Granted {coins} gold coins raining down. Wishes left: {left}.";
         }
 
@@ -203,6 +205,7 @@ namespace CoreAI.Demos.QwenDemo
                         new Color(0.55f, 0.35f, 0.8f), "✨ " + name);
                 });
             }
+
             return $"Summoned '{name}'. Wishes left: {left}.";
         }
 
@@ -234,9 +237,10 @@ namespace CoreAI.Demos.QwenDemo
                     QwenFx.Beam(this, _root, p + Vector3.up * 6f, p + Vector3.up, new Color(1f, 0.4f, 0.2f), 0.25f, 3);
                     QwenFx.Sparks(this, _root, p, new Color(1f, 0.4f, 0.2f), 14, 5f);
                     StartCoroutine(QwenFx.Shake(victim.transform, 0.2f, 0.5f));
-                    UnityEngine.Object.Destroy(victim, 3.5f);
+                    Destroy(victim, 3.5f);
                 });
             }
+
             return $"Smote '{name}' with a bolt. Wishes left: {left}.";
         }
 
@@ -252,6 +256,7 @@ namespace CoreAI.Demos.QwenDemo
             {
                 _pump.Enqueue(() => QwenFx.Label(_lamp.transform, "🚫", new Color(1f, 0.5f, 0.5f), 1.6f));
             }
+
             return $"Wish refused: {r}";
         }
 
@@ -337,7 +342,8 @@ namespace CoreAI.Demos.QwenDemo
 
             if (!_ready)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>", rich);
+                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>",
+                    rich);
             }
 
             GUILayout.Space(4);
@@ -381,6 +387,7 @@ namespace CoreAI.Demos.QwenDemo
                     Submit();
                 }
             }
+
             GUI.enabled = true;
 
             GUILayout.EndScrollView();

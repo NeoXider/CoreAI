@@ -15,10 +15,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
             Y = y;
         }
 
-        public static RbxVector2 Zero => new RbxVector2(0f, 0f);
-        public static RbxVector2 One => new RbxVector2(1f, 1f);
-        public static RbxVector2 XAxis => new RbxVector2(1f, 0f);
-        public static RbxVector2 YAxis => new RbxVector2(0f, 1f);
+        public static RbxVector2 Zero => new(0f, 0f);
+        public static RbxVector2 One => new(1f, 1f);
+        public static RbxVector2 XAxis => new(1f, 0f);
+        public static RbxVector2 YAxis => new(0f, 1f);
 
         public float Magnitude => MathF.Sqrt(X * X + Y * Y);
 
@@ -32,13 +32,22 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>2D cross product — the z component of the 3D cross (a scalar, per Roblox docs).</summary>
-        public float Cross(RbxVector2 other) => X * other.Y - Y * other.X;
+        public float Cross(RbxVector2 other)
+        {
+            return X * other.Y - Y * other.X;
+        }
 
-        public float Dot(RbxVector2 other) => X * other.X + Y * other.Y;
+        public float Dot(RbxVector2 other)
+        {
+            return X * other.X + Y * other.Y;
+        }
 
-        public RbxVector2 Lerp(RbxVector2 goal, float alpha) => new RbxVector2(
-            X + (goal.X - X) * alpha,
-            Y + (goal.Y - Y) * alpha);
+        public RbxVector2 Lerp(RbxVector2 goal, float alpha)
+        {
+            return new RbxVector2(
+                X + (goal.X - X) * alpha,
+                Y + (goal.Y - Y) * alpha);
+        }
 
         /// <summary>Angle in radians between vectors; negative allowed when <paramref name="isSigned"/>.</summary>
         public float Angle(RbxVector2 other, bool isSigned = false)
@@ -47,17 +56,34 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return isSigned ? angle : MathF.Abs(angle);
         }
 
-        public bool FuzzyEq(RbxVector2 other, float epsilon = 1e-5f) =>
-            MathF.Abs(X - other.X) <= epsilon && MathF.Abs(Y - other.Y) <= epsilon;
+        public bool FuzzyEq(RbxVector2 other, float epsilon = 1e-5f)
+        {
+            return MathF.Abs(X - other.X) <= epsilon && MathF.Abs(Y - other.Y) <= epsilon;
+        }
 
-        public RbxVector2 Abs() => new RbxVector2(MathF.Abs(X), MathF.Abs(Y));
-        public RbxVector2 Ceil() => new RbxVector2(MathF.Ceiling(X), MathF.Ceiling(Y));
-        public RbxVector2 Floor() => new RbxVector2(MathF.Floor(X), MathF.Floor(Y));
-        public RbxVector2 Sign() => new RbxVector2(MathF.Sign(X), MathF.Sign(Y));
+        public RbxVector2 Abs()
+        {
+            return new RbxVector2(MathF.Abs(X), MathF.Abs(Y));
+        }
+
+        public RbxVector2 Ceil()
+        {
+            return new RbxVector2(MathF.Ceiling(X), MathF.Ceiling(Y));
+        }
+
+        public RbxVector2 Floor()
+        {
+            return new RbxVector2(MathF.Floor(X), MathF.Floor(Y));
+        }
+
+        public RbxVector2 Sign()
+        {
+            return new RbxVector2(MathF.Sign(X), MathF.Sign(Y));
+        }
 
         public RbxVector2 Max(params RbxVector2[] others)
         {
-            var result = this;
+            RbxVector2 result = this;
             foreach (RbxVector2 v in others)
             {
                 result = new RbxVector2(MathF.Max(result.X, v.X), MathF.Max(result.Y, v.Y));
@@ -68,7 +94,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         public RbxVector2 Min(params RbxVector2[] others)
         {
-            var result = this;
+            RbxVector2 result = this;
             foreach (RbxVector2 v in others)
             {
                 result = new RbxVector2(MathF.Min(result.X, v.X), MathF.Min(result.Y, v.Y));
@@ -77,23 +103,75 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return result;
         }
 
-        public static RbxVector2 operator +(RbxVector2 a, RbxVector2 b) => new RbxVector2(a.X + b.X, a.Y + b.Y);
-        public static RbxVector2 operator -(RbxVector2 a, RbxVector2 b) => new RbxVector2(a.X - b.X, a.Y - b.Y);
-        public static RbxVector2 operator -(RbxVector2 a) => new RbxVector2(-a.X, -a.Y);
-        public static RbxVector2 operator *(RbxVector2 a, RbxVector2 b) => new RbxVector2(a.X * b.X, a.Y * b.Y);
-        public static RbxVector2 operator *(RbxVector2 a, float s) => new RbxVector2(a.X * s, a.Y * s);
-        public static RbxVector2 operator *(float s, RbxVector2 a) => a * s;
-        public static RbxVector2 operator /(RbxVector2 a, RbxVector2 b) => new RbxVector2(a.X / b.X, a.Y / b.Y);
-        public static RbxVector2 operator /(RbxVector2 a, float s) => new RbxVector2(a.X / s, a.Y / s);
+        public static RbxVector2 operator +(RbxVector2 a, RbxVector2 b)
+        {
+            return new RbxVector2(a.X + b.X, a.Y + b.Y);
+        }
 
-        public static bool operator ==(RbxVector2 a, RbxVector2 b) => a.Equals(b);
-        public static bool operator !=(RbxVector2 a, RbxVector2 b) => !a.Equals(b);
+        public static RbxVector2 operator -(RbxVector2 a, RbxVector2 b)
+        {
+            return new RbxVector2(a.X - b.X, a.Y - b.Y);
+        }
 
-        public bool Equals(RbxVector2 other) => X == other.X && Y == other.Y;
-        public override bool Equals(object obj) => obj is RbxVector2 v && Equals(v);
-        public override int GetHashCode() => HashCode.Combine(X, Y);
+        public static RbxVector2 operator -(RbxVector2 a)
+        {
+            return new RbxVector2(-a.X, -a.Y);
+        }
+
+        public static RbxVector2 operator *(RbxVector2 a, RbxVector2 b)
+        {
+            return new RbxVector2(a.X * b.X, a.Y * b.Y);
+        }
+
+        public static RbxVector2 operator *(RbxVector2 a, float s)
+        {
+            return new RbxVector2(a.X * s, a.Y * s);
+        }
+
+        public static RbxVector2 operator *(float s, RbxVector2 a)
+        {
+            return a * s;
+        }
+
+        public static RbxVector2 operator /(RbxVector2 a, RbxVector2 b)
+        {
+            return new RbxVector2(a.X / b.X, a.Y / b.Y);
+        }
+
+        public static RbxVector2 operator /(RbxVector2 a, float s)
+        {
+            return new RbxVector2(a.X / s, a.Y / s);
+        }
+
+        public static bool operator ==(RbxVector2 a, RbxVector2 b)
+        {
+            return a.Equals(b);
+        }
+
+        public static bool operator !=(RbxVector2 a, RbxVector2 b)
+        {
+            return !a.Equals(b);
+        }
+
+        public bool Equals(RbxVector2 other)
+        {
+            return X == other.X && Y == other.Y;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is RbxVector2 v && Equals(v);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(X, Y);
+        }
 
         /// <summary>Roblox tostring format: "x, y".</summary>
-        public override string ToString() => string.Format(CultureInfo.InvariantCulture, "{0}, {1}", X, Y);
+        public override string ToString()
+        {
+            return string.Format(CultureInfo.InvariantCulture, "{0}, {1}", X, Y);
+        }
     }
 }

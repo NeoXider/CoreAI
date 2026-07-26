@@ -93,7 +93,7 @@ namespace CoreAI.Tests.EditMode
             // explicit low budget (64MB) with generous step/time so the trip fires on the MEMORY backstop while
             // the string stays bounded (~128MB peak) — a huge default-budget bomb risks a multi-GB concat opcode
             // (uninterruptible between VM instructions) that can hang/OOM the machine.
-            LuaCsExecutionGuard guard = new(timeoutMs: 8000, maxSteps: 10_000_000, maxAllocatedBytes: 64 * 1024 * 1024);
+            LuaCsExecutionGuard guard = new(8000, 10_000_000, 64 * 1024 * 1024);
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
                 env.RunChunk(state,
                     "local s = string.rep('x', 1000000)\n" +
@@ -131,7 +131,7 @@ namespace CoreAI.Tests.EditMode
         {
             LuaCsSecureEnvironment env = new();
             LuaCsApiRegistry registry = new();
-            LuaCsExecutionGuard nestedGuard = new(timeoutMs: 2000, maxSteps: 10_000);
+            LuaCsExecutionGuard nestedGuard = new(2000, 10_000);
             LuaState state = null;
             LuaFunction noop = null;
             registry.Register("nested", new System.Func<double>(() =>
@@ -145,7 +145,7 @@ namespace CoreAI.Tests.EditMode
 
             // The nested guard's cleanup must restore the outer hook instead of clearing it; otherwise
             // the over-budget loop after nested() runs unlimited and the chunk returns normally.
-            LuaCsExecutionGuard outerGuard = new(timeoutMs: 2000, maxSteps: 5_000);
+            LuaCsExecutionGuard outerGuard = new(2000, 5_000);
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
                 env.RunChunk(state,
                     "nested()\n" +
@@ -214,7 +214,7 @@ namespace CoreAI.Tests.EditMode
             // longer than the 5,000-step budget must still be cut — if the batch scaling regressed (steps no
             // longer accumulate), the hook would under-count and the loop would run to completion, returning
             // normally and failing this Assert.Throws instead of hanging (the loop is finite).
-            LuaCsExecutionGuard guard = new(timeoutMs: 60_000, maxSteps: 5_000, maxAllocatedBytes: 0);
+            LuaCsExecutionGuard guard = new(60_000, 5_000, 0);
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
@@ -237,7 +237,7 @@ namespace CoreAI.Tests.EditMode
             // not weaken it. A huge step budget forces the TIME budget to be the one that trips. A regression
             // that broke the GetTimestamp/ticks-budget math would let the busy loop run unbounded and this
             // [Timeout] test would fail — the signal.
-            LuaCsExecutionGuard guard = new(timeoutMs: 150, maxSteps: 5_000_000_000L, maxAllocatedBytes: 0);
+            LuaCsExecutionGuard guard = new(150, 5_000_000_000L, 0);
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
@@ -258,7 +258,7 @@ namespace CoreAI.Tests.EditMode
 
             // A well-behaved short handler (the 20 Hz tick shape the guard is on) must pass cleanly under a
             // tight-but-sufficient budget: none of the sampled step/time/alloc limits may trip a normal call.
-            LuaCsExecutionGuard guard = new(timeoutMs: 2_000, maxSteps: 200_000);
+            LuaCsExecutionGuard guard = new(2_000, 200_000);
             LuaValue[] result = env.RunChunk(state,
                 "local x = 0\n" +
                 "for i = 1, 100 do x = x + i end\n" +

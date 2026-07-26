@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using CoreAI.Hub;
 using CoreAI.Hub.UI;
@@ -233,7 +234,8 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(pagesField);
                 Assert.IsNotNull(activePageField);
                 Assert.IsNotNull(destroyPage);
-                var pages = (System.Collections.Generic.Dictionary<string, IHubPage>)pagesField.GetValue(window);
+                Dictionary<string, IHubPage> pages =
+                    (System.Collections.Generic.Dictionary<string, IHubPage>)pagesField.GetValue(window);
                 pages.Add(page.PageId, page);
                 activePageField.SetValue(window, page.PageId);
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(

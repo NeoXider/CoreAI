@@ -45,15 +45,16 @@ namespace CoreAI.Composition
             // registers File*VersionStore before RegisterCorePortable). Guard like IGameConfigStore below —
             // unconditional registration made the Null store win the single resolve (and hard-conflict when
             // the host registered the same Null concrete type in a test).
-            if (!builder.Exists(typeof(ILuaScriptVersionStore), includeInterfaceTypes: true))
+            if (!builder.Exists(typeof(ILuaScriptVersionStore), true))
             {
                 builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
             }
 
-            if (!builder.Exists(typeof(IDataOverlayVersionStore), includeInterfaceTypes: true))
+            if (!builder.Exists(typeof(IDataOverlayVersionStore), true))
             {
                 builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             }
+
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<AgentSessionInspector>(Lifetime.Singleton);
@@ -94,10 +95,11 @@ namespace CoreAI.Composition
             // so a registration's ImplementationType is UnityGameConfigStore, not the interface. Without
             // this flag Exists always returned false and the Null default was registered unconditionally,
             // shadowing the host store on resolve (the guard was a silent no-op).
-            if (!builder.Exists(typeof(IGameConfigStore), includeInterfaceTypes: true))
+            if (!builder.Exists(typeof(IGameConfigStore), true))
             {
                 builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
             }
+
             builder.Register<GameConfigPolicy>(Lifetime.Singleton);
             builder.Register<AiOrchestrator>(Lifetime.Singleton);
             builder.Register<IAiOrchestrationService>(c =>

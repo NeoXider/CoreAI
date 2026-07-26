@@ -14,7 +14,7 @@ namespace CoreAI.Sandbox.LuaCs
     /// <c>error("…EXCEEDED_MEMORY_BUDGET…")</c> text cannot masquerade as a memory-budget trip in logs or
     /// telemetry. Only this guard can construct it.
     /// </summary>
-    public sealed class LuaMemoryBudgetException : Exception, CoreAI.Scripting.IScriptMemoryBudgetTrip
+    public sealed class LuaMemoryBudgetException : Exception, Scripting.IScriptMemoryBudgetTrip
     {
         /// <param name="message">The message value.</param>
         /// <param name="inner">The underlying VM exception, if any.</param>
@@ -105,7 +105,8 @@ namespace CoreAI.Sandbox.LuaCs
         // after warm-up the guard allocates nothing per call. Thread-local because rent/return run only
         // on the synchronous calling thread (body() blocks via GetResult), while the hook itself closes
         // directly over its GuardHook and so is thread-agnostic when the async VM migrates pool threads.
-        [ThreadStatic] private static Stack<GuardHook> _hookPool;
+        [ThreadStatic]
+        private static Stack<GuardHook> _hookPool;
 
         private readonly int _timeoutMs;
         private readonly long _maxSteps;

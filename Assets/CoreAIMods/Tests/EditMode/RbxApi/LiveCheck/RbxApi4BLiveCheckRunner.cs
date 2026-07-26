@@ -27,6 +27,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LiveCheck
     public static class RbxApi4BLiveCheckRunner
     {
         public const string DefaultBaseUrl = "http://127.0.0.1:1234/v1";
+
         // WHY: the -mtp build emits answer tokens via multi-token prediction — far faster to first
         // usable output than the plain reasoning build, which repeatedly blew the HTTP window.
         public const string DefaultModel = "qwen3.5-4b-mtp";
@@ -81,7 +82,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LiveCheck
         // not the whole Lua Modding skill. Execute_lua semantics + globals list + two examples.
 
         public const string SystemPrompt =
-@"You write Lua for the CoreAI `execute_lua` tool, which runs your script once in a sandboxed
+            @"You write Lua for the CoreAI `execute_lua` tool, which runs your script once in a sandboxed
 Roblox-style world and reports back the FIRST value your script `return`s (stringified).
 
 OUTPUT RULES (obey exactly):
@@ -123,6 +124,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
             public string Id;
             public string Title;
             public string UserTask;
+
             /// <summary>Returns (ok, detail). Inspects the real world + executor output.</summary>
             public Func<LuaCsRbxApiBindings, LuaTool.LuaResult, (bool ok, string detail)> Verify;
         }
@@ -131,7 +133,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
         {
             return new List<Scenario>
             {
-                new Scenario
+                new()
                 {
                     Id = "1_part_door_tagged",
                     Title = "create a Part named Door parented to workspace, tagged Interactive",
@@ -165,7 +167,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
                         return (true, "Part 'Door' under workspace, tag 'Interactive' present");
                     }
                 },
-                new Scenario
+                new()
                 {
                     Id = "2_loot_folder_three_coins",
                     Title = "create Folder Loot in workspace containing 3 Parts Coin1..Coin3",
@@ -204,7 +206,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
                         return (true, $"Folder 'Loot' with Coin1..Coin3 (childCount={childCount})");
                     }
                 },
-                new Scenario
+                new()
                 {
                     Id = "3_report_fullname_and_neon",
                     Title = "return workspace full name and Enum.Material.Neon value",
@@ -249,7 +251,7 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
             public string Id;
             public string Title;
             public string UserTask;
-            public readonly List<Attempt> Attempts = new List<Attempt>();
+            public readonly List<Attempt> Attempts = new();
             public bool Passed;
             public bool RetryNeeded;
             public bool RetryHelped;
@@ -459,10 +461,21 @@ return workspace:GetFullName() .. "" material="" .. tostring(Enum.Material.Grass
         /// <summary>Null-object logger so the factory's optional logger dependency is satisfied.</summary>
         private sealed class SilentGameLogger : IGameLogger
         {
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
         }
 
         /// <summary>Renders a scenario result as a plain-text transcript for logs / harness stdout.</summary>

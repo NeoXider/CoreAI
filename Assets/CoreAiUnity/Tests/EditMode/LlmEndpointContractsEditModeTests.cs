@@ -29,10 +29,25 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly ILlmClient _client = new StubLlmClient();
 
-            public ILlmClient ResolveClientForRole(string roleId) => _client;
-            public int ResolveContextWindowForRole(string roleId) => 4096;
-            public LlmExecutionMode ResolveExecutionModeForRole(string roleId) => LlmExecutionMode.Offline;
-            public string ResolveProfileIdForRole(string roleId) => "legacy";
+            public ILlmClient ResolveClientForRole(string roleId)
+            {
+                return _client;
+            }
+
+            public int ResolveContextWindowForRole(string roleId)
+            {
+                return 4096;
+            }
+
+            public LlmExecutionMode ResolveExecutionModeForRole(string roleId)
+            {
+                return LlmExecutionMode.Offline;
+            }
+
+            public string ResolveProfileIdForRole(string roleId)
+            {
+                return "legacy";
+            }
         }
 
         [TearDown]

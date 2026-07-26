@@ -82,6 +82,7 @@ namespace CoreAI.Ai.LuaCs
                     "If this is a player build, check link.xml preserves CoreAI.RbxApi.* assemblies and that " +
                     "RbxWorldHost is wired on CoreAiModsLifetimeScope.");
             }
+
             // WHY: worlds bootstrapped before the input slice (older snapshots / external trees)
             // may lack the service; creating it here keeps game:GetService("UserInputService")
             // resolvable for every world this bindings instance fronts.
@@ -108,6 +109,7 @@ namespace CoreAI.Ai.LuaCs
                 _runService = (RbxRunService)_registry.Create("RunService");
                 _runService.Parent = _game;
             }
+
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
             if (_enums.TryGet("CameraType", out RbxEnum cameraType)
                 && cameraType.TryGetItem("Custom", out RbxEnumItem custom))
@@ -308,8 +310,7 @@ namespace CoreAI.Ai.LuaCs
                 : OriginTag.FromConsole(
                     "session-" + Interlocked.Increment(ref _consoleInvocationCounter));
 
-            LuaCsRbxModContext context =
-                new LuaCsRbxModContext(this, capabilities, ownerModId, originTag);
+            LuaCsRbxModContext context = new(this, capabilities, ownerModId, originTag);
 
             luaRegistry.RegisterValue("Vector3", LuaCsRbxDatatypeBindings.BuildVector3Global);
             luaRegistry.RegisterValue("Vector2", LuaCsRbxDatatypeBindings.BuildVector2Global);
@@ -328,6 +329,7 @@ namespace CoreAI.Ai.LuaCs
                 luaRegistry.RegisterValue("UserInputService",
                     () => context.WrapInstance(_userInputService));
             }
+
             luaRegistry.RegisterValue("task", () => BuildTaskGlobal(context));
             // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
             // capability message instead of "attempt to call a nil value".

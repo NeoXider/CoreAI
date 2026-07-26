@@ -12,10 +12,8 @@ namespace CoreAI.Mods.Rbx.Instances
     {
         private static readonly string[] EmptyTags = new string[0];
 
-        private readonly Dictionary<string, HashSet<InstanceId>> _byTag =
-            new Dictionary<string, HashSet<InstanceId>>(StringComparer.Ordinal);
-        private readonly Dictionary<InstanceId, HashSet<string>> _byInstance =
-            new Dictionary<InstanceId, HashSet<string>>();
+        private readonly Dictionary<string, HashSet<InstanceId>> _byTag = new(StringComparer.Ordinal);
+        private readonly Dictionary<InstanceId, HashSet<string>> _byInstance = new();
 
         public void AddTag(InstanceId id, string tag)
         {
@@ -73,7 +71,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return EmptyTags;
             }
 
-            var result = new List<string>(tags);
+            List<string> result = new(tags);
             result.Sort(StringComparer.Ordinal);
             return result;
         }
@@ -87,7 +85,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return new InstanceId[0];
             }
 
-            var result = new List<InstanceId>(ids);
+            List<InstanceId> result = new(ids);
             result.Sort();
             return result;
         }

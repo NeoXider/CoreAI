@@ -63,15 +63,21 @@ namespace CoreAI.Mods.Rbx.Spatial
 
         // ---- Positions (scaled) ------------------------------------------------------
 
-        public static UnityEngine.Vector3 ToUnity(RbxVector3 position) => new UnityEngine.Vector3(
-            position.X * _metersPerStud,
-            position.Y * _metersPerStud,
-            -position.Z * _metersPerStud);
+        public static UnityEngine.Vector3 ToUnity(RbxVector3 position)
+        {
+            return new UnityEngine.Vector3(
+                position.X * _metersPerStud,
+                position.Y * _metersPerStud,
+                -position.Z * _metersPerStud);
+        }
 
-        public static RbxVector3 FromUnity(UnityEngine.Vector3 position) => new RbxVector3(
-            position.x * StudsPerMeter,
-            position.y * StudsPerMeter,
-            -position.z * StudsPerMeter);
+        public static RbxVector3 FromUnity(UnityEngine.Vector3 position)
+        {
+            return new RbxVector3(
+                position.x * StudsPerMeter,
+                position.y * StudsPerMeter,
+                -position.z * StudsPerMeter);
+        }
 
         // ---- Rotations (unscaled) ----------------------------------------------------
 
@@ -106,35 +112,63 @@ namespace CoreAI.Mods.Rbx.Spatial
 
         // ---- Directions / velocities (scaled, no translation) ------------------------
 
-        public static UnityEngine.Vector3 VelocityToUnity(RbxVector3 v) => ToUnity(v);
+        public static UnityEngine.Vector3 VelocityToUnity(RbxVector3 v)
+        {
+            return ToUnity(v);
+        }
 
-        public static RbxVector3 VelocityFromUnity(UnityEngine.Vector3 v) => FromUnity(v);
+        public static RbxVector3 VelocityFromUnity(UnityEngine.Vector3 v)
+        {
+            return FromUnity(v);
+        }
 
         /// <summary>Direction conversion: mirror only, no scale (unit vectors stay unit).</summary>
-        public static UnityEngine.Vector3 DirectionToUnity(RbxVector3 d) =>
-            new UnityEngine.Vector3(d.X, d.Y, -d.Z);
+        public static UnityEngine.Vector3 DirectionToUnity(RbxVector3 d)
+        {
+            return new UnityEngine.Vector3(d.X, d.Y, -d.Z);
+        }
 
-        public static RbxVector3 DirectionFromUnity(UnityEngine.Vector3 d) =>
-            new RbxVector3(d.x, d.y, -d.z);
+        public static RbxVector3 DirectionFromUnity(UnityEngine.Vector3 d)
+        {
+            return new RbxVector3(d.x, d.y, -d.z);
+        }
 
         // ---- Scalars -----------------------------------------------------------------
 
         /// <summary>studs/s^2 -> m/s^2 (gravity etc.; per-body application per DEV-6).</summary>
-        public static float AccelerationToUnity(float studsPerSecSq) => studsPerSecSq * _metersPerStud;
+        public static float AccelerationToUnity(float studsPerSecSq)
+        {
+            return studsPerSecSq * _metersPerStud;
+        }
 
-        public static float AccelerationFromUnity(float metersPerSecSq) => metersPerSecSq * StudsPerMeter;
+        public static float AccelerationFromUnity(float metersPerSecSq)
+        {
+            return metersPerSecSq * StudsPerMeter;
+        }
 
         /// <summary>Scalar length studs -> meters (part sizes: localScale = Size * MetersPerStud).</summary>
-        public static float LengthToUnity(float studs) => studs * _metersPerStud;
+        public static float LengthToUnity(float studs)
+        {
+            return studs * _metersPerStud;
+        }
 
-        public static float LengthFromUnity(float meters) => meters * StudsPerMeter;
+        public static float LengthFromUnity(float meters)
+        {
+            return meters * StudsPerMeter;
+        }
 
         /// <summary>Size conversion: scale each axis, no mirror (sizes are extents, not positions).</summary>
-        public static UnityEngine.Vector3 SizeToUnity(RbxVector3 size) => new UnityEngine.Vector3(
-            size.X * _metersPerStud, size.Y * _metersPerStud, size.Z * _metersPerStud);
+        public static UnityEngine.Vector3 SizeToUnity(RbxVector3 size)
+        {
+            return new UnityEngine.Vector3(
+                size.X * _metersPerStud, size.Y * _metersPerStud, size.Z * _metersPerStud);
+        }
 
-        public static RbxVector3 SizeFromUnity(UnityEngine.Vector3 size) => new RbxVector3(
-            size.x * StudsPerMeter, size.y * StudsPerMeter, size.z * StudsPerMeter);
+        public static RbxVector3 SizeFromUnity(UnityEngine.Vector3 size)
+        {
+            return new RbxVector3(
+                size.x * StudsPerMeter, size.y * StudsPerMeter, size.z * StudsPerMeter);
+        }
     }
 
     /// <summary>
@@ -143,7 +177,9 @@ namespace CoreAI.Mods.Rbx.Spatial
     /// </summary>
     internal static class ScaleMath
     {
-        public static bool Approximately(float a, float b) =>
-            Math.Abs(a - b) <= 1e-6f * Math.Max(1f, Math.Max(Math.Abs(a), Math.Abs(b)));
+        public static bool Approximately(float a, float b)
+        {
+            return Math.Abs(a - b) <= 1e-6f * Math.Max(1f, Math.Max(Math.Abs(a), Math.Abs(b)));
+        }
     }
 }

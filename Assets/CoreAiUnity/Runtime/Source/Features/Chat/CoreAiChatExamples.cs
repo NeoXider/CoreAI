@@ -68,7 +68,7 @@ namespace CoreAI.Chat
             new("tetris", "Tetris mod", TetrisMessage),
             new("clicker", "Clicker game", ClickerMessage),
             new("castle", "Build a castle", CastleMessage),
-            new("arena", "Fix the broken arena", ArenaMessage),
+            new("arena", "Fix the broken arena", ArenaMessage)
         };
 
         /// <summary>All built-in example prompts, in display order.</summary>
@@ -77,7 +77,7 @@ namespace CoreAI.Chat
         // A compact but genuinely playable falling-blocks game: 10x18 grid rendered from cubes, arrow keys to
         // move/rotate, blocks fall and lock, full rows clear, top-out ends the game and 'r' restarts.
         private const string TetrisLua =
-@"local COLS, ROWS = 10, 18
+            @"local COLS, ROWS = 10, 18
 local CELL = 3.5 -- studs (~1 m)
 local EMPTY = Color3.fromHex('#101820')
 
@@ -245,7 +245,7 @@ end)
         // gold coin into a tower, a passive +1/0.5s keeps it alive unattended, and 'r' resets. Uses only
         // documented globals (input_mouse_button / input_key_down, the Rbx build surface, store_*, report).
         private const string ClickerLua =
-@"local BTN_SIZE = 5 -- studs (~1.4 m)
+            @"local BTN_SIZE = 5 -- studs (~1.4 m)
 local MAX_COINS = 24
 local score = tonumber(store_get('clicker_score')) or 0
 local coins = 0
@@ -330,7 +330,7 @@ end)
         //  1) reads cfg.spawn_count, but the field is spawnCount -> arithmetic on a nil value.
         //  2) hooks_every(0, ...) is below the 0.05s minimum interval.
         private const string ArenaLua =
-@"local cfg = {
+            @"local cfg = {
   spawnCount = 5,
   radius = 21.0, -- studs (~6 m)
   interval = 0.25,

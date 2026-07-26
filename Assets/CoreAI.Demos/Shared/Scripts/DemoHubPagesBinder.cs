@@ -26,7 +26,7 @@ namespace CoreAI.Demos
             {
                 // WHY: the generic host assigns the registry in Awake; a null here means no host ran, so
                 // there is nothing to extend. Fail quiet — the scene simply keeps its built-in tabs.
-                CoreAI.Logging.Log.Instance.Warn(
+                Logging.Log.Instance.Warn(
                     "[DemoHubPagesBinder] No HubPageRegistry on the CoreAiHubWindow; demo pages not added.");
                 return;
             }
@@ -36,8 +36,8 @@ namespace CoreAI.Demos
             {
                 registry.Register(
                     WaveAutoBattlerHubPage.DefaultPageId,
-                    () => new WaveAutoBattlerHubPage(
-                        () => FindFirstObjectByType<WaveAutoBattlerModsDemoController>(FindObjectsInactive.Include)),
+                    () => new WaveAutoBattlerHubPage(() =>
+                        FindFirstObjectByType<WaveAutoBattlerModsDemoController>(FindObjectsInactive.Include)),
                     0);
             }
 
@@ -45,8 +45,8 @@ namespace CoreAI.Demos
             {
                 registry.Register(
                     LuaPlatformHubPage.DefaultPageId,
-                    () => new LuaPlatformHubPage(
-                        () => FindFirstObjectByType<LuaPlatformExampleController>(FindObjectsInactive.Include)),
+                    () => new LuaPlatformHubPage(() =>
+                        FindFirstObjectByType<LuaPlatformExampleController>(FindObjectsInactive.Include)),
                     20);
             }
 
@@ -58,8 +58,8 @@ namespace CoreAI.Demos
 
             // WHY: prompt templates live in ONE place — the chat's own "≡" example menu. Turn it on here so
             // it shows in demo scenes only (the base chat ships with it off). No separate Prompts Hub tab.
-            CoreAI.Chat.CoreAiChatPanel chat =
-                FindFirstObjectByType<CoreAI.Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
+            Chat.CoreAiChatPanel chat =
+                FindFirstObjectByType<Chat.CoreAiChatPanel>(FindObjectsInactive.Include);
             if (chat != null)
             {
                 chat.EnableExamplePrompts();

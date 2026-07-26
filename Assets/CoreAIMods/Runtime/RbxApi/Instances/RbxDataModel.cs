@@ -14,7 +14,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Roadmap phases for services that exist in the plan but not in this slice.
         /// WHY: naming the exact phase in the stub is part of the AI self-repair contract.</summary>
         private static readonly Dictionary<string, string> PlannedServices =
-            new Dictionary<string, string>(StringComparer.Ordinal)
+            new(StringComparer.Ordinal)
             {
                 // WHY: RunService left this table when the per-frame game loop was pulled forward;
                 // it now resolves as a real service child created by DataModelBootstrap.

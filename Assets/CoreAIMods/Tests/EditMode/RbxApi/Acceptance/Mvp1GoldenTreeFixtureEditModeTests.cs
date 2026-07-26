@@ -69,7 +69,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void GoldenTree_RegistryRecords_MatchTheExpectedShape()
         {
-            using var world = new Mvp1AcceptanceWorld();
+            using Mvp1AcceptanceWorld world = new();
             RbxInstance root = BuildGoldenTree(world);
 
             IReadOnlyList<RbxInstance> children = root.GetChildren();
@@ -79,7 +79,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual("Wedge", children[2].Name);
             Assert.AreEqual("Folder", root.ClassName);
 
-            var seenIds = new HashSet<ulong>();
+            HashSet<ulong> seenIds = new();
             ulong previous = 0;
             foreach (RbxInstance node in new[] { root, children[0], children[1], children[2] })
             {
@@ -108,47 +108,47 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void GoldenTree_At028_TransformsMatchTheTransposedGoldens()
         {
-            using var world = new Mvp1AcceptanceWorld(0.28f);
+            using Mvp1AcceptanceWorld world = new(0.28f);
             RbxInstance root = BuildGoldenTree(world);
 
             // WHY: the golden table below is the §5.1.8 fixture contract — position is
             // studs * 0.28 with z mirrored (D2/D3), localScale is Size * 0.28 with NO mirror.
             AssertPartGoldens(world, root, "Block",
-                expectedPosition: new Vector3(2.8f, 1.4f, 1.12f),
-                expectedScale: new Vector3(1.12f, 0.28f, 0.56f),
-                expectedStudPosition: new RbxVector3(10f, 5f, -4f),
-                expectedStudSize: new RbxVector3(4f, 1f, 2f));
+                new Vector3(2.8f, 1.4f, 1.12f),
+                new Vector3(1.12f, 0.28f, 0.56f),
+                new RbxVector3(10f, 5f, -4f),
+                new RbxVector3(4f, 1f, 2f));
             AssertPartGoldens(world, root, "Ball",
-                expectedPosition: new Vector3(0f, 0.84f, -1.68f),
-                expectedScale: new Vector3(1.68f, 1.68f, 1.68f),
-                expectedStudPosition: new RbxVector3(0f, 3f, 6f),
-                expectedStudSize: new RbxVector3(6f, 6f, 6f));
+                new Vector3(0f, 0.84f, -1.68f),
+                new Vector3(1.68f, 1.68f, 1.68f),
+                new RbxVector3(0f, 3f, 6f),
+                new RbxVector3(6f, 6f, 6f));
             AssertPartGoldens(world, root, "Wedge",
-                expectedPosition: new Vector3(-0.56f, 0.14f, -2.24f),
-                expectedScale: new Vector3(0.56f, 0.28f, 1.12f),
-                expectedStudPosition: new RbxVector3(-2f, 0.5f, 8f),
-                expectedStudSize: new RbxVector3(2f, 1f, 4f));
+                new Vector3(-0.56f, 0.14f, -2.24f),
+                new Vector3(0.56f, 0.28f, 1.12f),
+                new RbxVector3(-2f, 0.5f, 8f),
+                new RbxVector3(2f, 1f, 4f));
         }
 
         [Test]
         public void GoldenTree_At1To1_OnlyTheRobloxSpaceConstantChanges()
         {
-            using var world = new Mvp1AcceptanceWorld(1f);
+            using Mvp1AcceptanceWorld world = new(1f);
             RbxInstance root = BuildGoldenTree(world);
 
             // WHY: identical Lua, identical registry-side studs; the Unity numbers become the
             // stud numbers with only the z-mirror left — proof the scale switch touches zero
             // assets and zero mod code (§5.1.8 / D3).
             AssertPartGoldens(world, root, "Block",
-                expectedPosition: new Vector3(10f, 5f, 4f),
-                expectedScale: new Vector3(4f, 1f, 2f),
-                expectedStudPosition: new RbxVector3(10f, 5f, -4f),
-                expectedStudSize: new RbxVector3(4f, 1f, 2f));
+                new Vector3(10f, 5f, 4f),
+                new Vector3(4f, 1f, 2f),
+                new RbxVector3(10f, 5f, -4f),
+                new RbxVector3(4f, 1f, 2f));
             AssertPartGoldens(world, root, "Wedge",
-                expectedPosition: new Vector3(-2f, 0.5f, -8f),
-                expectedScale: new Vector3(2f, 1f, 4f),
-                expectedStudPosition: new RbxVector3(-2f, 0.5f, 8f),
-                expectedStudSize: new RbxVector3(2f, 1f, 4f));
+                new Vector3(-2f, 0.5f, -8f),
+                new Vector3(2f, 1f, 4f),
+                new RbxVector3(-2f, 0.5f, 8f),
+                new RbxVector3(2f, 1f, 4f));
         }
 
         [Test]
@@ -163,9 +163,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private List<ulong> CollectFixtureIds()
         {
-            using var world = new Mvp1AcceptanceWorld();
+            using Mvp1AcceptanceWorld world = new();
             RbxInstance root = BuildGoldenTree(world);
-            var ids = new List<ulong> { root.Id.Value };
+            List<ulong> ids = new() { root.Id.Value };
             foreach (RbxInstance child in root.GetChildren())
             {
                 ids.Add(child.Id.Value);

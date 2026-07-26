@@ -1,3 +1,4 @@
+using System.Text;
 using System.Threading;
 using CoreAI.Infrastructure.Luau;
 using Lua;
@@ -35,10 +36,10 @@ namespace CoreAI.Tests.EditMode
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 
-        static LuaValue[] RunLuau(string luau)
+        private static LuaValue[] RunLuau(string luau)
         {
             DownlevelResult result = LuauDownleveler.Process(luau, "exec");
-            var sb = new System.Text.StringBuilder();
+            StringBuilder sb = new();
             foreach (DownlevelDiagnostic d in result.Diagnostics)
             {
                 sb.Append(d).Append('\n');
@@ -53,7 +54,7 @@ namespace CoreAI.Tests.EditMode
             return state.DoStringAsync(result.LuaSource).GetAwaiter().GetResult();
         }
 
-        static double RunNumber(string luau)
+        private static double RunNumber(string luau)
         {
             LuaValue[] result = RunLuau(luau);
             Assert.IsTrue(result.Length > 0, "Expected a return value.");

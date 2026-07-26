@@ -44,6 +44,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     await Task.Yield();
                 }
+
                 return new LlmCompletionResult { Ok = true, Content = _name };
             }
         }
@@ -75,8 +76,8 @@ namespace CoreAI.Tests.PlayMode
                 string request = Encoding.ASCII.GetString(requestBytes, 0, read);
                 bool validPath = request.StartsWith("GET /v1/models ", System.StringComparison.Ordinal);
                 bool validAuthorization = string.IsNullOrEmpty(_expectedAuthorization) ||
-                    request.IndexOf("Authorization: " + _expectedAuthorization,
-                        System.StringComparison.OrdinalIgnoreCase) >= 0;
+                                          request.IndexOf("Authorization: " + _expectedAuthorization,
+                                              System.StringComparison.OrdinalIgnoreCase) >= 0;
                 int code = validPath && validAuthorization ? _statusCode : 400;
                 string reason = code == 200 ? "OK" : "Error";
                 byte[] body = Encoding.UTF8.GetBytes(code == 200 ? "{\"data\":[]}" : "{}");
@@ -142,8 +143,8 @@ namespace CoreAI.Tests.PlayMode
                 string request = Encoding.ASCII.GetString(requestBytes, 0, read);
                 bool validPath = request.StartsWith(expectedPath, System.StringComparison.Ordinal);
                 bool validAuthorization = string.IsNullOrEmpty(_expectedAuthorization) ||
-                    request.IndexOf("Authorization: " + _expectedAuthorization,
-                        System.StringComparison.OrdinalIgnoreCase) >= 0;
+                                          request.IndexOf("Authorization: " + _expectedAuthorization,
+                                              System.StringComparison.OrdinalIgnoreCase) >= 0;
                 int code = !validPath ? 404 : validAuthorization ? configuredStatus : 401;
                 string reason = code is >= 200 and < 300 ? "OK" : "Error";
                 byte[] body = Encoding.UTF8.GetBytes("{}");
@@ -202,6 +203,7 @@ namespace CoreAI.Tests.PlayMode
                         {
                             Disconnected.TrySetResult(true);
                         }
+
                         return;
                     }
 
@@ -446,7 +448,6 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(failed.IsFaulted, $"HTTP {status} must fail readiness.");
             }
-
         }
 
         [UnityTest]
@@ -470,7 +471,6 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsFalse(success.IsFaulted, success.Exception?.ToString());
                 Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, success.Result.Mode);
             }
-
         }
 
         [UnityTest]
@@ -492,7 +492,6 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(failed.IsFaulted, $"Fallback HTTP {status} must fail readiness.");
             }
-
         }
 
         [UnityTest]
@@ -546,7 +545,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator UnityReadinessProbe_CancellationAbortsInFlightRequest()
         {
             UnityWebRequestOpenAiReadinessProbe probe = new();
-            using CompletionHttpServer server = new(0, respond: false);
+            using CompletionHttpServer server = new(0, false);
             using CancellationTokenSource cancellation = new();
             Task<LlmEndpointReadinessResult> task = probe.ProbeAsync(
                 new LlmEndpointReadinessRequest

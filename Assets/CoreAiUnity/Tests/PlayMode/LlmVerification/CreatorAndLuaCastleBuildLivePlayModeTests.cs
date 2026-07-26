@@ -215,7 +215,8 @@ namespace CoreAI.Tests.PlayMode
 
                 int newCastle = CountNewCastleObjects(preExisting, out List<string> names);
                 TestContext.WriteLine("[CreatorCastle] ---------- TRANSCRIPT ----------");
-                TestContext.WriteLine($"[CreatorCastle] Castle objects found ({newCastle}): {string.Join(", ", names)}");
+                TestContext.WriteLine(
+                    $"[CreatorCastle] Castle objects found ({newCastle}): {string.Join(", ", names)}");
                 TestContext.WriteLine("[CreatorCastle] --------------------------------");
 
                 Assert.GreaterOrEqual(newCastle, MinCastleObjects,
@@ -324,7 +325,8 @@ namespace CoreAI.Tests.PlayMode
                 List<ApplyAiGameCommand> replay = new();
                 foreach (ApplyAiGameCommand command in commands)
                 {
-                    if (!string.Equals(command.CommandTypeId, AiGameCommandTypeIds.WorldCommand, StringComparison.Ordinal))
+                    if (!string.Equals(command.CommandTypeId, AiGameCommandTypeIds.WorldCommand,
+                            StringComparison.Ordinal))
                     {
                         continue;
                     }

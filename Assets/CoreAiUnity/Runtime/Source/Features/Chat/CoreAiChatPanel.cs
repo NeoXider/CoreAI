@@ -49,6 +49,7 @@ namespace CoreAI.Chat
         /// ready, then the panel binds to it exactly like the UIDocument path.
         /// </summary>
         private bool _embeddedHostMode;
+
         private VisualElement _embeddedHost;
         private VisualTreeAsset _embeddedChatTemplate;
         private StyleSheet _embeddedStyleSheet;

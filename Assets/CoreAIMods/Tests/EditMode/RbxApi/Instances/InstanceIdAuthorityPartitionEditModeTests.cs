@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
@@ -11,7 +12,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void ServerAndLocalIds_AreDistinguishableByTheAuthorityBit()
         {
-            var allocator = new InstanceIdAllocator();
+            InstanceIdAllocator allocator = new();
             InstanceId server = allocator.Next(InstanceIdAuthority.Server);
             InstanceId local = allocator.Next(InstanceIdAuthority.Local);
 
@@ -26,8 +27,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void TheTwoSpaces_NeverCollide()
         {
-            var allocator = new InstanceIdAllocator();
-            var seen = new System.Collections.Generic.HashSet<ulong>();
+            InstanceIdAllocator allocator = new();
+            HashSet<ulong> seen = new();
             for (int i = 0; i < 1000; i++)
             {
                 Assert.IsTrue(seen.Add(allocator.Next(InstanceIdAuthority.Server).Value));
@@ -47,13 +48,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void WireContract_RejectsLocallyAssignedIds()
         {
-            var allocator = new InstanceIdAllocator();
+            InstanceIdAllocator allocator = new();
             InstanceId server = allocator.Next(InstanceIdAuthority.Server);
             InstanceId local = allocator.Next(InstanceIdAuthority.Local);
 
             Assert.DoesNotThrow(() => InstanceIdWireContract.EnsureWireSafe(server));
-            RbxError error = Assert.Throws<RbxError>(
-                () => InstanceIdWireContract.EnsureWireSafe(local));
+            RbxError error = Assert.Throws<RbxError>(() => InstanceIdWireContract.EnsureWireSafe(local));
             Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code);
             Assert.Throws<RbxError>(() => InstanceIdWireContract.EnsureWireSafe(InstanceId.None));
         }
@@ -61,7 +61,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void BindNetId_RefusesLocallyAssignedInstances()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance localPart = registry.Create("Part", null, null, InstanceIdAuthority.Local);
             RbxError error = Assert.Throws<RbxError>(() => registry.BindNetId(localPart.Id, 7u));
             Assert.AreEqual(RbxErrorCode.NotAuthority, error.Code);
@@ -70,7 +70,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void EnsureNotBelow_AdvancesOnlyTheMatchingSpace()
         {
-            var allocator = new InstanceIdAllocator();
+            InstanceIdAllocator allocator = new();
             allocator.EnsureNotBelow(new InstanceId(500UL));
             Assert.AreEqual(501UL, allocator.Next(InstanceIdAuthority.Server).Value);
             Assert.AreEqual(InstanceId.AuthorityBit | 1UL,

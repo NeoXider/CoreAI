@@ -544,7 +544,7 @@ namespace CoreAI.Tests.EditMode
             {
                 // 4 steps * 100ms = ~400ms total, past the 250ms idle window — but each individual gap
                 // between tool-call events stays under it.
-                ToolCallProgressOrchestrator orchestrator = new(steps: 4, delayPerStep: TimeSpan.FromMilliseconds(100));
+                ToolCallProgressOrchestrator orchestrator = new(4, TimeSpan.FromMilliseconds(100));
                 StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.25f };
                 CoreAiChatService service = new(orchestrator, settings: settings);
 

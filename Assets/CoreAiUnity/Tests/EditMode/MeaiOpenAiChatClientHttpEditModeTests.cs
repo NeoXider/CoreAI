@@ -474,7 +474,7 @@ namespace CoreAI.Tests.EditMode
                 new AsyncDelegateHttpHandler((_, _) =>
                 {
                     StreamContent content = new(new DelayedFirstReadStream(
-                        Encoding.UTF8.GetBytes(sse), firstReadDelayMs: 1600));
+                        Encoding.UTF8.GetBytes(sse), 1600));
                     content.Headers.ContentType =
                         new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });

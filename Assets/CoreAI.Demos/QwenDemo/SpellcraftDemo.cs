@@ -125,6 +125,7 @@ namespace CoreAI.Demos.QwenDemo
             {
                 return;
             }
+
             if (this == null)
             {
                 return;
@@ -138,7 +139,8 @@ namespace CoreAI.Demos.QwenDemo
             }
 
             _ready = true;
-            Log("✅ Describe a spell in your own words (RU/EN); the model chooses element and power, while code checks mana.");
+            Log(
+                "✅ Describe a spell in your own words (RU/EN); the model chooses element and power, while code checks mana.");
         }
 
         private void OnDestroy()
@@ -195,6 +197,7 @@ namespace CoreAI.Demos.QwenDemo
                         QwenFx.Label(_caster.transform, "not enough mana!", new Color(1f, 0.5f, 0.5f), 1.6f);
                     });
                 }
+
                 return $"Not enough mana for {el} (need {cost}, have {(int)manaNow}). The spell fizzles.";
             }
 
@@ -202,6 +205,7 @@ namespace CoreAI.Demos.QwenDemo
             {
                 _pump.Enqueue(() => StartCoroutine(Effect(el, pow)));
             }
+
             return $"Cast {el} at power {pow} (spent {cost} mana).";
         }
 
@@ -241,14 +245,17 @@ namespace CoreAI.Demos.QwenDemo
             return "arcane";
         }
 
-        private Color ElementColor(string el) => el switch
+        private Color ElementColor(string el)
         {
-            "fire" => new Color(1f, 0.45f, 0.12f),
-            "frost" => new Color(0.55f, 0.85f, 1f),
-            "storm" => new Color(1f, 0.95f, 0.35f),
-            "poison" => new Color(0.55f, 0.95f, 0.25f),
-            _ => new Color(0.75f, 0.5f, 1f)
-        };
+            return el switch
+            {
+                "fire" => new Color(1f, 0.45f, 0.12f),
+                "frost" => new Color(0.55f, 0.85f, 1f),
+                "storm" => new Color(1f, 0.95f, 0.35f),
+                "poison" => new Color(0.55f, 0.95f, 0.25f),
+                _ => new Color(0.75f, 0.5f, 1f)
+            };
+        }
 
         private IEnumerator Effect(string el, int power)
         {
@@ -265,7 +272,7 @@ namespace CoreAI.Demos.QwenDemo
                     yield return QwenFx.MoveTo(bolt.transform, target, 16f);
                     if (bolt != null)
                     {
-                        UnityEngine.Object.Destroy(bolt);
+                        Destroy(bolt);
                     }
 
                     yield return QwenFx.Flash(_root, target, c, 2.4f * scale, 0.4f);
@@ -281,7 +288,7 @@ namespace CoreAI.Demos.QwenDemo
                     yield return QwenFx.MoveTo(bolt.transform, target, 14f);
                     if (bolt != null)
                     {
-                        UnityEngine.Object.Destroy(bolt);
+                        Destroy(bolt);
                     }
 
                     for (int i = 0; i < 4 + power * 2; i++)
@@ -328,7 +335,7 @@ namespace CoreAI.Demos.QwenDemo
                             UnityEngine.Random.Range(-0.8f, 0.8f), 0.3f, UnityEngine.Random.Range(-0.8f, 0.8f));
                         GameObject bub = QwenFx.Bolt(_root, p, c, 0.25f);
                         StartCoroutine(QwenFx.MoveTo(bub.transform, p + Vector3.up * 2.2f, 1.2f));
-                        UnityEngine.Object.Destroy(bub, 2f);
+                        Destroy(bub, 2f);
                         yield return new WaitForSeconds(0.1f);
                     }
 
@@ -345,7 +352,7 @@ namespace CoreAI.Demos.QwenDemo
                     yield return QwenFx.MoveTo(rock.transform, _dummy.transform.localPosition + Vector3.up * 0.4f, 22f);
                     if (rock != null)
                     {
-                        UnityEngine.Object.Destroy(rock);
+                        Destroy(rock);
                     }
 
                     yield return QwenFx.Flash(_root, _dummy.transform.localPosition + Vector3.up * 0.4f, c,
@@ -382,7 +389,7 @@ namespace CoreAI.Demos.QwenDemo
                                         UnityEngine.Random.Range(-0.4f, 0.4f));
                         GameObject smoke = QwenFx.Bolt(_root, p, new Color(0.3f, 0.3f, 0.3f), 0.4f);
                         StartCoroutine(QwenFx.MoveTo(smoke.transform, p + Vector3.up * 2.5f, 0.9f));
-                        UnityEngine.Object.Destroy(smoke, 2.2f);
+                        Destroy(smoke, 2.2f);
                     }
 
                     StartCoroutine(QwenFx.Shake(_dummy.transform, 0.18f, 0.4f));
@@ -637,7 +644,8 @@ namespace CoreAI.Demos.QwenDemo
 
             if (!_ready)
             {
-                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>", rich);
+                GUILayout.Label("<color=#ffd166>⏳ Qwen/llama.cpp is loading; actions unlock after readiness.</color>",
+                    rich);
             }
 
             GUILayout.Space(4);
@@ -689,6 +697,7 @@ namespace CoreAI.Demos.QwenDemo
                     Submit();
                 }
             }
+
             GUI.enabled = true;
 
             GUILayout.EndScrollView();

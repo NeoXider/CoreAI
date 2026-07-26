@@ -35,10 +35,21 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class FakeGameLogger : IGameLogger
         {
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
         }
 
         private static LuaCsModStack BuildStack()

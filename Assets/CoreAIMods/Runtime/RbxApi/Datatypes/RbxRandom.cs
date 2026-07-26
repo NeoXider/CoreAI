@@ -40,14 +40,23 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         private RbxRandom(ulong s0, ulong s1, ulong s2, ulong s3)
         {
-            _s0 = s0; _s1 = s1; _s2 = s2; _s3 = s3;
+            _s0 = s0;
+            _s1 = s1;
+            _s2 = s2;
+            _s3 = s3;
         }
 
         /// <summary>Random:Clone() — a new generator with identical state.</summary>
-        public RbxRandom Clone() => new RbxRandom(_s0, _s1, _s2, _s3);
+        public RbxRandom Clone()
+        {
+            return new RbxRandom(_s0, _s1, _s2, _s3);
+        }
 
         /// <summary>Random:NextNumber() — uniform in [0, 1).</summary>
-        public double NextNumber() => (NextUInt64() >> 11) * (1.0 / 9007199254740992.0);
+        public double NextNumber()
+        {
+            return (NextUInt64() >> 11) * (1.0 / 9007199254740992.0);
+        }
 
         /// <summary>Random:NextNumber(min, max) — uniform in [min, max).</summary>
         public double NextNumber(double min, double max)
@@ -85,8 +94,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             do
             {
                 sample = NextUInt64();
-            }
-            while (sample >= limit);
+            } while (sample >= limit);
 
             return unchecked(min + (long)(sample % range));
         }
@@ -135,8 +143,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
             return result;
         }
 
-        private static ulong RotateLeft(ulong value, int offset) =>
-            (value << offset) | (value >> (64 - offset));
+        private static ulong RotateLeft(ulong value, int offset)
+        {
+            return (value << offset) | (value >> (64 - offset));
+        }
 
         private static ulong SplitMix64(ref ulong state)
         {

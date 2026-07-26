@@ -41,7 +41,8 @@ namespace CoreAI.Composition
         private LlmRoutingManifest llmRoutingManifest;
 
         [Header("Optional Modules")]
-        [Tooltip("Optional child module that owns Lua and world-command configuration. A child component is auto-discovered when this reference is empty.")]
+        [Tooltip(
+            "Optional child module that owns Lua and world-command configuration. A child component is auto-discovered when this reference is empty.")]
         [SerializeField]
         private CoreAiLuaWorldModule luaWorldModule;
 

@@ -35,28 +35,28 @@ namespace CoreAI.Tests.EditMode
         public void ShouldCollapseOnEscape_ActivePageHandles_DoesNotCollapse()
         {
             Assert.IsFalse(CoreAiHubWindow.ShouldCollapseOnEscape(
-                escapeCollapses: true, isExpanded: true, pageHandledEscape: true));
+                true, true, true));
         }
 
         [Test]
         public void ShouldCollapseOnEscape_EscapeCollapsesDisabled_DoesNotCollapse()
         {
             Assert.IsFalse(CoreAiHubWindow.ShouldCollapseOnEscape(
-                escapeCollapses: false, isExpanded: true, pageHandledEscape: false));
+                false, true, false));
         }
 
         [Test]
         public void ShouldCollapseOnEscape_NotExpanded_DoesNotCollapse()
         {
             Assert.IsFalse(CoreAiHubWindow.ShouldCollapseOnEscape(
-                escapeCollapses: true, isExpanded: false, pageHandledEscape: false));
+                true, false, false));
         }
 
         [Test]
         public void ShouldCollapseOnEscape_ExpandedAndUnhandled_Collapses()
         {
             Assert.IsTrue(CoreAiHubWindow.ShouldCollapseOnEscape(
-                escapeCollapses: true, isExpanded: true, pageHandledEscape: false));
+                true, true, false));
         }
 
         [Test]
@@ -67,7 +67,7 @@ namespace CoreAI.Tests.EditMode
             {
                 go.AddComponent<UIDocument>();
                 CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
-                FakeEscapeHandlerPage page = new(handlesEscape: true);
+                FakeEscapeHandlerPage page = new(true);
                 RegisterActivePage(window, page);
 
                 bool result = InvokePrivate<bool>(window, "TryActivePageHandleEscape");
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode
             {
                 go.AddComponent<UIDocument>();
                 CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
-                FakeEscapeHandlerPage page = new(handlesEscape: true);
+                FakeEscapeHandlerPage page = new(true);
                 RegisterActivePage(window, page);
                 SetPrivateField(window, "requireVisibleCursor", false);
                 SetPrivateField(window, "_uiReady", true);
@@ -204,7 +204,8 @@ namespace CoreAI.Tests.EditMode
 
         private static void RegisterActivePage(CoreAiHubWindow window, IHubPage page)
         {
-            FieldInfo pagesField = typeof(CoreAiHubWindow).GetField("_pages", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo pagesField =
+                typeof(CoreAiHubWindow).GetField("_pages", BindingFlags.Instance | BindingFlags.NonPublic);
             IDictionary pages = (IDictionary)pagesField.GetValue(window);
             pages[page.PageId] = page;
 

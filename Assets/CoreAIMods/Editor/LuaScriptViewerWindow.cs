@@ -43,9 +43,9 @@ namespace CoreAI.Editor
 
             VisualElement root = rootVisualElement;
 
-            var toolbar = new Toolbar();
+            Toolbar toolbar = new();
 
-            var openButton = new ToolbarButton(OpenFilePicker) { text = "Open..." };
+            ToolbarButton openButton = new(OpenFilePicker) { text = "Open..." };
             toolbar.Add(openButton);
 
             _copyPathButton = new ToolbarButton(CopyPathToClipboard) { text = "Copy Path" };
@@ -54,21 +54,21 @@ namespace CoreAI.Editor
             _revealButton = new ToolbarButton(RevealFile) { text = "Reveal" };
             toolbar.Add(_revealButton);
 
-            var spacer = new VisualElement();
+            VisualElement spacer = new();
             spacer.style.flexGrow = 1f;
             toolbar.Add(spacer);
 
-            var fontLabel = new Label("Font");
+            Label fontLabel = new("Font");
             fontLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
             fontLabel.style.marginRight = 4f;
             toolbar.Add(fontLabel);
 
-            var fontValue = new Label(Mathf.RoundToInt(_fontSize).ToString());
+            Label fontValue = new(Mathf.RoundToInt(_fontSize).ToString());
             fontValue.style.unityTextAlign = TextAnchor.MiddleLeft;
             fontValue.style.marginLeft = 4f;
             fontValue.style.minWidth = 20f;
 
-            var fontSlider = new SliderInt((int)LuaSyntaxHighlightView.MinFontSize, (int)LuaSyntaxHighlightView.MaxFontSize)
+            SliderInt fontSlider = new((int)LuaSyntaxHighlightView.MinFontSize, (int)LuaSyntaxHighlightView.MaxFontSize)
             {
                 value = Mathf.RoundToInt(_fontSize)
             };

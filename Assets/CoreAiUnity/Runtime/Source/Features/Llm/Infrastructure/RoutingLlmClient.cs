@@ -98,19 +98,22 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
-                PublishCompleted(request, capturedMode, capturedGeneration, false, result != null && result.Ok, result?.Error ?? "",
+                PublishCompleted(request, capturedMode, capturedGeneration, false, result != null && result.Ok,
+                    result?.Error ?? "",
                     result?.ErrorCode ?? LlmErrorCode.None);
                 PublishUsage(request, capturedMode, false, result);
                 return result;
             }
             catch (LlmOperationTimeoutException)
             {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "timeout", LlmErrorCode.Timeout);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "timeout",
+                    LlmErrorCode.Timeout);
                 throw;
             }
             catch (OperationCanceledException)
             {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "cancelled", LlmErrorCode.Cancelled);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, "cancelled",
+                    LlmErrorCode.Cancelled);
                 throw;
             }
             catch (LlmClientException ex)
@@ -122,7 +125,8 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message, LlmErrorCode.ProviderError);
+                PublishCompleted(request, capturedMode, capturedGeneration, false, false, ex.Message,
+                    LlmErrorCode.ProviderError);
                 throw;
             }
         }
@@ -169,22 +173,28 @@ namespace CoreAI.Infrastructure.Llm
                     catch (LlmOperationTimeoutException)
                     {
                         completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout", LlmErrorCode.Timeout);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "timeout",
+                            LlmErrorCode.Timeout);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
+                            lastSeenModel);
                         throw;
                     }
                     catch (OperationCanceledException)
                     {
                         completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "cancelled", LlmErrorCode.Cancelled);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, "cancelled",
+                            LlmErrorCode.Cancelled);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
+                            lastSeenModel);
                         throw;
                     }
                     catch (LlmClientException ex)
                     {
                         completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, ex.ErrorCode);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message,
+                            ex.ErrorCode);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
+                            lastSeenModel);
                         throw;
                     }
                     catch (Exception ex)
@@ -192,8 +202,10 @@ namespace CoreAI.Infrastructure.Llm
                         // WHY: a transport exception other than timeout/cancel previously escaped with no
                         // completion event at all — subscribers saw a request start and never finish.
                         completedPublished = true;
-                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message, LlmErrorCode.ProviderError);
-                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
+                        PublishCompleted(request, capturedMode, capturedGeneration, true, false, ex.Message,
+                            LlmErrorCode.ProviderError);
+                        PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
+                            lastSeenModel);
                         throw;
                     }
 
@@ -246,7 +258,8 @@ namespace CoreAI.Infrastructure.Llm
                     PublishCompleted(request, capturedMode, capturedGeneration, true, false,
                         string.IsNullOrEmpty(error) ? "stream abandoned by consumer" : error,
                         errorCode == LlmErrorCode.None ? LlmErrorCode.Cancelled : errorCode);
-                    PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars, lastSeenModel);
+                    PublishUsage(request, capturedMode, true, lastUsageChunk, false, streamedCompletionChars,
+                        lastSeenModel);
                 }
 
                 await enumerator.DisposeAsync();

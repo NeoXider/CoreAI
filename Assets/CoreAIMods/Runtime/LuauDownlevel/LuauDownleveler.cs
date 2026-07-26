@@ -44,7 +44,7 @@ namespace CoreAI.Infrastructure.Luau
                 return new DownlevelResult(source, false, null);
             }
 
-            var ctx = new RewriteContext(source);
+            RewriteContext ctx = new(source);
             try
             {
                 new LuauRewriteParser(ctx, tokens).ParseChunk();
@@ -65,7 +65,7 @@ namespace CoreAI.Infrastructure.Luau
 
             if (!TryApplyEdits(source, ctx.Edits, out string output))
             {
-                var conflict = new List<DownlevelDiagnostic>(ctx.Diagnostics)
+                List<DownlevelDiagnostic> conflict = new(ctx.Diagnostics)
                 {
                     new DownlevelDiagnostic(DownlevelSeverity.Error,
                         $"internal downlevel edit conflict in '{chunkName}'; source left unchanged", 1, 1)
@@ -73,7 +73,7 @@ namespace CoreAI.Infrastructure.Luau
                 return new DownlevelResult(source, false, conflict);
             }
 
-            var diagnostics = new List<DownlevelDiagnostic>(ctx.Diagnostics.Count + ctx.Notes.Count);
+            List<DownlevelDiagnostic> diagnostics = new(ctx.Diagnostics.Count + ctx.Notes.Count);
             diagnostics.AddRange(ctx.Diagnostics);
             for (int i = 0; i < ctx.Notes.Count; i++)
             {
@@ -86,10 +86,10 @@ namespace CoreAI.Infrastructure.Luau
             return new DownlevelResult(output, true, diagnostics);
         }
 
-        static DownlevelResult Passthrough(string source, LuauDownlevelException ex, string chunkName,
+        private static DownlevelResult Passthrough(string source, LuauDownlevelException ex, string chunkName,
             List<DownlevelDiagnostic> collected)
         {
-            var diagnostics = collected != null
+            List<DownlevelDiagnostic> diagnostics = collected != null
                 ? new List<DownlevelDiagnostic>(collected)
                 : new List<DownlevelDiagnostic>();
             diagnostics.Add(new DownlevelDiagnostic(DownlevelSeverity.Error,
@@ -97,9 +97,9 @@ namespace CoreAI.Infrastructure.Luau
             return new DownlevelResult(source, false, diagnostics);
         }
 
-        static DownlevelResult InternalFailure(string source, Exception ex, string chunkName)
+        private static DownlevelResult InternalFailure(string source, Exception ex, string chunkName)
         {
-            var diagnostics = new List<DownlevelDiagnostic>
+            List<DownlevelDiagnostic> diagnostics = new()
             {
                 new DownlevelDiagnostic(DownlevelSeverity.Error,
                     $"{chunkName}: internal downlevel failure ({ex.GetType().Name}: {ex.Message}); source left unchanged",
@@ -117,7 +117,7 @@ namespace CoreAI.Infrastructure.Luau
         /// number literals by a token rewrite the lexer already computed, every other construct by its
         /// own token.
         /// </summary>
-        static bool NeedsDownlevel(List<LuauToken> tokens)
+        private static bool NeedsDownlevel(List<LuauToken> tokens)
         {
             for (int i = 0; i < tokens.Count; i++)
             {
@@ -198,7 +198,7 @@ namespace CoreAI.Infrastructure.Luau
         /// must never slip past. Plain comparisons (<c>a &lt; b then</c>) stop at the keyword and do
         /// not trigger.
         /// </summary>
-        static bool LooksLikeGenericList(List<LuauToken> tokens, int open)
+        private static bool LooksLikeGenericList(List<LuauToken> tokens, int open)
         {
             for (int i = open + 1; i < tokens.Count; i++)
             {
@@ -231,7 +231,7 @@ namespace CoreAI.Infrastructure.Luau
             return false;
         }
 
-        static bool IsTypeListStopWord(string text)
+        private static bool IsTypeListStopWord(string text)
         {
             switch (text)
             {
@@ -260,7 +260,7 @@ namespace CoreAI.Infrastructure.Luau
             }
         }
 
-        static bool IsIfExpressionPosition(LuauToken prev)
+        private static bool IsIfExpressionPosition(LuauToken prev)
         {
             if (prev.Kind == LuauTokenKind.Punct)
             {
@@ -284,11 +284,11 @@ namespace CoreAI.Infrastructure.Luau
             return false;
         }
 
-        static bool TryApplyEdits(string source, List<SourceEdit> edits, out string output)
+        private static bool TryApplyEdits(string source, List<SourceEdit> edits, out string output)
         {
-            var sorted = new List<SourceEdit>(edits);
+            List<SourceEdit> sorted = new(edits);
             sorted.Sort(LuauRewriteParser.CompareEdits);
-            var sb = new StringBuilder(source.Length + 64);
+            StringBuilder sb = new(source.Length + 64);
             int pos = 0;
             for (int i = 0; i < sorted.Count; i++)
             {

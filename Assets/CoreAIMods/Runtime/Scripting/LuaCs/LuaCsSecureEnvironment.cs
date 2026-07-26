@@ -168,7 +168,7 @@ namespace CoreAI.Sandbox.LuaCs
                 // the cheap monotonic process-heap reading (no forced-GC confirmation — that under-counts vs a
                 // garbage-inclusive baseline and lets the bomb reach OutOfMemory before the trip fires).
                 long maxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
-                long allocBaseline = maxAllocatedBytes > 0 ? System.GC.GetTotalMemory(false) : 0;
+                long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
 
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
@@ -188,7 +188,7 @@ namespace CoreAI.Sandbox.LuaCs
 
                     if (maxAllocatedBytes > 0)
                     {
-                        long allocated = System.GC.GetTotalMemory(false) - allocBaseline;
+                        long allocated = GC.GetTotalMemory(false) - allocBaseline;
                         if (allocated > maxAllocatedBytes)
                         {
                             throw new LuaRuntimeException(hctx.State,

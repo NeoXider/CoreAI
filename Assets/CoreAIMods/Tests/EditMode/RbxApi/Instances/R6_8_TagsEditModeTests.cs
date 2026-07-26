@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
@@ -51,7 +52,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             b.AddTag("Zone");
             c.AddTag("Other");
 
-            var tagged = _registry.Tags.GetTagged("Zone");
+            IReadOnlyList<InstanceId> tagged = _registry.Tags.GetTagged("Zone");
             Assert.AreEqual(2, tagged.Count);
             CollectionAssert.Contains(tagged, a.Id);
             CollectionAssert.Contains(tagged, b.Id);

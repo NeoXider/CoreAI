@@ -49,10 +49,12 @@ namespace CoreAI.Chat
         IReadOnlyList<LlmRuntimeProfile> GetProfiles();
         string GetProfileForRole(string roleId);
         CoreAiRoutingUiResult AssignProfileToRole(string roleId, string profileId);
+
         Task<CoreAiRoutingUiResult> SaveEndpointAsync(
             LlmEndpointDescriptor endpoint,
             string sessionApiKey,
             CancellationToken cancellationToken = default);
+
         Task<CoreAiRoutingUiResult> RemoveEndpointAsync(
             string endpointId,
             CancellationToken cancellationToken = default);
@@ -74,9 +76,20 @@ namespace CoreAI.Chat
             remove => _registry.Changed -= value;
         }
 
-        public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints() => _registry.GetEndpoints();
-        public IReadOnlyList<LlmRuntimeProfile> GetProfiles() => _registry.GetProfiles();
-        public string GetProfileForRole(string roleId) => _registry.GetRoleProfile(roleId);
+        public IReadOnlyList<LlmEndpointSnapshot> GetEndpoints()
+        {
+            return _registry.GetEndpoints();
+        }
+
+        public IReadOnlyList<LlmRuntimeProfile> GetProfiles()
+        {
+            return _registry.GetProfiles();
+        }
+
+        public string GetProfileForRole(string roleId)
+        {
+            return _registry.GetRoleProfile(roleId);
+        }
 
         public CoreAiRoutingUiResult AssignProfileToRole(string roleId, string profileId)
         {
@@ -90,6 +103,7 @@ namespace CoreAI.Chat
                 {
                     _registry.AssignRoleProfile(roleId, profileId);
                 }
+
                 return new CoreAiRoutingUiResult(true);
             }
             catch (Exception ex)

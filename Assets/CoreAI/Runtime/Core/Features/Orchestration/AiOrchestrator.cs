@@ -1063,6 +1063,7 @@ namespace CoreAI.Ai
                         .ConfigureAwait(false)
                     : _contextManager.BuildSnapshot(roleId, history, roleConfig, buildArgs);
             }
+
             if (snapshot == null)
             {
                 return (system, null, false, null);

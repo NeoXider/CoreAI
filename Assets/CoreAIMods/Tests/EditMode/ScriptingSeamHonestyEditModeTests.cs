@@ -25,8 +25,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(Directory.Exists(runtimeRoot), $"Runtime folder not found: {runtimeRoot}");
 
             string scriptingRoot = Path.GetFullPath(Path.Combine(runtimeRoot, "Scripting"))
-                                       .Replace('\\', '/')
-                                       .TrimEnd('/') + "/";
+                .Replace('\\', '/')
+                .TrimEnd('/') + "/";
 
             List<string> offenders = new();
             foreach (string file in Directory.GetFiles(runtimeRoot, "*.cs", SearchOption.AllDirectories))

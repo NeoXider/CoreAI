@@ -9,6 +9,7 @@ namespace CoreAI.Tests.EditMode
     public sealed class GameCreationBenchmarkLauncherEditModeTests
     {
         private string _tempDir;
+
         private readonly string[] _groupPrefs =
         {
             GameCreationBenchmarkLauncher.PrefG1,
@@ -124,21 +125,21 @@ namespace CoreAI.Tests.EditMode
         public void GroupsCsv_AllEightGroupsOn_ReturnsEmptyMeaningAllGroups()
         {
             Assert.AreEqual("", GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: true, g2: true, g3: true, g4: true, g5: true, g6: true, g7: true, g8: true));
+                true, true, true, true, true, true, true, true));
         }
 
         [Test]
         public void GroupsCsv_NoGroupsOn_ReturnsEmptyMeaningAllGroups()
         {
             Assert.AreEqual("", GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: false, g2: false, g3: false, g4: false, g5: false, g6: false, g7: false, g8: false));
+                false, false, false, false, false, false, false, false));
         }
 
         [Test]
         public void GroupsCsv_SubsetKeepsG8WhenSelected()
         {
             string csv = GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: true, g2: false, g3: false, g4: false, g5: false, g6: false, g7: false, g8: true);
+                true, false, false, false, false, false, false, true);
 
             StringAssert.Contains("G1", csv);
             StringAssert.Contains("G8", csv,
@@ -150,7 +151,7 @@ namespace CoreAI.Tests.EditMode
         public void GroupsCsv_SubsetWithoutG8_ExcludesItExplicitly()
         {
             string csv = GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: true, g2: true, g3: false, g4: false, g5: false, g6: false, g7: false, g8: false);
+                true, true, false, false, false, false, false, false);
 
             StringAssert.Contains("G1", csv);
             StringAssert.Contains("G2", csv);
@@ -161,14 +162,14 @@ namespace CoreAI.Tests.EditMode
         public void GroupsCsv_OnlyG8_ReturnsJustG8()
         {
             Assert.AreEqual("G8", GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: false, g2: false, g3: false, g4: false, g5: false, g6: false, g7: false, g8: true));
+                false, false, false, false, false, false, false, true));
         }
 
         [Test]
         public void GroupsCsv_AllOnExceptG8_IsNoLongerTreatedAsAllGroups()
         {
             string csv = GameCreationBenchmarkLauncher.GroupsCsv(
-                g1: true, g2: true, g3: true, g4: true, g5: true, g6: true, g7: true, g8: false);
+                true, true, true, true, true, true, true, false);
 
             Assert.AreNotEqual("", csv,
                 "Seven groups on with G8 off is a real subset, not the 'all groups' empty CSV.");

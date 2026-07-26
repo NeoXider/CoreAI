@@ -49,14 +49,14 @@ namespace CoreAI.Mods.Rbx.Instances
         public bool Archivable;
         public string OwnerModId;
         public string OriginTag;
-        public List<string> Tags = new List<string>();
-        public List<AttributeSnapshot> Attributes = new List<AttributeSnapshot>();
+        public List<string> Tags = new();
+        public List<AttributeSnapshot> Attributes = new();
     }
 
     /// <summary>A captured subtree in preorder (parents always precede children).</summary>
     [Serializable]
     public sealed class InstanceTreeSnapshot
     {
-        public List<InstanceSnapshot> Instances = new List<InstanceSnapshot>();
+        public List<InstanceSnapshot> Instances = new();
     }
 }

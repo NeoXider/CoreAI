@@ -40,6 +40,7 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileLocks =
             new(StringComparer.Ordinal);
+
         internal static Action BeforeAtomicReplaceForTesting;
 
         public FileLuaScriptVersionStore(

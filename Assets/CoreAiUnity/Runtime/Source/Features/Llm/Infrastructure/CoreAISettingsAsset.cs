@@ -794,7 +794,7 @@ namespace CoreAI.Infrastructure.Llm
         /// knowledge still win over this value in the orchestrator.
         /// </summary>
         public int ContextWindowTokens => enableContextWindowOverriding
-            ? (contextWindowTokens < 256 ? CoreAISettings.DefaultContextWindowTokens : contextWindowTokens)
+            ? contextWindowTokens < 256 ? CoreAISettings.DefaultContextWindowTokens : contextWindowTokens
             : CoreAISettings.UnlimitedContextWindowTokens;
 
         /// <summary>Global streaming flag.</summary>
@@ -960,6 +960,7 @@ namespace CoreAI.Infrastructure.Llm
                 enableContextWindowOverriding = true;
                 contextWindowTokens = options.ContextWindowTokens;
             }
+
             universalSystemPromptPrefix = options.UniversalSystemPromptPrefix ?? "";
             toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
@@ -977,6 +978,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 maxTokens = options.MaxTokens;
             }
+
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
             enableTokenCalibration = options.EnableTokenCalibration;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;

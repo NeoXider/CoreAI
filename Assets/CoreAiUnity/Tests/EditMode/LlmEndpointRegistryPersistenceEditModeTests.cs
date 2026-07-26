@@ -21,7 +21,10 @@ namespace CoreAI.Tests.EditMode
             public LlmEndpointRegistryState State { get; set; } = new();
             public int Saves { get; private set; }
 
-            public LlmEndpointRegistryState Load() => State;
+            public LlmEndpointRegistryState Load()
+            {
+                return State;
+            }
 
             public void Save(LlmEndpointRegistryState state)
             {
@@ -114,7 +117,10 @@ namespace CoreAI.Tests.EditMode
             public LlmEndpointRegistryState State { get; private set; } = new();
             public int Calls => Volatile.Read(ref _calls);
 
-            public LlmEndpointRegistryState Load() => new();
+            public LlmEndpointRegistryState Load()
+            {
+                return new LlmEndpointRegistryState();
+            }
 
             public void Save(LlmEndpointRegistryState state)
             {
@@ -157,7 +163,10 @@ namespace CoreAI.Tests.EditMode
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
-                CancellationToken cancellationToken = default) => Completion.Task;
+                CancellationToken cancellationToken = default)
+            {
+                return Completion.Task;
+            }
         }
 
         private CoreAISettingsAsset _settings;

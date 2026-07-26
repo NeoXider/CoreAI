@@ -45,8 +45,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class ClassCatalog
     {
-        private readonly Dictionary<string, ClassDescriptor> _byName =
-            new Dictionary<string, ClassDescriptor>(StringComparer.Ordinal);
+        private readonly Dictionary<string, ClassDescriptor> _byName = new(StringComparer.Ordinal);
 
         public void Register(ClassDescriptor descriptor)
         {
@@ -104,7 +103,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public static ClassCatalog CreateMvp1()
         {
-            var catalog = new ClassCatalog();
+            ClassCatalog catalog = new();
             catalog.Register(new ClassDescriptor("Instance", null, true, false, false));
             catalog.Register(new ClassDescriptor("PVInstance", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("Folder", "Instance", false, true, false));

@@ -618,7 +618,8 @@ namespace CoreAI.Tests.EditMode
             ConversationContextSnapshot snap = mgr.BuildSnapshot("roleA", history, roleConfig, buildArgs);
 
             Assert.IsTrue(snap.WasCompacted);
-            Assert.IsTrue(snap.Summary.StartsWith("…"), "Summary should evict oldest content when over MaxRolledSummaryTokens.");
+            Assert.IsTrue(snap.Summary.StartsWith("…"),
+                "Summary should evict oldest content when over MaxRolledSummaryTokens.");
             string persisted = store.LoadSummary("roleA");
             Assert.AreEqual(snap.Summary, ConversationFoldMarker.Strip(persisted),
                 "Store should receive the same truncated summary as the snapshot, plus only the fold marker.");
@@ -1143,8 +1144,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("clean prose", marked.ConversationSummary);
             Assert.AreEqual(clean.Budget.EstimatedSystemTokens, marked.Budget.EstimatedSystemTokens);
-            Assert.IsFalse(marked.EstimatedRequestChatHistory.Any(
-                message => message.Content.Contains("[fold:v1:", StringComparison.Ordinal)));
+            Assert.IsFalse(marked.EstimatedRequestChatHistory.Any(message =>
+                message.Content.Contains("[fold:v1:", StringComparison.Ordinal)));
         }
 
         /// <summary>

@@ -10,7 +10,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InstanceIdAllocator
     {
-        private readonly object _gate = new object();
+        private readonly object _gate = new();
         private ulong _nextServer = 1UL;
         private ulong _nextLocal = 1UL;
 

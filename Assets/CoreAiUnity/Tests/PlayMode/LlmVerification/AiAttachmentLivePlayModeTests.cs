@@ -81,7 +81,7 @@ namespace CoreAI.Tests.PlayMode
                     new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
 
                 StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, streaming: true, out _);
+                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
                 Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
                 yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "TextAttachment_Streaming");
 
@@ -116,7 +116,7 @@ namespace CoreAI.Tests.PlayMode
                     new List<AiAttachment> { AiAttachment.FromFile("spawn.lua", lua) });
 
                 StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, streaming: true, out _);
+                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
                 Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
                 yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "LuaAttachment_Streaming");
 
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.PlayMode
                     new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
 
                 // streaming:false forces CompleteForTaskAsync down the non-streaming ILlmClient.CompleteAsync path.
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, streaming: false, out _);
+                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, false, out _);
                 TaskResultBox box = new();
                 Task run = RunTaskCollectAsync(orch, task, box, CancellationToken.None);
                 yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "TextAttachment_NonStreaming");
@@ -198,7 +198,7 @@ namespace CoreAI.Tests.PlayMode
                     new List<AiAttachment> { AiAttachment.Image(png, "image/png", "red64.png") });
 
                 StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, streaming: true, out _);
+                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
                 Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
                 yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "ImageAttachment_Streaming");
 
@@ -247,7 +247,7 @@ namespace CoreAI.Tests.PlayMode
                     new List<AiAttachment> { AiAttachment.FromFile("note.md", md) });
 
                 // A recording store so the persisted user turn is readable after the orchestrator completes.
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, streaming: true,
+                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true,
                     out InMemoryStore store);
                 StreamOutcome outcome = new();
                 Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);

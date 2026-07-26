@@ -18,15 +18,16 @@ namespace CoreAI.Mods.Rbx.Instances
         // WHY: Roblox delivers input events in device order, so both the current keys (source order)
         // and the previous frame's keys are kept as ordered lists — iterating a HashSet would make
         // the per-frame Began/Ended order (and any test over it) nondeterministic.
-        private readonly List<int> _previousKeys = new List<int>();
-        private readonly HashSet<int> _currentKeys = new HashSet<int>();
-        private readonly List<int> _pollBuffer = new List<int>();
+        private readonly List<int> _previousKeys = new();
+        private readonly HashSet<int> _currentKeys = new();
+        private readonly List<int> _pollBuffer = new();
         private readonly bool[] _previousMouseButtons = new bool[3];
 
         // WHY: interned so StepMouseButtons never concatenates a string per button change, and the
         // gameProcessedEvent flag is a cached box so a per-frame fire never boxes the bool.
         private static readonly string[] MouseButtonTypeNames =
             { "MouseButton1", "MouseButton2", "MouseButton3" };
+
         private static readonly object GameNotProcessed = false;
 
         private RbxEnumRegistry _enums;
@@ -41,15 +42,15 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when a key/button/touch begins.</summary>
         public RbxScriptSignal InputBegan { get; } =
-            new RbxScriptSignal("UserInputService.InputBegan", supportsDispatch: true);
+            new("UserInputService.InputBegan", true);
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when a key/button/touch ends.</summary>
         public RbxScriptSignal InputEnded { get; } =
-            new RbxScriptSignal("UserInputService.InputEnded", supportsDispatch: true);
+            new("UserInputService.InputEnded", true);
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when an input changes (mouse movement).</summary>
         public RbxScriptSignal InputChanged { get; } =
-            new RbxScriptSignal("UserInputService.InputChanged", supportsDispatch: true);
+            new("UserInputService.InputChanged", true);
 
         /// <summary>Device state seam; headless in-memory by default, the composition attaches the
         /// engine-backed source once (like the camera rig).</summary>
@@ -96,8 +97,8 @@ namespace CoreAI.Mods.Rbx.Instances
             // _pollBuffer; clearing/refilling the shared list there throws "collection modified" out
             // of the pump. GetKeysPressed already allocates its result list, so a local int buffer is
             // no extra hot-path cost (this is a mod-chosen poll, not the per-frame pump).
-            var pressed = new List<RbxInputObject>();
-            var buffer = new List<int>();
+            List<RbxInputObject> pressed = new();
+            List<int> buffer = new();
             InputSource.CollectPressedKeyCodes(buffer);
             foreach (int keyCode in buffer)
             {
@@ -193,7 +194,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
 
                 RbxVector2 location = InputSource.GetMouseLocation();
-                var input = new RbxInputObject(
+                RbxInputObject input = new(
                     FindItemByName("KeyCode", "Unknown"),
                     FindItemByName("UserInputType", MouseButtonTypeNames[button]),
                     FindItemByName("UserInputState", down ? "Begin" : "End"),
@@ -212,7 +213,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 && _hasPreviousMouseLocation
                 && (location.X != _previousMouseLocation.X || location.Y != _previousMouseLocation.Y))
             {
-                var input = new RbxInputObject(
+                RbxInputObject input = new(
                     FindItemByName("KeyCode", "Unknown"),
                     FindItemByName("UserInputType", "MouseMovement"),
                     FindItemByName("UserInputState", "Change"),

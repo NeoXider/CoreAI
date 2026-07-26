@@ -83,7 +83,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PerModRingBuffer_EvictsOldestPastCap()
         {
-            LuaLogService service = new(perModCapacity: 3, globalCapacity: 100);
+            LuaLogService service = new(3, 100);
 
             for (int i = 1; i <= 5; i++)
             {
@@ -102,7 +102,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void GlobalRingBuffer_EvictsOldestPastCapAcrossMods()
         {
-            LuaLogService service = new(perModCapacity: 100, globalCapacity: 3);
+            LuaLogService service = new(100, 3);
 
             service.Append(Entry("a", LuaLogLevel.Print, "1"));
             service.Append(Entry("b", LuaLogLevel.Print, "2"));
@@ -261,7 +261,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ThreadSafetySmoke_ParallelAppendsAndQueries_DoNotCorruptCounts()
         {
-            LuaLogService service = new(perModCapacity: 1000, globalCapacity: 5000);
+            LuaLogService service = new(1000, 5000);
             const int producers = 8;
             const int perProducer = 200;
             long totalExpected = producers * perProducer;

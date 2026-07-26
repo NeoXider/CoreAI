@@ -20,7 +20,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 throw RbxError.BadArgument("cannot capture a nil root", "pass a live instance");
             }
 
-            var snapshot = new InstanceTreeSnapshot();
+            InstanceTreeSnapshot snapshot = new();
             CaptureNode(root, 0UL, snapshot.Instances);
             return snapshot;
         }
@@ -31,7 +31,7 @@ namespace CoreAI.Mods.Rbx.Instances
             InstanceRecord record = null;
             instance.Registry?.TryGetRecord(instance.Id, out record);
 
-            var node = new InstanceSnapshot
+            InstanceSnapshot node = new()
             {
                 Id = instance.Id.Value,
                 ParentId = parentId,
@@ -62,7 +62,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private static AttributeSnapshot ToAttributeSnapshot(string name, object value)
         {
-            var snapshot = new AttributeSnapshot { Name = name };
+            AttributeSnapshot snapshot = new() { Name = name };
             switch (value)
             {
                 case string s:
@@ -115,7 +115,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "capture a subtree with InstanceTreeSerializer.Capture first");
             }
 
-            var restored = new Dictionary<ulong, RbxInstance>();
+            Dictionary<ulong, RbxInstance> restored = new();
             foreach (InstanceSnapshot node in snapshot.Instances)
             {
                 RbxInstance instance = registry.RestoreInstance(node.ClassName,
@@ -159,25 +159,25 @@ namespace CoreAI.Mods.Rbx.Instances
                 case AttributeValueKind.Bool: return attribute.BoolValue;
                 case AttributeValueKind.Number: return attribute.NumberValue;
                 case AttributeValueKind.Vector3:
-                    {
-                        float[] p = Parse(attribute.StringValue, 3);
-                        return new RbxVector3(p[0], p[1], p[2]);
-                    }
+                {
+                    float[] p = Parse(attribute.StringValue, 3);
+                    return new RbxVector3(p[0], p[1], p[2]);
+                }
                 case AttributeValueKind.Vector2:
-                    {
-                        float[] p = Parse(attribute.StringValue, 2);
-                        return new RbxVector2(p[0], p[1]);
-                    }
+                {
+                    float[] p = Parse(attribute.StringValue, 2);
+                    return new RbxVector2(p[0], p[1]);
+                }
                 case AttributeValueKind.Color3:
-                    {
-                        float[] p = Parse(attribute.StringValue, 3);
-                        return new RbxColor3(p[0], p[1], p[2]);
-                    }
+                {
+                    float[] p = Parse(attribute.StringValue, 3);
+                    return new RbxColor3(p[0], p[1], p[2]);
+                }
                 case AttributeValueKind.UDim:
-                    {
-                        float[] p = Parse(attribute.StringValue, 2);
-                        return new RbxUDim(p[0], (int)p[1]);
-                    }
+                {
+                    float[] p = Parse(attribute.StringValue, 2);
+                    return new RbxUDim(p[0], (int)p[1]);
+                }
                 default: return attribute.NumberValue;
             }
         }
@@ -186,7 +186,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private static string Join(params float[] components)
         {
-            var parts = new string[components.Length];
+            string[] parts = new string[components.Length];
             for (int i = 0; i < components.Length; i++)
             {
                 parts[i] = F(components[i]);
@@ -196,7 +196,10 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>Round-trippable float format so restore reproduces the captured value exactly.</summary>
-        private static string F(float value) => value.ToString("R", CultureInfo.InvariantCulture);
+        private static string F(float value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
 
         private static float[] Parse(string serialized, int expected)
         {
@@ -208,7 +211,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "expected " + expected + " comma-separated components");
             }
 
-            var result = new float[expected];
+            float[] result = new float[expected];
             for (int i = 0; i < expected; i++)
             {
                 result[i] = float.Parse(parts[i], CultureInfo.InvariantCulture);

@@ -12,7 +12,6 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class FullAccessDemoScenePlayModeTests
     {
-
         [UnityTearDown]
         public IEnumerator UnloadLoadedScenes()
         {
@@ -20,6 +19,7 @@ namespace CoreAI.Tests.PlayMode
             // rest of the PlayMode run.
             yield return PlayModeSceneSandbox.UnloadToEmptyScene();
         }
+
         private const string ScenePath = "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity";
 
         [UnityTest]

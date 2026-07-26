@@ -95,9 +95,9 @@ namespace CoreAI.Core.Tests.EditMode
         [Test]
         public async Task HttpClientProbe_CallerCancellationRemainsCancellation()
         {
-            using HttpClient client = new(new AsyncDelegateHandler(
-                (_, token) => Task.Delay(TimeSpan.FromMinutes(1), token)
-                    .ContinueWith(_ => new HttpResponseMessage(HttpStatusCode.OK), token)));
+            using HttpClient client = new(new AsyncDelegateHandler((_, token) => Task
+                .Delay(TimeSpan.FromMinutes(1), token)
+                .ContinueWith(_ => new HttpResponseMessage(HttpStatusCode.OK), token)));
             HttpClientOpenAiReadinessProbe probe = new(client);
             using CancellationTokenSource cancellation = new();
             cancellation.Cancel();
@@ -106,11 +106,11 @@ namespace CoreAI.Core.Tests.EditMode
             try
             {
                 await probe.ProbeAsync(new LlmEndpointReadinessRequest
-                {
-                    BaseUrl = "https://example.test/v1",
-                    Mode = LlmEndpointReadinessMode.CompletionsOnly
-                },
-                cancellation.Token);
+                    {
+                        BaseUrl = "https://example.test/v1",
+                        Mode = LlmEndpointReadinessMode.CompletionsOnly
+                    },
+                    cancellation.Token);
             }
             catch (OperationCanceledException ex)
             {
@@ -181,7 +181,10 @@ namespace CoreAI.Core.Tests.EditMode
 
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
-                CancellationToken cancellationToken) => Task.FromResult(_response(request));
+                CancellationToken cancellationToken)
+            {
+                return Task.FromResult(_response(request));
+            }
         }
 
         private sealed class AsyncDelegateHandler : HttpMessageHandler
@@ -196,7 +199,10 @@ namespace CoreAI.Core.Tests.EditMode
 
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
-                CancellationToken cancellationToken) => _response(request, cancellationToken);
+                CancellationToken cancellationToken)
+            {
+                return _response(request, cancellationToken);
+            }
         }
     }
 }

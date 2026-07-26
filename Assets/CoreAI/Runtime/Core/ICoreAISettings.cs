@@ -32,6 +32,7 @@ namespace CoreAI
     public interface ICoreAISettings
     {
         const int DefaultConversationRolledSummaryMaxTokens = 2048;
+
         /// <summary>Max consecutive Programmer Lua repair attempts before stopping the retry loop.</summary>
         int MaxLuaRepairRetries { get; }
 

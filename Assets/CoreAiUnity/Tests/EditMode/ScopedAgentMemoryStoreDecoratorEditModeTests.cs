@@ -158,7 +158,7 @@ namespace CoreAI.Tests.EditMode
         public void AddToolForRole_PaddedRoleId_AddsToTrimmedRole()
         {
             AgentMemoryPolicy policy = new();
-            CoreAI.AgentMemory.MemoryLlmTool tool = new();
+            AgentMemory.MemoryLlmTool tool = new();
 
             policy.AddToolForRole(" trader ", tool);
 

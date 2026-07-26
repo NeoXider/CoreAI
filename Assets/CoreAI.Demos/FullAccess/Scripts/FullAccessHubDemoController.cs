@@ -126,7 +126,7 @@ namespace CoreAI.Demos
 
                 // WHY: last-writer-wins registration into the window's live registry; PageRegistered
                 // rebuilds the tab bar so the Mods tab lights up after the scopes are ready.
-                HubModsPages.Register(Registry, runtime, sourceStore, LuaCapabilities.All, allowFull: false);
+                HubModsPages.Register(Registry, runtime, sourceStore, LuaCapabilities.All, false);
             }
             catch (Exception ex)
             {

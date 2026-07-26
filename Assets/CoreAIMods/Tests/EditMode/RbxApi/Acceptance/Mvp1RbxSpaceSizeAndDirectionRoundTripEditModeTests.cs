@@ -2,6 +2,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
+using Random = System.Random;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
@@ -30,10 +31,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void SizeRoundTrip_RobloxFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(2026);
+            Random rng = new(2026);
             for (int i = 0; i < 200; i++)
             {
-                var size = new RbxVector3(NextExtent(rng), NextExtent(rng), NextExtent(rng));
+                RbxVector3 size = new(NextExtent(rng), NextExtent(rng), NextExtent(rng));
                 RbxVector3 roundTrip = RbxSpace.SizeFromUnity(RbxSpace.SizeToUnity(size));
                 Assert.IsTrue(roundTrip.FuzzyEq(size, Epsilon), $"{size} -> {roundTrip} at scale {scale}");
             }
@@ -44,10 +45,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void SizeRoundTrip_UnityFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(6202);
+            Random rng = new(6202);
             for (int i = 0; i < 200; i++)
             {
-                var size = new Vector3(NextExtent(rng), NextExtent(rng), NextExtent(rng));
+                Vector3 size = new(NextExtent(rng), NextExtent(rng), NextExtent(rng));
                 Vector3 roundTrip = RbxSpace.SizeToUnity(RbxSpace.SizeFromUnity(size));
                 Assert.Less((roundTrip - size).magnitude, Epsilon, $"{size} -> {roundTrip} at scale {scale}");
             }
@@ -70,7 +71,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void DirectionRoundTrip_PreservesUnitLength_AtAnyScale(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(31337);
+            Random rng = new(31337);
             for (int i = 0; i < 200; i++)
             {
                 RbxVector3 direction = new RbxVector3(
@@ -92,10 +93,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void VelocityRoundTrip_BothDirections(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(90210);
+            Random rng = new(90210);
             for (int i = 0; i < 100; i++)
             {
-                var v = new RbxVector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
+                RbxVector3 v = new(NextCoord(rng), NextCoord(rng), NextCoord(rng));
                 Assert.IsTrue(RbxSpace.VelocityFromUnity(RbxSpace.VelocityToUnity(v))
                     .FuzzyEq(v, Epsilon));
             }
@@ -106,7 +107,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         public void LengthAndAccelerationRoundTrip(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(404);
+            Random rng = new(404);
             for (int i = 0; i < 100; i++)
             {
                 float studs = NextCoord(rng);
@@ -127,10 +128,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             // WHY: the CFrame suite proves Roblox->Unity->Roblox; a host object handed to a mod
             // takes the opposite path (FromUnity then ToUnityPose), so both closures are locked.
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(112);
+            Random rng = new(112);
             for (int i = 0; i < 100; i++)
             {
-                var position = new Vector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
+                Vector3 position = new(NextCoord(rng), NextCoord(rng), NextCoord(rng));
                 Quaternion rotation = Quaternion.Euler(
                     NextAngle(rng), NextAngle(rng), NextAngle(rng));
                 RbxCFrame cf = RbxSpace.FromUnity(position, rotation);
@@ -142,13 +143,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
-        private static float NextCoord(System.Random rng) =>
-            (float)(rng.NextDouble() * 2000.0 - 1000.0);
+        private static float NextCoord(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 2000.0 - 1000.0);
+        }
 
-        private static float NextExtent(System.Random rng) =>
-            (float)(rng.NextDouble() * 512.0 + 0.05);
+        private static float NextExtent(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 512.0 + 0.05);
+        }
 
-        private static float NextAngle(System.Random rng) =>
-            (float)(rng.NextDouble() * 720.0 - 360.0);
+        private static float NextAngle(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 720.0 - 360.0);
+        }
     }
 }

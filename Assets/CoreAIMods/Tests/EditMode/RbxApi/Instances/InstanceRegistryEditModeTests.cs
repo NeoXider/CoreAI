@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
@@ -11,7 +12,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void Create_AssignsDefaultsAndRegistersRecord()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
             Assert.AreEqual("Part", part.ClassName);
@@ -30,7 +31,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void Lookup_ByNetIdAndWorldName_ResolvesTheSameRecord()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
             registry.BindNetId(part.Id, 42u);
@@ -45,12 +46,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void GetOwnedBy_ReturnsOnlyTheModsInstances()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance a = registry.Create("Part", "speed_pad", OriginTag.FromMod("speed_pad"));
             registry.Create("Part", "other_mod", OriginTag.FromMod("other_mod"));
             registry.Create("Folder");
 
-            var owned = registry.GetOwnedBy("speed_pad");
+            IReadOnlyList<RbxInstance> owned = registry.GetOwnedBy("speed_pad");
             Assert.AreEqual(1, owned.Count);
             Assert.AreSame(a, owned[0]);
         }
@@ -58,7 +59,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void RegisteredAndUnregistered_EventsFire()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             InstanceRecord registered = null;
             InstanceRecord unregistered = null;
             registry.Registered += record => registered = record;
@@ -76,7 +77,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void CreateScripted_RejectsNonCreatableClasses()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
 
             RbxError unknown = Assert.Throws<RbxError>(() => registry.CreateScripted("Bogus"));
             Assert.AreEqual(RbxErrorCode.BadArgument, unknown.Code);
@@ -92,7 +93,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void Create_RejectsAbstractAndUnknownClasses()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             Assert.Throws<RbxError>(() => registry.Create("Instance"));
             Assert.Throws<RbxError>(() => registry.Create("NoSuchClass"));
         }
@@ -100,7 +101,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void Create_RejectsInvalidOriginTag()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxError error = Assert.Throws<RbxError>(() => registry.Create("Part", null, "garbage"));
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
 
@@ -111,11 +112,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void RestoreInstance_RejectsDuplicateId()
         {
-            var registry = new InstanceRegistry();
+            InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
-            RbxError error = Assert.Throws<RbxError>(
-                () => registry.RestoreInstance("Part", part.Id));
+            RbxError error = Assert.Throws<RbxError>(() => registry.RestoreInstance("Part", part.Id));
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
         }
     }

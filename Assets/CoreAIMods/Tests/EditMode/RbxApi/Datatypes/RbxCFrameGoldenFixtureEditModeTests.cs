@@ -228,7 +228,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void Orthonormalize_RepairsDriftedRotation()
         {
-            RbxCFrame drifted = new RbxCFrame(
+            RbxCFrame drifted = new(
                 0f, 0f, 0f,
                 1.02f, 0.01f, 0f,
                 0f, 0.98f, 0.02f,

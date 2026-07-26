@@ -194,7 +194,8 @@ namespace CoreAI.Tests.EditMode
 
             try
             {
-                FileDataOverlayVersionStore.BeforeAtomicReplaceForTesting = () => throw new IOException("simulated crash");
+                FileDataOverlayVersionStore.BeforeAtomicReplaceForTesting =
+                    () => throw new IOException("simulated crash");
                 store.RecordSuccessfulApply("k", "p2");
             }
             finally

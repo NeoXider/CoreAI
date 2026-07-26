@@ -22,8 +22,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void Arithmetic_OperatorTable()
         {
-            var a = new RbxVector3(1f, 2f, 3f);
-            var b = new RbxVector3(4f, 5f, 6f);
+            RbxVector3 a = new(1f, 2f, 3f);
+            RbxVector3 b = new(4f, 5f, 6f);
 
             Assert.AreEqual(new RbxVector3(5f, 7f, 9f), a + b);
             Assert.AreEqual(new RbxVector3(-3f, -3f, -3f), a - b);
@@ -38,7 +38,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void MagnitudeAndUnit_Golden()
         {
-            var v = new RbxVector3(3f, 4f, 0f);
+            RbxVector3 v = new(3f, 4f, 0f);
             Assert.AreEqual(5f, v.Magnitude, Epsilon);
             Assert.IsTrue(v.Unit.FuzzyEq(new RbxVector3(0.6f, 0.8f, 0f), Epsilon));
         }
@@ -58,7 +58,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void Lerp_Midpoint()
         {
-            var result = RbxVector3.Zero.Lerp(new RbxVector3(10f, -4f, 2f), 0.5f);
+            RbxVector3 result = RbxVector3.Zero.Lerp(new RbxVector3(10f, -4f, 2f), 0.5f);
             Assert.IsTrue(result.FuzzyEq(new RbxVector3(5f, -2f, 1f), Epsilon));
         }
 
@@ -77,7 +77,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void ComponentHelpers_AbsCeilFloorSignMaxMin()
         {
-            var v = new RbxVector3(-1.5f, 2.5f, -0.5f);
+            RbxVector3 v = new(-1.5f, 2.5f, -0.5f);
             Assert.AreEqual(new RbxVector3(1.5f, 2.5f, 0.5f), v.Abs());
             Assert.AreEqual(new RbxVector3(-1f, 3f, 0f), v.Ceil());
             Assert.AreEqual(new RbxVector3(-2f, 2f, -1f), v.Floor());
@@ -91,7 +91,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void FromNormalId_FrontIsNegativeZ()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
             RbxEnum normalId = registry.Get("NormalId");
             Assert.AreEqual(new RbxVector3(0f, 0f, -1f), RbxVector3.FromNormalId(normalId["Front"]));
             Assert.AreEqual(new RbxVector3(0f, 0f, 1f), RbxVector3.FromNormalId(normalId["Back"]));

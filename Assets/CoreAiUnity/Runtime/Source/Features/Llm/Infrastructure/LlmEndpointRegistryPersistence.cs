@@ -24,7 +24,9 @@ namespace CoreAI.Infrastructure.Llm
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
         public IReadOnlyList<LlmEndpointDescriptor> Endpoints { get; set; } = Array.Empty<LlmEndpointDescriptor>();
         public IReadOnlyList<LlmRuntimeProfile> Profiles { get; set; } = Array.Empty<LlmRuntimeProfile>();
-        public IReadOnlyList<LlmPersistedRoleProfile> RoleProfiles { get; set; } = Array.Empty<LlmPersistedRoleProfile>();
+
+        public IReadOnlyList<LlmPersistedRoleProfile> RoleProfiles { get; set; } =
+            Array.Empty<LlmPersistedRoleProfile>();
     }
 
     /// <summary>Persistence boundary for runtime endpoint configuration.</summary>

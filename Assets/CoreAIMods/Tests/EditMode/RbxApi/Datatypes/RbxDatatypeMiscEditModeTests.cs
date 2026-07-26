@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using NUnit.Framework;
 
@@ -14,7 +15,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void Vector2_CoreMath()
         {
-            var a = new RbxVector2(3f, 4f);
+            RbxVector2 a = new(3f, 4f);
             Assert.AreEqual(5f, a.Magnitude, Epsilon);
             Assert.IsTrue(a.Unit.FuzzyEq(new RbxVector2(0.6f, 0.8f), Epsilon));
             Assert.AreEqual(11f, a.Dot(new RbxVector2(1f, 2f)), Epsilon);
@@ -29,7 +30,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         {
             float unsigned = RbxVector2.XAxis.Angle(RbxVector2.YAxis);
             Assert.AreEqual(System.MathF.PI / 2f, unsigned, Epsilon);
-            float signed = RbxVector2.YAxis.Angle(RbxVector2.XAxis, isSigned: true);
+            float signed = RbxVector2.YAxis.Angle(RbxVector2.XAxis, true);
             Assert.AreEqual(-System.MathF.PI / 2f, signed, Epsilon);
         }
 
@@ -91,8 +92,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void UDim_ArithmeticAndFormat()
         {
-            var a = new RbxUDim(0.5f, 10);
-            var b = new RbxUDim(0.25f, -4);
+            RbxUDim a = new(0.5f, 10);
+            RbxUDim b = new(0.25f, -4);
             Assert.AreEqual(new RbxUDim(0.75f, 6), a + b);
             Assert.AreEqual(new RbxUDim(0.25f, 14), a - b);
             Assert.AreEqual(new RbxUDim(-0.5f, -10), -a);
@@ -102,7 +103,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void UDim2_ConstructorsAndAliases()
         {
-            var full = new RbxUDim2(0.5f, 10, 0.25f, 5);
+            RbxUDim2 full = new(0.5f, 10, 0.25f, 5);
             Assert.AreEqual(new RbxUDim(0.5f, 10), full.X);
             Assert.AreEqual(new RbxUDim(0.25f, 5), full.Y);
             Assert.AreEqual(full.X, full.Width);
@@ -126,7 +127,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void EnumRegistry_BuiltinsSeeded_MaterialValuesMatchRoblox()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
             RbxEnum material = registry.Get("Material");
             Assert.AreEqual(256, material["Plastic"].Value);
             Assert.AreEqual(1088, material["Metal"].Value);
@@ -142,17 +143,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void EnumRegistry_ItemsAreInterned_IdentityEquality()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
             Assert.AreSame(registry.Get("Material")["Wood"], registry.Get("Material")["Wood"]);
         }
 
         [Test]
         public void EnumRegistry_UnknownEnum_RaisesLoudStub()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
             // WHY: KeyCode shipped with the MVP1 input slice; EasingStyle stays unimplemented
             // until TweenService (MVP8), so it is the loud-stub probe now.
-            var ex = Assert.Throws<RbxApiStubException>(() => registry.Get("EasingStyle"));
+            RbxApiStubException ex = Assert.Throws<RbxApiStubException>(() => registry.Get("EasingStyle"));
             Assert.AreEqual("NOT_IMPLEMENTED", ex.Code);
             StringAssert.Contains("Enum.EasingStyle", ex.Message);
             StringAssert.Contains("| fix:", ex.Message, "stub errors carry the machine-parsable fix section");
@@ -161,16 +162,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         [Test]
         public void Enum_UnknownItem_RaisesBadArgument()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
-            var ex = Assert.Throws<RbxApiStubException>(() => _ = registry.Get("Material")["Adamantium"]);
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
+            RbxApiStubException ex =
+                Assert.Throws<RbxApiStubException>(() => _ = registry.Get("Material")["Adamantium"]);
             Assert.AreEqual("BAD_ARGUMENT", ex.Code);
         }
 
         [Test]
         public void Enum_GetEnumItems_DeclarationOrder()
         {
-            var registry = RbxEnumRegistry.CreateWithBuiltins();
-            var items = registry.Get("NormalId").GetEnumItems();
+            RbxEnumRegistry registry = RbxEnumRegistry.CreateWithBuiltins();
+            IReadOnlyList<RbxEnumItem> items = registry.Get("NormalId").GetEnumItems();
             Assert.AreEqual(6, items.Count);
             Assert.AreEqual("Right", items[0].Name);
             Assert.AreEqual("Front", items[5].Name);

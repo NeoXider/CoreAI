@@ -154,7 +154,7 @@ namespace CoreAI.Infrastructure.World
             // WHY: Cancel then dispose the previous source so a re-start (interval change) never
             // leaks it; null it out first so the in-flight loop reading _autoSaveCts.Token can't race
             // onto a disposed source.
-            var old = _autoSaveCts;
+            CancellationTokenSource old = _autoSaveCts;
             _autoSaveCts = null;
             old?.Cancel();
             old?.Dispose();
@@ -566,7 +566,7 @@ namespace CoreAI.Infrastructure.World
 
             _disposed = true;
             Application.quitting -= OnApplicationQuitting;
-            var old = _autoSaveCts;
+            CancellationTokenSource old = _autoSaveCts;
             _autoSaveCts = null;
             old?.Cancel();
             old?.Dispose();

@@ -63,7 +63,7 @@ namespace CoreAI.Tests.EditMode
         {
             return new List<MEAI.ChatMessage>
             {
-                new MEAI.ChatMessage(MEAI.ChatRole.User, "hi")
+                new(MEAI.ChatRole.User, "hi")
             };
         }
 

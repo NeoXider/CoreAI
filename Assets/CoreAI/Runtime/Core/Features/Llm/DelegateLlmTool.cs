@@ -140,7 +140,7 @@ namespace CoreAI.Ai
                 // safe standalone behavior.
                 return true;
 #else
-                return !CoreAI.Infrastructure.Llm.ToolExecutionPolicy.LooksLikeArgumentConversionError(ex);
+                return !Infrastructure.Llm.ToolExecutionPolicy.LooksLikeArgumentConversionError(ex);
 #endif
             }
 
@@ -183,7 +183,7 @@ namespace CoreAI.Ai
 
         private static bool HasModelVisibleParameters(Delegate action)
         {
-            foreach (System.Reflection.ParameterInfo parameter in action.Method.GetParameters())
+            foreach (ParameterInfo parameter in action.Method.GetParameters())
             {
                 if (parameter.ParameterType != typeof(CancellationToken))
                 {

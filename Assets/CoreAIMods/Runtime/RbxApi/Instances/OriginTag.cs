@@ -12,11 +12,20 @@ namespace CoreAI.Mods.Rbx.Instances
         public const string ConsolePrefix = "console:";
         public const string AiPrefix = "ai:";
 
-        public static string FromMod(string modId) => ModPrefix + modId;
+        public static string FromMod(string modId)
+        {
+            return ModPrefix + modId;
+        }
 
-        public static string FromConsole(string invocationId) => ConsolePrefix + invocationId;
+        public static string FromConsole(string invocationId)
+        {
+            return ConsolePrefix + invocationId;
+        }
 
-        public static string FromAi(string modId) => AiPrefix + modId;
+        public static string FromAi(string modId)
+        {
+            return AiPrefix + modId;
+        }
 
         /// <summary>Null (host origin) or one of the three known prefixes with a non-empty payload.</summary>
         public static bool IsValid(string originTag)

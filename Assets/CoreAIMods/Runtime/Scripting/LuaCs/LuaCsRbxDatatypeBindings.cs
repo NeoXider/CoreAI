@@ -38,33 +38,65 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- Wrap entry points --------------------------------------------------------------
 
-        public static LuaValue Wrap(RbxVector3 value) => Box(value, Vector3Meta);
+        public static LuaValue Wrap(RbxVector3 value)
+        {
+            return Box(value, Vector3Meta);
+        }
 
-        public static LuaValue Wrap(RbxVector2 value) => Box(value, Vector2Meta);
+        public static LuaValue Wrap(RbxVector2 value)
+        {
+            return Box(value, Vector2Meta);
+        }
 
-        public static LuaValue Wrap(RbxCFrame value) => Box(value, CFrameMeta);
+        public static LuaValue Wrap(RbxCFrame value)
+        {
+            return Box(value, CFrameMeta);
+        }
 
-        public static LuaValue Wrap(RbxColor3 value) => Box(value, Color3Meta);
+        public static LuaValue Wrap(RbxColor3 value)
+        {
+            return Box(value, Color3Meta);
+        }
 
-        public static LuaValue Wrap(RbxUDim value) => Box(value, UDimMeta);
+        public static LuaValue Wrap(RbxUDim value)
+        {
+            return Box(value, UDimMeta);
+        }
 
-        public static LuaValue Wrap(RbxUDim2 value) => Box(value, UDim2Meta);
+        public static LuaValue Wrap(RbxUDim2 value)
+        {
+            return Box(value, UDim2Meta);
+        }
 
-        public static LuaValue Wrap(RbxRandom value) => Box(value, RandomMeta);
+        public static LuaValue Wrap(RbxRandom value)
+        {
+            return Box(value, RandomMeta);
+        }
 
-        public static LuaValue Wrap(RbxScriptSignal value) => Box(value, SignalMeta);
+        public static LuaValue Wrap(RbxScriptSignal value)
+        {
+            return Box(value, SignalMeta);
+        }
 
         /// <summary>
         /// Wraps a dispatch-enabled signal carrying the acting mod context so <c>Connect</c>/<c>Once</c>
         /// can record the returned connection for teardown (RunService/UserInputService reads use this;
         /// the MVP2-stub signals stay context-free since connecting them throws before a connection exists).
         /// </summary>
-        public static LuaValue Wrap(RbxScriptSignal value, LuaCsRbxModContext owner) =>
-            new LuaValue(new LuaCsRbxValueBox(value, SignalMeta, owner));
+        public static LuaValue Wrap(RbxScriptSignal value, LuaCsRbxModContext owner)
+        {
+            return new LuaValue(new LuaCsRbxValueBox(value, SignalMeta, owner));
+        }
 
-        public static LuaValue Wrap(RbxScriptConnection value) => Box(value, ConnectionMeta);
+        public static LuaValue Wrap(RbxScriptConnection value)
+        {
+            return Box(value, ConnectionMeta);
+        }
 
-        public static LuaValue Wrap(RbxInputObject value) => Box(value, InputObjectMeta);
+        public static LuaValue Wrap(RbxInputObject value)
+        {
+            return Box(value, InputObjectMeta);
+        }
 
         public static LuaValue Wrap(RbxEnumItem item)
         {
@@ -865,7 +897,7 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects an EnumItem at argument " + (index + 1),
                 "pass an Enum item like Enum.Material.Wood, got " + Describe(value)
-                + " at argument " + (index + 1));
+                                                                  + " at argument " + (index + 1));
         }
 
         private static RbxEnum ReadEnumType(LuaFunctionExecutionContext ctx, int index, string what)
@@ -879,7 +911,7 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 what + " expects an Enum at argument " + (index + 1),
                 "pass an Enum type like Enum.Material, got " + Describe(value)
-                + " at argument " + (index + 1));
+                                                             + " at argument " + (index + 1));
         }
 
         private static RbxRotationOrder ReadRotationOrder(LuaFunctionExecutionContext ctx, int index)
@@ -891,7 +923,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "RotationOrder"
-                && Enum.TryParse(item.Name, out RbxRotationOrder order))
+                                                      && Enum.TryParse(item.Name, out RbxRotationOrder order))
             {
                 return order;
             }
@@ -906,16 +938,16 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Budget for one synchronous signal-handler call (mirrors the logic-slot
         /// guard: a broken handler must never stall the frame).</summary>
         private static readonly CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard SignalHandlerGuard =
-            new(200, 200_000, CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
+            new(200, 200_000, Sandbox.LuaCs.LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
 
         // The three signal members capture nothing but a compile-time constant and take their
         // receiver from their own call context, so one instance each is reused for every member
         // read instead of building a fresh LuaFunction + closure per `sig:Connect(...)`.
         private static readonly LuaValue SignalConnectFn =
-            new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, once: false)));
+            new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, false)));
 
         private static readonly LuaValue SignalOnceFn =
-            new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, once: true)));
+            new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, true)));
 
         private static readonly LuaValue SignalWaitFn = new(Fn("RBXScriptSignal.Wait", inner =>
         {

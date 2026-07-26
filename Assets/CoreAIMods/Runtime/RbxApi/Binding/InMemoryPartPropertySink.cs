@@ -14,8 +14,7 @@ namespace CoreAI.Mods.Rbx.Binding
     /// </summary>
     public sealed class InMemoryPartPropertySink : IPartPropertySink
     {
-        private readonly Dictionary<InstanceId, PartProperties> _properties =
-            new Dictionary<InstanceId, PartProperties>();
+        private readonly Dictionary<InstanceId, PartProperties> _properties = new();
 
         public void SetCFrame(InstanceId id, in RbxCFrame cframe)
         {

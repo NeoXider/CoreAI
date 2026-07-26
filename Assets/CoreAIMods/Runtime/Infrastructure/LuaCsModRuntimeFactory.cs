@@ -227,14 +227,14 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: The bindings are the shared transaction scope of both surfaces; handing them to the
                 // runtime lets it reset a leaked coreai_world_begin per guarded call, exactly as the
                 // one-off executor resets around every chunk.
-                transactionScope: bindings,
-                handlerMaxAllocatedBytes: options.HandlerMaxAllocatedBytes,
-                engine: engine,
-                maxErrorsBeforeQuarantine: options.MaxErrorsBeforeQuarantine,
+                bindings,
+                options.HandlerMaxAllocatedBytes,
+                engine,
+                options.MaxErrorsBeforeQuarantine,
                 // WHY: Handing the shared slot surface to the runtime closes the teardown loop: a mod's
                 // logic_define overrides are cleared on unload/reload/quarantine and override failures are
                 // attributed into the mod's diagnostics channel.
-                logicSlots: bindings.LogicSlots);
+                bindings.LogicSlots);
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,

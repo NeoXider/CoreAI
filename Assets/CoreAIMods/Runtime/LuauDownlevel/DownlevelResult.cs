@@ -43,7 +43,7 @@ namespace CoreAI.Infrastructure.Luau
     /// </summary>
     public sealed class DownlevelResult
     {
-        static readonly IReadOnlyList<DownlevelDiagnostic> Empty = new DownlevelDiagnostic[0];
+        private static readonly IReadOnlyList<DownlevelDiagnostic> Empty = new DownlevelDiagnostic[0];
 
         public DownlevelResult(string luaSource, bool changed, IReadOnlyList<DownlevelDiagnostic> diagnostics)
         {

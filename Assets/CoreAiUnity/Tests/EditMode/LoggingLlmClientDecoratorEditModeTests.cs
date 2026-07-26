@@ -396,7 +396,7 @@ namespace CoreAI.Tests.EditMode
             SpyLogger spy = new();
             MockLlm inner = new(0, new LlmCompletionResult { Ok = true, Content = "SECRET_RESPONSE_BODY" });
             LoggingLlmClientDecorator dec = new(inner, spy, 0f, 0,
-                logPromptContent: false, logResponseContent: false);
+                false, false);
             LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Creator,

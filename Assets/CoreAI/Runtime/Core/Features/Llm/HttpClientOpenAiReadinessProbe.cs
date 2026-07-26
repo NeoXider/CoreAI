@@ -13,9 +13,10 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class HttpClientOpenAiReadinessProbe : ILlmEndpointReadinessProbe
     {
         private static readonly Lazy<HttpClient> s_loopbackClient =
-            new(() => CreateClient(bypassProxy: true));
+            new(() => CreateClient(true));
+
         private static readonly Lazy<HttpClient> s_externalClient =
-            new(() => CreateClient(bypassProxy: false));
+            new(() => CreateClient(false));
 
         private readonly HttpClient _client;
 
@@ -133,15 +134,20 @@ namespace CoreAI.Infrastructure.Llm
                 : Failed(status, $"Endpoint readiness probe failed ({status}).");
         }
 
-        private static LlmEndpointReadinessResult Failed(int statusCode, string error) => new()
+        private static LlmEndpointReadinessResult Failed(int statusCode, string error)
         {
-            IsReady = false,
-            StatusCode = statusCode,
-            Error = error ?? ""
-        };
+            return new LlmEndpointReadinessResult
+            {
+                IsReady = false,
+                StatusCode = statusCode,
+                Error = error ?? ""
+            };
+        }
 
-        private static HttpClient GetSharedClient(Uri uri) =>
-            uri.IsLoopback ? s_loopbackClient.Value : s_externalClient.Value;
+        private static HttpClient GetSharedClient(Uri uri)
+        {
+            return uri.IsLoopback ? s_loopbackClient.Value : s_externalClient.Value;
+        }
 
         private static HttpClient CreateClient(bool bypassProxy)
         {

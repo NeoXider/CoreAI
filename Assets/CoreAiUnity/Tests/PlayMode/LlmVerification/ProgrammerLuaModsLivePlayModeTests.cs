@@ -384,7 +384,7 @@ namespace CoreAI.Tests.PlayMode
         // BUG 2 (hooks_every(0, ...)) is omitted deliberately: it throws at LOAD time, and this arrange
         // step needs a mod that loads cleanly and only fails when the 'wave_start' event is dispatched.
         private const string BrokenArenaLua =
-@"local cfg = {
+            @"local cfg = {
   spawnCount = 5,
   radius = 6.0,
 }
@@ -459,7 +459,7 @@ end)
 
                 // ---- Arrange: load the broken mod through the REAL runtime and prove it is broken.
                 setup.Stack.Runtime.LoadMod(BrokenModId, BrokenArenaLua, LuaCapabilities.All,
-                    persistToStore: false);
+                    false);
                 Assert.IsTrue(setup.Stack.Runtime.IsLoaded(BrokenModId),
                     "Arrange failed: the broken mod did not load.");
 

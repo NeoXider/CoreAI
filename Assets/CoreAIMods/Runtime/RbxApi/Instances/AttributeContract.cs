@@ -91,7 +91,7 @@ namespace CoreAI.Mods.Rbx.Instances
         public static IReadOnlyList<KeyValuePair<string, object>> Sorted(
             IReadOnlyDictionary<string, object> attributes)
         {
-            var list = new List<KeyValuePair<string, object>>(attributes);
+            List<KeyValuePair<string, object>> list = new(attributes);
             list.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
             return list;
         }

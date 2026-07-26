@@ -18,7 +18,6 @@ namespace CoreAI.Tests.PlayMode
 {
     public sealed class CoreAiChatDemoRealModelWebGlPlayModeTests
     {
-
         [UnityTearDown]
         public IEnumerator UnloadLoadedScenes()
         {
@@ -26,6 +25,7 @@ namespace CoreAI.Tests.PlayMode
             // rest of the PlayMode run.
             yield return PlayModeSceneSandbox.UnloadToEmptyScene();
         }
+
         private const string LogPrefix = "[CoreAI.Tests.ChatSceneRealModel]";
         private const string SceneName = "CoreAiChatDemo";
         private const string RoleId = "SmartChat";

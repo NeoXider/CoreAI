@@ -15,7 +15,8 @@ namespace CoreAI.LuaAssets
         /// Builds the highlighted rich text. <paramref name="colorLookup"/> maps a token kind to a hex
         /// color (with or without a leading '#'); returning null/empty renders that kind unstyled.
         /// </summary>
-        public static string Format(string source, IReadOnlyList<LuaToken> tokens, Func<LuaTokenKind, string> colorLookup)
+        public static string Format(string source, IReadOnlyList<LuaToken> tokens,
+            Func<LuaTokenKind, string> colorLookup)
         {
             if (string.IsNullOrEmpty(source) || tokens == null || tokens.Count == 0)
             {

@@ -2,6 +2,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
+using Random = System.Random;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
 {
@@ -26,10 +27,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void DEV4_PositionRoundTrip_RobloxFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(1234);
+            Random rng = new(1234);
             for (int i = 0; i < 200; i++)
             {
-                var rbx = new RbxVector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
+                RbxVector3 rbx = new(NextCoord(rng), NextCoord(rng), NextCoord(rng));
                 RbxVector3 roundTrip = RbxSpace.FromUnity(RbxSpace.ToUnity(rbx));
                 Assert.IsTrue(roundTrip.FuzzyEq(rbx, Epsilon), $"{rbx} -> {roundTrip} at scale {scale}");
             }
@@ -40,10 +41,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void DEV4_PositionRoundTrip_UnityFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(4321);
+            Random rng = new(4321);
             for (int i = 0; i < 200; i++)
             {
-                var unity = new Vector3(NextCoord(rng), NextCoord(rng), NextCoord(rng));
+                Vector3 unity = new(NextCoord(rng), NextCoord(rng), NextCoord(rng));
                 Vector3 roundTrip = RbxSpace.ToUnity(RbxSpace.FromUnity(unity));
                 Assert.Less((roundTrip - unity).magnitude, Epsilon, $"{unity} -> {roundTrip} at scale {scale}");
             }
@@ -54,7 +55,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void DEV4_CFrameRoundTrip_RobloxFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(777);
+            Random rng = new(777);
             for (int i = 0; i < 100; i++)
             {
                 RbxCFrame cf = RandomCFrame(rng);
@@ -70,7 +71,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         public void DEV4_RotationRoundTrip_UnityFirst(float scale)
         {
             RbxSpace.ResetForTests(scale);
-            var rng = new System.Random(555);
+            Random rng = new(555);
             for (int i = 0; i < 100; i++)
             {
                 Quaternion q = Quaternion.Euler(NextAngle(rng), NextAngle(rng), NextAngle(rng));
@@ -115,7 +116,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         {
             // Acceptance §5.1.8 item 11 (datatype half): the same stud-space size maps through
             // Size * MetersPerStud under both configs with zero code/asset differences.
-            var size = new RbxVector3(4f, 1f, 2f);
+            RbxVector3 size = new(4f, 1f, 2f);
 
             RbxSpace.ResetForTests(0.28f);
             Vector3 at028 = RbxSpace.SizeToUnity(size);
@@ -126,9 +127,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             Assert.Less((at1 - new Vector3(4f, 1f, 2f)).magnitude, 1e-5f);
         }
 
-        private static float NextCoord(System.Random rng) => (float)(rng.NextDouble() * 2000.0 - 1000.0);
+        private static float NextCoord(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 2000.0 - 1000.0);
+        }
 
-        private static float NextAngle(System.Random rng) => (float)(rng.NextDouble() * 720.0 - 360.0);
+        private static float NextAngle(System.Random rng)
+        {
+            return (float)(rng.NextDouble() * 720.0 - 360.0);
+        }
 
         private static RbxCFrame RandomCFrame(System.Random rng)
         {

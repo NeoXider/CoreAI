@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task HttpEndpointFactory_DelegatesPortableModelsThenCompletionsProbe()
         {
-            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             RecordingReadinessProbe probe = new();
             try
             {

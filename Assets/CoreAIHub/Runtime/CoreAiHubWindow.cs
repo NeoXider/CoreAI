@@ -205,7 +205,8 @@ namespace CoreAI.Hub.UI
             {
                 if (!_missingShellWarned)
                 {
-                    CoreAI.Logging.Log.Instance.Warn("[CoreAiHubWindow] shellUxml is not assigned; the Hub UI cannot be built.");
+                    Logging.Log.Instance.Warn(
+                        "[CoreAiHubWindow] shellUxml is not assigned; the Hub UI cannot be built.");
                     _missingShellWarned = true;
                 }
 
@@ -219,7 +220,7 @@ namespace CoreAI.Hub.UI
             _root = uiRoot.Q<VisualElement>(RootName);
             if (_root == null)
             {
-                CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] shellUxml is missing the '{RootName}' element.");
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] shellUxml is missing the '{RootName}' element.");
                 _missingRootWarned = true;
                 return;
             }
@@ -375,7 +376,7 @@ namespace CoreAI.Hub.UI
             }
             catch (Exception ex)
             {
-                CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{_activePageId}' TryHandleEscape threw: {ex}");
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{_activePageId}' TryHandleEscape threw: {ex}");
                 return false;
             }
         }
@@ -564,7 +565,8 @@ namespace CoreAI.Hub.UI
                 }
                 catch (Exception ex)
                 {
-                    CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page factory '{pageId}' threw during metadata resolve: {ex}");
+                    Logging.Log.Instance.Error(
+                        $"[CoreAiHubWindow] Page factory '{pageId}' threw during metadata resolve: {ex}");
                 }
             }
 
@@ -595,7 +597,7 @@ namespace CoreAI.Hub.UI
                 }
                 catch (Exception ex)
                 {
-                    CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{_activePageId}' OnDeactivated threw: {ex}");
+                    Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{_activePageId}' OnDeactivated threw: {ex}");
                 }
             }
 
@@ -628,7 +630,7 @@ namespace CoreAI.Hub.UI
             }
             catch (Exception ex)
             {
-                CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' OnActivated threw: {ex}");
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' OnActivated threw: {ex}");
             }
 
             HighlightActiveTab();
@@ -684,7 +686,7 @@ namespace CoreAI.Hub.UI
             }
             catch (Exception ex)
             {
-                CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page factory '{pageId}' threw: {ex}");
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] Page factory '{pageId}' threw: {ex}");
                 return null;
             }
         }
@@ -703,13 +705,13 @@ namespace CoreAI.Hub.UI
                 content = created as VisualElement;
                 if (created != null && content == null)
                 {
-                    CoreAI.Logging.Log.Instance.Error(
+                    Logging.Log.Instance.Error(
                         $"[CoreAiHubWindow] Page '{pageId}' returned {created.GetType().Name}, expected a VisualElement.");
                 }
             }
             catch (Exception ex)
             {
-                CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' CreatePageContent threw: {ex}");
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' CreatePageContent threw: {ex}");
             }
 
             if (content != null)
@@ -794,7 +796,7 @@ namespace CoreAI.Hub.UI
                     }
                     catch (Exception ex)
                     {
-                        CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' deactivation threw: {ex}");
+                        Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' deactivation threw: {ex}");
                     }
                 }
 
@@ -804,7 +806,7 @@ namespace CoreAI.Hub.UI
                 }
                 catch (Exception ex)
                 {
-                    CoreAI.Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' destruction threw: {ex}");
+                    Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{pageId}' destruction threw: {ex}");
                 }
             }
 
