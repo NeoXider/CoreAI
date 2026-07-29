@@ -2,7 +2,7 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [Unreleased]
+## [6.11.0] - 2026-07-29
 
 ### Added
 
@@ -16,6 +16,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
       the prose before the tool call appeared twice and the sealed bubble stayed unrendered (raw
       `**`). The list is cleared when a turn starts, when the chat is cleared, and when the UI is
       rebound, so a host never receives detached elements.
+
+## [6.10.0] - 2026-07-29
+
+### Added
+
 - **Runtime log filtering: `GameLogFilter`.** Static, thread-safe entry point that works in a player:
       `MinimumLevel`, `EnabledFeatures`, `SetFeatureEnabled(feature, enabled)`, `IsFeatureEnabled`,
       `Snapshot()`, `ResetToAuthored()`. `CoreAILifetimeScope` copies `GameLogSettingsAsset` into it
