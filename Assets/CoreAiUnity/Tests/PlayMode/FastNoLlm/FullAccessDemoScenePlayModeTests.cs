@@ -23,7 +23,7 @@ namespace CoreAI.Tests.PlayMode
         private const string ScenePath = "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity";
 
         [UnityTest]
-        public IEnumerator FullAccessDemo_LoadsWithFullLuaAndTargetCube()
+        public IEnumerator FullAccessDemo_LoadsWithFullLuaAndAnEmptyWorld()
         {
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath) == null)
             {
@@ -52,9 +52,12 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(FindBehaviour("CoreAI.Demos.FullAccessHubDemoController"),
                 "FullAccessHubDemoController must be present.");
 
-            GameObject target = GameObject.Find("TargetCube");
-            Assert.IsNotNull(target, "FullAccessHubDemoController must create or normalize TargetCube.");
-            Assert.AreEqual(0.5f, target.transform.position.y, 0.01f);
+            // WHY: since 6.3.1 the demo opens on an empty world. Nothing is auto-spawned in the centre;
+            // a target exists only when one is assigned in the inspector, and the controller then renames
+            // it to "TargetCube" so prompts and mods keep finding it by name. The scene ships unassigned,
+            // so an object under that name here means the auto-spawn regressed back in.
+            Assert.IsNull(GameObject.Find("TargetCube"),
+                "FullAccessDemo must start with an empty world; TargetCube is inspector-assigned only.");
 
             // Prompt templates are surfaced by the chat panel's own "≡" example menu (enabled by the host),
             // so the demo must contain a chat panel rather than the legacy prompt-buttons controller.
