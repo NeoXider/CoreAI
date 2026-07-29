@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using Cysharp.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
 using LLMUnity;
@@ -25,6 +26,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Bounded drain before an owned llama.cpp host is force-released (see release path).</summary>
         private const int OwnedHostDrainTimeoutMs = 120_000;
+
+        /// <summary>Poll interval of the in-flight drain loop before an owned host is released.</summary>
+        private const int DrainPollIntervalMs = 10;
 
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
@@ -1307,6 +1311,16 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            // WHY: take the release delegate BEFORE draining. With nothing to release the drain is pure
+            // waiting, and on WebGL that wait never ends (no threads, no timers), so HostReleaseTask never
+            // completes and the next activation — which awaits it — leaves the endpoint in WaitingForHttp
+            // forever.
+            Func<Task> release = Interlocked.Exchange(ref runtime.ReleaseOwnedHostAsync, null);
+            if (release == null)
+            {
+                return;
+            }
+
             int drainWaitedMs = 0;
             while (Volatile.Read(ref runtime.InFlightRequests) > 0)
             {
@@ -1323,16 +1337,12 @@ namespace CoreAI.Infrastructure.Llm
                     break;
                 }
 
-                // WHY: paced poll instead of Task.Yield — there is no completion source for the
-                // in-flight counter, and a yield loop hot-spins a worker for long SSE streams.
-                await Task.Delay(10);
-                drainWaitedMs += 10;
-            }
-
-            Func<Task> release = Interlocked.Exchange(ref runtime.ReleaseOwnedHostAsync, null);
-            if (release == null)
-            {
-                return;
+                // WHY: paced poll instead of Task.Yield — there is no completion source for the in-flight
+                // counter, and a yield loop hot-spins a worker for long SSE streams. UniTask.Delay (not
+                // Task.Delay) because Task.Delay needs System.Threading.Timer, which does not exist on
+                // WebGL/Emscripten and would never resume there.
+                await UniTask.Delay(DrainPollIntervalMs, DelayType.Realtime);
+                drainWaitedMs += DrainPollIntervalMs;
             }
 
             try

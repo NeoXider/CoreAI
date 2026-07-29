@@ -176,13 +176,89 @@ namespace CoreAI.Infrastructure.Llm
             return TrySetModelFromEntry(llm, chosen, logger);
         }
 
-        private static List<ModelEntry> CollectResolvableNonLoraEntries()
+        /// <summary>
+        /// Whether the LLMUnity model registry currently holds at least one entry.
+        /// </summary>
+        public static bool HasLoadedModelEntries()
         {
+            return LLMManager.modelEntries != null && LLMManager.modelEntries.Count > 0;
+        }
+
+        /// <summary>
+        /// Populates the LLMUnity model registry only when it is still empty, so an already-populated
+        /// registry is never replaced.
+        /// </summary>
+        /// <remarks>
+        /// WHY: <c>LLMManager.LoadFromDisk()</c> is not a read-only probe. It overwrites the static
+        /// <c>modelEntries</c> list with the build snapshot from <c>StreamingAssets/LLMManager.json</c>
+        /// (normally empty in a project that has not built yet) and also resets <c>downloadOnStart</c> and
+        /// <c>LLMUnitySetup.DebugMode</c>. In the editor the registry is already loaded from PlayerPrefs by
+        /// LLMUnity's own <c>[InitializeOnLoadMethod]</c>, so an unconditional call wipes every model
+        /// registration for the whole session and the next Model Manager write persists the empty list.
+        /// In a player the disk snapshot is the only source, so the load still happens there.
+        /// </remarks>
+        public static void EnsureModelEntriesLoaded()
+        {
+            if (HasLoadedModelEntries())
+            {
+                return;
+            }
+
+            LoadFromDiskPreservingEditorState();
+        }
+
+        /// <summary>
+        /// Re-reads the model registry for an explicit user-triggered rescan without destroying
+        /// registrations that only exist in the editor store.
+        /// </summary>
+        public static void RefreshModelEntries()
+        {
+#if UNITY_EDITOR
+            // WHY: PlayerPrefs is the editor's authoritative Model Manager store, so re-reading it is the
+            // real rescan; LLMManager.Load() keeps the current list when the pref is empty.
+            LLMManager.Load();
+#endif
+            EnsureModelEntriesLoaded();
+        }
+
+        private static void LoadFromDiskPreservingEditorState()
+        {
+#if UNITY_EDITOR
+            List<ModelEntry> previousEntries = LLMManager.modelEntries;
+            bool previousDownloadOnStart = LLMManager.downloadOnStart;
+            LLMUnitySetup.DebugModeType previousDebugMode = LLMUnitySetup.DebugMode;
             try
             {
                 LLMManager.LoadFromDisk();
             }
+            finally
+            {
+                // WHY: LoadFromDisk() clobbers editor-only preferences with the build snapshot; restore them
+                // and keep the previous entries whenever the snapshot turned out to be empty.
+                LLMManager.downloadOnStart = previousDownloadOnStart;
+                LLMUnitySetup.DebugMode = previousDebugMode;
+                if (!HasLoadedModelEntries())
+                {
+                    LLMManager.modelEntries = previousEntries ?? new List<ModelEntry>();
+                }
+            }
+#else
+            LLMManager.LoadFromDisk();
+#endif
+        }
+
+        private static List<ModelEntry> CollectResolvableNonLoraEntries()
+        {
+            try
+            {
+                EnsureModelEntriesLoaded();
+            }
             catch
+            {
+                return new List<ModelEntry>();
+            }
+
+            if (LLMManager.modelEntries == null)
             {
                 return new List<ModelEntry>();
             }

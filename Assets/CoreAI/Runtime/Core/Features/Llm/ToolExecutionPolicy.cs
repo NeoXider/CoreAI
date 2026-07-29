@@ -103,7 +103,21 @@ namespace CoreAI.Infrastructure.Llm
         /// Snapshot of every tool call observed during this request lifetime
         /// (native, text-extracted, duplicate, missing). Order preserved.
         /// </summary>
-        public IReadOnlyList<LlmToolCallTrace> ExecutedTraces => _executedTraces;
+        /// <remarks>
+        /// A real COPY taken under the append lock. Returning the live list let a worker abandoned at the
+        /// drain deadline append while a caller was still enumerating, throwing
+        /// "Collection was modified" at the end of the turn, far from the cause.
+        /// </remarks>
+        public IReadOnlyList<LlmToolCallTrace> ExecutedTraces
+        {
+            get
+            {
+                lock (_traceLock)
+                {
+                    return _executedTraces.ToArray();
+                }
+            }
+        }
 
         /// <summary>
         /// Reset duplicate signatures, error counter, and trace log. Call at the start of each
@@ -114,7 +128,10 @@ namespace CoreAI.Infrastructure.Llm
             _consecutiveErrors = 0;
             _executedSignatures.Clear();
             _partialBatchSuccesses.Clear();
-            _executedTraces.Clear();
+            lock (_traceLock)
+            {
+                _executedTraces.Clear();
+            }
         }
 
         /// <summary>

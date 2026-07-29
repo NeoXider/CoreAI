@@ -867,7 +867,7 @@ MonoBehaviour:
   toggleKey: 96
   enableSearchbar: 1
   topSearchbarMinWidth: 360
-  copyAllLogsOnResizeButtonClick: 0
+  copyAllLogsOnResizeButtonClick: 1
   receiveLogsWhileInactive: 0
   receiveInfoLogs: 1
   receiveWarningLogs: 1

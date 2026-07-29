@@ -1291,7 +1291,7 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 ### Memory does not persist
 - Ensure `.WithMemory()` is called
 - Verify the model calls the memory tool: `{"name": "memory", ...}`
-- Enable logging: `GameLogger.SetFeatureEnabled(GameLogFeature.Llm, true)`
+- Enable logging: `GameLogFilter.SetFeatureEnabled(GameLogFeature.Llm, true)`
 
 ### Chat history does not work
 - Ensure `.WithChatHistory()` is called on the role

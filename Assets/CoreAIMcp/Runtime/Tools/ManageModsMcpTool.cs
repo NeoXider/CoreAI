@@ -52,11 +52,11 @@ namespace CoreAI.Mcp.Tools
         /// <inheritdoc />
         public async Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
-            string action = arguments?["action"]?.ToString();
-            string modId = arguments?["mod_id"]?.ToString();
-            string code = arguments?["code"]?.ToString();
-            string bundle = arguments?["bundle"]?.ToString();
-            int revision = arguments?["revision"] != null ? arguments["revision"].Value<int>() : -1;
+            string action = McpArguments.String(arguments, "action");
+            string modId = McpArguments.String(arguments, "mod_id");
+            string code = McpArguments.String(arguments, "code");
+            string bundle = McpArguments.String(arguments, "bundle");
+            int revision = McpArguments.Int(arguments, "revision", -1);
 
             string json = await _inner
                 .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken)

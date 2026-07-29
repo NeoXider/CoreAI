@@ -1,5 +1,51 @@
 # Changelog
 
+## [6.10.0] - 2026-07-29
+
+Acts on fresh audits of all five packages. The headline is an MCP security hole; the rest is a long
+tail of failures that were silent by construction.
+
+### Security
+
+- **The in-game MCP server accepted cross-origin requests.** Binding to `127.0.0.1` stops network
+  access but not the user's own browser: with `Content-Type: text/plain` a POST is a "simple" CORS
+  request and skips preflight, so any open web page could call `tools/call execute_lua` — and DNS
+  rebinding makes the request same-origin, exposing replies including `screenshot`. Requests are now
+  screened before routing (`IsLocal`, `Host`, `Origin`, JSON `Content-Type`) and authenticated with a
+  bearer token, generated per run or pinned via `COREAI_MCP_TOKEN`. The server remains off by default.
+
+### Fixed
+
+- **Six published demo scenes ran mods headless**, so `Instance.new` produced nothing in them —
+  `CoreAiHubDemo`, `LiveMechanicsDemo`, `LiveMechanicsModsChatDemo`, `WaveAutoBattlerModsDemo`,
+  `MiniRpgModsDemo`, `ModdableUnitsDemo` now each carry a wired `RbxWorldHost`.
+- **Editing a mod in the Hub froze the game**, and **`LLMManager.LoadFromDisk()` wiped the LLMUnity
+  model registry in the Editor** — a rescan that erased the user's registered models.
+- **A ChainReset past the first line no longer verifies an audit log as intact.** Truncating the tail
+  and appending a forged restart used to report `Ok`.
+- **A library timeout surfaced as "cancelled"**, so it read as if the user pressed Stop, and the
+  timeout branch never ran; an **empty streaming response** was recorded as success while vanishing
+  from history and traces; **`MutateAsync` destroyed a role's memory** when the load failed rather
+  than being absent; **`game_config update` reported success** when the store rejected the write.
+- WebGL: `Task.Delay` in the endpoint drain loop never resumed, wedging activation forever; seven
+  unguarded `SwitchToThreadPool` calls hung tool turns; an unclamped transcript entry could crash the
+  player.
+
+### Added
+
+- **`GameLogFilter`, `RuntimeGameLogSettings`, `GameLogDefaults`.** Portable runtime log filtering:
+  `GameLogFilter` is the entry point for retuning logs while the game runs (minimum level, category
+  mask, single-category toggle, snapshot, reset to the authored values). `RuntimeGameLogSettings`
+  holds the live values with lock-free reads (`Volatile` / `Interlocked`), so background threads
+  (LLM streaming) can log while another thread changes the filter.
+
+### Fixed
+
+- **`GameLogFeature.All` did not include `Metrics`.** `AllBuiltIn` was `Core|Composition|MessagePipe|
+  ExampleRoguelite|Llm` (31) and `All` was 799, so "enable every category" silently muted orchestration
+  metrics. `AllBuiltIn` is now 63 (adds `Metrics`) and `All` is 831. `GameLogSettingsOptions` defaults
+  to `All`.
+
 ## [6.9.0] - 2026-07-29
 
 One failure, two audiences: a sentence for the player, everything for the log.

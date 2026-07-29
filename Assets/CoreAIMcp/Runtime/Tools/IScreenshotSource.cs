@@ -9,10 +9,16 @@ namespace CoreAI.Mcp.Tools
     public interface IScreenshotSource
     {
         /// <summary>
-        /// Captures the active camera / screen and returns raw base64 PNG (no <c>data:</c> prefix), or
-        /// null when nothing could be captured (no camera, headless). <paramref name="maxResolution"/>
-        /// caps the longer edge in pixels; values &lt;= 0 mean "no cap".
+        /// Captures the active camera / screen into raw base64 PNG (no <c>data:</c> prefix).
+        /// <paramref name="maxResolution"/> caps the longer edge in pixels; values &lt;= 0 mean "no cap".
+        /// <para>
+        /// WHY (the out-parameter shape): a bare "returns null on failure" contract forced the tool to
+        /// guess a reason, and it guessed wrong - an exception inside the capture was reported to the
+        /// agent as "no active camera". Implementations MUST put the real reason in
+        /// <paramref name="error"/> and log the underlying exception.
+        /// </para>
         /// </summary>
-        string CaptureBase64Png(int maxResolution);
+        /// <returns>True when <paramref name="base64Png"/> holds an image; false with <paramref name="error"/> set.</returns>
+        bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error);
     }
 }

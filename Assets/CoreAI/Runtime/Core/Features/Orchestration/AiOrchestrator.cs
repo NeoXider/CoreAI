@@ -718,8 +718,14 @@ namespace CoreAI.Ai
                         }
                     }
 
+                    // WHY: A stream that ends with no error AND no content is a FAILED turn, not a
+                    // successful one - counting it as ok made "the model answered nothing" invisible in
+                    // the metrics. Tool-only turns still count as success: their visible text is
+                    // synthesized from the executed calls right after this block.
+                    bool producedContent = !string.IsNullOrWhiteSpace(accumulated.ToString()) ||
+                                           (executedToolCalls != null && executedToolCalls.Count > 0);
                     _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
-                        string.IsNullOrEmpty(terminalError),
+                        string.IsNullOrEmpty(terminalError) && producedContent,
                         sw.Elapsed.TotalMilliseconds);
                 }
 
@@ -800,6 +806,27 @@ namespace CoreAI.Ai
                         terminalHttpStatus,
                         terminalRetryAfterSeconds);
                     RecordTrace(bundle, failure, null, terminalError);
+                }
+                else
+                {
+                    // WHY: No error and no content. Previously NO branch ran here: the turn vanished from
+                    // the trace sink, never reached the chat history, and no terminal chunk told the
+                    // caller anything - a silent empty answer that looked like success. RunTaskAsync
+                    // already records "empty response" in the same situation; mirror it.
+                    const string emptyResponseError = "empty response";
+                    LlmCompletionResult emptyFailure = BuildFailureResult(
+                        emptyResponseError,
+                        LlmErrorCode.EmptyResponse,
+                        null,
+                        null);
+                    RecordTrace(bundle, emptyFailure, null, emptyResponseError);
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = emptyResponseError,
+                        ErrorCode = LlmErrorCode.EmptyResponse
+                    };
+                    yield break;
                 }
 
                 if (pendingToolOnlyTerminalChunk != null)

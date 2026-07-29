@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
@@ -22,8 +23,9 @@ namespace CoreAI.Mcp.Server
     /// opencode, LM Studio, or any MCP client - can drive the running game over localhost.
     /// <para>
     /// WHY (security): OFF by default (nothing starts until this component is added or <c>startOnEnable</c>
-    /// is set), localhost-only, and unauthenticated. Only ever run it on a trusted machine; never forward
-    /// the port off-box.
+    /// is set), loopback-only, and - unless you turn it off - protected by a bearer token printed to the
+    /// console at start. Loopback alone is NOT enough: a web page can POST to 127.0.0.1 cross-origin, and
+    /// any other local process can call the port. Never forward the port off-box.
     /// </para>
     /// This component is the <see cref="IMainThreadDispatcher"/>: every <c>tools/call</c> is queued here
     /// from an HTTP worker thread and drained on the Unity main thread in <see cref="Update"/>, so tool
@@ -32,6 +34,12 @@ namespace CoreAI.Mcp.Server
     [AddComponentMenu("CoreAI/CoreAI MCP Server")]
     public sealed class CoreAiMcpServer : MonoBehaviour, IMainThreadDispatcher
     {
+        /// <summary>Environment variable read when no token is set on the component.</summary>
+        public const string AuthTokenEnvironmentVariable = "COREAI_MCP_TOKEN";
+
+        /// <summary>Default seconds a <c>tools/call</c> waits for the main thread before failing.</summary>
+        public const float DefaultMainThreadTimeoutSeconds = 30f;
+
         [Tooltip("Loopback TCP port the MCP server listens on. Clients connect to http://127.0.0.1:<port>/mcp.")]
         [SerializeField]
         private int port = 8590;
@@ -40,14 +48,32 @@ namespace CoreAI.Mcp.Server
         [SerializeField]
         private bool startOnEnable;
 
+        [Tooltip("Require clients to send 'Authorization: Bearer <token>'. Keep this ON: loopback alone " +
+                 "stops neither a malicious local process nor a web page posting to 127.0.0.1.")]
+        [SerializeField]
+        private bool requireAuthToken = true;
+
+        [Tooltip("Fixed bearer token. Leave EMPTY to take it from the COREAI_MCP_TOKEN environment " +
+                 "variable, or - when that is unset too - to generate a fresh random token each start and " +
+                 "print it to the console.")]
+        [SerializeField]
+        private string authToken = "";
+
+        [Tooltip("Seconds a tools/call may wait for the Unity main thread before it fails with a clear " +
+                 "error. Guards against a paused game or a disabled component hanging the client forever. " +
+                 "0 disables the timeout.")]
+        [SerializeField]
+        private float mainThreadTimeoutSeconds = DefaultMainThreadTimeoutSeconds;
+
         [Tooltip("Optional CoreAI/mods LifetimeScope to resolve services from. When empty, the scene is " +
                  "searched for the scope that exposes the Lua executor.")]
         [SerializeField]
         private LifetimeScope scope;
 
-        private readonly ConcurrentQueue<Func<Task>> _mainThreadQueue = new();
+        private readonly ConcurrentQueue<QueuedMainThreadCall> _mainThreadQueue = new();
         private McpHttpServer _server;
         private McpSessionStore _sessions;
+        private string _activeAuthToken;
 
         private static CoreAiMcpServer _active;
 
@@ -56,6 +82,22 @@ namespace CoreAI.Mcp.Server
 
         /// <summary>The loopback URL clients connect to, or null when not running.</summary>
         public string Url => _server?.Url;
+
+        /// <summary>
+        /// The bearer token the running server requires, or null when token auth is off / not started.
+        /// Read it from code (or from the console line logged at start) to configure an MCP client.
+        /// </summary>
+        public string AuthToken => _activeAuthToken;
+
+        /// <summary>Seconds a <c>tools/call</c> waits for the main thread; 0 disables the timeout.</summary>
+        public float MainThreadTimeoutSeconds
+        {
+            get => mainThreadTimeoutSeconds;
+            set => mainThreadTimeoutSeconds = value;
+        }
+
+        /// <summary>The bearer token of the server started via the static API, or null.</summary>
+        public static string ActiveAuthToken => _active != null ? _active._activeAuthToken : null;
 
         private void OnEnable()
         {
@@ -72,12 +114,24 @@ namespace CoreAI.Mcp.Server
 
         private void Update()
         {
-            // Drain queued tool invocations on the main thread. Each item is fire-and-forget: its
-            // TaskCompletionSource (created in RunOnMainThreadAsync) bridges completion back to the awaiting
-            // HTTP worker, and any async continuations resume on Unity's synchronization context.
-            while (_mainThreadQueue.TryDequeue(out Func<Task> work))
+            PumpMainThreadQueue();
+        }
+
+        /// <summary>
+        /// Drains queued tool invocations on the main thread. Called from <c>Update</c>; public so a host
+        /// driving its own loop (and the EditMode tests) can pump the queue explicitly.
+        /// </summary>
+        public void PumpMainThreadQueue()
+        {
+            // Each item is fire-and-forget: its TaskCompletionSource (created in RunOnMainThreadAsync)
+            // bridges completion back to the awaiting HTTP worker, and any async continuations resume on
+            // Unity's synchronization context. Claiming skips items already failed by timeout or shutdown.
+            while (_mainThreadQueue.TryDequeue(out QueuedMainThreadCall call))
             {
-                _ = work();
+                if (call.TryClaim())
+                {
+                    _ = call.Body();
+                }
             }
         }
 
@@ -90,22 +144,33 @@ namespace CoreAI.Mcp.Server
             }
 
             TaskCompletionSource<T> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _mainThreadQueue.Enqueue(async () =>
+            QueuedMainThreadCall call = new(
+                async () =>
+                {
+                    try
+                    {
+                        T result = await work().ConfigureAwait(true);
+                        tcs.TrySetResult(result);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        tcs.TrySetCanceled();
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetException(ex);
+                    }
+                },
+                error => tcs.TrySetException(error));
+
+            _mainThreadQueue.Enqueue(call);
+
+            float timeout = mainThreadTimeoutSeconds;
+            if (timeout > 0f)
             {
-                try
-                {
-                    T result = await work().ConfigureAwait(true);
-                    tcs.TrySetResult(result);
-                }
-                catch (OperationCanceledException)
-                {
-                    tcs.TrySetCanceled();
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
-            });
+                _ = FailOnTimeoutAsync(call, tcs.Task, TimeSpan.FromSeconds(timeout));
+            }
+
             return tcs.Task;
         }
 
@@ -115,6 +180,16 @@ namespace CoreAI.Mcp.Server
             if (IsRunning)
             {
                 return;
+            }
+
+            if (!isActiveAndEnabled)
+            {
+                // WHY: Update() is what drains the main-thread queue; on a disabled component or an
+                // inactive GameObject every tools/call would sit in the queue until it times out.
+                Log.Instance.Warn(
+                    "[CoreAI MCP] Starting while this component is disabled (or its GameObject is " +
+                    "inactive): Update() will not run, so no tools/call can be executed and every call " +
+                    $"will fail after {mainThreadTimeoutSeconds}s. Enable the component and its GameObject.");
             }
 
             IObjectResolver resolver = ResolveContainer();
@@ -134,20 +209,25 @@ namespace CoreAI.Mcp.Server
                 return;
             }
 
+            string token = ResolveAuthToken();
             _sessions = new McpSessionStore();
             McpRpcDispatcher dispatcher = new(registry, _sessions, this);
             _server = new McpHttpServer(port, dispatcher,
                 m => Log.Instance.Info($"[CoreAI MCP] {m}"),
-                e => Log.Instance.Warn($"[CoreAI MCP] {e}"));
+                e => Log.Instance.Warn($"[CoreAI MCP] {e}"),
+                token);
 
             try
             {
                 _server.Start();
+                _activeAuthToken = token;
                 _active = this;
+                LogAccessInstructions(token);
             }
             catch (Exception ex)
             {
                 _server = null;
+                _activeAuthToken = null;
                 // WHY: HttpListener on Windows can need a URL ACL for a non-admin process; point the user
                 // at the fix instead of a bare stack trace.
                 Log.Instance.Error(
@@ -157,15 +237,88 @@ namespace CoreAI.Mcp.Server
             }
         }
 
-        /// <summary>Stops the server.</summary>
+        /// <summary>Stops the server and fails every call still waiting for the main thread.</summary>
         public void StopListening()
         {
             _server?.Dispose();
             _server = null;
+            _activeAuthToken = null;
+            FailPendingMainThreadCalls();
             if (_active == this)
             {
                 _active = null;
             }
+        }
+
+        private string ResolveAuthToken()
+        {
+            if (!requireAuthToken)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(authToken))
+            {
+                return authToken.Trim();
+            }
+
+            string fromEnvironment = Environment.GetEnvironmentVariable(AuthTokenEnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(fromEnvironment))
+            {
+                return fromEnvironment.Trim();
+            }
+
+            return McpRequestGuard.GenerateToken();
+        }
+
+        private void LogAccessInstructions(string token)
+        {
+            if (token == null)
+            {
+                Log.Instance.Warn(
+                    "[CoreAI MCP] Token auth is DISABLED. Any local process - and any web page that POSTs " +
+                    "to this port from the user's browser - can run Lua and load mods in this game. Only " +
+                    "do this on a machine you fully trust.");
+                return;
+            }
+
+            Log.Instance.Info(
+                $"[CoreAI MCP] Auth token: {token}\n" +
+                $"  claude mcp add --transport http coreai {_server.Url} --header \"Authorization: Bearer {token}\"\n" +
+                $"  Set {AuthTokenEnvironmentVariable} (or the Auth Token field) to keep the token stable " +
+                "across runs; otherwise a new one is generated every start.");
+        }
+
+        private void FailPendingMainThreadCalls()
+        {
+            // WHY: nothing will ever drain the queue after a stop, so resolve every pending call instead of
+            // leaking its TaskCompletionSource and leaving the HTTP worker awaiting forever.
+            while (_mainThreadQueue.TryDequeue(out QueuedMainThreadCall call))
+            {
+                if (call.TryClaim())
+                {
+                    call.Fail(new OperationCanceledException(
+                        "the CoreAI MCP server stopped before this call reached the Unity main thread."));
+                }
+            }
+        }
+
+        private async Task FailOnTimeoutAsync(QueuedMainThreadCall call, Task pending, TimeSpan timeout)
+        {
+            Task finished = await Task.WhenAny(pending, Task.Delay(timeout)).ConfigureAwait(false);
+            if (finished == pending)
+            {
+                return;
+            }
+
+            // TryClaim wins only when the call is still queued, which tells the two causes apart.
+            bool neverDequeued = call.TryClaim();
+            string reason = neverDequeued
+                ? $"the Unity main thread never drained the MCP queue within {timeout.TotalSeconds:0.#}s - " +
+                  "the game is paused, the CoreAiMcpServer component is disabled, or its GameObject is inactive"
+                : $"the tool did not finish within {timeout.TotalSeconds:0.#}s";
+
+            call.Fail(new TimeoutException($"{reason}."));
         }
 
         private McpToolRegistry BuildRegistry(IObjectResolver resolver)
@@ -178,9 +331,10 @@ namespace CoreAI.Mcp.Server
 
             WorldLlmTool worldTool = BuildWorldTool(resolver, settings);
             IReadOnlyList<SkillSet> skills = ResolveSkills(resolver);
-            IScreenshotSource screenshot = MainCameraScreenshotSource.HasCamera
-                ? new MainCameraScreenshotSource()
-                : null;
+            // WHY: register screenshot unconditionally. Probing for a camera at START-UP made the tool
+            // vanish from tools/list for the whole session when the server booted from a bootstrap scene;
+            // the source now reports a missing camera per call instead.
+            IScreenshotSource screenshot = new MainCameraScreenshotSource();
 
             return CoreAiMcpToolProvider.Build(
                 luaExecutor,
@@ -253,7 +407,8 @@ namespace CoreAI.Mcp.Server
 
         /// <summary>
         /// Starts (or reuses) a server on <paramref name="port"/> from anywhere, creating a hidden host
-        /// GameObject when no component exists yet. Returns the running instance.
+        /// GameObject when no component exists yet. Returns the running instance; read
+        /// <see cref="AuthToken"/> on it to obtain the bearer token clients must send.
         /// </summary>
         public static CoreAiMcpServer StartServer(int port = 8590)
         {
@@ -279,6 +434,37 @@ namespace CoreAI.Mcp.Server
         public static void StopServer()
         {
             _active?.StopListening();
+        }
+
+        /// <summary>
+        /// One queued main-thread invocation. Exactly one party runs it: the pump, the timeout watchdog,
+        /// or shutdown - whoever claims it first.
+        /// </summary>
+        private sealed class QueuedMainThreadCall
+        {
+            private readonly Action<Exception> _fail;
+            private int _claimed;
+
+            public QueuedMainThreadCall(Func<Task> body, Action<Exception> fail)
+            {
+                Body = body;
+                _fail = fail;
+            }
+
+            /// <summary>The work to run on the main thread.</summary>
+            public Func<Task> Body { get; }
+
+            /// <summary>True for the first caller only; everyone else must leave the call alone.</summary>
+            public bool TryClaim()
+            {
+                return Interlocked.Exchange(ref _claimed, 1) == 0;
+            }
+
+            /// <summary>Completes the awaiting HTTP worker with an error.</summary>
+            public void Fail(Exception error)
+            {
+                _fail(error);
+            }
         }
     }
 }

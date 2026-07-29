@@ -24,9 +24,11 @@ namespace CoreAI.Mcp.Tests
 
         private sealed class StubScreenshot : IScreenshotSource
         {
-            public string CaptureBase64Png(int maxResolution)
+            public bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error)
             {
-                return "AAAA";
+                base64Png = "AAAA";
+                error = null;
+                return true;
             }
         }
 

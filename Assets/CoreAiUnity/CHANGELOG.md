@@ -4,7 +4,30 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime log filtering: `GameLogFilter`.** Static, thread-safe entry point that works in a player:
+      `MinimumLevel`, `EnabledFeatures`, `SetFeatureEnabled(feature, enabled)`, `IsFeatureEnabled`,
+      `Snapshot()`, `ResetToAuthored()`. `CoreAILifetimeScope` copies `GameLogSettingsAsset` into it
+      while building the container and registers that runtime copy as `IGameLogSettings`, so the
+      scoped logger and `GameLoggerUnscopedFallback` share one live filter — and the `.asset` is
+      never mutated at runtime (no play-mode edits leaking into git).
+- **`IGameLogSink`.** `FilteringGameLogger` now writes through the interface instead of the concrete
+      `UnityGameLogSink`, so filtering is testable with a fake sink (and a sink can be swapped).
+
 ### Fixed
+
+- **`GameLoggerUnscopedFallback` was unfilterable.** It hardcoded `DefaultGameLogSettings`, so the
+      ~15 runtime files that log without a resolved scope ignored the project's log settings
+      entirely. It now uses the same live `GameLogFilter` settings as the container.
+- **A missing Game Log Settings asset was silent.** `CoreAILifetimeScope` now warns exactly once
+      while building the container, instead of quietly dropping everything below `Warning`.
+- **`DefaultGameLogSettings` ignored categories and muted `Info`.** The unconfigured default is now
+      "every category, level `Info` and above" (`GameLogDefaults`).
+- **`OnValidate` overwrote a deliberate category selection.** The legacy-preset migration on
+      `GameLogSettingsAsset` is now keyed on a serialized version field, so "everything except Llm
+      and Metrics" finally sticks instead of being widened on every reload.
+- **Wrong tooltip** on `GameLogSettingsAsset.enabledFeatures` (it described the level field).
 
 - **Mods silently produced no visible objects in Standalone/Android/WebGL builds.** IL2CPP managed
       stripping removed the entire Roblox API binding layer (`CoreAI.RbxApi.{Instances,Datatypes,
@@ -14,6 +37,46 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **Headless-mode warnings added.** `CoreAiModsInstaller`, `LuaCsRbxApiBindings`, and
       `InstanceGameObjectBinder` now log clear warnings when the Roblox world host is missing or
       the binder falls back to in-memory defaults, instead of silently degrading.
+
+- **Entering Play Mode wiped the LLMUnity Model Manager registry.** `LLMManager.LoadFromDisk()` is not
+      a read-only probe: it replaces the static `modelEntries` with the build snapshot in
+      `StreamingAssets/LLMManager.json` (empty until you build) and resets `downloadOnStart`/`DebugMode`.
+      CoreAI called it unconditionally from `LlmUnityModelBootstrap`, `CoreAI/Setup/Create LLMUnity
+      Objects` and the settings inspector's **Rescan** button, so every registered model vanished for the
+      session and the next Model Manager write persisted the empty list. All call sites now go through
+      `LlmUnityModelBootstrap.EnsureModelEntriesLoaded()` / `RefreshModelEntries()`, which read the disk
+      snapshot only when the registry is genuinely empty and restore the editor preferences afterwards.
+- **A failed WebGL build could lose the native LLM binaries for good.** The StreamingAssets guard parks
+      `LlamaLib*` / `LLMUnity*` in `Library/CoreAI/WebGlBuildBackup` but kept the restore manifest only in
+      `SessionState`, which dies with the editor — and it wrote that manifest after the whole move loop, so
+      an `IOException` halfway through orphaned everything already moved. The manifest now lives in the
+      backup folder itself and is rewritten after **every** move (`SessionState` is just a cache), restore
+      also runs on `EditorApplication.quitting`, a failed move restores what it already moved, and a
+      non-`Succeeded` build result is logged.
+- **WebGL: an endpoint could hang in `WaitingForHttp` forever.** `LlmClientRegistry`'s owned-host drain
+      used `Task.Delay`, which needs `System.Threading.Timer` and never resumes under Emscripten, and it
+      claimed the release delegate only *after* the loop — so deactivating with nothing to release still
+      polled. It now returns early when there is nothing to release and paces with `UniTask.Delay`.
+- **WebGL: `scene_tool` and `camera_tool` hung on the way out of a tool call.** Seven
+      `UniTask.SwitchToThreadPool()` calls in `finally` blocks (`SceneLlmTool`,
+      `Features/Vision/CameraLlmTool`) were missing the `#if !UNITY_WEBGL || UNITY_EDITOR` guard the other
+      call sites already had; WebGL has no thread pool, so the await never resumed.
+- **WebGL: restoring a long answer could crash the app.** The render cap moved from `AddMessage` to
+      `AppendMessageBubble`, the single bubble-render entry point — the streaming path recorded the full
+      response straight into the per-role transcript cache and persisted history was rehydrated directly,
+      so both bypassed the GPU-buffer backstop. The cache and history still keep the untruncated text.
+- **Typing indicator leaked a scheduler job per streamed chunk.** `ShowTypingIndicator()` overwrote
+      `_typingAnimation` without pausing the previous `Every(400)` item, leaving hundreds of live jobs per
+      turn all rewriting the label (which made the tool-progress hint flicker). It now stops the previous
+      animation first.
+- **Race on the chat panel's cancellation source.** `CoreAi.OnToolExecuted` arrives on a threadpool
+      thread and the handler called `GetOrCreateCancellationTokenSource()` — a mutator (`Cancel` +
+      `Dispose` + replace) — before hopping to the main thread, racing the Stop button into an
+      `ObjectDisposedException` or a lost cancellation. It now switches to the main thread first.
+- **An embedded chat panel went dead after disable → enable.** `OnDisable` cleared every UI reference but
+      left `_embeddedTreeBuilt` set, so `BuildEmbeddedChatTree()` returned early and `InitializeUiRoot()`
+      never ran again: the chat rendered but answered nothing. The flag is now reset and the already
+      inserted chat tree is re-bound instead of cloned a second time.
 
 ## [6.9.0] - 2026-07-29
 

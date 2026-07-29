@@ -20,7 +20,7 @@ namespace CoreAI.Composition
         /// <summary>Registers CoreAI domain services with the dependency injection container.</summary>
         public static void RegisterCore(this IContainerBuilder builder)
         {
-            builder.Register<UnityGameLogSink>(Lifetime.Singleton);
+            builder.Register<UnityGameLogSink>(Lifetime.Singleton).AsSelf().As<IGameLogSink>();
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
             builder.Register<UnityLog>(Lifetime.Singleton).As<ILog>();

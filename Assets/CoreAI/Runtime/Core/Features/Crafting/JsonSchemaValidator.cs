@@ -114,15 +114,21 @@ namespace CoreAI.Crafting
                     continue;
                 }
 
+                // WHY: Normalize ONCE and use the same value everywhere. CheckType lower-cased internally
+                // while the range gate below compared the raw string, so a schema declaring "Number" or
+                // "Integer" passed the type check and then skipped Min/Max entirely - an out-of-range
+                // value was reported as valid.
+                string normalizedType = field.Type?.ToLowerInvariant();
+
                 // WHY: Type check
-                if (!CheckType(token, field.Type, out string typeError))
+                if (!CheckType(token, normalizedType, out string typeError))
                 {
                     result.Errors.Add($"[{_schemaName}] Field '{field.Name}': {typeError}");
                     continue;
                 }
 
                 // WHY: Range check (number/integer)
-                if ((field.Type == "number" || field.Type == "integer") &&
+                if ((normalizedType == "number" || normalizedType == "integer") &&
                     token.Type != JTokenType.Null)
                 {
                     double val = token.Value<double>();

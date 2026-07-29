@@ -194,6 +194,9 @@ namespace CoreAI.Infrastructure.Llm
                         timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                     {
                         current.ErrorCode = LlmErrorCode.Timeout;
+                        // WHY: The inner translation reads "cancelled", which the UI shows as if the user
+                        // pressed Stop. Correct the text alongside the code so both agree.
+                        current.Error = "LLM request timed out.";
                     }
 
                     yield return current;

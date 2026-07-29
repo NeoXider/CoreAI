@@ -43,7 +43,7 @@ namespace CoreAI.Mcp.Tools
         public async Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
             JObject a = arguments ?? new JObject();
-            string action = a["action"]?.ToString();
+            string action = McpArguments.String(a, "action");
             if (string.IsNullOrEmpty(action))
             {
                 return McpToolResult.Failure("world_command: 'action' is required.");
@@ -51,38 +51,27 @@ namespace CoreAI.Mcp.Tools
 
             string json = await _inner.ExecuteAsync(
                 action,
-                Float(a, "x"), Float(a, "y"), Float(a, "z"),
-                Float(a, "fx"), Float(a, "fy"), Float(a, "fz"),
-                Float(a, "scale"), Float(a, "scaleX"), Float(a, "scaleY"), Float(a, "scaleZ"),
-                a["prefabKey"]?.ToString(),
-                a["targetName"]?.ToString(),
-                a["stringValue"]?.ToString(),
-                a["worldPositionStays"]?.Type == JTokenType.Boolean && a["worldPositionStays"].Value<bool>(),
-                a["animationName"]?.ToString(),
-                a["textToDisplay"]?.ToString(),
-                a["volume"] != null ? a["volume"].Value<float>() : 1f,
-                a["itemsJson"]?.ToString(),
+                McpArguments.FloatOrNull(a, "x"),
+                McpArguments.FloatOrNull(a, "y"),
+                McpArguments.FloatOrNull(a, "z"),
+                McpArguments.FloatOrNull(a, "fx"),
+                McpArguments.FloatOrNull(a, "fy"),
+                McpArguments.FloatOrNull(a, "fz"),
+                McpArguments.FloatOrNull(a, "scale"),
+                McpArguments.FloatOrNull(a, "scaleX"),
+                McpArguments.FloatOrNull(a, "scaleY"),
+                McpArguments.FloatOrNull(a, "scaleZ"),
+                McpArguments.String(a, "prefabKey"),
+                McpArguments.String(a, "targetName"),
+                McpArguments.String(a, "stringValue"),
+                McpArguments.Bool(a, "worldPositionStays"),
+                McpArguments.String(a, "animationName"),
+                McpArguments.String(a, "textToDisplay"),
+                McpArguments.Float(a, "volume", 1f),
+                McpArguments.String(a, "itemsJson"),
                 cancellationToken).ConfigureAwait(false);
 
             return new McpToolResult(new[] { McpContent.CreateText(json) });
-        }
-
-        private static float? Float(JObject a, string key)
-        {
-            JToken token = a[key];
-            if (token == null || token.Type == JTokenType.Null)
-            {
-                return null;
-            }
-
-            try
-            {
-                return token.Value<float>();
-            }
-            catch (Exception)
-            {
-                return null;
-            }
         }
     }
 }

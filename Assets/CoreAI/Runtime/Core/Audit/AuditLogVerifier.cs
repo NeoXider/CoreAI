@@ -125,9 +125,19 @@ namespace CoreAI.Audit
                     chainResetCount++;
                     if (!first)
                     {
+                        // WHY: A ChainReset is only a legitimate genesis marker at the START of a file.
+                        // Honouring one mid-file re-seeded prevHash from the line's OWN self-declared Kind,
+                        // so anyone could truncate the journal after any entry, append a hand-made
+                        // ChainReset line plus a forged tail, and still get Ok = true. Everything before a
+                        // mid-file reset is unverifiable against what follows: report the break.
                         Logging.Log.Instance.Warn(
                             $"[AuditLogVerifier] ChainReset encountered mid-file at line {lineCount} (seq {seq}) — possible tail truncation.",
                             Logging.LogTag.Core);
+
+                        return new AuditVerifyResult(false, lineCount, seq,
+                            $"seq {seq}: ChainReset at line {lineCount} is not the first entry — the chain is " +
+                            "broken here (possible tail truncation or a forged restart)",
+                            chainResetCount);
                     }
 
                     prevHash = "";

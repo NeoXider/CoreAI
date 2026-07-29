@@ -55,6 +55,12 @@ namespace CoreAI.Chat
         private StyleSheet _embeddedStyleSheet;
         private bool _embeddedTreeBuilt;
 
+        /// <summary>
+        /// The chat tree cloned into <see cref="_embeddedHost"/>. Kept across a disable/enable cycle so
+        /// re-enabling rebinds the existing tree instead of stacking a second clone under the host.
+        /// </summary>
+        private VisualElement _embeddedChatRoot;
+
         /// <summary>Project game logger (shared fallback when no scoped logger is available).</summary>
         protected static IGameLogger Logger => GameLoggerUnscopedFallback.Instance;
 
@@ -422,17 +428,24 @@ namespace CoreAI.Chat
 
             _embeddedTreeBuilt = true;
 
-            VisualElement chatRoot;
-            if (_embeddedChatTemplate != null)
+            // WHY: OnDisable drops the UI references but leaves the already-inserted tree parented to the
+            // host, so a re-enable must rebind that tree. Cloning a second one would stack two chats.
+            VisualElement chatRoot = _embeddedChatRoot;
+            if (chatRoot == null || (chatRoot != _embeddedHost && chatRoot.parent != _embeddedHost))
             {
-                chatRoot = _embeddedChatTemplate.CloneTree();
-                chatRoot.style.flexGrow = 1f;
-                _embeddedHost.Add(chatRoot);
-                NeutralizeFloatingContainer(chatRoot);
-            }
-            else
-            {
-                chatRoot = _embeddedHost;
+                if (_embeddedChatTemplate != null)
+                {
+                    chatRoot = _embeddedChatTemplate.CloneTree();
+                    chatRoot.style.flexGrow = 1f;
+                    _embeddedHost.Add(chatRoot);
+                    NeutralizeFloatingContainer(chatRoot);
+                }
+                else
+                {
+                    chatRoot = _embeddedHost;
+                }
+
+                _embeddedChatRoot = chatRoot;
             }
 
             if (_embeddedStyleSheet != null && !chatRoot.styleSheets.Contains(_embeddedStyleSheet))
@@ -571,6 +584,11 @@ namespace CoreAI.Chat
             UnbindUiCallbacks(true);
             StopTypingAnimation();
             ResetUiReferences();
+
+            // WHY: ResetUiReferences() nulls Root/SendButton/…, so the tree must be re-bound on the next
+            // OnEnable. Leaving the flag set made BuildEmbeddedChatTree() return early, InitializeUiRoot()
+            // never ran again and the embedded chat rendered but answered nothing.
+            _embeddedTreeBuilt = false;
         }
 
         /// <summary>
@@ -2923,14 +2941,6 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // WHY: WebGL GPU-buffer backstop: cap an oversized assistant dump before it becomes a giant bubble
-            // (user input is bounded by the input field). Hosts may cap earlier; this protects every
-            // consumer of the package. See ClampAssistantForRender.
-            if (!isUser)
-            {
-                text = ClampAssistantForRender(text);
-            }
-
             AppendMessageBubble(text, isUser);
             RecordRoleTranscriptMessage(ActiveRoleId, text, isUser);
         }
@@ -2940,9 +2950,22 @@ namespace CoreAI.Chat
         /// (<see cref="TryRestoreRoleTranscriptFromCache"/>) can re-render already-recorded, already-filtered
         /// text without appending duplicate entries back into <see cref="_roleTranscriptCache"/>.
         /// </summary>
+        /// <remarks>
+        /// WHY: the WebGL GPU-buffer backstop lives here because this is the single render entry point for
+        /// message bubbles. Clamping only in <see cref="AddMessage"/> left two paths uncapped: the streaming
+        /// reply records the full response straight into the per-role cache, and persisted history is
+        /// rehydrated directly — so restoring either could still overflow the vertex buffer and crash WebGL.
+        /// Render-only: the per-role cache and chat history keep the untruncated text.
+        /// </remarks>
         private void AppendMessageBubble(string text, bool isUser)
         {
             HideTypingIndicator();
+
+            // WHY: user input is bounded by the input field; only assistant text can be arbitrarily large.
+            if (!isUser)
+            {
+                text = ClampAssistantForRender(text);
+            }
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
             MessageScroll.Add(bubble);
@@ -3057,8 +3080,12 @@ namespace CoreAI.Chat
             {
                 try
                 {
-                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(
-                        GetOrCreateCancellationTokenSource().Token);
+                    // WHY: CoreAi.OnToolExecuted fires on a threadpool thread and
+                    // GetOrCreateCancellationTokenSource() is a mutator (Cancel + Dispose + replace), so
+                    // calling it here raced the Stop button into an ObjectDisposedException or a lost
+                    // cancellation. Hop to the main thread first; the checks below already drop the bubble
+                    // when the panel went away.
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 }
                 catch (OperationCanceledException)
                 {
@@ -3385,6 +3412,11 @@ namespace CoreAI.Chat
             {
                 return;
             }
+
+            // WHY: streaming calls this on every chunk. Without stopping the previous scheduled item first,
+            // each call leaked another Every(400) job that kept rewriting TypingLabel.text — hundreds of live
+            // jobs per turn, and they fought the tool-progress hint into a flicker.
+            StopTypingAnimation();
 
             TypingIndicator.style.display = DisplayStyle.Flex;
             _typingDotCount = 0;

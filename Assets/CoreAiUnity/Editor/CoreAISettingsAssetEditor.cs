@@ -242,11 +242,14 @@ namespace CoreAI.Infrastructure.Llm.Editor
             {
                 try
                 {
-                    LLMManager.LoadFromDisk();
+                    // WHY: never call LLMManager.LoadFromDisk() directly here — it replaces the whole model
+                    // registry with the (usually empty) build snapshot, and the next Model Manager write
+                    // then persists that empty list, losing every registration.
+                    LlmUnityModelBootstrap.RefreshModelEntries();
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAI] GGUF rescan: LLMManager.LoadFromDisk failed: {ex.Message}");
+                    Debug.LogWarning($"[CoreAI] GGUF rescan: LLMUnity model rescan failed: {ex.Message}");
                 }
 
                 RefreshGgufChoices();
@@ -351,10 +354,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             try
             {
                 // ModelEntries can be empty until the LLMUnity manager scans disk.
-                if (LLMManager.modelEntries == null || LLMManager.modelEntries.Count == 0)
-                {
-                    LLMManager.LoadFromDisk();
-                }
+                LlmUnityModelBootstrap.EnsureModelEntriesLoaded();
 
                 if (LLMManager.modelEntries != null)
                 {
@@ -374,7 +374,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             catch (Exception ex)
             {
                 // Keep the inspector usable even if LLMUnity cannot scan the model directory.
-                Debug.LogWarning($"[CoreAI] GGUF dropdown: LLMManager.LoadFromDisk failed: {ex.Message}");
+                Debug.LogWarning($"[CoreAI] GGUF dropdown: LLMUnity model scan failed: {ex.Message}");
             }
 
             string currentValue = serializedObject.FindProperty("ggufModelPath")?.stringValue ?? "";

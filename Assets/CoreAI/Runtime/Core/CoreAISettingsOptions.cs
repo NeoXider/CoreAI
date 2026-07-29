@@ -17,8 +17,12 @@ namespace CoreAI
         public bool LogLlmConnectionErrors { get; set; } = true;
         public int ContextWindowTokens { get; set; } = CoreAISettings.DefaultContextWindowTokens;
 
+        // WHY: The canonical prefix, not a paraphrase. This class used to declare its own short
+        // "Respond concisely..." string, so every host bootstrapped through it silently lost the
+        // CRITICAL RULES block - including "NEVER output JSON in your text response if tools are
+        // available", the rule that keeps models on the function-calling channel.
         public string UniversalSystemPromptPrefix { get; set; } =
-            "Respond concisely and to the point. Avoid unnecessary verbosity.";
+            CoreAISettings.DefaultUniversalSystemPromptPrefix;
 
         public string ToolContractAdditionalInstructions { get; set; } = "";
         public float Temperature { get; set; } = 0.1f;
@@ -36,7 +40,11 @@ namespace CoreAI
         public string TokenCalibrationModelKey { get; set; } = "default";
         public bool EnableConversationHistorySummarization { get; set; } = true;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
-        public int ConversationRolledSummaryMaxTokens { get; set; }
+
+        // WHY: 0 is the EXPLICIT "unlimited" opt-out, so the implicit default must be the interface's
+        // documented cap; otherwise the rolling summary was never trimmed for options-based hosts.
+        public int ConversationRolledSummaryMaxTokens { get; set; } =
+            ICoreAISettings.DefaultConversationRolledSummaryMaxTokens;
 
         public float ConversationCompactionTriggerRatio { get; set; } =
             CoreAISettings.DefaultConversationCompactionTriggerRatio;
@@ -53,6 +61,15 @@ namespace CoreAI
         public int MaxToolCallRoundtrips { get; set; } = 20;
         public int MaxToolCallHistoryMessages { get; set; } = 20; // 0 = EXPLICIT opt-out (unlimited)
         public int MaxParallelToolCalls { get; set; } = 4;
+
+        // WHY: These four were never declared here, so the compiler silently bound them to the default
+        // interface members and From() could not copy them. AllowWorldPrimitives in particular meant a
+        // host that had DISABLED primitive spawning got it re-enabled the moment its settings round-tripped
+        // through this class, and the per-token prices reset to 0 (cost overlay shows tokens only).
+        public bool AllowWorldPrimitives { get; set; } = true;
+        public bool EnableLuaOnWebGl { get; set; } = true;
+        public float InputTokenPricePer1KUsd { get; set; }
+        public float OutputTokenPricePer1KUsd { get; set; }
 
         public static CoreAISettingsOptions From(ICoreAISettings source)
         {
@@ -100,7 +117,11 @@ namespace CoreAI
                 MaxResponseChars = source.MaxResponseChars,
                 MaxToolCallRoundtrips = source.MaxToolCallRoundtrips,
                 MaxToolCallHistoryMessages = source.MaxToolCallHistoryMessages,
-                MaxParallelToolCalls = source.MaxParallelToolCalls
+                MaxParallelToolCalls = source.MaxParallelToolCalls,
+                AllowWorldPrimitives = source.AllowWorldPrimitives,
+                EnableLuaOnWebGl = source.EnableLuaOnWebGl,
+                InputTokenPricePer1KUsd = source.InputTokenPricePer1KUsd,
+                OutputTokenPricePer1KUsd = source.OutputTokenPricePer1KUsd
             };
         }
     }

@@ -551,6 +551,7 @@ namespace CoreAI.Infrastructure.Llm
 
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
             string initError = null;
+            LlmErrorCode initErrorCode = LlmErrorCode.None;
             try
             {
                 enumerator = _inner.CompleteStreamingAsync(request, cancellationToken)
@@ -560,6 +561,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 sw.Stop();
                 initError = ex.Message;
+                initErrorCode = ResolveStreamErrorCode(ex);
                 _logger.Warn(
                     $"LLM x (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
                     LogTag.Llm);
@@ -567,7 +569,12 @@ namespace CoreAI.Infrastructure.Llm
 
             if (initError != null)
             {
-                yield return new LlmStreamChunk { IsDone = true, Error = initError };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = initError,
+                    ErrorCode = initErrorCode
+                };
                 yield break;
             }
 
@@ -578,6 +585,7 @@ namespace CoreAI.Infrastructure.Llm
                     bool hasNext;
                     LlmStreamChunk current = null;
                     string exceptionMessage = null;
+                    LlmErrorCode exceptionCode = LlmErrorCode.None;
                     bool wasCancelled = false;
 
                     try
@@ -596,19 +604,35 @@ namespace CoreAI.Infrastructure.Llm
                     catch (Exception ex)
                     {
                         exceptionMessage = ex.Message;
+                        exceptionCode = ResolveStreamErrorCode(ex);
                         hasNext = false;
                     }
 
                     if (wasCancelled)
                     {
-                        yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
+                        // WHY: The typed code is load-bearing, not decoration. This decorator normally runs
+                        // INSIDE TimeoutLlmClientDecorator, which only rewrites a terminal chunk to
+                        // LlmErrorCode.Timeout when it is already tagged Cancelled. Emitting the default
+                        // None here made the timeout branch dead code and showed a library timeout as if
+                        // the user had pressed Stop.
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = terminalError,
+                            ErrorCode = LlmErrorCode.Cancelled
+                        };
                         yield break;
                     }
 
                     if (exceptionMessage != null)
                     {
                         terminalError = exceptionMessage;
-                        yield return new LlmStreamChunk { IsDone = true, Error = exceptionMessage };
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = exceptionMessage,
+                            ErrorCode = exceptionCode
+                        };
                         yield break;
                     }
 
@@ -964,6 +988,21 @@ namespace CoreAI.Infrastructure.Llm
         private static string Fmt(int? n)
         {
             return n.HasValue ? n.Value.ToString() : "-";
+        }
+
+        /// <summary>
+        /// Maps a streaming fault to a stable <see cref="LlmErrorCode"/> so consumers never receive a
+        /// terminal chunk that reports a failure with <see cref="LlmErrorCode.None"/>.
+        /// </summary>
+        private static LlmErrorCode ResolveStreamErrorCode(Exception ex)
+        {
+            return ex switch
+            {
+                LlmClientException typed => typed.ErrorCode,
+                LlmOperationTimeoutException => LlmErrorCode.Timeout,
+                OperationCanceledException => LlmErrorCode.Cancelled,
+                _ => LlmErrorCode.ProviderError
+            };
         }
 
         private static string Preview(string text, int maxChars)

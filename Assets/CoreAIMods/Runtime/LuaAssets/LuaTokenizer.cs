@@ -34,6 +34,11 @@ namespace CoreAI.LuaAssets
             "==", "~=", "<=", ">=", "::", "+=", "-=", "*=", "/=", "%=", "^=", "//", ".."
         };
 
+        /// <summary>
+        /// Splits <paramref name="source"/" into tokens that tile it exactly: every returned token has a
+        /// length of at least 1 and starts where the previous one ended. Guaranteed to terminate on any
+        /// input, including malformed or truncated source.
+        /// </summary>
         public static List<LuaToken> Tokenize(string source)
         {
             List<LuaToken> tokens = new();
@@ -46,99 +51,106 @@ namespace CoreAI.LuaAssets
             int pos = 0;
             while (pos < length)
             {
-                char c = source[pos];
+                int start = pos;
+                LuaTokenKind kind = ScanNext(source, tokens, ref pos);
 
-                if (IsWhitespace(c))
+                // WHY: hard termination invariant. This loop only ends while every scan consumes at least
+                // one character, and the scanners run on half-written source where a construct can be
+                // unterminated (a deleted quote, backtick or ']]'). A scanner that ever returned its own
+                // input position would spin here forever on the main thread and freeze the whole app, so a
+                // non-advancing scan is downgraded to a single unclassified character instead: any future
+                // scanner bug shows up as one mis-colored glyph, never as a hang.
+                if (pos <= start)
                 {
-                    int start = pos;
-                    while (pos < length && IsWhitespace(source[pos]))
-                    {
-                        pos++;
-                    }
-
-                    tokens.Add(new LuaToken(LuaTokenKind.Whitespace, start, pos - start));
-                    continue;
+                    pos = start + 1;
+                    kind = LuaTokenKind.Operator;
                 }
 
-                if (c == '-' && pos + 1 < length && source[pos + 1] == '-')
-                {
-                    int start = pos;
-                    pos += 2;
-                    if (TryMatchLongBracketOpen(source, pos, out int level))
-                    {
-                        pos = ScanLongBracket(source, pos, level);
-                    }
-                    else
-                    {
-                        while (pos < length && source[pos] != '\n')
-                        {
-                            pos++;
-                        }
-                    }
-
-                    tokens.Add(new LuaToken(LuaTokenKind.Comment, start, pos - start));
-                    continue;
-                }
-
-                if (c == '"' || c == '\'')
-                {
-                    int start = pos;
-                    pos = ScanShortString(source, pos, c);
-                    tokens.Add(new LuaToken(LuaTokenKind.String, start, pos - start));
-                    continue;
-                }
-
-                if (c == '`')
-                {
-                    int start = pos;
-                    pos = ScanInterpolatedString(source, pos);
-                    tokens.Add(new LuaToken(LuaTokenKind.InterpolatedString, start, pos - start));
-                    continue;
-                }
-
-                if (c == '[' && TryMatchLongBracketOpen(source, pos, out int longStringLevel))
-                {
-                    int start = pos;
-                    pos = ScanLongBracket(source, pos, longStringLevel);
-                    tokens.Add(new LuaToken(LuaTokenKind.LongString, start, pos - start));
-                    continue;
-                }
-
-                if (char.IsDigit(c) || (c == '.' && pos + 1 < length && char.IsDigit(source[pos + 1])))
-                {
-                    int start = pos;
-                    pos = ScanNumber(source, pos);
-                    tokens.Add(new LuaToken(LuaTokenKind.Number, start, pos - start));
-                    continue;
-                }
-
-                if (IsIdentStart(c))
-                {
-                    int start = pos;
-                    pos = ScanIdentifier(source, pos);
-                    LuaTokenKind kind = ClassifyWord(source, start, pos);
-                    tokens.Add(new LuaToken(kind, start, pos - start));
-                    continue;
-                }
-
-                if (c == ':')
-                {
-                    int start = pos;
-                    pos++;
-                    bool isTypeAnnotation = IsTypeAnnotationColon(tokens, source, pos);
-                    tokens.Add(new LuaToken(
-                        isTypeAnnotation ? LuaTokenKind.TypeAnnotation : LuaTokenKind.Operator, start, 1));
-                    continue;
-                }
-
-                {
-                    int start = pos;
-                    pos = ScanOperatorOrPunctuation(source, pos);
-                    tokens.Add(new LuaToken(LuaTokenKind.Operator, start, pos - start));
-                }
+                tokens.Add(new LuaToken(kind, start, pos - start));
             }
 
             return tokens;
+        }
+
+        /// <summary>
+        /// Consumes the token starting at <paramref name="pos"/> and returns its kind. Every branch must
+        /// leave <paramref name="pos"/> strictly greater than it received it; <see cref="Tokenize"/>
+        /// enforces that as a safety net.
+        /// </summary>
+        private static LuaTokenKind ScanNext(string source, List<LuaToken> tokens, ref int pos)
+        {
+            int length = source.Length;
+            int start = pos;
+            char c = source[pos];
+
+            if (IsWhitespace(c))
+            {
+                while (pos < length && IsWhitespace(source[pos]))
+                {
+                    pos++;
+                }
+
+                return LuaTokenKind.Whitespace;
+            }
+
+            if (c == '-' && pos + 1 < length && source[pos + 1] == '-')
+            {
+                pos += 2;
+                if (TryMatchLongBracketOpen(source, pos, out int commentLevel))
+                {
+                    pos = ScanLongBracket(source, pos, commentLevel);
+                }
+                else
+                {
+                    while (pos < length && source[pos] != '\n')
+                    {
+                        pos++;
+                    }
+                }
+
+                return LuaTokenKind.Comment;
+            }
+
+            if (c == '"' || c == '\'')
+            {
+                pos = ScanShortString(source, pos, c);
+                return LuaTokenKind.String;
+            }
+
+            if (c == '`')
+            {
+                pos = ScanInterpolatedString(source, pos);
+                return LuaTokenKind.InterpolatedString;
+            }
+
+            if (c == '[' && TryMatchLongBracketOpen(source, pos, out int longStringLevel))
+            {
+                pos = ScanLongBracket(source, pos, longStringLevel);
+                return LuaTokenKind.LongString;
+            }
+
+            if (char.IsDigit(c) || (c == '.' && pos + 1 < length && char.IsDigit(source[pos + 1])))
+            {
+                pos = ScanNumber(source, pos);
+                return LuaTokenKind.Number;
+            }
+
+            if (IsIdentStart(c))
+            {
+                pos = ScanIdentifier(source, pos);
+                return ClassifyWord(source, start, pos);
+            }
+
+            if (c == ':')
+            {
+                pos++;
+                return IsTypeAnnotationColon(tokens, source, pos)
+                    ? LuaTokenKind.TypeAnnotation
+                    : LuaTokenKind.Operator;
+            }
+
+            pos = ScanOperatorOrPunctuation(source, pos);
+            return LuaTokenKind.Operator;
         }
 
         private static LuaTokenKind ClassifyWord(string source, int start, int end)

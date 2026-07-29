@@ -149,13 +149,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
   title: LiveMechanics ready mod prompts
-  panelRect:
-    serializedVersion: 2
-    x: 700
-    y: 520
-    width: 500
-    height: 190
-  chatReserveWidth: 700
   prompts:
   - Label: Big boss reward
     Prompt: Make every boss victory give a big 1000 coin reward. Save it as a mod
@@ -167,8 +160,6 @@ MonoBehaviour:
     Prompt: Make the hero attack much faster so the boss fight speeds up. Save it
       as a mod.
   submitWhenInputUnavailable: 0
-  _showPanel: 1
-  _toggleKey: 289
 --- !u!4 &126857024
 Transform:
   m_ObjectHideFlags: 0
@@ -236,6 +227,7 @@ MonoBehaviour:
   enableFullLuaPrivateAccess: 0
   allowedLuaScenes: []
   blacklistPolicy: {fileID: 0}
+  robloxWorldHost: {fileID: 1682253805}
   storeId: live-mechanics-chat-demo
 --- !u!1 &286107348
 GameObject:
@@ -264,7 +256,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 37e0bb673a6c4874a9f11c08b6592ed6, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAiLuaWorldModule
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   allowedScenes: []
@@ -885,6 +877,52 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1682253804
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1682253806}
+  - component: {fileID: 1682253805}
+  m_Layer: 0
+  m_Name: RbxWorldHost
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1682253805
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1682253804}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5b50e8f2f11475ba0d27f38feea1340, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.RbxApi.Binding::CoreAI.Mods.Rbx.Binding.RbxWorldHost
+  _metersPerStud: 0.28
+  _camera: {fileID: 0}
+--- !u!4 &1682253806
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1682253804}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1980274142
 GameObject:
   m_ObjectHideFlags: 0
@@ -1015,7 +1053,7 @@ MonoBehaviour:
   agentPromptsManifest: {fileID: 11400000, guid: 76ac5bc3577a387409a9559c4de4a341, type: 2}
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}
   luaWorldModule: {fileID: 286107349}
-  legacyWorldPrefabRegistry: {fileID: 0}
+  worldPrefabRegistry: {fileID: 0}
   legacyLuaAllowedScenes: []
   legacyEnableFullLuaAccess: 0
   legacyEnableFullLuaPrivateAccess: 0
@@ -1052,3 +1090,4 @@ SceneRoots:
   - {fileID: 349880793}
   - {fileID: 933156841}
   - {fileID: 126857024}
+  - {fileID: 1682253806}

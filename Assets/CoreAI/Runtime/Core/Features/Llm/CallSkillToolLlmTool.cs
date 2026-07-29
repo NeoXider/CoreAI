@@ -177,6 +177,14 @@ namespace CoreAI.Ai
             {
                 return SkillSetToolResolver.SerializeFailure($"Invalid JSON arguments: {ex.Message}", toolsByName.Keys);
             }
+            catch (OperationCanceledException)
+            {
+                // WHY: ToolExecutionPolicy detects a per-tool timeout by CATCHING this. Collapsing it into a
+                // plain {"success":false} hid the timeout, skipped the "timed out after Nms" path, and let
+                // RecordFailure grow the consecutive-error counter until the turn aborted with a bogus
+                // "maximum consecutive tool processing errors". Mirrors DelegateLlmTool.
+                throw;
+            }
             catch (Exception ex)
             {
                 return SkillSetToolResolver.SerializeFailure($"Tool execution failed: {Unwrap(ex).Message}");

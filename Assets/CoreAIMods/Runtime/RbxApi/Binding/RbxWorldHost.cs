@@ -1,3 +1,4 @@
+using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
@@ -42,6 +43,28 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public bool IsInitialized => Registry != null;
 
+        private ILog _log;
+
+        // WHY: a scene component is created by Unity, not by the container, so it cannot be injected;
+        // the process-wide CoreAI logger is the sanctioned no-DI seam and CoreServicesInstaller points
+        // it at the scoped, settings-filtered logger at startup. SetLog upgrades it when a composition
+        // root does resolve one.
+        private ILog Logger => _log ??= CoreAI.Logging.Log.Instance;
+
+        /// <summary>Supplies the composition-scoped logger this world reports diagnostics through.
+        /// Safe before or after <see cref="Initialize"/> — an already-built binder is re-pointed too,
+        /// so scene Awake ordering cannot decide which logger the world ends up with.</summary>
+        public void SetLog(ILog log)
+        {
+            if (log == null)
+            {
+                return;
+            }
+
+            _log = log;
+            Binder?.SetLog(log);
+        }
+
         private void Awake()
         {
             // WHY: ExecuteAlways exists so OnDestroy reliably fires for edit-mode-created
@@ -63,9 +86,12 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             RbxSpace.Configure(_metersPerStud);
-            Binder = new InstanceGameObjectBinder(transform);
+            Binder = new InstanceGameObjectBinder(transform, Logger);
             Registry = new InstanceRegistry(null, Binder);
-            Registry.Diagnostics = Debug.LogError;
+            // WHY: InstanceRegistry stays engine-free and only exposes an Action<string> hook, so the
+            // Unity-side host is what adapts that hook onto the CoreAI logger — the registry never
+            // learns about UnityEngine or the logging stack. Resolved per call, so a later SetLog wins.
+            Registry.Diagnostics = message => Logger.Error(message, LogTag.World);
             Game = DataModelBootstrap.CreateGame(Registry);
             // WHY: the camera reference is resolved ONCE here at composition; Lua camera writes
             // must never pay a scene search per call.

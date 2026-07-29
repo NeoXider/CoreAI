@@ -14,3 +14,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Logging.GameLogSettingsAsset
   enabledFeatures: 63
   minimumLevel: 0
+  settingsVersion: 1

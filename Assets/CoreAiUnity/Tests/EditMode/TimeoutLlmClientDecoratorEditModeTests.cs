@@ -120,8 +120,13 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(chunks.Exists(c => c.ErrorCode == LlmErrorCode.Timeout));
         }
 
+        /// <summary>
+        /// The decorator rewrites BOTH the code and the text. Rewriting only the code left the message
+        /// reading "cancelled", which the UI presents as if the user had pressed Stop — the payload of the
+        /// stream (text, model, executed tool calls) is still preserved untouched.
+        /// </summary>
         [Test]
-        public async Task Streaming_InnerCancelledTerminalFromDecoratorToken_RewritesOnlyErrorCode()
+        public async Task Streaming_InnerCancelledTerminalFromDecoratorToken_RewritesCodeAndMessage()
         {
             CancelledResultClient inner = new();
             TimeoutLlmClientDecorator sut = new(inner, () => 0.03f);
@@ -130,7 +135,7 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(1, chunks.Count);
             Assert.AreEqual(LlmErrorCode.Timeout, chunks[0].ErrorCode);
-            Assert.AreEqual("inner cancelled", chunks[0].Error);
+            Assert.AreEqual("LLM request timed out.", chunks[0].Error);
             Assert.AreEqual("partial", chunks[0].Text);
             Assert.AreEqual("test-model", chunks[0].Model);
             Assert.AreEqual(1, chunks[0].ExecutedToolCalls.Count);

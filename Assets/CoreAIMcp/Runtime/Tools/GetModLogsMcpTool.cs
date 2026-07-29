@@ -46,12 +46,10 @@ namespace CoreAI.Mcp.Tools
         /// <inheritdoc />
         public async Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
-            string modId = arguments?["mod_id"]?.ToString();
-            string level = arguments?["level"]?.ToString();
-            long since = arguments?["since_sequence"] != null ? arguments["since_sequence"].Value<long>() : 0;
-            int max = arguments?["max_entries"] != null
-                ? arguments["max_entries"].Value<int>()
-                : GetModLogsLlmTool.DefaultMaxEntries;
+            string modId = McpArguments.String(arguments, "mod_id");
+            string level = McpArguments.String(arguments, "level");
+            long since = McpArguments.Long(arguments, "since_sequence", 0);
+            int max = McpArguments.Int(arguments, "max_entries", GetModLogsLlmTool.DefaultMaxEntries);
 
             string json = await _inner
                 .ExecuteAsync(modId, level, since, max, cancellationToken)

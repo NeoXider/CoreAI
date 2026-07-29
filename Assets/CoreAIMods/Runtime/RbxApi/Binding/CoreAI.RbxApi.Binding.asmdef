@@ -2,6 +2,7 @@
   "name": "CoreAI.RbxApi.Binding",
   "rootNamespace": "CoreAI.Mods.Rbx.Binding",
   "references": [
+    "CoreAI.Core",
     "CoreAI.RbxApi.Instances",
     "CoreAI.RbxApi.Datatypes",
     "CoreAI.RbxApi.Unity",

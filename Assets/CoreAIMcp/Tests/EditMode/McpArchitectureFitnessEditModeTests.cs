@@ -20,8 +20,10 @@ namespace CoreAI.Mcp.Tests
             "CoreAIMcp/Runtime/Protocol/McpContent.cs",
             "CoreAIMcp/Runtime/Protocol/McpMethods.cs",
             "CoreAIMcp/Runtime/Tools/IMcpTool.cs",
+            "CoreAIMcp/Runtime/Tools/McpArguments.cs",
             "CoreAIMcp/Runtime/Tools/McpToolRegistry.cs",
             "CoreAIMcp/Runtime/Tools/IScreenshotSource.cs",
+            "CoreAIMcp/Runtime/Server/McpRequestGuard.cs",
             "CoreAIMcp/Runtime/Server/McpRpcDispatcher.cs",
             "CoreAIMcp/Runtime/Server/McpSessionStore.cs",
             "CoreAIMcp/Runtime/Server/IMainThreadDispatcher.cs"

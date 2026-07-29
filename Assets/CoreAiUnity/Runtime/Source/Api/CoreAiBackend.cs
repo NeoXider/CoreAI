@@ -241,10 +241,7 @@ namespace CoreAI
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             try
             {
-                if (LLMManager.modelEntries == null || LLMManager.modelEntries.Count == 0)
-                {
-                    LLMManager.LoadFromDisk();
-                }
+                LlmUnityModelBootstrap.EnsureModelEntriesLoaded();
 
                 List<string> list = new();
                 if (LLMManager.modelEntries != null)

@@ -164,7 +164,11 @@ namespace CoreAI.Vision
             }
             finally
             {
+#if !UNITY_WEBGL || UNITY_EDITOR
+                // WHY: WebGL has no ThreadPool, so awaiting SwitchToThreadPool there never resumes and the
+                // whole turn hangs until the request timeout.
                 await UniTask.SwitchToThreadPool();
+#endif
             }
         }
 
@@ -229,7 +233,9 @@ namespace CoreAI.Vision
             }
             finally
             {
+#if !UNITY_WEBGL || UNITY_EDITOR
                 await UniTask.SwitchToThreadPool();
+#endif
             }
         }
 
@@ -260,7 +266,9 @@ namespace CoreAI.Vision
             }
             finally
             {
+#if !UNITY_WEBGL || UNITY_EDITOR
                 await UniTask.SwitchToThreadPool();
+#endif
             }
         }
 

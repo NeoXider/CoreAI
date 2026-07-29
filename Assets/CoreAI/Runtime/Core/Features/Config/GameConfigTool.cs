@@ -198,7 +198,41 @@ namespace CoreAI.Config
                 });
             }
 
-            _store.TrySave(primarykey, content);
+            // WHY: TryApplyChanges returns false for TWO different outcomes. An empty error means "no
+            // structured handler here, fall back to the raw save"; a non-empty error means the policy
+            // REJECTED the payload. Ignoring the distinction pushed rejected JSON straight into the store,
+            // bypassing validation, and still answered "Config updated".
+            if (!string.IsNullOrEmpty(error))
+            {
+                if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+                {
+                    Log.Instance.Warn($"[Tool Call] game_config: REJECTED - {error}", LogTag.Config);
+                }
+
+                return SerializeResult(new GameConfigResult
+                {
+                    Success = false,
+                    Error = error
+                });
+            }
+
+            if (!_store.TrySave(primarykey, content))
+            {
+                // WHY: The result of TrySave was discarded, so the standard NullGameConfigStore fallback
+                // (TrySave always false) reported "Config updated" while nothing was persisted at all.
+                string saveError = $"Config store rejected the write for key: {primarykey}";
+                if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+                {
+                    Log.Instance.Warn($"[Tool Call] game_config: FAILED - {saveError}", LogTag.Config);
+                }
+
+                return SerializeResult(new GameConfigResult
+                {
+                    Success = false,
+                    Error = saveError
+                });
+            }
+
             return SerializeResult(new GameConfigResult
             {
                 Success = true,

@@ -15,20 +15,32 @@ namespace CoreAI.Mcp.Server
     /// plain <c>application/json</c> and <c>text/event-stream</c> (SSE) - chosen by the request's
     /// <c>Accept</c> header. Session ids are issued on initialize but never required.
     /// <para>
-    /// WHY (security): binds strictly to 127.0.0.1, is opt-in (never auto-started), and performs NO
-    /// authentication - any local process can call it. That is acceptable ONLY on the loopback
-    /// interface: never bind this to 0.0.0.0 or a routable address, and never expose the port through a
-    /// tunnel or reverse proxy without adding auth first.
+    /// WHY (security): loopback binding alone does NOT protect this endpoint - a web page can POST to it
+    /// cross-origin without a preflight, and DNS rebinding can even let it read the responses. Every
+    /// request therefore passes <see cref="McpRequestGuard"/> first: it must arrive on the loopback
+    /// interface, carry a loopback <c>Host</c>, carry no foreign <c>Origin</c>, use a JSON media type,
+    /// stay under <see cref="MaxRequestBodyBytes"/>, and - when a token was configured - present
+    /// <c>Authorization: Bearer &lt;token&gt;</c>. Never bind this to 0.0.0.0 or expose the port through a
+    /// tunnel or reverse proxy.
     /// </para>
     /// </summary>
     public sealed class McpHttpServer : IDisposable
     {
+        /// <summary>Default hard cap on an accepted request body, in bytes.</summary>
+        public const int DefaultMaxRequestBodyBytes = 4 * 1024 * 1024;
+
         private const string EndpointPath = "/mcp";
+
+        // WHY: ERROR_OPERATION_ABORTED - what GetContextAsync throws when the listener is stopped.
+        private const int ListenerStoppedErrorCode = 995;
+
+        private const int AcceptErrorBackoffMs = 250;
 
         private readonly int _port;
         private readonly McpRpcDispatcher _dispatcher;
         private readonly Action<string> _log;
         private readonly Action<string> _logError;
+        private readonly string _authToken;
 
         private HttpListener _listener;
         private CancellationTokenSource _cts;
@@ -37,13 +49,18 @@ namespace CoreAI.Mcp.Server
         /// <param name="dispatcher">The JSON-RPC router (which owns session issuance).</param>
         /// <param name="log">Info sink.</param>
         /// <param name="logError">Error sink.</param>
+        /// <param name="authToken">
+        /// Bearer token every request must present. Null or empty disables token auth, leaving only the
+        /// Origin/Host checks - acceptable only on a fully trusted machine.
+        /// </param>
         public McpHttpServer(int port, McpRpcDispatcher dispatcher,
-            Action<string> log = null, Action<string> logError = null)
+            Action<string> log = null, Action<string> logError = null, string authToken = null)
         {
             _port = port;
             _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
             _log = log ?? (_ => { });
             _logError = logError ?? (_ => { });
+            _authToken = string.IsNullOrWhiteSpace(authToken) ? null : authToken.Trim();
         }
 
         /// <summary>True while the listener is accepting connections.</summary>
@@ -51,6 +68,12 @@ namespace CoreAI.Mcp.Server
 
         /// <summary>The loopback URL clients connect to.</summary>
         public string Url => $"http://127.0.0.1:{_port}{EndpointPath}";
+
+        /// <summary>True when a bearer token is required on every request.</summary>
+        public bool RequiresAuth => _authToken != null;
+
+        /// <summary>Largest accepted request body in bytes; anything bigger is refused with 413.</summary>
+        public int MaxRequestBodyBytes { get; set; } = DefaultMaxRequestBodyBytes;
 
         /// <summary>Starts the listener and the accept loop. Throws when the port cannot be bound.</summary>
         public void Start()
@@ -68,6 +91,8 @@ namespace CoreAI.Mcp.Server
             _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
             _listener.Start();
 
+            // WHY: a Start() after Stop() would otherwise leak the previous token source.
+            _cts?.Dispose();
             _cts = new CancellationTokenSource();
             // WHY: fire-and-forget accept loop; its lifetime is bound to the listener + CTS, both stopped
             // in Stop(). We do not join it - GetContextAsync unblocks when the listener is closed.
@@ -82,9 +107,9 @@ namespace CoreAI.Mcp.Server
             {
                 _cts?.Cancel();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // ignore
+                _logError($"cancelling in-flight MCP work failed during stop: {ex.GetType().Name}: {ex.Message}");
             }
 
             try
@@ -92,9 +117,9 @@ namespace CoreAI.Mcp.Server
                 _listener?.Stop();
                 _listener?.Close();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // ignore
+                _logError($"closing the MCP listener failed during stop: {ex.GetType().Name}: {ex.Message}");
             }
             finally
             {
@@ -119,10 +144,38 @@ namespace CoreAI.Mcp.Server
                 {
                     context = await _listener.GetContextAsync().ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (ObjectDisposedException)
                 {
-                    // Listener stopped/disposed - exit the loop quietly.
-                    break;
+                    return;
+                }
+                catch (InvalidOperationException)
+                {
+                    return;
+                }
+                catch (HttpListenerException ex) when (ex.ErrorCode == ListenerStoppedErrorCode)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // WHY: a transient accept failure (a client that reset mid-handshake) must not silently
+                    // kill the loop while IsRunning keeps reporting true - log it and keep serving.
+                    if (cancellationToken.IsCancellationRequested || !IsRunning)
+                    {
+                        return;
+                    }
+
+                    _logError($"accept loop error, still listening: {ex.GetType().Name}: {ex.Message}");
+                    try
+                    {
+                        await Task.Delay(AcceptErrorBackoffMs, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+
+                    continue;
                 }
 
                 // WHY: handle each request without blocking the accept loop; local clients may pipeline.
@@ -135,6 +188,11 @@ namespace CoreAI.Mcp.Server
             try
             {
                 HttpListenerRequest request = context.Request;
+
+                if (TryReject(context))
+                {
+                    return;
+                }
 
                 if (string.Equals(request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase))
                 {
@@ -154,10 +212,19 @@ namespace CoreAI.Mcp.Server
                     return;
                 }
 
-                string body;
-                using (StreamReader reader = new(request.InputStream, request.ContentEncoding ?? Encoding.UTF8))
+                if (!McpRequestGuard.IsContentTypeAllowed(request.ContentType))
                 {
-                    body = await reader.ReadToEndAsync().ConfigureAwait(false);
+                    Deny(context, 415,
+                        $"Unsupported Media Type: '{request.ContentType}'. POST JSON-RPC as application/json.");
+                    return;
+                }
+
+                string body = await ReadBodyAsync(request).ConfigureAwait(false);
+                if (body == null)
+                {
+                    Deny(context, 413,
+                        $"Payload Too Large: the request body exceeds {MaxRequestBodyBytes} bytes.");
+                    return;
                 }
 
                 bool wantsSse = AcceptsEventStream(request);
@@ -191,9 +258,97 @@ namespace CoreAI.Mcp.Server
                     context.Response.StatusCode = 500;
                     context.Response.Close();
                 }
-                catch (Exception)
+                catch (Exception closeError)
                 {
-                    // ignore
+                    _logError($"could not close the failed MCP response: {closeError.Message}");
+                }
+            }
+        }
+
+        // WHY: the whole security decision lives here, ahead of routing, so no method can bypass it.
+        private bool TryReject(HttpListenerContext context)
+        {
+            HttpListenerRequest request = context.Request;
+
+            if (!request.IsLocal)
+            {
+                Deny(context, 403, "Forbidden: the CoreAI MCP endpoint serves loopback clients only.");
+                return true;
+            }
+
+            if (!McpRequestGuard.IsHostAllowed(request.Headers?["Host"], _port))
+            {
+                Deny(context, 403,
+                    "Forbidden: unexpected Host header (DNS-rebinding protection). " +
+                    $"Connect to http://127.0.0.1:{_port}{EndpointPath} directly.");
+                return true;
+            }
+
+            string origin = request.Headers?["Origin"];
+            if (!McpRequestGuard.IsOriginAllowed(origin, _port))
+            {
+                Deny(context, 403, $"Forbidden: Origin '{origin}' is not allowed for the CoreAI MCP endpoint.");
+                return true;
+            }
+
+            if (!McpRequestGuard.IsAuthorized(request.Headers?["Authorization"], _authToken))
+            {
+                context.Response.AddHeader("WWW-Authenticate", "Bearer realm=\"coreai-mcp\"");
+                Deny(context, 401,
+                    "Unauthorized: send 'Authorization: Bearer <token>'. The token is printed to the game " +
+                    "console when the CoreAI MCP server starts.");
+                return true;
+            }
+
+            return false;
+        }
+
+        private void Deny(HttpListenerContext context, int status, string message)
+        {
+            _logError($"rejected {context.Request.HttpMethod} from {context.Request.RemoteEndPoint}: {message}");
+
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(message);
+                HttpListenerResponse response = context.Response;
+                response.StatusCode = status;
+                response.ContentType = "text/plain; charset=utf-8";
+                // WHY: the request body may be unread (oversized payloads); do not reuse the connection.
+                response.KeepAlive = false;
+                response.ContentLength64 = bytes.Length;
+                response.OutputStream.Write(bytes, 0, bytes.Length);
+                response.Close();
+            }
+            catch (Exception ex)
+            {
+                _logError($"could not write the MCP rejection response: {ex.Message}");
+            }
+        }
+
+        /// <summary>Reads the body up to the cap, or returns null when the request is too large.</summary>
+        private async Task<string> ReadBodyAsync(HttpListenerRequest request)
+        {
+            if (request.ContentLength64 > MaxRequestBodyBytes)
+            {
+                return null;
+            }
+
+            using StreamReader reader = new(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+            char[] buffer = new char[8192];
+            StringBuilder body = new();
+
+            while (true)
+            {
+                int read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    return body.ToString();
+                }
+
+                body.Append(buffer, 0, read);
+                if (body.Length > MaxRequestBodyBytes)
+                {
+                    return null;
                 }
             }
         }

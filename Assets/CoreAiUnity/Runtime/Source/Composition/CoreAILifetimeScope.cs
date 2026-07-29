@@ -28,7 +28,8 @@ namespace CoreAI.Composition
         [SerializeField]
         private CoreAISettingsAsset coreAiSettings;
 
-        [Tooltip("Optional log settings asset. If null, DefaultGameLogSettings is used.")]
+        [Tooltip("Optional log settings asset; authoring source for the runtime filter. " +
+                 "If null, every category is logged from level Info and a warning is issued.")]
         [SerializeField]
         private GameLogSettingsAsset gameLogSettings;
 
@@ -154,12 +155,23 @@ namespace CoreAI.Composition
 
             if (gameLogSettings != null)
             {
-                builder.RegisterInstance<IGameLogSettings>(gameLogSettings);
+                GameLogFilter.UseAuthoredSettings(gameLogSettings.ToOptions());
             }
             else
             {
-                builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+                GameLogFilter.UseAuthoredSettings(null);
+                GameLoggerUnscopedFallback.Instance.LogWarning(
+                    GameLogFeature.Composition,
+                    "No Game Log Settings asset is assigned on CoreAILifetimeScope — logging falls back to " +
+                    "every category at minimum level Info. Assign an asset (CoreAI/Logging/Game Log Settings) " +
+                    "or call GameLogFilter to change the filter at runtime.",
+                    this);
             }
+
+            // WHY: The container and the unscoped fallback logger must share one live settings instance,
+            // otherwise runtime GameLogFilter changes would only reach half of the call sites. The asset
+            // itself is never registered: it stays the authoring source and must not be mutated at runtime.
+            builder.RegisterInstance<IGameLogSettings>(GameLogFilter.Settings);
 
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();

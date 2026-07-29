@@ -86,13 +86,19 @@ namespace CoreAI.Composition
                 // headless in-memory (same API, no rendering). Initialize() is idempotent and safe
                 // before Awake ordering.
                 Mods.Rbx.Binding.RbxWorldHost rbxHost = c.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
+                // WHY: the scoped ILog applies the authored GameLogSettings filter; Log.Instance backs
+                // minimal containers (tests, headless tools) that never registered one, so the Rbx
+                // wiring diagnostics below survive either way.
+                Logging.ILog rbxLog = c.ResolveOrDefault<Logging.ILog>() ?? Logging.Log.Instance;
                 LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
+                    rbxHost.SetLog(rbxLog);
                     rbxHost.Initialize();
-                    Debug.Log(
+                    rbxLog.Info(
                         $"[CoreAiMods] RbxWorldHost resolved — registry has {rbxHost.Registry.Count} instances, " +
-                        $"binder bound count={rbxHost.Binder.BoundCount}.");
+                        $"binder bound count={rbxHost.Binder.BoundCount}.",
+                        Logging.LogTag.World);
                     rbxApi = new LuaCsRbxApiBindings(
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
@@ -100,13 +106,15 @@ namespace CoreAI.Composition
                 }
                 else
                 {
-                    Debug.LogError(
+                    rbxLog.Error(
                         "[CoreAiMods] RbxWorldHost NOT resolved — mods run headless. " +
                         "Instance.new / workspace mutations produce no GameObjects. " +
                         "Check: (1) RbxWorldHost component exists in the scene, " +
                         "(2) CoreAiModsLifetimeScope.robloxWorldHost is wired to it, " +
-                        "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.");
-                    rbxApi = new LuaCsRbxApiBindings(log: msg => Debug.LogWarning("[CoreAI.RbxApi] " + msg));
+                        "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.",
+                        Logging.LogTag.World);
+                    rbxApi = new LuaCsRbxApiBindings(
+                        log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions

@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Logging;
 using CoreAI.Mcp.Tools;
 using UnityEngine;
 
@@ -9,19 +10,26 @@ namespace CoreAI.Mcp.Server
     /// main thread. Renders <see cref="Camera.main"/> (falling back to any enabled camera) into an
     /// off-screen <see cref="RenderTexture"/> so the capture works headless-of-display and in a build,
     /// then downscales to the requested cap.
+    /// <para>
+    /// WHY: the camera is resolved per call, never cached at startup - a server started from a bootstrap
+    /// scene would otherwise decide "no camera" forever, and the tool would stay missing from
+    /// <c>tools/list</c> for the whole session.
+    /// </para>
     /// </summary>
     public sealed class MainCameraScreenshotSource : IScreenshotSource
     {
-        /// <summary>True when a camera exists to capture from right now.</summary>
-        public static bool HasCamera => ResolveCamera() != null;
-
         /// <inheritdoc />
-        public string CaptureBase64Png(int maxResolution)
+        public bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error)
         {
+            base64Png = null;
+            error = null;
+
             Camera camera = ResolveCamera();
             if (camera == null)
             {
-                return null;
+                error = "no camera is active in the loaded scenes (Camera.main is null and " +
+                        "Camera.allCameras is empty).";
+                return false;
             }
 
             int width = Screen.width > 0 ? Screen.width : 1280;
@@ -48,11 +56,24 @@ namespace CoreAI.Mcp.Server
                 texture.Apply(false);
 
                 byte[] png = texture.EncodeToPNG();
-                return png != null ? Convert.ToBase64String(png) : null;
+                if (png == null || png.Length == 0)
+                {
+                    error = $"EncodeToPNG produced no bytes for a {width}x{height} capture of camera " +
+                            $"'{camera.name}'.";
+                    return false;
+                }
+
+                base64Png = Convert.ToBase64String(png);
+                return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return null;
+                // WHY: swallowing this used to report "no active camera" for a live camera - log the real
+                // exception AND hand its text to the agent, which is the only one that can act on it.
+                error = $"capture of camera '{camera.name}' at {width}x{height} failed: " +
+                        $"{ex.GetType().Name}: {ex.Message}";
+                Log.Instance.Error($"[CoreAI MCP] screenshot {error}\n{ex}");
+                return false;
             }
             finally
             {

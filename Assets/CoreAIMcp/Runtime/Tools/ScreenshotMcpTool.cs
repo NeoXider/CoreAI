@@ -8,8 +8,10 @@ namespace CoreAI.Mcp.Tools
 {
     /// <summary>
     /// MCP <c>screenshot</c> tool: captures the running game's main camera to a PNG and returns it as an
-    /// MCP image content item (base64). Present ONLY when an <see cref="IScreenshotSource"/> is available
-    /// in the current composition. Runs on the Unity main thread (rendering is main-thread only).
+    /// MCP image content item (base64). Registered whenever an <see cref="IScreenshotSource"/> exists;
+    /// the Unity host always supplies one, so a missing camera is reported at CALL time instead of
+    /// hiding the tool from <c>tools/list</c> for the whole session. Runs on the Unity main thread
+    /// (rendering is main-thread only).
     /// </summary>
     public sealed class ScreenshotMcpTool : IMcpTool
     {
@@ -18,7 +20,7 @@ namespace CoreAI.Mcp.Tools
 
         private readonly IScreenshotSource _source;
 
-        /// <param name="source">The capture source. Never null - the tool is omitted when none exists.</param>
+        /// <param name="source">The capture source. Never null - the tool is not registered without one.</param>
         public ScreenshotMcpTool(IScreenshotSource source)
         {
             _source = source ?? throw new ArgumentNullException(nameof(source));
@@ -41,25 +43,21 @@ namespace CoreAI.Mcp.Tools
         /// <inheritdoc />
         public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
-            int maxRes = DefaultMaxResolution;
-            JToken token = arguments?["max_resolution"];
-            if (token != null && token.Type != JTokenType.Null)
+            int maxRes = McpArguments.Int(arguments, "max_resolution", DefaultMaxResolution);
+
+            // WHY: the source reports WHY it failed; passing that text through is the difference between
+            // "fix your camera" and a wrong-diagnosis goose chase for the agent on the other end.
+            if (!_source.TryCaptureBase64Png(maxRes, out string base64, out string error))
             {
-                try
-                {
-                    maxRes = token.Value<int>();
-                }
-                catch (Exception)
-                {
-                    maxRes = DefaultMaxResolution;
-                }
+                return Task.FromResult(McpToolResult.Failure(
+                    "screenshot: capture failed - " +
+                    (string.IsNullOrEmpty(error) ? "the capture source reported no reason." : error)));
             }
 
-            string base64 = _source.CaptureBase64Png(maxRes);
             if (string.IsNullOrEmpty(base64))
             {
                 return Task.FromResult(McpToolResult.Failure(
-                    "screenshot: nothing could be captured (no active camera or headless session)."));
+                    "screenshot: the capture source reported success but returned an empty image."));
             }
 
             return Task.FromResult(new McpToolResult(new[] { McpContent.CreateImage(base64, "image/png") }));

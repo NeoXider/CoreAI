@@ -7,14 +7,17 @@ namespace CoreAI.Infrastructure.Logging
     /// </summary>
     public sealed class FilteringGameLogger : IGameLogger
     {
-        private readonly UnityGameLogSink _sink;
+        private readonly IGameLogSink _sink;
         private readonly IGameLogSettings _settings;
 
         /// <summary>Initializes a new instance of FilteringGameLogger.</summary>
-        public FilteringGameLogger(UnityGameLogSink sink, IGameLogSettings settings)
+        public FilteringGameLogger(IGameLogSink sink, IGameLogSettings settings)
         {
             _sink = sink;
-            _settings = settings;
+
+            // WHY: A logger without settings would throw on every call; falling back to the live
+            // runtime filter keeps an unconfigured logger filtering like every other one.
+            _settings = settings ?? GameLogFilter.Settings;
         }
 
         /// <inheritdoc />

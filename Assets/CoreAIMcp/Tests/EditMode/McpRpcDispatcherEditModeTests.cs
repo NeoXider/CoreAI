@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mcp.Protocol;
@@ -147,6 +148,33 @@ namespace CoreAI.Mcp.Tests
                 await dispatcher.DispatchAsync(Request("does/not/exist", 6), CancellationToken.None);
 
             Assert.AreEqual(JsonRpcErrorCodes.MethodNotFound, result.Response["error"]!["code"]!.Value<int>());
+        }
+
+        [Test]
+        public async Task ToolsCall_WhenTheMainThreadStalls_ReturnsAJsonRpcErrorNotAHang()
+        {
+            McpRpcDispatcher dispatcher = new(new McpToolRegistry(new[] { new FakeMcpTool("echo_tool") }),
+                new McpSessionStore(), new StallingMainThreadDispatcher());
+            JObject parameters = new() { ["name"] = "echo_tool" };
+
+            McpDispatchResult result =
+                await dispatcher.DispatchAsync(Request(McpMethods.ToolsCall, 8, parameters), CancellationToken.None);
+
+            Assert.AreEqual(JsonRpcErrorCodes.InternalError, result.Response["error"]!["code"]!.Value<int>());
+            StringAssert.Contains("timed out", result.Response["error"]!["message"]!.ToString());
+            StringAssert.Contains("paused", result.Response["error"]!["message"]!.ToString(),
+                "the error must name the cause so the caller can fix it.");
+        }
+
+        /// <summary>Test double for a player loop that never drains the queue (paused game / disabled host).</summary>
+        private sealed class StallingMainThreadDispatcher : IMainThreadDispatcher
+        {
+            public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work)
+            {
+                return Task.FromException<T>(new TimeoutException(
+                    "the Unity main thread never drained the MCP queue within 30s - the game is paused, " +
+                    "the CoreAiMcpServer component is disabled, or its GameObject is inactive."));
+            }
         }
 
         [Test]

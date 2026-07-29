@@ -242,8 +242,14 @@ namespace CoreAI.Tests.EditMode.Audit
             Assert.IsFalse(result.Ok, "Truncated tail line should break verification.");
         }
 
+        /// <summary>
+        /// A ChainReset anywhere but the first line FAILS verification. It used to start a fresh valid
+        /// chain, which is exactly the forgery this file exists to detect: truncate the log after an
+        /// unwanted entry, append a ChainReset, and rebuild a self-consistent tail from genesis — the
+        /// verifier reported Ok. The reset is still reported as a warning so an operator sees where.
+        /// </summary>
         [Test]
-        public void Verify_ChainResetMidFile_StartsNewValidChain()
+        public void Verify_ChainResetMidFile_BreaksVerification()
         {
             using AuditLogWriter writer = new(_testFolder);
             WriteEntries(writer, 2);
@@ -266,7 +272,10 @@ namespace CoreAI.Tests.EditMode.Audit
                 Log.Instance = originalLog;
             }
 
-            Assert.IsTrue(result.Ok, result.Error);
+            Assert.IsFalse(
+                result.Ok,
+                "A ChainReset past the first line lets a forged tail pass as a fresh chain.");
+            StringAssert.Contains("ChainReset", result.Error);
             Assert.AreEqual(3, result.LineCount);
             Assert.AreEqual(1, result.ChainResetCount);
             // WHY: the verifier warns via the portable Log abstraction (not Console.Error); a mid-file

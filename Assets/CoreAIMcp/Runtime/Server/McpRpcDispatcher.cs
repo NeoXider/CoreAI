@@ -161,12 +161,20 @@ namespace CoreAI.Mcp.Server
                 return McpDispatchResult.Reply(JsonRpc.Result(id,
                     (toolResult ?? McpToolResult.Failure("Tool returned no result.")).ToJson()));
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
                 // WHY: Cancellation is a lifecycle signal (server stopping / client gone), never a tool
                 // failure - surface it as a protocol-level internal error without an isError tool payload.
                 return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InternalError,
-                    $"Tool '{name}' was cancelled."));
+                    $"Tool '{name}' was cancelled: {ex.Message}"));
+            }
+            catch (TimeoutException ex)
+            {
+                // WHY: a stalled main thread (paused game, disabled host component) is a server lifecycle
+                // failure, not a tool failure - report it as a JSON-RPC error carrying the cause so the
+                // client fails fast with an actionable message instead of waiting forever.
+                return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InternalError,
+                    $"Tool '{name}' timed out: {ex.Message}"));
             }
             catch (Exception ex)
             {

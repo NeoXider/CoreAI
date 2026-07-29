@@ -6,7 +6,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// Decorates an existing memory store and maps role ids to scoped keys.
     /// </summary>
-    public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore
+    public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics
     {
         private readonly IAgentMemoryStore _inner;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
@@ -26,6 +26,22 @@ namespace CoreAI.Ai
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
             return _inner.TryLoad(ToScopedKey(roleId), out state);
+        }
+
+        /// <inheritdoc />
+        public AgentMemoryLoadStatus TryLoadDetailed(string roleId, out AgentMemoryState state)
+        {
+            string key = ToScopedKey(roleId);
+            if (_inner is IAgentMemoryLoadDiagnostics diagnostics)
+            {
+                return diagnostics.TryLoadDetailed(key, out state);
+            }
+
+            // WHY: An inner store without the capability cannot tell "missing" from "unreadable"; report
+            // the optimistic NotFound rather than blocking every first write behind a false Failed.
+            return _inner.TryLoad(key, out state) && state != null
+                ? AgentMemoryLoadStatus.Loaded
+                : AgentMemoryLoadStatus.NotFound;
         }
 
         /// <inheritdoc />

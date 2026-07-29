@@ -40,6 +40,49 @@ namespace CoreAI.Ai
         ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0);
     }
 
+    /// <summary>Outcome of one role-memory load attempt.</summary>
+    public enum AgentMemoryLoadStatus
+    {
+        /// <summary>Persisted state was read successfully.</summary>
+        Loaded = 0,
+
+        /// <summary>Nothing is persisted for the role yet; starting from an empty state is safe.</summary>
+        NotFound = 1,
+
+        /// <summary>Persisted state exists but could not be read; its content is unknown.</summary>
+        Failed = 2
+    }
+
+    /// <summary>
+    /// Optional store capability that separates "nothing persisted yet" from "persisted state exists but
+    /// could not be read". <see cref="IAgentMemoryStore.TryLoad"/> collapses both into <c>false</c>, which
+    /// makes a read/modify/write cycle overwrite a live memory document with an empty one whenever a read
+    /// fails transiently (a locked file, a partial write).
+    /// </summary>
+    public interface IAgentMemoryLoadDiagnostics
+    {
+        /// <summary>Attempts to load persisted memory state and reports why the attempt did not succeed.</summary>
+        AgentMemoryLoadStatus TryLoadDetailed(string roleId, out AgentMemoryState state);
+    }
+
+    /// <summary>
+    /// Raised when persisted role memory exists but could not be read, so a read/modify/write cycle must
+    /// abort instead of persisting a state built on top of an unknown baseline.
+    /// </summary>
+    public sealed class AgentMemoryLoadException : Exception
+    {
+        /// <summary>Creates the exception for a role whose persisted memory could not be read.</summary>
+        public AgentMemoryLoadException(string roleId)
+            : base($"Persisted memory for role '{roleId}' exists but could not be read; " +
+                   "the mutation was aborted to avoid overwriting it.")
+        {
+            RoleId = roleId ?? "";
+        }
+
+        /// <summary>Agent role id whose memory could not be read.</summary>
+        public string RoleId { get; }
+    }
+
     /// <summary>
     /// Optional store capability for atomic role-memory read/modify/write transactions.
     /// </summary>
@@ -123,10 +166,7 @@ namespace CoreAI.Ai
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (!store.TryLoad(roleId, out AgentMemoryState state) || state == null)
-                {
-                    state = new AgentMemoryState();
-                }
+                AgentMemoryState state = LoadBaselineOrThrow(store, roleId);
 
                 TResult result = mutator(state);
                 store.Save(roleId, state);
@@ -136,6 +176,36 @@ namespace CoreAI.Ai
             {
                 gate.Release();
             }
+        }
+
+        /// <summary>
+        /// Reads the baseline state a mutation will be built on. A missing document is a legitimate empty
+        /// start; a document that exists but cannot be READ is not - continuing there would persist a
+        /// mutation applied to an empty baseline and wipe the real memory plus its whole version history.
+        /// </summary>
+        /// <exception cref="AgentMemoryLoadException">
+        /// The store reported that persisted state exists but could not be read.
+        /// </exception>
+        private static AgentMemoryState LoadBaselineOrThrow(IAgentMemoryStore store, string roleId)
+        {
+            AgentMemoryState state;
+            if (store is IAgentMemoryLoadDiagnostics diagnostics)
+            {
+                AgentMemoryLoadStatus status = diagnostics.TryLoadDetailed(roleId, out state);
+                if (status == AgentMemoryLoadStatus.Failed)
+                {
+                    throw new AgentMemoryLoadException(roleId);
+                }
+
+                return state ?? new AgentMemoryState();
+            }
+
+            if (!store.TryLoad(roleId, out state) || state == null)
+            {
+                return new AgentMemoryState();
+            }
+
+            return state;
         }
 
         /// <summary>Returns retained memory versions for a role in chronological order.</summary>

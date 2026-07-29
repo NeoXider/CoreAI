@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
@@ -63,6 +64,13 @@ namespace CoreAI.Mods.Rbx.Binding
         private readonly Dictionary<InstanceId, BindingEntry> _bindings = new();
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
+        private ILog _log;
+
+        // WHY: the binder is constructed by RbxWorldHost, not by the container, so the host hands it
+        // the composition-scoped logger (see SetLog); the process-wide CoreAI logger backs direct
+        // constructions (tests, harnesses) so materialization diagnostics are never silently lost.
+        private ILog Logger => _log ??= CoreAI.Logging.Log.Instance;
+
         private sealed class BindingEntry
         {
             public GameObject GameObject;
@@ -97,10 +105,23 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
-        /// represents game/DataModel; null = scene root).</summary>
-        public InstanceGameObjectBinder(Transform worldParent = null)
+        /// represents game/DataModel; null = scene root). <paramref name="log"/> receives the
+        /// materialization diagnostics; null falls back to the process-wide CoreAI logger.</summary>
+        public InstanceGameObjectBinder(Transform worldParent = null, ILog log = null)
         {
             _worldParent = worldParent;
+            _log = log;
+        }
+
+        /// <summary>Re-points diagnostics at the composition-scoped logger after construction, so a
+        /// scene whose host awakes before the container is built still logs through the authored
+        /// game-log settings rather than the process-wide fallback.</summary>
+        public void SetLog(ILog log)
+        {
+            if (log != null)
+            {
+                _log = log;
+            }
         }
 
         /// <summary>Count of live backing GameObjects (materialized or parked-deactivated).</summary>
@@ -179,19 +200,21 @@ namespace CoreAI.Mods.Rbx.Binding
                     if (!_loggedFirstPart)
                     {
                         _loggedFirstPart = true;
-                        Debug.Log(
+                        Logger.Info(
                             $"[CoreAI.RbxApi] first part materialized: '{record.Instance.Name}' " +
                             $"active={entry.GameObject.activeInHierarchy} " +
                             $"renderer={(entry.Renderer != null ? "yes" : "NONE")} " +
-                            $"shader={(entry.Renderer != null && entry.Renderer.sharedMaterial != null ? entry.Renderer.sharedMaterial.shader.name : "NO MATERIAL")}");
+                            $"shader={(entry.Renderer != null && entry.Renderer.sharedMaterial != null ? entry.Renderer.sharedMaterial.shader.name : "NO MATERIAL")}",
+                            LogTag.World);
                     }
                 }
             }
             catch (System.Exception ex)
             {
-                Debug.LogError(
+                Logger.Error(
                     $"[CoreAI.RbxApi] Failed to materialize '{record.Instance.Name}' " +
-                    $"(class={record.Instance.ClassName}, id={record.Id}): {ex.Message}");
+                    $"(class={record.Instance.ClassName}, id={record.Id}): {ex.Message}",
+                    LogTag.World);
             }
         }
 
@@ -566,10 +589,14 @@ namespace CoreAI.Mods.Rbx.Binding
                 }
                 else
                 {
-                    Debug.LogError(
+                    // WHY: the primitive cache is static (shared by every binder instance), so there is
+                    // no instance logger to reach here — the process-wide CoreAI logger is the only
+                    // seam available, and it still routes through the game-log category filter.
+                    CoreAI.Logging.Log.Instance.Error(
                         "[CoreAI.RbxApi] A render pipeline is active but its default shader could not be " +
                         "resolved; spawned parts will be invisible. Add the pipeline's Lit shader " +
-                        "(e.g. 'Universal Render Pipeline/Lit') to Always Included Shaders.");
+                        "(e.g. 'Universal Render Pipeline/Lit') to Always Included Shaders.",
+                        LogTag.World);
                 }
             }
         }

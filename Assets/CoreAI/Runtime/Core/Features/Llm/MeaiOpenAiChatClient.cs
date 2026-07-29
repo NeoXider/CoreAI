@@ -365,8 +365,8 @@ namespace CoreAI.Infrastructure.Llm
                 _log.Info(
                     "MeaiOpenAiChatClient: transport has no SSE support - using non-stream completion and simulated streaming updates (WebGL / UnityWebRequest).",
                     LogTag.Llm);
-                MEAI.ChatResponse full = await GetResponseAsync(chatMessages, options, cancellationToken);
-                foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
+                MEAI.ChatResponse simulated = await GetResponseAsync(chatMessages, options, cancellationToken);
+                foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(simulated))
                 {
                     yield return u;
                 }
@@ -741,15 +741,26 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            if (fallBackToNonStreaming)
+            if (!fallBackToNonStreaming)
             {
-                // WHY: Zero transient budget: this IS the fallback request; if it fails too, the typed
-                // error surfaces (request → retry → fallback → error, no hidden extra rounds).
-                MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken);
-                foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
-                {
-                    yield return u;
-                }
+                // WHY: Falling out of the attempt loop means every attempt ended in `continue` (transient
+                // 5xx/429 on stream-open). Without this the iterator would complete with zero chunks and
+                // zero exceptions, and the caller would report a meaningless "stream ended without
+                // content" while the real HTTP status stayed in the log only.
+                _log.Warn(
+                    $"MeaiOpenAiChatClient: stream exhausted all {transientLocalLlmReloadMaxAttempts} attempts without a usable response.",
+                    LogTag.Llm);
+                throw new LlmClientException(
+                    "LLM stream exhausted all attempts without a response.",
+                    LlmErrorCode.BackendUnavailable);
+            }
+
+            // WHY: Zero transient budget: this IS the fallback request; if it fails too, the typed
+            // error surfaces (request → retry → fallback → error, no hidden extra rounds).
+            MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken);
+            foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
+            {
+                yield return u;
             }
         }
 

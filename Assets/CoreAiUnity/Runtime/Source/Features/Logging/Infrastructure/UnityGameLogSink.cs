@@ -5,11 +5,11 @@ namespace CoreAI.Infrastructure.Logging
     /// <summary>
     /// Writes game log events to the Unity console.
     /// </summary>
-    public sealed class UnityGameLogSink
+    public sealed class UnityGameLogSink : IGameLogSink
     {
         private const string Prefix = "[CoreAI] ";
 
-        /// <summary>Replaces an existing memory value with the supplied content.</summary>
+        /// <inheritdoc />
         public void Write(GameLogLevel level, string message, Object context = null)
         {
             switch (level)
