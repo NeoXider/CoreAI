@@ -127,6 +127,29 @@ namespace CoreAI.Chat
         /// </summary>
         private bool _streamingBubbleSealed;
 
+        /// <summary>
+        /// Prose bubbles opened during the current turn, in order. A turn is split into several bubbles
+        /// when tool rounds run between prose (see <see cref="_streamingBubbleSealed"/>), and only this
+        /// class knows where those boundaries are: <see cref="OnResponseReceived"/> receives the whole
+        /// turn CONCATENATED, with nothing to say which part landed in which bubble.
+        /// <para>
+        /// Without this list a host that post-processes bubbles (markdown rendering, syntax highlighting,
+        /// per-bubble actions) has to rediscover them from the visual tree by CSS class and text
+        /// matching — brittle guesswork that silently breaks exactly when a turn is split. A shipping
+        /// host hit that: the whole response was re-rendered into the LAST bubble, so the prose before
+        /// the tool call was shown twice and the sealed bubble stayed unrendered.
+        /// </para>
+        /// </summary>
+        private readonly List<Label> _turnStreamingBubbles = new();
+
+        /// <summary>
+        /// Prose bubbles of the current (or last completed) turn, in the order they were opened. A turn
+        /// split by tool rounds has more than one, and each holds only its own segment of the answer.
+        /// Valid from the first streamed chunk until the next turn starts, so it can be read from
+        /// <see cref="OnResponseReceived"/> and from work scheduled shortly after it.
+        /// </summary>
+        protected IReadOnlyList<Label> TurnStreamingBubbles => _turnStreamingBubbles;
+
         /// <summary>Tracks the in-flight tool round so ToolRoundStarted can carry the last tool name.</summary>
         private string _lastToolNameInTurn;
 
@@ -1170,6 +1193,9 @@ namespace CoreAI.Chat
             _apiProfileToggle = null;
             _longRequestHint = null;
             _streamingLabel = null;
+            // WHY: those bubbles belonged to the old visual tree; keeping them would hand a host
+            // detached elements to post-process.
+            _turnStreamingBubbles.Clear();
             // WHY: pending scheduler jobs die with the old visual tree; a stuck flag would block every
             // scroll after a UI rebuild.
             _scrollToBottomScheduled = false;
@@ -2431,6 +2457,9 @@ namespace CoreAI.Chat
             ResetThinkFilter();
             _streamingStartedVisible = false;
             _streamingBubbleSealed = false;
+            // WHY: bubbles of the PREVIOUS turn must not leak into this one — a host reading
+            // TurnStreamingBubbles would re-render already finished bubbles with the new answer.
+            _turnStreamingBubbles.Clear();
 
             // WHY: yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish
             // the enumerator.
@@ -3495,6 +3524,9 @@ namespace CoreAI.Chat
             MakeTextSelectable(_streamingLabel);
 
             AddBubbleContent(templateRow, contentSlot, _streamingLabel);
+            // WHY: record the bubble in open order — after the turn a host needs EVERY segment, not
+            // just the last one (see TurnStreamingBubbles).
+            _turnStreamingBubbles.Add(_streamingLabel);
             MessageScroll.Add(templateRow);
             ScrollToBottom();
         }
@@ -3644,6 +3676,10 @@ namespace CoreAI.Chat
                 {
                     MessageScroll.Clear();
                 }
+
+                // WHY: the bubbles were just removed from the tree; a host must not be handed
+                // detached elements to post-process.
+                _turnStreamingBubbles.Clear();
 
                 string roleId = ActiveRoleId;
                 // WHY: keep the in-memory cache consistent with the now-empty scroll, otherwise switching

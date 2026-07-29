@@ -6,6 +6,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- **`CoreAiChatPanel.TurnStreamingBubbles`** — the prose bubbles of the current turn, in the order
+      they were opened. A turn is split into several bubbles when tool rounds run between prose
+      (`SealStreamingBubbleIfAny`), but `OnResponseReceived` hands the host the whole turn
+      CONCATENATED, with nothing to say which part landed in which bubble. Hosts that post-process
+      bubbles (markdown rendering, syntax highlighting, per-bubble actions) had to rediscover them
+      from the visual tree by CSS class and text matching — guesswork that breaks exactly when a turn
+      is split. A shipping host hit that: the whole response was re-rendered into the LAST bubble, so
+      the prose before the tool call appeared twice and the sealed bubble stayed unrendered (raw
+      `**`). The list is cleared when a turn starts, when the chat is cleared, and when the UI is
+      rebound, so a host never receives detached elements.
 - **Runtime log filtering: `GameLogFilter`.** Static, thread-safe entry point that works in a player:
       `MinimumLevel`, `EnabledFeatures`, `SetFeatureEnabled(feature, enabled)`, `IsFeatureEnabled`,
       `Snapshot()`, `ResetToAuthored()`. `CoreAILifetimeScope` copies `GameLogSettingsAsset` into it
