@@ -10,6 +10,12 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
     (`coreai_world_begin/commit`), and stores the wave counter in persistent store (`store_set/get`);
   - `hooks_every(4.0, ...)` recolors `Boss` through `coreai_world_set_color`;
   - `events_emit("wave_spawned", n)` sends an event back to the game (`ModEventEmitted`).
+
+  > ⚠️ **The spawn and recolor halves of this mod no longer run on the default composition.**
+  > `CoreAiModsInstaller` sets `RegisterWorldEditBuildBindings = false`, so `coreai_world_begin`,
+  > `coreai_world_spawn`, `coreai_world_commit` and `coreai_world_set_color` are withheld stubs that
+  > raise an actionable error. `coreai_world_exists`, the store, hooks and events are unaffected.
+  > Migrating the mod to `Instance.new('Part')` ([Rbx API](../../CoreAI/Docs/RBX_API.md)) is pending.
 - **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
   `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every
   frame and shows which formula is active: Lua override or C# default.
@@ -26,7 +32,7 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 ## What to Verify Visually
 
 - The `wave_director` mod has no `logic_define` (no `LogicOverride` level), and `damage_tuner`
-  has no `coreai_world_spawn`: capability levels really restrict the global set.
+  has no world-building globals at all: capability levels really restrict the global set.
 - The wave counter survives mod Unload/Load (stored in `FileLuaModStore`,
   `persistentDataPath/CoreAI/LuaMods`).
 - API details: `Assets/CoreAI/Docs/LUA_GAME_API.md`; security:

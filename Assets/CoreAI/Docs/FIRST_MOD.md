@@ -1,9 +1,10 @@
 # Your First Lua Mod in 5 Minutes
 
 This is a hands-on quickstart for writing, loading, persisting, and sharing a Lua mod in CoreAI.
-For the full surface (every binding, the capability tiers, transactions, Full mode) read
-[LUA_GAME_API.md](LUA_GAME_API.md). For the security model read
-[LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md).
+To create world objects — parts, folders, cameras, clicks — read [RBX_API.md](RBX_API.md): that
+Roblox-style surface is what a mod builds with. For the mod runtime itself (every binding, the
+capability tiers, transactions, Full mode) read [LUA_GAME_API.md](LUA_GAME_API.md). For the security
+model read [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md).
 
 > Lua is an optional module. If your project defines `COREAI_NO_LUA`, none of
 > this applies — the runtime ships stub bindings instead. See
@@ -58,7 +59,7 @@ absent from the mod's globals.
 |---|---|
 | `Read` | `log_*`, world queries (`coreai_world_exists/pos/find/...`), versions |
 | `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
-| `WorldEdit` | `coreai_world_spawn/move/rotate/destroy/parent/...`, batches, transactions |
+| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md) — how a mod creates world objects |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | reflection (`unity_*`) — **opt-in, off by default** |
 

@@ -17,6 +17,7 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | Understand how tools reach MEAI | [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) |
 | Route requests across local, HTTP, or Unity hosts | [LLM_ROUTING.md](LLM_ROUTING.md) |
 | Expose AI-authored Lua safely | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) |
+| Create world objects from a mod | [RBX_API.md](RBX_API.md) |
 | Game Lua API, mods, Full mode | [LUA_GAME_API.md](LUA_GAME_API.md) |
 | Lua do's and don'ts | [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) |
 | Keep tool logic free of Unity APIs | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) |
@@ -31,6 +32,7 @@ Russian files are kept only when the filename is explicitly marked `_RU`.
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
 | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
+| [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, samples |
 | [LUA_GAME_API.md](LUA_GAME_API.md) | Game Lua API reference: capabilities, mods, world, Full, LLM tools |
 | [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) | Best practices and anti-patterns for Lua in games |
 | [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md) | Lua native APIs vs CoreAI wrappers |

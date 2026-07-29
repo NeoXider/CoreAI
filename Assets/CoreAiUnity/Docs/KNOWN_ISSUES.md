@@ -2,6 +2,65 @@
 
 This file tracks accepted warning debt and project-level issues that are not runtime regressions.
 
+## FullAccess demo: "Start Tetris" throws
+
+Symptom: pressing **Start Tetris** in the FullAccess demo reports
+`Tetris load failed: coreai_world_spawn: coreai_world_spawn requires the WorldEdit build bindings,
+which are disabled for this mod`.
+
+Cause: `LuaPlatformExampleController.cs` embeds a Tetris written against the classic
+`coreai_world_*` build API. The default composition (`CoreAiModsInstaller`) sets
+`RegisterWorldEditBuildBindings = false`, so those functions are withheld stubs in every shipping
+game — the demo source was never migrated. The demo's self-test path is unaffected and still passes.
+
+Workaround: the bundled **`sample_tetris3d`** mod is the same game written in the
+[Rbx API](../../CoreAI/Docs/RBX_API.md); enable it from the **Hub → Mods** tab.
+
+Recommended follow-up: rewrite the embedded demo source on `Instance.new`, or have the demo load the
+bundled mod instead of carrying its own copy.
+
+The **LuaMods demo** has the same defect: `WaveDirectorMod.lua.txt` builds its wave through
+`coreai_world_begin` / `coreai_world_spawn` / `coreai_world_commit` and recolors through
+`coreai_world_set_color`, so pressing **Emit 'wave_started'** raises the same withheld-API error.
+Its store, hooks, events and `coreai_world_exists` halves still work.
+
+## LLMUnity throws on WebGL startup
+
+Symptom: a WebGL player logs `ArgumentException: Unknown platform Unix <version>` from
+`UndreamAI.LlamaLib.LlamaLib.GetPlatform()` during startup.
+
+Cause: LLMUnity's native platform probe does not recognise the triple the WebGL player reports.
+
+Impact: noise only. A local GGUF model cannot run in a browser player regardless; CoreAI itself
+starts normally and an OpenAI-compatible HTTP backend works.
+
+Recommended follow-up: skip the LLMUnity module entirely for WebGL builds (do not install
+`ai.undream.llm`, or guard its activation behind a non-WebGL check).
+
+## Legacy log-settings migration hides Lua mod errors
+
+Symptom: after upgrading a project whose log filter was set to "everything", errors raised by Lua
+mods stop appearing in the console.
+
+Cause: `GameLogSettingsAsset.TryMigrateFeatures` widens a legacy preset to
+`GameLogFeature.AllBuiltIn`, which does **not** include `CustomA` — and `LuaLogService` mirrors mod
+errors under `CustomA`. Freshly created settings assets default to `GameLogFeature.All` and are not
+affected.
+
+Workaround: set the feature filter back to **All** in the Game Log Settings asset.
+
+## Windows IL2CPP needs the MSVC C++ toolchain
+
+Symptom: a Windows Standalone IL2CPP build fails with
+`Unity.IL2CPP.Bee.BuildLogic.ToolchainNotFoundException`, reporting a Visual Studio installation
+"without C++ tool components" and/or a missing Windows SDK.
+
+Cause: IL2CPP compiles generated C++ with MSVC; the Visual Studio workload that ships it is not
+installed by default.
+
+Fix: install the **Desktop development with C++** workload (MSVC toolset) plus **Windows SDK
+10.0.19041** or newer. Android and WebGL already build with IL2CPP and need no extra install.
+
 ## CS8632 nullable warnings
 
 Symptom: Unity/C# compiler reports CS8632: nullable reference annotations are used outside a nullable context.

@@ -1,5 +1,29 @@
 # Changelog
 
+## [6.11.1] - 2026-07-30
+
+Documentation-only release; no portable-core code changed.
+
+### Added
+
+- **`Docs/RBX_API.md`** — reference for the Roblox-style API a mod builds with (`Instance.new`, the
+      supported classes, datatype and service globals, `Part` properties, a working mod, the bundled
+      sample mods). It did not exist before, while the docs still taught the retired
+      `coreai_world_*` build API in its place.
+
+### Fixed
+
+- **`LUA_GAME_API.md` / `FIRST_MOD.md`** no longer present the classic `coreai_world_*` build
+      functions as the `WorldEdit` surface. The default composition withholds them
+      (`RegisterWorldEditBuildBindings = false`) and answers a call with `LuaApiWithheldException`;
+      both docs now lead with the Rbx API and scope the classic surface to opt-in hosts. The
+      read-only world queries are unaffected and are marked as such.
+
+## [6.11.0] - 2026-07-29
+
+Unity-layer release; see `CoreAiUnity/CHANGELOG.md` for the notes
+(`CoreAiChatPanel.TurnStreamingBubbles`).
+
 ## [6.10.0] - 2026-07-29
 
 Acts on fresh audits of all five packages. The headline is an MCP security hole; the rest is a long

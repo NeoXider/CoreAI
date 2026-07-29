@@ -242,7 +242,7 @@ $ claude mcp add --transport http coreai http://127.0.0.1:8590/mcp \
 <- { "success": true, "skill": "Rbx API", "instructions": "<full Roblox-style API reference...>" }
 
 # 4. It spawns a part with Lua, using globals from the reference
--> tools/call execute_lua { "code": "coreai_world_spawn({prefab='cube', name='Box', x=0, y=1, z=0}) report('spawned Box')" }
+-> tools/call execute_lua { "code": "local p = Instance.new('Part') p.Name = 'Box' p.Position = Vector3.new(0, 1, 0) p.Parent = workspace report('spawned Box')" }
 <- { "Success": true, "Output": "spawned Box" }
 
 # 5. It reads back what the mod/script printed

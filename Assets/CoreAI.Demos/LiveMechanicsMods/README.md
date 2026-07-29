@@ -115,8 +115,9 @@ Ready prompt buttons insert prompts into the chat input:
 
 Visible spawn path:
 
-- `coreai_world_list_prefabs()` includes `Enemy`.
-- `coreai_world_spawn('enemy.basic', 'Enemy_1', x, y, z)` creates the demo enemy cube prefab.
+- `Instance.new('Part')` + setting `.Parent` creates a real object — see
+  [RBX_API.md](../../CoreAI/Docs/RBX_API.md). This is the spawn path on the default composition;
+  the classic `coreai_world_spawn` build call is a withheld stub and raises an actionable error.
 - A Lua timer that only calls `report('spawn...')` is just a log message, not a physical spawn.
 
 ## LiveMechanics Mods Chat

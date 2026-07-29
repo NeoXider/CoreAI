@@ -13,8 +13,11 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
 - `CoreAiChatPanel` with the **Programmer** role: the model replies with Lua code (a fenced block or
   tool-call `execute_lua`), which goes through the normal pipeline
   `LuaCsAiEnvelopeProcessor -> LuaCsSecureEnvironment` with the full game binding set
-  (`LuaCapabilities.All`): logic slots, `ILuaModRuntime`, world commands
-  (`coreai_world_spawn`, etc.; prefabs from `Shared/DemoPrefabRegistry`).
+  (`LuaCapabilities.All`): logic slots, `ILuaModRuntime`, and world building through the
+  [Rbx API](../../CoreAI/Docs/RBX_API.md) (`Instance.new('Part')`). The classic `coreai_world_*`
+  build calls are withheld stubs on this composition; the read-only queries
+  (`coreai_world_find`/`_pos`/`_exists`) still work, as does `Shared/DemoPrefabRegistry` for the C#
+  JSON world-command pipeline.
 - Left panel (OnGUI): boss HP, gold, slot states (C# default / Lua override), loaded mods, combat log.
   Open chat with **C**.
 

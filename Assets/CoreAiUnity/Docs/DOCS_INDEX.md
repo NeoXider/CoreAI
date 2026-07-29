@@ -56,6 +56,7 @@ Package manifests:
 | Document | Purpose |
 |---|---|
 | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | Built-in tools, schemas, examples, and tool-call patterns. |
+| [TOOL_AUTHORING_GUIDE.md](TOOL_AUTHORING_GUIDE.md) | Writing your own tool: schema, validation, result envelope, registration. |
 | [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | Naming, idempotency, result envelopes, duplicate calls, test checklist. |
 | [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md) | Worked merchant/inventory example for chat tool calling. |
 | [JSON_COMMAND_FORMAT.md](JSON_COMMAND_FORMAT.md) | JSON command format reference for role-driven commands. |
@@ -76,6 +77,7 @@ Package manifests:
 | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
 | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md) | Your first Lua mod in 5 minutes: load via agent/C#/TextAsset, persistence, sharing. |
+| [RBX_API](../../CoreAI/Docs/RBX_API.md) | The Roblox-style API a mod builds with: `Instance.new`, datatypes, services, bundled samples. |
 | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`, persistence & sharing. |
 | [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, Lua-CSharp, LLM context. |
 | [LUA_NATIVE_APIS](../../CoreAI/Docs/LUA_NATIVE_APIS.md) | Native Lua-CSharp vs custom CoreAI code. |
@@ -97,6 +99,8 @@ Package manifests:
 | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) | Token anatomy of a turn, measuring real usage, spend caps, and a designer budget worksheet. |
 | [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
 | [DETERMINISM_AND_REPLAY.md](DETERMINISM_AND_REPLAY.md) | Effect-determinism contract, host-authoritative pattern, and the proposed audit-log replayer. |
+| [CONTEXT_MANAGEMENT_ROADMAP.md](CONTEXT_MANAGEMENT_ROADMAP.md) | Planned work on token budget, rolling summaries, and compaction. |
+| [AGENT_SESSION_INSPECTOR.md](AGENT_SESSION_INSPECTOR.md) | Inspecting a live agent session: turns, tool calls, memory reads. |
 | [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 
@@ -105,6 +109,7 @@ Package manifests:
 | Document Or Test | Scope |
 |---|---|
 | [../Tests/README.md](../Tests/README.md) | EditMode & PlayMode test requirements, layout, and backend needs. |
+| [RUNNING_LIVE_TESTS.md](RUNNING_LIVE_TESTS.md) | Running the LIVE PlayMode suite against a real provider, and its local config file. |
 | [../Tests/PlayMode/Scenarios/CraftingMemory_README.md](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | Crafting memory workflow scenario. |
 | [TESTING_TOOL_CALLING.md](TESTING_TOOL_CALLING.md) | How to run and extend tool-calling tests. |
 | `ThinkBlockStreamFilterEditModeTests` | Streaming `<think>` filter and split-tag cases. |

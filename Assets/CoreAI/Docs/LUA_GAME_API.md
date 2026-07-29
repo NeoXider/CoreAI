@@ -35,11 +35,27 @@ needed.
 |---|---|
 | `Read` | `log_*`, versions, `coreai_world_exists/pos/find/list_prefabs/raycast` |
 | `Gameplay` | `time_*` (including `time_set_scale`), `input_*` (keyboard/mouse, read-only) |
-| `WorldEdit` | `coreai_world_spawn`, `coreai_world_change`, `coreai_world_set_color`, `coreai_world_destroy`, scenes, batches, transactions |
+| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md); the classic `coreai_world_spawn`/`_change`/`_set_color`/`_destroy` build functions, scenes, batches and transactions **only where the host opts in** (see the note below) |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
 
 Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id`) are **not gated by a capability tier** — every loaded mod gets them regardless of its `LuaCapabilities`, since they are the mod-runtime surface itself rather than a game binding. See [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
+
+> ### The classic `coreai_world_*` build API is opt-in
+>
+> The default shipping composition (`CoreAiModsInstaller`) sets `RegisterWorldEditBuildBindings =
+> false`. In a game built on it, `coreai_world_spawn`, `coreai_world_change`,
+> `coreai_world_set_color`, `coreai_world_destroy`, the batch/grid helpers and the transaction
+> functions are **not registered**: each one is replaced by a stub that raises
+> `LuaApiWithheldException` naming the withheld surface and pointing at the replacement. **Mods
+> create world objects through the [Rbx API](RBX_API.md) — `Instance.new('Part')`.** The `WorldEdit`
+> capability itself is still granted, because `Instance.new` requires it.
+>
+> The read-only queries in Stage 1 (`coreai_world_exists` / `_pos` / `_find` / `_list_prefabs` /
+> `_raycast`) live at the `Read` tier and are **not** affected.
+>
+> Everything documented in Stage 4 below therefore applies only to a host that deliberately sets
+> `RegisterWorldEditBuildBindings = true` in its own `LuaCsModStackOptions`.
 
 ## Stage 1 - Reading the World (Query API)
 
@@ -91,7 +107,10 @@ modRuntime.UnloadMod("night_director");
 ```lua
 -- inside a mod (runs during LoadMod, registers hooks):
 hooks_on("wave_started", function(evt, payload)
-  coreai_world_spawn({ prefab="enemy.basic", name="wave_" .. payload, x=0, y=0, z=10 })
+  local enemy = Instance.new("Part")           -- Rbx API: see RBX_API.md
+  enemy.Name = "wave_" .. payload
+  enemy.Position = Vector3.new(0, 0, 10)
+  enemy.Parent = workspace
 end)
 hooks_every(2.0, function() ... end)   -- interval >= 0.05 s
 hooks_on("tick", function() ... end)   -- alias for hooks_every(0.05, ...): per-frame-ish callback
@@ -105,8 +124,10 @@ log_info(mod_id())
 `hooks_every(0.05, fn)` timer (20 Hz), since nothing emits those names as events. Prefer
 `hooks_every` directly when you want an explicit interval.
 
-`coreai_world_spawn` creates visible objects only when the host prefab registry contains the prefab
-key/name. Check `coreai_world_list_prefabs()` first; a `report("spawn...")` call is only a log.
+A `report("spawn...")` call is only a log line — it creates nothing. Where the classic build API is
+enabled, `coreai_world_spawn` additionally creates visible objects only when the host prefab registry
+contains the prefab key/name, so check `coreai_world_list_prefabs()` first. `Instance.new("Part")`
+needs no prefab registry at all.
 
 Budgets: every handler call gets 100 ms / 100k instructions; <= 64 handlers and <= 16 timers per
 mod; event queue <= 256 (oldest evicted); 8 consecutive errors unload the mod automatically.
@@ -118,7 +139,11 @@ that want mod autoload should persist selected mod sources separately and call `
 during startup. One-shot `execute_lua` rule-slot edits can be persisted by the host with
 `ILuaScriptVersionStore`; the LiveMechanics demo does this for its own known slots.
 
-## Stage 4 - Level Primitives and Transactions
+## Stage 4 - Level Primitives and Transactions (opt-in hosts only)
+
+> Everything in this section is part of the classic build API, which the default composition does
+> **not** register. It applies only to a host that sets `RegisterWorldEditBuildBindings = true`.
+> On the default composition, build worlds with the [Rbx API](RBX_API.md) instead.
 
 Batches do not hit the `execute_lua` rate limit: one call publishes up to 100 commands:
 
@@ -357,9 +382,10 @@ unity_parent(id, unity_find("LevelRoot"), true)
 ```
 
 Spawn, delete, hierarchy, colour, and common transform control are intentionally available without
-Full through `WorldEdit`: use `coreai_world_spawn`, `coreai_world_change`,
-`coreai_world_set_color`, and `coreai_world_destroy` when object names and prefab keys are known.
-Full remains for diagnostics and reflection-only cases.
+Full through `WorldEdit`: use the [Rbx API](RBX_API.md) — `Instance.new('Part')`, property
+assignment, `instance:Destroy()` — or, on a host that opts into the classic build bindings,
+`coreai_world_spawn` / `coreai_world_change` / `coreai_world_set_color` / `coreai_world_destroy`
+when object names and prefab keys are known. Full remains for diagnostics and reflection-only cases.
 
 > **Persistence:** every object spawned via `WorldEdit` (or `world_command`) is auto-saved to disk and
 > re-created on the next session entry — including transform, parent, active state, and any colour set via

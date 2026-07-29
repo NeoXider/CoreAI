@@ -133,7 +133,8 @@ FirebaseCppApp-*.so
 /[Aa]ssets/_Recovery/
 
 # Benchmark-generated castle prefabs (built by models during the G6 free-build)
-
-# Benchmark-generated castle prefabs (built by models during the G6 free-build)
 Assets/Benchmark/
 Assets/Benchmark.meta
+
+# Per-task progress notes written by CLI subagents in the working directory
+PROGRESS.*.md

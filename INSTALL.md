@@ -149,8 +149,13 @@ in the project.
   `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Disable Lua`.
   Runtime code is guarded by `#if !COREAI_NO_LUA`.
 - **WebGL:** Lua on the WebGL player is **on by default** (new settings assets); toggle with
-  `CoreAISettingsAsset.EnableLuaOnWebGl`. Lua-CSharp is AOT-safe, so it runs under IL2CPP/WebGL
-  without extra stripping protection; the Full `unity_*` reflection tier stays disabled on WebGL.
+  `CoreAISettingsAsset.EnableLuaOnWebGl`. Lua-CSharp is AOT-safe, so it runs under IL2CPP; the Full
+  `unity_*` reflection tier stays disabled on WebGL. Managed stripping is handled by the `link.xml`
+  shipped in the CoreAiUnity package, which preserves the Lua VM, the CoreAI assemblies, the Rbx API
+  assemblies and VContainer — verified on a WebGL/IL2CPP player at stripping level **Medium**, where
+  the container, mod seeding and mod-driven `Instance.new` spawning all survive. **If your own game
+  assemblies are resolved through DI or reflection, add them to your project's own `link.xml`** —
+  CoreAI's only covers CoreAI's.
 - **Hub integration:** if `com.neoxider.coreaihub` (§4) is also installed, Mods' `CoreAI.Mods.Hub`
   assembly auto-enables via the `COREAI_HAS_HUB` version define and adds a Mods page to the Hub
   window — no extra configuration needed either way.

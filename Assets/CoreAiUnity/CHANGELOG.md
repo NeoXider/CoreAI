@@ -2,6 +2,55 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [6.11.1] - 2026-07-30
+
+Documentation-only release: no runtime code changed. The docs had drifted from what the packages
+actually ship, in one specific and expensive way — they still taught the classic `coreai_world_*`
+build API as the way for a mod to create world objects, while the API a mod actually uses was
+documented nowhere at all.
+
+### Added
+
+- **`CoreAI/Docs/RBX_API.md`** — the missing reference for the Roblox-style API mods build with:
+      `Instance.new` and the supported classes, the datatype/service globals actually registered by
+      `LuaCsRbxApiBindings`, the `Part` property set, a working mod, the four bundled sample mods
+      (including the fact that the three playable ones ship `active: false` and are enabled from the
+      Hub Mods tab), and the verified IL2CPP/WebGL stripping story. Linked from both doc indexes.
+- **`KNOWN_ISSUES.md`** gained four entries that were real but unrecorded: the FullAccess demo's
+      **Start Tetris** and the LuaMods demo's **wave_started** both throw because their Lua is still
+      written against the withheld `coreai_world_*` build API; LLMUnity throws
+      `ArgumentException: Unknown platform Unix` on WebGL startup; the legacy log-settings migration
+      widens to `GameLogFeature.AllBuiltIn`, which excludes `CustomA` and therefore silently hides
+      Lua mod errors; and Windows IL2CPP needs the MSVC C++ workload plus Windows SDK 10.0.19041+.
+- **`WEBGL_BUILD_TROUBLESHOOTING.md`**: `CS0103: WebGLInput does not exist` — `WebGLModule.dll` is
+      in the reference set only when the **active** build target is already WebGL, so a
+      `#if UNITY_WEBGL` guard does not save you; switch the platform first. Plus the
+      "scripts are compiling" race right after a platform switch, the shipped WebGL settings, and
+      what `link.xml` was verified to preserve at Medium stripping.
+
+### Fixed
+
+- **Docs taught a withheld API.** `LUA_GAME_API.md` and `FIRST_MOD.md` presented
+      `coreai_world_spawn` / `_change` / `_set_color` / `_destroy`, the batch/grid helpers and the
+      transaction functions as the `WorldEdit` surface. The default composition
+      (`CoreAiModsInstaller`) sets `RegisterWorldEditBuildBindings = false`, so each of those is a
+      stub raising `LuaApiWithheldException`. Both docs now lead with the Rbx API and scope the
+      classic surface to hosts that deliberately opt in; the read-only queries
+      (`coreai_world_exists` / `_pos` / `_find` / `_list_prefabs` / `_raycast`) are unaffected and
+      are called out as such. Same correction in the LiveMechanics, LiveMechanicsMods, LuaMods and
+      MCP READMEs.
+- **`RbxApi/Instances/README.md`** still described signals as `NOT_IMPLEMENTED` stubs awaiting a
+      scheduler and the Unity binder as unwritten; both shipped long ago. It also pointed at a
+      `RobloxApiInstaller` that no longer exists under that name.
+- **`DOCS_INDEX.md`** omitted five docs that exist on disk (`TOOL_AUTHORING_GUIDE`,
+      `RUNNING_LIVE_TESTS`, `AGENT_SESSION_INSPECTOR`, `CONTEXT_MANAGEMENT_ROADMAP`, and the new
+      `RBX_API`).
+- **`INSTALL.md`** claimed Lua runs under IL2CPP/WebGL "without extra stripping protection" while
+      the package ships a `link.xml` doing exactly that; it now says what is preserved and warns
+      that your own DI-resolved assemblies need entries in your own `link.xml`.
+- **`SHIPPING_PLAYER_MACHINES.md`** now states that Windows Standalone currently ships Mono2x, and
+      what enabling IL2CPP for it requires.
+
 ## [6.11.0] - 2026-07-29
 
 ### Added

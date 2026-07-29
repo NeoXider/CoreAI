@@ -2,6 +2,42 @@
 
 Symptoms and mitigations when **Player → WebGL** fails in a large sample project (e.g. this repo with Roguelite example + CoreAI).
 
+## `CS0103: The name 'WebGLInput' does not exist in the current context`
+
+**Switch the active build target to WebGL *first*, then build.** This is the single most common way
+to lose an hour here.
+
+`UnityEngine.WebGLInput` lives in `UnityEngine.WebGLModule.dll`, and Unity adds that assembly to the
+compilation reference set **only when the editor's active build target is already WebGL**. A
+`#if UNITY_WEBGL` guard does not save you: the define is on while building for WebGL, so the code is
+compiled, but the reference is absent when the build was started from a different active target
+(Android, Standalone…). The result is `CS0103` on a symbol that plainly exists.
+
+**Fix:** switch the platform to WebGL (also make sure the selected build target *group* is WebGL),
+let the domain reload and recompilation finish, and only then start the build. Do **not** work around
+it in source with reflection — that hides a real project-configuration error.
+
+## `Error building Player because scripts are compiling`
+
+Starting a build right after a platform switch races the recompilation that switch triggers. Wait
+until both `EditorApplication.isCompiling` and `EditorApplication.isUpdating` are false, confirm the
+console is error-free, then build. Automated build scripts must poll for this explicitly.
+
+## Managed stripping and DI (what is actually verified)
+
+CoreAI ships WebGL as **IL2CPP** with managed stripping level **Medium** and
+`il2cppCodeGeneration = OptimizeSize`, compressed **Brotli** with the JS decompression fallback on —
+hence the `*.unityweb` file names, which a plain static HTTP server can serve as-is.
+
+At that stripping level the VContainer registrations, `RbxWorldHost` instance binding, bundled-mod
+seeding, the Lua VM and mod-driven `Instance.new` part spawning are all **verified working in a real
+WebGL player**. The protection comes from `Assets/CoreAiUnity/link.xml`, which preserves the Lua VM,
+the CoreAI assemblies, the Rbx API assemblies and VContainer.
+
+**If DI or reflection resolves types from your own assemblies, add them to your project's own
+`link.xml`** — CoreAI's covers CoreAI's assemblies only. A container that builds in the editor but
+fails to resolve only in the WebGL player is almost always this.
+
 ## `[CoreAI] Build aborted: … API key` (BuildFailedException)
 
 CoreAI refuses to build a player that would ship a provider key. Two guards throw `BuildFailedException` before compilation starts:
