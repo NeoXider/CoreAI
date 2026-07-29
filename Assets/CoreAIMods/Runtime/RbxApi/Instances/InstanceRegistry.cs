@@ -32,6 +32,15 @@ namespace CoreAI.Mods.Rbx.Instances
             _binder = binder ?? NullInstanceBackingBinder.Instance;
         }
 
+        /// <summary>
+        /// Optional sink for composition faults this registry detects but must not throw on. Engine-free
+        /// by design (a delegate, not a Unity logger); the Unity host wires it to the console.
+        /// WHY: these failures are otherwise SILENT — an instance tree that diverges from the registry
+        /// backing it yields no exception and no GameObject, which is indistinguishable from "the script
+        /// did nothing".
+        /// </summary>
+        public Action<string> Diagnostics { get; set; }
+
         public ClassCatalog Catalog { get; }
 
         public InstanceIdAllocator Allocator { get; }
@@ -331,8 +340,22 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void NotifyMembership(RbxInstance instance, bool entered)
         {
-            if (!_byId.TryGetValue(instance.Id, out InstanceRecord record)
-                || record.IsMaterialized == entered)
+            if (!_byId.TryGetValue(instance.Id, out InstanceRecord record))
+            {
+                // WHY: the instance reached this registry's tree but was never registered HERE, so no
+                // binder call can follow and it can never materialize. That means the world the script
+                // writes to and the registry backing the binder are two different objects — a
+                // composition fault. Reporting it is the only way it is ever visible: the script still
+                // completes, nothing throws, and the only symptom is a missing object.
+                Diagnostics?.Invoke(
+                    $"[CoreAI.RbxApi] '{instance.Name}' (class={instance.ClassName}) entered a tree this " +
+                    "registry does not own, so it will never materialize. The Rbx world used by scripts " +
+                    "and the registry wired to the binder are different instances — check that " +
+                    "RbxWorldHost.Registry/Game are the ones passed to LuaCsRbxApiBindings.");
+                return;
+            }
+
+            if (record.IsMaterialized == entered)
             {
                 return;
             }

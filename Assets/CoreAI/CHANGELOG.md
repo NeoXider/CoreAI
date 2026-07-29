@@ -1,17 +1,35 @@
 # Changelog
 
-## [Unreleased]
+## [6.8.3] - 2026-07-29
+
+The real fix for "mods spawn nothing in a build", and a correction: 6.8.2 blamed the wrong cause.
 
 ### Fixed
 
-- **Mods silently produced no visible objects in Standalone/Android/WebGL builds.** IL2CPP managed
-      stripping removed the entire Roblox API binding layer (`CoreAI.RbxApi.{Instances,Datatypes,
-      Binding,Unity}`) and VContainer internals (`BuilderCallbackDisposable`), so the mods DI
-      container never built and `Instance.new`/`workspace` mutations were no-ops. Added all five
-      assemblies to `link.xml`.
-- **Headless-mode warnings added.** `CoreAiModsInstaller`, `LuaCsRbxApiBindings`, and
-      `InstanceGameObjectBinder` now log clear warnings when the Roblox world host is missing or
-      the binder falls back to in-memory defaults, instead of silently degrading.
+- **Parts spawned by mods were invisible in every player build.** The parts were always there —
+  active, correctly sized, collidable — they just drew nothing. URP declares
+  `UniversalRenderPipelineAsset.defaultMaterial` under `#if UNITY_EDITOR`, so in a player it is null
+  and `GameObject.CreatePrimitive` substitutes the **built-in** `Default-Material` (shader
+  `Standard`). That material is not null — so a null check never caught it — and URP cannot render a
+  built-in shader. `InstanceGameObjectBinder` now builds its default material from the active
+  pipeline's own shader whenever a Scriptable Render Pipeline is present, instead of trusting the
+  primitive's material; cylinders get it assigned explicitly, `Universal Render Pipeline/Lit` is in
+  Always Included Shaders, and an unresolvable shader is now a loud error.
+- **Correction to 6.8.2.** That release attributed this to IL2CPP managed stripping and added
+  `link.xml` entries. Measured on the live editor, Standalone builds with **Mono2x and managed
+  stripping Disabled**, where no managed stripping happens at all — so stripping could not have been
+  the cause, and the symptom reproduced identically on Mono and IL2CPP. The `link.xml` entries are
+  kept (they are correct and necessary for WebGL, which does strip at Medium), but they fixed
+  nothing here.
+
+### Added
+
+- **The failure is no longer silent.** A part that is created but never drawn was indistinguishable
+  from one that was never created, and a player has no inspector to tell them apart — the reason this
+  bug survived a full debugging session. The binder now reports the first materialized part with its
+  renderer and resolved shader (once, not per part), and `InstanceRegistry` gained an engine-free
+  `Diagnostics` hook that reports an instance entering a tree the registry does not own — previously
+  an early `return` with no log, no exception, and no object.
 
 ## [6.8.0] - 2026-07-25
 

@@ -106,6 +106,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             RegisterMinimalModStack(builder, registry);
             // WHY: no RegisterInstance(host) — ResolveOrDefault<RbxWorldHost>() yields null, so the
             // factory builds an in-memory Rbx surface with no part sink and nothing materializes.
+            // The factory reports that as an error because in a shipped game it is a misconfiguration;
+            // this test opts into headless deliberately, so the message is expected, not a failure.
+            UnityEngine.TestTools.LogAssert.Expect(
+                LogType.Error, new System.Text.RegularExpressions.Regex("RbxWorldHost NOT resolved"));
 
             IObjectResolver container = builder.Build();
             try

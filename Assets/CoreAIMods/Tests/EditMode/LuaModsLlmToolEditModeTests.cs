@@ -189,6 +189,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RegisterCoreAiMods_AttachesLuaTools_ToProgrammerRole()
         {
+            // WHY: this container has no RbxWorldHost, which the mods factory reports as an error because
+            // in a shipped game it means Instance.new renders nothing. The tool wiring under test does not
+            // need a host, so the message is expected here rather than a failure.
+            ExpectHeadlessWorldHostError();
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             try
             {
@@ -221,6 +225,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task RegisterCoreAiMods_FullAccess_ManageModsGrantsFullLua()
         {
+            // WHY: see RegisterCoreAiMods_AttachesLuaTools_ToProgrammerRole — headless is deliberate here.
+            ExpectHeadlessWorldHostError();
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject probe = new("FullManageModsProbe");
             LuaModsLlmTool modsTool = null;
@@ -311,6 +317,17 @@ namespace CoreAI.Tests.EditMode
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Accepts the mods factory's "RbxWorldHost NOT resolved" error for a container built without a
+        /// host on purpose. The error is correct production behaviour — it is how a real game learns that
+        /// Instance.new will render nothing — so it is expected here, not silenced globally.
+        /// </summary>
+        private static void ExpectHeadlessWorldHostError()
+        {
+            UnityEngine.TestTools.LogAssert.Expect(
+                LogType.Error, new System.Text.RegularExpressions.Regex("RbxWorldHost NOT resolved"));
         }
     }
 }

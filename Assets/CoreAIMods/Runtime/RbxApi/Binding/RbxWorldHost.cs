@@ -65,6 +65,7 @@ namespace CoreAI.Mods.Rbx.Binding
             RbxSpace.Configure(_metersPerStud);
             Binder = new InstanceGameObjectBinder(transform);
             Registry = new InstanceRegistry(null, Binder);
+            Registry.Diagnostics = Debug.LogError;
             Game = DataModelBootstrap.CreateGame(Registry);
             // WHY: the camera reference is resolved ONCE here at composition; Lua camera writes
             // must never pay a scene search per call.

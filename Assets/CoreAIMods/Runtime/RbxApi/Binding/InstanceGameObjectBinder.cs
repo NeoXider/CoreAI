@@ -3,6 +3,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CoreAI.Mods.Rbx.Binding
 {
@@ -47,6 +48,7 @@ namespace CoreAI.Mods.Rbx.Binding
         private static Mesh _cubeMesh;
         private static Mesh _sphereMesh;
         private static Material _defaultMaterial;
+        private static bool _loggedFirstPart;
 
         // WHY: storage services and their subtrees are not part of the physical world, so their
         // GameObject materializes inactive (children inherit inactive-in-hierarchy). Workspace and
@@ -169,6 +171,20 @@ namespace CoreAI.Mods.Rbx.Binding
                 if (entry.IsPart)
                 {
                     Apply(entry, GetPartPropertiesOrDefault(record.Id));
+                    // WHY: report the FIRST part only. A part that is created but never drawn is
+                    // indistinguishable from one that was never created — both look like "the script did
+                    // nothing" — and in a player there is no inspector to tell them apart. One line naming
+                    // the renderer and the resolved shader settles it; logging every part would flood the
+                    // console on any mod that spawns in bulk.
+                    if (!_loggedFirstPart)
+                    {
+                        _loggedFirstPart = true;
+                        Debug.Log(
+                            $"[CoreAI.RbxApi] first part materialized: '{record.Instance.Name}' " +
+                            $"active={entry.GameObject.activeInHierarchy} " +
+                            $"renderer={(entry.Renderer != null ? "yes" : "NONE")} " +
+                            $"shader={(entry.Renderer != null && entry.Renderer.sharedMaterial != null ? entry.Renderer.sharedMaterial.shader.name : "NO MATERIAL")}");
+                    }
                 }
             }
             catch (System.Exception ex)
@@ -531,6 +547,31 @@ namespace CoreAI.Mods.Rbx.Binding
             GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             _sphereMesh = sphere.GetComponent<MeshFilter>().sharedMesh;
             SafeDestroy(sphere);
+
+            // WHY: never trust the primitive's own material while a Scriptable Render Pipeline is active.
+            // URP's UniversalRenderPipelineAsset.defaultMaterial is compiled under #if UNITY_EDITOR, so in a
+            // PLAYER it is null and CreatePrimitive silently substitutes the BUILT-IN Default-Material
+            // (shader "Standard"). That material is non-null — so a null check does not catch it — yet URP
+            // cannot render a built-in shader, so every part came out invisible: present, active, correctly
+            // sized and collidable, drawing nothing. The Editor never showed it because there the URP asset
+            // does return a real Lit material. Build the material from the pipeline's own shader instead.
+            RenderPipelineAsset pipeline = GraphicsSettings.currentRenderPipeline;
+            if (pipeline != null)
+            {
+                Shader shader = pipeline.defaultShader;
+                shader = shader != null ? shader : Shader.Find("Universal Render Pipeline/Lit");
+                if (shader != null)
+                {
+                    _defaultMaterial = new Material(shader) { name = "CoreAiRbxPartDefault" };
+                }
+                else
+                {
+                    Debug.LogError(
+                        "[CoreAI.RbxApi] A render pipeline is active but its default shader could not be " +
+                        "resolved; spawned parts will be invisible. Add the pipeline's Lit shader " +
+                        "(e.g. 'Universal Render Pipeline/Lit') to Always Included Shaders.");
+                }
+            }
         }
 
         /// <summary>Roblox Cylinder: the circular axis is the part's local X and the length is
@@ -541,6 +582,10 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             GameObject child = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             child.name = ShapeChildName;
+            // WHY: the primitive keeps the pipeline's own material, which is null in a player — see
+            // EnsurePrimitiveCache. Cylinders would stay invisible even once every other shape is fixed.
+            EnsurePrimitiveCache();
+            child.GetComponent<MeshRenderer>().sharedMaterial = _defaultMaterial;
             child.transform.SetParent(gameObject.transform, false);
             child.transform.localPosition = Vector3.zero;
             child.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
