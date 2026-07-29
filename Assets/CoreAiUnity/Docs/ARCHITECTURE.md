@@ -92,7 +92,12 @@ If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChat
 
 **Context-length retry:** in addition to network retries above, **`AiOrchestrator.RunTaskAsync`** may issue bounded additional LLM calls when the completion result carries **`ContextLengthExceeded`**, after rebuilding prompts with progressively tighter history compaction.
 
-**Error propagation:** `CoreAiChatService` does not swallow exceptions; `CoreAiChatPanel` catches and displays them.
+**Error propagation:** `CoreAiChatService` does not swallow exceptions; `CoreAiChatPanel` catches them and splits the failure between **two audiences** via **`LlmErrorPresentation`** (portable core):
+
+- **Player** — `ToUserMessage(ex)` in the chat bubble: a message the backend authored for the player wins (parsed out of `LlmClientException.ProviderErrorBody`), otherwise a phrase for the typed `LlmErrorCode`. JSON bodies, stack traces and over-long text never reach the transcript, and a `401` body is never shown (providers echo the submitted key back in it).
+- **Log** — `ToDiagnosticText(ex)` plus the exception itself: typed code, HTTP status, retry hint, raw provider body (redacted for `401`) and stack trace.
+
+Override `CoreAiChatPanel.ResolveErrorMessage(Exception)` / `ResolveStreamErrorMessage(string)` to localize or re-route the player-facing text; the log line is written first, so an override cannot hide diagnostics.
 
 ## Test Integrity Rule
 

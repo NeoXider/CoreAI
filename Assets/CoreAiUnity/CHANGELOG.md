@@ -15,6 +15,27 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
       `InstanceGameObjectBinder` now log clear warnings when the Roblox world host is missing or
       the binder falls back to in-memory defaults, instead of silently degrading.
 
+## [6.9.0] - 2026-07-29
+
+### Changed
+
+- **`CoreAiChatPanel` stopped pasting exception text into the transcript.** A failed turn used to
+      render `Options.ErrorMessagePrefix + ex.Message`, so a player read
+      `❌ HTTP error 403: {"error":{"message":"..."}}` — transport noise plus a JSON blob — while the
+      log got the same short string and never saw the provider body. The bubble now shows
+      `LlmErrorPresentation.ToUserMessage(ex)` (backend-authored sentence, else a phrase for the typed
+      `LlmErrorCode`), and the log line carries `LlmErrorPresentation.ToDiagnosticText(ex)` **plus**
+      the full exception: code, HTTP status, retry hint, raw provider body and stack trace.
+- **Errors reported inside a stream chunk** (`LlmStreamChunk.Error`) are logged too, and the bubble
+      drops the `HTTP error 500:` prefix instead of showing it to the player.
+
+### Added
+
+- **`ResolveErrorMessage(Exception)` and `ResolveStreamErrorMessage(string)`** — `protected virtual`
+      hooks next to `ResolveTimeoutMessage`, so a game can localize error text or react to a specific
+      `LlmErrorCode` without replacing the panel. Overriding them cannot hide diagnostics: the log
+      line is written before the bubble is built.
+
 ## [6.0.0] - 2026-07-22
 
 ### Changed

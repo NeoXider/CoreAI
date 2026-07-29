@@ -2293,11 +2293,17 @@ namespace CoreAI.Chat
             catch (Exception ex)
             {
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
-                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Error: {ex}");
+                // WHY: two audiences, two strings. The log keeps EVERYTHING (typed code, HTTP status,
+                // retry hint, raw provider body, stack trace); the transcript gets one readable
+                // sentence. Pasting `ex.Message` into the bubble used to show players
+                // `HTTP error 403: {"error":{...}}` — noise to them, and the body never reached the log.
+                Logger.LogError(
+                    GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Error: {LlmErrorPresentation.ToDiagnosticText(ex)} | {ex}");
                 if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
                 {
                     FinishStreaming();
-                    AddMessage(Options.ErrorMessagePrefix + ex.Message, false);
+                    AddMessage(Options.ErrorMessagePrefix + ResolveErrorMessage(ex), false);
                 }
 
                 return null;
@@ -2452,7 +2458,8 @@ namespace CoreAI.Chat
                             return null;
                         }
 
-                        AddMessage(Options.ErrorMessagePrefix + chunk.Error, false);
+                        Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Stream error: {chunk.Error}");
+                        AddMessage(Options.ErrorMessagePrefix + ResolveStreamErrorMessage(chunk.Error), false);
                         return null;
                     }
 
@@ -2665,6 +2672,30 @@ namespace CoreAI.Chat
             }
 
             return Options.TimeoutMessage ?? "Timeout.";
+        }
+
+        /// <summary>
+        /// Player-facing text for a failed turn (shown after <see cref="CoreAiChatConfig.ErrorMessagePrefix"/>).
+        ///
+        /// Default: a message authored by the backend for the player wins; otherwise a phrase for the
+        /// typed <see cref="LlmErrorCode"/> — see <see cref="LlmErrorPresentation"/>. The technical
+        /// detail (status, provider body, stack) is logged separately, so overriding this never hides
+        /// diagnostics. Override to localize or to react to a specific error code.
+        /// </summary>
+        protected virtual string ResolveErrorMessage(Exception exception)
+        {
+            return LlmErrorPresentation.ToUserMessage(exception);
+        }
+
+        /// <summary>
+        /// Player-facing text for an error reported inside a stream chunk (<see cref="LlmStreamChunk.Error"/>),
+        /// where there is no exception to inspect — transport noise like the <c>HTTP error 500:</c>
+        /// prefix is stripped, the rest is shown as-is.
+        /// </summary>
+        protected virtual string ResolveStreamErrorMessage(string chunkError)
+        {
+            string stripped = LlmErrorPresentation.StripHttpErrorPrefix(chunkError);
+            return string.IsNullOrWhiteSpace(stripped) ? LlmErrorPresentation.DefaultUserMessage : stripped;
         }
 
         /// <summary>

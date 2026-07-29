@@ -1,5 +1,29 @@
 # Changelog
 
+## [6.9.0] - 2026-07-29
+
+One failure, two audiences: a sentence for the player, everything for the log.
+
+### Added
+
+- **`LlmErrorPresentation`** (portable core, no Unity types). Turns a failed LLM call into the two
+  strings it always needed:
+  - `ToUserMessage(exception)` — one readable sentence for a chat bubble. A message the BACKEND
+    authored for the player wins (parsed from `error.message` in `LlmClientException.ProviderErrorBody`),
+    because a gateway that already says "the teacher is unavailable, try again in a minute" knows the
+    product better than this library. Otherwise a phrase per `LlmErrorCode` is used — with the
+    provider's retry window folded into the `RateLimited` text.
+  - `ToDiagnosticText(exception)` — typed code, HTTP status, retry hint and the raw provider body,
+    for the log line next to the exception itself.
+  - `ExtractProviderMessage` / `StripHttpErrorPrefix` are public: hosts that render errors themselves
+    reuse the same parsing instead of string-matching `"HTTP error "`.
+- Guardrails, all covered by `LlmErrorPresentationEditModeTests`:
+  - JSON dumps, stack traces and bodies longer than `MaxUserMessageLength` (400) are diagnostics, not
+    UI text — they fall back to the typed phrase, so a player never reads `{"error":{...}}`.
+  - **A 401 body reaches neither the player nor the log.** Providers echo the submitted key back in
+    invalid-credentials responses, so the redaction the HTTP adapters already apply to log lines now
+    applies here too (`body=[redacted auth error body]`; the bubble shows the "sign in again" phrase).
+
 ## [6.8.3] - 2026-07-29
 
 The real fix for "mods spawn nothing in a build", and a correction: 6.8.2 blamed the wrong cause.

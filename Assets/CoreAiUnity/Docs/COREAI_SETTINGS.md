@@ -48,7 +48,7 @@ ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJ
 
 `ServerManagedLlmClient` reads this provider for every HTTP and streaming request in `ServerManagedApi`, including routed `LlmRoutingManifest` profiles.
 
-CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings.
+CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings. To render one of those failures, use `LlmErrorPresentation.ToUserMessage(exception)` (player-facing sentence — prefers a message your backend authored for the player) and `LlmErrorPresentation.ToDiagnosticText(exception)` (log line) instead of printing `exception.Message`.
 
 ### Preset-based setup (Resources)
 
