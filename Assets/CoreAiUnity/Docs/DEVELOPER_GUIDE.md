@@ -501,10 +501,13 @@ public bool IsBusy { get; }                                  // _isSending || _i
 public event Action<bool> BusyStateChanged;                  // UI thread, fires on transitions only
 public event Action<int /*iteration*/, string /*lastTool*/> ToolRoundStarted;
 public int CurrentTurnGeneration { get; }                    // monotonic, ++ at start of each turn
-public void ResetBusyStateWithoutCancellation();             // unlock UI without cancelling HTTP
+public void ResetBusyStateWithoutCancellation();             // unlock UI without cancelling HTTP or moving the turn generation
+public bool AbandonCurrentTurn();                            // Unreleased — honestly gives up on the current turn (see below)
 ```
 
 `ToolRoundStarted` fires before each LLM iteration inside a turn (after a tool result), so hosts can show "tool advance_lesson (2/3)" badges without observing the private streaming state machine.
+
+**`ResetBusyStateWithoutCancellation()` vs `AbandonCurrentTurn()`:** the first only clears the busy flags and typing/streaming UI — the turn itself keeps running, and when it eventually finishes or fails it still owns the transcript. Use it when the turn is already finished by its own code path and only the UI needs a nudge. If your own watchdog is giving up on a turn that may still be in flight (e.g. a shorter host-side timeout than the package's HTTP timeout), call `AbandonCurrentTurn()` instead: it bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error handling recognises itself as stale and does not touch the transcript), cancels the active request the same way the Stop button does, and resets busy state for you. It returns `true` only if a turn was actually in flight, so you don't show a "no answer" message for nothing. This is what prevents a host's own timeout message from being followed by a second, redundant error bubble once the real request eventually fails.
 
 **Stock chat template:** default floating size **~650×910** (see `CoreAiChatConfig` / `CoreAiChat.uss`), **vertical scrollbar flush** to the panel’s inner right edge, and optional **`coreai-long-request-hint`** (status under the typing row on long turns) — details in [README_CHAT.md](../Runtime/Source/Features/Chat/README_CHAT.md).
 

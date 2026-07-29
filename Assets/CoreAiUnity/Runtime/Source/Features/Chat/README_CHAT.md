@@ -754,6 +754,11 @@ int turn = chatPanel.CurrentTurnGeneration;
 
 // Force-unlock input without cancelling the active HTTP request:
 chatPanel.ResetBusyStateWithoutCancellation();
+
+// Your own watchdog gave up on this turn (e.g. a shorter host-side timeout than the package's
+// HTTP timeout) — abandon it for real: bumps the turn generation, cancels the in-flight request,
+// and resets busy state. Returns false if nothing was actually in flight.
+bool wasAbandoned = chatPanel.AbandonCurrentTurn();
 ```
 
 ### Public busy API — quick reference (since 2.4.0)
@@ -764,4 +769,5 @@ chatPanel.ResetBusyStateWithoutCancellation();
 | `BusyStateChanged` | `event Action<bool>` | Fires on the UI thread on every `IsBusy` transition (not on every flag mutation). |
 | `CurrentTurnGeneration` | `int` (get) | Monotonic counter, incremented at the start of each agent turn. Compare across awaits to detect "a newer turn started". |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
-| `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request (in contrast to `StopActiveGeneration()` / `StopAgent()`). |
+| `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request and **without** moving the turn generation (in contrast to `StopActiveGeneration()` / `StopAgent()` / `AbandonCurrentTurn()`). The turn itself keeps running and still owns the transcript when it finishes. |
+| `AbandonCurrentTurn()` *(Unreleased)* | `bool` | For a host's own watchdog that gives up on the current turn independently of this panel's HTTP timeout. Bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error path recognises itself as stale and stops touching the transcript), cancels the active request the same way the Stop button does, and calls `ResetBusyStateWithoutCancellation()`. Returns `true` only if a turn was actually in flight — this is what stops a host's own "no answer" message from being followed by a second, redundant error bubble once the real request eventually fails. |

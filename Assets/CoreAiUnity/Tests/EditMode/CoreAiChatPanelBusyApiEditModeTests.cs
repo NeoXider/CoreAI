@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -376,6 +377,109 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(GetFlag(ctx.Panel, "_isClearing"));
         }
 
+        /// <summary>
+        /// Direct unit coverage for the mechanics <see cref="CoreAiChatPanel.AbandonCurrentTurn"/> must
+        /// perform when a turn is genuinely in flight: the active request CTS gets cancelled (so the host
+        /// never keeps burning provider tokens for a call it already gave up on), the turn generation
+        /// moves forward, and busy state comes back to idle - all without touching a real chat service.
+        /// </summary>
+        [Test]
+        public void AbandonCurrentTurn_WhenBusyFlagsSetManually_CancelsRequestResetsBusyAndReturnsTrue()
+        {
+            using PanelCtx ctx = NewPanel();
+            CancellationTokenSource activeRequestCts = new();
+            SetField(ctx.Panel, "_activeRequestCts", activeRequestCts);
+            SetFlag(ctx.Panel, "_isSending", true);
+            SetFlag(ctx.Panel, "_isStreaming", true);
+
+            int generationBefore = ctx.Panel.CurrentTurnGeneration;
+
+            bool wasInProgress = ctx.Panel.AbandonCurrentTurn();
+
+            Assert.IsTrue(wasInProgress, "a turn was in flight (sending+streaming) when abandoned");
+            Assert.Greater(ctx.Panel.CurrentTurnGeneration, generationBefore,
+                "turn generation must move forward so any still-unwinding turn becomes stale");
+            Assert.IsTrue(activeRequestCts.IsCancellationRequested,
+                "the in-flight request must be cancelled, not left running to burn provider tokens");
+            Assert.IsFalse(ctx.Panel.IsBusy, "busy state must be reset to idle");
+            Assert.IsFalse(GetFlag(ctx.Panel, "_isSending"));
+            Assert.IsFalse(GetFlag(ctx.Panel, "_isStreaming"));
+        }
+
+        [Test]
+        public void AbandonCurrentTurn_WhenNoTurnInFlight_ReturnsFalseAndDoesNotThrow()
+        {
+            using PanelCtx ctx = NewPanel();
+
+            bool wasInProgress = true;
+            Assert.DoesNotThrow(() => wasInProgress = ctx.Panel.AbandonCurrentTurn());
+
+            Assert.IsFalse(wasInProgress, "nothing was in flight, so there was nothing to abandon");
+            Assert.IsFalse(ctx.Panel.IsBusy, "must still leave the panel in a clean idle state");
+        }
+
+        /// <summary>
+        /// Regression for the original defect: a host watchdog fires before the actual HTTP call fails,
+        /// calls <see cref="CoreAiChatPanel.AbandonCurrentTurn"/> and shows its own "no answer" message,
+        /// then the real request eventually fails on its own (simulated here by
+        /// <see cref="FakeLateFailureOrchestrator"/>, which ignores the cancellation token to stand in
+        /// for a provider call that had not yet observed it). Before this fix the panel's own turn was
+        /// still "current" (nothing had moved <c>_currentTurnGeneration</c>), so its <c>catch (Exception)</c>
+        /// path appended a second, redundant error bubble on top of the host's message. With
+        /// <see cref="CoreAiChatPanel.AbandonCurrentTurn"/> bumping the generation up front, the late
+        /// failure must be recognised as stale and must not touch the transcript at all.
+        /// </summary>
+        [Test]
+        public async Task AbandonCurrentTurn_LateFailureAfterAbandon_DoesNotAppendDuplicateErrorMessage()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+
+                FakeLateFailureOrchestrator orchestrator = new();
+                ctx.Panel.ChatService = new CoreAiChatService(
+                    orchestrator,
+                    settings: new StubSettings { EnableStreaming = true });
+
+                Task<string?> turnTask = ctx.Panel.SubmitMessageFromExternalAsync(
+                    "hello",
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+
+                // Let the streaming request genuinely start (busy flags set, request in flight) before
+                // abandoning it - otherwise this would not exercise the "turn was really running" path.
+                await orchestrator.Started;
+                Assert.IsTrue(ctx.Panel.IsRequestInProgress, "precondition: the turn must be running");
+
+                bool wasInProgress = ctx.Panel.AbandonCurrentTurn();
+                Assert.IsTrue(wasInProgress);
+                Assert.IsFalse(ctx.Panel.IsBusy, "AbandonCurrentTurn must unlock the UI immediately");
+
+                // Now let the "real" request fail, well after the local watchdog already gave up on it.
+                orchestrator.FailNow();
+                string? result = await turnTask;
+
+                Assert.IsNull(result, "an abandoned turn must not resolve to assistant text");
+                Assert.AreEqual(0, GetMessageScrollChildCount(ctx.Panel),
+                    "the late failure of an abandoned turn must not append a second error bubble");
+            }
+            finally
+            {
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
         [Test]
         public async Task ToolRoundStarted_DoesNotFireForVisibleHintWithoutToolProgressFlag()
         {
@@ -498,6 +602,35 @@ namespace CoreAI.Tests.EditMode
                 .SetValue(panel, value);
         }
 
+        /// <summary>
+        /// <see cref="UnityEngine.UIElements.ScrollView.schedule"/> (used by <c>ScrollToBottom</c>) needs a
+        /// real panel, so message bubbles can't be rendered into a detached <c>ScrollView</c> in EditMode -
+        /// attach one to a hidden <see cref="UIDocument"/>-backed host, same pattern as
+        /// <c>CoreAiChatPanelEditModeTests.CreateAttachedMessageScroll</c>.
+        /// </summary>
+        private static ScrollView CreateAttachedMessageScroll(
+            out GameObject panelHost,
+            out PanelSettings panelSettings)
+        {
+            panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
+            panelHost = new GameObject("CoreAiChatPanel_BusyApi_MessageScroll_PanelHost_Test");
+            panelHost.SetActive(false);
+            UIDocument document = panelHost.AddComponent<UIDocument>();
+            document.panelSettings = panelSettings;
+            panelHost.SetActive(true);
+
+            ScrollView scroll = new();
+            document.rootVisualElement.Add(scroll);
+            return scroll;
+        }
+
+        private static int GetMessageScrollChildCount(CoreAiChatPanel panel)
+        {
+            return (int)typeof(CoreAiChatPanel)
+                .GetMethod("GetMessageScrollChildCount", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(panel, null);
+        }
+
         private sealed class StubSettings : ICoreAISettings
         {
             public string UniversalSystemPromptPrefix { get; set; } = string.Empty;
@@ -580,6 +713,53 @@ namespace CoreAI.Tests.EditMode
                     yield return _chunks.Dequeue();
                     await Task.Yield();
                 }
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Stands in for a provider call that keeps running after local cancellation (e.g. the request
+        /// had already left the process and the cancellation has not been observed yet) and then fails on
+        /// its own. <see cref="Started"/> lets a test wait until the streaming pump has genuinely begun
+        /// (busy flags set, request considered in flight) before acting; <see cref="FailNow"/> releases the
+        /// simulated in-flight call so it throws, exactly like a delayed timeout/network failure would.
+        /// Deliberately ignores the cancellation token passed to <see cref="RunStreamingAsync"/> - that is
+        /// the whole point of the regression this reproduces.
+        /// </summary>
+        private sealed class FakeLateFailureOrchestrator : IAiOrchestrationService
+        {
+            private readonly TaskCompletionSource<bool> _started =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            private readonly TaskCompletionSource<bool> _release =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task Started => _started.Task;
+
+            public void FailNow()
+            {
+                _release.TrySetResult(true);
+            }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(string.Empty);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                _started.TrySetResult(true);
+                await _release.Task;
+                throw new InvalidOperationException("Simulated late failure after AbandonCurrentTurn.");
+#pragma warning disable CS0162 // unreachable code: needed only so the compiler treats this as an iterator.
+                yield break;
+#pragma warning restore CS0162
             }
 
             public void CancelTasks(string cancellationScope)

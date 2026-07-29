@@ -2065,6 +2065,22 @@ namespace CoreAI.Chat
         /// <summary>
         /// Resets busy state without cancellation to its default state.
         /// </summary>
+        /// <remarks>
+        /// WHEN TO USE THIS vs <see cref="AbandonCurrentTurn"/>: this method only clears the four busy
+        /// flags and the typing/streaming UI — it does NOT move <see cref="_currentTurnGeneration"/> and
+        /// does NOT cancel the in-flight request. Use it when the turn itself is already finished or
+        /// already being torn down by its own code path (e.g. a host reacting to
+        /// <see cref="BusyStateChanged"/> after the turn's own <c>finally</c> already ran) and only the
+        /// UI affordance needs a nudge.
+        /// <para>
+        /// Do NOT use this alone as a "the host gave up waiting" watchdog action: the turn keeps running
+        /// underneath, <see cref="IsStaleTurn"/> still reports it as current, and when it eventually
+        /// completes or fails it will append its own transcript/error bubble on top of whatever the host
+        /// already told the player — a second, redundant message for one failure. For that case call
+        /// <see cref="AbandonCurrentTurn"/> instead, which moves the turn generation AND cancels the
+        /// request AND resets busy state (by calling this method) in one safe operation.
+        /// </para>
+        /// </remarks>
         public void ResetBusyStateWithoutCancellation()
         {
             HideTypingIndicator();
@@ -2075,6 +2091,103 @@ namespace CoreAI.Chat
             FinishStreaming();
             UpdateSendButtonVisualState();
             RaiseBusyStateChangedIfChanged();
+        }
+
+        /// <summary>
+        /// Lets a caller-owned watchdog (e.g. a host's own request timeout, independent of this panel's
+        /// internal cancellation) honestly give up on the current turn instead of only hiding the busy
+        /// UI while the turn keeps running underneath.
+        /// </summary>
+        /// <remarks>
+        /// WHY this exists: a host may run its own timeout shorter than the actual HTTP timeout (e.g. it
+        /// warns the player "teacher didn't answer" after 60s against a 160s HTTP timeout) and then calls
+        /// <see cref="ResetBusyStateWithoutCancellation"/> to unlock its UI. That alone does not move
+        /// <see cref="_currentTurnGeneration"/> and does not cancel the request, so when the real call
+        /// later completes or fails, <see cref="IsStaleTurn"/> still reports the turn as CURRENT and its
+        /// own error handling appends a second, redundant bubble on top of the message the host already
+        /// showed. This method fixes that at the source instead of asking every such host to suppress its
+        /// own second message:
+        /// <list type="number">
+        /// <item>Bumps <see cref="_currentTurnGeneration"/> the same way the start of a turn does (see
+        /// <see cref="RunAgentTurnAsync"/>). The in-flight turn becomes stale by construction, so every
+        /// <see cref="IsStaleTurn"/> check already inside it stops touching the transcript/busy state on
+        /// its own — nothing is suppressed after the fact, the turn is honestly marked abandoned.</item>
+        /// <item>Cancels the in-flight request the same way <see cref="StopActiveGeneration"/> does
+        /// (same active-request-CTS handling, same <c>CoreAi.StopAgent</c> / <see cref="_chatService"/>
+        /// fallback, same root-CTS replace): keeping the call alive would only burn provider tokens for a
+        /// result nobody will read, since it is now guaranteed to be discarded as stale.</item>
+        /// <item>Resets busy state via <see cref="ResetBusyStateWithoutCancellation"/> so the UI is
+        /// immediately usable again.</item>
+        /// </list>
+        /// WHY main-thread only: like <see cref="GetOrCreateCancellationTokenSource"/> (see its own
+        /// remarks on the same race), this method cancels, disposes, and replaces
+        /// <see cref="_activeRequestCts"/> / <see cref="_cts"/>. Calling it off the main thread risks the
+        /// same use-after-dispose race as calling that mutator off the main thread — call it from the
+        /// main/Unity thread only.
+        /// </remarks>
+        /// <returns>
+        /// <c>true</c> if a turn was in flight and got abandoned; <c>false</c> if there was nothing to
+        /// abandon (nothing was cancelled, but busy state is still safely reset).
+        /// </returns>
+        public bool AbandonCurrentTurn()
+        {
+            bool wasInProgress = IsRequestInProgress;
+
+            // WHY: bump first and unconditionally. Every IsStaleTurn check the (possibly still unwinding)
+            // in-flight turn runs from this point on compares against a generation that has already moved
+            // on, so it stops touching the transcript/busy state under its own logic — this is what makes
+            // the "second error message" defect impossible rather than merely suppressed.
+            Interlocked.Increment(ref _currentTurnGeneration);
+
+            string roleId = ActiveRoleId;
+            CancellationTokenSource activeRequestCts = _activeRequestCts;
+
+            // WHY: same facade/service fallback chain as StopActiveGeneration - the CoreAi facade may have
+            // no live scope (teardown/tests), so fall back to the chat service rather than leaving the
+            // orchestrator scope's queued work running for this role.
+            try
+            {
+                CoreAi.StopAgent(roleId);
+            }
+            catch (Exception coreAiEx)
+            {
+                try
+                {
+                    _chatService?.StopAgent(roleId);
+                }
+                catch (Exception chatServiceEx)
+                {
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] AbandonCurrentTurn: StopAgent fallback failed. CoreAi: {coreAiEx.Message}; ChatService: {chatServiceEx.Message}");
+                }
+            }
+
+            // WHY: cancel the active HTTP/streaming request directly, exactly like StopActiveGeneration.
+            // On WebGL, cancellation callbacks can surface browser/JS-side exceptions; abandon must never
+            // throw back into the caller (typically a host's Update loop / watchdog tick).
+            if (IsCancellationSourceActive(activeRequestCts))
+            {
+                try
+                {
+                    activeRequestCts.Cancel();
+                }
+                catch (Exception cancelEx)
+                {
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] AbandonCurrentTurn: request cancel failed: {cancelEx.Message}");
+                }
+            }
+
+            if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+            {
+                _activeRequestCts = null;
+            }
+
+            CancelAndReplaceRootCancellationSource("AbandonCurrentTurn");
+
+            ResetBusyStateWithoutCancellation();
+
+            return wasInProgress;
         }
 
         private void RaiseToolRoundStarted(int iteration, string lastToolName)

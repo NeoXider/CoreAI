@@ -2,6 +2,28 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [Unreleased]
+
+### Added
+
+- **`CoreAiChatPanel.AbandonCurrentTurn()`.** A host that runs its own watchdog shorter than the actual
+      HTTP timeout (e.g. warning the player "the teacher didn't answer" after 60s against a 160s HTTP
+      timeout) had no honest way to give up on the current turn. Calling only
+      `ResetBusyStateWithoutCancellation()` unlocked the UI but did neither move the turn generation nor
+      cancel the in-flight request, so `IsStaleTurn` still reported the turn as current; when the real
+      call eventually completed or failed on its own, the panel appended its own error bubble on top of
+      the message the host had already shown — a second, unrelated-looking error for one failure. Before
+      6.9.0 that second bubble was unreadable JSON and the duplication went unnoticed; after 6.9.0 it
+      became a clean, human sentence and the duplicate became obvious. `AbandonCurrentTurn()` bumps the
+      turn generation the same way the start of a turn does (so every `IsStaleTurn` check already inside
+      the turn stops touching the transcript/busy state on its own — nothing is suppressed after the
+      fact), cancels the in-flight request the same way the Stop button does (same CTS handling, same
+      `CoreAi.StopAgent` / chat-service fallback — otherwise the call keeps burning provider tokens for a
+      result nobody will read), and resets busy state through the existing
+      `ResetBusyStateWithoutCancellation()`. Returns whether a turn was actually in flight, so a host does
+      not show a "no answer" message for nothing. `ResetBusyStateWithoutCancellation()`'s doc comment now
+      spells out when to use it and when a host needs `AbandonCurrentTurn()` instead.
+
 ## [6.11.1] - 2026-07-30
 
 Documentation-only release: no runtime code changed. The docs had drifted from what the packages
