@@ -11,6 +11,31 @@
 > `frost|2`, each through
 > native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
 
+## Chat / LLM host wave (2026-07-31) — shipped in 6.13.0, see both CHANGELOGs
+
+- [x] **Typing indicator moved to USS.** Three `coreai-typing-dot` elements + one class flip instead of
+      rewriting `TypingLabel.text` every 400 ms; timing/stagger in
+      `Assets/CoreAiUnity/Resources/CoreAI/UI/CoreAiChatTypingDots.uss`, which the panel attaches to the
+      chat root so hosts with their own chat UXML keep a working indicator.
+- [x] **`CoreAiChatPanel.CreateMessageBubbleRow` is `protected`** and applies the row side through the new
+      `ICoreAiChatMessageBubble` interface, so a host that only swaps bubble CONTENT stops copying the row
+      scaffolding.
+- [x] **Deferred scroll jobs no longer crash a closing panel.** `ResetUiReferences()` nulls the UI fields
+      while the jobs `ScrollToBottom()` queued (immediate + 80/200/500 ms) keep firing on the still-live
+      visual tree, so one landing in that window threw `NullReferenceException` out of
+      `BaseRuntimePanel.Update`. They all go through the single guarded `ScheduleOnMessageScroll` helper
+      now; `ScheduleStreamingScrollToBottom()` carried the identical unguarded dereference and is fixed by
+      the same change. Found from a failing PlayMode fixture in RedoSchool.
+- [x] **No hidden `gpt-4o-mini`.** An unset model is an explicit `LlmErrorCode.InvalidRequest` for
+      client-owned modes and an omitted `model` key under `ServerManagedApi`; the result's `Model` comes
+      from the provider response instead of the client setting; the inspector hides the model field under
+      `ServerManagedApi` and warns when a client-owned profile has none.
+      Verification gate: run `CoreAiChatPanelRenderPathsEditModeTests` (including the two new pins —
+      `ScheduledScrollJob_AfterUiReferencesCleared_IsSkippedInsteadOfDereferencingNull` and
+      `TypingDotsPulseInterval_CoversTheStyleSheetWave`), `MeaiOpenAiChatClientHttpEditModeTests`,
+      `CoreAISettingsAssetEditModeTests` and the full EditMode suite on next editor start; visually confirm
+      the dot wave in the chat demo scene (compile gates all green via `dotnet build CoreAI.sln`, 0 errors).
+
 ## Roblox API ladder (MVP0-MVP17) — foundation items (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`)
 
 > **Pending (2026-07-23):** `UserInputService` pulled into **MVP1** (from MVP10) for mini-game controls,

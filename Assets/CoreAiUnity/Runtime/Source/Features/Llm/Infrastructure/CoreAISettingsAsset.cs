@@ -110,9 +110,12 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string apiKey = "";
 
-        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.).")]
+        [Tooltip(
+            "Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.). " +
+            "Required for every client-owned mode - there is no built-in default. " +
+            "Leave empty under ServerManagedApi: the backend picks the model.")]
         [SerializeField]
-        private string modelName = "gpt-4o-mini";
+        private string modelName = "";
 
         [Tooltip(
             "Vision / multimodal capability of the configured model.\n" +
@@ -631,14 +634,23 @@ namespace CoreAI.Infrastructure.Llm
             !string.IsNullOrWhiteSpace(secondaryApiBaseUrl) &&
             !string.IsNullOrWhiteSpace(secondaryModelName);
 
-        /// <summary>Provider model identifier (HTTP) or GGUF hint (LLMUnity fallback).</summary>
+        /// <summary>
+        /// Provider model identifier (HTTP) or GGUF hint (LLMUnity fallback).
+        /// <para>
+        /// Empty means "no model configured" and stays empty on purpose: under
+        /// <see cref="LlmExecutionMode.ServerManagedApi"/> the backend owns the choice, and in every other
+        /// mode the HTTP client raises an explicit configuration error. The old silent
+        /// <c>gpt-4o-mini</c> fallback sent traffic to a model nobody selected, then reported that
+        /// invented name in logs, usage history and the client-side token estimator's encoding pick.
+        /// </para>
+        /// </summary>
         public string ModelName
         {
             get
             {
                 if (!string.IsNullOrWhiteSpace(modelName))
                 {
-                    return modelName;
+                    return modelName.Trim();
                 }
 
                 if (ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto)
@@ -649,7 +661,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                return "gpt-4o-mini";
+                return "";
             }
         }
 
@@ -1006,7 +1018,12 @@ namespace CoreAI.Infrastructure.Llm
 
         #region Runtime Configuration
 
-        /// <summary>Programmatic HTTP preset (tests / runtime bootstrap).</summary>
+        /// <summary>
+        /// Programmatic HTTP preset (tests / runtime bootstrap). An empty <paramref name="model"/> is stored
+        /// as empty — <see cref="ConfigureServerManagedApi"/> relies on that to hand the choice to the
+        /// backend, and every other mode then fails with an explicit configuration error instead of
+        /// silently calling a built-in default model.
+        /// </summary>
         public void ConfigureHttpApi(
             string baseUrl,
             string key,
@@ -1020,7 +1037,7 @@ namespace CoreAI.Infrastructure.Llm
             executionMode = LlmExecutionMode.ClientOwnedApi;
             apiBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:1234/v1" : baseUrl;
             apiKey = key ?? "";
-            modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
+            modelName = model ?? "";
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
             enableTemperatureOverriding = overrideTemperature;
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;

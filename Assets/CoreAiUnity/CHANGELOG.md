@@ -2,9 +2,81 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [Unreleased]
+## [6.13.0] - 2026-07-31
+
+### Added
+
+- **`CoreAiChatPanel.CreateMessageBubbleRow` is `protected`.** A host that only replaces the bubble
+      CONTENT (markdown, quiz widgets, drag-and-drop) had to reimplement the row scaffolding — clone the
+      template, strip the container, swap `coreai-user-row`/`coreai-ai-row`, fall back to a hand-built row
+      when no template is assigned — because the only entry point, `CreateMessageBubble`, gave it a
+      finished bubble. Every such host carried a near-verbatim copy that silently drifted from the package.
+      The row builder is now overridable-from-the-outside: override `CreateMessageBubble`, call
+      `CreateMessageBubbleRow(isUser)`, fill `coreai-message-content-slot`. The row's side is applied
+      through the new `ICoreAiChatMessageBubble` interface instead of a concrete-type check, so a host
+      whose bubble template instantiates its OWN side-aware element gets `IsUser` applied too;
+      `CoreAiChatMessageBubbleElement` implements it.
+
+### Changed
+
+- **The typing indicator is three dot elements animated by USS, not a label rewritten every 400 ms.**
+      The old indicator rebuilt `TypingLabel.text` from a scheduled job (`baseText + "." / ".." / "..."`
+      plus padding spaces), which meant a text-layout pass several times per second for a decoration,
+      a jump every time the padding width changed, and an animation that no stylesheet could restyle.
+      The row now carries `coreai-typing-dots` with three `coreai-typing-dot` children; a single class
+      flip (`coreai-typing-dots--pulse`) on the container is the only code left, because UI Toolkit has
+      no `@keyframes` and a loop needs something to transition against — duration, easing and the per-dot
+      `transition-delay` stagger live in `CoreAiChatTypingDots.uss`. The label now shows
+      `TypingIndicatorText` verbatim (no appended dots). Hosts with their own chat UXML do not have to
+      change anything: when the dots are absent the panel builds them at bind time and attaches the
+      package stylesheet to the chat root, so the animation ships with the structure. Hosts that DO want
+      their own look can override `.coreai-typing-dot` with a more specific selector.
+      The pulse period is tuned against numbers that live in the stylesheet, not in C#, so an EditMode
+      test now parses `CoreAiChatTypingDots.uss` and fails if the flip interval ever drops below the
+      transition duration plus the last dot's stagger — the invariant used to exist only as a comment,
+      and that comment already disagreed with the code it described.
+- **`CoreAISettingsAsset.ModelName` and `OpenAiHttpLlmSettings.Model` no longer invent `gpt-4o-mini`.**
+      Both getters return an empty string when nothing is configured, both serialized fields ship empty,
+      and `ConfigureHttpApi` / `ApplyOptions` / `SetRuntimeConfiguration` store an empty model as empty
+      instead of substituting one. `ServerManagedApi` then means what it says — the backend picks the
+      model — and every other mode fails with an explicit configuration error from the HTTP client
+      (see `com.neoxider.coreai`). This removes the reason hosts had to write a placeholder string such as
+      `server-managed` into the asset just to keep the fallback from firing. **Migration:** a client-owned
+      HTTP profile whose model field was empty was silently running on `gpt-4o-mini`; it must now name a
+      model.
+- **The CoreAI settings inspector hides the model field under `ServerManagedApi`** and says why (the
+      backend picks the model, the `model` key is omitted from request bodies, the served model is read
+      back from the response). In every other HTTP mode an empty model field now raises a warning instead
+      of looking harmless, and the built-in connection tests omit `model` from their probe bodies rather
+      than sending `"model":""`.
 
 ### Fixed
+
+- **Closing a chat panel could throw `NullReferenceException` out of `BaseRuntimePanel.Update`.**
+      `ScrollToBottom()` queues a settle chain — an immediate snap plus retries at 80/200/500 ms — to catch
+      layout passes that land after the bubble is added. Tearing the panel down runs
+      `ResetUiReferences()`, which nulls `MessageScroll`, but the jobs already queued keep firing on the
+      still-live visual tree until Unity detaches it; the job that landed in that window dereferenced the
+      field that had just been nulled and threw from inside the panel update, where no game code can catch
+      it. The bug was invisible in normal play (the window is one or two frames wide) and surfaced as a
+      flaky teardown in a host's PlayMode fixture. Every deferred scroll job now goes through one guarded
+      scheduling helper that re-checks the panel and the ScrollView before running, so the same mistake
+      cannot be made one job at a time — `ScheduleStreamingScrollToBottom()`, which had the identical
+      unguarded dereference, is fixed by the same change. The comment in `ResetUiReferences()` claiming
+      that "pending scheduler jobs die with the old visual tree" — the assumption the missing check rested
+      on — now says the opposite, which is what actually happens.
+- **The reported model in usage history is the one the provider actually served.** `MeaiLlmClient`
+      stamped every completion result and streaming chunk with the CLIENT's configured model name; under
+      `ServerManagedApi` that name is meaningless, and behind a router it is simply wrong. The provider's
+      `model` (from `ChatResponse.ModelId` / `ChatResponseUpdate.ModelId`) now wins, and the configured
+      name survives only as the fallback for providers that echo nothing and for error paths that have no
+      response to read.
+- **`ServerManagedLlmClient` dropped the provider-specific request-body settings.** Its internal
+      authorization wrapper implemented `IOpenAiHttpSettings` without forwarding `ExtraBodyJson`,
+      `ReasoningMode` or `ThinkingBudgetTokens`, so it silently fell back to the interface defaults: a
+      reasoning-mode or extra-body configuration that worked in client-owned mode stopped being sent the
+      moment the same profile switched to a backend proxy. All three are forwarded now, alongside the new
+      `ExecutionMode`.
 
 - **A timed-out role in the built-in-role PlayMode sweep no longer leaks its request into the rest of
       the run.** `AiOrchestratorBuiltInRolesPlayModeHarness` called `RunTaskAsync` without a token and

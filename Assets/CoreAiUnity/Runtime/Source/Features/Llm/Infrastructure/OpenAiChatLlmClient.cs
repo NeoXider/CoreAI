@@ -84,6 +84,7 @@ namespace CoreAI.Infrastructure.Llm
             public string ApiKey => _s.ApiKey;
             public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
+            public LlmExecutionMode ExecutionMode => _s.ExecutionMode;
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;

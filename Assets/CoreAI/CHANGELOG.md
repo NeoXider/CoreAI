@@ -1,5 +1,33 @@
 # Changelog
 
+## [6.13.0] - 2026-07-31
+
+### Changed
+
+- **The hidden `gpt-4o-mini` fallback is gone: an unset model is now either an explicit error or an
+      explicit decision of the backend.** `OpenAiHttpOptions.Model` no longer defaults to `gpt-4o-mini`,
+      and `MeaiOpenAiChatClient` no longer copies whatever the settings hand it straight into the request
+      body. It resolves the model once: a non-empty name is sent as before; an empty name under
+      `LlmExecutionMode.ServerManagedApi` OMITS the `model` key entirely (the backend owns the choice
+      there, and an empty string is not a model id any provider accepts); an empty name in any other mode
+      throws `LlmClientException(LlmErrorCode.InvalidRequest)` naming the setting to fix. The old silent
+      default was worse than a missing setting: traffic went to a model nobody selected, the invented name
+      then appeared in logs, usage history and cost telemetry as if it were real, and it steered the
+      client-side token estimator onto the `o200k` encoding of a model that never answered. Callers that
+      relied on the implicit default must now name a model — which is the point.
+      `IOpenAiHttpSettings` gained `ExecutionMode` (default-implemented as `ClientOwnedApi`) so the client
+      can tell the two empty-model cases apart; existing implementations compile unchanged.
+
+### Fixed
+
+- **The completion result named the model the CLIENT asked for, not the one that answered.** With a
+      router, a proxy, or `ServerManagedApi` (where the client asks for nothing at all) those are routinely
+      different models, so every usage record and cost report attributed tokens to a guess.
+      `ParseResponse` now carries the provider's `model` field into `ChatResponse.ModelId`, every SSE delta
+      stamps `ChatResponseUpdate.ModelId` from the same field, and both synthetic streaming paths (the
+      smooth re-emit of oversized deltas, and `FullResponseToSimulatedStreamingUpdates` used by WebGL
+      without native SSE and by the stream→non-stream fallback) propagate it instead of dropping it.
+
 ## [6.12.0] - 2026-07-30
 
 ### Fixed

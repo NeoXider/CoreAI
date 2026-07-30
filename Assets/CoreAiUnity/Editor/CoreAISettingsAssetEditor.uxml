@@ -34,10 +34,16 @@
                            tooltip="https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)"/>
         <uie:PropertyField binding-path="apiKey" label="API Key"
                            tooltip="Bearer token. Leave empty for LM Studio."/>
-        <uie:PropertyField binding-path="modelName" label="Model"
-                           tooltip="Provider model id. Type a custom value or choose a common preset below."/>
-        <ui:DropdownField name="model-preset" label="Model Preset"
-                          tooltip="Quickly fill the Model field with a common OpenAI-compatible model id."/>
+        <ui:VisualElement name="model-row">
+          <uie:PropertyField binding-path="modelName" label="Model"
+                             tooltip="Provider model id. Type a custom value or choose a common preset below."/>
+          <ui:DropdownField name="model-preset" label="Model Preset"
+                            tooltip="Quickly fill the Model field with a common OpenAI-compatible model id."/>
+          <ui:HelpBox name="model-missing-warning" message-type="Warning" class="coreai-dynamic"
+                      text="No model is set. Client-owned HTTP modes require an explicit model id: requests fail with a configuration error instead of falling back to a built-in default."/>
+        </ui:VisualElement>
+        <ui:HelpBox name="servermanaged-model-info" message-type="Info" class="coreai-dynamic"
+                    text="ServerManagedApi: the backend picks the model, so there is no client-side model field here. The 'model' key is omitted from request bodies and the served model is read back from the provider response."/>
       </ui:VisualElement>
 
       <ui:VisualElement name="llmunity-essentials">

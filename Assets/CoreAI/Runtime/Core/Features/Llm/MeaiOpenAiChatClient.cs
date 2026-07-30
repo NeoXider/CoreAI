@@ -158,6 +158,40 @@ namespace CoreAI.Infrastructure.Llm
         }
 #endif
 
+        /// <summary>
+        /// Writes the <c>model</c> field of an OpenAI-compatible request body, or deliberately leaves it out.
+        /// <para>
+        /// Under <see cref="LlmExecutionMode.ServerManagedApi"/> the backend owns the model choice, so an
+        /// empty client-side name is a valid configuration and the field is omitted — the server decides.
+        /// In every other mode an empty name is a configuration error and fails loudly: substituting a
+        /// built-in default used to send traffic to a model nobody selected, and then reported that
+        /// invented name in logs, usage history and token accounting.
+        /// </para>
+        /// </summary>
+        /// <exception cref="LlmClientException">No model is configured for a client-owned backend.</exception>
+        private void AddRequestModel(Dictionary<string, object> reqBody)
+        {
+            string model = _settings.Model?.Trim() ?? "";
+            if (model.Length > 0)
+            {
+                reqBody["model"] = model;
+                return;
+            }
+
+            if (_settings.ExecutionMode == LlmExecutionMode.ServerManagedApi)
+            {
+                _log.Info(
+                    "MeaiOpenAiChatClient: no client-side model configured under ServerManagedApi - omitting 'model' from the request body so the backend picks it.",
+                    LogTag.Llm);
+                return;
+            }
+
+            throw new LlmClientException(
+                "No LLM model is configured. Set the model id on the CoreAI settings asset (or the HTTP profile), " +
+                "or switch the execution mode to ServerManagedApi so the backend chooses the model.",
+                LlmErrorCode.InvalidRequest);
+        }
+
         public Task<MEAI.ChatResponse> GetResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
@@ -214,11 +248,9 @@ namespace CoreAI.Infrastructure.Llm
             List<Dictionary<string, object>> messages = BuildMessagesPayload(msgs);
             List<Dictionary<string, object>> toolsList = BuildToolsPayload(options);
 
-            Dictionary<string, object> reqBody = new()
-            {
-                { "model", _settings.Model },
-                { "messages", messages }
-            };
+            Dictionary<string, object> reqBody = new();
+            AddRequestModel(reqBody);
+            reqBody["messages"] = messages;
             if (options?.Temperature.HasValue == true)
             {
                 reqBody["temperature"] = options.Temperature.Value;
@@ -380,13 +412,11 @@ namespace CoreAI.Infrastructure.Llm
             List<Dictionary<string, object>> messages = BuildMessagesPayload(msgs);
             List<Dictionary<string, object>> toolsList = BuildToolsPayload(options);
 
-            Dictionary<string, object> reqBody = new()
-            {
-                { "model", _settings.Model },
-                { "messages", messages },
-                { "stream", true },
-                { "stream_options", new Dictionary<string, object> { { "include_usage", true } } }
-            };
+            Dictionary<string, object> reqBody = new();
+            AddRequestModel(reqBody);
+            reqBody["messages"] = messages;
+            reqBody["stream"] = true;
+            reqBody["stream_options"] = new Dictionary<string, object> { { "include_usage", true } };
             if (options?.Temperature.HasValue == true)
             {
                 reqBody["temperature"] = options.Temperature.Value;
@@ -648,7 +678,13 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 foreach (string piece in SplitForSmoothStreaming(updateText))
                                 {
-                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
+                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece)
+                                    {
+                                        // WHY: the re-emitted pieces replace the original delta, so the
+                                        // served model id has to travel with them or the consumer never
+                                        // sees which model answered a smoothly-streamed turn.
+                                        ModelId = update.ModelId
+                                    };
                                     await DelayBetweenSyntheticStreamPiecesAsync(cancellationToken);
                                 }
                             }
@@ -1150,6 +1186,11 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
+            // WHY: this path replaces a real stream (WebGL without native SSE, and the stream->non-stream
+            // fallback), so the served model id has to be re-emitted on every synthetic update — otherwise
+            // those turns are the only ones that cannot report which model answered.
+            string servedModel = response.ModelId;
+
             if (response.Messages != null && response.Messages.Count > 0)
             {
                 MEAI.ChatMessage msg = response.Messages[0];
@@ -1160,17 +1201,26 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
                         {
-                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text);
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text)
+                            {
+                                ModelId = servedModel
+                            };
                         }
                         else if (c is MEAI.TextReasoningContent rc && !string.IsNullOrEmpty(rc.Text))
                         {
-                            MEAI.ChatResponseUpdate ru = new(MEAI.ChatRole.Assistant, "");
+                            MEAI.ChatResponseUpdate ru = new(MEAI.ChatRole.Assistant, "")
+                            {
+                                ModelId = servedModel
+                            };
                             ru.Contents = new List<MEAI.AIContent> { rc };
                             yield return ru;
                         }
                         else if (c is MEAI.FunctionCallContent fc)
                         {
-                            MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "");
+                            MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "")
+                            {
+                                ModelId = servedModel
+                            };
                             u.Contents = new List<MEAI.AIContent> { fc };
                             yield return u;
                         }
@@ -1178,7 +1228,10 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (!string.IsNullOrEmpty(msg.Text))
                 {
-                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text);
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text)
+                    {
+                        ModelId = servedModel
+                    };
                 }
             }
 
@@ -1188,7 +1241,10 @@ namespace CoreAI.Infrastructure.Llm
                 // WebGL non-native-streaming path and the stream->non-stream fallback, so those
                 // turns reported 0 tokens. Re-emit it as a trailing UsageContent update, mirroring
                 // OpenAI's final stream_options.include_usage chunk.
-                MEAI.ChatResponseUpdate usageUpdate = new(MEAI.ChatRole.Assistant, "");
+                MEAI.ChatResponseUpdate usageUpdate = new(MEAI.ChatRole.Assistant, "")
+                {
+                    ModelId = servedModel
+                };
                 usageUpdate.Contents = new List<MEAI.AIContent> { new MEAI.UsageContent(response.Usage) };
                 yield return usageUpdate;
             }
@@ -1532,6 +1588,15 @@ namespace CoreAI.Infrastructure.Llm
 
                 MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents));
 
+                // WHY: the provider names the model it ACTUALLY served (a proxy/router may pick a different
+                // one than the client asked for, and under ServerManagedApi the client asks for nothing at
+                // all). Carrying it out is what lets usage history and cost telemetry report the truth.
+                string servedModel = root["model"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(servedModel))
+                {
+                    response.ModelId = servedModel.Trim();
+                }
+
                 if (root["usage"] is JObject usage)
                 {
                     response.Usage = BuildUsageDetailsFromOpenAiUsageObject(usage);
@@ -1813,11 +1878,42 @@ namespace CoreAI.Infrastructure.Llm
             return IsSseDoneLine(line);
         }
 
+        /// <summary>
+        /// Parses one SSE data object and stamps the served model id onto the resulting update. OpenAI-
+        /// compatible providers repeat <c>model</c> in every streamed chunk; carrying it out is how the
+        /// consumer learns which model actually answered instead of echoing the client's configuration.
+        /// </summary>
         private static MEAI.ChatResponseUpdate ExtractDeltaUpdate(string json, SseToolCallAccumulator accumulator)
+        {
+            JObject root;
+            try
+            {
+                root = JObject.Parse(json);
+            }
+            catch
+            {
+                return null;
+            }
+
+            MEAI.ChatResponseUpdate update = ExtractDeltaUpdateCore(root, accumulator);
+            if (update == null)
+            {
+                return null;
+            }
+
+            string servedModel = root["model"]?.ToString();
+            if (string.IsNullOrEmpty(update.ModelId) && !string.IsNullOrWhiteSpace(servedModel))
+            {
+                update.ModelId = servedModel.Trim();
+            }
+
+            return update;
+        }
+
+        private static MEAI.ChatResponseUpdate ExtractDeltaUpdateCore(JObject obj, SseToolCallAccumulator accumulator)
         {
             try
             {
-                JObject obj = JObject.Parse(json);
                 JToken choice0 = null;
                 if (obj["choices"] is JArray choiceArr && choiceArr.Count > 0)
                 {

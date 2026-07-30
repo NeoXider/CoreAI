@@ -18,8 +18,13 @@
     <ui:VisualElement name="coreai-typing-indicator" class="coreai-message-row coreai-ai-row"
                       style="display: none;">
       <ui:VisualElement name="coreai-typing-avatar" class="coreai-avatar coreai-ai-avatar"/>
-      <ui:Label name="coreai-typing-label" text="..."
+      <ui:Label name="coreai-typing-label" text=""
                 class="coreai-chat-message coreai-ai-message coreai-typing-message"/>
+      <ui:VisualElement name="coreai-typing-dots" class="coreai-typing-dots" picking-mode="Ignore">
+        <ui:VisualElement class="coreai-typing-dot coreai-typing-dot--1" picking-mode="Ignore"/>
+        <ui:VisualElement class="coreai-typing-dot coreai-typing-dot--2" picking-mode="Ignore"/>
+        <ui:VisualElement class="coreai-typing-dot coreai-typing-dot--3" picking-mode="Ignore"/>
+      </ui:VisualElement>
     </ui:VisualElement>
     <ui:Label name="coreai-long-request-hint" picking-mode="Ignore" text="" class="coreai-long-request-hint"
               style="display: none;"/>

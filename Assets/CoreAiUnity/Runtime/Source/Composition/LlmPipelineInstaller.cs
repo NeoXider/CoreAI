@@ -436,6 +436,14 @@ namespace CoreAI.Composition
             public string ApiKey => _settings.ApiKey;
             public string AuthorizationHeader => "";
             public string Model => _settings.ModelName;
+
+            /// <summary>
+            /// Always ServerManagedApi: this adapter exists only for that path, and the HTTP client reads
+            /// the mode to decide whether an empty <see cref="Model"/> means "the backend picks" or is a
+            /// configuration error.
+            /// </summary>
+            public LlmExecutionMode ExecutionMode => LlmExecutionMode.ServerManagedApi;
+
             public float Temperature => _settings.Temperature;
             public int RequestTimeoutSeconds => _settings.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _settings.MaxTokens;

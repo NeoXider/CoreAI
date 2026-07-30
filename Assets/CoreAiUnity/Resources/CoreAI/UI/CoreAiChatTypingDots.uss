@@ -1,0 +1,40 @@
+/* Typing indicator dots.
+   Three real elements animated by USS transitions instead of rewriting a label's text.
+   The only code involved is a single class flip on the container (UI Toolkit has no @keyframes,
+   so a looping indicator needs one state toggle); every duration, easing and per-dot stagger
+   lives here. CoreAiChatPanel attaches this sheet to the chat root at bind time, so a host with
+   its own chat UXML/USS gets the animation without copying these rules. */
+
+.coreai-typing-dots {
+  flex-direction: row;
+  align-items: center;
+  align-self: center;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.coreai-typing-dot {
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 999px;
+  background-color: rgba(77, 208, 225, 0.7);
+  opacity: 0.3;
+  translate: 0 2px;
+  transition-property: opacity, translate;
+  transition-duration: 420ms, 420ms;
+  transition-timing-function: ease-in-out, ease-in-out;
+}
+
+.coreai-typing-dot--2 {
+  transition-delay: 140ms, 140ms;
+}
+
+.coreai-typing-dot--3 {
+  transition-delay: 280ms, 280ms;
+}
+
+.coreai-typing-dots--pulse > .coreai-typing-dot {
+  opacity: 1;
+  translate: 0 -2px;
+}

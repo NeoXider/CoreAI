@@ -23,7 +23,10 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LlmAutoPriority.LlmUnityFirst, settings.AutoPriority);
             Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
             Assert.AreEqual("", settings.ApiKey);
-            Assert.AreEqual("gpt-4o-mini", settings.ModelName);
+            Assert.AreEqual("Qwen3.5-2B-Q4_K_M.gguf", settings.ModelName,
+                "No HTTP model ships by default; in Auto mode the getter falls back to the GGUF hint. " +
+                "There is no built-in 'gpt-4o-mini' any more - an unset HTTP model must surface as an " +
+                "explicit configuration error, not as silent traffic to a model nobody selected.");
             Assert.AreEqual(0.1f, settings.Temperature);
             Assert.IsFalse(settings.OverrideTemperature);
             Assert.IsFalse(settings.OverrideMaxTokens, "No output cap by default: the provider decides.");
@@ -136,7 +139,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ModelName_ShouldFallbackToGgufForLocalModes_AndDefaultForNonLocalModes()
+        public void ModelName_ShouldFallbackToGgufForLocalModes_AndStayEmptyForNonLocalModes()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
@@ -150,10 +153,12 @@ namespace CoreAI.Tests.EditMode
                 LlmExecutionMode.Auto, LlmBackendType.LlmUnity, "   ", "local-model.gguf");
             Assert.AreEqual("local-model.gguf", settings.ModelName);
 
-            // Auto + HTTP backend should not use local GGUF fallback
+            // Auto + HTTP backend should not use local GGUF fallback - and must not invent one either.
             settings.SetModelResolution(
                 LlmExecutionMode.Auto, LlmBackendType.OpenAiHttp, "   ", "local-model.gguf");
-            Assert.AreEqual("gpt-4o-mini", settings.ModelName);
+            Assert.AreEqual("", settings.ModelName,
+                "A hidden 'gpt-4o-mini' default sent traffic to a model nobody selected and then reported " +
+                "that invented name in logs, usage history and the token estimator's encoding pick.");
 
             Object.DestroyImmediate(settings);
         }

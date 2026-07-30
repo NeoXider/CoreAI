@@ -4,9 +4,20 @@ using UnityEngine.UIElements;
 namespace CoreAI.Chat
 {
     /// <summary>
+    /// Side-aware chat bubble row. Implemented by <see cref="CoreAiChatMessageBubbleElement"/> and by any
+    /// host-authored replacement so that <c>CoreAiChatPanel.CreateMessageBubbleRow</c> can hand the row its
+    /// user/assistant side without knowing the concrete element type.
+    /// </summary>
+    public interface ICoreAiChatMessageBubble
+    {
+        /// <summary>Whether this row renders a user message (true) or an assistant message (false).</summary>
+        bool IsUser { get; set; }
+    }
+
+    /// <summary>
     /// Authorable UI Toolkit chat bubble used by CoreAiChatPanel and editable in UI Builder.
     /// </summary>
-    public sealed class CoreAiChatMessageBubbleElement : VisualElement
+    public sealed class CoreAiChatMessageBubbleElement : VisualElement, ICoreAiChatMessageBubble
     {
         public new class UxmlFactory : UxmlFactory<CoreAiChatMessageBubbleElement, UxmlTraits>
         {

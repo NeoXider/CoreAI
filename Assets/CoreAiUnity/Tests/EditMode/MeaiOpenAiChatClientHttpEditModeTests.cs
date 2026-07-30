@@ -199,6 +199,83 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetResponseAsync_ServerManagedApiWithoutModel_OmitsModelFromTheBody()
+        {
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}");
+                })) { Timeout = System.TimeSpan.FromSeconds(30) };
+
+            MeaiOpenAiChatClient client = new(new ModelSettings
+            {
+                ModelValue = "",
+                ExecutionModeValue = LlmExecutionMode.ServerManagedApi
+            });
+
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") });
+
+            Assert.NotNull(capturedJson);
+            Assert.IsNull(JObject.Parse(capturedJson)["model"],
+                "ServerManagedApi means the BACKEND picks the model: sending an empty or invented name " +
+                "either fails at the provider or bills a model nobody selected.");
+        }
+
+        [Test]
+        public void GetResponseAsync_ClientOwnedApiWithoutModel_FailsWithAnExplicitConfigurationError()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(_ => OkJson("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            MeaiOpenAiChatClient client = new(new ModelSettings
+            {
+                ModelValue = "",
+                ExecutionModeValue = LlmExecutionMode.ClientOwnedApi
+            });
+
+            LlmClientException ex = Assert.ThrowsAsync<LlmClientException>(async () =>
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") }));
+
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, ex.ErrorCode,
+                "A missing model is a configuration error, not a silent fallback to a built-in default.");
+        }
+
+        [Test]
+        public async Task GetResponseAsync_ReportsTheModelTheProviderActuallyServed()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(_ => OkJson(
+                    "{\"model\":\"router/actually-served\",\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") });
+
+            Assert.AreEqual("router/actually-served", response.ModelId,
+                "A proxy or router serves whatever it likes; usage history must name that, not the request.");
+        }
+
+        [Test]
+        public void ParseSseUpdates_CarryTheServedModelId()
+        {
+            List<MEAI.ChatResponseUpdate> updates = MeaiOpenAiChatClient.ParseSseUpdatesForTests(
+                    "data: {\"model\":\"router/actually-served\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n")
+                .ToList();
+
+            Assert.AreEqual(1, updates.Count);
+            Assert.AreEqual("router/actually-served", updates[0].ModelId);
+        }
+
+        [Test]
         public async Task GetResponseAsync_429_MapsRetryAfterSeconds()
         {
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
@@ -369,6 +446,26 @@ namespace CoreAI.Tests.EditMode
             public string ApiKey => "";
             public string AuthorizationHeader => "";
             public string Model => "test-model";
+            public IRequestHeaderProvider? HeaderProvider => null;
+        }
+
+        /// <summary>Settings whose model id and execution mode are set per test.</summary>
+        private sealed class ModelSettings : IOpenAiHttpSettings
+        {
+            public string ModelValue { get; set; } = "";
+            public LlmExecutionMode ExecutionModeValue { get; set; } = LlmExecutionMode.ClientOwnedApi;
+
+            public float Temperature => 0f;
+            public int RequestTimeoutSeconds => 60;
+            public int MaxTokens => 512;
+            public bool LogLlmInput => false;
+            public bool LogLlmOutput => false;
+            public bool EnableHttpDebugLogging => false;
+            public string ApiBaseUrl => "http://127.0.0.1:9";
+            public string ApiKey => "";
+            public string AuthorizationHeader => "";
+            public string Model => ModelValue;
+            public LlmExecutionMode ExecutionMode => ExecutionModeValue;
             public IRequestHeaderProvider? HeaderProvider => null;
         }
 

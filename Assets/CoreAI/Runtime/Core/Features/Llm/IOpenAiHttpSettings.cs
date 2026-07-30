@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CoreAI.Ai;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -33,8 +34,20 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         string AuthorizationHeader { get; }
 
-        /// <summary>Model identifier requested from the LLM backend.</summary>
+        /// <summary>
+        /// Model identifier requested from the LLM backend. May be empty ONLY under
+        /// <see cref="LlmExecutionMode.ServerManagedApi"/>, where the backend picks the model and the
+        /// field is omitted from the request body; every other mode treats an empty name as a
+        /// configuration error rather than substituting a default.
+        /// </summary>
         string Model { get; }
+
+        /// <summary>
+        /// Product-facing execution mode of this HTTP profile. Defaults to
+        /// <see cref="LlmExecutionMode.ClientOwnedApi"/> so an implementation that does not model the
+        /// mode keeps the strict "an explicit model is required" contract.
+        /// </summary>
+        LlmExecutionMode ExecutionMode => LlmExecutionMode.ClientOwnedApi;
 
         /// <summary>Sampling temperature requested from the LLM backend.</summary>
         float Temperature { get; }

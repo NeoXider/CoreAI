@@ -13,7 +13,12 @@ namespace CoreAI.Infrastructure.Llm
         public string ApiBaseUrl { get; set; } = OpenAiHttpConstants.DefaultApiBaseUrl;
         public string ApiKey { get; set; } = "";
         public string AuthorizationHeader { get; set; } = "";
-        public string Model { get; set; } = "gpt-4o-mini";
+        /// <summary>
+        /// Provider model id. Empty is "not configured" — legal only under
+        /// <see cref="LlmExecutionMode.ServerManagedApi"/>, where the backend picks the model. There is no
+        /// built-in default: a silent one bills a model nobody selected and then lies about it in logs.
+        /// </summary>
+        public string Model { get; set; } = "";
         public float Temperature { get; set; } = 0.2f;
         public int RequestTimeoutSeconds { get; set; } = 120;
         public int MaxTokens { get; set; } = 128000;

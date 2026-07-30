@@ -243,7 +243,7 @@ namespace CoreAI.Infrastructure.Llm
                     Error = "Empty response from LLM",
                     ErrorCode = LlmErrorCode.EmptyResponse,
                     ReasoningContent = reasoningText,
-                    Model = ResolveModelName(),
+                    Model = ResolveModelName(response.ModelId),
                     ExecutedToolCalls = functionClient.LastExecutedToolCalls
                 };
             }
@@ -253,7 +253,7 @@ namespace CoreAI.Infrastructure.Llm
                 Ok = true,
                 Content = text,
                 ReasoningContent = reasoningText,
-                Model = ResolveModelName()
+                Model = ResolveModelName(response.ModelId)
             };
             if (response.Usage != null)
             {
@@ -380,8 +380,23 @@ namespace CoreAI.Infrastructure.Llm
             return new MEAI.ChatMessage(MEAI.ChatRole.User, "System context update:\n" + (text ?? string.Empty));
         }
 
-        private string ResolveModelName()
+        /// <summary>
+        /// Model name reported on the completion result.
+        /// <para>
+        /// The provider's own answer wins: a proxy or router may serve a different model than the client
+        /// asked for, and under <c>ServerManagedApi</c> the client asks for nothing at all — the backend
+        /// decides. The configured name is only a fallback for providers that do not echo one (and for
+        /// error paths, where there is no response to read).
+        /// </para>
+        /// </summary>
+        /// <param name="providerReportedModel">Model id taken from the provider response, if any.</param>
+        private string ResolveModelName(string providerReportedModel = null)
         {
+            if (!string.IsNullOrWhiteSpace(providerReportedModel))
+            {
+                return providerReportedModel.Trim();
+            }
+
             return _settings switch
             {
                 CoreAISettingsAsset asset => asset.ModelName,
@@ -857,6 +872,14 @@ namespace CoreAI.Infrastructure.Llm
                         midStreamFailureMessage =
                             $"stream failed after {streamedExecutedCallCount} executed tool call(s): {ex.Message}";
                         break;
+                    }
+
+                    // WHY: OpenAI-compatible providers repeat the SERVED model on every chunk. Adopting it
+                    // means usage/cost telemetry reports what actually answered - a router or a
+                    // ServerManagedApi backend routinely picks a model the client never named.
+                    if (!string.IsNullOrWhiteSpace(update.ModelId))
+                    {
+                        streamModel = ResolveModelName(update.ModelId);
                     }
 
                     int nativeToolCountBeforeUpdate = nativeToolCalls.Count;
@@ -2730,6 +2753,7 @@ namespace CoreAI.Infrastructure.Llm
             public string ApiKey => _s.ApiKey;
             public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
+            public LlmExecutionMode ExecutionMode => _s.ExecutionMode;
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;

@@ -101,7 +101,19 @@ namespace CoreAI.Infrastructure.Llm
 
             public string Model => _inner.Model;
 
+            /// <summary>
+            /// Forwarded so an empty <see cref="Model"/> reads as "the backend picks the model" instead of
+            /// the strict client-owned contract that rejects it.
+            /// </summary>
+            public LlmExecutionMode ExecutionMode => _inner.ExecutionMode;
+
             public float Temperature => _inner.Temperature;
+
+            public string ExtraBodyJson => _inner.ExtraBodyJson;
+
+            public LlmReasoningMode ReasoningMode => _inner.ReasoningMode;
+
+            public int ThinkingBudgetTokens => _inner.ThinkingBudgetTokens;
 
             public int RequestTimeoutSeconds => _inner.RequestTimeoutSeconds;
 

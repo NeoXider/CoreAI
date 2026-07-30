@@ -24,8 +24,11 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string apiKey = "";
 
+        [Tooltip(
+            "Provider model id. Required for client-owned modes - there is no built-in default. " +
+            "Leave empty under ServerManagedApi: the backend picks the model.")]
         [SerializeField]
-        private string model = "gpt-4o-mini";
+        private string model = "";
 
         [SerializeField]
         [Range(0f, 2f)]
@@ -93,8 +96,12 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Full Authorization header value. Empty means use <see cref="ApiKey"/> as bearer token.</summary>
         public string AuthorizationHeader => "";
 
-        /// <summary>Provider-side model identifier.</summary>
-        public string Model => string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
+        /// <summary>
+        /// Provider-side model identifier. Empty means "not configured": under
+        /// <see cref="LlmExecutionMode.ServerManagedApi"/> the backend picks the model, in every other mode
+        /// the request fails with a configuration error. No built-in model is substituted here.
+        /// </summary>
+        public string Model => string.IsNullOrWhiteSpace(model) ? "" : model.Trim();
 
         /// <summary>Sampling temperature.</summary>
         public float Temperature => temperature;
@@ -175,7 +182,7 @@ namespace CoreAI.Infrastructure.Llm
                 ? OpenAiHttpConstants.DefaultApiBaseUrl
                 : options.ApiBaseUrl;
             apiKey = options.ApiKey ?? "";
-            model = string.IsNullOrWhiteSpace(options.Model) ? "gpt-4o-mini" : options.Model;
+            model = options.Model ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
             requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
             maxTokens = options.MaxTokens < 64 ? 128000 : options.MaxTokens;
@@ -210,7 +217,7 @@ namespace CoreAI.Infrastructure.Llm
                 ? OpenAiHttpConstants.DefaultApiBaseUrl
                 : apiBaseUrl;
             this.apiKey = apiKey ?? "";
-            this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
+            this.model = model ?? "";
             this.temperature = temperature;
             this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
             this.maxTokens = maxTokens < 64 ? 128000 : maxTokens;

@@ -31,6 +31,25 @@ namespace CoreAI.Chat
         private const string CollapsedClassName = "coreai-collapsed";
         private const string CollapsedPrefsKey = "CoreAI.Chat.Collapsed";
         private const string SendButtonStopClassName = "coreai-chat-send-button-stop";
+        private const string TypingDotsElementName = "coreai-typing-dots";
+        private const string TypingDotsClassName = "coreai-typing-dots";
+        private const string TypingDotsPulseClassName = "coreai-typing-dots--pulse";
+        private const string TypingDotClassName = "coreai-typing-dot";
+        private const string TypingDotsStyleSheetResourcePath = "CoreAI/UI/CoreAiChatTypingDots";
+        private const int TypingDotCount = 3;
+
+        /// <summary>
+        /// Period of the single class flip that drives the typing dots. Must not be SHORTER than the USS
+        /// <c>transition-duration</c> plus the last dot's <c>transition-delay</c>, otherwise the flip
+        /// reverses a wave that is still travelling and the third dot never arrives. Equality is the
+        /// intended tuning: the wave lands exactly as it turns around.
+        /// <para>
+        /// The two halves of that invariant live in different files, so
+        /// <c>CoreAiChatPanelRenderPathsEditModeTests.TypingDotsPulseInterval_CoversTheStyleSheetWave</c>
+        /// parses <c>CoreAiChatTypingDots.uss</c> and fails when either side drifts.
+        /// </para>
+        /// </summary>
+        private const int TypingDotsPulseIntervalMilliseconds = 700;
 
         [Header("Config")]
         [Tooltip("Chat configuration asset (Assets -> Create -> CoreAI -> Chat Config).")]
@@ -190,7 +209,7 @@ namespace CoreAI.Chat
         private bool _scrollToBottomScheduled;
 
         private IVisualElementScheduledItem _typingAnimation;
-        private int _typingDotCount;
+        private VisualElement _typingDots;
 
         protected CoreAiChatService _chatService;
 
@@ -982,6 +1001,7 @@ namespace CoreAI.Chat
             TypingIndicator = Root.Q<VisualElement>("coreai-typing-indicator");
             TypingAvatar = Root.Q<VisualElement>("coreai-typing-avatar");
             TypingLabel = Root.Q<Label>("coreai-typing-label");
+            _typingDots = ResolveOrCreateTypingDots();
             HeaderTitle = Root.Q<Label>("coreai-chat-header-title");
             HeaderIcon = Root.Q<VisualElement>("coreai-chat-header-icon");
             _longRequestHint = Root.Q<Label>("coreai-long-request-hint");
@@ -1171,6 +1191,9 @@ namespace CoreAI.Chat
 
         private void ResetUiReferences()
         {
+            // WHY: the dot animation belongs to the tree being dropped; leaving it running would keep
+            // flipping a class on detached elements until the scheduler collected them.
+            StopTypingAnimation();
             Root = null;
             ChatContainer = null;
             MessageScroll = null;
@@ -1182,6 +1205,7 @@ namespace CoreAI.Chat
             TypingIndicator = null;
             TypingAvatar = null;
             TypingLabel = null;
+            _typingDots = null;
             HeaderTitle = null;
             HeaderIcon = null;
             _examplesButton = null;
@@ -1193,8 +1217,10 @@ namespace CoreAI.Chat
             // WHY: those bubbles belonged to the old visual tree; keeping them would hand a host
             // detached elements to post-process.
             _turnStreamingBubbles.Clear();
-            // WHY: pending scheduler jobs die with the old visual tree; a stuck flag would block every
-            // scroll after a UI rebuild.
+            // WHY: pending scheduler jobs do NOT die here — they keep firing on the old visual tree until
+            // Unity detaches it, which is why every one of them is queued through
+            // ScheduleOnMessageScroll and re-checks these fields before touching them. Clearing the flags
+            // is only about the next bind: a stuck flag would block every scroll after a UI rebuild.
             _scrollToBottomScheduled = false;
             _streamingScrollScheduled = false;
         }
@@ -3015,7 +3041,15 @@ namespace CoreAI.Chat
             label.focusable = true; // WHY: required so Ctrl/Cmd+C copies the active selection
         }
 
-        private VisualElement CreateMessageBubbleRow(bool isUser)
+        /// <summary>
+        /// Builds the bare message row (template clone or the built-in
+        /// <see cref="CoreAiChatMessageBubbleElement"/>) with its side classes applied and no content.
+        /// Exposed to subclasses so a host that only replaces the BUBBLE CONTENT (markdown, custom
+        /// widgets) does not have to copy the row scaffolding — override
+        /// <see cref="CreateMessageBubble"/>, call this, then fill <c>coreai-message-content-slot</c>.
+        /// </summary>
+        /// <param name="isUser">True for a user row, false for an assistant row.</param>
+        protected VisualElement CreateMessageBubbleRow(bool isUser)
         {
             VisualElement row = null;
             if (messageBubbleTemplate != null)
@@ -3038,7 +3072,9 @@ namespace CoreAI.Chat
             row.AddToClassList("coreai-message-row");
             row.AddToClassList(isUser ? "coreai-user-row" : "coreai-ai-row");
 
-            if (row is CoreAiChatMessageBubbleElement bubble)
+            // WHY: matched by INTERFACE, not by the concrete package element — a host whose bubble
+            // template instantiates its own side-aware element still gets IsUser applied here.
+            if (row is ICoreAiChatMessageBubble bubble)
             {
                 bubble.IsUser = isUser;
             }
@@ -3553,27 +3589,39 @@ namespace CoreAI.Chat
             }
 
             // WHY: streaming calls this on every chunk. Without stopping the previous scheduled item first,
-            // each call leaked another Every(400) job that kept rewriting TypingLabel.text — hundreds of live
-            // jobs per turn, and they fought the tool-progress hint into a flicker.
+            // each call leaked another repeating job — hundreds of live jobs per turn, and they fought the
+            // tool-progress hint into a flicker.
             StopTypingAnimation();
 
             TypingIndicator.style.display = DisplayStyle.Flex;
-            _typingDotCount = 0;
 
-            string baseText = Options.TypingIndicatorText ?? string.Empty;
-            _typingAnimation = TypingIndicator.schedule.Execute(() =>
+            if (TypingLabel != null && IsElementReadyForStyle(TypingLabel))
             {
-                _typingDotCount =
-                    _typingDotCount % 3 + 1;
-                if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
-                {
-                    return;
-                }
+                TypingLabel.text = Options.TypingIndicatorText ?? string.Empty;
+            }
 
-                string dots = new('.', _typingDotCount);
-                string pad = new(' ', 3 - _typingDotCount);
-                TypingLabel.text = baseText + dots + pad;
-            }).Every(400);
+            // WHY: a host can hand the panel its typing row outside BindUI (embedded trees, tests), so the
+            // dots are re-resolved whenever they are missing or no longer part of a live tree.
+            if (_typingDots == null || _typingDots.parent == null)
+            {
+                _typingDots = ResolveOrCreateTypingDots();
+            }
+
+            if (_typingDots == null || !IsElementReadyForStyle(_typingDots))
+            {
+                return;
+            }
+
+            VisualElement dots = _typingDots;
+            dots.style.display = DisplayStyle.Flex;
+            // WHY: the only code left in this animation is one state flip — UI Toolkit has no @keyframes,
+            // so a looping indicator needs a toggle to transition against. Duration, easing and the
+            // per-dot stagger (transition-delay) live in CoreAiChatTypingDots.uss. The job holds the
+            // element it animates (not the field), so a UI rebuild that clears the field cannot make a
+            // still-draining job throw.
+            _typingAnimation = dots.schedule
+                .Execute(() => dots.ToggleInClassList(TypingDotsPulseClassName))
+                .Every(TypingDotsPulseIntervalMilliseconds);
         }
 
         private void ApplyStreamingToolProgressTypingHint()
@@ -3584,6 +3632,9 @@ namespace CoreAI.Chat
             }
 
             StopTypingAnimation();
+            // WHY: the hint is a STATIC status line ("running tools…"), so the dots must not keep
+            // pulsing next to it — the same intent the old code had when it stopped the text animation.
+            SetTypingDotsVisible(false);
             string fromConfig = Options.StreamingToolProgressHint;
             TypingLabel.text = string.IsNullOrWhiteSpace(fromConfig)
                 ? DefaultStreamingToolProgressHint
@@ -3604,6 +3655,68 @@ namespace CoreAI.Chat
         {
             _typingAnimation?.Pause();
             _typingAnimation = null;
+            _typingDots?.RemoveFromClassList(TypingDotsPulseClassName);
+        }
+
+        private void SetTypingDotsVisible(bool visible)
+        {
+            if (_typingDots == null || !IsElementReadyForStyle(_typingDots))
+            {
+                return;
+            }
+
+            _typingDots.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        /// <summary>
+        /// Returns the three-dot element of the typing row, creating it when the host's chat UXML predates
+        /// it. The package stylesheet that animates the dots is attached to the chat root here as well, so a
+        /// host with its own UXML/USS gets a working indicator without copying any rules.
+        /// </summary>
+        private VisualElement ResolveOrCreateTypingDots()
+        {
+            if (TypingIndicator == null)
+            {
+                return null;
+            }
+
+            EnsureTypingDotsStyleSheet();
+
+            VisualElement existing = TypingIndicator.Q<VisualElement>(TypingDotsElementName);
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            VisualElement dots = new() { name = TypingDotsElementName, pickingMode = PickingMode.Ignore };
+            dots.AddToClassList(TypingDotsClassName);
+            for (int index = 1; index <= TypingDotCount; index++)
+            {
+                VisualElement dot = new() { pickingMode = PickingMode.Ignore };
+                dot.AddToClassList(TypingDotClassName);
+                dot.AddToClassList($"{TypingDotClassName}--{index}");
+                dots.Add(dot);
+            }
+
+            VisualElement host = TypingLabel?.parent ?? TypingIndicator;
+            host.Add(dots);
+            return dots;
+        }
+
+        private void EnsureTypingDotsStyleSheet()
+        {
+            if (Root == null)
+            {
+                return;
+            }
+
+            StyleSheet sheet = Resources.Load<StyleSheet>(TypingDotsStyleSheetResourcePath);
+            if (sheet == null || Root.styleSheets.Contains(sheet))
+            {
+                return;
+            }
+
+            Root.styleSheets.Add(sheet);
         }
 
         private void StartStreaming()
@@ -3697,6 +3810,48 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Queues <paramref name="job"/> on the message ScrollView's scheduler, guarded against the panel
+        /// being torn down before the job runs.
+        /// <para>
+        /// Every deferred scroll job MUST go through here. <see cref="ResetUiReferences"/> nulls the UI
+        /// fields, but jobs queued earlier keep firing on the still-live visual tree until Unity detaches
+        /// it, so a job landing in that window reads a null field — the scroll settle chain used to
+        /// dereference <see cref="MessageScroll"/> there and threw out of
+        /// <c>BaseRuntimePanel.Update</c>.
+        /// </para>
+        /// </summary>
+        /// <param name="job">Work to run on the scheduler once the panel is confirmed alive.</param>
+        /// <param name="delayMilliseconds">Delay before the first run; 0 runs on the next scheduler pass.</param>
+        private void ScheduleOnMessageScroll(Action job, long delayMilliseconds = 0)
+        {
+            ScrollView scroll = MessageScroll;
+            if (scroll == null)
+            {
+                return;
+            }
+
+            IVisualElementScheduledItem item = scroll.schedule.Execute(() => RunMessageScrollJob(job));
+            if (delayMilliseconds > 0)
+            {
+                item.StartingIn(delayMilliseconds);
+            }
+        }
+
+        /// <summary>
+        /// Runs a scheduled scroll job unless the panel or its UI references went away first. Named (not
+        /// inlined into the closure) so the guard itself is reachable from a regression test.
+        /// </summary>
+        private void RunMessageScrollJob(Action job)
+        {
+            if (this == null || MessageScroll == null)
+            {
+                return;
+            }
+
+            job();
+        }
+
+        /// <summary>
         /// Requests a scroll to the newest message. Coalesced: a burst of appended messages schedules a
         /// single settle chain (immediate + delayed snaps for late layout passes) instead of five
         /// scheduler jobs per message.
@@ -3709,14 +3864,14 @@ namespace CoreAI.Chat
             }
 
             _scrollToBottomScheduled = true;
-            MessageScroll.schedule.Execute(() =>
+            ScheduleOnMessageScroll(() =>
             {
                 _scrollToBottomScheduled = false;
                 SnapScrollToBottom();
-                MessageScroll.schedule.Execute(SnapScrollToBottom);
-                MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(80);
-                MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(200);
-                MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(500);
+                ScheduleOnMessageScroll(SnapScrollToBottom);
+                ScheduleOnMessageScroll(SnapScrollToBottom, 80);
+                ScheduleOnMessageScroll(SnapScrollToBottom, 200);
+                ScheduleOnMessageScroll(SnapScrollToBottom, 500);
             });
         }
 
@@ -3736,11 +3891,11 @@ namespace CoreAI.Chat
             }
 
             _streamingScrollScheduled = true;
-            MessageScroll.schedule.Execute(() =>
+            ScheduleOnMessageScroll(() =>
             {
                 _streamingScrollScheduled = false;
                 SnapScrollToBottom();
-                MessageScroll.schedule.Execute(SnapScrollToBottom);
+                ScheduleOnMessageScroll(SnapScrollToBottom);
             });
         }
 

@@ -58,6 +58,9 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private HelpBox _productionWarning;
         private HelpBox _webGlStreamingHint;
         private DropdownField _modelPreset;
+        private VisualElement _modelRow;
+        private HelpBox _modelMissingWarning;
+        private HelpBox _serverManagedModelInfo;
         private VisualElement _httpAdvancedGroup;
         private HelpBox _serverManagedWarning;
         private HelpBox _httpAutoHint;
@@ -121,6 +124,9 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _productionWarning = root.Q<HelpBox>("production-warning");
             _webGlStreamingHint = root.Q<HelpBox>("webgl-streaming-hint");
             _modelPreset = root.Q<DropdownField>("model-preset");
+            _modelRow = root.Q<VisualElement>("model-row");
+            _modelMissingWarning = root.Q<HelpBox>("model-missing-warning");
+            _serverManagedModelInfo = root.Q<HelpBox>("servermanaged-model-info");
             _httpAdvancedGroup = root.Q<VisualElement>("http-advanced-group");
             _serverManagedWarning = root.Q<HelpBox>("servermanaged-warning");
             _httpAutoHint = root.Q<HelpBox>("http-auto-hint");
@@ -435,6 +441,14 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _modelPreset.SetValueWithoutNotify(
                 Array.IndexOf(HttpModelPresets, model) >= 0 ? model : CustomPresetLabel);
 
+            // The backend owns the model choice under ServerManagedApi, so the client-side field is dead
+            // configuration there: hide it instead of letting a stale value look meaningful. Every other
+            // HTTP mode now REQUIRES a model (no built-in fallback), so an empty field is worth a warning.
+            bool serverManagedModel = settings.ExecutionMode == LlmExecutionMode.ServerManagedApi;
+            Show(_modelRow, showHttp && !serverManagedModel);
+            Show(_serverManagedModelInfo, serverManagedModel);
+            Show(_modelMissingWarning, showHttp && !serverManagedModel && model.Length == 0);
+
             _httpAdvancedGroup.SetEnabled(isAuto || settings.UseHttpApi);
             Show(_serverManagedWarning, settings.ExecutionMode == LlmExecutionMode.ServerManagedApi);
             string priorityHint = settings.AutoPriority == LlmAutoPriority.HttpFirst
@@ -713,6 +727,17 @@ namespace CoreAI.Infrastructure.Llm.Editor
         }
 
         /// <summary>
+        /// <c>"model":"…",</c> fragment for the diagnostic request bodies, or an empty string. Mirrors the
+        /// runtime contract: an unset model is OMITTED so a ServerManagedApi backend picks one, instead of
+        /// sending an empty string that every provider rejects.
+        /// </summary>
+        private static string BuildModelJsonFragment(CoreAISettingsAsset settings)
+        {
+            string model = settings.ModelName;
+            return string.IsNullOrWhiteSpace(model) ? "" : $"\"model\":\"{model}\",";
+        }
+
+        /// <summary>
         /// Sends a minimal chat completions request.
         /// </summary>
         private async System.Threading.Tasks.Task TestViaChatCompletions(CoreAISettingsAsset settings)
@@ -720,7 +745,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             string url = settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
             string jsonBody =
-                $"{{\"model\":\"{settings.ModelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Say exactly: OK\"}}],\"max_tokens\":64}}";
+                $"{{{BuildModelJsonFragment(settings)}\"messages\":[{{\"role\":\"user\",\"content\":\"Say exactly: OK\"}}],\"max_tokens\":64}}";
 
             Debug.Log($"[CoreAI Test] Chat URL: {url}");
             Debug.Log($"[CoreAI Test] Chat request: {jsonBody}");
@@ -1039,13 +1064,15 @@ namespace CoreAI.Infrastructure.Llm.Editor
             if (!string.IsNullOrEmpty(settings.ApiBaseUrl))
             {
                 messages.AppendLine($"2. HTTP API: {settings.ApiBaseUrl}");
-                messages.AppendLine($"   Model: {settings.ModelName}");
+                messages.AppendLine(string.IsNullOrWhiteSpace(settings.ModelName)
+                    ? "   Model: (not set - the backend picks it)"
+                    : $"   Model: {settings.ModelName}");
 
                 try
                 {
                     string url = settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
                     string jsonBody =
-                        $"{{\"model\":\"{settings.ModelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Say OK\"}}],\"max_tokens\":10}}";
+                        $"{{{BuildModelJsonFragment(settings)}\"messages\":[{{\"role\":\"user\",\"content\":\"Say OK\"}}],\"max_tokens\":10}}";
 
                     using (UnityWebRequest req = new(url, "POST"))
                     {
