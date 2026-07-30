@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaiunity",
-  "version": "6.11.1",
+  "version": "6.12.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity framework for LLM-powered NPCs and agents that call your game code \u2014 drop-in chat UI, function-calling tools, persistent memory, token-by-token streaming, and per-role LLM routing. Runs on a local GGUF model (via LLMUnity) or any OpenAI-compatible API; proven on a 4 GB local model. Unity layer for com.neoxider.coreai.",
@@ -11,6 +11,6 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
-    "com.neoxider.coreai": "6.11.1"
+    "com.neoxider.coreai": "6.12.0"
   }
 }

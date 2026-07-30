@@ -2,7 +2,7 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [Unreleased]
+## [6.12.0] - 2026-07-30
 
 ### Added
 
