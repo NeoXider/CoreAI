@@ -38,6 +38,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Changed
 
+- **`AbandonCurrentTurn_LateFailureAfterAbandon_DoesNotAppendDuplicateErrorMessage` now allows the
+      console line it provokes.** An abandoned turn still reports its late failure to the log —
+      swallowing it would hide real provider errors — but the test failed on that expected message
+      instead of on the behaviour it pins, which is that no second error bubble reaches the transcript.
+      This never showed up before because the assembly did not compile, so the test had never run.
+- **`// WHY:` comments pruned across the host package (311 → 294) and the rambling ones tightened.**
+      Same rule as the other packages: a WHY earns its place only when a reader who understands the
+      code would still ask why. Concurrency and staleness-generation invariants, WebGL/IL2CPP
+      constraints and UITK layout workarounds were kept; restatements of the next line were not.
 - **`DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes` no longer stalls the run.** The
       registry's drain loop paces itself with `UniTask.Delay`, whose continuations run only when the
       editor loop ticks; as a plain `async Task` test it awaited without ever yielding a frame, so the

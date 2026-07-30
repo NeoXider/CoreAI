@@ -1873,9 +1873,8 @@ namespace CoreAI.Infrastructure.Llm
             out List<MEAI.FunctionCallContent> toolCalls,
             out string cleanedText)
         {
-            // WHY: This layer used to keep its own, laxer parser that executed cited schema
-            // examples (inline-code/quoted JSON, placeholder tool names). Delegating to the
-            // hardened portable extractor closes that gap instead of duplicating its guards.
+            // WHY: delegates to the hardened portable extractor instead of a local parser so
+            // cited schema examples never execute and the guards aren't duplicated.
             return TryPortableToolExtract(text, out toolCalls, out cleanedText);
         }
 

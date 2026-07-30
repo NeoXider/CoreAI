@@ -48,7 +48,6 @@ namespace CoreAI.Infrastructure.Llm
             {
                 LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken);
 
-                // WHY: If primary returned a result but with a retryable error, try secondary
                 if (result != null &&
                     !result.Ok &&
                     !HasExecutedToolCalls(result) &&
@@ -203,7 +202,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // WHY: Fallback to secondary
             if (primaryFailed)
             {
                 FallbackCount++;

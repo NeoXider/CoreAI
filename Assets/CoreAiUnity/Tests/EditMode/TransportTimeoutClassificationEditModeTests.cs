@@ -125,7 +125,6 @@ namespace CoreAI.Tests.EditMode
             using CancellationTokenSource cts = new();
             cts.Cancel();
 
-            // WHY: TaskCanceledException derives from OperationCanceledException, and both are valid here.
             OperationCanceledException exception = null;
             try
             {

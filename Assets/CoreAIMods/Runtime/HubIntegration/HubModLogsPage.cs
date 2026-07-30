@@ -138,7 +138,6 @@ namespace CoreAI.Ai.Hub
             }
             catch (Exception)
             {
-                // WHY: Best-effort: clearing history must not break the UI action.
             }
 
             Refresh();

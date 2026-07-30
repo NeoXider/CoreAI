@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **"All my parts vanished and then Lua threw an error about Workspace."** When the `RbxWorldHost`
+      that owns a world is destroyed — a scene load, a domain reload during play, or leaving play
+      mode — its teardown destroys the whole DataModel, and with it every part in the world. The mod
+      stack does not go away: `LuaCsRbxApiBindings` captures the `InstanceRegistry` once at install
+      time, so scripts keep running against a registry whose scene is gone. The next `Instance.new`
+      then failed at the *parent assignment* with `PARENT_LOCKED` or `INSTANCE_DESTROYED` naming
+      Workspace, which reads as a bug in the mod's own code and says nothing about the world having
+      been torn down. The host now marks the registry detached on teardown and scripted creation
+      fails immediately with a new `WORLD_DETACHED` code that names the lost host and tells the
+      reader to reload the mods. Host-level creation (snapshot restore, service bootstrap) is
+      unaffected, so a world can still be rebuilt.
 - **The MCP server told every client the wrong version.** `serverInfo.version` in the `initialize`
       handshake is a hand-maintained C# constant that the release tooling never touched, so it answered
       `6.9.0` while the packages shipped `6.11.1` — the number that lands in bug reports and in a
@@ -19,6 +30,15 @@
 
 ### Changed
 
+- **`// WHY:` comments pruned across every package (1065 → 958), and ~55 rambling ones tightened.**
+      The convention is that a WHY records something a competent reader would still ask about; it had
+      drifted into a comment on nearly every edit, which buries the few that carry a real constraint.
+      Removed were the ones restating the next line, the field name, the neighbouring `/// <summary>`,
+      or a standard .NET fact. Platform constraints (WebGL has no threads or timers, IL2CPP stripping),
+      ordering and main-thread invariants, sandbox and admission-control invariants, and third-party
+      workarounds were kept. Comments only — no code changed, verified line by line over the diff.
+- **Restored 24 XML doc blocks in `MeaiOpenAiChatClient` that a previous pass had corrupted** into
+      `// WHY: / <summary>` comments, and repaired 13 double-encoded em-dashes (`вЂ"`) in three files.
 - **Two mods EditMode fixtures no longer assert diagnostics through the Unity console.** Whether a CoreAI
       `ILog` line reaches `LogAssert` depends on the process-wide `Log.Instance` and the live
       `GameLogFilter`, both of which any earlier test in the run may change, so those expectations passed

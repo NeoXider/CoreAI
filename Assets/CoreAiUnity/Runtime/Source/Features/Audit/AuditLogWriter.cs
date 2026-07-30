@@ -124,7 +124,7 @@ namespace CoreAI.Features.Audit
             bool joined = _worker == null || _worker.Join(WorkerJoinTimeout);
             if (!joined || !_queue.IsEmpty)
             {
-                // WHY: Worker didn't finish in time (or never started) вЂ” fall back to draining on the
+                // WHY: Worker didn't finish in time (or never started) — fall back to draining on the
                 // calling thread so entries are not silently lost.
                 DrainOnDispose();
             }
@@ -192,7 +192,7 @@ namespace CoreAI.Features.Audit
                 }
                 catch (Exception ex)
                 {
-                    // WHY: The chain itself was read fine вЂ” only rotation failed (e.g. disk full/locked).
+                    // WHY: The chain itself was read fine — only rotation failed (e.g. disk full/locked).
                     // Leave _seq/_prevHash as read; the oversized file will be retried on the next
                     // flush tick instead of discarding an otherwise-valid chain.
                     Debug.LogWarning(
@@ -374,7 +374,7 @@ namespace CoreAI.Features.Audit
         /// <summary>
         /// Background flush loop: wakes every <see cref="FlushIntervalMs"/> or immediately when
         /// <see cref="_cts"/> is cancelled (Dispose). Owns <see cref="_seq"/>/<see cref="_prevHash"/>
-        /// exclusively via <see cref="_flushGate"/> вЂ” Record() only ever enqueues.
+        /// exclusively via <see cref="_flushGate"/> — Record() only ever enqueues.
         /// Must not call any UnityEngine API directly; log messages are deferred via
         /// <see cref="EnqueueLog"/> and emitted on the main thread instead.
         /// </summary>
@@ -479,7 +479,7 @@ namespace CoreAI.Features.Audit
             {
                 localSeq++;
 
-                // WHY: Built ONCE вЂ” a single Ts, the real chain-head prevHash, hash left blank. This is
+                // WHY: Built ONCE — a single Ts, the real chain-head prevHash, hash left blank. This is
                 // the canonical preimage: the stored line is this same entry with only the hash
                 // field filled in, so a verifier can reconstruct it exactly.
                 AuditEntry finalEntry = new(

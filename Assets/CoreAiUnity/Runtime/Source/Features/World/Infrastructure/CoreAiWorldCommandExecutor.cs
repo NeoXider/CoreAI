@@ -225,7 +225,6 @@ namespace CoreAI.Infrastructure.World
                 return null;
             }
 
-            // WHY: Rotation (fx/fy/fz) and scale can be set during spawn for convenience.
             Quaternion rotation = Quaternion.identity;
             if (env.fx != 0f || env.fy != 0f || env.fz != 0f)
             {
@@ -1249,7 +1248,6 @@ namespace CoreAI.Infrastructure.World
                 });
             }
 
-            // WHY: Iterate through the data sequence.
             for (int i = 0; i < parent.transform.childCount; i++)
             {
                 CollectObjectsRecursive(parent.transform.GetChild(i).gameObject, searchPattern, results);

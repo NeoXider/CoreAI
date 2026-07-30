@@ -277,7 +277,6 @@ namespace CoreAI.Tests.EditMode
             object[] results = engine.RunChunk(state, "return 40 + 2");
             Assert.AreEqual(42d, engine.Marshaller.ToHostValue(results[0]));
 
-            // WHY: The state must be sandboxed exactly like the concrete environment created it.
             object[] stripped = engine.RunChunk(state, "return os == nil and io == nil and load == nil");
             Assert.AreEqual(true, engine.Marshaller.ToHostValue(stripped[0]),
                 "Seam-created states must carry the full sandbox hardening.");

@@ -118,5 +118,40 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             RbxError error = Assert.Throws<RbxError>(() => registry.RestoreInstance("Part", part.Id));
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
         }
+
+        /// <summary>
+        /// A destroyed <c>RbxWorldHost</c> takes the whole DataModel with it, but the mod stack keeps the
+        /// registry it captured at install time and goes on calling <c>Instance.new</c>. The spawn must
+        /// name that, because what a player reports is "every part vanished and then I got an error about
+        /// Workspace" — which reads as a bug in their own script.
+        /// </summary>
+        [Test]
+        public void CreateScripted_AfterTheHostDetachedTheWorld_FailsNamingTheLostHost()
+        {
+            InstanceRegistry registry = new();
+            Assert.IsFalse(registry.IsDetached);
+
+            registry.MarkDetached();
+
+            Assert.IsTrue(registry.IsDetached);
+            RbxError error = Assert.Throws<RbxError>(() => registry.CreateScripted("Part"));
+            Assert.AreEqual(RbxErrorCode.WorldDetached, error.Code);
+            Assert.That(error.Message, Does.Contain("RbxWorldHost"));
+            Assert.That(error.Message, Does.Contain("Part"), "the failing call must be identifiable");
+            Assert.That(error.Fix, Does.Contain("reload the mods"));
+        }
+
+        /// <summary>
+        /// Host-level restore paths (snapshot load, service bootstrap) must stay usable while a world is
+        /// rebuilt — only the script-facing surface is refused.
+        /// </summary>
+        [Test]
+        public void Create_AfterDetach_StillWorksForHostLevelCallers()
+        {
+            InstanceRegistry registry = new();
+            registry.MarkDetached();
+
+            Assert.DoesNotThrow(() => registry.Create("Part"));
+        }
     }
 }

@@ -184,8 +184,6 @@ namespace CoreAI.Mcp.Server
 
             if (!isActiveAndEnabled)
             {
-                // WHY: Update() is what drains the main-thread queue; on a disabled component or an
-                // inactive GameObject every tools/call would sit in the queue until it times out.
                 Log.Instance.Warn(
                     "[CoreAI MCP] Starting while this component is disabled (or its GameObject is " +
                     "inactive): Update() will not run, so no tools/call can be executed and every call " +

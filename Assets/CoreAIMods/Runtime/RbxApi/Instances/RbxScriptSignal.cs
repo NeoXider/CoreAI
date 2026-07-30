@@ -113,10 +113,9 @@ namespace CoreAI.Mods.Rbx.Instances
             Dispatch(args);
         }
 
-        // WHY: iterate a snapshot so a handler may Connect/Disconnect on the same signal while
-        // firing; the snapshot reuses a shared buffer in the common (non-nested) case, and a nested
-        // fire takes a private copy. Handlers are opaque Action<object[]> wrappers built by the
-        // scripting adapter (which owns guarding/marshalling/error attribution), so a throwing
+        // WHY: iterate a snapshot so a handler may Connect/Disconnect on the same signal while firing;
+        // the snapshot reuses a shared buffer in the common (non-nested) case and a nested fire takes a
+        // private copy. Handlers are opaque wrappers owned by the scripting adapter, so a throwing
         // wrapper is the adapter's bug — this layer stays engine-free and does not swallow.
         private void Dispatch(object[] args)
         {

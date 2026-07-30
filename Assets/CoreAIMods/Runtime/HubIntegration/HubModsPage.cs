@@ -214,7 +214,6 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            // WHY: Group into a category tree. Foldouts keyed by the manifest Category (or "Uncategorized").
             SortedDictionary<string, List<HubModRecord>> groups =
                 new(StringComparer.OrdinalIgnoreCase);
             foreach (HubModRecord mod in filtered)

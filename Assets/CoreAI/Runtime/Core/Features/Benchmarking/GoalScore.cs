@@ -21,7 +21,7 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public enum FailureAttribution
     {
-        /// <summary>Goal reached or only normal model shortfall вЂ” nothing to attribute.</summary>
+        /// <summary>Goal reached or only normal model shortfall — nothing to attribute.</summary>
         None = 0,
 
         /// <summary>Parser / tool execution / memory / sink / assertion infrastructure broke.</summary>
@@ -34,7 +34,7 @@ namespace CoreAI.Benchmarking
         Environment = 3,
 
         /// <summary>
-        /// Ran fine, but deliberately excluded from the model's score вЂ” e.g. a scenario whose prompt was
+        /// Ran fine, but deliberately excluded from the model's score — e.g. a scenario whose prompt was
         /// fully overridden by an operator env var, so the built-in checkpoints (tuned for the default
         /// prompt) no longer describe the task that was actually asked. Still shown in screenshots/tool
         /// stats/session transcript, just excluded from <see cref="BenchmarkReport"/>'s graded aggregates.
@@ -45,7 +45,7 @@ namespace CoreAI.Benchmarking
     /// <summary>
     /// Scoring dimension a checkpoint contributes to. Lets the report break one suite score into a few
     /// comparable axes. Adding a new dimension (for future groups like G3) only needs a new enum value
-    /// plus checkpoints tagged with it вЂ” the aggregation and report adapt automatically.
+    /// plus checkpoints tagged with it — the aggregation and report adapt automatically.
     /// </summary>
     public enum BenchmarkDimension
     {
@@ -63,7 +63,7 @@ namespace CoreAI.Benchmarking
 
         /// <summary>
         /// Genuine reasoning: correctness on derived / non-obvious inputs the model had to work out
-        /// itself (no spoon-fed code) вЂ” piecewise logic, recursion, multi-condition math, constraint
+        /// itself (no spoon-fed code) — piecewise logic, recursion, multi-condition math, constraint
         /// satisfaction. This is the axis that separates "follows instructions" from "is smart".
         /// </summary>
         Reasoning = 4,
@@ -128,7 +128,7 @@ namespace CoreAI.Benchmarking
     /// Immutable result of grading one scenario: a normalized 0..100 <see cref="Base"/> score plus a
     /// bounded <see cref="Bonus"/> (only granted when the base is already near-perfect, so a bonus can
     /// never rescue a failed task). <see cref="Total"/> is reported separately and never used to
-    /// compare suites вЂ” comparisons use <see cref="Base"/>.
+    /// compare suites — comparisons use <see cref="Base"/>.
     /// </summary>
     public readonly struct GoalScore
     {
@@ -267,7 +267,7 @@ namespace CoreAI.Benchmarking
             double clampedJudgeWeight = Clamp(judgeWeight, 0, 0.5);
             double judge = judgeScore ?? double.NaN;
             double mergedBase = checkpointScore;
-            // WHY: A NaN/Inf judge score means the judge did not run вЂ” ignore it rather than poisoning the base.
+            // WHY: A NaN/Inf judge score means the judge did not run — ignore it rather than poisoning the base.
             bool judgeUsable = judgeScore.HasValue && !double.IsNaN(judgeScore.Value)
                                                    && !double.IsInfinity(judgeScore.Value);
             if (judgeUsable && clampedJudgeWeight > 0)
@@ -292,10 +292,10 @@ namespace CoreAI.Benchmarking
             }
 
             // WHY: Bonus is gated: a task must already be near-perfect to earn it. It rewards being MORE CORRECT
-            // than the pass bar вЂ” deliberately NOT being faster. Speed/efficiency is reported separately as a
+            // than the pass bar — deliberately NOT being faster. Speed/efficiency is reported separately as a
             // tok/s metric; folding it into a score made a merely-faster model (e.g. a "spark" tier) look
             // "smarter" than an equally-correct but slower one. So the token/time efficiency components no
-            // longer add to any score вЂ” only the correctness bonus does.
+            // longer add to any score — only the correctness bonus does.
             double correctnessBonus = 0;
             double tokenBonus = 0;
             double timeBonus = 0;
@@ -305,7 +305,6 @@ namespace CoreAI.Benchmarking
             {
                 correctnessBonus = Clamp(rawBonus, 0, MaxBonus);
                 bonus = correctnessBonus;
-                // WHY: tokenBonus / timeBonus / efficiencyBonus intentionally stay 0: speed does not add points.
             }
 
             bool allMandatoryPassed = true;

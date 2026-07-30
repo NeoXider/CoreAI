@@ -55,6 +55,22 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public int Count => _byId.Count;
 
+        /// <summary>
+        /// True once the world this registry backs was torn down with its host. Scripts keep a direct
+        /// reference to this object (the Lua bindings capture it at install time), so the registry
+        /// outlives the host and every later creation would land in a world with no scene behind it.
+        /// </summary>
+        public bool IsDetached { get; private set; }
+
+        /// <summary>
+        /// Declares the backing world gone, so scripted creation fails with a named error instead of
+        /// quietly building instances nothing will ever render.
+        /// </summary>
+        public void MarkDetached()
+        {
+            IsDetached = true;
+        }
+
         public event Action<InstanceRecord> Registered;
 
         public event Action<InstanceRecord> Unregistered;
@@ -78,6 +94,14 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxInstance CreateScripted(string className, string ownerModId = null,
             string originTag = null, InstanceIdAuthority authority = InstanceIdAuthority.Server)
         {
+            // WHY: reported here rather than at the later Parent assignment. Parenting into the dead
+            // world throws PARENT_LOCKED about Workspace, which reads as a script mistake; the real
+            // event — the host died and took every existing part with it — is only visible from here.
+            if (IsDetached)
+            {
+                throw RbxError.WorldDetached("Instance.new(\"" + className + "\")");
+            }
+
             if (!Catalog.TryGet(className, out ClassDescriptor descriptor)
                 || descriptor.IsAbstract
                 || !descriptor.IsCreatable)
@@ -342,11 +366,10 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             if (!_byId.TryGetValue(instance.Id, out InstanceRecord record))
             {
-                // WHY: the instance reached this registry's tree but was never registered HERE, so no
-                // binder call can follow and it can never materialize. That means the world the script
-                // writes to and the registry backing the binder are two different objects — a
-                // composition fault. Reporting it is the only way it is ever visible: the script still
-                // completes, nothing throws, and the only symptom is a missing object.
+                // WHY: the instance reached this registry's tree but was never registered HERE, so it can
+                // never materialize — the world the script writes to and the registry backing the binder
+                // are two different objects (a composition fault). Reporting it here is the only way it
+                // becomes visible: the script still completes and the only symptom is a missing object.
                 Diagnostics?.Invoke(
                     $"[CoreAI.RbxApi] '{instance.Name}' (class={instance.ClassName}) entered a tree this " +
                     "registry does not own, so it will never materialize. The Rbx world used by scripts " +

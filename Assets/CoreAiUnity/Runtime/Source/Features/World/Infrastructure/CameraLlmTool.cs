@@ -34,7 +34,7 @@ namespace CoreAI.Infrastructure.World
                     Name = "capture_camera",
                     Description =
                         "Take a screenshot from a specific camera (or 'main') and return it as a JPEG Base64 string."
-                } // WHY: arguments: cameraName, width, height
+                }
             );
         }
 

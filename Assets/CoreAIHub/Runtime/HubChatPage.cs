@@ -112,9 +112,8 @@ namespace CoreAI.Hub.UI
 
         private object BuildContent()
         {
-            // WHY: fill the tab. The Chat page carries no inner padding of its own — the Hub content area drops
-            // its padding for the chat (see CoreAiHubWindow full-bleed handling) so the chat reaches all four
-            // edges evenly, with no left-clip and no right/bottom gap.
+            // WHY: no inner padding here — the Hub content area drops its padding for the chat (see
+            // CoreAiHubWindow full-bleed handling) so the chat reaches all four edges evenly.
             _host = new VisualElement { name = "coreai-hub-chat-host" };
             _host.style.flexGrow = 1f;
 

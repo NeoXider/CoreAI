@@ -380,7 +380,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             roblox.PumpInput();
             roblox.PumpInput();
 
-            // WHY: began must be edge-triggered — holding a key across frames fires once.
             Assert.AreEqual(1, beganCount);
         }
 
@@ -394,8 +393,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             source.PressKey(KeyA);
             source.PressKey(ButtonA);
 
-            // WHY: Roblox GetKeysPressed() returns keyboard keys only — the gamepad button (1000+)
-            // must not appear.
             IReadOnlyList<RbxInputObject> pressed = service.GetKeysPressed();
             Assert.AreEqual(1, pressed.Count);
             Assert.AreEqual(KeyA, pressed[0].KeyCode.Value);

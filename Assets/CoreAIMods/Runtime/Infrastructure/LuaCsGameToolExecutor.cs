@@ -97,8 +97,6 @@ namespace CoreAI.Ai.LuaCs
             // coreai_world_begin() and commit/rollback leaves its transaction open, which would
             // silently buffer this chunk's world commands. Reset before running and abort in the
             // finally so a leaked transaction can never bleed across runs in either direction.
-            // ILuaTransactionScope is VM-agnostic (LuaCsWorldRuntimeBindings implements it), so the
-            // exact reset behavior of the MoonSharp executor is preserved here.
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
             try
             {

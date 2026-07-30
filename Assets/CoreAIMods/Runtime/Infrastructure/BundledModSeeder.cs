@@ -154,19 +154,14 @@ namespace CoreAI.Infrastructure.Lua
                 return Outcome.Skipped;
             }
 
-            // WHY: Only act when the bundled version is strictly newer than what we last seeded.
             if (CompareVersions(mod.Version, existing.SeededVersion) <= 0)
             {
                 return Outcome.Skipped;
             }
 
-            // WHY: A strictly-newer BUNDLED version always wins so "bump the header version and it ships"
-            // is reliable — the old symptom was a sample silently sticking on its previous version because
-            // it had once been opened/edited (which changes its hash and used to downgrade the update to a
-            // no-op "UpdateAvailable" flag). Bundled samples are canonical, and the store keeps the prior
-            // source as a revision (recoverable from the mod's history), so this preserves any local edit
-            // rather than losing it. A same-or-older version is still skipped (the guard above), and a
-            // non-bundled user mod sharing the id is still never touched (the empty-Origin guard above).
+            // WHY: A strictly-newer bundled version always wins so "bump the header version and it ships"
+            // stays reliable — editing a sample changes its hash but not its version, so a hash-based
+            // staleness check alone would leave it stuck on stale content forever.
             LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
             _store.Save(id, mod.Source, updated);
             return Outcome.Updated;
@@ -236,7 +231,7 @@ namespace CoreAI.Infrastructure.Lua
             return 0;
         }
 
-        /// <summary>FNV-1a 32-bit hex digest of the UTF-8 bytes вЂ” a cheap edit-detection fingerprint.</summary>
+        /// <summary>FNV-1a 32-bit hex digest of the UTF-8 bytes — a cheap edit-detection fingerprint.</summary>
         internal static string Fnv1a(string text)
         {
             const uint offset = 2166136261;

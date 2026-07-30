@@ -67,7 +67,6 @@ namespace CoreAI.Crafting
                 return result;
             }
 
-            // WHY: Trim potential markdown fences
             json = json.Trim();
             if (json.StartsWith("```"))
             {
@@ -102,7 +101,6 @@ namespace CoreAI.Crafting
             {
                 JToken token = obj[field.Name];
 
-                // WHY: Required check
                 if (field.Required && (token == null || token.Type == JTokenType.Null))
                 {
                     result.Errors.Add($"[{_schemaName}] Missing required field '{field.Name}'");
@@ -120,14 +118,12 @@ namespace CoreAI.Crafting
                 // value was reported as valid.
                 string normalizedType = field.Type?.ToLowerInvariant();
 
-                // WHY: Type check
                 if (!CheckType(token, normalizedType, out string typeError))
                 {
                     result.Errors.Add($"[{_schemaName}] Field '{field.Name}': {typeError}");
                     continue;
                 }
 
-                // WHY: Range check (number/integer)
                 if ((normalizedType == "number" || normalizedType == "integer") &&
                     token.Type != JTokenType.Null)
                 {
@@ -146,7 +142,6 @@ namespace CoreAI.Crafting
                     }
                 }
 
-                // WHY: Enum check
                 if (field.AllowedValues != null && field.AllowedValues.Length > 0 &&
                     token.Type == JTokenType.String)
                 {
@@ -231,7 +226,6 @@ namespace CoreAI.Crafting
                 case "integer":
                     if (token.Type != JTokenType.Integer)
                     {
-                        // WHY: Allow float that is whole number
                         if (token.Type == JTokenType.Float)
                         {
                             double d = token.Value<double>();

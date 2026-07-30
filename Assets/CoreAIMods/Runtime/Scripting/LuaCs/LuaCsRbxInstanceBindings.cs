@@ -335,8 +335,8 @@ namespace CoreAI.Ai.LuaCs
                 context.RequireWorldEdit("Instance:Clone");
                 if (IsProtectedSingleton(self))
                 {
-                    // WHY: services and the canonical Camera are singletons — Roblox marks them
-                    // non-archivable, so Clone yields nil rather than a second live instance.
+                    // WHY: Roblox marks singletons non-archivable, so Clone yields nil here
+                    // instead of a second live instance.
                     return LuaValue.Nil;
                 }
 
@@ -349,9 +349,9 @@ namespace CoreAI.Ai.LuaCs
                 context.RequireWorldEdit("Instance:Destroy");
                 if (IsProtectedSingleton(self))
                 {
-                    // WHY: destroying a shared service (cached once at composition, never re-resolved)
-                    // would brick input/lighting/etc for EVERY mod in the world; the Camera is the
-                    // canonical workspace.CurrentCamera. Roblox locks these against destruction too.
+                    // WHY: a shared service is cached once at composition and never re-resolved, so
+                    // destroying it would brick input/lighting/etc for every mod; Roblox locks these
+                    // against destruction too.
                     throw RbxError.BadArgument(
                         self.ClassName + " cannot be destroyed — it is a shared singleton",
                         "services and workspace.CurrentCamera live for the world's lifetime; "
@@ -479,11 +479,9 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        // WHY: RbxInstance.Clone deep-copies identity/attributes/tags, but BasePart spatial and
-        // appearance state lives in the external part sink keyed by id (D2 keeps RbxInstance
-        // engine-free). A Roblox-faithful clone must carry that state to the copy's fresh id, so
-        // walk source and copy in lockstep — Clone preserves archivable child order, so the trees
-        // align — and copy each stored record across.
+        // WHY: Clone deep-copies identity/attributes/tags, but BasePart spatial/appearance state
+        // lives in the external part sink keyed by id (D2 keeps RbxInstance engine-free) and must
+        // be walked and copied separately; Clone preserves archivable child order, so the trees align.
         // TODO: MVP2 — move this sink-copy into a registry-level clone seam so completeness no
         // longer depends on each Clone call site (the registry already owns the binder/sink).
         private static void CopyPartSinkState(IPartPropertySink sink, RbxInstance source,
@@ -583,9 +581,8 @@ namespace CoreAI.Ai.LuaCs
                 case LuaValueType.Number: return value.Read<double>();
                 case LuaValueType.String: return value.Read<string>();
                 default:
-                    // WHY: attributes accept the datatype subset the contract serializes; other
-                    // userdata/tables/functions are rejected. Naming the Lua-side type and the exact
-                    // supported list keeps the BAD_ARGUMENT fix actionable and Roblox-parity honest.
+                    // WHY: only the datatype subset the attribute contract serializes is accepted;
+                    // other userdata/tables/functions are rejected here.
                     if (TryUnbox(value, out RbxVector3 v3))
                     {
                         return v3;
@@ -1073,9 +1070,6 @@ namespace CoreAI.Ai.LuaCs
 
         private static RbxError SpatialStub(string property)
         {
-            // WHY: Shape/Position/Size/CFrame/Color/Transparency/Anchored/CanCollide are wired to
-            // the part-property sink; Material needs the material catalog and
-            // Orientation/Rotation need Euler decomposition — both later BasePart follow-ups.
             return RbxError.NotImplemented(
                 "BasePart." + property,
                 "the BasePart material + orientation follow-up",

@@ -370,10 +370,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                                 break;
                             }
 
-                            // WHY: The stop flag is otherwise only read at the top of the reps loop, so
-                            // WHY: with retries a pressed Stop against a dead provider would still wait up to
-                            // WHY: maxAttempts full timeouts. This hard failure was never given its configured
-                            // WHY: retry, so exclude the stop-aborted scenario from model scoring.
+                            // WHY: the stop flag is otherwise only read at the top of the reps loop, so with
+                            // retries a pressed Stop against a dead provider would still wait out maxAttempts
+                            // full timeouts; exclude the stop-aborted scenario from model scoring instead.
                             if (AbortRetryForStop(BenchmarkProgress.StopRequested, ref captured))
                             {
                                 droppedForStop = true;

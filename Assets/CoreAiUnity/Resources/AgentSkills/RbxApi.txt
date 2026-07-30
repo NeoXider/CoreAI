@@ -155,7 +155,12 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
 
 Every failure is a Lua error whose message is `CODE: message | fix: suggestion` (no
 `[mod:...]` prefix). Catch with `pcall`. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE,
-INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED.
+INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED.
+
+`WORLD_DETACHED` is not a mistake in your script. The RbxWorldHost that owned the world was
+destroyed — a scene load, a domain reload during play, or leaving play mode — and it took every
+part in that world with it. Nothing you spawn can materialize until the mods are reloaded against
+the current world, so report it instead of retrying the spawn.
 
 ## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 

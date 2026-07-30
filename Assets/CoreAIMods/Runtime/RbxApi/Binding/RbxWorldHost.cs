@@ -107,6 +107,12 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void OnDestroy()
         {
+            // WHY: the mod stack outlives this component — LuaCsRbxApiBindings captures the registry
+            // once at install time, so clearing our own property hides nothing from running scripts.
+            // Marking it detached is what turns the next Instance.new into a named WORLD_DETACHED
+            // error instead of a PARENT_LOCKED about a Workspace that died with us.
+            Registry?.MarkDetached();
+
             // WHY: registry-driven teardown releases backing GameObjects through the binder,
             // keeping the ledger and the scene consistent even on scene unload.
             Game?.Destroy();

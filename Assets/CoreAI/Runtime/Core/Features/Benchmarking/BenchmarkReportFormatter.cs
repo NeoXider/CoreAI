@@ -174,7 +174,6 @@ namespace CoreAI.Benchmarking
             sb.AppendLine("_Base 0..100; Bonus = correctness + efficiency (fewer tokens & less time than budget), " +
                           "capped 20. `~tokens` = BPE estimate (provider usage unavailable)._");
 
-            // WHY: Failed checkpoints, so a run is debuggable from the artifact alone.
             sb.AppendLine();
             sb.AppendLine("## Failed checkpoints");
             bool anyFailure = false;
@@ -221,8 +220,6 @@ namespace CoreAI.Benchmarking
                 sb.AppendLine("_None — every checkpoint passed._");
             }
 
-            // WHY: Full model session at the end: the complete per-turn transcript the model produced,
-            // so a run can be understood and debugged from the report alone.
             sb.AppendLine();
             sb.AppendLine("---");
             sb.AppendLine("## Full model session");

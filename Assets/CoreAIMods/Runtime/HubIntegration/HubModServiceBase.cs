@@ -267,7 +267,6 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // WHY: Best-effort: a store failure must not break the UI action.
             }
 
             RaiseChanged();
@@ -402,7 +401,6 @@ namespace CoreAI.Ai.Hub
             }
             catch
             {
-                // WHY: Ignore: fall back to a fresh manifest when the existing entry cannot be read.
             }
 
             try

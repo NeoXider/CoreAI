@@ -92,11 +92,9 @@ namespace CoreAI.Mods.Rbx.Instances
         public IReadOnlyList<RbxInputObject> GetKeysPressed()
         {
             ThrowIfDestroyed("GetKeysPressed");
-            // WHY: own buffer, NOT the shared _pollBuffer — a Lua handler may call GetKeysPressed()
-            // from inside an InputBegan/InputEnded handler while StepKeys is mid-foreach over
-            // _pollBuffer; clearing/refilling the shared list there throws "collection modified" out
-            // of the pump. GetKeysPressed already allocates its result list, so a local int buffer is
-            // no extra hot-path cost (this is a mod-chosen poll, not the per-frame pump).
+            // WHY: own buffer, not the shared _pollBuffer — a Lua handler may call GetKeysPressed()
+            // from inside an InputBegan/InputEnded handler while StepKeys is mid-foreach over it,
+            // which would throw "collection modified"; this path already allocates, so it's free.
             List<RbxInputObject> pressed = new();
             List<int> buffer = new();
             InputSource.CollectPressedKeyCodes(buffer);

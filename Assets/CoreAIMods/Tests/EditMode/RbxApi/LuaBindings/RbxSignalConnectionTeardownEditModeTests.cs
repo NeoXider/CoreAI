@@ -137,14 +137,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             Assert.IsTrue(stack.Runtime.UnloadMod("m"), "the mod unloads");
 
-            // WHY: the teardown sweep must have disconnected the mod's Heartbeat handler.
             Assert.IsFalse(roblox.RunService.Heartbeat.HasConnections,
                 "unloading the mod disconnects its Heartbeat connection");
 
             roblox.PumpFrame(0.1f);
             roblox.PumpFrame(0.1f);
 
-            // WHY: no further increments — the disconnected handler never fires against the torn-down mod.
             Assert.AreEqual("3", store.Get("m", "n"),
                 "Heartbeat must not fire after the mod is unloaded");
         }
@@ -175,7 +173,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // must disconnect only gen-1 and keep gen-2 live, so the game loop keeps running.
             stack.Runtime.ReloadMod("m", bump);
 
-            // WHY: the reloaded chunk's connection survives the teardown (not left inert).
             Assert.IsTrue(roblox.RunService.Heartbeat.HasConnections,
                 "the reloaded chunk's Heartbeat connection survives the reload teardown");
 

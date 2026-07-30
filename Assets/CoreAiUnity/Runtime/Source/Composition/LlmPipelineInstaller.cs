@@ -119,7 +119,6 @@ namespace CoreAI.Composition
                     () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
 #endif
 
-            // WHY: Resolve and cache required local values.
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
@@ -158,7 +157,6 @@ namespace CoreAI.Composition
         {
             ILlmClient primaryClient = ResolveLlmClient(settings, logger, memoryStore, agentProvider);
 
-            // WHY: Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
             if (settings != null && settings.HasValidFallbackBackend)
             {
                 ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
@@ -231,7 +229,6 @@ namespace CoreAI.Composition
             ILlmAgentProvider agentProvider)
         {
 #if UNITY_WEBGL
-            // WHY: WebGL: try HTTP only, otherwise Offline.
             ILlmClient http = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
             return http ?? BuildOfflineClient(settings);
 #else

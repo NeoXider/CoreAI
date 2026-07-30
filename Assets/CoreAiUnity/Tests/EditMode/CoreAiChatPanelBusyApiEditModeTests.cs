@@ -458,6 +458,11 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsTrue(wasInProgress);
                 Assert.IsFalse(ctx.Panel.IsBusy, "AbandonCurrentTurn must unlock the UI immediately");
 
+                // The abandoned turn still reports its failure to the console — swallowing it would hide
+                // real provider errors. What must not happen is a second bubble in the transcript, which
+                // is what this test pins; the console line is expected, so it must not fail the run.
+                LogAssert.ignoreFailingMessages = true;
+
                 // Now let the "real" request fail, well after the local watchdog already gave up on it.
                 orchestrator.FailNow();
                 string? result = await turnTask;
@@ -468,6 +473,8 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
+                LogAssert.ignoreFailingMessages = false;
+
                 if (panelHost != null)
                 {
                     Object.DestroyImmediate(panelHost);

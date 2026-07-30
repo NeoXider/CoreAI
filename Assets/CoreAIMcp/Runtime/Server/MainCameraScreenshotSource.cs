@@ -68,8 +68,8 @@ namespace CoreAI.Mcp.Server
             }
             catch (Exception ex)
             {
-                // WHY: swallowing this used to report "no active camera" for a live camera - log the real
-                // exception AND hand its text to the agent, which is the only one that can act on it.
+                // WHY: log the real exception AND hand its text to the agent, which is the only one that
+                // can act on it — a generic "no active camera" here would misdiagnose a live camera.
                 error = $"capture of camera '{camera.name}' at {width}x{height} failed: " +
                         $"{ex.GetType().Name}: {ex.Message}";
                 Log.Instance.Error($"[CoreAI MCP] screenshot {error}\n{ex}");

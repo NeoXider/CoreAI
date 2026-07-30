@@ -36,8 +36,6 @@ namespace CoreAI.Ai.LuaCs
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
 
-        // WHY: ClickDetector fires on the RISING edge of MouseButton1 (one click = one fire), so the
-        // previous frame's held state is kept to detect the press transition in the per-frame pump.
         private bool _mouseButton1Down;
 
         /// <summary>

@@ -43,17 +43,13 @@ namespace CoreAI.Mods.Rbx.Binding
         // wedge parts — the root's Size-driven localScale carries the dimensions like Block/Ball.
         private static Mesh _wedgeMesh;
 
-        // WHY: the built-in cube/sphere meshes and the pipeline default material are cached once
-        // (they are shared assets that survive their template's destroy) so a swarm spawning many
-        // parts never pays a CreatePrimitive-plus-destroy GameObject per part.
         private static Mesh _cubeMesh;
         private static Mesh _sphereMesh;
         private static Material _defaultMaterial;
         private static bool _loggedFirstPart;
 
-        // WHY: storage services and their subtrees are not part of the physical world, so their
-        // GameObject materializes inactive (children inherit inactive-in-hierarchy). Workspace and
-        // Lighting stay active. Roblox's service set is fixed, so an explicit list is honest here.
+        // WHY: Roblox's service set is fixed, so a static list here (rather than dynamic
+        // classification) is safe to hard-code.
         private static readonly HashSet<string> InactiveServiceClasses =
             new(System.StringComparer.Ordinal)
             {
@@ -83,10 +79,9 @@ namespace CoreAI.Mods.Rbx.Binding
             /// <summary>Shape whose visual is currently built; null until the first Apply.</summary>
             public RbxPartShape? MaterializedShape;
 
-            // WHY: cached on the visual build (ApplyShape) so per-frame property writes skip the
-            // GetComponent scans, and the appearance/collide setters target THIS part's own visual
-            // (root for Block/Ball/Wedge, the Shape child for Cylinder) rather than descending into
-            // nested child parts via GetComponentInChildren. Rebuilt on every shape switch.
+            // WHY: cached on the visual build (ApplyShape) so per-frame property writes skip
+            // GetComponent scans; rebuilt on every shape switch. See CacheVisualComponents for
+            // how the target visual is resolved.
             public Renderer Renderer;
             public Collider Collider;
 
@@ -192,11 +187,9 @@ namespace CoreAI.Mods.Rbx.Binding
                 if (entry.IsPart)
                 {
                     Apply(entry, GetPartPropertiesOrDefault(record.Id));
-                    // WHY: report the FIRST part only. A part that is created but never drawn is
-                    // indistinguishable from one that was never created — both look like "the script did
-                    // nothing" — and in a player there is no inspector to tell them apart. One line naming
-                    // the renderer and the resolved shader settles it; logging every part would flood the
-                    // console on any mod that spawns in bulk.
+                    // WHY: log only the FIRST part — a materialized-but-invisible part looks
+                    // identical to one never created, and a player has no inspector to tell them
+                    // apart; logging every part would flood mods that spawn in bulk.
                     if (!_loggedFirstPart)
                     {
                         _loggedFirstPart = true;
@@ -391,9 +384,6 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             if (instance.IsA("DataModel"))
             {
-                // WHY: game IS the host GameObject — no new GO, and the entry is flagged so
-                // teardown never destroys/renames/re-parents the host. Falls back to a fresh root
-                // only when the binder was created without a host transform.
                 GameObject host = _worldParent != null ? _worldParent.gameObject : new GameObject(instance.Name);
                 return new BindingEntry
                 {
@@ -513,11 +503,10 @@ namespace CoreAI.Mods.Rbx.Binding
         /// ShapeChild), keeping the GameObject identity and its Rigidbody untouched.</summary>
         private static void StripShapeVisual(BindingEntry entry)
         {
-            // WHY: destroy synchronously even in Play Mode. ApplyShape rebuilds the visual on the
-            // very next lines, and a deferred Object.Destroy would leave the old MeshRenderer alive
-            // when AddComponent<MeshRenderer> runs (Renderer is single-per-GameObject → the add
-            // fails and returns null) and would let CacheVisualComponents cache soon-fake-null
-            // components. These are binder-owned, so DestroyImmediate is legal here.
+            // WHY: destroy synchronously even in Play Mode — ApplyShape rebuilds the visual right
+            // after, and a deferred Object.Destroy would leave the old MeshRenderer alive for the
+            // next AddComponent<MeshRenderer> (single-per-GameObject, so the add would fail).
+            // Binder-owned, so DestroyImmediate is legal here.
             GameObject gameObject = entry.GameObject;
             DestroyNow(gameObject.GetComponent<Collider>());
             DestroyNow(gameObject.GetComponent<MeshRenderer>());
@@ -692,8 +681,6 @@ namespace CoreAI.Mods.Rbx.Binding
             return _wedgeMesh;
         }
 
-        // WHY: the wedge reuses the same cached pipeline default material as Block/Ball so it
-        // renders identically before the appearance pass overrides color — no extra template.
         private static Material DefaultLitMaterial()
         {
             EnsurePrimitiveCache();
@@ -751,8 +738,6 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static void ApplyCanCollide(BindingEntry entry, bool canCollide)
         {
-            // WHY: entry.Collider is the part's own visual collider (root for Block/Ball/Wedge, the
-            // Shape child for Cylinder), cached at build — never a nested child part's collider.
             if (entry.Collider != null)
             {
                 entry.Collider.enabled = canCollide;

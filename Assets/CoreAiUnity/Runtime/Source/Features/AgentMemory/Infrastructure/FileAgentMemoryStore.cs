@@ -60,7 +60,7 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             public string lastSystemPrompt;
             public string memory;
-            public string chatHistoryJson; // WHY: Serialized chat history JSON payload for persistence.
+            public string chatHistoryJson;
             public string transcriptEntriesJson;
 
             // WHY: Memory versioning + stable-prefix snapshot. Persisted so the documented rollback feature
@@ -519,7 +519,6 @@ namespace CoreAI.Infrastructure.AiMemory
 
             _loadedRoles.Remove(roleId); // WHY: re-sync _ephemeralHistory on next access after removing the list above
 
-            // WHY: Wrap the following block with exception-safe behavior.
             try
             {
                 string path = GetPath(roleId);

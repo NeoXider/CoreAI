@@ -142,7 +142,6 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (!hasNext)
                         {
-                            // WHY: Ended without ever committing content: treat as a transient empty stream.
                             retryablePreCommitFailure = true;
                             terminalErrorChunk = new LlmStreamChunk
                             {
@@ -162,7 +161,6 @@ namespace CoreAI.Infrastructure.Llm
                                 break;
                             }
 
-                            // WHY: Non-retryable terminal error before commit: forward it, do not retry.
                             yield return current;
                             yield break;
                         }
@@ -176,7 +174,6 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (current.IsDone)
                         {
-                            // WHY: Terminal chunk, no text/tool/error: nothing committed, retry as empty.
                             retryablePreCommitFailure = true;
                             terminalErrorChunk = new LlmStreamChunk
                             {
@@ -194,7 +191,6 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (committed)
                     {
-                        // WHY: Real content is out: post-commit failures propagate, never retried.
                         while (await enumerator.MoveNextAsync().ConfigureAwait(false))
                         {
                             yield return enumerator.Current;
@@ -215,7 +211,6 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (attempt >= _maxRetryAttempts)
                 {
-                    // WHY: Retries exhausted: surface the last terminal error.
                     yield return terminalErrorChunk ?? new LlmStreamChunk
                     {
                         IsDone = true,

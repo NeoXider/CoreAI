@@ -180,13 +180,10 @@ namespace CoreAI.Ai.Hub
                 pickingMode = PickingMode.Ignore
             };
             _highlightOverlay.style.position = Position.Absolute;
-            // WHY: UI Toolkit positions absolute children relative to the parent's padding box, not its
-            // content box, so a zero inset lands the overlay flush against the input's border — ignoring
-            // the input's own left/top padding (see HubModWidgets.StyleCodeField). That left the overlay
-            // (the only visible text; the real glyphs are made transparent below) rendered further left
-            // than the real text would be, and the clipped first ~character was cropped by the input's
-            // border. Giving the overlay the same padding as the input lines its text up with where the
-            // real glyphs would render, regardless of that box-model detail.
+            // WHY: UI Toolkit positions absolute children against the parent's padding box, not its
+            // content box, so a zero inset ignores the input's own left/top padding (see
+            // HubModWidgets.StyleCodeField). Matching that padding here lines the overlay text up with
+            // where the real (transparent) glyphs would render.
             _highlightOverlay.style.left = 0f;
             _highlightOverlay.style.top = 0f;
             _highlightOverlay.style.right = 0f;

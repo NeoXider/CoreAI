@@ -20,7 +20,8 @@ namespace CoreAI.Mods.Rbx.Instances
         ApiVersionMismatch,
         NotAuthority,
         PayloadTooLarge,
-        ContextViolation
+        ContextViolation,
+        WorldDetached
     }
 
     /// <summary>
@@ -86,6 +87,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 case RbxErrorCode.NotAuthority: return "NOT_AUTHORITY";
                 case RbxErrorCode.PayloadTooLarge: return "PAYLOAD_TOO_LARGE";
                 case RbxErrorCode.ContextViolation: return "CONTEXT_VIOLATION";
+                case RbxErrorCode.WorldDetached: return "WORLD_DETACHED";
                 default: throw new ArgumentOutOfRangeException(nameof(code), code, null);
             }
         }
@@ -126,6 +128,27 @@ namespace CoreAI.Mods.Rbx.Instances
             return new RbxError(RbxErrorCode.InstanceDestroyed,
                 memberName + " on destroyed instance " + instanceName + " (id " + id.Value + ")",
                 "drop references to destroyed instances and create a new Instance instead");
+        }
+
+        /// <summary>
+        /// The world this script writes to no longer has a host: the <c>RbxWorldHost</c> that owned it
+        /// was destroyed (scene load, domain reload, or play-mode exit) while the mod stack kept
+        /// running against the registry it captured at install time.
+        /// <para>
+        /// WHY a dedicated code: without it the first symptom is every existing part vanishing at once
+        /// (the host's teardown destroys the whole DataModel) followed by a PARENT_LOCKED or
+        /// INSTANCE_DESTROYED on the next spawn, because the script parents to a Workspace that was
+        /// destroyed with it. Both messages describe the instance and say nothing about the world being
+        /// gone, which sends the reader hunting a bug in their own script.
+        /// </para>
+        /// </summary>
+        public static RbxError WorldDetached(string operation)
+        {
+            return new RbxError(RbxErrorCode.WorldDetached,
+                operation + " failed: the RbxWorldHost that owned this world was destroyed, so the "
+                + "world these scripts hold is no longer backed by the scene",
+                "reload the mods so they bind to the current world; a host is destroyed by a scene "
+                + "load, a domain reload during play, or leaving play mode");
         }
 
         /// <summary>Exact message per roadmap D6.</summary>

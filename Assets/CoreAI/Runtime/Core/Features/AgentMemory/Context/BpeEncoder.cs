@@ -68,7 +68,6 @@ namespace CoreAI.Ai
             }
             catch
             {
-                // WHY: Corrupt/partial data: signal fallback rather than producing wrong counts.
                 return null;
             }
 
@@ -128,7 +127,6 @@ namespace CoreAI.Ai
             int total = 0;
             int cursor = 0;
 
-            // WHY: Walk the string, peeling off special tokens as single tokens and BPE-encoding the gaps.
             while (cursor < text.Length)
             {
                 int nextSpecial = -1;
@@ -226,11 +224,9 @@ namespace CoreAI.Ai
                     break; // no further merges possible
                 }
 
-                // WHY: Merge segments bestIdx and bestIdx+1 by removing the boundary between them.
                 starts.RemoveAt(bestIdx + 1);
             }
 
-            // WHY: Number of segments = starts.Count - 1.
             return starts.Count - 1;
         }
 

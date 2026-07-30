@@ -12,7 +12,6 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public static class RoleFitness
     {
-        // WHY: Signal keys: the six dimensions plus a derived Speed score.
         private const string Tool = "Tool";
         private const string Intent = "Intent";
         private const string Task = "Task";
@@ -105,7 +104,6 @@ namespace CoreAI.Benchmarking
             }
         };
 
-        // WHY: Weight of each agentic role in the overall blend.
         private static readonly Dictionary<string, double> AgenticBlend = new()
         {
             ["Mechanic / GameMaster"] = .30,
@@ -200,7 +198,6 @@ namespace CoreAI.Benchmarking
                 }
                 else if (kv.Key != Speed)
                 {
-                    // WHY: A scoring dimension this run never measured (e.g. a single-group run).
                     missing.Add(Label(kv.Key));
                 }
             }

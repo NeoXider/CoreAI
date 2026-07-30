@@ -325,9 +325,8 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
-        // WHY: Runs the override synchronously under the guard, returning the raw first script result.
-        // Formulas never yield, so the sync drive (inside the guard) is safe. Internal: the public
-        // surface stays VM-agnostic.
+        // WHY: Formulas never yield, so driving the override synchronously under the guard is safe.
+        // Internal: the public surface stays VM-agnostic.
         private bool TryInvokeRaw(string name, out object result, params object[] args)
         {
             result = null;

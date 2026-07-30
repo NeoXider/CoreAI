@@ -154,11 +154,9 @@ namespace CoreAI.Ai
                     ContextRetryLevel = contextRetryPass
                 };
                 budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
-                // WHY: Disabling summarization used to switch to an effectively unlimited tail
-                // (UnlimitedHistoryTokenBudget), so every request re-sent the whole transcript and
-                // long sessions got progressively slower until the context window overflowed. The
-                // recent tail is now always bounded by the endpoint-derived policy budget (rolling
-                // truncation drops the oldest turns); summarization off only skips summary generation.
+                // WHY: The recent tail is always bounded by the endpoint-derived policy budget
+                // (rolling truncation drops the oldest turns); summarization off only skips summary
+                // generation, it does not unbound the tail.
                 int historyBudget = budget.HistoryTokenBudget;
                 if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
                 {
@@ -1631,7 +1629,6 @@ namespace CoreAI.Ai
                 }
             }
 
-            // WHY: Roadmap §7 cross-turn stale tool results are pruned from the prompt copy before compaction.
             return wroteEntry ? sb.ToString().TrimEnd() : "";
         }
 
@@ -1774,10 +1771,9 @@ namespace CoreAI.Ai
 
             if (failed.Count > 0)
             {
-                // WHY: Surface the failure to the user with the tool name(s) and the real reason, symmetric with
-                // the success path below. Previously this returned null, so a failed tool-only turn fell
-                // through to a misleading generic "LLM request failed." even though the LLM succeeded and a
-                // tool failed. The per-tool "name: detail" strings were already built above.
+                // WHY: Symmetric with the success path below - a failed tool-only turn must surface the
+                // tool name(s) and reason, not fall through to a generic "LLM request failed." even
+                // though the LLM itself succeeded and only the tool failed.
                 return failed.Count == 1
                     ? "Tool call failed: " + failed[0] + "."
                     : "Tool calls failed: " + string.Join("; ", failed) + ".";

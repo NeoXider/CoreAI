@@ -20,7 +20,6 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class ImguiBanRatchetEditModeTests
     {
-        // WHY: exact tokens the ban targets — draw entry points, layout/style calls, and GUI.* draw calls.
         private static readonly Regex ImguiToken = new(
             @"OnGUI\(|OnInspectorGUI\(|GUILayout\.|EditorGUILayout\.|GUIStyle|GUI\.",
             RegexOptions.Compiled);
@@ -36,7 +35,6 @@ namespace CoreAI.Tests.EditMode
             "CoreAI.Demos"
         };
 
-        // WHY: Editor IMGUI is allowed; these roots are only reported, never failed.
         private static readonly string[] EditorScanRoots =
         {
             "CoreAI/Editor",
@@ -98,8 +96,6 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Whitelist_OnlyShrinks_NoStaleOrMissingEntries()
         {
-            // WHY: a whitelisted file that no longer has IMGUI (or was deleted) must be removed from the
-            // list, otherwise the ratchet stops shrinking. This keeps the list honest.
             List<string> stale = new();
             foreach (string relative in Whitelist)
             {
@@ -125,8 +121,6 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void EditorImgui_IsReportedButNotFailed()
         {
-            // WHY: editor windows/inspectors are allowed to use IMGUI; this only surfaces the remaining
-            // count so the (already-started) UITK migration of editor tooling can be tracked. Never fails.
             List<string> editorImgui = new();
             foreach (string root in EditorScanRoots)
             {

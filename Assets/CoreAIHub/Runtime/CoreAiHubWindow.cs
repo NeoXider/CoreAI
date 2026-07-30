@@ -213,7 +213,6 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // WHY: guard against double-adding if a stale clone is still parented under uiRoot.
             uiRoot.Q<VisualElement>(RootName)?.RemoveFromHierarchy();
             shellUxml.CloneTree(uiRoot);
 
@@ -442,11 +441,9 @@ namespace CoreAI.Hub.UI
             // scheduler so VisualElement mutations always run on the main thread.
             _root.schedule.Execute(() =>
             {
-                // WHY: a re-registered id may point to a NEW factory (e.g. a DI binder upgrading the
-                // built-in Settings/Statistics pages with live sources after the DI-free bootstrap
-                // registered them with null sources). We cache page instances at metadata-peek time,
-                // so drop any cached instance/content for a still-present id and let the new factory
-                // build it on next activation.
+                // WHY: a re-registered id may point to a NEW factory (e.g. a DI binder upgrading a
+                // page with a live source after the DI-free bootstrap registered it with null). Drop
+                // the cached instance for a still-present id so the new factory builds it next activation.
                 if (pageId != null && _registry != null && _registry.TryGet(pageId, out _))
                 {
                     bool wasActive = string.Equals(pageId, _activePageId, StringComparison.Ordinal);

@@ -102,10 +102,10 @@ namespace CoreAI.Ai
                 ? baseSystem
                 : prefix.TrimEnd() + "\n" + baseSystem;
 
-            // WHY: BUG-4 fix + FINDING-15: the whole snapshot -> LLM -> append sequence runs as one
-            // serialized continuation, so a concurrent request cannot snapshot history that is missing
-            // the previous turn or interleave its append. _historyLock still guards reads
-            // (HistoryPairCount / ClearHistory) that run outside the gate.
+            // WHY: _historyLock alone is not enough here - it only guards individual reads/writes
+            // (HistoryPairCount / ClearHistory), not the snapshot -> LLM -> append sequence. _requestGate
+            // additionally serializes that whole sequence so a concurrent request cannot snapshot history
+            // that is missing the previous turn or interleave its append.
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -166,7 +166,6 @@ namespace CoreAI.Ai
         {
             lock (_rateLock)
             {
-                // WHY: Purge expired timestamps so AcceptedInWindow is accurate.
                 DateTime now = DateTime.UtcNow;
                 DateTime cutoff = now - _rateLimitWindow;
                 while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoff)
@@ -189,7 +188,7 @@ namespace CoreAI.Ai
         {
             if (_maxRequestsPerWindow <= 0)
             {
-                return true; // WHY: No rate limit is configured.
+                return true;
             }
 
             lock (_rateLock)

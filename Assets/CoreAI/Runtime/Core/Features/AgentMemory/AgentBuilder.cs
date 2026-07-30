@@ -494,11 +494,6 @@ namespace CoreAI.Ai
             int ctxTokens = _contextWindowTokens ??
                             _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // WHY: final composition time (three-layer architecture):
-            //   Layer 1: universalSystemPromptPrefix (project-wide rules)
-            //   Layer 2: role base prompt from Manifest / Resources (.txt files)
-            //   Layer 3: extra prompt from this builder (the one above)
-
             if (!SuppressBuildWarnings)
             {
                 EmitBuildWarnings();
@@ -780,10 +775,7 @@ namespace CoreAI.Ai
                         : additionalPrompt.TrimEnd() + "\n\n" + catalog.Trim();
                 }
 
-                // WHY: Register read_skill meta-tool (loads instructions + tool schemas)
                 policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(catalogSkills));
-
-                // WHY: Register call_skill_tool proxy (routes to real skill tools)
                 policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(catalogSkills));
             }
 
@@ -802,7 +794,6 @@ namespace CoreAI.Ai
         /// </summary>
         private void RehydrateAndRegisterAuthoring(AgentMemoryPolicy policy, MutableSkillCatalog liveCatalog)
         {
-            // WHY: Index every tool the role already has, by name, so an authored skill can reference it.
             Dictionary<string, ILlmTool> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (ILlmTool tool in Tools)
             {
@@ -841,10 +832,7 @@ namespace CoreAI.Ai
                 resolver,
                 RequireKnownSkillTools);
 
-            // WHY: Rehydrate persisted skills so prior-session skills reappear in this agent's read_skill catalog.
             coordinator.RehydrateFromStore();
-
-            // WHY: One extra visible tool (progressive disclosure: skill bodies still load on demand).
             policy.AddToolForRole(RoleId, new ManageSkillsLlmTool(coordinator));
         }
 

@@ -183,8 +183,8 @@ namespace CoreAI.Composition
             }
             else
             {
-                // WHY: Existing scenes keep their behavior until migrated to the child module.
-                // WHY: New scopes without the optional module retain the safe legacy defaults.
+                // WHY: no optional Lua world module resolved — register the legacy world-command
+                // defaults directly so existing and new scenes without the module keep working.
                 builder.RegisterWorldCommands(
                     worldPrefabRegistry,
                     legacyLuaAllowedScenes,

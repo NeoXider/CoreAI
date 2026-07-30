@@ -1505,7 +1505,9 @@ format is **stable and machine-parsable from day one**, LOCKED):
 - `code` — stable machine enum: `NOT_IMPLEMENTED`, `BAD_ARGUMENT`, `UNKNOWN_SERVICE`,
   `INSTANCE_DESTROYED`, `PARENT_LOCKED`, `BUDGET_EXCEEDED`, `SIGNAL_CASCADE`, `THREAD_CAP`,
   `CYCLIC_REQUIRE` (MVP5, DEV-1), `API_VERSION_MISMATCH` (MVP5), `NOT_AUTHORITY` (MVP12),
-  `PAYLOAD_TOO_LARGE` (MVP11), `CONTEXT_VIOLATION` (MVP11)
+  `PAYLOAD_TOO_LARGE` (MVP11), `CONTEXT_VIOLATION` (MVP11), `WORLD_DETACHED` (the owning
+  `RbxWorldHost` was destroyed — scene load, domain reload, or play-mode exit — so the registry the
+  mods captured no longer backs a scene)
 - `message` — states what happened and (for stubs) the exact MVP phase
 - `fix` — one actionable suggestion, present tense, ≤1 sentence; for `BAD_ARGUMENT` it names the
   expected type and position (`fix: pass a Vector3, got string at argument 2`)

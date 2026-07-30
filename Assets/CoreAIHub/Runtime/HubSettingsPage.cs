@@ -1500,11 +1500,9 @@ namespace CoreAI.Hub.UI
             List<string> choices = new();
             if (result.Ok)
             {
-                // WHY: seed a non-model prompt at index 0 rather than the first real model. Selecting it
-                // via SetValueWithoutNotify below fires no ChangeEvent, so if a real model sat at index 0
-                // it would look picked (highlighted in the dropdown) without ever being written into the
-                // target text field — the exact "picking a model does nothing" bug this discovery list
-                // exists to avoid.
+                // WHY: seed a non-model prompt at index 0, not the first real model — SetValueWithoutNotify
+                // below fires no ChangeEvent, so a real model at index 0 would look picked without ever
+                // being written into the target text field ("picking a model does nothing").
                 choices.Add(ModelPickerPickPrompt);
                 foreach (string model in result.Models)
                 {
@@ -1526,10 +1524,8 @@ namespace CoreAI.Hub.UI
             SetVisible(picker, result.Ok);
         }
 
-        // WHY: The picker-to-model copy lives here (not inline in the RegisterValueChangedCallback lambda)
-        // so it can be exercised by an EditMode test: a detached DropdownField dispatches no ChangeEvent
-        // (event delivery needs an attached panel), so the test drives this exact logic directly instead
-        // of setting picker.value on an off-panel element. A placeholder/prompt is never copied.
+        // WHY: lives here, not inline in the RegisterValueChangedCallback lambda, so an EditMode test can
+        // drive it directly — a detached DropdownField dispatches no ChangeEvent (needs an attached panel).
         private static void CopyPickedModelInto(TextField target, string pickedValue)
         {
             if (target != null && IsSelectableModel(pickedValue))
@@ -1557,11 +1553,9 @@ namespace CoreAI.Hub.UI
             CoreAISettingsAsset asset = ResolveSettingsAsset();
             _liveMode = status.Mode;
 
-            // WHY: RefreshFromStatus also runs from OnActivated (every tab re-entry) and from
-            // OnBackendChanged (any external switch), both of which can fire while the user has the
-            // Mode dropdown open mid-pick. Overwriting it there silently reverts their choice before
-            // Apply is even clicked, which reads as "I can't select anything (e.g. Auto) — it snaps
-            // back". Only sync it when it isn't the element currently receiving input.
+            // WHY: this also runs from OnActivated and OnBackendChanged, which can fire while the user
+            // has the Mode dropdown open mid-pick; overwriting it there would silently revert their
+            // choice before Apply is clicked. Only sync it when it isn't the focused element.
             if (!IsFocusWithin(_mode))
             {
                 _mode.SetValueWithoutNotify(ModeToOption(status.Mode));

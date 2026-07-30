@@ -507,7 +507,6 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                // WHY: F-10: same bounded admission policy as the task path.
                 if (_pending.Count + _streamPending.Count >= _maxPending)
                 {
                     rejected = true;

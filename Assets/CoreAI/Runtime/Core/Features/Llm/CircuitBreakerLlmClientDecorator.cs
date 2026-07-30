@@ -359,7 +359,6 @@ namespace CoreAI.Infrastructure.Llm
                 _halfOpenProbeInFlight = false;
                 if (_state == State.HalfOpen)
                 {
-                    // WHY: The probe failed — re-open for another cooldown.
                     _state = State.Open;
                     _openedAtMs = _nowMs();
                     _log?.Invoke("[CircuitBreaker] re-opened: half-open probe failed.");

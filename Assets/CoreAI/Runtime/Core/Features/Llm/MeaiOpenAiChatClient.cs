@@ -764,11 +764,11 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        // WHY: / <summary>
-        // / Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
-        // / can render smooth per-word streaming even when an upstream provider batches many tokens
-        // / into one SSE event.
-        // / </summary>
+        /// <summary>
+        /// Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
+        /// can render smooth per-word streaming even when an upstream provider batches many tokens
+        /// into one SSE event.
+        /// </summary>
         private static IEnumerable<string> SplitForSmoothStreaming(string text)
         {
             if (string.IsNullOrEmpty(text))
@@ -781,7 +781,6 @@ namespace CoreAI.Infrastructure.Llm
             while (i < text.Length)
             {
                 int end = Math.Min(i + targetChunkSize, text.Length);
-                // WHY: Extend to the next whitespace to avoid splitting inside a word when possible.
                 while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && end - i < targetChunkSize * 2)
                 {
                     end++;
@@ -804,13 +803,13 @@ namespace CoreAI.Infrastructure.Llm
 #endif
         }
 
-        // WHY: / <summary>
-        // / Cross-platform line reader for SSE streams. Bypasses <see cref="StreamReader.ReadLineAsync"/>
-        // / because Mono on Windows can hold lines back until a larger buffer fills, collapsing many small
-        // / token-by-token deltas into a single large yield (visible to the user as "no streaming"). WebGL
-        // / uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
-        // / <see cref="StreamReader.ReadLineAsync"/>.
-        // / </summary>
+        /// <summary>
+        /// Cross-platform line reader for SSE streams. Bypasses <see cref="StreamReader.ReadLineAsync"/>
+        /// because Mono on Windows can hold lines back until a larger buffer fills, collapsing many small
+        /// token-by-token deltas into a single large yield (visible to the user as "no streaming"). WebGL
+        /// uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
+        /// <see cref="StreamReader.ReadLineAsync"/>.
+        /// </summary>
         private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
             Stream stream,
             int streamIdleTimeoutSeconds,
@@ -927,11 +926,11 @@ namespace CoreAI.Infrastructure.Llm
                 LlmErrorCode.Timeout);
         }
 
-        // WHY: / <summary>
-        // / Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
-        // / <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
-        // / as an unobserved task exception on the finalizer thread.
-        // / </summary>
+        /// <summary>
+        /// Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
+        /// <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
+        /// as an unobserved task exception on the finalizer thread.
+        /// </summary>
         private static void ObserveAbandonedRead(Task readTask)
         {
             _ = readTask.ContinueWith(
@@ -957,10 +956,10 @@ namespace CoreAI.Infrastructure.Llm
                 _log);
         }
 
-        // WHY: / <summary>
-        // / EditMode tests: same header list as <see cref="BuildTransportHeaders"/> for an explicit
-        // / <paramref name="omitCorsSensitiveCorrelationHeaders"/> (WebGL player uses <c>true</c>).
-        // / </summary>
+        /// <summary>
+        /// EditMode tests: same header list as <see cref="BuildTransportHeaders"/> for an explicit
+        /// <paramref name="omitCorsSensitiveCorrelationHeaders"/> (WebGL player uses <c>true</c>).
+        /// </summary>
         internal static List<KeyValuePair<string, string>> BuildTransportHeadersForTests(
             string url,
             bool acceptEventStream,
@@ -1386,11 +1385,11 @@ namespace CoreAI.Infrastructure.Llm
             return LlmErrorCode.ProviderError;
         }
 
-        // WHY: / <summary>
-        // / Conservative rate-limit detection in (lowercased) error text: a bare "rate" substring also
-        // / matched "generate"/"moderate" and misclassified unrelated errors as RateLimited, so only
-        // / specific provider phrasings count. HTTP 429 is handled by status in <see cref="MapHttpStatus"/>.
-        // / </summary>
+        /// <summary>
+        /// Conservative rate-limit detection in (lowercased) error text: a bare "rate" substring also
+        /// matched "generate"/"moderate" and misclassified unrelated errors as RateLimited, so only
+        /// specific provider phrasings count. HTTP 429 is handled by status in <see cref="MapHttpStatus"/>.
+        /// </summary>
         private static bool ContainsRateLimitToken(string lowerText)
         {
             return lowerText.Contains("rate limit") ||
@@ -1400,14 +1399,14 @@ namespace CoreAI.Infrastructure.Llm
                    lowerText.Contains("too many requests");
         }
 
-        // WHY: / <summary>EditMode tests: HTTP status + body/detail text → typed error code classification.</summary>
+        /// <summary>EditMode tests: HTTP status + body/detail text → typed error code classification.</summary>
         internal static LlmErrorCode MapHttpStatusForTests(int status, string body, string fallback)
         {
             return MapHttpStatus(status, body, fallback);
         }
 
-        // WHY: / <summary>EditMode tests: the typed HTTP exception built from a provider error response,
-        // / so tests can assert the exception message never carries the raw/untruncated body.</summary>
+        /// <summary>EditMode tests: the typed HTTP exception built from a provider error response,
+        /// so tests can assert the exception message never carries the raw/untruncated body.</summary>
         internal static LlmClientException BuildHttpExceptionForTests(int status, string body)
         {
             return BuildHttpException(status, body, FormatHttpErrorForLog(status, body), null);
@@ -1521,7 +1520,6 @@ namespace CoreAI.Infrastructure.Llm
                         JObject func = tc["function"] as JObject;
                         if (func == null)
                         {
-                            // WHY: Do not let a shapeless entry vanish silently - surface the loss.
                             logger.Warn(
                                 "MeaiOpenAiChatClient: dropped non-streaming tool call without a 'function' object.",
                                 LogTag.Llm);
@@ -1550,12 +1548,12 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        // WHY: / <summary>
-        // / Parses ONE non-streaming tool call. Malformed <c>arguments</c> JSON degrades only THIS
-        // / call: it is surfaced with the shared parse-error markers (same contract as the streaming
-        // / accumulator; <see cref="ToolExecutionPolicy"/> turns it into a failed call) instead of
-        // / wiping the assistant text and every other tool call in the message.
-        // / </summary>
+        /// <summary>
+        /// Parses ONE non-streaming tool call. Malformed <c>arguments</c> JSON degrades only THIS
+        /// call: it is surfaced with the shared parse-error markers (same contract as the streaming
+        /// accumulator; <see cref="ToolExecutionPolicy"/> turns it into a failed call) instead of
+        /// wiping the assistant text and every other tool call in the message.
+        /// </summary>
         private static MEAI.FunctionCallContent ParseNonStreamingToolCall(JToken tc, JObject func, ILog log)
         {
             string callId = tc["id"]?.ToString() ?? "";
@@ -1804,7 +1802,7 @@ namespace CoreAI.Infrastructure.Llm
             return string.Equals(data, "[DONE]", StringComparison.Ordinal);
         }
 
-        // WHY: / <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
+        /// <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
         internal static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdatesForTests(string raw)
         {
             return ParseSseUpdates(raw, new SseToolCallAccumulator());
@@ -1908,7 +1906,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        // WHY: / <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
+        /// <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
         private static MEAI.ChatResponseUpdate TryParseStreamingUsageChunk(JObject obj)
         {
             JToken usageTok = obj["usage"];
@@ -2014,18 +2012,18 @@ namespace CoreAI.Infrastructure.Llm
             return ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
         }
 
-        // WHY: / <summary>EditMode tests: simulated streaming updates built from a full response
-        // / (WebGL non-native-streaming and the stream->non-stream fallback path).</summary>
+        /// <summary>EditMode tests: simulated streaming updates built from a full response
+        /// (WebGL non-native-streaming and the stream->non-stream fallback path).</summary>
         internal static List<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdatesForTests(
             MEAI.ChatResponse response)
         {
             return FullResponseToSimulatedStreamingUpdates(response).ToList();
         }
 
-        // WHY: / <summary>
-        // / EditMode tests: feed several streaming <c>delta</c> data-line JSON payloads into a single
-        // / accumulator (mirroring multi-chunk <c>tool_calls</c> reassembly) then return the flushed update.
-        // / </summary>
+        /// <summary>
+        /// EditMode tests: feed several streaming <c>delta</c> data-line JSON payloads into a single
+        /// accumulator (mirroring multi-chunk <c>tool_calls</c> reassembly) then return the flushed update.
+        /// </summary>
         internal static MEAI.ChatResponseUpdate AccumulateToolCallDeltasForTests(IEnumerable<string> dataJsonChunks)
         {
             SseToolCallAccumulator accumulator = new();
@@ -2037,11 +2035,11 @@ namespace CoreAI.Infrastructure.Llm
             return accumulator.Flush();
         }
 
-        // WHY: / <summary>
-        // / EditMode tests: feed streaming <c>delta</c> data-line JSON payloads one by one and report,
-        // / per chunk, which tool calls DrainCompleted() surfaced at that point (execute-as-you-stream
-        // / timing), plus the final Flush() leftovers as the last element.
-        // / </summary>
+        /// <summary>
+        /// EditMode tests: feed streaming <c>delta</c> data-line JSON payloads one by one and report,
+        /// per chunk, which tool calls DrainCompleted() surfaced at that point (execute-as-you-stream
+        /// timing), plus the final Flush() leftovers as the last element.
+        /// </summary>
         internal static List<MEAI.ChatResponseUpdate> DrainPerChunkForTests(IEnumerable<string> dataJsonChunks)
         {
             SseToolCallAccumulator accumulator = new();
@@ -2056,28 +2054,28 @@ namespace CoreAI.Infrastructure.Llm
             return perChunk;
         }
 
-        // WHY: / <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
+        /// <summary>EditMode tests: direct access to the complete-JSON-object detector.</summary>
         internal static bool IsCompleteJsonObjectForTests(string s)
         {
             return SseToolCallAccumulator.IsCompleteJsonObject(s);
         }
 
-        // WHY: / <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
+        /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
         internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
 
-        // WHY: / <summary>EditMode tests: marker key set when accumulated tool-call arguments could not be parsed.</summary>
+        /// <summary>EditMode tests: marker key set when accumulated tool-call arguments could not be parsed.</summary>
         internal static string ToolCallParseErrorKeyForTests => SseToolCallAccumulator.ParseErrorKey;
 
-        // WHY: / <summary>
-        // / Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by stable call id when
-        // / present, otherwise by tool-call index. Parallel compliant calls accumulate independently.
-        // / </summary>
+        /// <summary>
+        /// Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by stable call id when
+        /// present, otherwise by tool-call index. Parallel compliant calls accumulate independently.
+        /// </summary>
         private sealed class SseToolCallAccumulator
         {
-            // WHY: / <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+            /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
             internal const string RawArgumentsKey = ToolCallArgumentMarkers.RawArgumentsKey;
 
-            // WHY: / <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
+            /// <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
             internal const string ParseErrorKey = ToolCallArgumentMarkers.ParseErrorKey;
 
             private readonly List<PendingToolCall> _pending = new();
@@ -2103,11 +2101,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             /// <summary>
-            // / Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
-            // / later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
-            // / always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
-            // / arrive in any order across chunks.
-            // / </summary>
+            /// Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
+            /// later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
+            /// always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
+            /// arrive in any order across chunks.
+            /// </summary>
             public void Feed(int? index, string callId, string name, string argumentsFragment)
             {
                 string stableId = string.IsNullOrWhiteSpace(callId) ? null : callId;
@@ -2197,20 +2195,20 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             /// <summary>
-            // / True while the entry can still accept argument fragments: its accumulated arguments do
-            // / not yet form one complete JSON object. A completed entry gaining anything further would
-            // / only accumulate trailing junk, so it can never own a new fragment.
-            // / </summary>
+            /// True while the entry can still accept argument fragments: its accumulated arguments do
+            /// not yet form one complete JSON object. A completed entry gaining anything further would
+            /// only accumulate trailing junk, so it can never own a new fragment.
+            /// </summary>
             private static bool IsOpenForMoreArguments(PendingToolCall pending)
             {
                 string argsStr = pending.Arguments.ToString();
                 return argsStr.Length == 0 || !IsCompleteJsonObject(argsStr);
             }
 
-            // WHY: / <summary>
-            // / Returns the single pending call whose arguments are still open, or null when zero or
-            // / several are open (attribution of an id/index-less fragment truly ambiguous).
-            // / </summary>
+            /// <summary>
+            /// Returns the single pending call whose arguments are still open, or null when zero or
+            /// several are open (attribution of an id/index-less fragment truly ambiguous).
+            /// </summary>
             private PendingToolCall FindSoleOpenPendingCall()
             {
                 PendingToolCall sole = null;
@@ -2232,11 +2230,11 @@ namespace CoreAI.Infrastructure.Llm
                 return sole;
             }
 
-            // WHY: / <summary>
-            // / True when the fragment refers to a call that already drained (and executed). A fragment
-            // / carrying a FRESH stable id that merely reuses a drained index is a genuinely new call,
-            // / so the id check takes precedence over the index tombstone.
-            // / </summary>
+            /// <summary>
+            /// True when the fragment refers to a call that already drained (and executed). A fragment
+            /// carrying a FRESH stable id that merely reuses a drained index is a genuinely new call,
+            /// so the id check takes precedence over the index tombstone.
+            /// </summary>
             private bool IsDrainedTombstone(int? index, string stableId)
             {
                 if (!string.IsNullOrEmpty(stableId))
@@ -2315,17 +2313,17 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
             }
 
-            // WHY: / <summary>
-            // / Drains pending calls whose accumulated arguments already form one COMPLETE JSON
-            // / object, emitting them WITHOUT waiting for the stream to end. This is what lets the
-            // / client execute tool calls while the model is still generating the rest of the turn
-            // / (execute-as-you-stream). To preserve the provider's tool_calls index order across
-            // / chunks (dependent pairs like create -> configure must never run out of order), only
-            // / the longest CONTIGUOUS PREFIX of the (index, sequence) order in which every entry
-            // / is ready is drained: an entry that is not ready yet (no name, ambiguity mark, or
-            // / still-open JSON) blocks every later entry, which stays pending and drains on a
-            // / later call or at <see cref="Flush"/> (which also handles malformed/truncated cases).
-            // / </summary>
+            /// <summary>
+            /// Drains pending calls whose accumulated arguments already form one COMPLETE JSON
+            /// object, emitting them WITHOUT waiting for the stream to end. This is what lets the
+            /// client execute tool calls while the model is still generating the rest of the turn
+            /// (execute-as-you-stream). To preserve the provider's tool_calls index order across
+            /// chunks (dependent pairs like create -> configure must never run out of order), only
+            /// the longest CONTIGUOUS PREFIX of the (index, sequence) order in which every entry
+            /// is ready is drained: an entry that is not ready yet (no name, ambiguity mark, or
+            /// still-open JSON) blocks every later entry, which stays pending and drains on a
+            /// later call or at <see cref="Flush"/> (which also handles malformed/truncated cases).
+            /// </summary>
             public MEAI.ChatResponseUpdate DrainCompleted()
             {
                 if (_pending.Count == 0)
@@ -2389,12 +2387,12 @@ namespace CoreAI.Infrastructure.Llm
                 return argsStr.Length > 0 && IsCompleteJsonObject(argsStr);
             }
 
-            // WHY: / <summary>
-            // / True when <paramref name="s"/> is exactly one complete JSON object (balanced braces
-            // / outside strings, string/escape aware, only whitespace after the close). OpenAI tool
-            // / arguments are always a single object, so "balanced and closed" means "no more
-            // / fragments are coming" for a sane provider.
-            // / </summary>
+            /// <summary>
+            /// True when <paramref name="s"/> is exactly one complete JSON object (balanced braces
+            /// outside strings, string/escape aware, only whitespace after the close). OpenAI tool
+            /// arguments are always a single object, so "balanced and closed" means "no more
+            /// fragments are coming" for a sane provider.
+            /// </summary>
             internal static bool IsCompleteJsonObject(string s)
             {
                 int i = 0;
@@ -2473,8 +2471,6 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (string.IsNullOrEmpty(pending.Name))
                     {
-                        // WHY: An entry with accumulated id/args but no name cannot be invoked. Do not let it
-                        // silently vanish - surface it so the loss is observable.
                         if (!string.IsNullOrEmpty(pending.Id) || !string.IsNullOrEmpty(argsStr))
                         {
                             _log.Warn(
@@ -2498,7 +2494,7 @@ namespace CoreAI.Infrastructure.Llm
                 return update.Contents.Count > 0 ? update : null;
             }
 
-            // WHY: / <summary>
+            /// <summary>
             /// Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
             /// dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
             /// and a warning is logged, so callers can detect and recover from a broken stream.

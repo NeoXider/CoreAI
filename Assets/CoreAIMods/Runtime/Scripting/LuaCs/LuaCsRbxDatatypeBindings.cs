@@ -1021,10 +1021,8 @@ namespace CoreAI.Ai.LuaCs
             RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
 
             // WHY: attribute the connection to the mod that opened it so composition teardown can
-            // Disconnect it on unload/reload/quarantine — otherwise the per-frame handler keeps firing
-            // against the torn-down mod one frame later (INSTANCE_DESTROYED). The owner rides on the
-            // signal box (RunService/UserInputService reads wrap with context); a context-free wrap or a
-            // mod-less one-off records nothing.
+            // Disconnect it on unload/reload/quarantine — otherwise the handler keeps firing against the
+            // torn-down mod (INSTANCE_DESTROYED). A context-free wrap or a mod-less one-off records nothing.
             if (Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox) && signalBox.SignalOwner != null)
             {
                 signalBox.SignalOwner.TrackConnection(connection);

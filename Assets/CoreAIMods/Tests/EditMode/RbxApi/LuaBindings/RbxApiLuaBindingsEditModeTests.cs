@@ -574,10 +574,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [Test]
         public void Lua_BasePartPosition_RoundTripsThroughBinder_NoScaleOrChiralityDistortion()
         {
-            // WHY: the golden — a Lua Position write must survive Roblox→Unity→(read) with no
-            // double-conversion: the GameObject lands at the 0.28-scaled, Z-mirrored pose while the
-            // Lua/registry side keeps pure Roblox-space studs (mirrors PositionGolden in the binder
-            // tests, driven end-to-end through the Lua surface).
+            // WHY: golden — a Lua Position write must survive Roblox→Unity→(read) with no double
+            // conversion: GameObject lands 0.28-scaled/Z-mirrored, Lua/registry keeps pure Roblox studs
+            // (mirrors PositionGolden in the binder tests, driven end-to-end through the Lua surface).
             RbxSpace.ResetForTests(0.28f);
             GameObject root = new("GoldenRoot");
             try

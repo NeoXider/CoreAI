@@ -174,8 +174,8 @@ namespace CoreAI.Chat
         private bool? _wasChatInputAllowed;
 
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
-        private bool _streamingStartedVisible; // WHY: true while streaming assistant output is currently visible.
-        private bool _nonStreamAssistantOutputStarted; // WHY: true while non-stream assistant output has started.
+        private bool _streamingStartedVisible;
+        private bool _nonStreamAssistantOutputStarted;
 
         /// <summary>
         /// Prevents duplicate deferred scroll jobs; nested <c>schedule.Execute</c> calls can
@@ -503,11 +503,9 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // WHY: .coreai-chat-embedded strips the floating border/radius. The container's fixed 650×910 and
-            // bottom-right anchoring resist USS/inline overrides in the cascade on this Unity version, so we
-            // pin it absolute top-left and drive its exact pixel size from the wrapper's resolved geometry.
-            // Absolute + left/top:0 guarantees alignment (no residual right-anchor shift → left-clip); the
-            // geometry sync guarantees the size (and tracks resizes).
+            // WHY: .coreai-chat-embedded strips the floating border/radius, but the container's fixed 650×910
+            // and bottom-right anchoring resist USS/inline overrides on this Unity version, so pin it absolute
+            // top-left and drive its exact pixel size from the wrapper's resolved geometry to avoid left-clip.
             container.AddToClassList("coreai-chat-embedded");
 
             // WHY: re-assert position AND size on every layout pass. Doing it inside the GeometryChanged callback
@@ -935,7 +933,6 @@ namespace CoreAI.Chat
             string previousRole = _activeRoleId;
             _activeRoleId = evt.newValue;
 
-            // WHY: every chat agent (including one switched to at runtime) gets the camera tool when enabled.
             EnsureCameraToolForActiveRole();
 
             // WHY: re-target the panel to the newly selected role. Stop any in-flight turn for the
@@ -3567,7 +3564,7 @@ namespace CoreAI.Chat
             _typingAnimation = TypingIndicator.schedule.Execute(() =>
             {
                 _typingDotCount =
-                    _typingDotCount % 3 + 1; // WHY: animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
+                    _typingDotCount % 3 + 1;
                 if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
                 {
                     return;

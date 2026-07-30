@@ -26,7 +26,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// <summary>Color3.fromHSV(hue, saturation, value) — all in 0..1.</summary>
         public static RbxColor3 FromHSV(float h, float s, float v)
         {
-            // WHY: standard HSV sextant conversion; hue 1.0 wraps to 0 like Roblox.
+            // WHY: hue 1.0 wraps to 0, matching Roblox.
             h = h - MathF.Floor(h);
             float c = v * s;
             float sector = h * 6f;

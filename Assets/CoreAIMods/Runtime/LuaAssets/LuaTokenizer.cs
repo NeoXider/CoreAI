@@ -54,12 +54,9 @@ namespace CoreAI.LuaAssets
                 int start = pos;
                 LuaTokenKind kind = ScanNext(source, tokens, ref pos);
 
-                // WHY: hard termination invariant. This loop only ends while every scan consumes at least
-                // one character, and the scanners run on half-written source where a construct can be
-                // unterminated (a deleted quote, backtick or ']]'). A scanner that ever returned its own
-                // input position would spin here forever on the main thread and freeze the whole app, so a
-                // non-advancing scan is downgraded to a single unclassified character instead: any future
-                // scanner bug shows up as one mis-colored glyph, never as a hang.
+                // WHY: hard termination invariant — scanners run on half-written source (unterminated
+                // quote/backtick/']]'), so a non-advancing scan is downgraded to a single unclassified
+                // character instead of spinning here forever on the main thread.
                 if (pos <= start)
                 {
                     pos = start + 1;

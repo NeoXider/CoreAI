@@ -225,7 +225,7 @@ namespace CoreAI.Infrastructure.World
                     parentValue = parentTag != null ? parentTag.persistentId : t.parent.gameObject.name;
 
                     // WHY: Only a tracked persistent parent can replace the retained link. A transient
-                    // WHY: carrier must not erase it because that parent cannot survive a later restore.
+                    // carrier must not erase it because that parent cannot survive a later restore.
                     if (parentTag != null && !string.IsNullOrEmpty(parentTag.persistentId))
                     {
                         _pendingParentByChildId.Remove(tag.persistentId);

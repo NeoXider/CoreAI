@@ -71,22 +71,18 @@ namespace CoreAI.Sandbox.LuaCs
         // LuaFunction plus its capture per resume.
         private const int CoroutineHookInstructionBatch = 4;
 
-        // WHY: The native coroutine library runs a coroutine body on a CHILD LuaState that does NOT inherit
-        // LuaCsExecutionGuard's step/time/alloc hook, so an unbounded loop inside a resumed coroutine
-        // (e.g. `local co=coroutine.create(function() while true do end end); coroutine.resume(co)`) would
-        // escape every budget and hang the game. Wrapping `coroutine.resume` arms a per-resume step+time+alloc
-        // guard hook on the coroutine's own child state (mirroring LuaCsCoroutineHandle.Resume) and clears it
-        // afterwards, so the coroutine body is cut like any other guarded execution.
+        // WHY: A coroutine body runs on a CHILD LuaState that does NOT inherit LuaCsExecutionGuard's hook,
+        // so an unbounded loop inside a resumed coroutine would escape every budget and hang the game.
+        // Wrapping `coroutine.resume` arms a per-resume step+time+alloc guard hook on the child state and
+        // clears it afterwards, so the coroutine body is cut like any other guarded execution.
         //
-        // coroutine.wrap is REMOVED (set nil), not left native: its returned resumer drives a hidden child
-        // thread through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
-        // wrap-created body would run on a child state with NO guard hook — an unbounded-loop / allocation-bomb
-        // host-hang vector (`coroutine.wrap(function() while true do end end)()` hangs the game thread forever,
-        // no cut, no unload). It cannot be safely re-armed on this Lua-CSharp build: a C# reimplementation's
-        // returned Lua function did not round-trip as callable, and a Lua redefinition needs a sync-over-async
-        // Load/Execute in Create() that DEADLOCKS on a SynchronizationContext-bearing thread (the editor main
-        // thread during domain reload). Removing it is fail-safe: mods use the guarded create + resume pair, and
-        // calling the absent wrap raises a clean "attempt to call a nil value" error instead of hanging.
+        // coroutine.wrap is REMOVED (set nil), not left native: its resumer drives a hidden child thread
+        // through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
+        // wrap-created body would run with NO guard hook — an unbounded-loop / allocation-bomb host-hang
+        // vector. It cannot be safely re-armed on this Lua-CSharp build: a C# reimplementation's returned
+        // function did not round-trip as callable, and a Lua redefinition needs a sync-over-async
+        // Load/Execute that DEADLOCKS on a SynchronizationContext-bearing thread (editor domain reload).
+        // Removing it is fail-safe: mods use the guarded create + resume pair instead.
         private static void HardenCoroutineLibrary(LuaState state)
         {
             LuaValue coroValue = state.Environment["coroutine"];
@@ -135,13 +131,10 @@ namespace CoreAI.Sandbox.LuaCs
                 coroutineState = null;
             }
 
-            // WHY: Arm/clear the hook ONLY on a genuinely SUSPENDED coroutine — the only state native resume
-            // will actually run. Any re-entrant resume of a state already executing higher in the call chain
-            // (a self-resume, a running ancestor coroutine, or the main thread) is NON-suspended: native resume
-            // rejects it with [false,...] without running an instruction, so arming would be pointless and the
-            // finally's SetHook(null) would strip the guard hook the OUTER guarded call (or LuaCsExecutionGuard
-            // on the main state) already installed there, re-opening the unbounded-loop/allocation DoS. The
-            // CanResume gate skips arming in exactly those cases, so a running state's guard is never clobbered.
+            // WHY: Arm/clear the hook ONLY on a genuinely SUSPENDED coroutine. A re-entrant resume of a
+            // state already executing higher in the call chain (self-resume, running ancestor, main thread)
+            // is non-suspended and rejected by native resume without running an instruction — arming there
+            // would strip whichever outer guard hook is already installed, reopening the DoS.
             bool armed = false;
             bool canResume = false;
             try
@@ -156,17 +149,13 @@ namespace CoreAI.Sandbox.LuaCs
             if (canResume)
             {
                 long steps = 0;
-                // WHY: raw timestamp + a precomputed ticks budget, not a Stopwatch instance and not
-                // ElapsedMilliseconds — same reason as LuaCsExecutionGuard.GuardHook. The clock is read on
-                // every fire, also for that type's reason: the hook does not fire during a host call, so
-                // sampling it lets a binding-heavy body miss the deadline check entirely.
+                // WHY: raw timestamp + a precomputed ticks budget, not a Stopwatch instance — same
+                // allocation-avoidance reason as LuaCsExecutionGuard.GuardHook (see that type for detail).
                 long startTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
                 long timeoutTicks = (long)CoroutineResumeTimeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
-                // WHY: Mirror LuaCsExecutionGuard's allocation backstop on the coroutine's child state. Step and
-                // time caps do NOT catch a doubling concat bomb (`s = s .. s`): it runs only a handful of VM
-                // opcodes yet allocates to OOM, and plain concatenation has no library call site to cap. Trip on
-                // the cheap monotonic process-heap reading (no forced-GC confirmation — that under-counts vs a
-                // garbage-inclusive baseline and lets the bomb reach OutOfMemory before the trip fires).
+                // WHY: Mirrors LuaCsExecutionGuard's allocation backstop on the coroutine's child state —
+                // step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes with no
+                // library call site to cap (see LuaCsExecutionGuard.GuardHook.Hook for the full rationale).
                 long maxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
                 long allocBaseline = maxAllocatedBytes > 0 ? GC.GetTotalMemory(false) : 0;
 

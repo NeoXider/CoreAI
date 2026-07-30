@@ -487,11 +487,10 @@ namespace CoreAI.Ai.LuaCs
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
 
-            // WHY: Record the revision before persisting so PersistMod can stamp the manifest Version from the
-            // revision count. The version store seeds the original on the first record and dedups identical
-            // source, so a rehydrate (which replays the stored current source) does not create a spurious
-            // entry. Recording is independent of persistToStore: a masked rehydrate/import still wants its
-            // history seeded.
+            // WHY: Record the revision before persisting so PersistMod can stamp the manifest Version from
+            // the revision count; the version store dedups identical source so a rehydrate replay does not
+            // add a spurious entry. Independent of persistToStore — a masked rehydrate/import still needs
+            // its history seeded.
             RecordRevision(modId, luaCode);
             if (persistToStore)
             {
@@ -516,11 +515,11 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
 
-            // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau
-            // syntax (compound assignment, continue, string interpolation, if-expressions, type
-            // annotations). Keyed by the mod id so any surfaced diagnostic maps to the right source; a
-            // downlevel Error throws out of the load (never a silent raw fallback). mod.Source keeps the
-            // ORIGINAL author text — get_source/versions round-trip the Luau the user wrote.
+            // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau syntax
+            // (compound assignment, continue, string interpolation, if-expressions, type annotations);
+            // keyed by mod id so a downlevel error maps to the right source and throws out of the load,
+            // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
+            // round-trip the Luau the user wrote.
             string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
 
             IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
@@ -828,8 +827,6 @@ namespace CoreAI.Ai.LuaCs
                 _tickScratch.Clear();
                 foreach (Mod mod in _mods.Values)
                 {
-                    // WHY: Quarantined mods stay loaded/addressable but must not run: no timers, no
-                    // handler dispatch, until a reload replaces them with a fresh instance.
                     if (!mod.Quarantined)
                     {
                         _tickScratch.Add(mod);
@@ -1056,25 +1053,15 @@ namespace CoreAI.Ai.LuaCs
             {
                 _handlerGuard.Invoke(mod.State, fn, CancellationToken.None, args);
 
-                // WHY: "MaxErrorsBeforeQuarantine failures in a row": a successful call forgives past
-                // errors, so rare sporadic failures over a long lifetime do not quarantine the mod.
                 mod.ErrorCount = 0;
             }
             catch (Exception ex)
             {
-                // WHY: An allocation-budget trip is charged to the same consecutive-error streak as any other
-                // failure — a success resets it, so a mod is only quarantined after MaxErrorsBeforeQuarantine
-                // failures IN A ROW. This is safe despite the budget reading the shared process heap (which can
-                // trip a blameless mod on unrelated growth) because a memory trip is effectively a
-                // ONCE-PER-LIFETIME event: GC.GetTotalMemory reports the COMMITTED heap high-water mark, so the
-                // FIRST oversized allocation grows the heap and trips, but every later call reuses that committed
-                // space and its per-call delta no longer crosses the budget (verified empirically — a mod bombing
-                // every tick trips ~once, not repeatedly, even with a forced GC between calls). So a lone noise
-                // trip is forgiven by the next success and never quarantines a healthy mod, while the per-call
-                // step/time budgets — not this streak — are what bound a mod that keeps allocating within the
-                // committed envelope. Classified by TYPE (see IsMemoryBudgetTrip) for the log label only; a mod
-                // cannot forge the marker in its own error text to change how it is charged (all failures charge
-                // alike).
+                // WHY: An allocation-budget trip charges the same consecutive-error streak as any failure
+                // (see the handlerMaxAllocatedBytes param doc above for why a lone trip self-forgives —
+                // GC.GetTotalMemory's committed high-water mark makes it a once-per-lifetime event, verified
+                // empirically). Classified by TYPE (see IsMemoryBudgetTrip) for the log label only — a mod
+                // cannot forge the marker in its own error text to change how it is charged.
                 bool memoryTrip = ScriptExecutionErrors.IsMemoryBudgetTrip(ex);
                 mod.ErrorCount++;
 
@@ -1145,10 +1132,9 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        // WHY: Per-subscriber isolated event raises. A host UI/telemetry listener throwing must never make a
-        // healthy mod load/reload/unload/report/error notification appear failed to the caller: every
-        // subscriber on the invocation list is called independently, and a subscriber's exception is
-        // logged and swallowed rather than propagated or allowed to skip the remaining subscribers.
+        // WHY: Per-subscriber isolated raises — a throwing UI/telemetry listener must never make a healthy
+        // load/reload/unload/report/error notification look failed; each subscriber runs independently and
+        // a subscriber's exception is logged and swallowed, never propagated or allowed to skip the rest.
 
         private void RaiseModSourceLoaded(string modId, string source, LuaCapabilities caps)
         {
@@ -1357,12 +1343,11 @@ namespace CoreAI.Ai.LuaCs
                     throw new ArgumentException("hooks_every: a function is required as the second argument.");
                 }
 
-                // WHY: A timer fires at most ONCE per Tick (see TickTimers — DueIn resets to the full
-                // interval, never catches up), and Tick runs once per frame, so a sub-frame interval is a
-                // per-frame loop (the RunService.Heartbeat equivalent), NOT per-instruction spam. So we no
-                // longer REJECT a small/zero interval — we clamp it to 0 ("every frame") and let the mod
-                // scale motion by time_delta() for smooth, frame-rate-independent movement. A negative,
-                // NaN, or infinite interval is treated as 0.
+                // WHY: A timer fires at most once per Tick (DueIn resets to the full interval, never
+                // catches up), so a sub-frame interval behaves as a per-frame loop (RunService.Heartbeat
+                // equivalent), not per-instruction spam — so a small/zero/negative/NaN/infinite interval is
+                // clamped to 0 ("every frame") instead of rejected, and mods scale motion by time_delta()
+                // for frame-rate-independent movement.
                 if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0d)
                 {
                     seconds = 0d;
@@ -1452,18 +1437,17 @@ namespace CoreAI.Ai.LuaCs
                 object[] marshalled = new object[extra];
                 for (int i = 0; i < extra; i++)
                 {
-                    // WHY: Copy caller args into plain data, then rebuild them for the callee's state.
                     marshalled[i] = _marshaller.FromPortable(
                         _marshaller.ToPortable(call.GetArgument(i + 2), CrossModTableDepth));
                 }
 
                 _crossCallDepth++;
 
-                // WHY: The callee runs on a DIFFERENT state but shares this runtime's single world
-                // binding instance. Push an isolated transaction frame so the callee's
-                // coreai_world_begin/commit operate on their OWN frame and cannot flush or clear the
-                // caller's still-open transaction (the buffer-corruption bug); popped in finally so a
-                // transaction the callee leaks is discarded rather than bleeding back into the caller.
+                // WHY: The callee runs on a DIFFERENT state but shares this runtime's single world binding
+                // instance, so push an isolated transaction frame: the callee's coreai_world_begin/commit
+                // operate on their own frame and cannot flush or clear the caller's still-open transaction
+                // (the buffer-corruption bug); popped in finally so a transaction the callee leaks is
+                // discarded instead of bleeding into the caller.
                 PushTransactionScope();
                 try
                 {
@@ -1471,7 +1455,6 @@ namespace CoreAI.Ai.LuaCs
                         _handlerGuard.Invoke(target.State, export, CancellationToken.None, marshalled);
                     object first = results.Length > 0 ? results[0] : null;
 
-                    // WHY: Marshal the result back into the caller's state by value.
                     return ScriptCallResult.Return(
                         _marshaller.FromPortable(_marshaller.ToPortable(first, CrossModTableDepth)));
                 }
@@ -1563,11 +1546,9 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 // WHY: Quarantine must suspend ALL FOUR dispatch surfaces — handlers, timers, queued
-                // events/logic_define overrides, AND cross-mod exports (mods_call/mods_get). Without
-                // this guard a quarantined mod's export stays synchronously invokable: a broken export
-                // that throws surfaces in the CALLER's InvokeGuarded catch and mis-charges the caller's
-                // error streak, driving a healthy dependent mod into quarantine. Fail here so the error
-                // is attributable to the quarantined target, not the caller.
+                // events/logic_define overrides, AND cross-mod exports. Without this guard a quarantined
+                // mod's export stays invokable, and a throwing export would surface in the CALLER's
+                // InvokeGuarded catch and mis-charge the caller's streak instead of the quarantined target's.
                 if (target.Quarantined)
                 {
                     throw new InvalidOperationException(
@@ -1618,7 +1599,6 @@ namespace CoreAI.Ai.LuaCs
 
             if (mod.Pending.Count >= DefaultMaxQueuedEventsPerMod)
             {
-                // WHY: Drop oldest: a stalled mod must not grow its queue without bound.
                 mod.Pending.Dequeue();
             }
 
@@ -1812,20 +1792,18 @@ namespace CoreAI.Ai.LuaCs
                 if (IsLoaded(modId))
                 {
                     // WHY: Reloading an already-loaded mod only swaps its SOURCE; it deliberately KEEPS the
-                    // mod's current capability tier (ReloadMod reuses existing.Caps) and cannot escalate it —
-                    // an import can never raise a live mod's privileges from an untrusted bundle header. To
-                    // CHANGE a loaded mod's tier the host must unload/forget it first, then re-import under the
-                    // desired grant (the fresh-load branch below applies the host-masked tier).
+                    // mod's current capability tier (ReloadMod reuses existing.Caps), so an import can never
+                    // escalate a live mod's privileges from an untrusted bundle header. To change a loaded
+                    // mod's tier the host must unload/forget it first, then re-import under the desired grant.
                     ReloadMod(modId, bundle.Source);
                 }
                 else
                 {
-                    // WHY: Persist the HOST-MASKED effective capabilities, NOT the bundle's declared request.
-                    // An untrusted shared bundle can DECLARE Full; if the store recorded that declared tier,
-                    // a later restart's RehydrateFromStore run under a host-wide allowFull=true would re-grant
-                    // Full to this specific mod that was imported WITHOUT it — defeating the import-time
-                    // decision across a restart. The store must never hold more than the host granted here; a
-                    // host that later wants Full for a not-yet-loaded mod re-imports it under allowFull=true.
+                    // WHY: Persist the HOST-MASKED effective capabilities, NOT the bundle's declared request
+                    // — an untrusted bundle can DECLARE Full, and if the store recorded that, a later
+                    // restart's allowFull=true rehydrate would re-grant Full to a mod imported WITHOUT it.
+                    // The store must never hold more than the host granted here; re-import under
+                    // allowFull=true to raise it later.
                     LoadMod(modId, bundle.Source, effectiveCaps, false);
                     PersistMod(modId, bundle.Source, effectiveCaps);
                 }

@@ -80,11 +80,10 @@ namespace CoreAI.Composition
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
             builder.Register(c =>
             {
-                // WHY: a scene that references a RbxWorldHost on its CoreAiModsLifetimeScope gets a
-                // VISIBLE Rbx world - the host's registry/game/binder back the Lua surface, so
-                // Instance.new('Part') materializes a GameObject. Without a host the world stays
-                // headless in-memory (same API, no rendering). Initialize() is idempotent and safe
-                // before Awake ordering.
+                // WHY: a scene that references a RbxWorldHost gets a VISIBLE Rbx world — its registry/
+                // game/binder back the Lua surface, so Instance.new('Part') materializes a GameObject.
+                // Without a host the world stays headless in-memory (same API, no rendering).
+                // Initialize() is idempotent and safe before Awake ordering.
                 Mods.Rbx.Binding.RbxWorldHost rbxHost = c.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
                 // WHY: the scoped ILog applies the authored GameLogSettings filter; Log.Instance backs
                 // minimal containers (tests, headless tools) that never registered one, so the Rbx
@@ -162,11 +161,9 @@ namespace CoreAI.Composition
                     Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
                     {
-                        // WHY: disconnect BEFORE the instance sweep so a Heartbeat/InputBegan handler is
-                        // already dead when its owning instances are destroyed below. On RELOAD the
-                        // replacement chunk has ALREADY re-Connected (BuildMod runs before this teardown),
-                        // so keep the current generation and drop only the outgoing chunk's connections;
-                        // Unload/Quarantine have no new chunk and disconnect everything.
+                        // WHY: on RELOAD the replacement chunk has ALREADY re-Connected (BuildMod runs
+                        // before this teardown), so only the outgoing chunk's connections are dropped here,
+                        // not the new generation's; Unload/Quarantine have no new chunk, so everything goes.
                         ownedConnections?.DisconnectOwnedBy(
                             modId, reason == LuaModTeardownReason.Reload);
 
@@ -204,11 +201,10 @@ namespace CoreAI.Composition
             // persistent store, so rehydrating there would inject earlier-run mods into every fresh
             // container; and DontDestroyOnLoad throws outside play mode. EditMode consumers load and Tick
             // explicitly. Best-effort: a rehydrate failure never aborts container construction.
-            // WHY: the ticker is DontDestroyOnLoad (its runtime must keep ticking across additive scene
-            // loads while the owning scope lives), so scene unload does NOT destroy it. Without an
-            // explicit dispose hook every scope build leaks an immortal ticker whose runtime keeps
-            // driving persisted mod handlers into scenes/tests that no longer own them (observed:
-            // cross-test world-command spam and an eventual editor OOM during full PlayMode runs).
+            // WHY: the ticker is DontDestroyOnLoad (must keep ticking across additive scene loads), so
+            // scene unload does NOT destroy it — without this explicit dispose hook every scope build
+            // leaks an immortal ticker that drives persisted mod handlers into scenes/tests that no
+            // longer own them (observed: cross-test world-command spam, eventual editor OOM in PlayMode).
             GameObject[] tickerHolder = new GameObject[1];
             builder.RegisterDisposeCallback(_ =>
             {
