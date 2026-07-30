@@ -233,6 +233,20 @@ var spy = new SpyLogger();
 Log.Instance = spy;
 ```
 
+**Never assert a CoreAI `ILog` message with `LogAssert.Expect`.** Whether an `ILog` line reaches the
+Unity console depends on two pieces of process-wide state that any earlier test in the run may have
+changed: `Log.Instance` (a `NullLog` swallows everything) and the live `GameLogFilter` mask/level. A
+`LogAssert.Expect` over such a line therefore passes or fails by test order, not by behaviour. Register
+an explicit recorder in the container under test and assert against it instead — see
+`RecordingLog` in `CoreAI.Mods.Tests` and its use in `RbxWorldHostDiWiringEditModeTests`:
+
+```csharp
+// EditMode test pattern:
+builder.RegisterInstance<ILog>(_log); // RecordingLog, not the ambient Log.Instance
+...
+Assert.IsTrue(_log.HasError("RbxWorldHost NOT resolved"));
+```
+
 ### 3.5 Prompt Layers (what the model actually sees)
 
 The system prompt sent to the model is **not** the literal string you pass to `AgentBuilder.WithSystemPrompt`. CoreAI composes the final prompt from three independent layers, in this order, in `AiPromptComposer`:
@@ -436,6 +450,42 @@ Current Edit Mode checks for recent stability fixes:
 - `CoreAIGameEntryPointEditModeTests` — single-init behavior for the CoreAI facade when the entry point starts twice.
 - `MeaiLlmClientEditModeTests.CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` — tool-call JSON does not reach the UI; visible text is preserved.
 - `MeaiLlmClientEditModeTests.CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` — streaming tool loop ends with a controlled error when the iteration limit is exceeded.
+
+### Testing code that waits on a UniTask timer
+
+**If the code under test resumes from `UniTask.Delay` or `CancelAfterSlim`, the test must yield editor
+frames.** Those continuations run on the UniTask player loop, which in EditMode is driven by the editor
+update; a plain `[Test] async Task` awaits without ever giving the editor a frame, so the timer never
+fires. The test does not fail — it *hangs* until the runner kills it, minutes later, and because it
+depends on what the rest of the run did it looks like flakiness rather than a mistake.
+
+Use `[UnityTest]`, yield frames, and bound every wait so a stuck task is named instead of silent:
+
+```csharp
+[UnityTest]
+[Timeout(30000)]
+public IEnumerator DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes()
+{
+    ...
+    yield return WaitForTask(registry.RemoveEndpointAsync("owned"), "drained endpoint removal");
+}
+
+private static IEnumerator WaitForTask(Task task, string what, float timeoutSeconds = 10f)
+{
+    float deadline = Time.realtimeSinceStartup + timeoutSeconds;
+    while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
+    {
+        yield return null;                 // lets the editor loop tick, so UniTask timers fire
+    }
+
+    Assert.IsTrue(task.IsCompleted, $"{what} did not complete within {timeoutSeconds}s.");
+    task.GetAwaiter().GetResult();         // rethrow faults exactly as await would
+}
+```
+
+Live examples: `LlmEndpointRegistryPersistenceEditModeTests` (drain loop) and
+`CoreAiChatServiceEditModeTests` (request timeouts, which additionally set `Time.timeScale = 0f` to
+prove the deadline is real time, not game time).
 
 ---
 

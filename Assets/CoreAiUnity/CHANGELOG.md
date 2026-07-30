@@ -24,6 +24,27 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
       not show a "no answer" message for nothing. `ResetBusyStateWithoutCancellation()`'s doc comment now
       spells out when to use it and when a host needs `AbandonCurrentTurn()` instead.
 
+### Fixed
+
+- **The EditMode test assembly did not compile.** `CoreAiChatPanelBusyApiEditModeTests` threw an
+      unqualified `InvalidOperationException` in a file that deliberately carries no `using System;` — it
+      cannot, because that would make `Object` ambiguous against `UnityEngine.Object` elsewhere in the
+      same file. One unresolved type fails the whole assembly, so *no* EditMode test could run. The
+      exception is now qualified the way the file already qualifies `EnumeratorCancellation`.
+- **Two `ResolveAgent` reflection tests failed on a WebGL build target.** The method under test is
+      compiled out by `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM`, but the tests carried
+      only the first condition, so with WebGL active `GetMethod` returned null and they failed for a
+      missing method rather than a broken one. The tests now carry the method's exact guard.
+
+### Changed
+
+- **`DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes` no longer stalls the run.** The
+      registry's drain loop paces itself with `UniTask.Delay`, whose continuations run only when the
+      editor loop ticks; as a plain `async Task` test it awaited without ever yielding a frame, so the
+      loop could not observe the tracked request finishing and the test hung until the runner killed it
+      minutes later. It is now a `[UnityTest]` that yields frames, with every wait bounded — a stuck
+      drain becomes a named failure in seconds instead of a silent multi-minute stall.
+
 ## [6.11.1] - 2026-07-30
 
 Documentation-only release: no runtime code changed. The docs had drifted from what the packages

@@ -130,7 +130,10 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-#if COREAI_HAS_LLMUNITY
+        // WHY: ResolveAgent itself is compiled out on WebGL and with LLM support off, so these reflection
+        // tests must carry the same guard as the method — otherwise GetMethod returns null and they fail
+        // for a missing method rather than a broken one, which is what happened on a WebGL build target.
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
         [Test]
         public void ResolveAgent_FindsExactNamedInactiveHostWithoutModelStartup()
         {
@@ -182,6 +185,9 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+#endif
+
+#if COREAI_HAS_LLMUNITY
         [Test]
         public void NativeActivationSource_WaitsForReadinessWithoutWarmupPrompt()
         {

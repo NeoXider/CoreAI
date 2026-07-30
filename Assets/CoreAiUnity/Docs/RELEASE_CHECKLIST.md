@@ -1,11 +1,14 @@
 # CoreAI release checklist
 
-Use this checklist before every commit or release that changes any of the five UPM packages:
-`CoreAI`, `CoreAiUnity`, `CoreAIMods`, `CoreAIHub`, or `CoreAIBenchmark`.
+Use this checklist before every commit or release that changes any of the six UPM packages:
+`CoreAI`, `CoreAiUnity`, `CoreAIMods`, `CoreAIHub`, `CoreAIBenchmark`, or `CoreAIMcp`.
 
 ## Versioning
 
-- Update the affected package manifests and keep all five package versions in lockstep.
+- Run `python tools/bump_version.py <version>` rather than editing manifests by hand: it writes all
+  six `package.json` versions, every internal `com.neoxider.*` pin, and `McpServerInfo.Version` — the
+  MCP server's advertised version, which is the one that silently drifts when a bump is done manually.
+- `python tools/bump_version.py --check` verifies lockstep (including the MCP constant) without writing.
 - Keep every internal `com.neoxider.coreai*` dependency aligned with that version.
 - `CoreAIBenchmark` depends on Core, Unity, and Mods because G1-G8 execute real Lua tools.
 - Keep changelog headings consistent with package.json versions.

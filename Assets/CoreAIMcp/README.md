@@ -103,7 +103,12 @@ the client forever.
 - Errors: unknown method → `-32601`, unknown/absent tool name → `-32602`, malformed JSON → `-32700`,
   non-object JSON → `-32600`, a stalled main thread → `-32603` (message names the cause).
 - Transport-level refusals never reach JSON-RPC: `401` (no/wrong token), `403` (foreign `Origin` or
-  `Host`, non-local socket), `413` (body over 4 MB), `415` (non-JSON body).
+  `Host`, non-local socket), `413` (body over 4 MB), `415` (non-JSON body). A refused request's body is
+  drained (up to 64 KB) before the connection closes, so the client reads the status instead of a reset
+  connection; a body larger than that is still dropped mid-flight, which is the point of the cap.
+- **`serverInfo.version` is the package version.** It comes from `McpServerInfo.Version`, which
+  `tools/bump_version.py` rewrites together with every `package.json`; `McpPackageVersionEditModeTests`
+  fails the build if the two ever drift apart.
 - `GET /mcp` returns `405 Method Not Allowed` (this server offers no server-initiated SSE stream).
   Legacy HTTP+SSE-only clients should bridge with `npx mcp-remote` (see below).
 

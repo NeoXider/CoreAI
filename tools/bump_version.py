@@ -8,6 +8,10 @@ rule the CI "Package graph (lockstep + deps)" gate enforces (one shared version,
 internal pins equal to it). Formatting and line endings are preserved (targeted
 regex, not a JSON re-dump).
 
+The one version that also lives in C# — McpServerInfo.Version, advertised to every
+MCP client during `initialize` — is rewritten from the same input, so it can no
+longer drift behind the manifest (McpPackageVersionEditModeTests guards it).
+
 Usage:
     python tools/bump_version.py 6.2.1     # write the bump to every package.json
     python tools/bump_version.py --check   # verify lockstep only, no writes
@@ -22,6 +26,9 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
 VERSION_FIELD = re.compile(r'("version"\s*:\s*")[^"]*(")')
 INTERNAL_PIN = re.compile(r'("com\.neoxider\.[a-z0-9.]+"\s*:\s*")[^"]*(")')
 
+MCP_VERSION_FILE = "Assets/CoreAIMcp/Runtime/Protocol/McpMethods.cs"
+MCP_VERSION_CONST = re.compile(r'(public const string Version = ")[^"]*(";)')
+
 
 def package_files():
     return sorted(glob.glob("Assets/*/package.json"))
@@ -35,6 +42,28 @@ def bump_file(path, version):
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
     return n_version, n_pins
+
+
+def bump_mcp_const(version):
+    """Rewrite the advertised MCP server version. Returns the number of substitutions."""
+    if not os.path.exists(MCP_VERSION_FILE):
+        return 0
+    with open(MCP_VERSION_FILE, encoding="utf-8", newline="") as f:
+        text = f.read()
+    text, n = MCP_VERSION_CONST.subn(r"\g<1>" + version + r"\g<2>", text, count=1)
+    if n:
+        with open(MCP_VERSION_FILE, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    return n
+
+
+def mcp_const_version():
+    """The version string currently baked into McpServerInfo, or None when unreadable."""
+    if not os.path.exists(MCP_VERSION_FILE):
+        return None
+    with open(MCP_VERSION_FILE, encoding="utf-8") as f:
+        match = MCP_VERSION_CONST.search(f.read())
+    return match.group(0).split('"')[1] if match else None
 
 
 def check():
@@ -55,7 +84,12 @@ def check():
             if dep.startswith("com.neoxider.") and dep in pkgs and dver != pkgs[dep][0]:
                 print(f"ERROR: {name} pins {dep}@{dver} but that package is {pkgs[dep][0]}")
                 ok = False
-    print("packages:", {n: v[0] for n, v in sorted(pkgs.items())})
+    mcp = mcp_const_version()
+    if mcp is not None and len(versions) == 1 and mcp not in versions:
+        print(f"ERROR: McpServerInfo.Version is {mcp} but the packages are {sorted(versions)[0]}")
+        ok = False
+
+    print("packages:", {n: v[0] for n, v in sorted(pkgs.items())}, "| mcp const:", mcp)
     return ok
 
 
@@ -86,6 +120,7 @@ def main(argv):
         total_pins += n_pins
         print(f"  {path}: version x{n_version}, internal pins x{n_pins}")
     print(f"bumped {len(files)} packages to {version} ({total_pins} internal pins)")
+    print(f"  {MCP_VERSION_FILE}: McpServerInfo.Version x{bump_mcp_const(version)}")
 
     if not check():
         print("LOCKSTEP CHECK FAILED after bump")

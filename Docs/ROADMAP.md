@@ -242,7 +242,7 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
   contract. Scope: the current starting-point state (the 5.9.0-aligned unreleased wave: engine
   seam, quarantine policy, Luau downleveler, log-service core, multi-endpoint routing, syntax
   highlighting) **plus Roblox API MVP0–MVP2** (seam complete, Instance/DataModel core, scheduler/
-  signals/services framework with loud stubs). All five packages bump together (lockstep is the
+  signals/services framework with loud stubs). All six packages bump together (lockstep is the
   standing rule).
 - **6.x minors.** Subsequent MVP rungs of the ladder ship as 6.x minors, roughly one or a few
   rungs per minor (MVP3 worlds/backups, MVP4 RBXL, MVP5 mod UX, MVP6 skill-docs, … MVP11+

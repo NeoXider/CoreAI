@@ -24,11 +24,13 @@ namespace CoreAI.Tests.EditMode
     {
         private CoreAISettingsAsset _settings;
         private SynchronizationContext _savedContext;
+        private RecordingLog _log;
 
         [SetUp]
         public void SetUp()
         {
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _log = new RecordingLog();
 
             // The Lua-CSharp runtime bridges its async VM to a synchronous call site; detaching the Unity
             // SynchronizationContext for the duration of each test lets those continuations complete on the
@@ -191,14 +193,13 @@ namespace CoreAI.Tests.EditMode
         {
             // WHY: this container has no RbxWorldHost, which the mods factory reports as an error because
             // in a shipped game it means Instance.new renders nothing. The tool wiring under test does not
-            // need a host, so the message is expected here rather than a failure.
-            ExpectHeadlessWorldHostError();
+            // need a host, so headless is deliberate here.
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             try
             {
                 ContainerBuilder builder = new();
                 builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
-                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.RegisterInstance<ILog>(_log);
                 builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
                 builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
                 builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
@@ -226,7 +227,6 @@ namespace CoreAI.Tests.EditMode
         public async Task RegisterCoreAiMods_FullAccess_ManageModsGrantsFullLua()
         {
             // WHY: see RegisterCoreAiMods_AttachesLuaTools_ToProgrammerRole — headless is deliberate here.
-            ExpectHeadlessWorldHostError();
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject probe = new("FullManageModsProbe");
             LuaModsLlmTool modsTool = null;
@@ -235,7 +235,7 @@ namespace CoreAI.Tests.EditMode
             {
                 ContainerBuilder builder = new();
                 builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
-                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.RegisterInstance<ILog>(_log);
                 builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
                 builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
                 builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
@@ -287,7 +287,7 @@ namespace CoreAI.Tests.EditMode
             {
                 ContainerBuilder builder = new();
                 builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
-                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.RegisterInstance<ILog>(_log);
                 builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
                 builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
                 builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
@@ -317,17 +317,6 @@ namespace CoreAI.Tests.EditMode
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Accepts the mods factory's "RbxWorldHost NOT resolved" error for a container built without a
-        /// host on purpose. The error is correct production behaviour — it is how a real game learns that
-        /// Instance.new will render nothing — so it is expected here, not silenced globally.
-        /// </summary>
-        private static void ExpectHeadlessWorldHostError()
-        {
-            UnityEngine.TestTools.LogAssert.Expect(
-                LogType.Error, new System.Text.RegularExpressions.Regex("RbxWorldHost NOT resolved"));
         }
     }
 }

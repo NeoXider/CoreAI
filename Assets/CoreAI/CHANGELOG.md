@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The MCP server told every client the wrong version.** `serverInfo.version` in the `initialize`
+      handshake is a hand-maintained C# constant that the release tooling never touched, so it answered
+      `6.9.0` while the packages shipped `6.11.1` — the number that lands in bug reports and in a
+      client's server list. `tools/bump_version.py` now rewrites `McpServerInfo.Version` alongside every
+      `package.json`, and `--check` fails when the two disagree, so the drift cannot come back the way it
+      came (the test that caught it had been failing, correctly, for three minor versions).
+- **A refused MCP request could reach the client as a dropped connection instead of its status code.**
+      The server wrote `413`/`415`/`401` and closed immediately, without reading the request body the
+      client was still sending; the OS answered the unread body with a reset that discarded the response
+      already in flight, so the caller saw a transport error rather than "payload too large". Refusals now
+      drain the pending body first, up to 64 KB. A body bigger than that is still dropped mid-flight —
+      reading it is exactly the cost the size cap exists to refuse.
+
+### Changed
+
+- **Two mods EditMode fixtures no longer assert diagnostics through the Unity console.** Whether a CoreAI
+      `ILog` line reaches `LogAssert` depends on the process-wide `Log.Instance` and the live
+      `GameLogFilter`, both of which any earlier test in the run may change, so those expectations passed
+      or failed by test order. They now register a `RecordingLog` in the container under test and assert
+      against it directly.
+
 ## [6.11.1] - 2026-07-30
 
 Documentation-only release; no portable-core code changed.

@@ -27,7 +27,7 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
   escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
 - **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
   `com.neoxider.coreai` package compiles and tests on its own, without the Unity layer.
-- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all five packages carry
+- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all six packages carry
   the same lockstep version and that their internal dependency pins agree.
 - **`merge-queue-gate` job** — on the `merge_group` trigger the workflow **fails** (does not skip)
   when `UNITY_LICENSE` is absent, so a PR can never be merged through the queue without the licensed
@@ -75,4 +75,9 @@ New public symbols follow `CoreAI…`; only the top-level facade keeps `CoreAi`.
 1. **Reformat** — Rider *Reformat & Cleanup Code* (applies `.editorconfig`, incl. attribute-per-line).
 2. **Tests** — run the EditMode gate green (CI runs `lua` + `no-lua`; run locally in batchmode for a fast pre-push check).
 3. **Changelog** — add an entry under `[Unreleased]` (or the release section) in the affected package `CHANGELOG.md`.
-4. **Version** — for a release, bump **all five** `package.json` files in lockstep to the same version.
+4. **Version** — for a release run `python tools/bump_version.py <version>`: it sets **all six**
+   `package.json` files (and their internal `com.neoxider.*` pins) plus `McpServerInfo.Version` in
+   lockstep, then verifies the result. `python tools/bump_version.py --check` verifies without writing.
+   Never hand-edit one manifest — the MCP server's advertised version is the piece that silently drifts.
+5. **Docs** — update every doc the change makes stale, in the same commit. Ask which README, guide or
+   checklist described the old behaviour; a change is not done while a doc still describes what it replaced.

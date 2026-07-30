@@ -36,6 +36,9 @@ namespace CoreAI.Mcp.Server
 
         private const int AcceptErrorBackoffMs = 250;
 
+        // Largest refused body still worth reading so the rejection response survives the close.
+        private const int MaxDrainBytes = 64 * 1024;
+
         private readonly int _port;
         private readonly McpRpcDispatcher _dispatcher;
         private readonly Action<string> _log;
@@ -309,6 +312,8 @@ namespace CoreAI.Mcp.Server
 
             try
             {
+                DrainRequestBody(context.Request);
+
                 byte[] bytes = Encoding.UTF8.GetBytes(message);
                 HttpListenerResponse response = context.Response;
                 response.StatusCode = status;
@@ -322,6 +327,44 @@ namespace CoreAI.Mcp.Server
             catch (Exception ex)
             {
                 _logError($"could not write the MCP rejection response: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Discards what is left of a refused request's body, up to <see cref="MaxDrainBytes"/>.
+        /// <para>
+        /// WHY: closing the response while the client is still sending resets the connection, and the
+        /// client then observes a transport error instead of the 413/415/401 we just wrote. Draining
+        /// first lets the refusal actually arrive. The cap keeps the defence intact: a body too big to
+        /// drain cheaply is dropped on the floor exactly as before, since reading it is the cost the
+        /// limit exists to avoid.
+        /// </para>
+        /// </summary>
+        private static void DrainRequestBody(HttpListenerRequest request)
+        {
+            if (request == null || !request.HasEntityBody || request.ContentLength64 > MaxDrainBytes)
+            {
+                return;
+            }
+
+            try
+            {
+                byte[] scratch = new byte[4096];
+                int drained = 0;
+                while (drained <= MaxDrainBytes)
+                {
+                    int read = request.InputStream.Read(scratch, 0, scratch.Length);
+                    if (read <= 0)
+                    {
+                        return;
+                    }
+
+                    drained += read;
+                }
+            }
+            catch (Exception)
+            {
+                // The client hung up or the body stalled; the refusal response is still worth attempting.
             }
         }
 

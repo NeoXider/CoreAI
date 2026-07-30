@@ -756,7 +756,7 @@ namespace CoreAI.Tests.EditMode
             {
                 _started.TrySetResult(true);
                 await _release.Task;
-                throw new InvalidOperationException("Simulated late failure after AbandonCurrentTurn.");
+                throw new System.InvalidOperationException("Simulated late failure after AbandonCurrentTurn.");
 #pragma warning disable CS0162 // unreachable code: needed only so the compiler treats this as an iterator.
                 yield break;
 #pragma warning restore CS0162

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -11,6 +12,7 @@ using CoreAI.Infrastructure.Logging;
 using Newtonsoft.Json;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -538,8 +540,19 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, releases);
         }
 
-        [Test]
-        public async Task DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes()
+        /// <summary>
+        /// A drained removal must keep the owned host alive until the last tracked request finishes.
+        /// <para>
+        /// WHY <see cref="UnityTestAttribute"/>: the production drain loop paces itself with
+        /// <c>UniTask.Delay</c>, whose continuations only run when the editor loop ticks. A plain
+        /// <c>async Task</c> test awaits without ever giving the editor a frame, so the loop could not
+        /// observe the request finishing and the test stalled until the runner killed it — the same trap
+        /// <see cref="CoreAiChatServiceEditModeTests"/> documents for <c>CancelAfterSlim</c>.
+        /// </para>
+        /// </summary>
+        [UnityTest]
+        [Timeout(30000)]
+        public IEnumerator DrainRemoval_DefersOwnedHostReleaseUntilTrackedRequestCompletes()
         {
             int releases = 0;
             TaskCompletionSource<bool> released = new();
@@ -555,16 +568,21 @@ namespace CoreAI.Tests.EditMode
                 }
             };
             LlmClientRegistry registry = BuildRegistry(new MemoryStore(), factory);
-            await registry.AddOrUpdateEndpointAsync(Descriptor("owned", "https://example.test/v1"));
+            yield return WaitForTask(
+                registry.AddOrUpdateEndpointAsync(Descriptor("owned", "https://example.test/v1")),
+                "endpoint registration");
+
             Task<LlmCompletionResult> request = registry.ResolveClientForRole("Chat", "owned")
                 .CompleteAsync(new LlmCompletionRequest());
 
-            Assert.IsTrue(await registry.RemoveEndpointAsync("owned"));
-            Assert.AreEqual(0, releases);
+            Task<bool> removal = registry.RemoveEndpointAsync("owned");
+            yield return WaitForTask(removal, "drained endpoint removal");
+            Assert.IsTrue(removal.Result);
+            Assert.AreEqual(0, releases, "the owned host must survive while a request is still tracked");
 
             client.Completion.SetResult(new LlmCompletionResult { Ok = true });
-            await request;
-            await released.Task;
+            yield return WaitForTask(request, "the tracked request");
+            yield return WaitForTask(released.Task, "the deferred owned-host release");
 
             Assert.AreEqual(1, releases);
         }
@@ -812,6 +830,23 @@ namespace CoreAI.Tests.EditMode
                 Active = true,
                 ContextWindowTokens = 4096
             };
+        }
+
+        /// <summary>
+        /// Awaits <paramref name="task"/> by yielding editor frames, so UniTask timers keep running, and
+        /// turns a stuck task into a named failure within <paramref name="timeoutSeconds"/> instead of a
+        /// silent multi-minute stall. Faults are rethrown exactly as <c>await</c> would.
+        /// </summary>
+        private static IEnumerator WaitForTask(Task task, string what, float timeoutSeconds = 10f)
+        {
+            float deadline = Time.realtimeSinceStartup + timeoutSeconds;
+            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.IsTrue(task.IsCompleted, $"{what} did not complete within {timeoutSeconds}s.");
+            task.GetAwaiter().GetResult();
         }
 
         private static async Task<bool> WaitForConditionAsync(Func<bool> condition, TimeSpan timeout)

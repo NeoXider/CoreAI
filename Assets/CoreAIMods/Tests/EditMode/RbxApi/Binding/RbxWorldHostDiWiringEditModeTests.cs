@@ -33,6 +33,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         // the blocked main thread (mirrors RbxApiLuaBindingsEditModeTests).
         private SynchronizationContext _savedContext;
         private CoreAISettingsAsset _settings;
+        private RecordingLog _log;
 
         [SetUp]
         public void SetUp()
@@ -41,6 +42,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             _savedContext = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(null);
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _log = new RecordingLog();
         }
 
         [TearDown]
@@ -106,11 +108,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             RegisterMinimalModStack(builder, registry);
             // WHY: no RegisterInstance(host) — ResolveOrDefault<RbxWorldHost>() yields null, so the
             // factory builds an in-memory Rbx surface with no part sink and nothing materializes.
-            // The factory reports that as an error because in a shipped game it is a misconfiguration;
-            // this test opts into headless deliberately, so the message is expected, not a failure.
-            UnityEngine.TestTools.LogAssert.Expect(
-                LogType.Error, new System.Text.RegularExpressions.Regex("RbxWorldHost NOT resolved"));
-
             IObjectResolver container = builder.Build();
             try
             {
@@ -123,6 +120,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                 Assert.IsTrue(result.Success, result.Error);
                 Assert.IsNull(GameObject.Find("Part"),
                     "without a registered host the world stays headless — no GameObject is created");
+
+                // A shipped game must learn that Instance.new will render nothing, so the missing host is
+                // reported as an error rather than silently tolerated.
+                Assert.IsTrue(_log.HasError("RbxWorldHost NOT resolved"),
+                    "the factory must report the missing host so a misconfigured game is not left guessing");
             }
             finally
             {
@@ -181,7 +183,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         private void RegisterMinimalModStack(ContainerBuilder builder, CoreAiPrefabRegistryAsset registry)
         {
             builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
-            builder.RegisterInstance<ILog>(Log.Instance);
+            // WHY: an explicit recorder, not the ambient Log.Instance — the factory's diagnostics are then
+            // assertable regardless of what the rest of the run did to the global logger and log filter.
+            builder.RegisterInstance<ILog>(_log);
             builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
             builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
             builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();

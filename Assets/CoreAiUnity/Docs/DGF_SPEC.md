@@ -48,11 +48,11 @@
 ## 3. Current repository state (normative snapshot)
 
 > **Current architecture note:** the two-layer (`coreai` / `coreaiunity`) boundary below predates the
-> Lua/Hub/Benchmark package split. The repository now ships **five UPM packages** —
+> Lua/Hub/Benchmark package split. The repository now ships **six UPM packages** —
 > `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
 > `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
-> `com.neoxider.coreaihub` (optional UI Toolkit Hub window), and `com.neoxider.coreaibenchmark`
-> (dev/test-only benchmark harness). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
+> `com.neoxider.coreaihub` (optional UI Toolkit Hub window), `com.neoxider.coreaibenchmark`
+> (dev/test-only benchmark harness), and `com.neoxider.coreaimcp` (optional in-game MCP server). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
 > and `execute_lua`/`manage_mods` tools live entirely in `CoreAI.Mods`. See [INSTALL.md](../../../INSTALL.md)
 > and the root [README.md §Architecture](../../../README.md#%EF%B8%8F-architecture) for the current
 > package/dependency graph; treat the rest of this section as historical unless it is updated.
