@@ -2,6 +2,17 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [Unreleased]
+
+### Fixed
+
+- **A timed-out role in the built-in-role PlayMode sweep no longer leaks its request into the rest of
+      the run.** `AiOrchestratorBuiltInRolesPlayModeHarness` called `RunTaskAsync` without a token and
+      handed `WaitTask` no `CancellationTokenSource`, so when a slow model blew the per-role budget the
+      request stayed alive and kept the single live backend busy — the following live tests then failed
+      for want of a free model rather than for anything of their own, which `WaitTask`'s own diagnostic
+      said out loud. Each role now gets its own `CancellationTokenSource`, cancelled on timeout.
+
 ## [6.12.0] - 2026-07-30
 
 ### Added

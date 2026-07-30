@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -56,15 +57,23 @@ namespace CoreAI.Tests.PlayMode
             {
                 sink.Commands.Clear();
                 Debug.Log($"[Test] Testing role: {role}");
-                Task task = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = role,
-                    Hint =
-                        "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
-                });
+
+                // WHY: a slow model can blow the per-role budget, and without a token the abandoned
+                // request keeps holding the single live backend — the next roles then fail for lack of a
+                // free model rather than for anything of their own. Cancelling on timeout keeps one slow
+                // role from cascading into the rest of the sweep.
+                using CancellationTokenSource roleCts = new();
+                Task task = orch.RunTaskAsync(
+                    new AiTaskRequest
+                    {
+                        RoleId = role,
+                        Hint =
+                            "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
+                    },
+                    roleCts.Token);
 
                 float timeout = role == BuiltInAgentRoleIds.Programmer ? 300f : 180f;
-                yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'");
+                yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'", roleCts);
 
                 if (sink.Commands.Count == 0)
                 {
