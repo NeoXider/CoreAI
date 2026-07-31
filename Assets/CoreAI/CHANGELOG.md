@@ -1,5 +1,36 @@
 # Changelog
 
+## [6.13.1] - 2026-07-31
+
+### Fixed
+
+- **A mod that calls `coroutine.resume` no longer deadlocks a WebGL player.** The bundled Lua VM is
+      now stock **Lua-CSharp v0.5.6** (was a locally patched 0.5.5 build). Upstream v0.5.6 stops the
+      coroutine machinery from marshalling its continuations through `SynchronizationContext`
+      (nuskey8/Lua-CSharp#329, for the deadlock we reported as issue #327): Unity's main thread has a
+      `SynchronizationContext`, so a suspended `coroutine.yield` posted its continuation to a thread
+      that was already blocked in `GetAwaiter().GetResult()` — on desktop another thread eventually
+      picked it up, on single-threaded WASM nothing ever did and the player froze. Both sync-over-async
+      drives CoreAI relies on are affected: `LuaCsSecureEnvironment`'s guarded `coroutine.resume`
+      wrapper and `LuaCsCoroutineHandle.Resume`. Verified against all three builds outside Unity: the
+      old bundled VM leaves the resume task incomplete with one posted continuation, v0.5.6 completes
+      it synchronously with none.
+- **The local VM patch is retired.** The `NotifyTop` fix we carried on our own Lua.dll since 2026-07-10
+      (`#t` returning nil under the sandbox's instruction hook) landed upstream as
+      nuskey8/Lua-CSharp#331 and ships in v0.5.6, so the bundled binary is an unmodified upstream build
+      again — no local patch to re-apply on the next VM bump. The regression is re-verified: `#t` under
+      a count hook is 3 on the new build, nil on stock 0.5.5.
+
+### Changed
+
+- **Lua execution is ~25% faster across the board on the new VM.** Upstream applied a lightweight async
+      method builder to the VM internals (nuskey8/Lua-CSharp#330); measured on a tight numeric loop
+      outside Unity, raw execution went 30 ms → 22 ms and the same loop under the sandbox's guard hook
+      165 ms → 127 ms. The guard's *shape* is unchanged — an empty hook body still triples a tight loop,
+      so the cost remains the hook invocation rather than the work inside it (see
+      `dev-docs/LUA_PERF_AUDIT_v6.6_2026-07.md` §7).
+- `IScriptEngine.EngineVersion` for the Lua-CSharp engine now reports `0.5.6`.
+
 ## [6.13.0] - 2026-07-31
 
 ### Changed

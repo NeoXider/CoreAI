@@ -82,9 +82,10 @@ Derived rules:
 
 ## 2. Standing decisions (researched 2026-07; items marked LOCKED are user-confirmed)
 
-- **VM**: keep Lua-CSharp v0.5.5 (bundled `Lua.dll`/`Lua.Annotations.dll` in
+- **VM**: keep Lua-CSharp v0.5.6 (bundled `Lua.dll`/`Lua.Annotations.dll` in
   `Assets/CoreAIMods/Plugins`; Lua 5.2, double-only numbers — near-Luau semantics). No MoonSharp
-  return, no native Luau (WebGL).
+  return, no native Luau (WebGL). Stock upstream build: the local `NotifyTop` patch we carried on
+  0.5.5 landed upstream as PR #331, and our WebGL coroutine deadlock report (issue #327) as PR #329.
 - **Luau syntax**: pure-C# downlevel preprocessor at mod ingestion (strip type annotations, rewrite
   `+=`/`continue`/string interpolation/`if`-expressions/`//`). Parser: the targeted
   **mini-rewriter**, chosen and **implemented on disk** (`Assets/CoreAIMods/Runtime/LuauDownlevel/`:

@@ -26,7 +26,7 @@ namespace CoreAI.Scripting.LuaCs
         public string EngineName => "Lua-CSharp";
 
         /// <inheritdoc />
-        public string EngineVersion => "0.5.5 (Lua 5.2, double-only numbers)";
+        public string EngineVersion => "0.5.6 (Lua 5.2, double-only numbers)";
 
         /// <inheritdoc />
         public IValueMarshaller Marshaller => LuaCsValueMarshaller.Instance;

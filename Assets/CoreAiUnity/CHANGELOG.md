@@ -2,6 +2,16 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [6.13.1] - 2026-07-31
+
+### Fixed
+
+- **The bundled Lua VM is now stock Lua-CSharp v0.5.6**, which unblocks coroutines in a WebGL player
+      (upstream #329, for the deadlock we reported as #327) and carries the `NotifyTop` fix we used to
+      patch into our own build (upstream #331), so the shipped `Lua.dll` is an unmodified upstream
+      binary again. Lua execution is ~25% faster on the new VM. See the
+      `com.neoxider.coreai` changelog for the full entry.
+
 ## [6.13.0] - 2026-07-31
 
 ### Added

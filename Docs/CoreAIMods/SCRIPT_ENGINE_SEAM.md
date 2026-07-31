@@ -1,7 +1,7 @@
 # Script-engine abstraction seam (MVP0)
 
 All interpreter access in `Assets/CoreAIMods/Runtime` goes through engine-neutral contracts so the VM
-(currently Lua-CSharp v0.5.5) can be swapped by reimplementing one folder. The regression tripwire is
+(currently Lua-CSharp v0.5.6) can be swapped by reimplementing one folder. The regression tripwire is
 `ScriptingSeamHonestyEditModeTests`: no `using Lua` may appear in runtime source outside
 `Runtime/Scripting`.
 

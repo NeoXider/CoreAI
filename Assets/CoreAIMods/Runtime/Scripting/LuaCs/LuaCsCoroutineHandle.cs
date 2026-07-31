@@ -19,7 +19,10 @@ namespace CoreAI.Sandbox.LuaCs
     /// caller's stack: it consumes the whole stack as resume arguments and, on return, overwrites it
     /// with <c>[ok, values...]</c> (Lua's <c>coroutine.resume</c> convention). A well-behaved handler
     /// that reaches <c>coroutine.yield</c> completes this call SYNCHRONOUSLY, so
-    /// <c>GetAwaiter().GetResult()</c> never blocks a single-threaded WASM player loop. A runaway that
+    /// <c>GetAwaiter().GetResult()</c> never blocks a single-threaded WASM player loop. That holds only
+    /// from Lua-CSharp v0.5.6 on: earlier builds posted a suspended resume's continuation to the
+    /// ambient <c>SynchronizationContext</c> — which on Unity's main thread is the very thread parked
+    /// in <c>GetResult()</c> — and froze a WebGL player (upstream #327/#329). A runaway that
     /// never yields is cut by the per-resume instruction/time budget armed via <see cref="LuaState.SetHook"/>
     /// (the same mechanism as <see cref="LuaCsExecutionGuard"/>) or by the lifetime step cap.
     ///

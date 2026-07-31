@@ -57,7 +57,8 @@ A binding absent from your tier simply doesn't exist in the sandbox (calling it 
 ## Coroutines (work across frames, WebGL-safe)
 `coroutine.create/resume/yield/status` are available. A coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this
-is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would deadlock single-threaded WASM).
+is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would deadlock single-threaded WASM;
+this needs the bundled VM at v0.5.6 or newer — older builds froze the player on the first yield).
 See `coroutine_countdown.lua`. Do NOT busy-wait; yield and resume from a timer/handler.
 
 ## Design rule: native/Lua boundary

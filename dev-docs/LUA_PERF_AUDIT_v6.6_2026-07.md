@@ -157,3 +157,29 @@ There is **no** microbenchmark for guard overhead in the repo — `Assets/CoreAI
 LLM game-creation scenarios. The numbers above were produced ad hoc through the Editor. A checked-in
 EditMode benchmark (fixed Lua loop, run with no hook / batch 4 / batch 64) would make this table
 reproducible and would gate any future guard change.
+
+## 7. Follow-up 2026-07-31 — measured against Lua-CSharp v0.5.6
+
+Measured outside Unity (standalone .NET 8 console, CoreCLR JIT, same machine) so the two VM builds
+could be swapped without an editor restart. Workload `local x = 0 for i = 1, 2000000 do x = x + i end`,
+hook installed exactly the way `LuaCsExecutionGuard` installs it (`SetHook(fn, "", 4)`), median of
+three runs. **CoreCLR numbers are not Mono numbers** — the Editor figures in §1–§4 stand as the Unity
+reality; this table isolates what changed between the two VM builds.
+
+| | raw, no hook | hook, empty body | hook, guard body (clock + heap read) |
+|---|---:|---:|---:|
+| v0.5.5 | 30 ms | 94 ms (3.11×, ~64 ns/fire) | 165 ms (5.44×, ~134 ns/fire) |
+| v0.5.6 | 22 ms | 72 ms (3.16×, ~49 ns/fire) | 127 ms (5.39×, ~107 ns/fire) |
+
+v0.5.6 applied `LightAsyncValueTaskMethodBuilder` to the VM internals including the hook path
+(upstream PR #330), which is worth ~25% on every column. The **shape** is unchanged: an empty hook
+body still triples the runtime of a tight loop, so §2's conclusion holds — the cost is the hook
+*invocation*, not the work inside it, and the lever is still the number of fires.
+
+### The §4 feasibility risk is resolved: `SetHook` from inside the hook WORKS
+
+Open question 1 in §4 ("Does Lua-CSharp permit `LuaState.SetHook` from **inside** a hook?") was the
+blocker for the adaptive batch. Measured on both v0.5.5 and v0.5.6: a hook that re-arms itself with
+`SetHook(self, "", 64)` on its first fire drops from 1,000,001 fires to 62,501 — exactly the batch-64
+count — and throws nothing. The remaining §4 items (charging the step budget by the batch actually in
+force, and `EndGuard` restoring the enclosing window) are ordinary implementation work, not risks.
