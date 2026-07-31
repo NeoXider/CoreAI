@@ -9,8 +9,11 @@ using CoreAI.Logging;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Wraps a primary and secondary <see cref="ILlmClient"/>. When the primary fails
-    /// (non-cancellation error), the request is automatically retried on the secondary backend.
+    /// Wraps a primary and secondary <see cref="ILlmClient"/>. When the primary fails with a
+    /// TRANSIENT error, the request is automatically retried on the secondary backend.
+    /// Cancellation and permanent refusals (see <c>IsRetryableError</c>) propagate instead: the
+    /// secondary is a different endpoint, but it cannot turn "out of credit", "bad credentials" or
+    /// "malformed request" into an answer, so switching would only double the wait.
     /// </summary>
     public sealed class FallbackLlmClientDecorator : ILlmClient
     {
@@ -77,6 +80,19 @@ namespace CoreAI.Infrastructure.Llm
                 FallbackCount++;
                 return await _secondary.CompleteAsync(request, cancellationToken);
             }
+            // WHY: A permanently refused request is refused for a reason the secondary backend cannot
+            // undo (no credit, bad credentials, malformed body). The result-based branch above has
+            // always refused to fall back on those codes; the thrown-exception branch used to fall
+            // back on ANY exception, so the same failure behaved differently depending on whether the
+            // adapter reported it as a result or threw it.
+            catch (LlmClientException ex) when (!IsRetryableError(ex.ErrorCode))
+            {
+                _logger.Warn(
+                    $"[Fallback] Primary failed permanently ({ex.ErrorCode}: {ex.Message}); " +
+                    "the secondary backend cannot change that answer, so no fallback.",
+                    LogTag.Llm);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.Warn(
@@ -130,6 +146,17 @@ namespace CoreAI.Infrastructure.Llm
                             LogTag.Llm);
                         primaryFailed = true;
                         break;
+                    }
+                    // WHY: Same rule as the error-chunk branch below - a permanent refusal is not made
+                    // right by a second backend, so it propagates on the first attempt instead of
+                    // paying for a second round trip that returns the same answer.
+                    catch (LlmClientException ex) when (!IsRetryableError(ex.ErrorCode))
+                    {
+                        _logger.Warn(
+                            $"[Fallback] Primary streaming failed permanently ({ex.ErrorCode}: {ex.Message}); " +
+                            "the secondary backend cannot change that answer, so no fallback.",
+                            LogTag.Llm);
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -219,6 +246,13 @@ namespace CoreAI.Infrastructure.Llm
                    (chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0);
         }
 
+        /// <summary>
+        /// Failure categories a DIFFERENT backend could plausibly answer better. It is a whitelist on
+        /// purpose: an unlisted (or newly added) code never triggers a fallback, which is what keeps
+        /// permanent refusals — <see cref="LlmErrorCode.PaymentRequired"/>,
+        /// <see cref="LlmErrorCode.AuthExpired"/>, <see cref="LlmErrorCode.InvalidRequest"/>,
+        /// <see cref="LlmErrorCode.PermanentProviderError"/> — from costing a second round trip.
+        /// </summary>
         private static bool IsRetryableError(LlmErrorCode code)
         {
             return code == LlmErrorCode.ProviderError ||

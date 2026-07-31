@@ -94,6 +94,10 @@ namespace CoreAI.Ai
                     return "The session has expired. Please sign in again.";
                 case LlmErrorCode.QuotaExceeded:
                     return "The assistant quota for this account is used up.";
+                case LlmErrorCode.PaymentRequired:
+                    return "The assistant account has run out of credit. Please tell the maintainer.";
+                case LlmErrorCode.PermanentProviderError:
+                    return "The assistant provider refused this request. Please tell the maintainer.";
                 case LlmErrorCode.RateLimited:
                     return "Too many requests to the assistant right now." + retryHint;
                 case LlmErrorCode.BackendUnavailable:

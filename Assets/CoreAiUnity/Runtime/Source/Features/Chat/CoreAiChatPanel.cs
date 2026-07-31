@@ -211,6 +211,14 @@ namespace CoreAI.Chat
         private IVisualElementScheduledItem _typingAnimation;
         private VisualElement _typingDots;
 
+        /// <summary>
+        /// Typing-row state kept OUTSIDE the visual tree, so a <c>PanelRenderer</c> rebuild mid-turn can
+        /// be restored by <see cref="ApplyPanelStateToTree"/> instead of silently dropping the indicator.
+        /// </summary>
+        private bool _typingIndicatorVisible;
+
+        private bool _typingToolProgressHintActive;
+
         protected CoreAiChatService _chatService;
 
         public virtual CoreAiChatService ChatService
@@ -1068,17 +1076,53 @@ namespace CoreAI.Chat
                 HeaderIcon.focusable = false;
             }
 
-            if (TypingIndicator != null)
+            ApplyPanelStateToTree();
+            ApplyShortcutTooltips();
+        }
+
+        /// <summary>
+        /// Pushes every piece of panel state that lives in the visual tree - USS classes and inline
+        /// display - onto the elements <see cref="BindUI"/> just resolved.
+        /// <para>
+        /// The tree is not permanent. <c>PanelRenderer</c> rebuilds it (<c>RegisterUIReloadCallback</c>),
+        /// and each rebuild runs <see cref="ResetUiReferences"/> + <see cref="BindUI"/> against brand-new
+        /// elements that carry only what the UXML declares. Everything the panel had toggled since the
+        /// last build was therefore dropped on the floor: most visibly the collapsed class, so
+        /// <see cref="IsCollapsed"/> kept reporting "collapsed" while a fully expanded, history-filled
+        /// chat was on screen - and whether it happened at all depended on whether the rebuild landed
+        /// before or after <see cref="SetCollapsed"/>.
+        /// </para>
+        /// <para>
+        /// Every state setter and the end of <see cref="BindUI"/> funnel through this one method, so a
+        /// third path that applies state without re-applying it after a rebuild cannot appear.
+        /// </para>
+        /// </summary>
+        protected void ApplyPanelStateToTree()
+        {
+            ChatContainer?.EnableInClassList(CollapsedClassName, IsCollapsed);
+
+            if (FabButton != null && IsElementReadyForStyle(FabButton))
             {
-                if (IsElementReadyForStyle(TypingIndicator))
+                FabButton.style.display = IsCollapsed ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+
+            // WHY: a rebuild in the middle of a turn must not erase the "assistant is answering"
+            // affordance - the request keeps running, so the indicator has to come back with the tree.
+            if (_typingIndicatorVisible)
+            {
+                ShowTypingIndicator();
+                if (_typingToolProgressHintActive)
                 {
-                    TypingIndicator.style.display = DisplayStyle.None;
+                    ApplyStreamingToolProgressTypingHint();
                 }
+            }
+            else
+            {
+                HideTypingIndicator();
             }
 
             ApplyClearButtonVisibility();
             UpdateSendButtonVisualState();
-            ApplyShortcutTooltips();
         }
 
         /// <summary>
@@ -1516,22 +1560,7 @@ namespace CoreAI.Chat
             bool changed = IsCollapsed != collapsed;
             IsCollapsed = collapsed;
 
-            if (ChatContainer != null)
-            {
-                if (collapsed)
-                {
-                    ChatContainer.AddToClassList(CollapsedClassName);
-                }
-                else
-                {
-                    ChatContainer.RemoveFromClassList(CollapsedClassName);
-                }
-            }
-
-            if (FabButton != null && IsElementReadyForStyle(FabButton))
-            {
-                FabButton.style.display = collapsed ? DisplayStyle.Flex : DisplayStyle.None;
-            }
+            ApplyPanelStateToTree();
 
             if (persist)
             {
@@ -3583,6 +3612,12 @@ namespace CoreAI.Chat
 
         public void ShowTypingIndicator()
         {
+            // WHY: recorded BEFORE the readiness guard - the panel must know the indicator is due even
+            // when the current tree cannot show it yet, so ApplyPanelStateToTree can restore it on the
+            // next bind instead of leaving a running turn with no visible progress.
+            _typingIndicatorVisible = true;
+            _typingToolProgressHintActive = false;
+
             if (TypingIndicator == null || !IsElementReadyForStyle(TypingIndicator))
             {
                 return;
@@ -3626,6 +3661,8 @@ namespace CoreAI.Chat
 
         private void ApplyStreamingToolProgressTypingHint()
         {
+            _typingToolProgressHintActive = true;
+
             if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
             {
                 return;
@@ -3643,6 +3680,9 @@ namespace CoreAI.Chat
 
         public void HideTypingIndicator()
         {
+            _typingIndicatorVisible = false;
+            _typingToolProgressHintActive = false;
+
             if (TypingIndicator != null && IsElementReadyForStyle(TypingIndicator))
             {
                 TypingIndicator.style.display = DisplayStyle.None;

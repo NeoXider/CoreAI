@@ -1416,6 +1416,15 @@ namespace CoreAI.Infrastructure.Llm
                 return LlmErrorCode.QuotaExceeded;
             }
 
+            // WHY: 402 says the provider account is out of credit. Replaying it with the same key
+            // returns the same 402 forever, so it must NOT reach the transient ProviderError bucket
+            // that the retry/fallback decorators replay. Checked after the quota branch on purpose:
+            // a 402 whose body already says "quota" keeps the older, equally permanent QuotaExceeded.
+            if (status == 402)
+            {
+                return LlmErrorCode.PaymentRequired;
+            }
+
             if (status == 429 || ContainsRateLimitToken(text))
             {
                 return LlmErrorCode.RateLimited;
@@ -1433,9 +1442,25 @@ namespace CoreAI.Infrastructure.Llm
                 return LlmErrorCode.InvalidRequest;
             }
 
+            // WHY: 408 is the one 4xx a replay can actually clear, so it is classified before the
+            // permanent-4xx sweep below (and matches IsRetryableHttpStatus, which already retries it).
+            if (status == 408)
+            {
+                return LlmErrorCode.Timeout;
+            }
+
             if (status >= 500 || status == 0)
             {
                 return LlmErrorCode.BackendUnavailable;
+            }
+
+            // WHY: every remaining 4xx (404 model/route missing, 405, 410, 451, ...) is a permanent
+            // refusal. Falling through to ProviderError made the streaming retry and the fallback
+            // decorator replay it as if the backend were merely flaky, multiplying the user's wait
+            // by the retry budget for an answer that could never change.
+            if (status >= 400 && status < 500)
+            {
+                return LlmErrorCode.PermanentProviderError;
             }
 
             return LlmErrorCode.ProviderError;

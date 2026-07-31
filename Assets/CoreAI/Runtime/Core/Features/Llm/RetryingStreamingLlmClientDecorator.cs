@@ -109,7 +109,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         LlmStreamChunk current = null;
                         bool hasNext = false;
-                        string exceptionMessage = null;
+                        LlmStreamChunk transportFailure = null;
 
                         try
                         {
@@ -125,18 +125,22 @@ namespace CoreAI.Infrastructure.Llm
                         }
                         catch (Exception ex)
                         {
-                            exceptionMessage = ex.Message;
+                            transportFailure = DescribeTransportFailure(ex);
                         }
 
-                        if (exceptionMessage != null)
+                        if (transportFailure != null)
                         {
-                            retryablePreCommitFailure = true;
-                            terminalErrorChunk = new LlmStreamChunk
+                            // WHY: A permanent refusal (payment required, expired auth, malformed request)
+                            // answers every replay identically. Retrying it only multiplies the user's wait
+                            // by the retry budget, so it is surfaced on the first attempt.
+                            if (!IsRetryableError(transportFailure.ErrorCode))
                             {
-                                IsDone = true,
-                                Error = exceptionMessage,
-                                ErrorCode = LlmErrorCode.ProviderError
-                            };
+                                yield return transportFailure;
+                                yield break;
+                            }
+
+                            retryablePreCommitFailure = true;
+                            terminalErrorChunk = transportFailure;
                             break;
                         }
 
@@ -241,6 +245,36 @@ namespace CoreAI.Infrastructure.Llm
                    (chunk.ExecutedToolCalls != null && chunk.ExecutedToolCalls.Count > 0);
         }
 
+        /// <summary>
+        /// Turns a mid-stream transport fault into the terminal chunk the caller would have received.
+        /// <para>
+        /// The typed <see cref="LlmClientException"/> already carries the adapter's classification
+        /// (HTTP status, error code, retry hint). Flattening every exception to
+        /// <see cref="LlmErrorCode.ProviderError"/> — as this decorator used to — erased that: an
+        /// HTTP 402/401/400 arrived here already classified as permanent and was retried anyway,
+        /// because ProviderError is on the retryable list.
+        /// </para>
+        /// </summary>
+        private static LlmStreamChunk DescribeTransportFailure(Exception ex)
+        {
+            LlmClientException typed = ex as LlmClientException;
+            return new LlmStreamChunk
+            {
+                IsDone = true,
+                Error = ex.Message,
+                ErrorCode = typed?.ErrorCode ?? LlmErrorCode.ProviderError,
+                HttpStatus = typed?.HttpStatus,
+                RetryAfterSeconds = typed?.RetryAfterSeconds
+            };
+        }
+
+        /// <summary>
+        /// Failure categories worth re-opening the SAME stream for. It is a whitelist on purpose: an
+        /// unlisted (or newly added) code is never retried, which is what keeps permanent refusals —
+        /// <see cref="LlmErrorCode.PaymentRequired"/>, <see cref="LlmErrorCode.AuthExpired"/>,
+        /// <see cref="LlmErrorCode.InvalidRequest"/>,
+        /// <see cref="LlmErrorCode.PermanentProviderError"/> — from burning the whole retry budget.
+        /// </summary>
         private static bool IsRetryableError(LlmErrorCode code)
         {
             return code == LlmErrorCode.ProviderError ||

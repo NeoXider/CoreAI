@@ -59,6 +59,81 @@ namespace CoreAI.Core.Tests.EditMode
         }
 
         [Test]
+        public async Task RetryingStreamingDecorator_PaymentRequired_FailsOnTheFirstAttemptWithoutWaiting()
+        {
+            ReplayableStreamingClient inner = new(
+                new LlmClientException("HTTP error 402: out of credit", LlmErrorCode.PaymentRequired, 402));
+            List<int> scheduledBackoffs = new();
+            RetryingStreamingLlmClientDecorator sut = new(
+                inner,
+                3,
+                attempt =>
+                {
+                    scheduledBackoffs.Add(attempt);
+                    return TimeSpan.FromSeconds(5);
+                });
+
+            List<LlmStreamChunk> chunks = await DrainAsync(sut);
+
+            Assert.AreEqual(
+                1, inner.StreamOpens,
+                "HTTP 402 answers every replay identically, so the stream must be opened exactly once.");
+            Assert.AreEqual(0, sut.RetryCount);
+            CollectionAssert.IsEmpty(
+                scheduledBackoffs,
+                "A permanent failure must not schedule any backoff wait - that wait is the delay the " +
+                "player actually sits through.");
+            Assert.AreEqual(1, chunks.Count);
+            Assert.IsTrue(chunks[0].IsDone);
+            Assert.AreEqual(
+                LlmErrorCode.PaymentRequired, chunks[0].ErrorCode,
+                "The adapter's classification must survive the decorator instead of collapsing to ProviderError.");
+            Assert.AreEqual(402, chunks[0].HttpStatus, "The HTTP status must reach the caller.");
+            StringAssert.Contains("402", chunks[0].Error);
+        }
+
+        [TestCase(LlmErrorCode.BackendUnavailable, 503)]
+        [TestCase(LlmErrorCode.RateLimited, 429)]
+        [TestCase(LlmErrorCode.Timeout, 408)]
+        [TestCase(LlmErrorCode.ProviderError, 0)]
+        public async Task RetryingStreamingDecorator_TransientFailure_KeepsRetryingAndRecovers(
+            LlmErrorCode code, int httpStatus)
+        {
+            ReplayableStreamingClient inner = new(
+                new LlmClientException("transient backend fault", code, httpStatus == 0 ? null : httpStatus),
+                failingOpens: 2);
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, _ => TimeSpan.Zero);
+
+            List<LlmStreamChunk> chunks = await DrainAsync(sut);
+
+            Assert.AreEqual(
+                3, inner.StreamOpens,
+                $"{code} is transient: tightening the permanent-failure rule must not cost it its retries.");
+            Assert.AreEqual(2, sut.RetryCount);
+            Assert.IsTrue(chunks.Exists(c => c.Text == "recovered"));
+        }
+
+        [Test]
+        public async Task RetryingStreamingDecorator_PaymentRequiredErrorChunk_IsForwardedWithoutRetry()
+        {
+            TerminalErrorChunkClient inner = new(new LlmStreamChunk
+            {
+                IsDone = true,
+                Error = "HTTP error 402: out of credit",
+                ErrorCode = LlmErrorCode.PaymentRequired,
+                HttpStatus = 402
+            });
+            RetryingStreamingLlmClientDecorator sut = new(inner, 3, _ => TimeSpan.Zero);
+
+            List<LlmStreamChunk> chunks = await DrainAsync(sut);
+
+            Assert.AreEqual(1, inner.StreamOpens, "A permanent error chunk must not re-open the stream.");
+            Assert.AreEqual(1, chunks.Count);
+            Assert.AreEqual(LlmErrorCode.PaymentRequired, chunks[0].ErrorCode);
+            Assert.AreEqual(402, chunks[0].HttpStatus);
+        }
+
+        [Test]
         public async Task CircuitBreaker_HalfOpenProbeThrowingSynchronously_ReleasesTheProbeSlot()
         {
             ProbeStreamingClient inner = new();
@@ -213,6 +288,75 @@ namespace CoreAI.Core.Tests.EditMode
                 }
 
                 yield return new LlmStreamChunk { IsDone = true, Text = "never reached" };
+            }
+        }
+
+        /// <summary>
+        /// Throws the supplied transport failure on its first <paramref name="failingOpens" /> stream
+        /// opens, then streams a normal answer. <see cref="StreamOpens" /> is the observable retry count.
+        /// </summary>
+        private sealed class ReplayableStreamingClient : ILlmClient
+        {
+            private readonly Exception _failure;
+            private readonly int _failingOpens;
+
+            public ReplayableStreamingClient(Exception failure, int failingOpens = int.MaxValue)
+            {
+                _failure = failure;
+                _failingOpens = failingOpens;
+            }
+
+            public int StreamOpens { get; private set; }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                bool shouldFail = StreamOpens <= _failingOpens;
+                await Task.Yield();
+                if (shouldFail)
+                {
+                    throw _failure;
+                }
+
+                yield return new LlmStreamChunk { Text = "recovered" };
+                yield return new LlmStreamChunk { IsDone = true, Text = "" };
+            }
+        }
+
+        private sealed class TerminalErrorChunkClient : ILlmClient
+        {
+            private readonly LlmStreamChunk _terminal;
+
+            public TerminalErrorChunkClient(LlmStreamChunk terminal)
+            {
+                _terminal = terminal;
+            }
+
+            public int StreamOpens { get; private set; }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = _terminal.Error });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                await Task.Yield();
+                yield return _terminal;
             }
         }
 

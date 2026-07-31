@@ -37,14 +37,34 @@ namespace CoreAI.Ai
         /// <summary>The request was malformed or rejected by validation.</summary>
         InvalidRequest = 8,
 
-        /// <summary>The provider returned an error that does not fit a more specific category.</summary>
+        /// <summary>
+        /// The provider returned an error that does not fit a more specific category.
+        /// <para>
+        /// Treated as TRANSIENT by the retry/fallback decorators, so a failure that a replay can never
+        /// fix must not land here — see <see cref="PermanentProviderError"/> and
+        /// <see cref="PaymentRequired"/>.
+        /// </para>
+        /// </summary>
         ProviderError = 9,
 
         /// <summary>Routing could not resolve a usable backend.</summary>
         RoutingError = 10,
 
         /// <summary>The request exceeded the model or provider context window.</summary>
-        ContextLengthExceeded = 11
+        ContextLengthExceeded = 11,
+
+        /// <summary>
+        /// The provider account cannot pay for the request (HTTP 402): credits or balance are exhausted.
+        /// Replaying the identical request with the identical credentials returns the identical answer,
+        /// so this is never retried and never used to switch backends.
+        /// </summary>
+        PaymentRequired = 12,
+
+        /// <summary>
+        /// The provider refused the request permanently and no more specific category applies
+        /// (an unclassified 4xx). Same-request replay is pointless, so it is never retried.
+        /// </summary>
+        PermanentProviderError = 13
     }
 
     /// <summary>
