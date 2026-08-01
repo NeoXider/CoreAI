@@ -1,7 +1,7 @@
 # Server-Managed LLM Protocol Specification
 
-**Version:** 1.0 (Draft)
-**Date:** 2026-05-03
+**Version:** 1.1 (Draft)
+**Date:** 2026-08-01
 **Goal:** Define the contract between a CoreAI WebGL client and a custom backend proxy.
 
 ## 1. Endpoint
@@ -21,6 +21,28 @@
 | `Idempotency-Key` | Yes | Stable key for the logical request. Reused across HTTP retries. Populated from **`LlmCompletionRequest.IdempotencyKey`** (auto-assigned once per request instance if empty). |
 | `X-Coreai-Role` | No | Agent role ID (e.g., `SmartChat`, `Teacher`). |
 | `X-Coreai-Client` | No | Client version string (e.g. semver from `com.neoxider.coreaiunity` `package.json`). |
+| Host-specific attribution header | No | For example `X-RedoSchool-Lesson-Id`; supplied dynamically by the host and validated by the backend. |
+
+### 2.1. Динамические заголовки продукта
+
+Хост может зарегистрировать `IRequestHeaderProvider` через
+`ServerManagedAuthorization.SetRequestHeaderProvider(...)`. Уже созданные `ServerManagedLlmClient`
+подхватывают provider без пересборки клиента. Заголовки снимаются один раз на invocation
+`CompleteAsync` / `CompleteStreamingAsync`: внутренние HTTP-повторы, повтор после обновления JWT, внешние sync
+retry после retryable result/exception и streaming pre-commit retry получают тот же snapshot, а следующий
+invocation читает актуальные значения заново, даже если host повторно использует
+тот же объект `LlmCompletionRequest`. `ClearRequestHeaderProvider()` удаляет только этот hook и не сбрасывает
+Authorization provider/refresher; вызывайте его отдельно при logout и в `TearDown` интеграционных тестов.
+
+Если одновременно задан `IOpenAiHttpSettings.HeaderProvider`, его значения имеют приоритет, а глобальный
+ServerManaged provider дополняет отсутствующие имена. Custom provider не может подменить transport-owned
+`Authorization`, `Content-Type`, `Idempotency-Key` и `X-Request-Id`; его одноимённые элементы и свойства
+игнорируются. Trace и idempotency продолжают приходить из `LlmCompletionRequest`/`LlmRequestContext`.
+
+Backend обязан проверять host-specific значение в контексте аутентифицированного пользователя. Например,
+`X-RedoSchool-Lesson-Id` можно использовать для атрибуции расходов только после проверки, что урок существует
+и доступен текущему пользователю; заголовок из WebGL-клиента нельзя считать доверенным источником биллинга.
+При cross-origin WebGL добавьте точное имя custom header в `Access-Control-Allow-Headers`.
 
 ## 3. Request Body (JSON)
 
@@ -95,10 +117,10 @@ If `ApiBaseUrl` starts with `/` (e.g., `/api/llm/v1`):
 
 To implement a basic compliant backend, ensure:
 - [ ] JWT Validation (JWKS or static secret).
-- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`).
+- [ ] Header parsing (`X-Tenant-Id`, `X-User-Id`, `Idempotency-Key`, разрешённые host-specific headers).
 - [ ] Idempotency store (Redis/InMemory with TTL).
 - [ ] SSE pass-through with `Transfer-Encoding: chunked`.
 - [ ] Error mapping (401, 409, 429).
 - [ ] CORS headers if cross-origin:
   `Access-Control-Allow-Origin: <origin>`
-  `Access-Control-Allow-Headers: Authorization, Content-Type, X-Request-Id, Idempotency-Key, X-Tenant-Id, X-Session-Id`
+  `Access-Control-Allow-Headers: Authorization, Content-Type, X-Request-Id, Idempotency-Key, X-Tenant-Id, X-Session-Id, <your-custom-header>`

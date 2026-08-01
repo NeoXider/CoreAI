@@ -19,7 +19,7 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// PlayMode :  3     AgentBuilder.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class CustomAgentsPlayModeTests
     {
         private sealed class InMemoryStore : IAgentMemoryStore

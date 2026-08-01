@@ -517,7 +517,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
 
         public static RbxCFrame operator -(RbxCFrame cf, RbxVector3 v)
         {
-            return cf + (-v);
+            return cf + -v;
         }
 
         public static bool operator ==(RbxCFrame a, RbxCFrame b)

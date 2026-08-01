@@ -62,8 +62,9 @@ namespace CoreAI.Tests.EditMode
 
             InvokePrivate(ctx.Panel, "RecordRoleTranscriptMessage", "SmartChat", full, false);
 
-            var cache = GetPrivateField<Dictionary<string, List<(string Text, bool IsUser)>>>(
-                ctx.Panel, "_roleTranscriptCache");
+            Dictionary<string, List<(string Text, bool IsUser)>> cache =
+                GetPrivateField<Dictionary<string, List<(string Text, bool IsUser)>>>(
+                    ctx.Panel, "_roleTranscriptCache");
 
             Assert.AreEqual(full.Length, cache["SmartChat"][0].Text.Length,
                 "The cap is render-only: the cache must keep the untruncated answer.");

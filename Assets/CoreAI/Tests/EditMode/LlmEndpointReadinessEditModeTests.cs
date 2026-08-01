@@ -39,6 +39,7 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreEqual(expected, LlmEndpointReadinessPolicy.ShouldTryCompletions(status));
         }
 
+#if COREAI_LLM
         [Test]
         public async Task HttpClientProbe_Models404_FallsBackAndForwardsAuthorization()
         {
@@ -169,6 +170,7 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreEqual(0, result.StatusCode);
             StringAssert.DoesNotContain("example.test", result.Error);
         }
+#endif
 
         private sealed class DelegateHandler : HttpMessageHandler
         {

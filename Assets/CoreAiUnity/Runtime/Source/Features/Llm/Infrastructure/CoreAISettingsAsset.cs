@@ -1,5 +1,6 @@
 using CoreAI;
 using CoreAI.Ai;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -759,6 +760,24 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Optional provider-specific HTTP request body JSON.</summary>
         public string ExtraBodyJson => extraBodyJson ?? "";
+
+        /// <summary>
+        /// Safely sets a provider-specific OpenAI-compatible request-body parameter. Passing C#
+        /// <see langword="null"/> removes it; use <see cref="JValue.CreateNull"/> to send JSON <c>null</c>.
+        /// Invalid input leaves the asset unchanged.
+        /// </summary>
+        public void SetProviderBodyParameter(string key, JToken value)
+        {
+            string normalized = OpenAiProviderBodyParameters.Set(extraBodyJson, key, value);
+            extraBodyJson = normalized;
+        }
+
+        /// <summary>Safely removes a provider-specific OpenAI-compatible request-body parameter.</summary>
+        public void RemoveProviderBodyParameter(string key)
+        {
+            string normalized = OpenAiProviderBodyParameters.Remove(extraBodyJson, key);
+            extraBodyJson = normalized;
+        }
 
         /// <summary>LLMUnity session concurrency clamp.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;

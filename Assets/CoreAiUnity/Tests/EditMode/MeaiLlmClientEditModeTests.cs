@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     public sealed class MeaiLlmClientEditModeTests
     {
         [Test]
@@ -250,6 +250,57 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(MEAI.ChatRole.User, inner.LastMessages[1].Role);
             StringAssert.Contains("## World State", inner.LastMessages[1].Text);
             Assert.AreEqual("current user", inner.LastMessages[^1].Text);
+        }
+
+        [Test]
+        public async Task CompleteAndStreaming_MapSharedPrefixAndPersonalTailIdenticallyOffline()
+        {
+            LlmCompletionRequest studentA = BuildCacheLayeredTransportRequest(
+                "Student A",
+                "tool_alpha",
+                "world-a");
+            LlmCompletionRequest studentB = BuildCacheLayeredTransportRequest(
+                "Student B",
+                "tool_beta",
+                "world-b");
+
+            (List<MEAI.ChatMessage> aSync, string aSyncOutput) = await MapNonStreamingAsync(studentA);
+            (List<MEAI.ChatMessage> aStream, string aStreamOutput) = await MapStreamingAsync(studentA);
+            (List<MEAI.ChatMessage> bSync, string bSyncOutput) = await MapNonStreamingAsync(studentB);
+            (List<MEAI.ChatMessage> bStream, string bStreamOutput) = await MapStreamingAsync(studentB);
+
+            CollectionAssert.AreEqual(MessageSignatures(aSync), MessageSignatures(aStream));
+            CollectionAssert.AreEqual(MessageSignatures(bSync), MessageSignatures(bStream));
+            Assert.AreEqual("ok", aSyncOutput);
+            Assert.AreEqual("ok", aStreamOutput);
+            Assert.AreEqual("ok", bSyncOutput);
+            Assert.AreEqual("ok", bStreamOutput);
+
+            Assert.AreEqual(MEAI.ChatRole.System, aSync[0].Role);
+            Assert.AreEqual(MEAI.ChatRole.System, bSync[0].Role);
+            Assert.AreEqual(aSync[0].Text, bSync[0].Text,
+                "The first provider system message is shared by stable role/prompt version, not by student.");
+            Assert.AreEqual("shared role prefix", aSync[0].Text);
+            StringAssert.DoesNotContain("Student A", aSync[0].Text);
+            StringAssert.DoesNotContain("Student B", bSync[0].Text);
+            Assert.IsFalse(aSync.Skip(1).Any(message => message.Role == MEAI.ChatRole.System));
+            Assert.IsFalse(bSync.Skip(1).Any(message => message.Role == MEAI.ChatRole.System));
+
+            string aTail = string.Join("\n", aSync.Skip(1).Select(message => message.Text));
+            string bTail = string.Join("\n", bSync.Skip(1).Select(message => message.Text));
+            StringAssert.Contains("Student A", aTail);
+            StringAssert.Contains("tool_alpha", aTail);
+            StringAssert.Contains("world-a", aTail);
+            StringAssert.Contains("Student B", bTail);
+            StringAssert.Contains("tool_beta", bTail);
+            StringAssert.Contains("world-b", bTail);
+            Assert.AreNotEqual(aTail, bTail);
+            StringAssert.StartsWith("System context update:", aSync[1].Text);
+            StringAssert.StartsWith("System context update:", bSync[1].Text);
+            Assert.AreEqual("current user for Student A", aSync[^1].Text);
+            Assert.AreEqual("current user for Student B", bSync[^1].Text);
+            Assert.AreEqual(MEAI.ChatRole.User, aSync[^1].Role);
+            Assert.AreEqual(MEAI.ChatRole.User, bSync[^1].Role);
         }
 
         [Test]
@@ -752,6 +803,67 @@ namespace CoreAI.Tests.EditMode
                         Description = Description
                     });
             }
+        }
+
+        private static LlmCompletionRequest BuildCacheLayeredTransportRequest(
+            string student,
+            string availableTool,
+            string worldState)
+        {
+            return new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "shared role prefix",
+                UserPayload = "current user for " + student,
+                ChatHistory = new List<MEAI.ChatMessage>
+                {
+                    new(MEAI.ChatRole.System, "## Request System Instructions\nGuidance for " + student),
+                    new(MEAI.ChatRole.System, "## Memory\nFacts for " + student),
+                    new(MEAI.ChatRole.System,
+                        "## Tool Availability (current request)\nAvailable tools:\n- " + availableTool),
+                    new(MEAI.ChatRole.System, "## World State\n" + worldState)
+                }
+            };
+        }
+
+        private static async Task<(List<MEAI.ChatMessage> Messages, string Output)> MapNonStreamingAsync(
+            LlmCompletionRequest request)
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(
+                inner,
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                null);
+
+            LlmCompletionResult result = await client.CompleteAsync(request, CancellationToken.None);
+            return (inner.LastMessages, result.Content);
+        }
+
+        private static async Task<(List<MEAI.ChatMessage> Messages, string Output)> MapStreamingAsync(
+            LlmCompletionRequest request)
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(
+                inner,
+                GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(),
+                null);
+            List<string> textChunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    textChunks.Add(chunk.Text);
+                }
+            }
+
+            return (inner.LastMessages, string.Concat(textChunks));
+        }
+
+        private static string[] MessageSignatures(IEnumerable<MEAI.ChatMessage> messages)
+        {
+            return messages.Select(message => message.Role + ":" + message.Text).ToArray();
         }
 
         private sealed class CapturingChatClient : MEAI.IChatClient

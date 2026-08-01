@@ -96,6 +96,9 @@ namespace CoreAI.Tests.PlayMode
             CoreAiChatService svc = new(orchestrator);
             panel.AssignTest(cfg, svc);
             SetPrivateField(panel, "_cts", new CancellationTokenSource());
+            // WHY: This no-UIDocument harness tests the turn pipeline, not OnEnable binding. Explicitly
+            // model an active lifecycle so the production inactive-panel guard does not short-circuit it.
+            SetPrivateField(panel, "_lifecycleActive", true);
 
             string captured = null;
             panel.OnAiResponseCompleted += reply => captured = reply;
@@ -146,6 +149,8 @@ namespace CoreAI.Tests.PlayMode
             CoreAiChatService svc = new(orchestrator);
             panel.AssignTest(cfg, svc);
             SetPrivateField(panel, "_cts", new CancellationTokenSource());
+            // WHY: Exercise the formatter's empty-result branch rather than the inactive-panel early return.
+            SetPrivateField(panel, "_lifecycleActive", true);
 
             int completionCalls = 0;
             panel.OnAiResponseCompleted += _ => completionCalls++;

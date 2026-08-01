@@ -40,7 +40,7 @@ For simple projects, choose one global mode on `CoreAISettingsAsset`:
 - `LocalModel` uses LLMUnity when the platform and scene provide an `LLMAgent`.
 - `ClientOwnedApi` calls an OpenAI-compatible endpoint with the user's provider key.
 - `ClientLimited` calls an OpenAI-compatible endpoint after local request and prompt-size checks.
-- `ServerManagedApi` calls a backend-owned proxy through `ServerManagedLlmClient` and keeps provider keys off the client. Games can set a dynamic JWT with `ServerManagedAuthorization.SetProvider(...)`.
+- `ServerManagedApi` calls a backend-owned proxy through `ServerManagedLlmClient` and keeps provider keys off the client. Games can set a dynamic JWT with `ServerManagedAuthorization.SetProvider(...)`. Динамические host-specific headers (например, атрибуция usage по уроку) подключаются через `ServerManagedAuthorization.SetRequestHeaderProvider(...)`: один immutable snapshot на invocation, с сохранением transport-owned auth/trace/idempotency headers; следующий invocation снимает новые значения даже при повторном использовании того же request object.
 - `Offline` uses deterministic test/demo responses.
 
 For mixed projects, use `LlmRoutingManifest` profiles. Each profile has its own `LlmExecutionMode`, backend settings, context window, and optional ClientLimited limits. Route entries map role ids such as `SmartChat`, `Analyzer`, or `*` to those profiles.
@@ -74,15 +74,42 @@ If the game adds a **child** `LifetimeScope` (VContainer parent = `CoreAILifetim
 
 `IAiPromptContextProvider` lets a game append per-request context such as current quest, lesson slot, learner profile, or world objective without mutating the static role prompt. `AiPromptComposer` appends these sections under `## Runtime Context`.
 
-`ScopedAgentMemoryStoreDecorator` and `IAgentMemoryScopeProvider` let projects isolate memory by tenant, user, session, topic, and role while preserving the old role-only key when no scope provider is registered. Lossless scope ids (including GUIDs) keep their legacy on-disk keys; a lossy id (one that sanitization would alter, or that mimics the hashed shape) gets a raw-length prefix plus a `-<12 hex>` hash suffix of the trimmed id, so distinct raw scopes can never collide into the same memory bucket.
+`IAgentMemoryScopeProvider` задаёт границу tenant/user/session/topic. Один канонический преобразователь ключа используется memory/flat chat, structured transcript, compacted summary и cancellation scope очереди. Любой непустой scope кодируется как `scope-v1-<64 lowercase hex>` от полного SHA-256 над injective length-prefixed tuple. Ни tenant/user/session/topic, ни role id не попадают в scoped filename и storage-error log; различие только регистром даёт разные lowercase hashes и не сталкивается на Windows/macOS. Пустой `AgentMemoryScope.Empty` сохраняет прежний bare role key байт-в-байт только для backward compatibility. Scoped facade не подхватывает этот общий legacy key автоматически: host явно выбирает identity-получателя миграции.
+
+`CoreAILifetimeScope` принимает provider двумя способами **до сборки контейнера**: компонент, наследующий `AgentMemoryScopeProviderBehaviour`, назначается в inspector-поле **Agent Memory Scope Provider**, либо код вызывает `SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` на неактивном GameObject и затем активирует scope. Там же host может вызвать `SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly)`. Оба setter-а после build бросают `InvalidOperationException`: молчаливая смена key space или backing store посреди запросов запрещена. `CorePortableInstaller` добавляет `DefaultAgentMemoryScopeProvider` только если host ещё не зарегистрировал свой provider, поэтому host instance всегда выигрывает default.
+
+```csharp
+public sealed class RedoSchoolMemoryScopeProvider : AgentMemoryScopeProviderBehaviour
+{
+    public string CurrentStudentId { get; private set; } = "";
+
+    public void SetStudent(string opaqueBackendStudentId)
+    {
+        CurrentStudentId = opaqueBackendStudentId ?? "";
+    }
+
+    public override AgentMemoryScope GetScope(string roleId)
+    {
+        return new AgentMemoryScope("redoschool", CurrentStudentId, "", "");
+    }
+}
+
+// Для code-only setup объект должен быть неактивен, пока VContainer не построен.
+scopeGameObject.SetActive(false);
+coreAiLifetimeScope.SetAgentMemoryScopeProvider(provider);
+coreAiLifetimeScope.SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly);
+scopeGameObject.SetActive(true);
+```
+
+`CurrentStudentId` здесь — стабильный opaque id авторизованного ученика из backend, используемый только для локального storage key. Его нельзя добавлять в prompt, логи или provider body. В частности, OpenRouter `session_id` — отдельный application/agent-cohort routing id и **никогда не student id**. Если один процесс действительно обслуживает учеников параллельно, provider обязан хранить scope в request-local контексте, а не в одной глобальной mutable строке; пример выше рассчитан на Unity-клиент с одним текущим авторизованным учеником.
 
 `IConversationContextManager` prepares long chat history before each LLM call. The default `DeterministicConversationContextManager` keeps recent messages in `ChatHistory` and compacts older turns into a `## Conversation Summary` system section using `IConversationSummaryStore`. **`RegisterCorePortable`** registers **`InMemoryConversationSummaryStore`** by default so summaries accumulate across turns for each role for the process lifetime. **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) plus **`ITokenEstimator`** (`HeuristicTokenEstimator`) allocate a **`HistoryTokenBudget`** from the role/context window minus reserved completion headroom and an estimate of system + user + tool-contract text — this replaces the legacy fixed `ContextTokens/2` split.
 
-`CoreAILifetimeScope` registers **`FileConversationSummaryStore`** at `%persistentDataPath%/CoreAI/ConversationSummaries` (non-WebGL targets), then calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** so persistence survives app restarts and the host’s **`FileAgentMemoryStore`** is the sole **`IAgentMemoryStore`** (since **v1.5.22** — avoids a duplicate **`NullAgentMemoryStore`** registration that caused **`VContainerException`** at scope build). **`UNITY_WEBGL`** skips file-backed summaries and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: false, suppressDefaultAgentMemoryStore: true)`** so **`InMemoryConversationSummaryStore`** applies — synchronous **`File`** access on WebGL maps to IndexedDB and would stall the main thread each turn (since **v1.5.20**). **WebGL player** still registers **`FileAgentMemoryStore`** + **`IConversationTranscriptStore`** (since **v1.6.19**): chat/memory JSON under **`persistentDataPath`** is flushed to IndexedDB after writes via **`CoreAi_PersistFsSync`** (**`CoreAiPersistFs.jslib`**), so history survives reload when **`Application.Quit`** does not run. Hosts that only call **`RegisterCorePortable()`** keep the portable in-memory summaries and default **`NullAgentMemoryStore`**. **`NullConversationSummaryStore`** remains for diagnostics/tests that disable accumulation. Composition note for custom hosts: register your **`IConversationSummaryStore`** implementation first, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`**; if you register your own **`IAgentMemoryStore`**, pass **`suppressDefaultAgentMemoryStore: true`** as well.
+`CoreAILifetimeScope` регистрирует backing stores отдельно от публичных контрактов. Режим `Persistent` остаётся backward-compatible default: private `FileAgentMemoryStore` обслуживает desktop и WebGL (`persistentDataPath` + `CoreAi_PersistFsSync`), desktop использует private `FileConversationSummaryStore`, а WebGL — `InMemoryConversationSummaryStore` для summaries. Режим `SessionOnly` заменяет оба private backing-а на `InMemoryAgentMemoryStore` и `InMemoryConversationSummaryStore`: memory document, flat chat, structured transcript и compacted summary живут только до завершения процесса и не создают файлов. В обоих режимах наружу выдаются те же scoped memory/transcript/summary decorators, а `RegisterCorePortable(... suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)` не добавляет конкурирующие defaults. Backing stores сохраняют собственную блокировку и atomic-mutation семантику; `ScopedAgentMemoryStoreDecorator` также проксирует `IAtomicAgentMemoryStore` на уже вычисленный scoped key и использует безопасный per-key fallback, если произвольный inner store не имеет native atomic capability.
 
 If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChatClient` maps HTTP 413 and common overload bodies/messages), **`AiOrchestrator`** may retry **bounded** rebuilds up to **`ICoreAISettings.MaxContextOverflowRetries`** (default `3`, `0` disables). Each retry increments **`ContextRetryLevel`**, and **`DefaultContextBudgetPolicy`** applies a **`0.75^level`** history-budget factor so older history is dropped progressively. Coordinating interface: **`IConversationCompactionCoordinator`** (default **`DefaultConversationCompactionCoordinator`**).
 
-`FileAgentMemoryStore` implements **`IConversationTranscriptStore`**: structured **`ConversationEntry`** rows (tool hooks for future callers) migrate from legacy flat **`chatHistoryJson`** when `transcriptEntriesJson` is absent.
+`FileAgentMemoryStore` по-прежнему реализует `IConversationTranscriptStore`: structured `ConversationEntry` мигрируют из legacy flat `chatHistoryJson`, если `transcriptEntriesJson` отсутствует. `InMemoryAgentMemoryStore` реализует те же memory/chat/transcript и atomic-mutation capabilities без filesystem API. Выбранный production backing не публикуется напрямую ни как memory, ни как transcript, чтобы raw role key нельзя было обойти через DI resolve.
 
 ## Timeout & Retry Rule (v1.5.1)
 

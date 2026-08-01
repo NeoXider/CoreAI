@@ -265,7 +265,7 @@ namespace CoreAI
                 return Array.Empty<string>();
             }
 #else
-            return System.Array.Empty<string>();
+            return Array.Empty<string>();
 #endif
         }
 

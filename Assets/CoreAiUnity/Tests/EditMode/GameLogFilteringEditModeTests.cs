@@ -32,7 +32,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AllBuiltIn_ContainsMetrics()
         {
-            Assert.AreEqual(63, (int)GameLogFeature.AllBuiltIn, "Core|Composition|MessagePipe|ExampleRoguelite|Llm|Metrics = 1+2+4+8+16+32");
+            Assert.AreEqual(63, (int)GameLogFeature.AllBuiltIn,
+                "Core|Composition|MessagePipe|ExampleRoguelite|Llm|Metrics = 1+2+4+8+16+32");
             Assert.IsTrue((GameLogFeature.AllBuiltIn & GameLogFeature.Metrics) != 0);
         }
 
@@ -301,7 +302,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(GameLogSettingsAsset.TryMigrateFeatures(0, legacyBeforeLlm, out GameLogFeature fromOldest));
             Assert.AreEqual(GameLogFeature.AllBuiltIn, fromOldest);
 
-            Assert.IsTrue(GameLogSettingsAsset.TryMigrateFeatures(0, legacyBeforeMetrics, out GameLogFeature fromRecent));
+            Assert.IsTrue(
+                GameLogSettingsAsset.TryMigrateFeatures(0, legacyBeforeMetrics, out GameLogFeature fromRecent));
             Assert.AreEqual(GameLogFeature.AllBuiltIn, fromRecent);
         }
 

@@ -127,17 +127,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             Assert.Less((at1 - new Vector3(4f, 1f, 2f)).magnitude, 1e-5f);
         }
 
-        private static float NextCoord(System.Random rng)
+        private static float NextCoord(Random rng)
         {
             return (float)(rng.NextDouble() * 2000.0 - 1000.0);
         }
 
-        private static float NextAngle(System.Random rng)
+        private static float NextAngle(Random rng)
         {
             return (float)(rng.NextDouble() * 720.0 - 360.0);
         }
 
-        private static RbxCFrame RandomCFrame(System.Random rng)
+        private static RbxCFrame RandomCFrame(Random rng)
         {
             RbxCFrame rotation = RbxCFrame.FromEulerAnglesXYZ(
                 NextAngle(rng) * Mathf.Deg2Rad,

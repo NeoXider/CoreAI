@@ -956,7 +956,7 @@ Ordering changes vs. the seed roadmap, with justification:
 ## 5. MVP1 and MVP2 in detail
 
 New code home: `Assets/CoreAIMods/Runtime/RobloxApi/` (asmdef: part of `CoreAI.Mods`), all files
-guarded `#if !COREAI_NO_LUA` where they touch the VM adapter, namespace `CoreAI.Mods.Rbx`.
+guarded `#if COREAI_LUA` where they touch the VM adapter, namespace `CoreAI.Mods.Rbx`.
 C# classes use the `Rbx` prefix to avoid colliding with Unity types (`RbxInstance` vs. Unity
 `Object`); the *Lua-visible* names are unprefixed Roblox names. Rule IDs cited below refer to
 the normative docs in §2.1.

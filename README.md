@@ -31,7 +31,7 @@
 LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is the missing production layer between a chat box and your gameplay: the model doesn't just talk — it **calls your C# and Lua**, and the framework handles the messy reality of small local models (wrong tool casing, split streaming tags, runaway loops, rate limits, context overflow) so your game doesn't break.
 
 - 🆓 **Works out of the box, scales to production** — one-liner `await CoreAi.AskAsync("…")` for your first feature; full `AgentBuilder` + orchestrator + per-role routing when you need it.
-- 🧩 **No forced heavy dependencies** — LLM and Lua are **optional modules** (`COREAI_NO_LLM` / `COREAI_NO_LUA`, auto-detected from installed packages). Install only what your game uses.
+- 🧩 **Provider backends are opt-in** — portable orchestration, scripted/stub clients, chat contracts/UI, and the required MEAI assemblies stay available in every build. Add `COREAI_LLM` for provider-backed HTTP/MEAI/LLMUnity implementations, `COREAI_LUA` for Lua, or both for the full provider + Lua runtime.
 - 🛡️ **Built for small local models** — auto-repairs tool-name casing, retries with feedback, survives streaming `<think>` splits, caps runaway generation. Recorded live checks on **Qwen3.5-4B** cover real memory and world-command tool calls; deterministic suites use stubs.
 
 ### Is it for you?
@@ -445,7 +445,7 @@ The repository ships as **six UPM packages**. Only the first two are required; M
 | Package | What's inside | Depends on |
 |---------|--------------|--------------|
 | **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity: orchestration, tools, memory, routing | — |
-| **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), LLM clients (MEAI), MessagePipe, chat UI, tests | `coreai` |
+| **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity host — DI (VContainer), MessagePipe, chat UI and tests; provider-backed MEAI/HTTP/LLMUnity clients compile with `COREAI_LLM` | `coreai` |
 | **[com.neoxider.coreaimods](Assets/CoreAIMods)** | Optional Lua modding layer — Lua-CSharp sandbox, `execute_lua` / `manage_mods` tools, mod runtime | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaihub](Assets/CoreAIHub)** | Optional UI Toolkit Hub window — tabbed pages (Chat, Settings, Statistics, Mods) with reusable grouped **sub-tabs** (e.g. Mods + Logs) | `coreai` + `coreaiunity` |
 | **[com.neoxider.coreaibenchmark](Assets/CoreAIBenchmark)** | Dev/test-only LLM game-creation benchmark harness | `coreai` + `coreaiunity` + `coreaimods` |
@@ -483,8 +483,8 @@ See [INSTALL.md](INSTALL.md) for step-by-step instructions per profile.
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                     LLM Client (MeaiLlmClient)               │
-│  • LLMUnity (local GGUF)  • OpenAI HTTP  • Stub             │
+│                         LLM Client                          │
+│  • Scripted/Stub always  • HTTP/MEAI/LLMUnity: COREAI_LLM │
 │  • TryExtractToolCallsFromText (JSON-in-text → tool call)    │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓

@@ -23,7 +23,8 @@ namespace CoreAI.Ai
     public static class LlmErrorPresentation
     {
         /// <summary>Fallback shown when nothing more specific is known.</summary>
-        public const string DefaultUserMessage = "The assistant is unavailable right now. Please try again in a moment.";
+        public const string DefaultUserMessage =
+            "The assistant is unavailable right now. Please try again in a moment.";
 
         /// <summary>Longest server-authored message that is shown to the player as-is.</summary>
         public const int MaxUserMessageLength = 400;
@@ -220,10 +221,14 @@ namespace CoreAI.Ai
         }
 
         /// <summary>401-class failure: its body is treated as secret-bearing everywhere.</summary>
-        private static bool IsAuthFailure(LlmClientException exception) =>
-            exception.HttpStatus == 401 || exception.ErrorCode == LlmErrorCode.AuthExpired;
+        private static bool IsAuthFailure(LlmClientException exception)
+        {
+            return exception.HttpStatus == 401 || exception.ErrorCode == LlmErrorCode.AuthExpired;
+        }
 
-        private static string Coalesce(string preferred, string fallback) =>
-            string.IsNullOrWhiteSpace(preferred) ? fallback : preferred.Trim();
+        private static string Coalesce(string preferred, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(preferred) ? fallback : preferred.Trim();
+        }
     }
 }

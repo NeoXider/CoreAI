@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -101,7 +101,7 @@ namespace CoreAI.Core.Tests.EditMode
         {
             ReplayableStreamingClient inner = new(
                 new LlmClientException("transient backend fault", code, httpStatus == 0 ? null : httpStatus),
-                failingOpens: 2);
+                2);
             RetryingStreamingLlmClientDecorator sut = new(inner, 3, _ => TimeSpan.Zero);
 
             List<LlmStreamChunk> chunks = await DrainAsync(sut);

@@ -646,7 +646,8 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Cancels queued/in-flight orchestrator work for <paramref name="cancellationScope"/> (typically a role id).
+        /// Cancels queued/in-flight orchestrator work for <paramref name="cancellationScope"/> in the current
+        /// identity partition of every matching role. The scope may be a role id or a domain scope.
         /// </summary>
         public static void StopAgent(string cancellationScope)
         {
@@ -670,24 +671,40 @@ namespace CoreAI
                     {
                         IAgentMemoryStore? memStore =
                             (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
-                        if (memStore != null)
-                        {
-                            if (clearLongTermMemory)
-                            {
-                                memStore.Clear(roleId);
-                            }
-
-                            if (clearChatHistory)
-                            {
-                                memStore.ClearChatHistory(roleId);
-                            }
-                        }
+                        IConversationSummaryStore? summaryStore = clearChatHistory
+                            ? (IConversationSummaryStore)_scope.Container.Resolve(typeof(IConversationSummaryStore))
+                            : null;
+                        ClearContextStores(
+                            memStore,
+                            summaryStore,
+                            roleId,
+                            clearChatHistory,
+                            clearLongTermMemory);
                     }
                     catch (Exception ex)
                     {
                         LogFacadeWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
                     }
                 }
+            }
+        }
+
+        internal static void ClearContextStores(
+            IAgentMemoryStore memoryStore,
+            IConversationSummaryStore? summaryStore,
+            string roleId,
+            bool clearChatHistory,
+            bool clearLongTermMemory)
+        {
+            if (clearLongTermMemory)
+            {
+                memoryStore?.Clear(roleId);
+            }
+
+            if (clearChatHistory)
+            {
+                memoryStore?.ClearChatHistory(roleId);
+                summaryStore?.ClearSummary(roleId);
             }
         }
 

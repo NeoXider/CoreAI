@@ -146,7 +146,7 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             return new RbxError(RbxErrorCode.WorldDetached,
                 operation + " failed: the RbxWorldHost that owned this world was destroyed, so the "
-                + "world these scripts hold is no longer backed by the scene",
+                          + "world these scripts hold is no longer backed by the scene",
                 "reload the mods so they bind to the current world; a host is destroyed by a scene "
                 + "load, a domain reload during play, or leaving play mode");
         }

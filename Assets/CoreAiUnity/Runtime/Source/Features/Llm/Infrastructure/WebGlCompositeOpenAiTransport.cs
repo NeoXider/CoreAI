@@ -1,4 +1,4 @@
-#if UNITY_WEBGL && !UNITY_EDITOR && !COREAI_NO_LLM
+#if UNITY_WEBGL && !UNITY_EDITOR && COREAI_LLM
 using System;
 using System.Threading;
 using System.Threading.Tasks;

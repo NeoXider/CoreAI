@@ -11,7 +11,7 @@ using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
 {
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     /// <summary>
     /// Verifies that <see cref="ICoreAISettings.MaxTokens"/> is uniformly forwarded into
     /// <c>ChatOptions.MaxOutputTokens</c> for both non-streaming and streaming code paths,

@@ -5,8 +5,8 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-07-22. Current lockstep package version: 5.9.0 (unreleased; last release 5.8.10).
-Next release: **6.0.0** (major — breaking mod contract, see [Release plan](#4-release-plan)).
+Last updated: 2026-08-01. Current lockstep package version: **7.0.0 release candidate**.
+The release is a major compile-contract and multi-user isolation update; see [Release plan](#4-release-plan).
 
 ---
 
@@ -52,20 +52,23 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Five UPM packages, released in lockstep (all currently 5.9.0-unreleased):
+Six UPM packages, released in lockstep (all currently 7.0.0 release candidates):
 
 | Package | What it is |
 |---|---|
 | `com.neoxider.coreai` (`Assets/CoreAI`) | Portable C# core, no UnityEngine dependency: orchestration, function-calling tools, agent memory, `AgentBuilder`, skills, resilience decorators (retry/timeout/fallback/circuit-breaker), multi-endpoint LLM routing contracts. |
-| `com.neoxider.coreaiunity` (`Assets/CoreAiUnity`) | Unity layer: chat UI, streaming, LLMUnity + HTTP backends, world commands, persistence, settings, demos glue. |
+| `com.neoxider.coreaiunity` (`Assets/CoreAiUnity`) | Unity layer: always-available chat UI, orchestration wiring and persistence; provider-backed HTTP/MEAI/LLMUnity implementations compile with `COREAI_LLM`; world commands, settings and demo glue. |
 | `com.neoxider.coreaimods` (`Assets/CoreAIMods`) | Lua modding layer: Lua-CSharp sandbox (AOT/WebGL-safe), script-engine seam, mod runtime + stores, Luau downleveler, Lua log service, `execute_lua` / `manage_mods` tools, the Roblox-like API (in progress). |
 | `com.neoxider.coreaihub` (`Assets/CoreAIHub`) | UI Toolkit Hub window: tabbed pages (Chat, Settings, Statistics, Mods, C#/Lua-authored pages) over `HubPageRegistry`. |
 | `com.neoxider.coreaibenchmark` (`Assets/CoreAIBenchmark`) | Game-creation benchmark harness (G1–G8 PlayMode scenarios), scoring, model leaderboard. |
+| `com.neoxider.coreaimcp` (`Assets/CoreAIMcp`) | Optional in-game MCP server for loopback-only control of the running game by an external MCP client. |
 
 Dependency direction: `coreai` ← `coreaiunity` ← (`coreaimods`, `coreaihub`);
-`coreaibenchmark` depends on `coreai` + `coreaiunity` + `coreaimods` (not on the hub).
-LLM and Lua are optional modules (`COREAI_NO_LLM` / `COREAI_NO_LUA`); the core compiles without
-either.
+`coreaibenchmark` and `coreaimcp` depend on `coreai` + `coreaiunity` + `coreaimods` (not on the hub).
+Provider implementations and Lua are independent positive opt-in modules: `COREAI_LLM` enables
+provider-backed HTTP/MEAI/LLMUnity clients/transports, while `COREAI_LUA` enables Lua. Portable
+orchestration/chat, scripted/stub clients, tool contracts and required MEAI references remain in Core
+with neither symbol; both symbols enable the full provider + Lua runtime.
 
 ## 3. Tracks
 
@@ -238,17 +241,13 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 
 ## 4. Release plan
 
-- **6.0.0 (next release).** Major bump — the Roblox-like mod API is a breaking change to the mod
-  contract. Scope: the current starting-point state (the 5.9.0-aligned unreleased wave: engine
-  seam, quarantine policy, Luau downleveler, log-service core, multi-endpoint routing, syntax
-  highlighting) **plus Roblox API MVP0–MVP2** (seam complete, Instance/DataModel core, scheduler/
-  signals/services framework with loud stubs). All six packages bump together (lockstep is the
-  standing rule).
-- **6.x minors.** Subsequent MVP rungs of the ladder ship as 6.x minors, roughly one or a few
-  rungs per minor (MVP3 worlds/backups, MVP4 RBXL, MVP5 mod UX, MVP6 skill-docs, … MVP11+
-  Mirror). The R4 runtime-UI wave is the flagship of an early 6.x minor. Patch releases carry
-  fixes only; every release passes the full EditMode/PlayMode gates and updates changelogs in
-  all touched packages.
+- **7.0.0 (current release candidate, 2026-08-01).** Breaking migration to independent positive
+  provider/Lua symbols, full-demo repository baseline, four-leg CI matrix, opaque multi-user
+  persistence keys, scope-aware cancellation, session-only persistence, prompt-cache layering and
+  chat lifecycle hardening. All six packages remain lockstep at 7.0.0.
+- **7.x minors.** Subsequent Roblox API and runtime-UI rungs ship as compatible 7.x minors. Patch
+  releases carry fixes only; every release passes the full EditMode/PlayMode gates and updates the
+  changelog for every touched package.
 - **Mod `api_version`.** The `mod.json` `api_version` line is a **separate contract, starting
   at 1**, independent of the package semver. It increments only when the mod-facing API breaks;
   the loader version-gates mods against the host's supported API version (ROBLOX_API_ROADMAP

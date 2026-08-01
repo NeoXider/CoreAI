@@ -6,6 +6,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using Newtonsoft.Json.Linq;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
@@ -31,7 +32,7 @@ namespace CoreAI.Tests.PlayMode
         public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle,
             IAgentMemoryStore memoryStore)
         {
-#if COREAI_NO_LLM || UNITY_WEBGL
+#if !COREAI_LLM || UNITY_WEBGL
             // In this build target, we do not use LLMUnity and may not have HTTP client types compiled.
             // Just return the resolved client as-is.
             return handle.Client;
@@ -80,7 +81,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class InMemoryStore : IAgentMemoryStore
     {
         public readonly Dictionary<string, AgentMemoryState> States = new();
-        public readonly Dictionary<string, List<Ai.ChatMessage>> ChatHistories = new();
+        public readonly Dictionary<string, List<ChatMessage>> ChatHistories = new();
 
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
@@ -104,20 +105,20 @@ namespace CoreAI.Tests.PlayMode
 
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<Ai.ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<ChatMessage> list))
             {
-                list = new List<Ai.ChatMessage>();
+                list = new List<ChatMessage>();
                 ChatHistories[roleId] = list;
             }
 
-            list.Add(new Ai.ChatMessage(role, content ?? ""));
+            list.Add(new ChatMessage(role, content ?? ""));
         }
 
-        public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<Ai.ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<ChatMessage> list))
             {
-                return Array.Empty<Ai.ChatMessage>();
+                return Array.Empty<ChatMessage>();
             }
 
             if (maxMessages <= 0)
@@ -444,8 +445,8 @@ namespace CoreAI.Tests.PlayMode
             out string ignoreReason)
         {
             handle = null;
-#if COREAI_NO_LLM
-            ignoreReason = "COREAI_NO_LLM: HTTP LLM clients are excluded from build.";
+#if !COREAI_LLM
+            ignoreReason = "COREAI_LLM is not set: HTTP LLM clients are excluded from the build.";
             return false;
 #else
             // Unified resolution surface: env vars > gitignored local file > project defaults (opt-in).
@@ -464,6 +465,14 @@ namespace CoreAI.Tests.PlayMode
                     config.Model,
                     temperature,
                     timeoutSeconds);
+                if (!string.IsNullOrWhiteSpace(config.ExtraBodyJson))
+                {
+                    JObject extraBody = JObject.Parse(config.ExtraBodyJson);
+                    foreach (JProperty property in extraBody.Properties())
+                    {
+                        httpSettings.SetProviderBodyParameter(property.Name, property.Value);
+                    }
+                }
 
                 // Behavioral config (streaming etc.) carried by an ICoreAISettings snapshot.
                 CoreAISettingsAsset behavior = BuildBehaviorSettings(config.Streaming, timeoutSeconds);
@@ -516,7 +525,7 @@ namespace CoreAI.Tests.PlayMode
 #endif
         }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         /// <summary>
         /// Builds a throwaway <see cref="CoreAISettingsAsset"/> carrying the resolved behavioral flags
         /// (streaming, orchestration timeout). The asset has no public streaming setter, so the serialized
@@ -564,8 +573,8 @@ namespace CoreAI.Tests.PlayMode
             out string ignoreReason)
         {
             handle = null;
-#if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            ignoreReason = "  COREAI_NO_LLM  LLMUnity .";
+#if !COREAI_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
+            ignoreReason = "COREAI_LLM is not set, or LLMUnity is unavailable on this platform.";
             return false;
 #else
             string agentName = settings?.LlmUnityAgentName;
@@ -609,7 +618,7 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     /// <summary>
     /// Forwarding <see cref="ILlmClient"/> decorator that forces native tool calling OFF, so the
     /// orchestrator falls back to the text/prompt tool contract. Used by the live-suite config when

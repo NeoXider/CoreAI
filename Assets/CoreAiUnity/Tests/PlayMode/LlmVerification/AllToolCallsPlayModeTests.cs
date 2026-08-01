@@ -27,7 +27,7 @@ namespace CoreAI.Tests.PlayMode
     /// Runs against LLMUnity, an OpenAI-compatible HTTP API, or automatic backend selection.
     /// Select the backend with COREAI_PLAYMODE_LLM_BACKEND and related test settings.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class AllToolCallsPlayModeTests
     {
         private sealed class InMemoryStore : IAgentMemoryStore

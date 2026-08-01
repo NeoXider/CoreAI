@@ -33,7 +33,7 @@ namespace CoreAI.Tests.PlayMode
     /// The test verifies that the model called read_skill AND used the correct secret values.
     /// </para>
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class SkillSetReadSkillVerificationPlayModeTests
     {
         private const int ComplexTurnTimeoutSeconds = 240;

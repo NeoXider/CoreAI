@@ -1,3 +1,8 @@
+using System;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -30,5 +35,146 @@ namespace CoreAI.Ai
 
         /// <summary>Default empty scope that preserves role-only memory keys.</summary>
         public static AgentMemoryScope Empty => new("", "", "", "");
+    }
+
+    /// <summary>
+    /// Single canonical role/scope key mapping shared by memory, chat, transcript, and conversation summaries.
+    /// Internal so persistence adapters cannot accidentally invent a second encoding.
+    /// </summary>
+    internal static class AgentMemoryScopeKey
+    {
+        internal const string ScopedKeyPrefix = "scope-v1-";
+
+        internal static string Resolve(IAgentMemoryScopeProvider scopeProvider, string roleId)
+        {
+            roleId = NormalizeRoleId(roleId);
+            AgentMemoryScope scope = AgentMemoryScopeExecutionContext.TryGet(out AgentMemoryScope captured)
+                ? captured
+                : (scopeProvider ?? new DefaultAgentMemoryScopeProvider()).GetScope(roleId);
+            return Resolve(scope, roleId);
+        }
+
+        internal static string Resolve(AgentMemoryScope scope, string roleId)
+        {
+            roleId = NormalizeRoleId(roleId);
+            if (string.IsNullOrWhiteSpace(scope.TenantId) &&
+                string.IsNullOrWhiteSpace(scope.UserId) &&
+                string.IsNullOrWhiteSpace(scope.SessionId) &&
+                string.IsNullOrWhiteSpace(scope.TopicId))
+            {
+                return roleId;
+            }
+
+            // WHY: Scoped ids commonly contain account/learner PII. Persisting the old readable,
+            // length-prefixed mapping exposed those ids in filenames and could collide on a
+            // case-insensitive filesystem when two identities differed only by case. A full digest
+            // is opaque and turns case differences into unrelated lowercase filenames.
+            StringBuilder canonical = new(128);
+            AppendCanonicalPart(canonical, scope.TenantId);
+            AppendCanonicalPart(canonical, scope.UserId);
+            AppendCanonicalPart(canonical, scope.SessionId);
+            AppendCanonicalPart(canonical, scope.TopicId);
+            AppendCanonicalPart(canonical, roleId);
+            return ScopedKeyPrefix + Sha256Hex(canonical.ToString());
+        }
+
+        private static string NormalizeRoleId(string roleId)
+        {
+            return string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
+        }
+
+        /// <summary>
+        /// Length-prefixes every trimmed component before hashing, keeping the tuple encoding injective.
+        /// Empty-scope bare-role data is deliberately not folded into this encoding: importing a legacy
+        /// role file into a user scope must be an explicit host migration so the first scoped user cannot
+        /// accidentally claim data that used to be shared by every user of that role.
+        /// </summary>
+        private static void AppendCanonicalPart(StringBuilder sb, string value)
+        {
+            string raw = value?.Trim() ?? "";
+            sb.Append(raw.Length).Append(':').Append(raw).Append(';');
+        }
+
+        private static string Sha256Hex(string value)
+        {
+            byte[] digest;
+            using (SHA256 sha = SHA256.Create())
+            {
+                digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
+            }
+
+            StringBuilder sb = new(digest.Length * 2);
+            for (int i = 0; i < digest.Length; i++)
+            {
+                sb.Append(digest[i].ToString("x2"));
+            }
+
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Carries an immutable enqueue-time memory scope across asynchronous orchestration execution.
+    /// </summary>
+    internal static class AgentMemoryScopeExecutionContext
+    {
+        private static readonly AsyncLocal<Frame> Current = new();
+
+        internal static IDisposable Push(AgentMemoryScope scope)
+        {
+            Frame previous = Current.Value;
+            Frame frame = new(scope);
+            Current.Value = frame;
+            return new Lease(frame, previous);
+        }
+
+        internal static bool TryGet(out AgentMemoryScope scope)
+        {
+            Frame frame = Current.Value;
+            if (frame == null)
+            {
+                scope = AgentMemoryScope.Empty;
+                return false;
+            }
+
+            scope = frame.Scope;
+            return true;
+        }
+
+        private sealed class Frame
+        {
+            internal Frame(AgentMemoryScope scope)
+            {
+                Scope = scope;
+            }
+
+            internal AgentMemoryScope Scope { get; }
+        }
+
+        private sealed class Lease : IDisposable
+        {
+            private readonly Frame _owned;
+            private readonly Frame _previous;
+            private int _disposed;
+
+            internal Lease(Frame owned, Frame previous)
+            {
+                _owned = owned;
+                _previous = previous;
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(Current.Value, _owned))
+                {
+                    Current.Value = _previous;
+                }
+            }
+        }
     }
 }

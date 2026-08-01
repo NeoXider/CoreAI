@@ -12,10 +12,13 @@ namespace CoreAI.Editor
     /// <summary>
     /// Enable / disable the optional CoreAI modules from the editor:
     /// <list type="bullet">
+    /// <item><b>LLM providers</b> — provider-backed HTTP/MEAI/LLMUnity implementations, enabled
+    /// explicitly with <c>COREAI_LLM</c>. Portable orchestration, chat, and scripted/stub clients
+    /// remain available without the symbol.</item>
     /// <item><b>Lua (Lua-CSharp)</b> — the managed, AOT-safe Lua runtime ships bundled inside the
-    /// <c>com.neoxider.coreaimods</c> package (no external package to install). It is compiled in by
-    /// default; the <c>COREAI_NO_LUA</c> scripting define compiles every Lua feature out for builds that
-    /// do not want scripting (the runtime guards on <c>!COREAI_NO_LUA</c>).</item>
+    /// <c>com.neoxider.coreaimods</c> package (no external package to install). Lua is disabled by
+    /// default; the <c>COREAI_LUA</c> scripting define opts a target into the runtime and its security
+    /// surface (the runtime guards on <c>COREAI_LUA</c>).</item>
     /// <item><b>LLMUnity</b> — package <c>ai.undream.llm</c>; its presence sets <c>COREAI_HAS_LLMUNITY</c>.</item>
     /// </list>
     /// "Enable + Update" runs <see cref="Client.Add(string)"/> with the canonical git URL, which both
@@ -26,16 +29,44 @@ namespace CoreAI.Editor
         private const string LlmUnityId = "ai.undream.llm";
         private const string LlmUnityUrl = "https://github.com/undreamai/LLMUnity.git";
 
-        private const string NoLuaDefine = "COREAI_NO_LUA";
+        private const string LlmDefine = "COREAI_LLM";
+        private const string LuaDefine = "COREAI_LUA";
 
         private static bool _busy;
+
+        [MenuItem("CoreAI/Setup/Modules/LLM Providers/Enable Providers", priority = 0)]
+        public static void EnableLlm()
+        {
+            SetDefine(LlmDefine, true);
+            EditorUtility.DisplayDialog("CoreAI Modules",
+                "LLM providers enabled. Concrete HTTP/MEAI and available LLMUnity implementations now " +
+                "compile for the current build target. Portable orchestration, chat, and scripted/stub " +
+                "clients are always available. COREAI_LUA remains an independent opt-in.",
+                "OK");
+        }
+
+        [MenuItem("CoreAI/Setup/Modules/LLM Providers/Disable Providers", priority = 1)]
+        public static void DisableLlm()
+        {
+            if (!EditorUtility.DisplayDialog("CoreAI Modules",
+                    "Disable provider-backed LLM implementations by removing COREAI_LLM?\n\nHTTP/MEAI/" +
+                    "LLMUnity provider clients and their focused tests compile out. Portable orchestration, " +
+                    "chat, scripted/stub clients, and required MEAI contracts remain available. Lua stays " +
+                    "independently controlled by COREAI_LUA.",
+                    "Disable", "Cancel"))
+            {
+                return;
+            }
+
+            SetDefine(LlmDefine, false);
+        }
 
         // ----------------------------------------------------------------- Lua (Lua-CSharp)
 
         [MenuItem("CoreAI/Setup/Modules/Lua (Lua-CSharp)/Enable Lua", priority = 0)]
         public static void EnableLua()
         {
-            SetDefine(NoLuaDefine, false);
+            SetDefine(LuaDefine, true);
             EditorUtility.DisplayDialog("CoreAI Modules",
                 "Lua enabled. The Lua-CSharp runtime is bundled with the CoreAI Mods package — there is " +
                 "no external package to install. Scripts recompile with all Lua features (sandbox, mods, " +
@@ -47,7 +78,7 @@ namespace CoreAI.Editor
         public static void DisableLua()
         {
             if (!EditorUtility.DisplayDialog("CoreAI Modules",
-                    "Disable Lua via COREAI_NO_LUA?\n\nEvery Lua feature (sandbox, mods, logic slots, Full " +
+                    "Disable Lua by removing COREAI_LUA?\n\nEvery Lua feature (sandbox, mods, logic slots, Full " +
                     "reflection) compiles out. The bundled Lua-CSharp assembly stays in the project; only " +
                     "the CoreAI Lua surface is removed. Re-enable from the same menu.",
                     "Disable", "Cancel"))
@@ -55,7 +86,7 @@ namespace CoreAI.Editor
                 return;
             }
 
-            SetDefine(NoLuaDefine, true);
+            SetDefine(LuaDefine, false);
         }
 
         // ----------------------------------------------------------------- LLMUnity
@@ -94,14 +125,18 @@ namespace CoreAI.Editor
             Pump(list, () =>
             {
                 string llmunity = DescribePackage(list, LlmUnityId);
-                bool noLua = HasDefine(NoLuaDefine);
+                bool llmEnabled = HasDefine(LlmDefine);
+                bool luaEnabled = HasDefine(LuaDefine);
 
                 string message =
+                    $"COREAI_LLM define: {(llmEnabled ? "SET (providers enabled)" : "not set")}\n" +
+                    $"-> Provider-backed LLM implementations: {(llmEnabled ? "ENABLED" : "disabled")}\n" +
+                    "-> Portable orchestration/chat + scripted/stub clients: ENABLED\n\n" +
                     $"Lua runtime: Lua-CSharp (bundled with CoreAI Mods)\n" +
-                    $"COREAI_NO_LUA define: {(noLua ? "SET (Lua disabled)" : "not set")}\n" +
-                    $"-> Lua effective: {(noLua ? "disabled" : "ENABLED")}\n\n" +
+                    $"COREAI_LUA define: {(luaEnabled ? "SET (Lua enabled)" : "not set")}\n" +
+                    $"-> Lua effective: {(luaEnabled ? "ENABLED" : "disabled")}\n\n" +
                     $"LLMUnity package: {llmunity}\n" +
-                    $"-> Local LLM effective: {(llmunity != "not installed" ? "ENABLED" : "disabled")}";
+                    $"-> Local LLM effective: {(llmEnabled && llmunity != "not installed" ? "ENABLED" : "disabled")}";
 
                 EditorUtility.DisplayDialog("CoreAI - Module status", message, "OK");
             });

@@ -2,7 +2,7 @@
 
 Status: DRAFT (implementation contract for subagents). All code, comments, identifiers,
 and commit messages are English. Guard every Lua/mod C# file with
-`#if !COREAI_NO_LUA`. Never hand-create Unity `.meta` files.
+`#if COREAI_LUA`. Never hand-create Unity `.meta` files.
 Do not run `git commit` in subagent tasks — the orchestrator commits after review.
 
 ## 0. Goals
@@ -234,7 +234,7 @@ Fixes:
 
 - WebGL: `Resources` works; `StreamingAssets` needs `UnityWebRequest`; `FileLuaModSourceStore` already
   flushes IDBFS. Keep the seeder synchronous only for the Resources source; async for the rest.
-- `COREAI_NO_LUA` builds: everything guarded; the core compiles with Lua fully stripped out
+- Default builds omit Lua; `COREAI_LUA` builds include the guarded Lua surfaces
   (the Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll`, so there is no
   external package to omit).
 - All five `com.neoxider.coreai*` packages bump in lockstep at release time.

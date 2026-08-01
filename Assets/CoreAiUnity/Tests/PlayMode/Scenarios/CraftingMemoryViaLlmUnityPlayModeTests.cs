@@ -20,7 +20,7 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// PlayMode scenario that verifies crafting memory across multiple LLMUnity-backed turns.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class CraftingMemoryViaLlmUnityPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;

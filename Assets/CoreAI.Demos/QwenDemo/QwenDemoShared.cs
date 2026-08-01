@@ -402,6 +402,14 @@ namespace CoreAI.Demos.QwenDemo
             return property != null && property.GetValue(source) is T propertyValue ? propertyValue : default;
         }
 
+#if !COREAI_LLM
+        private static Task<bool> ProbeHttpAsync(int port, CancellationToken cancellationToken)
+        {
+            _ = port;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(false);
+        }
+#else
         private static async Task<bool> ProbeHttpAsync(int port, CancellationToken cancellationToken)
         {
             ILlmEndpointReadinessProbe probe = new UnityWebRequestOpenAiReadinessProbe();
@@ -415,6 +423,7 @@ namespace CoreAI.Demos.QwenDemo
                 cancellationToken);
             return result.IsReady;
         }
+#endif
     }
 
     /// <summary>

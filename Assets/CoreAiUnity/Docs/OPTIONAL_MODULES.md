@@ -1,14 +1,15 @@
 # Optional modules: Mods/Lua, Hub, and LLMUnity
 
-CoreAI ships as five lockstep UPM packages. `com.neoxider.coreai` is the portable core and
+CoreAI ships as six lockstep UPM packages. `com.neoxider.coreai` is the portable core and
 `com.neoxider.coreaiunity` is the Unity host. Lua/modding, Hub UI, and the benchmark are separate
 packages so a consumer installs only the surfaces it uses.
 
-| Module | Package/dependency | Auto-define | Manual opt-out |
+| Module | Package/dependency | Auto-define when installed | Manual switch |
 |---|---|---|---|
-| Lua mods | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — (compiled in by default) | `COREAI_NO_LUA` |
+| Lua mods | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — | `COREAI_LUA` (positive enable; absent by default) |
 | Hub UI | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` in Mods/Hub integration | remove Hub package |
-| Local inference | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | `COREAI_NO_LLM` |
+| LLM pipeline | NuGet `Microsoft.Extensions.AI` | — | `COREAI_LLM` (positive enable; absent by default) |
+| Local inference | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | also requires `COREAI_LLM` |
 | Benchmark | `com.neoxider.coreaibenchmark` | none | do not install in players |
 
 `CoreAI.Core.asmdef` has no Lua reference. Lua VM/sandbox implementations and their
@@ -17,14 +18,14 @@ adapter. The benchmark depends on Core, Unity, and Mods because G1-G8 execute re
 
 ## Editor module tool
 
-Use **CoreAI > Setup > Modules** to report module state, soft-disable Lua, or install/remove backend
+Use **CoreAI > Setup > Modules** to report module state, add/remove the LLM and Lua opt-in defines, or install/remove backend
 dependencies. Package operations trigger a domain reload; wait for compilation before editing scenes
 or running tests. **Install Git Dependencies** adds missing project dependencies, but production
 projects should pin every Git URL to a reviewed tag or commit.
 
 ## Verification boundary
 
-The monorepo verifies enabled modules and the soft-disable defines. Full package-removal consumers
+The monorepo verifies `core`, `llm`, `lua`, and `full` compile configurations. Full package-removal consumers
 (Base, +Mods, +Hub, Full/Benchmark, no-Lua, and no-Hub) remain a release-engineering item under
 R0.6/F-22 in the root `TODO.md`. Until that matrix is automated, do not claim that physical removal
 of every optional package is continuously proven.

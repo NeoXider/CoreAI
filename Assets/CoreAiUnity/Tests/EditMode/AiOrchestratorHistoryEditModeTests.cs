@@ -191,8 +191,11 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(policy.GetRoleConfig(BuiltInAgentRoleIds.Programmer).WithChatHistory,
                 "Chat source should not mutate the global Programmer role policy.");
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            Assert.AreEqual(2, llm.LastRequest.ChatHistory.Count);
-            StringAssert.Contains("отвечай на русском", llm.LastRequest.ChatHistory[0].Text);
+            List<Microsoft.Extensions.AI.ChatMessage> transcript = llm.LastRequest.ChatHistory
+                .Where(m => m.Role != ChatRole.System)
+                .ToList();
+            Assert.AreEqual(2, transcript.Count);
+            StringAssert.Contains("отвечай на русском", transcript[0].Text);
             Assert.AreEqual(2, memory.Appended.Count);
             Assert.IsFalse(memory.Appended[0].Persist,
                 "Programmer chat history is session context unless the role explicitly enables persistence.");
@@ -223,7 +226,8 @@ namespace CoreAI.Tests.EditMode
                 Hint = "run lua"
             });
 
-            Assert.IsNull(llm.LastRequest.ChatHistory);
+            Assert.IsFalse(llm.LastRequest.ChatHistory?.Any(m => m.Role != ChatRole.System) ?? false,
+                "A non-chat Programmer request must not inherit prior user/assistant turns; dynamic system tail is allowed.");
             Assert.AreEqual(0, memory.Appended.Count);
         }
 
@@ -478,6 +482,833 @@ namespace CoreAI.Tests.EditMode
                 "Content without think markers is returned unchanged (no allocation).");
         }
 
+        /// <summary>
+        /// Store double whose appends are visible to the next read, unlike <see cref="TestMemoryStore"/>.
+        /// </summary>
+        private sealed class LiveTestMemoryStore : IAgentMemoryStore
+        {
+            public List<Ai.ChatMessage> History { get; } = new();
+
+            public List<(string Role, string Content, bool Persist)> Appended { get; } = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+                History.Clear();
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+                History.Clear();
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                Appended.Add((role, content, persistToDisk));
+                History.Add(new Ai.ChatMessage { Role = role, Content = content });
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                if (maxMessages > 0 && History.Count > maxMessages)
+                {
+                    return History.ToArray()[(History.Count - maxMessages)..];
+                }
+
+                return History.ToArray();
+            }
+        }
+
+        private sealed class ThrowOnUserMemoryStore : IAgentMemoryStore
+        {
+            public List<(string Role, string Content)> Appended { get; } = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                if (role == "user")
+                {
+                    throw new InvalidOperationException("user append failed");
+                }
+
+                Appended.Add((role, content));
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<Ai.ChatMessage>();
+            }
+        }
+
+        private sealed class ThrowAfterCommittedUserAppendMemoryStore : IAgentMemoryStore
+        {
+            private bool _throwNextUserAppend = true;
+
+            public List<(string Role, string Content)> Appended { get; } = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                Appended.Add((role, content));
+                if (role == "user" && _throwNextUserAppend)
+                {
+                    _throwNextUserAppend = false;
+                    throw new InvalidOperationException("committed user append failed");
+                }
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<Ai.ChatMessage>();
+            }
+        }
+
+        private sealed class RoleScopedLiveMemoryStore : IAgentMemoryStore
+        {
+            private readonly Dictionary<string, List<Ai.ChatMessage>> _history = new();
+
+            public List<(string RoleId, string MessageRole, string Content, bool Persist)> Appended { get; } = new();
+
+            public void Seed(string roleId, string role, string content)
+            {
+                GetOrCreate(roleId).Add(new Ai.ChatMessage { Role = role, Content = content });
+            }
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+                _history.Remove(roleId);
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+                _history.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                Appended.Add((roleId, role, content, persistToDisk));
+                GetOrCreate(roleId).Add(new Ai.ChatMessage { Role = role, Content = content });
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                if (!_history.TryGetValue(roleId, out List<Ai.ChatMessage> messages))
+                {
+                    return Array.Empty<Ai.ChatMessage>();
+                }
+
+                if (maxMessages > 0 && messages.Count > maxMessages)
+                {
+                    return messages.ToArray()[(messages.Count - maxMessages)..];
+                }
+
+                return messages.ToArray();
+            }
+
+            private List<Ai.ChatMessage> GetOrCreate(string roleId)
+            {
+                if (!_history.TryGetValue(roleId, out List<Ai.ChatMessage> messages))
+                {
+                    messages = new List<Ai.ChatMessage>();
+                    _history[roleId] = messages;
+                }
+
+                return messages;
+            }
+        }
+
+        private sealed class CancelingContextManager : IAsyncConversationContextManager
+        {
+            public ConversationContextSnapshot BuildSnapshot(
+                string roleId,
+                Ai.ChatMessage[] history,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                ConversationContextBuildArgs buildArgs = null)
+            {
+                throw new InvalidOperationException("async path expected");
+            }
+
+            public Task<ConversationContextSnapshot> BuildSnapshotAsync(
+                string roleId,
+                Ai.ChatMessage[] history,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                ConversationContextBuildArgs buildArgs,
+                string orchestrationTraceId,
+                CancellationToken cancellationToken)
+            {
+                return Task.FromCanceled<ConversationContextSnapshot>(cancellationToken);
+            }
+        }
+
+        private sealed class CancelingLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromException<LlmCompletionResult>(
+                    new OperationCanceledException("provider timeout"));
+            }
+        }
+
+        private sealed class CancelOnceThenSucceedLlmClient : ILlmClient
+        {
+            private bool _cancelNext = true;
+
+            public List<LlmCompletionRequest> Requests { get; } = new();
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                if (_cancelNext)
+                {
+                    _cancelNext = false;
+                    return Task.FromException<LlmCompletionResult>(
+                        new OperationCanceledException("provider timeout"));
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "recovered" });
+            }
+        }
+
+        /// <summary>
+        /// Streams some visible text and then dies mid-turn (dropped connection, 402, provider fault).
+        /// Flip <see cref="FailNextStream"/> to let the next turn answer normally, so a test can inspect
+        /// what the FOLLOW-UP request carried as history.
+        /// </summary>
+        private sealed class FailingMidStreamLlmClient : ILlmClient
+        {
+            public List<LlmCompletionRequest> Requests { get; } = new();
+
+            public bool FailNextStream { get; set; } = true;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                Requests.Add(request);
+                if (FailNextStream)
+                {
+                    yield return new LlmStreamChunk { Text = "начинаю отве" };
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = "HTTP 402 payment required",
+                        ErrorCode = LlmErrorCode.PaymentRequired
+                    };
+                    yield break;
+                }
+
+                yield return new LlmStreamChunk { Text = "полный ответ", IsDone = true };
+            }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_TurnFails_UserMessageStillReachesTheNextRequestAsHistory()
+        {
+            // WHY: the user turn was persisted only by the success path, while the host had already
+            // rendered the message and stored it server-side. A 402 / timeout / cancelled turn therefore
+            // erased the question from the model's view - the learner was answered as if they never asked.
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "HTTP 402 payment required",
+                    ErrorCode = LlmErrorCode.PaymentRequired
+                },
+                new LlmCompletionResult { Ok = true, Content = "Отвечаю" });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "почему цикл не останавливается?"
+            });
+
+            Assert.AreEqual(1, memory.Appended.Count,
+                "A failed turn must persist the user message and nothing else.");
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("почему цикл не останавливается?", memory.Appended[0].Content,
+                "History must contain the exact raw Hint, without telemetry/runtime envelopes.");
+            Assert.IsFalse(
+                llm.Requests[0].ChatHistory != null &&
+                llm.Requests[0].ChatHistory.Any(m => (m.Text ?? "").Contains("почему цикл не останавливается?")),
+                "The turn's own message travels as the user payload; it must not also sit in that turn's history.");
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "и что теперь?" });
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.AreEqual(1,
+                llm.Requests[1].ChatHistory.Count(m =>
+                    m.Role == ChatRole.User && m.Text == "почему цикл не останавливается?"),
+                "The next request must see the failed question exactly once in the correct role history.");
+            Assert.AreEqual(2, memory.Appended.Count(m => m.MessageRole == "user"),
+                "The latch must be per turn rather than shared across orchestrator calls.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SuccessfulTurn_RecordsUserMessageExactlyOnce()
+        {
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "Ответ" });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "как устроен list?" });
+
+            Assert.AreEqual(1, memory.Appended.Count(m => m.MessageRole == "user"),
+                "Recording the user turn on failure must not double-write it on success.");
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "The user turn must still be persisted before the assistant answer.");
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("как устроен list?", memory.Appended[0].Content);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_EmptyResponse_RecordsUserAndNoAssistant()
+        {
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = string.Empty });
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "empty" });
+
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray());
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ContextOverflowRetry_DoesNotLeakUserMessageIntoTheRetryHistory()
+        {
+            // WHY: the overflow retry rebuilds the request from the store. Recording the user turn before the
+            // retry would send the same message twice AND grow the prompt the retry exists to shrink.
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "context too long"
+                },
+                new LlmCompletionResult { Ok = true, Content = "ok" });
+            // WHY: a store whose appends are visible to the next read lets the retry expose self-history.
+            LiveTestMemoryStore memory = new();
+            memory.History.Add(new Ai.ChatMessage { Role = "user", Content = "прошлый вопрос" });
+            memory.History.Add(new Ai.ChatMessage { Role = "assistant", Content = "прошлый ответ" });
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new() { MaxContextOverflowRetries = 1 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "переполняющий вопрос"
+            });
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.IsTrue(
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains("прошлый вопрос")),
+                "precondition: the retry really does rebuild its history from the store.");
+            Assert.IsFalse(
+                llm.Requests[1].ChatHistory.Any(m => (m.Text ?? "").Contains("переполняющий вопрос")),
+                "The retry must not replay the in-flight user message as history.");
+            Assert.AreEqual(1, memory.Appended.Count(m => m.Role == "user"),
+                "Two internal passes are still ONE turn and one user message.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ContextOverflowRetriesExhausted_RecordsUserAfterTheLastRequest()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "context too long"
+                },
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "still too long"
+                });
+            LiveTestMemoryStore memory = new();
+            memory.History.Add(new Ai.ChatMessage { Role = "user", Content = "previous" });
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new() { MaxContextOverflowRetries = 1 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "current" });
+
+            Assert.AreEqual(2, llm.Requests.Count, "precondition: the configured retry must be exhausted.");
+            Assert.IsTrue(llm.Requests.All(r =>
+                    r.ChatHistory == null || r.ChatHistory.All(m => !(m.Text ?? "").Contains("current"))),
+                "The in-flight turn must not enter any overflow retry's history.");
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray());
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_StreamDiesMidTurn_StillRecordsUserMessageOnce()
+        {
+            FailingMidStreamLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(new AiTaskRequest
+                           {
+                               RoleId = "Teacher",
+                               Hint = "объясни рекурсию"
+                           }))
+            {
+            }
+
+            Assert.AreEqual(1, memory.Appended.Count,
+                "A stream that died mid-turn persists the user message and no assistant turn.");
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("объясни рекурсию", memory.Appended[0].Content);
+
+            llm.FailNextStream = false;
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(new AiTaskRequest
+                           {
+                               RoleId = "Teacher",
+                               Hint = "продолжай"
+                           }))
+            {
+            }
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.AreEqual(1,
+                llm.Requests[1].ChatHistory.Count(m =>
+                    m.Role == ChatRole.User && m.Text == "объясни рекурсию"),
+                "The next streamed turn must see the broken-stream question exactly once.");
+            Assert.AreEqual(2, memory.Appended.Count(m => m.MessageRole == "user"),
+                "A following stream must get a fresh per-turn latch.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_SuccessfulTurn_RecordsUserBeforeAssistantExactlyOnce()
+        {
+            FailingMidStreamLlmClient llm = new() { FailNextStream = false };
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", Hint = "stream success" }))
+            {
+            }
+
+            CollectionAssert.AreEqual(new[] { "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "The core success path must record user first; wrapper teardown must not duplicate it.");
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("stream success", memory.Appended[0].Content);
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_ConsumerAbandonsTurn_RecordsUserMessageOnceAndNothingElse()
+        {
+            // WHY: the learner presses Stop (or the panel drops a superseded turn) and the consumer stops
+            // pulling. Their message stays on screen, so it must stay in history too - exactly once, with
+            // no half-written assistant turn beside it.
+            FailingMidStreamLlmClient llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(new AiTaskRequest
+                           {
+                               RoleId = "Teacher",
+                               Hint = "что такое словарь?"
+                           }))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    break;
+                }
+            }
+
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray(),
+                "An abandoned turn leaves exactly the user message - no duplicate, no partial assistant turn.");
+            StringAssert.Contains("что такое словарь?", memory.Appended[0].Content);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_CancelledDuringInitialBuild_StillRecordsUserOnce()
+        {
+            ToolTraceLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Programmer", "user", "previous");
+            AgentMemoryPolicy policy = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy, new CancelingContextManager());
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest
+                {
+                    RoleId = "Programmer",
+                    SourceTag = "Chat",
+                    Hint = "cancelled build"
+                }, cts.Token));
+
+            CollectionAssert.AreEqual(new[] { "Programmer" }, memory.Appended.Select(m => m.RoleId).ToArray());
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.MessageRole).ToArray());
+            Assert.AreEqual("cancelled build", memory.Appended[0].Content);
+            Assert.IsFalse(memory.Appended[0].Persist,
+                "Chat source must use the transient fallback history config when bundle construction cancels.");
+            Assert.AreEqual(0, llm.Requests.Count, "The cancellation must happen before provider dispatch.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_CancelledDuringInitialBuild_StillRecordsUserOnce()
+        {
+            ToolTraceLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            memory.Seed("Programmer", "user", "previous");
+            AgentMemoryPolicy policy = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy, new CancelingContextManager());
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            await CaptureExceptionAsync<OperationCanceledException>(async () =>
+            {
+                await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                                   new AiTaskRequest
+                                   {
+                                       RoleId = "Programmer",
+                                       SourceTag = "Chat",
+                                       Hint = "cancelled stream build"
+                                   },
+                                   cts.Token))
+                {
+                }
+            });
+
+            CollectionAssert.AreEqual(new[] { "Programmer" }, memory.Appended.Select(m => m.RoleId).ToArray());
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.MessageRole).ToArray());
+            Assert.AreEqual("cancelled stream build", memory.Appended[0].Content);
+            Assert.IsFalse(memory.Appended[0].Persist);
+            Assert.AreEqual(0, llm.Requests.Count, "The cancellation must happen before provider dispatch.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ProviderCancellation_RecordsExactRawTurnAndNextRequestReadsItOnce()
+        {
+            CancelOnceThenSucceedLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => orchestrator.RunTaskAsync(
+                new AiTaskRequest
+                {
+                    RoleId = "Teacher",
+                    SourceTag = "Chat",
+                    Hint = "provider-cancelled raw question"
+                }));
+
+            Assert.AreEqual(1, memory.Appended.Count);
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("provider-cancelled raw question", memory.Appended[0].Content);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "Chat",
+                Hint = "follow-up"
+            });
+
+            Assert.AreEqual(2, llm.Requests.Count);
+            Assert.AreEqual(1, llm.Requests[1].ChatHistory.Count(m =>
+                    m.Role == ChatRole.User && m.Text == "provider-cancelled raw question"),
+                "The healthy live store must expose the cancelled question exactly once on the next request.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AuthorityDenied_RecordsRawTurnInResolvedRoleAndNextRequestReadsIt()
+        {
+            TestAuthority authority = new() { CanRunAiTasks = false };
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "recovered" });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                authority, llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = " Teacher ",
+                SourceTag = "Chat",
+                Hint = "authority-denied raw question"
+            });
+
+            Assert.AreEqual(0, llm.Requests.Count, "Authority denial must happen before provider dispatch.");
+            Assert.AreEqual(1, memory.Appended.Count);
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("authority-denied raw question", memory.Appended[0].Content);
+
+            authority.CanRunAiTasks = true;
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "Chat",
+                Hint = "follow-up"
+            });
+
+            Assert.AreEqual(1, llm.Requests.Count);
+            Assert.AreEqual(1, llm.Requests[0].ChatHistory.Count(m =>
+                m.Role == ChatRole.User && m.Text == "authority-denied raw question"));
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_AuthorityDenied_RecordsRawTurnInResolvedRole()
+        {
+            TestAuthority authority = new() { CanRunAiTasks = false };
+            FailingMidStreamLlmClient llm = new() { FailNextStream = false };
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                authority, llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(new AiTaskRequest
+                           {
+                               RoleId = " Teacher ",
+                               SourceTag = "Chat",
+                               Hint = "authority-denied stream raw"
+                           }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, chunks.Count);
+            Assert.IsTrue(chunks[0].IsDone);
+            Assert.AreEqual("authority denied", chunks[0].Error);
+            Assert.AreEqual(0, llm.Requests.Count);
+            Assert.AreEqual(1, memory.Appended.Count);
+            Assert.AreEqual("Teacher", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("authority-denied stream raw", memory.Appended[0].Content);
+        }
+
+        [Test]
+        public async Task QueuedAiOrchestrator_PreCancelledProductionInner_UsesUnstartedPersistenceCapability()
+        {
+            ToolTraceLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            AiOrchestrator core = BuildOrchestrator(llm, memory, policy);
+            QueuedAiOrchestrator queue = new(core, new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+
+            Task turn = queue.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Programmer",
+                SourceTag = "Chat",
+                Hint = "queue production raw"
+            }, cts.Token);
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => turn);
+            Assert.AreEqual(0, llm.Requests.Count);
+            Assert.AreEqual(1, memory.Appended.Count);
+            Assert.AreEqual("Programmer", memory.Appended[0].RoleId);
+            Assert.AreEqual("user", memory.Appended[0].MessageRole);
+            Assert.AreEqual("queue production raw", memory.Appended[0].Content);
+            Assert.IsFalse(memory.Appended[0].Persist,
+                "Chat fallback history for an unconfigured role remains transient.");
+        }
+
+        [Test]
+        public async Task FailedTurn_WithAttachment_PersistsRawHintPlusExactCompactPlaceholder()
+        {
+            ToolTraceLlmClient llm = new(new LlmCompletionResult
+            {
+                Ok = false,
+                Error = "HTTP 402 payment required",
+                ErrorCode = LlmErrorCode.PaymentRequired
+            });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "Chat",
+                Hint = "inspect this image",
+                Attachments = new[]
+                {
+                    AiAttachment.Image(new byte[12 * 1024], "image/png", "diagram.png")
+                }
+            });
+
+            Assert.AreEqual(1, memory.Appended.Count);
+            Assert.AreEqual(
+                "inspect this image\n[attachment: diagram.png image/png 12 KB]",
+                memory.Appended[0].Content,
+                "Binary attachment bytes must never enter text history; only the deterministic placeholder may follow raw Hint.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_UserHistoryAppendFails_DoesNotPersistAssistantAlone()
+        {
+            ToolTraceLlmClient llm = new(new LlmCompletionResult { Ok = true, Content = "answer" });
+            ThrowOnUserMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            InvalidOperationException thrown = await CaptureExceptionAsync<InvalidOperationException>(() =>
+                orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "write failure" }));
+
+            Assert.AreEqual("user append failed", thrown.Message);
+            Assert.IsEmpty(memory.Appended, "An assistant turn must never be persisted without its user turn.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_CancelAndHistoryAppendFail_PreservesOriginalCancellation()
+        {
+            ThrowOnUserMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(new CancelingLlmClient(), memory, policy);
+
+            OperationCanceledException thrown = await CaptureExceptionAsync<OperationCanceledException>(() =>
+                orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "timeout" }));
+
+            StringAssert.DoesNotContain("history store failed", thrown.Message,
+                "A store exception in teardown must not replace the provider cancellation.");
+            Assert.IsEmpty(memory.Appended);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_UserAppendCommitsThenThrows_DoesNotRetryOrPersistAssistant()
+        {
+            ThrowAfterCommittedUserAppendMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                new ToolTraceLlmClient(new LlmCompletionResult { Ok = true, Content = "answer" }),
+                memory,
+                policy);
+
+            InvalidOperationException thrown = await CaptureExceptionAsync<InvalidOperationException>(() =>
+                orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "commit then throw" }));
+            Assert.AreEqual("committed user append failed", thrown.Message);
+
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray(),
+                "An ambiguous committed append must never be retried or followed by an assistant append.");
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_UserAppendCommitsThenThrows_DoesNotRetryOrPersistAssistant()
+        {
+            ThrowAfterCommittedUserAppendMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            FailingMidStreamLlmClient llm = new() { FailNextStream = false };
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            InvalidOperationException thrown = null;
+            try
+            {
+                await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                                   new AiTaskRequest { RoleId = "Teacher", Hint = "stream commit then throw" }))
+                {
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                thrown = ex;
+            }
+
+            Assert.NotNull(thrown, "The first committed user append must still surface its store failure.");
+            Assert.AreEqual("committed user append failed", thrown.Message);
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.Role).ToArray(),
+                "Streaming teardown must not retry an append that may already have committed.");
+        }
+
         private static AgentMemoryPolicy BuildToolResultPolicy(string roleId)
         {
             AgentMemoryPolicy policy = new();
@@ -489,14 +1320,15 @@ namespace CoreAI.Tests.EditMode
 
         private static AiOrchestrator BuildOrchestrator(
             ILlmClient llm,
-            TestMemoryStore memory,
-            AgentMemoryPolicy policy)
+            IAgentMemoryStore memory,
+            AgentMemoryPolicy policy,
+            IConversationContextManager contextManager = null)
         {
             TestSettings settings = new();
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, contextManager);
         }
 
         private static int CountOccurrences(string value, string needle)
@@ -510,6 +1342,22 @@ namespace CoreAI.Tests.EditMode
             }
 
             return count;
+        }
+
+        private static async Task<TException> CaptureExceptionAsync<TException>(Func<Task> action)
+            where TException : Exception
+        {
+            try
+            {
+                await action();
+            }
+            catch (TException ex)
+            {
+                return ex;
+            }
+
+            Assert.Fail($"Expected {typeof(TException).Name}, but the operation completed successfully.");
+            return null;
         }
 
         private sealed class TestSink : IAiGameCommandSink
@@ -650,13 +1498,16 @@ namespace CoreAI.Tests.EditMode
             // Assert
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            Assert.AreEqual(15, llm.LastRequest.ChatHistory.Count,
+            List<Microsoft.Extensions.AI.ChatMessage> transcript = llm.LastRequest.ChatHistory
+                .Where(m => m.Role != ChatRole.System)
+                .ToList();
+            Assert.AreEqual(15, transcript.Count,
                 "History should be truncated to exactly MaxChatHistoryMessages");
 
             // Check that we got the *most recent* 15
-            Assert.IsTrue(llm.LastRequest.ChatHistory[14].Text.Contains("Short msg 49"),
+            Assert.IsTrue(transcript[14].Text.Contains("Short msg 49"),
                 "Last message should match the latest");
-            Assert.IsTrue(llm.LastRequest.ChatHistory[0].Text.Contains("Short msg 35"),
+            Assert.IsTrue(transcript[0].Text.Contains("Short msg 35"),
                 "First message in truncated history should match sequence");
         }
 
@@ -734,10 +1585,12 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
-            Assert.AreEqual(ChatRole.System, llm.LastRequest.ChatHistory[0].Role);
-            StringAssert.Contains("## Conversation Summary", llm.LastRequest.ChatHistory[0].Text);
-            StringAssert.Contains("old-context-0", llm.LastRequest.ChatHistory[0].Text);
-            StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
+            Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").Contains("## Conversation Summary"));
+            StringAssert.Contains("old-context-0", summary.Text);
+            Microsoft.Extensions.AI.ChatMessage newestTranscript = llm.LastRequest.ChatHistory.Last(m =>
+                m.Role != ChatRole.System);
+            StringAssert.Contains("old-context-9", newestTranscript.Text);
         }
 
         [Test]
@@ -757,7 +1610,9 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("old-context-0", summaryMessage.Text);
             Assert.Greater(tailLlm.LastRequest.ChatHistory.Count, 1);
             Assert.AreNotEqual(ChatRole.System, tailLlm.LastRequest.ChatHistory[1].Role);
-            StringAssert.Contains("old-context-9", tailLlm.LastRequest.ChatHistory[^1].Text);
+            Microsoft.Extensions.AI.ChatMessage newestTranscript = tailLlm.LastRequest.ChatHistory.Last(m =>
+                m.Role != ChatRole.System);
+            StringAssert.Contains("old-context-9", newestTranscript.Text);
         }
 
         [Test]
@@ -771,7 +1626,8 @@ namespace CoreAI.Tests.EditMode
                 tailLlm.LastRequest.SystemPrompt.Contains("CURRENT SLIDE: 3"),
                 "Live world-state should stay out of the stable system prefix.");
             Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
-            Assert.AreEqual(1, tailLlm.LastRequest.ChatHistory.Count);
+            Assert.AreEqual(1, tailLlm.LastRequest.ChatHistory.Count(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").Contains("## World State")));
             Microsoft.Extensions.AI.ChatMessage worldState = tailLlm.LastRequest.ChatHistory[^1];
             Assert.AreEqual(ChatRole.System, worldState.Role);
             StringAssert.Contains("## World State", worldState.Text);
@@ -801,9 +1657,13 @@ namespace CoreAI.Tests.EditMode
             TestMemoryStore tailMemory = await RunMemoryPlacementRequestAsync(tailLlm);
 
             Assert.IsNotNull(tailLlm.LastRequest);
-            StringAssert.Contains("## Memory", tailLlm.LastRequest.SystemPrompt);
-            StringAssert.Contains("Learner likes geometry puzzles.", tailLlm.LastRequest.SystemPrompt);
-            Assert.IsNull(tailLlm.LastRequest.ChatHistory);
+            StringAssert.DoesNotContain("## Memory", tailLlm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Learner likes geometry puzzles.", tailLlm.LastRequest.SystemPrompt,
+                "Student-scoped memory must never personalize the shared provider-cache prefix.");
+            Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage initialSnapshot = tailLlm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            StringAssert.Contains("Learner likes geometry puzzles.", initialSnapshot.Text);
             Assert.AreEqual("Learner likes geometry puzzles.", tailMemory.MemoryState.SystemPromptMemorySnapshot);
 
             TestLlmClient updateLlm = new();
@@ -813,20 +1673,25 @@ namespace CoreAI.Tests.EditMode
                 "Learner likes geometry puzzles.");
 
             Assert.IsNotNull(updateLlm.LastRequest);
-            StringAssert.Contains("Learner likes geometry puzzles.", updateLlm.LastRequest.SystemPrompt);
-            Assert.IsFalse(
-                updateLlm.LastRequest.SystemPrompt.Contains("Learner prefers hints."),
-                "Pending memory updates should not rewrite the cached system prefix before a boundary.");
+            StringAssert.DoesNotContain("Learner likes geometry puzzles.", updateLlm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Learner prefers hints.", updateLlm.LastRequest.SystemPrompt);
             Assert.IsNotNull(updateLlm.LastRequest.ChatHistory);
-            Assert.AreEqual(1, updateLlm.LastRequest.ChatHistory.Count);
-            Microsoft.Extensions.AI.ChatMessage memoryUpdates = updateLlm.LastRequest.ChatHistory[0];
+            Microsoft.Extensions.AI.ChatMessage canonicalMemory = updateLlm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            Microsoft.Extensions.AI.ChatMessage memoryUpdates = updateLlm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System &&
+                (m.Text ?? "").StartsWith("## Memory (updates)", StringComparison.Ordinal));
+            Assert.Less(updateLlm.LastRequest.ChatHistory.IndexOf(canonicalMemory),
+                updateLlm.LastRequest.ChatHistory.IndexOf(memoryUpdates),
+                "Canonical memory must precede its volatile delta in the ordered system tail.");
+            StringAssert.Contains("Learner likes geometry puzzles.", canonicalMemory.Text);
             Assert.AreEqual(ChatRole.System, memoryUpdates.Role);
             StringAssert.Contains("## Memory (updates)", memoryUpdates.Text);
             StringAssert.Contains("Learner prefers hints.", memoryUpdates.Text);
         }
 
         [Test]
-        public async Task RunTaskAsync_Compaction_ConsolidatesMemoryUpdatesIntoSystemPrefix()
+        public async Task RunTaskAsync_Compaction_ConsolidatesMemoryUpdatesIntoSystemTail()
         {
             TestLlmClient llm = new();
             TestMemoryStore memory = new()
@@ -859,16 +1724,20 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
 
             Assert.IsNotNull(llm.LastRequest);
-            StringAssert.Contains("Learner likes geometry puzzles.", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("Learner prefers hints.", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Learner likes geometry puzzles.", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Learner prefers hints.", llm.LastRequest.SystemPrompt);
             Assert.AreEqual(memory.MemoryState.Memory, memory.MemoryState.SystemPromptMemorySnapshot);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.IsFalse(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
             Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("## Conversation Summary")));
+            Microsoft.Extensions.AI.ChatMessage consolidated = llm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            StringAssert.Contains("Learner likes geometry puzzles.", consolidated.Text);
+            StringAssert.Contains("Learner prefers hints.", consolidated.Text);
         }
 
         [Test]
-        public async Task RunTaskAsync_ContextOverflowRetry_ConsolidatesMemoryUpdatesIntoSystemPrefix()
+        public async Task RunTaskAsync_ContextOverflowRetry_ConsolidatesMemoryUpdatesIntoSystemTail()
         {
             ToolTraceLlmClient llm = new(
                 new LlmCompletionResult
@@ -906,14 +1775,27 @@ namespace CoreAI.Tests.EditMode
             LlmCompletionRequest first = llm.Requests[0];
             LlmCompletionRequest second = llm.Requests[1];
 
-            StringAssert.Contains("Learner likes geometry puzzles.", first.SystemPrompt);
+            Assert.AreEqual(first.SystemPrompt, second.SystemPrompt,
+                "Memory consolidation during retry must not rewrite the shared provider-cache prefix.");
+            StringAssert.DoesNotContain("Learner likes geometry puzzles.", first.SystemPrompt);
             StringAssert.DoesNotContain("Learner prefers hints.", first.SystemPrompt);
-            Assert.IsTrue(first.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
+            Microsoft.Extensions.AI.ChatMessage firstCanonical = first.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            Microsoft.Extensions.AI.ChatMessage firstUpdates = first.ChatHistory.Single(m =>
+                m.Role == ChatRole.System &&
+                (m.Text ?? "").StartsWith("## Memory (updates)", StringComparison.Ordinal));
+            Assert.Less(first.ChatHistory.IndexOf(firstCanonical), first.ChatHistory.IndexOf(firstUpdates));
+            StringAssert.Contains("Learner likes geometry puzzles.", firstCanonical.Text);
+            StringAssert.Contains("Learner prefers hints.", firstUpdates.Text);
 
-            StringAssert.Contains("Learner likes geometry puzzles.", second.SystemPrompt);
-            StringAssert.Contains("Learner prefers hints.", second.SystemPrompt);
+            StringAssert.DoesNotContain("Learner likes geometry puzzles.", second.SystemPrompt);
+            StringAssert.DoesNotContain("Learner prefers hints.", second.SystemPrompt);
             Assert.IsFalse(second.ChatHistory != null &&
                            second.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
+            Microsoft.Extensions.AI.ChatMessage secondCanonical = second.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            StringAssert.Contains("Learner likes geometry puzzles.", secondCanonical.Text);
+            StringAssert.Contains("Learner prefers hints.", secondCanonical.Text);
             Assert.AreEqual(memory.MemoryState.Memory, memory.MemoryState.SystemPromptMemorySnapshot);
         }
 
@@ -949,8 +1831,10 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            Assert.AreEqual(10, llm.LastRequest.ChatHistory.Count);
+            Assert.AreEqual(10, llm.LastRequest.ChatHistory.Count(m => m.Role != ChatRole.System));
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
+            Assert.IsFalse(llm.LastRequest.ChatHistory.Any(m =>
+                (m.Text ?? "").Contains("## Conversation Summary")));
         }
 
         [Test]
@@ -997,9 +1881,9 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
 
             Assert.AreEqual(2, llm.Requests.Count);
-            Assert.AreEqual(10, llm.Requests[0].ChatHistory.Count,
+            Assert.AreEqual(10, llm.Requests[0].ChatHistory.Count(m => m.Role != ChatRole.System),
                 "First pass with summarization off keeps the full tail.");
-            Assert.Less(llm.Requests[1].ChatHistory.Count, 10,
+            Assert.Less(llm.Requests[1].ChatHistory.Count(m => m.Role != ChatRole.System), 10,
                 "Overflow retry must shrink the tail even with summarization disabled.");
             Assert.IsTrue(llm.Requests[1].ChatHistory.Any(m =>
                     (m.Text ?? "").Contains("old-context-9")),
@@ -1321,12 +2205,15 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
 
             Assert.IsNotNull(llm.LastRequest?.ChatHistory);
-            Assert.AreEqual(2, llm.LastRequest.ChatHistory.Count);
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
-            Assert.AreEqual(ChatRole.System, llm.LastRequest.ChatHistory[0].Role);
-            StringAssert.Contains("## Conversation Summary", llm.LastRequest.ChatHistory[0].Text);
-            StringAssert.Contains("old-context-0", llm.LastRequest.ChatHistory[0].Text);
-            StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
+            Microsoft.Extensions.AI.ChatMessage summary = llm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").Contains("## Conversation Summary"));
+            StringAssert.Contains("old-context-0", summary.Text);
+            List<Microsoft.Extensions.AI.ChatMessage> transcript = llm.LastRequest.ChatHistory
+                .Where(m => m.Role != ChatRole.System)
+                .ToList();
+            Assert.AreEqual(1, transcript.Count, "The override must retain only the newest transcript turn.");
+            StringAssert.Contains("old-context-9", transcript[0].Text);
         }
 
         [Test]

@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
 using LLMUnity;
 using UnityEngine;
 #endif
@@ -55,8 +55,8 @@ namespace CoreAI.Infrastructure.Llm
             _unitySettings = settings as CoreAISettingsAsset;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _memoryStore = memoryStore;
-#if COREAI_NO_LLM
-            // WHY: COREAI_NO_LLM strips the probe implementations; HTTP/LLMUnity activation throws
+#if !COREAI_LLM
+            // WHY: without COREAI_LLM the probe implementations are absent; HTTP/LLMUnity activation throws
             // before any probe is consulted, so no default instance is required.
             _readinessProbe = readinessProbe;
 #else
@@ -73,9 +73,9 @@ namespace CoreAI.Infrastructure.Llm
             switch (descriptor.Kind)
             {
                 case LlmEndpointKind.HttpOpenAi:
-#if COREAI_NO_LLM
+#if !COREAI_LLM
                     throw new PlatformNotSupportedException(
-                        "HTTP LLM endpoints are unavailable: COREAI_NO_LLM strips the LLM module.");
+                        "HTTP LLM endpoints are unavailable: enable the COREAI_LLM module.");
 #else
                     await EnsureReadyAsync(
                         descriptor.BaseUrl,
@@ -99,7 +99,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         private LlmEndpointClientActivation BuildHttp(LlmEndpointDescriptor descriptor, string sessionApiKey)
         {
             OpenAiHttpOptions options = BuildHttpOptions(descriptor, sessionApiKey, _settings);
@@ -139,7 +139,7 @@ namespace CoreAI.Infrastructure.Llm
             string sessionApiKey,
             CancellationToken cancellationToken)
         {
-#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || COREAI_NO_LLM
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || !COREAI_LLM
             await Task.Yield();
             throw new PlatformNotSupportedException("LLMUnity endpoints are unavailable on this platform.");
 #else
@@ -161,7 +161,7 @@ namespace CoreAI.Infrastructure.Llm
 #endif
         }
 
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
         private async Task<LlmEndpointClientActivation> ActivateOwnedLlmUnityAsync(
             LlmEndpointDescriptor descriptor,
             string sessionApiKey,
@@ -375,7 +375,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 #endif
 
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
         private static LLMAgent ResolveAgent(string name)
         {
             if (!string.IsNullOrWhiteSpace(name))
@@ -410,7 +410,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 #endif
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         private async Task EnsureReadyAsync(
             string baseUrl,
             string apiKey,
@@ -437,7 +437,7 @@ namespace CoreAI.Infrastructure.Llm
 #endif
     }
 
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
     internal static class LlmUnityActivationCoordinator
     {
         private static readonly ConditionalWeakTable<LLMAgent, SemaphoreSlim> Gates = new();

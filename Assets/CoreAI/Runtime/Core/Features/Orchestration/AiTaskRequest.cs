@@ -17,11 +17,19 @@ namespace CoreAI.Ai
         public string RoutingProfileId { get; set; } = "";
 
         /// <summary>
-        /// Optional per-request system-prompt override. When non-empty, the composer uses it as the role base
-        /// prompt (the UniversalSystemPromptPrefix is still prepended). Empty = use the registered role prompt
-        /// (default).
+        /// Optional legacy base-role prompt override. When non-empty, this replaces the role base prompt
+        /// for this request while preserving the universal prefix and registered role additions. Because the
+        /// value is part of the first provider system message, request- or user-specific callers should migrate
+        /// to <see cref="RequestSystemInstructions"/> to preserve shared prompt-cache reuse.
         /// </summary>
         public string SystemPrompt { get; set; } = "";
+
+        /// <summary>
+        /// Optional cache-safe instructions for this request. The orchestrator emits them in the volatile
+        /// provider-compatible tail after the stable universal/role/tool prefix and conversation transcript,
+        /// but before the current user payload. This property does not replace the role base prompt.
+        /// </summary>
+        public string RequestSystemInstructions { get; set; } = "";
 
         /// <summary>User or system hint that describes the requested task.</summary>
         public string Hint { get; set; } = "";
@@ -65,7 +73,9 @@ namespace CoreAI.Ai
         public string SourceTag { get; set; } = "";
 
         /// <summary>
-        /// Cancellation scope.
+        /// Logical latest-wins cancellation scope. <see cref="QueuedAiOrchestrator"/> combines a
+        /// non-empty value with the current <see cref="AgentMemoryScope"/> for <see cref="RoleId"/>,
+        /// so identical role/scope strings in different learner identities do not cross-cancel.
         /// </summary>
         public string CancellationScope { get; set; } = "";
 

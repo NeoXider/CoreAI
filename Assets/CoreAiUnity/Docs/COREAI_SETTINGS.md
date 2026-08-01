@@ -48,6 +48,23 @@ ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJ
 
 `ServerManagedLlmClient` reads this provider for every HTTP and streaming request in `ServerManagedApi`, including routed `LlmRoutingManifest` profiles.
 
+Для динамической атрибуции (урок, эксперимент, cohort) зарегистрируйте
+`IRequestHeaderProvider` без пересоздания LLM-клиента:
+
+```csharp
+ServerManagedAuthorization.SetRequestHeaderProvider(lessonHeaderProvider);
+// На logout/смене product context и в TearDown интеграционных тестов:
+ServerManagedAuthorization.ClearRequestHeaderProvider();
+```
+
+Provider вызывается один раз на invocation `CompleteAsync` / `CompleteStreamingAsync`; внутренний HTTP/auth-retry,
+внешние sync retry после retryable result/exception и streaming pre-commit retry получают тот же snapshot.
+Следующий invocation получает актуальное значение, даже если host повторно
+использует тот же объект `LlmCompletionRequest`. `Authorization`, `Content-Type`,
+`Idempotency-Key` и `X-Request-Id` через custom provider подменить нельзя. Backend обязан
+валидировать client-supplied lesson/cohort перед атрибуцией usage. Полный контракт —
+[SERVER_MANAGED_PROTOCOL.md](../../CoreAI/Docs/SERVER_MANAGED_PROTOCOL.md).
+
 CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings. To render one of those failures, use `LlmErrorPresentation.ToUserMessage(exception)` (player-facing sentence — prefers a message your backend authored for the player) and `LlmErrorPresentation.ToDiagnosticText(exception)` (log line) instead of printing `exception.Message`.
 
 ### Preset-based setup (Resources)
@@ -429,7 +446,7 @@ Without extra setup, **`RegisterCorePortable()`** wires **`InMemoryConversationS
 
 The **stored** summary's final line is a `[fold:v1:<hashes>]` fold marker (content hashes of the last folded messages) that records how far history has already been folded. It is internal bookkeeping: it is stamped after the token cap (so the limiter can never trim it) and stripped from every LLM- and UI-facing view of the summary.
 
-Unity scenes using **`CoreAILifetimeScope`** switch to **`FileConversationSummaryStore`** under **`%persistentDataPath%/CoreAI/ConversationSummaries`** so compaction survives restarts, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** (**v1.5.22** adds agent-memory suppression so **`IAgentMemoryStore`** is not double-registered).
+Unity scenes using **`CoreAILifetimeScope`** call **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** and publish host-selected backing stores. Backward-compatible `AgentMemoryPersistenceMode.Persistent` uses **`FileConversationSummaryStore`** under **`%persistentDataPath%/CoreAI/ConversationSummaries`** on desktop (WebGL summaries remain in-memory) and `FileAgentMemoryStore` for memory/chat/transcript. `SessionOnly`, selected before build, keeps all four data sets in process memory and writes no memory/summary files.
 
 This is separate from **`FileAgentMemoryStore`** transcript JSON; orchestration details are in [ARCHITECTURE.md](ARCHITECTURE.md) and [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
 

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using Cysharp.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -1603,7 +1603,7 @@ namespace CoreAI.Infrastructure.Llm
                 case LlmExecutionMode.ClientOwnedApi:
                 case LlmExecutionMode.ClientLimited:
                 case LlmExecutionMode.ServerManagedApi:
-#if COREAI_NO_LLM
+#if !COREAI_LLM
                     return new StubLlmClient();
 #else
                     if (p.httpSettings == null || !p.httpSettings.UseOpenAiCompatibleHttp)
@@ -1630,7 +1630,7 @@ namespace CoreAI.Infrastructure.Llm
                     return new ClientLimitedLlmClientDecorator(http, maxRequests, maxPromptChars);
 #endif
                 case LlmExecutionMode.LocalModel:
-#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || COREAI_NO_LLM
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || !COREAI_LLM
                     return new StubLlmClient();
 #else
                     LLMAgent agent = null;

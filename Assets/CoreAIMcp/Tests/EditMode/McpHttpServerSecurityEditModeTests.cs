@@ -64,7 +64,7 @@ namespace CoreAI.Mcp.Tests
         {
             using HttpClient client = new();
             HttpResponseMessage response =
-                await PostAsync(client, ToolsListBody(), token: Token, origin: "https://evil.example");
+                await PostAsync(client, ToolsListBody(), Token, "https://evil.example");
 
             Assert.AreEqual(HttpStatusCode.Forbidden, response.StatusCode,
                 "a web page must not be able to reach the endpoint even with a valid token.");
@@ -75,7 +75,7 @@ namespace CoreAI.Mcp.Tests
         {
             using HttpClient client = new();
             HttpResponseMessage response =
-                await PostAsync(client, ToolsListBody(), token: Token, origin: $"http://127.0.0.1:{_port}");
+                await PostAsync(client, ToolsListBody(), Token, $"http://127.0.0.1:{_port}");
 
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         }
@@ -84,7 +84,7 @@ namespace CoreAI.Mcp.Tests
         public async Task Post_WithoutToken_IsUnauthorized_AndAdvertisesBearer()
         {
             using HttpClient client = new();
-            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), token: null);
+            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), null);
 
             Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
             Assert.IsTrue(response.Headers.Contains("WWW-Authenticate"));
@@ -94,7 +94,7 @@ namespace CoreAI.Mcp.Tests
         public async Task Post_WithWrongToken_IsUnauthorized()
         {
             using HttpClient client = new();
-            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), token: "not-the-token");
+            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), "not-the-token");
 
             Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         }
@@ -103,7 +103,7 @@ namespace CoreAI.Mcp.Tests
         public async Task Post_WithCorrectToken_Succeeds()
         {
             using HttpClient client = new();
-            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), token: Token);
+            HttpResponseMessage response = await PostAsync(client, ToolsListBody(), Token);
 
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
             JObject payload = JObject.Parse(await response.Content.ReadAsStringAsync());
@@ -134,7 +134,7 @@ namespace CoreAI.Mcp.Tests
             using HttpClient client = new();
             string body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"pad\":\"" +
                           new string('x', 2048) + "\"}";
-            HttpResponseMessage response = await PostAsync(client, body, token: Token);
+            HttpResponseMessage response = await PostAsync(client, body, Token);
 
             Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         }

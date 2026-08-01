@@ -27,7 +27,7 @@ Full access is split by member visibility:
 
 ## Requirements
 
-- `COREAI_NO_LUA` not defined.
+- `COREAI_LUA` defined.
 - LM Studio / OpenAI-compatible endpoint in `Resources/CoreAISettings`.
 - On the `CoreAI` scope: **Enable Full Lua Access = true** (already set in the demo scene).
 

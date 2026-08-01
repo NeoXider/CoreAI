@@ -20,7 +20,7 @@ namespace CoreAI.Tests.PlayMode
     /// PlayMode integration tests for CoreAiChatService + IAiOrchestrationService.
     /// Verifies "chat only", "tools only", "chat + tools", and "swapping agents on the fly".
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class CoreAiChatServiceIntegrationPlayModeTests
     {
         private sealed class DummyGameCommandSink : IAiGameCommandSink

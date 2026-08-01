@@ -28,8 +28,11 @@ standalone through its tools. Benchmark and MCP both build on Mods, so installin
 | **+MCP** | Base + `coreaimods` + `coreaimcp` | [§3](#3-mods-module-lua) + [§6](#6-optional-modules-at-a-glance) |
 | **Full** | Base + `coreaimods` + `coreaihub` (+ `coreaibenchmark` for local model evaluation, `coreaimcp` for external MCP clients) | [§3](#3-mods-module-lua) + [§4](#4-hub-module-ui-toolkit) + [§5](#5-benchmark-module-dev-only) |
 
-**LLM** (Microsoft.Extensions.AI) is an **optional module within the base**. The core compiles
-without it; features light up automatically when the NuGet package is present. Install only what your game uses.
+**Provider-backed LLM implementations** are an optional compile module within the base. Portable
+orchestration, scripted/stub clients, chat contracts/UI, and MEAI-based public tool contracts remain
+in the base in every configuration. The required Microsoft.Extensions.AI assemblies therefore remain
+a Core dependency; `COREAI_LLM` controls the concrete HTTP/MEAI/LLMUnity provider implementations,
+not whether orchestration or chat types exist.
 
 Requirements: **Unity 6000.0+**.
 
@@ -73,15 +76,18 @@ CoreAI → Setup → Create Chat Demo Scene     (chat UI + lifetime scope)
 CoreAI → Setup → Create Bare Scene (advanced)   (scope + settings, no demo UI)
 ```
 
-> By default the LLM pipeline is compiled in and needs the NuGet DLLs from section **2** —
-> without them you get compile errors on `Microsoft.Extensions.AI`. To build without LLM, see 2.3.
+> The default no-symbol build keeps portable orchestration/chat and scripted/stub clients but has no
+> provider-backed HTTP or LLMUnity execution. The required MEAI DLLs from section **2** remain part of
+> the Core contract in either mode. Add `COREAI_LLM` when you want concrete providers; see 2.3.
 
 ---
 
 ## 2. LLM module (Microsoft.Extensions.AI, via NuGet)
 
-The LLM pipeline uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI).
-It is delivered through **NuGetForUnity**, not UPM, so it does not arrive with the two CoreAI packages.
+CoreAI's portable tool/chat contracts and provider adapters use
+[Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI). The assemblies are
+required by the base even when provider implementations are compiled out. They are delivered through
+**NuGetForUnity**, not UPM, so they do not arrive with the two CoreAI packages.
 
 ### 2.1 Install (recommended: NuGetForUnity)
 
@@ -103,11 +109,14 @@ Clone this repo and copy the entire `Assets/Packages/` folder into your project.
 restored DLLs; the `packages.config` / `NuGet.config` manifests live at `Assets/packages.config` and
 `Assets/NuGet.config`.
 
-### 2.3 Building without LLM
+### 2.3 Enabling the LLM pipeline
 
-If you do not want the LLM pipeline (and do not want the NuGet DLLs), add the scripting define
-`COREAI_NO_LLM` (Player Settings → Scripting Define Symbols). The LLM code compiles out and the DLLs
-are no longer required. HTTP/OpenAI-compatible code is gated by the same define.
+The default build keeps portable orchestration, queueing, chat contracts/UI, scripted/stub clients, and
+the MEAI-dependent public contracts. To compile concrete HTTP/OpenAI-compatible and LLMUnity provider
+implementations, add the scripting define `COREAI_LLM` (Player Settings → Scripting Define Symbols),
+or use **CoreAI → Setup → Modules → LLM Providers → Enable Providers**. Without the define,
+provider transports/clients and their focused tests compile out while offline/scripted orchestration remains.
+`COREAI_LUA` is independent; enable both symbols for the full provider + Lua runtime.
 
 ### 2.4 Local on-device models (optional)
 
@@ -138,18 +147,21 @@ WebGL). It ships **bundled** as `Lua.dll` + `Lua.Annotations.dll` inside the pac
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMods
 ```
 
-Lua is compiled in by default: with the `coreaimods` package present, the Lua sandbox,
-`execute_lua`/`manage_mods` tools, and the mod runtime are available automatically. Remove the
-`coreaimods` package (or set `COREAI_NO_LUA`) and the Lua code compiles out with no errors elsewhere
-in the project.
+Lua is a positive opt-in: with the `coreaimods` package present, add `COREAI_LUA` to enable the Lua
+sandbox, `execute_lua`/`manage_mods` tools, and the mod runtime. Without the define, CoreAI keeps the
+LLM pipeline but compiles Lua-dependent surfaces out. Remove the package as well when the project does
+not need any modding assets or APIs.
 
 ### 3.2 Switches
 
-- **Soft-disable** (keep the package, compile Lua out): scripting define `COREAI_NO_LUA`, or
+- **Enable** (keep the package and compile Lua in): add scripting define `COREAI_LUA`, or use
+  `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Enable Lua`.
+- **Disable** (the default): remove `COREAI_LUA`, or use
   `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Disable Lua`.
-  Runtime code is guarded by `#if !COREAI_NO_LUA`.
-- **WebGL:** Lua on the WebGL player is **on by default** (new settings assets); toggle with
-  `CoreAISettingsAsset.EnableLuaOnWebGl`. Lua-CSharp is AOT-safe, so it runs under IL2CPP; the Full
+  Lua-dependent runtime and tests are guarded by `#if COREAI_LUA`.
+- **WebGL:** when `COREAI_LUA` is compiled in, Lua on the WebGL player is **on by default** in new
+  settings assets; toggle the runtime allowance with `CoreAISettingsAsset.EnableLuaOnWebGl`.
+  Lua-CSharp is AOT-safe, so it runs under IL2CPP; the Full
   `unity_*` reflection tier stays disabled on WebGL. Managed stripping is handled by the `link.xml`
   shipped in the CoreAiUnity package, which preserves the Lua VM, the CoreAI assemblies, the Rbx API
   assemblies and VContainer — verified on a WebGL/IL2CPP player at stripping level **Medium**, where
@@ -199,12 +211,12 @@ local multi-model sweep.
 
 | Module | Package | Auto-define when installed | Manual switch |
 |---|---|---|---|
-| Mods (Lua) | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — (compiled in by default) | `COREAI_NO_LUA` (soft-disable) |
+| Mods (Lua) | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — | `COREAI_LUA` (positive enable; absent by default) |
 | Hub (UI Toolkit) | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` (consumed by Mods' Hub integration) | — |
 | Benchmark | `com.neoxider.coreaibenchmark` (needs Mods) | — | dev/test-only, not referenced by runtime code |
 | MCP server | `com.neoxider.coreaimcp` (needs Mods) — git URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMcp` | — | off until a `CoreAiMcpServer` component is added to a scene; loopback-only, no auth — see [its README](Assets/CoreAIMcp/README.md) |
-| Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | — |
-| LLM pipeline (MEAI) | NuGet `Microsoft.Extensions.AI` | — (on by default) | `COREAI_NO_LLM` (compile out) |
+| Local LLM | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | also requires `COREAI_LLM` |
+| Provider-backed LLM implementations | NuGet `Microsoft.Extensions.AI` (required by Core contracts) | — | `COREAI_LLM` (positive enable; absent by default) |
 
 Check the current state any time:
 

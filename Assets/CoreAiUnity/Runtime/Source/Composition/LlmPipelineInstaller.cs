@@ -37,14 +37,14 @@ namespace CoreAI.Composition
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
 #endif
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
             builder.Register<UnityWebRequestOpenAiReadinessProbe>(Lifetime.Singleton)
                 .As<ILlmEndpointReadinessProbe>();
 #endif
 
             builder.Register(c =>
                 {
-#if COREAI_NO_LLM
+#if !COREAI_LLM
                 // WHY: the probe implementations are stripped with the LLM module; the endpoint
                 // factory rejects HTTP/LLMUnity activation before any probe would be consulted.
                 ILlmEndpointReadinessProbe readinessProbe = null;
@@ -77,7 +77,7 @@ namespace CoreAI.Composition
             builder.RegisterBuildCallback(container => container.Resolve<CoreAiRoutingUiAttachment>());
 
             int maxRetries = settings != null ? settings.MaxLlmRequestRetries : 0;
-#if COREAI_NO_LLM
+#if !COREAI_LLM
             // WHY: the timeout/streaming-retry decorators are stripped with the LLM module; routing
             // still resolves (to stubs/offline clients), so keep logging + routing only.
             builder.Register<ILlmClient>(c =>
@@ -187,9 +187,10 @@ namespace CoreAI.Composition
                 return BuildOfflineClient(settings);
             }
 
-            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore) ?? BuildOfflineClient(settings);
+            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore) ??
+                   BuildOfflineClient(settings);
 #endif
-#if COREAI_NO_LLM
+#if !COREAI_LLM
             if (settings != null && settings.ExecutionMode == LlmExecutionMode.Offline)
             {
                 return BuildOfflineClient(settings);
@@ -272,7 +273,7 @@ namespace CoreAI.Composition
         private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode,
             IAgentMemoryStore memoryStore = null)
         {
-#if COREAI_NO_LLM
+#if !COREAI_LLM
             return null;
 #else
             if (settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
@@ -289,7 +290,7 @@ namespace CoreAI.Composition
         internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode,
             IAgentMemoryStore memoryStore = null)
         {
-#if COREAI_NO_LLM
+#if !COREAI_LLM
             return new StubLlmClient();
 #else
             if (mode == LlmExecutionMode.ServerManagedApi)
@@ -317,7 +318,7 @@ namespace CoreAI.Composition
         /// </summary>
         private static ILlmClient BuildSecondaryHttpClient(CoreAISettingsAsset settings)
         {
-#if COREAI_NO_LLM
+#if !COREAI_LLM
             return new StubLlmClient();
 #else
             return new OpenAiChatLlmClient(
@@ -328,7 +329,7 @@ namespace CoreAI.Composition
 #endif
         }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         /// <summary>Adapts secondary backend fields to <see cref="IOpenAiHttpSettings"/>.</summary>
         private sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
         {
@@ -374,7 +375,7 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
-#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || COREAI_NO_LLM
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || !COREAI_LLM
             return null;
 #else
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);
@@ -422,7 +423,7 @@ namespace CoreAI.Composition
             return client ?? new StubLlmClient();
         }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         private sealed class ServerManagedCoreSettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _settings;

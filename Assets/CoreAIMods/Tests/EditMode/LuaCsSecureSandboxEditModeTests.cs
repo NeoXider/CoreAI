@@ -1,3 +1,4 @@
+#if COREAI_LUA
 using System.Threading;
 using CoreAI.Sandbox.LuaCs;
 using Lua;
@@ -87,6 +88,13 @@ namespace CoreAI.Tests.EditMode
         {
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
+
+            // WHY: the production guard deliberately samples GC.GetTotalMemory(false), whose committed
+            // high-water mark can be reused across repeated test runs. Compact first so this test measures
+            // the bomb's live growth instead of inheriting capacity from an earlier Unity process run.
+            System.GC.Collect();
+            System.GC.WaitForPendingFinalizers();
+            System.GC.Collect();
 
             // string.rep is capped at MaxStringRepLength (1MB); doubling it via plain concatenation (no library
             // call site to intercept) must be caught by the per-instruction GC allocation budget. Use an
@@ -271,3 +279,4 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+#endif

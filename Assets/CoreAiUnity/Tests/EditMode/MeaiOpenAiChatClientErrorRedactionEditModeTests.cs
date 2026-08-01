@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;

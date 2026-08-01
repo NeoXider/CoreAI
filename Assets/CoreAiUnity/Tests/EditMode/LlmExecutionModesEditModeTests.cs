@@ -1,17 +1,27 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Logging;
 using CoreAI.Messaging;
 using NUnit.Framework;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace CoreAI.Tests.EditMode
 {
     public sealed class LlmExecutionModesEditModeTests
     {
+        [TearDown]
+        public void TearDownServerManagedHooks()
+        {
+            ServerManagedAuthorization.ClearProvider();
+            ServerManagedAuthorization.ClearRequestHeaderProvider();
+        }
+
         [Test]
         public async Task ClientLimitedDecorator_RejectsAfterRequestLimit()
         {
@@ -269,6 +279,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", ServerManagedAuthorization.GetAuthorizationHeader());
         }
 
+#if COREAI_LLM
         [Test]
         public void ServerManagedLlmClient_ForwardsDynamicAuthorizationHeaderToHttpClient()
         {
@@ -314,6 +325,167 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ServerManagedLlmClient_ComposesDynamicHeadersAsOneSnapshotPerLogicalRequest()
+        {
+            TestOpenAiHttpSettings sourceSettings = new()
+            {
+                HeaderProviderImpl = new FixedRequestHeaderProvider(
+                    new[]
+                    {
+                        new KeyValuePair<string, string>("X-Client-Version", "7.0.0"),
+                        new KeyValuePair<string, string>("X-Shared", "settings")
+                    },
+                    "inner-idempotency",
+                    "inner-request")
+            };
+            CoreAISettingsAsset coreSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                ServerManagedLlmClient client = new(
+                    sourceSettings,
+                    coreSettings,
+                    GameLoggerUnscopedFallback.Instance);
+                IOpenAiHttpSettings effectiveSettings = GetEffectiveHttpSettings(client);
+
+                MutableLessonHeaderProvider dynamicHeaders = new("lesson-a");
+                ServerManagedAuthorization.SetProvider(() => "Bearer current-session");
+                ServerManagedAuthorization.SetRequestHeaderProvider(dynamicHeaders);
+
+                LlmCompletionRequest logicalRequest = new();
+                IReadOnlyList<KeyValuePair<string, string>> first;
+                IReadOnlyList<KeyValuePair<string, string>> retry;
+                using (BeginHeaderSnapshot(effectiveSettings, logicalRequest))
+                {
+                    using (BeginHeaderSnapshot(effectiveSettings, logicalRequest))
+                    using (LlmRequestContext.Begin("Teacher", "trace-a", "idem-a"))
+                    {
+                        first = BuildHeaders(effectiveSettings);
+                    }
+
+                    dynamicHeaders.LessonId = "lesson-b";
+                    using (BeginHeaderSnapshot(effectiveSettings, logicalRequest))
+                    using (LlmRequestContext.Begin("Teacher", "trace-a", "idem-a"))
+                    {
+                        retry = BuildHeaders(effectiveSettings);
+                    }
+                }
+
+                Assert.AreEqual("lesson-a", HeaderValue(first, "X-RedoSchool-Lesson-Id"));
+                Assert.AreEqual("lesson-a", HeaderValue(retry, "X-RedoSchool-Lesson-Id"));
+                Assert.AreEqual(1, dynamicHeaders.CallCount,
+                    "Decorator and transport retries must reuse the first logical-request header snapshot.");
+                Assert.AreEqual("7.0.0", HeaderValue(first, "X-Client-Version"));
+                Assert.AreEqual("settings", HeaderValue(first, "X-Shared"));
+                Assert.AreEqual("Bearer current-session", HeaderValue(first, "Authorization"));
+                Assert.IsNull(HeaderValue(first, "Content-Type"));
+                Assert.AreEqual("idem-a", HeaderValue(first, "Idempotency-Key"));
+                Assert.AreEqual("trace-a", HeaderValue(first, "X-Request-Id"));
+                Assert.AreEqual(1, HeaderCount(first, "Authorization"));
+                Assert.AreEqual(1, HeaderCount(first, "Idempotency-Key"));
+                Assert.AreEqual(1, HeaderCount(first, "X-Request-Id"));
+
+                using (BeginHeaderSnapshot(effectiveSettings, logicalRequest))
+                using (LlmRequestContext.Begin("Teacher", "trace-b", "idem-b"))
+                {
+                    IReadOnlyList<KeyValuePair<string, string>> next = BuildHeaders(effectiveSettings);
+                    Assert.AreEqual("lesson-b", HeaderValue(next, "X-RedoSchool-Lesson-Id"));
+                    Assert.AreEqual("idem-b", HeaderValue(next, "Idempotency-Key"));
+                    Assert.AreEqual("trace-b", HeaderValue(next, "X-Request-Id"));
+                    Assert.AreEqual(2, dynamicHeaders.CallCount,
+                        "A later invocation must sample the current lesson even when the request object is reused.");
+                }
+
+                ServerManagedAuthorization.ClearRequestHeaderProvider();
+                using (BeginHeaderSnapshot(effectiveSettings, new LlmCompletionRequest()))
+                using (LlmRequestContext.Begin("Teacher", "trace-c", "idem-c"))
+                {
+                    IReadOnlyList<KeyValuePair<string, string>> afterClear = BuildHeaders(effectiveSettings);
+
+                    Assert.IsNull(HeaderValue(afterClear, "X-RedoSchool-Lesson-Id"));
+                    Assert.AreEqual("7.0.0", HeaderValue(afterClear, "X-Client-Version"));
+                    Assert.AreEqual(2, dynamicHeaders.CallCount);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(coreSettings);
+            }
+        }
+
+        private static IDisposable BeginHeaderSnapshot(
+            IOpenAiHttpSettings effectiveSettings,
+            LlmCompletionRequest request)
+        {
+            MethodInfo method = effectiveSettings.GetType().GetMethod(
+                "BeginRequestHeaders",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(method);
+            return (IDisposable)method.Invoke(effectiveSettings, new object[] { request });
+        }
+
+        private static IOpenAiHttpSettings GetEffectiveHttpSettings(ServerManagedLlmClient client)
+        {
+            FieldInfo clientField = typeof(ServerManagedLlmClient).GetField(
+                "_client",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(clientField);
+            object meaiClient = clientField.GetValue(client);
+            Assert.IsNotNull(meaiClient);
+
+            FieldInfo innerClientField = typeof(MeaiLlmClient).GetField(
+                "_innerClient",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(innerClientField);
+            object innerClient = innerClientField.GetValue(meaiClient);
+            Assert.IsInstanceOf<MeaiOpenAiChatClient>(innerClient);
+
+            FieldInfo settingsField = typeof(MeaiOpenAiChatClient).GetField(
+                "_settings",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(settingsField);
+            return (IOpenAiHttpSettings)settingsField.GetValue(innerClient);
+        }
+
+        private static IReadOnlyList<KeyValuePair<string, string>> BuildHeaders(IOpenAiHttpSettings settings)
+        {
+            return MeaiOpenAiChatClient.BuildTransportHeadersForTests(
+                "https://backend.example.test/v1/chat/completions",
+                false,
+                false,
+                settings.AuthorizationHeader,
+                settings,
+                NullLog.Instance);
+        }
+
+        private static string HeaderValue(IReadOnlyList<KeyValuePair<string, string>> headers, string name)
+        {
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (string.Equals(header.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return header.Value;
+                }
+            }
+
+            return null;
+        }
+
+        private static int HeaderCount(IReadOnlyList<KeyValuePair<string, string>> headers, string name)
+        {
+            int count = 0;
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (string.Equals(header.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+#endif
+
+        [Test]
         public void ScopedMemoryStore_IsolatesByScope()
         {
             InMemoryAgentMemoryStore inner = new();
@@ -352,6 +524,8 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestOpenAiHttpSettings : IOpenAiHttpSettings
         {
+            public IRequestHeaderProvider HeaderProviderImpl { get; set; }
+
             public string ApiBaseUrl => "https://gateway.example.test/v1";
             public string ApiKey => "";
             public string AuthorizationHeader => "";
@@ -362,8 +536,64 @@ namespace CoreAI.Tests.EditMode
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;
             public bool EnableHttpDebugLogging => false;
-            public IRequestHeaderProvider HeaderProvider => null;
+            public IRequestHeaderProvider HeaderProvider => HeaderProviderImpl;
         }
+
+#if COREAI_LLM
+        private sealed class FixedRequestHeaderProvider : IRequestHeaderProvider
+        {
+            private readonly IReadOnlyList<KeyValuePair<string, string>> _headers;
+
+            public FixedRequestHeaderProvider(
+                IReadOnlyList<KeyValuePair<string, string>> headers,
+                string idempotencyKey,
+                string requestId)
+            {
+                _headers = headers;
+                IdempotencyKey = idempotencyKey;
+                RequestId = requestId;
+            }
+
+            public IReadOnlyList<KeyValuePair<string, string>> GetHeaders()
+            {
+                return _headers;
+            }
+
+            public string IdempotencyKey { get; }
+
+            public string RequestId { get; }
+        }
+
+        private sealed class MutableLessonHeaderProvider : IRequestHeaderProvider
+        {
+            public MutableLessonHeaderProvider(string lessonId)
+            {
+                LessonId = lessonId;
+            }
+
+            public string LessonId { get; set; }
+
+            public int CallCount { get; private set; }
+
+            public IReadOnlyList<KeyValuePair<string, string>> GetHeaders()
+            {
+                CallCount++;
+                return new[]
+                {
+                    new KeyValuePair<string, string>("X-RedoSchool-Lesson-Id", LessonId),
+                    new KeyValuePair<string, string>("X-Shared", "dynamic-must-not-override-settings"),
+                    new KeyValuePair<string, string>("Authorization", "Bearer forbidden"),
+                    new KeyValuePair<string, string>("content-type", "text/plain"),
+                    new KeyValuePair<string, string>("Idempotency-Key", "forbidden-idempotency"),
+                    new KeyValuePair<string, string>("X-Request-Id", "forbidden-request")
+                };
+            }
+
+            public string IdempotencyKey => "forbidden-provider-idempotency";
+
+            public string RequestId => "forbidden-provider-request";
+        }
+#endif
 
         private sealed class FixedScopeProvider : IAgentMemoryScopeProvider
         {

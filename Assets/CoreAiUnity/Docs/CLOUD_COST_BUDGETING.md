@@ -16,11 +16,13 @@ Every turn the model bills you for **everything it reads (input) plus everything
 
 ```
 INPUT (prompt) tokens
-├── Universal system prompt prefix        (shared rules, optional)
-├── Role system prompt                    (the NPC/agent persona + task contract)
-├── Tool definitions                      (JSON schemas of the tools offered this turn)
+├── Shared system prefix                  (universal + stable role instructions)
+├── Stable full role tool contract        (deterministic names + JSON schemas)
 ├── ## Conversation Summary               (rolling summary of older history, if compaction ran)
 ├── Recent chat history                   (verbatim tail within the token budget)
+├── Request system instructions           (`AiTaskRequest.RequestSystemInstructions`, if set)
+├── Canonical + pending student memory    (when role memory is enabled)
+├── Current-turn tool availability        (allowlist / forced mode / required tool)
 ├── Runtime/world context                 (per-role context providers, if registered)
 └── Current user message                  (what the player just said / task payload)
 
@@ -32,6 +34,66 @@ Two multipliers that surprise people:
 
 - **History is re-sent every turn.** Turn 20 of a chat resends the (budgeted) tail of turns 1–19 as input. Input tokens dominate the bill for long conversations — this is why the history budget knobs in §3 matter.
 - **Tool calls are roundtrips.** One player message can trigger several LLM calls (model → tool call → tool result → model → …, up to `Max Tool Call Roundtrips`). Each roundtrip re-sends the prompt and bills again.
+
+The first two rows form a strict, byte-stable provider-cache prefix. Student memory, current slide/world state,
+per-request instructions, and tool filtering never enter it. With a busy school deployment, one warmed role
+prefix can therefore serve thousands of students; each request pays only for its smaller volatile tail (subject
+to the provider's cache lifetime, routing, and minimum-prefix rules). Native request `Tools` remain filtered to
+the current turn even though the shared textual role contract describes the role's complete tool set.
+
+`AiTaskRequest.SystemPrompt` remains the migration-compatible base-role override and therefore changes the first
+system message. Do not put student/turn data there when cache reuse matters; use
+`RequestSystemInstructions`. On the current MEAI OpenAI-compatible transport, volatile orchestration system-tail
+entries are serialized after the prefix as provider-safe `user` messages headed `System context update:`; the
+current user payload still comes last.
+
+### Cache scope and router reality
+
+CoreAI does not create or address a per-student prompt cache. The reusable unit is the byte-identical prefix for
+a stable agent/role prompt version and provider route. Student memory, history, limits, allowlists, and world
+state remain ordinary volatile tail input. Provider/account isolation, minimum prefix length, TTL, and routing
+still decide whether those shared leading bytes produce a physical cache hit.
+
+При сотнях агентов и тысячах учеников число потенциальных записей кеша растёт по числу **уникальных стабильных
+префиксов**, а не по числу учеников или экземпляров C#-объекта. Сто экземпляров роли `Teacher` с одинаковыми
+universal/role/persona/tool байтами используют один и тот же cache-eligible prefix. Сто действительно разных
+persona prompt дают до ста отдельных префиксов на каждый фактически выбранный endpoint. Данные ученика,
+прогресс, история и состояние урока должны оставаться в tail; иначе каждый ученик создаст отдельный префикс.
+
+- [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching) uses sticky routing
+  at account + model + conversation granularity. Without `session_id`, the conversation key is derived from the
+  first system/developer message and first non-system message. Different student conversations can therefore
+  warm the same stable prefix on several provider endpoints; do not assume one global physical cache. For
+  deliberate sticky routing, set `session_id` through `SetProviderBodyParameter` to an opaque application/agent
+  cohort such as `coreai-teacher-v3` — never `studentId`, email, login, GUID ученика или иное PII. A small fixed
+  shard set (`coreai-teacher-v3-0` … `-3`) is acceptable only when you intentionally trade cache concentration
+  for throughput. To measure one concrete OpenRouter endpoint, use
+  `provider.order: ["cloudflare/fp8"]` together with `provider.allow_fallbacks: false`; remove that pin after the
+  experiment if production failover is required.
+- [DeepSeek context caching](https://api-docs.deepseek.com/guides/kv_cache) is automatic and matches complete
+  prefixes from token zero; DeepSeek documents cache isolation between API users. Its optional
+  [`user_id`](https://api-docs.deepseek.com/quick_start/rate_limit) adds another KV-cache/content-safety/scheduling
+  isolation boundary. CoreAI does not set it: never send student id/PII there, and remember that a distinct opaque
+  value per student intentionally prevents a shared provider cache. Leave it empty for account-wide role-prefix
+  reuse, or choose an opaque tenant/cohort boundary only when that privacy/throughput trade-off is deliberate.
+  CoreAI keeps the reusable prefix deterministic and does not attempt to manage provider cache entries.
+
+**Живая проверка:** `PromptCacheLivePlayModeTests` делает три ограниченных по времени/выходу запроса через
+production-like CoreAI pipeline с одним длинным role/tool prefix и разными синтетическими student tails. Тест
+запускается только при `COREAI_TEST_PROMPT_CACHE=true`, требует `CacheReadTokens > 0` не позднее третьего запроса
+и печатает provider/model/prompt/completion/cache-read/cache-write. Настройка и точный provider pin описаны в
+[`RUNNING_LIVE_TESTS.md`](RUNNING_LIVE_TESTS.md). Это доказывает один настроенный маршрут; реальные hit rate всё
+равно измеряйте по endpoint/model, потому что byte-stability доказывает лишь eligibility.
+
+Кеш префикса не изолирует состояние ученика. `CoreAILifetimeScope` теперь сам проводит memory, flat chat,
+structured transcript и compacted conversation summary через scoped decorators с одним каноническим ключом.
+Host должен до container build назначить inspector-компонент `AgentMemoryScopeProviderBehaviour` или вызвать
+`SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` на неактивном scope GameObject. Provider возвращает
+`AgentMemoryScope` с tenant/user/session/topic для текущего авторизованного ученика. `AgentMemoryScope.Empty`
+сохраняет legacy role-only key и безопасен только для одного пользователя, отключённой или намеренно общей памяти.
+Точный Unity API и пример для student id приведены в [`ARCHITECTURE.md`](ARCHITECTURE.md#runtime-context-and-memory-scope).
+Никогда не используйте этот персональный scope как provider `session_id`: OpenRouter routing cohort и локальная
+изоляция истории имеют разные назначения.
 
 ### Worked example (illustrative numbers)
 

@@ -162,22 +162,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
-        private static float NextCoord(System.Random rng)
+        private static float NextCoord(Random rng)
         {
             return (float)(rng.NextDouble() * 500.0 - 250.0);
         }
 
-        private static float NextExtent(System.Random rng)
+        private static float NextExtent(Random rng)
         {
             return (float)(rng.NextDouble() * 64.0 + 0.05);
         }
 
-        private static float NextAngle(System.Random rng)
+        private static float NextAngle(Random rng)
         {
             return (float)(rng.NextDouble() * 720.0 - 360.0);
         }
 
-        private static RbxCFrame RandomCFrame(System.Random rng)
+        private static RbxCFrame RandomCFrame(Random rng)
         {
             RbxCFrame rotation = RbxCFrame.FromEulerAnglesXYZ(
                 NextAngle(rng) * Mathf.Deg2Rad,

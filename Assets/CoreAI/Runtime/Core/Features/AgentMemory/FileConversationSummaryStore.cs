@@ -125,7 +125,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Load failed for {roleId}: {ex}");
+                LogStorageFailure("Load", ex);
                 return "";
             }
         }
@@ -181,7 +181,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Save failed for {roleId}: {ex}");
+                LogStorageFailure("Save", ex);
             }
         }
 
@@ -237,8 +237,15 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Clear failed for {roleId}: {ex}");
+                LogStorageFailure("Clear", ex);
             }
+        }
+
+        private void LogStorageFailure(string operation, Exception ex)
+        {
+            // WHY: roleId may be a scoped persistence key and exception messages commonly repeat the
+            // filesystem path. Keep diagnostics actionable without disclosing either identity data or keys.
+            _log?.Error($"[FileConversationSummaryStore] {operation} failed ({ex.GetType().Name}).");
         }
 
         /// <summary>Releases the internal file-access semaphore.</summary>

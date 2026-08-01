@@ -20,8 +20,8 @@ button copies those values to the child module and clears the legacy storage. Th
 player and does not depend on `AssetDatabase` or editor-only migration code.
 
 Omitting the child module keeps the legacy-safe defaults: an empty prefab registry, unrestricted Build
-Settings scene list, and Full/private reflection disabled. Compile-time `COREAI_NO_LUA` remains the way to
-remove Lua itself from a build.
+Settings scene list, and Full/private reflection disabled. Compile-time `COREAI_LUA` is required to
+enable Lua itself in a build.
 
 ## 1. Data flow
 

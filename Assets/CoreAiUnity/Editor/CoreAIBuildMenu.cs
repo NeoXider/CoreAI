@@ -372,7 +372,8 @@ namespace CoreAI.Editor
                 CoreAIEditorLog.LogWarning($"Scene Setup: failed to create LLM objects: {ex.Message}");
             }
 #else
-            CoreAIEditorLog.LogWarning("Scene Setup: LLMUnity is unavailable (package not installed or UNITY_WEBGL). LLM and LLMAgent were not created.");
+            CoreAIEditorLog.LogWarning(
+                "Scene Setup: LLMUnity is unavailable (package not installed or UNITY_WEBGL). LLM and LLMAgent were not created.");
 #endif
         }
 

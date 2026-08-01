@@ -16,7 +16,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 | **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua 5.4 coroutine pattern; the handle only drives Resume per frame |
 | **API registration** | `LuaCsApiRegistry.Register(name, delegate)` / `RegisterCallback` | Typed host delegates marshalled to `LuaFunction`; no CLR surface leaks |
 | **Logic slots / mod hooks** | C# guarded invoke + `LuaCsExecutionGuard` | Errors surface host-side; scripts cannot silently swallow failures |
-| **Optional module** | `#if !COREAI_NO_LUA` | Build without Lua: stub/null in DI, no compile errors elsewhere |
+| **Optional module** | `#if COREAI_LUA` | Define to enable Lua; default build keeps stub/null DI surfaces |
 
 ## What Is Intentionally Not Exposed
 

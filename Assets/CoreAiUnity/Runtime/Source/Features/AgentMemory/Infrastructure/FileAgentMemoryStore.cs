@@ -194,7 +194,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to load memory for {roleId}: {ex}");
+                LogStorageFailure("load memory", ex);
                 return null;
             }
         }
@@ -311,7 +311,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to save memory for {roleId}: {ex}");
+                LogStorageFailure("save memory", ex);
             }
         }
 
@@ -379,13 +379,13 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
                     catch (Exception ex)
                     {
-                        _log?.Warn($"[FileAgentMemoryStore] Replacing corrupt memory for {roleId}: {ex.Message}");
+                        LogStorageFailure("replace corrupt memory", ex, true);
                         p = null;
                     }
 
                     if (p == null)
                     {
-                        _log?.Warn($"[FileAgentMemoryStore] Replacing unparseable memory for {roleId}.");
+                        _log?.Warn("[FileAgentMemoryStore] Replacing unparseable memory.");
                         p = new Persisted();
                         parseFailed = true;
                     }
@@ -414,7 +414,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to clear memory for {roleId}: {ex}");
+                LogStorageFailure("clear memory", ex);
             }
         }
 
@@ -537,7 +537,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to clear chat history for {roleId}: {ex}");
+                LogStorageFailure("clear chat history", ex);
             }
         }
 
@@ -761,7 +761,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
                     catch (Exception tex)
                     {
-                        _log?.Error($"[FileAgentMemoryStore] Transcript JSON for {roleId}: {tex}");
+                        LogStorageFailure("parse transcript JSON", tex);
                     }
                 }
 
@@ -772,8 +772,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error(
-                    $"[FileAgentMemoryStore] Failed to read chat history from disk for {roleId}: {ex}");
+                LogStorageFailure("read chat history from disk", ex);
             }
         }
 
@@ -827,7 +826,22 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to persist JSON for {roleId}: {ex}");
+                LogStorageFailure("persist JSON", ex);
+            }
+        }
+
+        private void LogStorageFailure(string operation, Exception ex, bool warning = false)
+        {
+            // WHY: roleId may be a scoped persistence key and exception messages commonly repeat the
+            // filesystem path. Report only the operation and exception kind so logs disclose neither.
+            string message = $"[FileAgentMemoryStore] Failed to {operation} ({ex.GetType().Name}).";
+            if (warning)
+            {
+                _log?.Warn(message);
+            }
+            else
+            {
+                _log?.Error(message);
             }
         }
 

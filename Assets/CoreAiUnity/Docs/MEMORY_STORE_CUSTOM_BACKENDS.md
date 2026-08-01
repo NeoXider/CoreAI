@@ -8,7 +8,7 @@ You **can** replace it with:
 - **Cloud save** — multi-device, backups, optional server authority.
 - **Composite** — e.g. local file + async upload (offline-first).
 
-DI registration today (Unity package): [`CoreAILifetimeScope`](../Runtime/Source/Composition/CoreAILifetimeScope.cs) registers `FileAgentMemoryStore` as `IAgentMemoryStore`. Swap that registration (or register a decorator) with your implementation.
+DI registration today (Unity package): [`CoreAILifetimeScope`](../Runtime/Source/Composition/CoreAILifetimeScope.cs) defaults to `FileAgentMemoryStore`, while `AgentMemoryPersistenceMode.SessionOnly` selects `InMemoryAgentMemoryStore` before build. For a custom backend, replace the selected private backing while keeping the scoped memory/transcript decorators at the public DI boundary.
 
 ---
 

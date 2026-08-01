@@ -5,7 +5,7 @@ logic, and communicate with the game through events. The sandbox (`SecureLuaEnvi
 [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) is not weakened by this: only the binding surface
 grows, and every group is gated by a capability level.
 
-**Lua is an optional module:** define `COREAI_NO_LUA`, and CoreAI
+**Lua is an optional module:** define `COREAI_LUA` to compile it in. Without the define CoreAI
 builds without Lua (stub bindings in DI). See [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md).
 
 **New to mods?** Start with [FIRST_MOD.md](FIRST_MOD.md) — "Your first Lua mod in 5 minutes".

@@ -58,7 +58,15 @@ namespace CoreAI.Composition
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<AgentSessionInspector>(Lifetime.Singleton);
-            builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
+            // WHY: Unity and other multi-tenant hosts may register a live scope provider before the portable
+            // graph is added. An unconditional default silently replaced that host boundary with role-only
+            // memory, so sequential users could read the same local chat history.
+            if (!builder.Exists(typeof(IAgentMemoryScopeProvider), true))
+            {
+                builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton)
+                    .As<IAgentMemoryScopeProvider>();
+            }
+
             builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
             if (!suppressDefaultTokenCalibrationStore)
             {
@@ -103,7 +111,10 @@ namespace CoreAI.Composition
             builder.Register<GameConfigPolicy>(Lifetime.Singleton);
             builder.Register<AiOrchestrator>(Lifetime.Singleton);
             builder.Register<IAiOrchestrationService>(c =>
-                    new QueuedAiOrchestrator(c.Resolve<AiOrchestrator>(), c.Resolve<AiOrchestrationQueueOptions>()),
+                    new QueuedAiOrchestrator(
+                        c.Resolve<AiOrchestrator>(),
+                        c.Resolve<AiOrchestrationQueueOptions>(),
+                        c.Resolve<IAgentMemoryScopeProvider>()),
                 Lifetime.Singleton);
             builder.Register<InGameLlmChatService>(Lifetime.Singleton).As<IInGameLlmChatService>();
         }

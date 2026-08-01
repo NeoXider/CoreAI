@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -32,6 +32,27 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, inner.StreamCallCount, "The stream must be re-opened once.");
             Assert.AreEqual("hello", Concat(chunks));
             Assert.IsFalse(HasError(chunks), "The retried stream succeeded, so no error should surface.");
+        }
+
+        [Test]
+        public async Task PreCommitRetry_KeepsOneHeaderSnapshotAndLaterInvocationResamples()
+        {
+            SnapshotAwareStreamingClient inner = new();
+            RetryingStreamingLlmClientDecorator sut = new(inner, 1, null);
+            LlmCompletionRequest request = Req();
+
+            List<LlmStreamChunk> first = await Drain(sut.CompleteStreamingAsync(request));
+
+            Assert.AreEqual("ok", Concat(first));
+            CollectionAssert.AreEqual(new[] { "lesson-a", "lesson-a" }, inner.SeenLessons);
+            Assert.AreEqual(1, inner.ScopeCount);
+
+            inner.CurrentLesson = "lesson-c";
+            List<LlmStreamChunk> later = await Drain(sut.CompleteStreamingAsync(request));
+
+            Assert.AreEqual("ok", Concat(later));
+            CollectionAssert.AreEqual(new[] { "lesson-a", "lesson-a", "lesson-c" }, inner.SeenLessons);
+            Assert.AreEqual(2, inner.ScopeCount);
         }
 
         [Test]
@@ -223,6 +244,78 @@ namespace CoreAI.Tests.EditMode
                     cancellationToken.ThrowIfCancellationRequested();
                     await Task.Yield();
                     yield return c;
+                }
+            }
+        }
+
+        private sealed class SnapshotAwareStreamingClient : ILlmClient, ILlmRequestHeaderScope
+        {
+            private string _activeLesson;
+            private int _depth;
+            private int _streamCalls;
+
+            public string CurrentLesson { get; set; } = "lesson-a";
+
+            public int ScopeCount { get; private set; }
+
+            public List<string> SeenLessons { get; } = new();
+
+            public IDisposable BeginRequestHeaders(LlmCompletionRequest request)
+            {
+                string previous = _activeLesson;
+                if (_depth == 0)
+                {
+                    _activeLesson = CurrentLesson;
+                    ScopeCount++;
+                }
+
+                _depth++;
+                return new HeaderScope(this, previous);
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                using (BeginRequestHeaders(request))
+                {
+                    SeenLessons.Add(_activeLesson);
+                    _streamCalls++;
+                    await Task.Yield();
+                    if (_streamCalls == 1)
+                    {
+                        CurrentLesson = "lesson-b";
+                        yield return ErrChunk(LlmErrorCode.BackendUnavailable);
+                        yield break;
+                    }
+
+                    yield return Text("ok");
+                    yield return Done();
+                }
+            }
+
+            private sealed class HeaderScope : IDisposable
+            {
+                private readonly SnapshotAwareStreamingClient _owner;
+                private readonly string _previous;
+
+                public HeaderScope(SnapshotAwareStreamingClient owner, string previous)
+                {
+                    _owner = owner;
+                    _previous = previous;
+                }
+
+                public void Dispose()
+                {
+                    _owner._depth--;
+                    _owner._activeLesson = _previous;
                 }
             }
         }

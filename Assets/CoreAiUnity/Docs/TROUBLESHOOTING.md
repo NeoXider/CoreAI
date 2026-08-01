@@ -119,7 +119,7 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 **Why Stub was chosen:**
 1. Backend = Auto, but neither LLMUnity nor HTTP is available
 2. LLMAgent not found on scene and HTTP URL not configured
-3. `COREAI_NO_LLM` define is enabled (manual opt-out)
+3. `COREAI_LLM` define is missing (the LLM pipeline is a manual positive opt-in)
 4. Package `ai.undream.llm` is not installed (`COREAI_HAS_LLMUNITY` not defined) — LLMUnity backend unavailable
 
 **Fix:**
@@ -314,7 +314,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 |----------|---------|
 | Memory disabled for role | `policy.ConfigureRole("MyRole", useMemoryTool: true)` |
 | Model does not call tool | Add instruction to the prompt |
-| NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, resolve **`FileAgentMemoryStore`** on **all** players (WebGL included, **v1.6.19+**). If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
+| NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, `Persistent` resolves a scoped facade over **`FileAgentMemoryStore`** on all players (WebGL included), while `SessionOnly` resolves it over **`InMemoryAgentMemoryStore`**. If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
 | WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.neoxider.coreaiunity`**. |

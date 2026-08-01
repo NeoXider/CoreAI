@@ -25,38 +25,67 @@ Reference implementations we are aligning with:
 ## Target design
 
 ### 1. Transcript model + stable cacheable prefix
-- Status: **implemented as the only CoreAI runtime path** for conversation summary, world-state, and live
-  memory-update placement. The summary is prepended as the first tail message because it represents the evicted
-  oldest turns; recent turns already remain verbatim after it.
+- Status: **implemented as the only CoreAI runtime path**. The first provider `system` message contains only
+  stable universal/role instructions and a deterministic full role tool contract. The summary is prepended as
+  the first transcript-tail message because it represents the evicted oldest turns; recent turns remain verbatim
+  after it.
 - Keep recent turns as **real `user`/`assistant`/`tool` messages** in the tail; do **not** rewrite the
   `system`/`tools` prefix each turn. The frozen prefix is what the provider caches.
-- Volatile, per-turn content goes at the **end**, after the cache breakpoint.
+- Volatile, per-turn content goes after the transcript as ordered system-role tail messages, before the current
+  user payload.
 
 ### 1a. Prefix vs Tail — how live memory & summary coexist with caching (the core decision)
 - Status: **implemented as mandatory tail placement**. `AiOrchestrator.BuildChatHistoryAsync` emits
   `## Conversation Summary` as the first system-role
   `ChatHistory` message, before recent verbatim turns, instead of appending it to the system prefix.
-  Runtime/world-state context from the existing per-role/global context providers is emitted as the final
-  system-role `## World State` tail message. `## Memory` remains a stable prefix snapshot; changes after that
-  snapshot are emitted as `## Memory (updates)` tail content and consolidated only at compaction/retry boundaries.
+  After the transcript it emits, in order, per-request `AiTaskRequest.RequestSystemInstructions`, canonical memory,
+  pending memory updates, current-turn tool availability/requirement guidance, and runtime/world-state context.
+  Every one of these blocks is a system-role tail message; none can contaminate the shared prefix.
 
-The reason today's design breaks caching is **placement, not content**: the `## Memory` block and
-`## Conversation Summary` are injected into the **top-level `system`** (the prefix), so every memory update or
-re-summarization changes the prefix and invalidates the provider cache. Fix it by splitting context into:
+The cache boundary is a strict layering rule, not a best-effort optimization. Any student, slide, time,
+progress, allowlist, or request-dependent byte in the first `system` message fragments a platform-wide warm
+cache into one entry per turn/student. Context is therefore split into:
 
-- **Frozen prefix (cached):** persona / system playbook, **tool definitions**, and (optionally) a stable
-  *global* memory slice. Never rewritten mid-session.
-- **Volatile tail (cheap to reprocess):** the **current memory snapshot**, the conversation summary, and the
-  **dynamic world-state observation** (§8) — emitted at the **end** of `messages[]`, after the cache breakpoint:
-  - Anthropic-style: a `role: "system"` message appended after history (beta `mid-conversation-system`) — carries
-    operator authority, leaves the cached prefix intact.
-  - OpenAI/DeepSeek-compatible (current backend): a system/user message in the tail; auto prefix-caching covers
-    the stable head.
+- **Frozen prefix (cached):** universal rules, stable role/persona instructions, and the deterministic **full
+  role tool contract**. It is byte-identical for every student using the same role and provider route.
+- **Volatile tail (cheap to reprocess):** per-request system instructions, the **current memory snapshot** and
+  pending updates, conversation summary/recent history, filtered tool availability/forced-mode guidance, and the
+  **dynamic world-state observation** (§8) — emitted after the frozen prefix and before the current user payload:
+  - Anthropic-style: a future dedicated transport may use a late `role: "system"` / developer-authority message
+    when the provider explicitly supports it.
+  - OpenAI/DeepSeek-compatible MEAI transport (current backend): orchestration system-tail entries are normalized
+    to provider-safe `role: "user"` messages headed `System context update:` because some compatible chat
+    templates reject `system` outside position zero. The stable first system message remains unchanged and the
+    current user payload remains last.
 
-Result: the large prefix caches; the small live tail updates every turn. **Memory executes in full AND the cache
-survives.** Caching is not the priority — but this placement costs nothing extra and also fixes the "amnesia"
+`AiTaskRequest.SystemPrompt` intentionally retains its legacy behavior: it replaces the request's role base
+prompt and therefore changes the frozen prefix. New request/student-specific callers must use
+`RequestSystemInstructions`; this explicit API split avoids a silent behavioral migration.
+
+Result: the large role prefix can be warmed once and reused across thousands of students; the small live tail
+updates every turn. **Memory executes in full AND the cache survives.** This placement also fixes the "amnesia"
 (we stop rewriting the prefix and keep recent turns verbatim). Cache *tiers* help too: a `system` change
 invalidates system+messages but **not** tools; a tail-only `messages` change invalidates neither tools nor system.
+
+This is shared-prefix eligibility per stable agent/role prompt version, not a per-student cache design. Memory,
+history, quotas/limits, tool policy, and world state are never used as CoreAI cache identities. Provider routing
+may create several physical warm copies of the same prefix: OpenRouter sticky routing is scoped by account,
+model, and conversation (default conversation fingerprint: first system/developer + first non-system message),
+while DeepSeek automatically matches complete prefixes from token zero within its documented API-user isolation.
+Do not claim one global cache across endpoints. Provider-specific routing parameters are available through the
+safe `SetProviderBodyParameter(string, JToken)` API. For OpenRouter, an optional `session_id` must name an opaque
+application/agent cohort (`coreai-teacher-v3`), never a student/user/PII value; use only a small fixed shard set
+when throughput design requires it. Exact cache measurement may pin
+`provider.order: ["cloudflare/fp8"]` plus `provider.allow_fallbacks: false`, but production failover then becomes
+the application's explicit responsibility.
+
+Scaling rule: cache cardinality follows unique stable prefix versions. Identical role instances across thousands
+of students share eligibility; unique persona prompts create distinct entries per routed endpoint. Personal state
+is isolated separately: `CoreAILifetimeScope` wraps memory, flat chat, structured transcript, and compacted summary
+with one scope-key mapping. A multi-tenant host must provide `IAgentMemoryScopeProvider` before container build via
+the inspector `AgentMemoryScopeProviderBehaviour` field or `SetAgentMemoryScopeProvider(...)`. The default
+`AgentMemoryScope.Empty` is a legacy role-only key and is safe only in a one-user process, with memory disabled, or
+when shared memory/history is deliberate.
 
 ### 1a caching — verification & provider notes
 - Status: **verification implemented.** Provider cache token counts now flow from
@@ -73,6 +102,11 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   frozen prefix through `ChatOptions.AdditionalProperties` / `RawRepresentationFactory`
   in that backend's transport adapter. Do not add those markers to the current
   OpenAI-compatible transport.
+- Live validation: `PromptCacheLivePlayModeTests` is an explicit paid probe
+  (`COREAI_TEST_PROMPT_CACHE=true`). It sends three different synthetic student tails through the real
+  production-like pipeline, asserts a byte-identical long role/tool `SystemPrompt`, and requires a provider
+  cache-read report by request three. Diagnostics include provider, model, prompt/completion tokens, cache reads,
+  and cache writes. Run it separately for every production route; one green endpoint is not a global guarantee.
 
 ### 2. Compaction by threshold (not every turn)
 - Status: **implemented.** `ConversationCompactionTriggerRatio` defaults to `0.8`; invalid/unset per-request
@@ -80,7 +114,7 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   rewrite the stored rolling summary.
 - Run condensation only when approaching the context limit. Produce an **anchored summary** that replaces the
   **oldest** turns; keep the most recent N turns verbatim while they fit.
-- Re-summarize infrequently so the cached prefix survives across turns.
+- Re-summarize infrequently so the volatile tail stays small and deterministic across nearby turns.
 
 ### 3. Tool-result hygiene before truncation (`ToolResultMemoryPolicy`) - implemented
 - New per-role policy: `None | ErrorsOnly | CompactSummary | Full` (default `CompactSummary`).
@@ -128,38 +162,35 @@ boundary consolidation.
   agent edits, it does **not** rewrite the whole thing each time (model-decided when useful).
 - **Versioned:** snapshot per mutation for audit + rollback (revert a bad self-edit).
 
-**Placement & consolidation (the cache-safe rule).** Tie memory placement to *cache boundaries*, not to each turn:
+**Placement & consolidation (the cache-safe rule).** Canonical and pending memory are both student-scoped and
+therefore both remain in system-role tail messages. Storage still keeps a canonical snapshot plus pending
+updates: compaction/retry boundaries may consolidate them to shorten the tail, but consolidation never moves
+student memory into the first provider `system` message.
 
-1. **Mid-session** an incremental edit goes into a small **"memory delta" block in the tail** — the cached
-   prefix stays intact, the change is visible to the model immediately.
-2. **At a boundary** — session start, **after summarization/compaction**, or an explicit reload — the prefix is
-   rebuilt anyway (cache already cold), so **consolidate** the accumulated deltas into the **canonical memory
-   snapshot in the prefix** and clear the tail deltas. Re-embedding memory into `system` at a boundary is free.
+So two levels live in the tail: a **canonical snapshot** and **pending deltas** updated as the agent edits. The
+model sees the complete effective memory every turn while the shared universal/role/tool prefix remains
+byte-identical across students.
 
-So two levels live in the prompt: a **canonical snapshot** (prefix, refreshed only at boundaries) and
-**this-segment deltas** (tail, updated as the agent edits). This is the formal answer to "recompute memory into
-the system prompt when the session summarizes/restarts" — yes, the boundary is exactly the consolidation point.
-
-- **Memory is always fully readable.** The full memory is present in context every turn (canonical prefix +
-  tail deltas), so the model never loses it; the explicit `read` action lets the agent re-read the whole memory
-  on demand. Caching is *not* the goal — keeping the system prompt stable is only a
-  side effect of "the model already remembers"; at boundaries (new session / summarization / truncation) the
-  cache breaks anyway, so that is exactly when we refresh memory into the system prompt.
+- **Memory is always fully readable.** The full memory is present in tail context every turn (canonical snapshot
+  plus pending deltas), so the model never loses it; the explicit `read` action lets the agent re-read the whole
+  memory on demand. A compaction boundary may merge the two storage levels, but it does not change their
+  provider-message layer.
 
 - **Layered scopes**, each mapping onto the above:
-  - `global / persona` — rarely changes → canonical **prefix**.
-  - `per-user` (e.g. the student profile) and `per-session` — change often → tail deltas, consolidated at boundaries.
+  - `global / persona` — stable instructions belong to the role prefix; mutable memory belongs to the tail.
+  - `per-user` (e.g. the student profile) and `per-session` — canonical state and updates both remain in the tail.
 - Durable across sessions (survives WebGL restart). Game-side requirement: RedoSchool `MVP_TODO.md`
   → *2.2 Personal student memory*.
 - **Inspector:** extend the Agent Session Inspector to show memory deltas + version history.
 
-### 6a. Conditional tool contract (native vs text-shaped backends)
-Status: implemented for the current prompt formatter path.
+### 6a. Stable role contract + current-turn availability
+Status: implemented for native and text-shaped backends.
 
-The `## Tool Contract` block now keeps the full tool list + JSON schema in the **system prompt** only when the
-backend cannot receive native tools (local GGUF / text-shaped extraction). Native tool-calling backends receive
-only the minimal contract guidance because the schema is already sent in the native `tools` array. This saves
-tokens and keeps the prefix lean while remaining deterministic for caching.
+The first `system` message contains the deterministic full role tool list + JSON schemas, independent of
+`AllowedToolNames`, `ForcedToolMode`, and `RequiredToolName`. Native request `Tools` are still filtered to the
+actual current-turn set. An ordered `## Tool Availability (current request)` orchestration tail message lists the
+effective tools, sorted allowlist entries, selection mode, and required tool. Text-shaped backends therefore do
+not call a filtered-out tool merely because its stable definition remains in the shared role contract.
 
 ### 7. Context editing (prune) alongside compaction (summarize)
 - Status: **implemented** for prompt-history copies. `ConversationHistoryPruner` runs before
@@ -186,7 +217,8 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
 
 ### 9. Deterministic serialization & per-role policy
 - Status: **implemented** for the frozen prefix/tool contract. Tool rendering and MEAI native tool arrays use
-  ordinal-by-name ordering, text-shaped tool schemas are compacted with recursively sorted object keys, and
+  ordinal-by-name ordering, text-shaped tool schemas are complete valid JSON without character truncation and
+  are compacted with recursively sorted object keys, and
   EditMode regressions guard identical fixed-input system prefixes from generated GUID/timestamp leakage.
   Per-role policy is provided by existing `AgentBuilder` / `AgentMemoryPolicy` knobs; see
   `COREAI_SETTINGS.md` ("Per-role policy").

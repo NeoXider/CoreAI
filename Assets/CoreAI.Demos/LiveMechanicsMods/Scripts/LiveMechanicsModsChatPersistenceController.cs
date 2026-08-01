@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Presentation;
@@ -17,7 +17,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class LiveMechanicsModsChatPersistenceController : MonoBehaviour
     {
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         private const string DefaultModKeyPrefix = "demo.live_mechanics.mods_chat.mod.";
         private const string ActiveFlagSegment = "__active__.";
 
@@ -715,7 +715,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[LiveMechanicsModsChatDemo] COREAI_NO_LUA is set; demo persistence is inactive.");
+                "[LiveMechanicsModsChatDemo] COREAI_LUA is not set; demo persistence is inactive.");
             enabled = false;
         }
 #endif

@@ -91,6 +91,43 @@ authenticated backend.
 - `LlmRequestContext` (AsyncLocal) carries the per-request idempotency key, role id, and trace id. `MeaiLlmClient` populates a frame on every `CompleteAsync`/`CompleteStreamingAsync`; HTTP transports emit `Idempotency-Key`, `X-Request-Id`, `X-Coreai-Role`. The same key is reused across decorator retries (e.g. `RefreshOnUnauthorizedDecorator`) so the backend can deduplicate without double-billing.
 - `IRequestHeaderProvider` (on `IOpenAiHttpSettings.HeaderProvider`) exposes a per-settings hook for additional static headers (defaults to `null` on built-in adapters).
 
+### Provider-specific request body (7.0)
+
+Для произвольных OpenAI-compatible полей используйте публичный AOT/WebGL-safe API на
+`OpenAiHttpOptions`, `OpenAiHttpLlmSettings` или `CoreAISettingsAsset`:
+
+```csharp
+settings.SetProviderBodyParameter("provider", new JObject
+{
+    ["order"] = new JArray("cloudflare/fp8"),
+    ["allow_fallbacks"] = false
+});
+settings.SetProviderBodyParameter("session_id", "coreai-teacher-v3");
+settings.RemoveProviderBodyParameter("session_id");
+```
+
+`JObject`/`JArray` позволяют передавать вложенные структуры без `dynamic` и reflection. Объекты
+сериализуются компактно с рекурсивной сортировкой ключей; порядок массивов сохраняется. Передача C# `null`
+удаляет ключ, `JValue.CreateNull()` отправляет JSON `null`. Операция атомарна: невалидный исходный JSON,
+duplicate property или reserved key оставляет прежний `ExtraBodyJson` без изменений. CoreAI защищает
+`model`, `messages`, `temperature`, `max_tokens`, `stream`, `stream_options`, `tools`, `tool_choice`, потому что
+эти поля строит transport/orchestrator.
+
+Raw `ExtraBodyJson` остаётся совместимым advanced escape hatch и исторически может переопределить даже
+reserved field. Новому application-коду следует использовать safe setters. Тексты исключений safe API не
+содержат JSON values/body, поэтому provider secret не попадает в ошибку.
+
+Для OpenRouter `session_id` — непрозрачный id приложения/когорты агента, например `coreai-teacher-v3`, а не
+student/user id и не PII. Малое фиксированное шардирование допустимо только как осознанный throughput trade-off.
+Комбинация `provider.order: ["cloudflare/fp8"]` и `provider.allow_fallbacks: false` полезна для измерения одного
+endpoint, но отключает failover. Физический cache остаётся scoped к provider/account/model/route; CoreAI не
+обещает один cache между endpoint-ами.
+
+У прямого DeepSeek API другое поле: `user_id` является границей KV-cache/content-safety/scheduling. CoreAI его
+не устанавливает. Не передавайте туда student id или PII; per-student opaque `user_id` также намеренно разделит
+provider cache на учеников и уберёт общий прогрев role prefix. Если такая privacy-изоляция не требуется, оставьте
+поле пустым; если требуется — выберите стабильную непрозрачную tenant/cohort-гранулярность осознанно.
+
 ## Runtime Policy Integration
 
 Lesson and practice orchestrators can keep routing portable while adding per-turn policy:

@@ -131,7 +131,8 @@ namespace CoreAI.Core.Tests.EditMode
         public void StripHttpErrorPrefix_LeavesOrdinaryTextAlone()
         {
             Assert.AreEqual("Model is overloaded.", LlmErrorPresentation.StripHttpErrorPrefix("Model is overloaded."));
-            Assert.AreEqual("Model is overloaded.", LlmErrorPresentation.StripHttpErrorPrefix("HTTP error 503: Model is overloaded."));
+            Assert.AreEqual("Model is overloaded.",
+                LlmErrorPresentation.StripHttpErrorPrefix("HTTP error 503: Model is overloaded."));
             Assert.AreEqual("", LlmErrorPresentation.StripHttpErrorPrefix(null));
         }
     }

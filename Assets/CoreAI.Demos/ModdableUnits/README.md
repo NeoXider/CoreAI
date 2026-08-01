@@ -46,7 +46,7 @@ bindings are authored but not yet threaded into the mod runtime, so this demo is
 
 ## Requirements
 
-- `COREAI_NO_LUA` **not** defined.
+- `COREAI_LUA` defined.
 - An LLM endpoint configured in `Resources/CoreAISettings` (LM Studio / OpenAI-compatible).
 - The scene's `CoreAI` scope uses the built-in **Programmer** role (already wired in the
   scene) so `manage_mods` is available in chat.

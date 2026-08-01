@@ -100,7 +100,7 @@ Resolution: the Lua VM was replaced end-to-end by **Lua-CSharp**, a managed, AOT
 Recommended follow-up:
 
 - Add or extend WebGL Player tests to keep covering the Lua-CSharp path on IL2CPP.
-- You can still compile Lua out entirely with the `COREAI_NO_LUA` scripting define (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md) — useful for WebGL or any build that does not need scripting.
+- Lua remains compiled out unless the build defines `COREAI_LUA` (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md); enable it explicitly for WebGL players that need scripting.
 
 ## Warning handling policy
 

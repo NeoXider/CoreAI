@@ -1,4 +1,4 @@
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using System;
 using System.Text;
 using System.Threading;
@@ -135,13 +135,13 @@ using UnityEngine;
 
 namespace CoreAI.Demos
 {
-    /// <summary>No-op fallback when the Lua runtime is stripped (no-lua build: COREAI_NO_LUA).</summary>
+    /// <summary>No-op fallback when the positive Lua opt-in is absent.</summary>
     public sealed class WebGlLuaSelfTest : MonoBehaviour
     {
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(10, 10, 520, 60), GUI.skin.box);
-            GUILayout.Label("CoreAI Lua sandbox self-test unavailable: COREAI_NO_LUA build.");
+            GUILayout.Label("CoreAI Lua sandbox self-test unavailable: COREAI_LUA is not set.");
             GUILayout.EndArea();
         }
     }

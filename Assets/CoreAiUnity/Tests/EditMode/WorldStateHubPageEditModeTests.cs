@@ -235,7 +235,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(activePageField);
                 Assert.IsNotNull(destroyPage);
                 Dictionary<string, IHubPage> pages =
-                    (System.Collections.Generic.Dictionary<string, IHubPage>)pagesField.GetValue(window);
+                    (Dictionary<string, IHubPage>)pagesField.GetValue(window);
                 pages.Add(page.PageId, page);
                 activePageField.SetValue(window, page.PageId);
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(

@@ -1,5 +1,5 @@
 using UnityEngine;
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -17,7 +17,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class LiveMechanicsDemoController : MonoBehaviour
     {
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         /// <summary>Slot: damage per hero attack, args (atk, def) → number.</summary>
         public const string DamageSlot = "damage_formula";
 
@@ -265,7 +265,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[LiveMechanicsDemo] COREAI_NO_LUA is set; demo is inactive.");
+                "[LiveMechanicsDemo] COREAI_LUA is not set; demo is inactive.");
             enabled = false;
         }
 #endif

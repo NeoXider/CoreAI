@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections;
 using System.Collections.Generic;

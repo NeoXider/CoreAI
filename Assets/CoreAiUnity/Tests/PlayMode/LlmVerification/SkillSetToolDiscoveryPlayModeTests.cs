@@ -22,7 +22,7 @@ namespace CoreAI.Tests.PlayMode
     /// then call_skill_tool to execute it. The tool is NOT in the model's tool list —
     /// only read_skill and call_skill_tool are visible.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class SkillSetToolDiscoveryPlayModeTests
     {
         private static bool _enchantWeaponCalled;

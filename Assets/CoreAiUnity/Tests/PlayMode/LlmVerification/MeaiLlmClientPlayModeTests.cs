@@ -15,7 +15,7 @@ namespace CoreAI.Tests.PlayMode
     /// PlayMode   MeaiLlmClient   MEAI .
     ///     (HTTP  LLMUnity)    pipeline.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class MeaiLlmClientPlayModeTests
     {
         /// <summary>

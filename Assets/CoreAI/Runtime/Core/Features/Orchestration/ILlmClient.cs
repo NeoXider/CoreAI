@@ -478,4 +478,17 @@ namespace CoreAI.Ai
             };
         }
     }
+
+    internal interface ILlmRequestHeaderScope
+    {
+        IDisposable BeginRequestHeaders(LlmCompletionRequest request);
+    }
+
+    internal static class LlmRequestHeaderScopes
+    {
+        internal static IDisposable Begin(ILlmClient client, LlmCompletionRequest request)
+        {
+            return (client as ILlmRequestHeaderScope)?.BeginRequestHeaders(request);
+        }
+    }
 }

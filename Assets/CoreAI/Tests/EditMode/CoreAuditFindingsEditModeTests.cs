@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -153,8 +153,8 @@ namespace CoreAI.Core.Tests.EditMode
         {
             UnreadableMemoryStore store = new();
 
-            AgentMemoryLoadException thrown = Assert.ThrowsAsync<AgentMemoryLoadException>(
-                async () => await store.MutateAsync("creator", state =>
+            AgentMemoryLoadException thrown = Assert.ThrowsAsync<AgentMemoryLoadException>(async () =>
+                await store.MutateAsync("creator", state =>
                 {
                     state.Memory = "brand new";
                     return true;

@@ -7,7 +7,7 @@ namespace CoreAI.Ai
     /// Sliding-window rate limiter for LLM-driven Lua script generation/execution. Guards the
     /// envelope pipeline against runaway loops where failing scripts keep scheduling new
     /// Programmer generations (or a misbehaving agent keeps emitting Lua envelopes).
-    /// Pure C# (no MoonSharp/UnityEngine) so it compiles under <c>COREAI_NO_LUA</c> and is
+    /// Pure C# (no Lua-CSharp/UnityEngine) so it compiles when <c>COREAI_LUA</c> is absent and is
     /// EditMode-testable with an injected clock.
     /// </summary>
     public sealed class LuaGenerationRateLimiter

@@ -1,5 +1,5 @@
-#if !COREAI_NO_LUA
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LUA
+#if COREAI_LLM && !UNITY_WEBGL
 using CoreAI.Ai;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;

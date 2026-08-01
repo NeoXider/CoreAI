@@ -837,24 +837,24 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
-    Android: DOTWEEN;COREAI_HAS_HUB
-    EmbeddedLinux: DOTWEEN
-    GameCoreScarlett: DOTWEEN
-    GameCoreXboxOne: DOTWEEN
-    Kepler: DOTWEEN
-    LinuxHeadlessSimulation: DOTWEEN
-    Nintendo Switch: DOTWEEN
-    Nintendo Switch 2: DOTWEEN
-    PS4: DOTWEEN
-    PS5: DOTWEEN
-    QNX: DOTWEEN
-    Standalone: DOTWEEN;COREAI_HAS_HUB
-    VisionOS: DOTWEEN
-    WebGL: DOTWEEN;COREAI_HAS_HUB
-    Windows Store Apps: DOTWEEN
-    XboxOne: DOTWEEN
-    iPhone: DOTWEEN
-    tvOS: DOTWEEN
+    Android: DOTWEEN;COREAI_HAS_HUB;COREAI_LLM;COREAI_LUA
+    EmbeddedLinux: DOTWEEN;COREAI_LLM;COREAI_LUA
+    GameCoreScarlett: DOTWEEN;COREAI_LLM;COREAI_LUA
+    GameCoreXboxOne: DOTWEEN;COREAI_LLM;COREAI_LUA
+    Kepler: DOTWEEN;COREAI_LLM;COREAI_LUA
+    LinuxHeadlessSimulation: DOTWEEN;COREAI_LLM;COREAI_LUA
+    Nintendo Switch: DOTWEEN;COREAI_LLM;COREAI_LUA
+    Nintendo Switch 2: DOTWEEN;COREAI_LLM;COREAI_LUA
+    PS4: DOTWEEN;COREAI_LLM;COREAI_LUA
+    PS5: DOTWEEN;COREAI_LLM;COREAI_LUA
+    QNX: DOTWEEN;COREAI_LLM;COREAI_LUA
+    Standalone: DOTWEEN;COREAI_HAS_HUB;COREAI_LLM;COREAI_LUA
+    VisionOS: DOTWEEN;COREAI_LLM;COREAI_LUA
+    WebGL: DOTWEEN;COREAI_HAS_HUB;COREAI_LLM;COREAI_LUA
+    Windows Store Apps: DOTWEEN;COREAI_LLM;COREAI_LUA
+    XboxOne: DOTWEEN;COREAI_LLM;COREAI_LUA
+    iPhone: DOTWEEN;COREAI_LLM;COREAI_LUA
+    tvOS: DOTWEEN;COREAI_LLM;COREAI_LUA
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

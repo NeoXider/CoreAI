@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -18,7 +18,7 @@ namespace CoreAI.Infrastructure.Llm
     /// hold because the inner client preserves the same <c>Idempotency-Key</c> across the
     /// retry (header derived from <see cref="LlmRequestContextFrame.IdempotencyKey"/>).
     /// </summary>
-    public sealed class RefreshOnUnauthorizedDecorator : ILlmClient
+    public sealed class RefreshOnUnauthorizedDecorator : ILlmClient, ILlmRequestHeaderScope
     {
         private readonly ILlmClient _inner;
 
@@ -42,6 +42,7 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
+            using IDisposable requestHeaders = BeginRequestHeaders(request);
             LlmCompletionResult result;
             try
             {
@@ -81,6 +82,7 @@ namespace CoreAI.Infrastructure.Llm
             [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            using IDisposable requestHeaders = BeginRequestHeaders(request);
             bool authExpired = false;
             bool emittedVisibleText = false;
             IAsyncEnumerator<LlmStreamChunk> enumerator =
@@ -179,6 +181,16 @@ namespace CoreAI.Infrastructure.Llm
             {
                 return false;
             }
+        }
+
+        private IDisposable BeginRequestHeaders(LlmCompletionRequest request)
+        {
+            return LlmRequestHeaderScopes.Begin(_inner, request);
+        }
+
+        IDisposable ILlmRequestHeaderScope.BeginRequestHeaders(LlmCompletionRequest request)
+        {
+            return BeginRequestHeaders(request);
         }
 
         private static void PublishExpiredEvent(LlmCompletionRequest request)

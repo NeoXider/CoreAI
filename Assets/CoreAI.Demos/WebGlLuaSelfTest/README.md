@@ -14,20 +14,20 @@ globals, `string.rep` / `string.format` caps) and then:
 - renders the same PASS/FAIL report on screen via `OnGUI`, so the result is visible inside a
   built WebGL player without a console.
 
-When the Lua runtime is stripped (a no-lua build: `COREAI_NO_LUA` defined), the script compiles
+When Lua is not enabled (`COREAI_LUA` absent), the script compiles
 to a no-op fallback that just shows
-"Lua sandbox self-test unavailable: COREAI_NO_LUA build."
+"CoreAI Lua sandbox self-test unavailable: COREAI_LUA is not set."
 
 ## How to use
 
 1. Attach `WebGlLuaSelfTest` to a GameObject in a scene.
-2. Ensure `COREAI_NO_LUA` is **not** defined.
+2. Ensure `COREAI_LUA` is defined.
 3. Set `CoreAISettingsAsset.EnableLuaOnWebGl = true`.
 4. Build to WebGL and open the player — the on-screen box reports PASS/FAIL.
 
 ## Requirements
 
-- `COREAI_NO_LUA` **not** defined (otherwise the fallback runs).
+- `COREAI_LUA` defined (otherwise the fallback runs).
 - No LLM backend required — this is a pure sandbox check.
 
 ## Related

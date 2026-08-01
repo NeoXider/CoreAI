@@ -1,5 +1,5 @@
 using UnityEngine;
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -26,7 +26,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class DirectorAiDemoController : MonoBehaviour
     {
-#if !COREAI_NO_LLM
+#if COREAI_LLM
         private const string PassDirective = "PASS";
         private const float ActionWindowSeconds = 60f;
 
@@ -342,7 +342,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[DirectorAiDemo] COREAI_NO_LLM is set; the LLM module is disabled and the Director demo is inactive.");
+                "[DirectorAiDemo] COREAI_LLM is not set; the LLM module is disabled and the Director demo is inactive.");
             enabled = false;
         }
 #endif

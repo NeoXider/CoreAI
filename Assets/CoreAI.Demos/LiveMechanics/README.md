@@ -25,7 +25,7 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
 
 - LM Studio (or any OpenAI-compatible server) at `http://127.0.0.1:1234/v1` with a loaded model;
   the endpoint is configured in `Assets/Resources/CoreAISettings.asset`.
-- The Lua-CSharp runtime (shipped via the CoreAI.Mods package), without `COREAI_NO_LUA`.
+- The Lua-CSharp runtime (shipped via the CoreAI.Mods package), with `COREAI_LUA` defined.
 
 ## How to Use It
 

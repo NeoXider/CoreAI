@@ -1,15 +1,51 @@
 # TODO
 
-> Updated 2026-07-15. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 5.8.10 (2026-07-13, all five packages in lockstep). Unreleased packages are aligned at 5.9.0.
-> Last full verification 2026-07-15 in the interactive editor: EditMode 1691 passed / 0 failed /
-> 4 ignored optional Neoxider Pages tests, PlayMode `FastNoLlm` 73 passed / 0 failed, and six
-> Unity-generated `dotnet build` compile gates completed with 0 errors. Live Qwen3.5-0.8B LLMUnity
-> smokes called Genie `grant_gold`; Spellcraft classified the Russian equivalents of "mega lightning" as
-> `storm|3`, "wall of fire" as `fire|2`, "poisonous fog" as `poison|1`, and "freeze them to the bone" as
-> `frost|2`, each through
-> native `cast_spell` with no ToolsOnly error. Hub/Chat started with 0 warnings/errors.
+> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.0.
+> Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
+> 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
+> `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
+> gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
+> native `cast_spell` with no ToolsOnly error.
+
+## Turn teardown + positive module opt-in wave (2026-08-01) — release candidate 7.0.0
+
+- [x] Breaking provider/Lua define migration uses independent positive `COREAI_LLM` and `COREAI_LUA` symbols.
+      No symbols retain portable orchestration/chat, scripted/stub clients, and required MEAI contracts;
+      `COREAI_LLM` adds concrete HTTP/MEAI/LLMUnity providers, `COREAI_LUA` adds Lua, and both enable the
+      full provider + Lua runtime.
+      Setup Enable adds each symbol and Disable removes it. CI names are `core` / `llm` / `lua` / `full`,
+      verifies Standalone + WebGL injection, gates sandbox coverage in `lua`/`full`, and gates LLM coverage
+      in `llm`/`full`; FastNoLlm PlayMode compiles with `COREAI_LLM`. The license-free contract guard has
+      mutation RED/GREEN evidence; active source/tests/CI/setup/current docs contain no legacy negative
+      symbols, while released changelog/audit history retains original names and semantics. Asmdef
+      assemblies are not blanket-gated.
+
+- [x] Failed/cancelled/abandoned turns persist one raw user message per orchestration invocation / admitted
+      queue item after all internal passes, including queue exits before inner and direct authority denial;
+      context-overflow retries never receive the in-flight message as their own history, and a failed user
+      append cannot leave an assistant-only history pair. A separate external retry is intentionally outside
+      this guarantee until `IAgentMemoryStore` has a stable idempotency key.
+- [x] Stable provider-cache layering keeps role/persona + the complete canonical role tool contract in the
+      shared prefix; per-request instructions, student memory, request tool availability and world state are
+      ordered system-tail messages. The paid OpenRouter/Cloudflare probe kept 6383 prompt tokens stable and
+      reported cache reads `0 -> 6144 -> 6144` with exact `cloudflare/fp8` routing and fallback disabled.
+- [x] `ServerManagedApi` accepts dynamic host-specific headers without rebuilding the client. Inner/global
+      providers compose into one immutable snapshot per invocation; transport/auth retries, outer sync
+      result/exception retries and streaming pre-commit retries reuse it, while a later invocation reads the
+      current lesson/cohort even if the host reuses the request object. The custom hook cannot replace
+      auth/content type/trace/idempotency, and the backend validates attribution values.
+- [x] Production memory, flat chat history, structured transcript and compacted summary share one canonical
+      `AgentMemoryScope` boundary. Host-provided scope wins the legacy empty default; two sequential students
+      with the same role are isolated, while `AgentMemoryScope.Empty` preserves exact legacy role keys.
+- [x] Streaming bubble ownership has one release path; stale teardown cleans only its own bubbles, while
+      `OnDisable` releases the active USS class before embedded UI references are dropped.
+      Verification evidence (2026-08-01): the post-restore focused turn/panel suite is 28/28 GREEN after three
+      mutation RED runs; provider-cache and memory-scope guards each demonstrated RED and restored GREEN; the
+      common full EditMode gate is 2615 passed / 0 failed / 9 skipped. `python tools/bump_version.py --check`
+      and the touched Core/Source/Tests/LlmInfra/LlmVerification compile gates are green. This evidence does not
+      claim the later v7.0 positive-module matrix or non-live PlayMode gates recorded above/below.
 
 ## Chat / LLM host wave (2026-07-31) — shipped in 6.13.0, see both CHANGELOGs
 

@@ -43,7 +43,7 @@ namespace CoreAI.Mcp.Tests
         public void ReconnectStorm_StaysUnderTheCap()
         {
             DateTimeOffset now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            McpSessionStore store = new(TimeSpan.FromHours(1), maxSessions: 8, clock: () =>
+            McpSessionStore store = new(TimeSpan.FromHours(1), 8, () =>
             {
                 now = now.AddSeconds(1);
                 return now;
@@ -61,7 +61,7 @@ namespace CoreAI.Mcp.Tests
         public void CapEviction_DropsTheOldestIdFirst()
         {
             DateTimeOffset now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            McpSessionStore store = new(TimeSpan.FromHours(1), maxSessions: 2, clock: () =>
+            McpSessionStore store = new(TimeSpan.FromHours(1), 2, () =>
             {
                 now = now.AddSeconds(1);
                 return now;

@@ -1,5 +1,78 @@
 # Changelog
 
+## [7.0.0] - 2026-08-01
+
+### Breaking
+
+- **LLM и Lua перешли с отрицательных opt-out символов на независимые положительные opt-in.**
+  Миграция с 6.x: удалить `COREAI_NO_LLM` и `COREAI_NO_LUA` из всех Scripting Define Symbols;
+  добавить `COREAI_LLM` target-ам, которым нужны provider-backed HTTP/MEAI/LLMUnity реализации, и `COREAI_LUA`
+  target-ам, которым нужен Lua runtime. Без символов остаются portable orchestration/chat,
+  scripted/stub clients, public tool contracts и обязательные MEAI-сборки; оба символа дают full provider + Lua runtime.
+  Старые отрицательные символы больше не влияют на
+  активный код и не поддерживаются как aliases.
+- **CI matrix теперь `core` / `llm` / `lua` / `full`.** Каждый положительный define добавляется ко всем
+  platform targets и проверяется в Standalone/WebGL. Sandbox suite обязана выполняться в `lua`/`full`,
+  LLM suite — в `llm`/`full`; FastNoLlm PlayMode использует `COREAI_LLM`, потому что имя suite означает
+  отсутствие live backend, а не compile-out LLM слоя.
+
+### Fixed
+
+- **Все persistent role-keyed данные ученика используют одну непрозрачную scope-границу.** Общий
+  `AgentMemoryScopeKey` сохраняет exact legacy bare-role keys только для `AgentMemoryScope.Empty`, а любой непустой
+  scope превращает в `scope-v1-<full SHA-256>` без PII в именах файлов и логах; миграция legacy-ключа в scoped
+  identity только явная. Тот же ключ используется memory/chat,
+  structured transcript и compacted conversation summary decorators. `ScopedAgentMemoryStoreDecorator`
+  проксирует `IAtomicAgentMemoryStore` на уже вычисленный scoped key и не объявляет чужие optional capabilities.
+  Это исключает перенос локальной памяти и сжатого контекста между последовательными учениками одной роли.
+- **Cancellation scope очереди получил ту же границу identity.** `QueuedAiOrchestrator` комбинирует logical
+  `CancellationScope` с `AgentMemoryScope` роли; одинаковые Teacher-ходы разных учеников не отменяют друг друга.
+  Одноаргументный `CancelTasks(scope)` и совместимый `CoreAi.StopAgent(scope)` теперь находят текущую identity
+  через роль, сохранённую у каждого admitted item, поэтому работают и когда domain scope не равен role id.
+  `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` остаётся явным вариантом для конкретной роли.
+- **Очередь запоминает identity ученика в момент enqueue.** Sync/stream work item хранит immutable
+  `AgentMemoryScope`; запуск inner orchestrator, отмена и `RecordUnstartedTurn` используют этот snapshot, даже если
+  host успел переключить mutable scope provider на другого ученика до фактического выполнения.
+- **Неуспешный AI-ход больше не исчезает из памяти разговора — в том числе до запуска inner
+      orchestrator.** После HTTP 402, таймаута, отказа authority, отмены во время сборки запроса,
+      обрыва стрима, пустого ответа или исчерпания повторов при переполнении контекста следующая
+      реплика модели видит исходный вопрос ученика. Production-очередь применяет тот же teardown к
+      pre-cancel, pending/claimed-before-inner cancel, замене cancellation scope, `CancelTasks`, queue-full
+      и `Dispose`; поддержаны sync и streaming пути.
+- **Одна orchestration invocation или один admitted queue item делает не более одной попытки записи
+      пользовательского хода.** Внутренние tool-roundtrips и повторы после переполнения контекста не
+      дублируют текущий вопрос и не подкладывают его в собственный повторный запрос; прерванный стрим
+      не сохраняет половинчатый ответ ассистента. Это не обещание дедупликации отдельного внешнего
+      повтора того же logical turn: для неё `IAgentMemoryStore` понадобится стабильный idempotency key.
+- **Ошибка записи истории не подменяет исходную ошибку неуспешного хода.** На успешном ходе ответ
+      ассистента не сохраняется отдельно, если соответствующую пользовательскую реплику записать
+      не удалось; на queue teardown сохраняются исходные cancel, queue-full и dispose outcomes.
+- **Общий provider-cache prefix отделён от персонального хвоста.** В `SystemPrompt` остаются стабильные
+      role/persona-инструкции и полный канонический contract инструментов роли. Per-request system
+      instructions, canonical/delta memory ученика, доступность отфильтрованных инструментов и world
+      state идут после истории как упорядоченные system-tail messages, поэтому смена ученика или слайда
+      не переписывает общий префикс.
+- **Dynamic custom headers сохраняют один identity snapshot на весь внешний retry-loop.** Один logical
+      `CompleteAsync` использует одинаковые lesson/cohort headers после retryable result и
+      `LlmClientException`; streaming pre-commit retry также не переснимает mutable provider. Новый invocation
+      получает актуальный snapshot, даже если повторно используется тот же `LlmCompletionRequest`.
+
+### Added
+
+- **`InMemoryAgentMemoryStore` для process-only host policy.** Portable backing реализует memory document,
+  bounded flat chat, structured transcript, load diagnostics и atomic mutation без filesystem API; значения
+  клонируются на границе store, поэтому вызывающий код не может менять сохранённое состояние по ссылке.
+- **Публичный безопасный API provider-specific body для OpenAI-compatible HTTP.**
+  `OpenAiHttpOptions.SetProviderBodyParameter(string, JToken)` и `RemoveProviderBodyParameter` принимают
+  вложенные `JObject`/`JArray` без reflection/dynamic, детерминированно сортируют object keys, сохраняют порядок
+  массивов и работают на AOT/WebGL. C# `null` удаляет поле, `JValue.CreateNull()` отправляет JSON `null`.
+  `model`, `messages`, `temperature`, `max_tokens`, `stream`, `stream_options`, `tools`, `tool_choice`,
+  `enable_thinking`, `thinking_budget`, `chat_template_kwargs` защищены как
+  CoreAI-owned; invalid/non-object/duplicate/reserved input отклоняется атомарно без утечки JSON values/body в
+  exception. Raw `ExtraBodyJson` сохранён как advanced backwards-compatible escape hatch и по-прежнему может
+  переопределять reserved fields. Миграция: новый application-код должен использовать safe setters; raw JSON
+  оставлять только там, где сознательно нужна прежняя небезопасная семантика override.
+
 ## [6.14.0] - 2026-07-31
 
 ### Fixed

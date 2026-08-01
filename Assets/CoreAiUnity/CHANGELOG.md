@@ -2,6 +2,94 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [7.0.0] - 2026-08-01
+
+### Breaking
+
+- **Editor setup управляет двумя положительными opt-in символами.** `Enable LLM` / `Enable Lua` добавляют
+  `COREAI_LLM` / `COREAI_LUA`, Disable-команды удаляют соответствующий символ, а status dialog показывает
+  effective state обоих независимых модулей. Миграция с 6.x удаляет `COREAI_NO_LLM` и `COREAI_NO_LUA`;
+  проект без новых символов сохраняет portable orchestration/chat, scripted/stub clients и обязательные MEAI-контракты;
+  `COREAI_LLM` включает provider-backed HTTP/MEAI/LLMUnity реализации, а оба символа включают full provider + Lua runtime.
+- **Unity/CI guard фиксирует четырёхрежимный breaking contract.** Активные source/tests/setup/current docs
+  не могут вернуть старые символы, Lua security fixture компилируется только при `COREAI_LUA`, LLM tests —
+  только при `COREAI_LLM`, а matrix `core` / `llm` / `lua` / `full` проверяет инъекцию Standalone/WebGL.
+  Asmdef целиком positive define не отключаются.
+
+### Fixed
+
+- **`CoreAILifetimeScope` больше не оставляет role-only обходы вокруг memory scope.** Production DI публикует
+  scoped memory, transcript и conversation-summary decorators поверх private file/in-memory backing stores;
+  `IConversationTranscriptStore` остаётся отдельной честной capability, а memory facade сохраняет native/fallback
+  atomic mutation. Два ученика одной роли больше не видят memory, flat chat, structured transcript или compacted
+  summary друг друга.
+- **Host-owned `IAgentMemoryScopeProvider` выигрывает backward-compatible empty default.** Provider можно назначить
+  inspector-компонентом `AgentMemoryScopeProviderBehaviour` либо вызвать
+  `CoreAILifetimeScope.SetAgentMemoryScopeProvider(...)` до container build. `AgentMemoryScope.Empty` по-прежнему
+  даёт exact legacy role key для однопользовательских проектов.
+- **Scoped persistence не раскрывает PII и не зависит от case sensitivity файловой системы.** Любой непустой
+  tenant/user/session/topic пишется под `scope-v1-<full SHA-256>`; этот же ключ защищает file mutation lock.
+  File memory/summary errors логируют только operation + exception type, а legacy bare-role import остаётся явной миграцией.
+- **Queue latest-wins и stop изолированы по `AgentMemoryScope`.** Production DI передаёт scope provider в
+  `QueuedAiOrchestrator`; stock chat и `CoreAi.StopAgent(roleId)` не могут cross-cancel ту же роль другого ученика,
+  одноаргументный stop корректно работает и для domain scope, не равного role id, а
+  `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` даёт явный API для конкретной роли.
+- **Запущенная очередь не теряет enqueue-time identity.** Каждый sync/stream work item хранит immutable
+  `AgentMemoryScope`; inner execution, cancellation teardown и `RecordUnstartedTurn` продолжают работать под
+  тем учеником, который стоял в provider при enqueue, даже если host сменил его до pump.
+- **Unity production wiring больше не теряет пользовательский ход на границе очереди.** Регрессии
+      фиксируют sync/stream pre-cancel, pending и claimed-before-inner cancellation, замену scope,
+      `CancelTasks`, queue-full и `Dispose`, а также direct authority denial. Во всех случаях в
+      правильную роль попадает исходный `Hint` (и компактные attachment placeholders), а ошибка store
+      не подменяет исходный terminal outcome. Гарантия ограничена одной orchestration invocation / одним
+      admitted item и не заявляет дедупликацию отдельного внешнего retry без idempotency key в store.
+- **Персональный контекст вынесен из общего provider-cache prefix.** Unity-регрессии проверяют, что
+      память ученика, per-request инструкции, allowlist текущего слайда и world state образуют
+      упорядоченный system tail, а стабильный role/tool prefix совпадает между учениками и слайдами.
+- **`CoreAi.ClearContext(..., clearChatHistory: true)` очищает и scoped conversation summary.** Раньше
+      flat/structured history исчезала, но compacted summary сохранялась и могла вернуть старый контекст
+      ученика в следующий запрос. Исправление покрывает `Persistent` и `SessionOnly` backing stores.
+- **Отключение панели во время стрима больше не оставляет мёртвый пузырь активным.** В embedded UI
+      дерево остаётся у хоста после `OnDisable`, но ссылка на текущий пузырь раньше терялась до
+      снятия `coreai-streaming-active`. Из-за этого внешний индикатор мог считать, что ответ всё ещё
+      печатается, пока UI не был перестроен. Теперь класс снимается до сброса UI-ссылок.
+- **Уборка stale-хода защищает только его собственные пузыри.** Это defense-in-depth для возможного
+      будущего supersede-пути: текущие публичные generation-bump пути уже завершают streaming UI,
+      а stale teardown не имеет права снимать класс с пузыря нового хода.
+
+### Added
+
+- **`ServerManagedApi` получил dynamic custom-header hook без пересборки клиента.**
+  `ServerManagedAuthorization.SetRequestHeaderProvider(IRequestHeaderProvider)` / `ClearRequestHeaderProvider()`
+  позволяют host-у передавать валидируемый lesson/cohort/experiment id на backend. Inner settings provider
+  и global provider композятся с приоритетом inner; snapshot снимается один раз на invocation и повторно
+  используется в transport/auth-retry, внешних sync retry после result/exception и streaming pre-commit retry,
+  но следующий invocation (даже с тем же `LlmCompletionRequest` object) читает актуальные значения.
+  Custom headers не могут подменить `Authorization`, `Content-Type`,
+  `Idempotency-Key` и `X-Request-Id`; trace/idempotency остаются request-owned.
+- **Host выбирает persistence policy до сборки `CoreAILifetimeScope`.** Новый
+  `AgentMemoryPersistenceMode.Persistent|SessionOnly` и
+  `SetAgentMemoryPersistenceMode(...)` сохраняют прежний file-backed режим по умолчанию, но позволяют
+  переключить memory, flat chat, structured transcript и compacted summary на process-only backing с теми
+  же scoped decorators и без файловых записей. На WebGL `Persistent` по-прежнему использует file memory/chat/
+  transcript и in-memory summary; `SessionOnly` держит в памяти все четыре набора. Вызов setter после build
+  fail-fast отклоняется.
+- **Provider-specific HTTP body теперь настраивается публично и безопасно из Unity-кода.**
+  `OpenAiHttpLlmSettings` и `CoreAISettingsAsset` получили `SetProviderBodyParameter(string, JToken)` /
+  `RemoveProviderBodyParameter`; они используют portable atomic/deterministic API CoreAI 7.0.0. Raw
+  `ExtraBodyJson` остаётся только совместимым advanced escape hatch. Для OpenRouter документированы opaque
+  application/agent-cohort `session_id` без student id/PII и точный измерительный pin
+  `provider.order=["cloudflare/fp8"]`, `allow_fallbacks=false`.
+- **Gitignored live-конфиг поддерживает проверенные provider fields и явный prompt-cache probe.**
+  `coreai-live-tests.local.json.extraBody` / `COREAI_TEST_EXTRA_BODY_JSON` валидируются без логирования API key
+  или body values и проходят safe setters фабрики. `PromptCacheLivePlayModeTests` запускается только при
+  `COREAI_TEST_PROMPT_CACHE=true`: три разных synthetic student tails идут через реальный production-like
+  orchestrator с byte-identical длинным role/tool prefix; к третьему запросу требуется provider-reported
+  `CacheReadTokens > 0`, а диагностика показывает provider/model/token/cache read-write без секретов.
+- **`CoreAiChatPanel.StreamingActiveUssClassName`** — публичная константа класса пузыря, в который
+      ход стримит прямо сейчас. Хостам, опрашивающим дерево на «идёт ли ход», больше не нужно
+      хардкодить строку `coreai-streaming-active` у себя.
+
 ## [6.14.0] - 2026-07-31
 
 ### Fixed

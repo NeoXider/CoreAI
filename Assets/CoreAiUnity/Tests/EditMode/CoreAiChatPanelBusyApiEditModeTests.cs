@@ -1,6 +1,7 @@
-﻿using CoreAI.Ai;
+using CoreAI.Ai;
 using CoreAI.Chat;
 using NUnit.Framework;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
@@ -445,7 +446,7 @@ namespace CoreAI.Tests.EditMode
                     orchestrator,
                     settings: new StubSettings { EnableStreaming = true });
 
-                Task<string?> turnTask = ctx.Panel.SubmitMessageFromExternalAsync(
+                Task<string> turnTask = ctx.Panel.SubmitMessageFromExternalAsync(
                     "hello",
                     new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
 
@@ -542,7 +543,156 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Pins the latent stale-turn invariant: clean only bubbles owned by the abandoned turn and never
+        /// remove <see cref="CoreAiChatPanel.StreamingActiveUssClassName"/> from its live successor.
+        /// </summary>
+        [Test]
+        public async Task SupersededTurn_CleansOwnBubbleWithoutTouchingSuccessorBubble()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+
+                FakeGatedStreamOrchestrator orchestrator = new();
+                ctx.Panel.ChatService = new CoreAiChatService(
+                    orchestrator,
+                    settings: new StubSettings { EnableStreaming = true });
+
+                Task<string> turnTask = ctx.Panel.SubmitMessageFromExternalAsync(
+                    "вопрос",
+                    new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false });
+
+                await orchestrator.BubbleRendered;
+                Assert.AreEqual(1, CountActiveStreamingBubbles(scroll),
+                    "precondition: the turn must be streaming into an open bubble");
+                Label staleBubble = scroll.Query<Label>(
+                    className: CoreAiChatPanel.StreamingActiveUssClassName).First();
+
+                // WHY: a newer turn takes over. Moving the turn generation is exactly what the start of
+                // RunAgentTurnAsync does, and it is what makes the running turn stale.
+                BumpTurnGeneration(ctx.Panel);
+                Label successorBubble = new("ответ нового хода");
+                successorBubble.AddToClassList(CoreAiChatPanel.StreamingActiveUssClassName);
+                scroll.Add(successorBubble);
+                SetField(ctx.Panel, "_streamingLabel", successorBubble);
+
+                orchestrator.Release();
+                await turnTask;
+
+                Assert.IsFalse(staleBubble.ClassListContains(CoreAiChatPanel.StreamingActiveUssClassName),
+                    "an abandoned turn must remove the class from its own dead bubble");
+                Assert.IsTrue(successorBubble.ClassListContains(CoreAiChatPanel.StreamingActiveUssClassName),
+                    "a stale teardown must not remove the class from the successor's live bubble");
+                Assert.AreEqual(1, CountActiveStreamingBubbles(scroll));
+            }
+            finally
+            {
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Opening a bubble must never orphan the previous one: dropping the reference while the element
+        /// still carries the streaming class leaves nothing able to take that class off again.
+        /// </summary>
+        [Test]
+        public void StartStreaming_DoesNotOrphanTheBubbleItReplaces()
+        {
+            using PanelCtx ctx = NewPanel();
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
+            try
+            {
+                ScrollView scroll = CreateAttachedMessageScroll(out panelHost, out panelSettings);
+                SetField(ctx.Panel, "MessageScroll", scroll);
+
+                Label leftOpen = new("ответ прошлого хода");
+                leftOpen.AddToClassList(CoreAiChatPanel.StreamingActiveUssClassName);
+                scroll.Add(leftOpen);
+                SetField(ctx.Panel, "_streamingLabel", leftOpen);
+                SetFlag(ctx.Panel, "_isStreaming", true);
+
+                InvokeStartStreaming(ctx.Panel);
+
+                Assert.IsFalse(leftOpen.ClassListContains(CoreAiChatPanel.StreamingActiveUssClassName),
+                    "the replaced bubble must lose the streaming class instead of keeping it forever");
+                Assert.AreEqual(1, CountActiveStreamingBubbles(scroll),
+                    "only the freshly opened bubble may be marked as actively streaming");
+            }
+            finally
+            {
+                if (panelHost != null)
+                {
+                    Object.DestroyImmediate(panelHost);
+                }
+
+                if (panelSettings != null)
+                {
+                    Object.DestroyImmediate(panelSettings);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A transient or malformed UI root can be present before its message scroll is available. Startup
+        /// hydration must remain a no-op instead of dereferencing the missing control.
+        /// </summary>
+        [Test]
+        public void HydrateStartupMessagesWithoutMessageScroll_DoesNotThrow()
+        {
+            using PanelCtx ctx = NewPanel();
+            ctx.Panel.SetRuntimeOptions(new CoreAiChatOptions
+            {
+                WelcomeMessage = "must not render without a message scroll",
+                LoadPersistedChatOnStartup = false
+            });
+
+            Assert.IsNull(CurrentMessageScroll(ctx.Panel));
+            Assert.DoesNotThrow(() => typeof(CoreAiChatPanel)
+                .GetMethod("HydrateStartupMessagesFromStore", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(ctx.Panel, null));
+        }
+
         // ---------- helpers ----------
+
+        private static int CountActiveStreamingBubbles(VisualElement root)
+        {
+            return root.Query<VisualElement>(className: CoreAiChatPanel.StreamingActiveUssClassName)
+                .ToList()
+                .Count;
+        }
+
+        private static void BumpTurnGeneration(CoreAiChatPanel panel)
+        {
+            FieldInfo field = typeof(CoreAiChatPanel)
+                .GetField("_currentTurnGeneration", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            field.SetValue(panel, (int)field.GetValue(panel) + 1);
+        }
+
+        private static void InvokeStartStreaming(CoreAiChatPanel panel)
+        {
+            typeof(CoreAiChatPanel)
+                .GetMethod("StartStreaming", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(panel, null);
+        }
+
+        private static ScrollView CurrentMessageScroll(CoreAiChatPanel panel)
+        {
+            return GetField<ScrollView>(panel, "MessageScroll");
+        }
 
         private readonly struct PanelCtx : System.IDisposable
         {
@@ -565,6 +715,10 @@ namespace CoreAI.Tests.EditMode
         {
             GameObject go = new("CoreAiChatPanel_BusyApi_Test");
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+            // WHY: plain EditMode [Test] methods do not drive MonoBehaviour lifecycle callbacks. These
+            // unit tests exercise turn mechanics directly; lifecycle ordering is covered separately by
+            // CoreAiChatPanelLifecyclePlayModeTests in the FastNoLlm PlayMode assembly.
+            SetField(panel, "_lifecycleActive", true);
             return new PanelCtx(go, panel);
         }
 
@@ -767,6 +921,50 @@ namespace CoreAI.Tests.EditMode
 #pragma warning disable CS0162 // unreachable code: needed only so the compiler treats this as an iterator.
                 yield break;
 #pragma warning restore CS0162
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Streams one visible chunk, then parks until <see cref="Release"/> is called. Lets a test act on
+        /// the panel at the exact moment a turn has an OPEN streaming bubble.
+        /// </summary>
+        private sealed class FakeGatedStreamOrchestrator : IAiOrchestrationService
+        {
+            private readonly TaskCompletionSource<bool> _bubbleRendered =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            private readonly TaskCompletionSource<bool> _release =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            /// <summary>Completes once the panel has consumed the first text chunk (bubble is on screen).</summary>
+            public Task BubbleRendered => _bubbleRendered.Task;
+
+            /// <summary>Lets the parked turn run to completion.</summary>
+            public void Release()
+            {
+                _release.TrySetResult(true);
+            }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(string.Empty);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                yield return new LlmStreamChunk { Text = "часть ответа" };
+
+                // WHY: reached only when the panel asks for the NEXT chunk, after it rendered the bubble.
+                _bubbleRendered.TrySetResult(true);
+                await _release.Task;
+                yield return new LlmStreamChunk { IsDone = true };
             }
 
             public void CancelTasks(string cancellationScope)

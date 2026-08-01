@@ -87,40 +87,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void MeaiLlmClient_BuildAIFunctions_CreatesAllFunctions()
+        public void MeaiLlmClient_BuildAIFunctions_MapsEveryRequestedToolOffline()
         {
-#if COREAI_NO_LLM
-            Assert.Ignore("COREAI_NO_LLM: MeaiLlmClient (HTTP/MEAI pipeline) is excluded from build.");
+#if !COREAI_LLM
+            Assert.Ignore("COREAI_LLM is not set: MeaiLlmClient (HTTP/MEAI pipeline) is excluded from the build.");
 #else
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test");
-            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            TestMemoryStore memoryStore = new();
-
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
-
-            // Проверяем что BuildAIFunctions создаёт функции для каждого инструмента
-            List<ILlmTool> tools = new()
+            CoreAISettingsAsset luaSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
             {
-                new MemoryLlmTool(),
-                new LuaLlmTool(new TestLuaExecutor(), ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    Logging.NullLog.Instance)
-            };
+                settings.ConfigureHttpApi("http://offline.invalid/v1", "", "test");
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(
+                    settings,
+                    GameLoggerUnscopedFallback.Instance,
+                    new TestMemoryStore());
+                List<ILlmTool> tools = new()
+                {
+                    new MemoryLlmTool(),
+                    new LuaLlmTool(new TestLuaExecutor(), luaSettings, Logging.NullLog.Instance)
+                };
 
-            // Вызываем CompleteAsync чтобы проверить что инструменты обрабатываются
-            // (в EditMode без реальной LLM — проверяем что код не падает)
-            Task<LlmCompletionResult> task = client.CompleteAsync(new LlmCompletionRequest
+                IReadOnlyList<Microsoft.Extensions.AI.AIFunction> functions =
+                    client.BuildAIFunctions(tools, "TestRole");
+
+                Assert.AreEqual(2, functions.Count);
+                CollectionAssert.AreEqual(
+                    new[] { "execute_lua", "memory" },
+                    functions.Select(function => function.Name).ToArray());
+            }
+            finally
             {
-                AgentRoleId = "TestRole",
-                SystemPrompt = "test",
-                UserPayload = "test",
-                Tools = tools
-            });
-
-            // В EditMode без LLM — ожидаем ошибку подключения, но не ArgumentNullException
-            Assert.IsTrue(task.IsCompleted || task.Status == TaskStatus.WaitingForActivation);
-
-            UnityEngine.Object.DestroyImmediate(settings);
+                UnityEngine.Object.DestroyImmediate(luaSettings);
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
 #endif
         }
 

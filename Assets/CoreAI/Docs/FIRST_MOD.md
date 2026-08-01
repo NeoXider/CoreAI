@@ -6,8 +6,8 @@ Roblox-style surface is what a mod builds with. For the mod runtime itself (ever
 capability tiers, transactions, Full mode) read [LUA_GAME_API.md](LUA_GAME_API.md). For the security
 model read [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md).
 
-> Lua is an optional module. If your project defines `COREAI_NO_LUA`, none of
-> this applies — the runtime ships stub bindings instead. See
+> Lua is an optional module. This guide applies only when your project defines
+> `COREAI_LUA`; without it the runtime ships stub bindings instead. See
 > [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 ## What a mod is

@@ -94,6 +94,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(expected, LlmEndpointReadinessPolicy.IsHandlerReached(status));
         }
 
+#if COREAI_LLM
         [Test]
         public async Task HttpEndpointFactory_DelegatesPortableModelsThenCompletionsProbe()
         {
@@ -129,11 +130,12 @@ namespace CoreAI.Tests.EditMode
                 UnityEngine.Object.DestroyImmediate(settings);
             }
         }
+#endif
 
         // WHY: ResolveAgent itself is compiled out on WebGL and with LLM support off, so these reflection
         // tests must carry the same guard as the method — otherwise GetMethod returns null and they fail
         // for a missing method rather than a broken one, which is what happened on a WebGL build target.
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
         [Test]
         public void ResolveAgent_FindsExactNamedInactiveHostWithoutModelStartup()
         {
@@ -200,7 +202,7 @@ namespace CoreAI.Tests.EditMode
         }
 #endif
 
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
         [Test]
         public void NativeConfiguration_AppliesAndFingerprintsParallelSlotsAndContext()
         {

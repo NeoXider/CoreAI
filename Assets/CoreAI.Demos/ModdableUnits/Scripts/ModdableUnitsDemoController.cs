@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
@@ -17,11 +17,11 @@ namespace CoreAI.Demos
     /// nearest enemy and attacks in range. The whole game emerges from mods.
     /// </summary>
     public sealed class ModdableUnitsDemoController : MonoBehaviour
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         , IUnitForge
 #endif
     {
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         private const int MaxLogLines = 12;
         private const int MaxUnits = 64;
         private const float ArenaHalfWidth = 7f;
@@ -447,7 +447,7 @@ namespace CoreAI.Demos
         private void Start()
         {
             Debug.LogWarning(
-                "[ModdableUnitsDemo] COREAI_NO_LUA is set; demo is inactive.");
+                "[ModdableUnitsDemo] COREAI_LUA is not set; demo is inactive.");
             enabled = false;
         }
 #endif

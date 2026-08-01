@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -196,6 +196,141 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(true, request["enable_thinking"]?.Value<bool>());
             Assert.AreEqual(true, request["chat_template_kwargs"]?["custom"]?.Value<bool>());
             Assert.AreEqual(true, request["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
+        }
+
+        [Test]
+        public void ProviderBodyParameters_NestedObjectAndArray_AreDeterministicAndRemovable()
+        {
+            OpenAiHttpOptions options = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            options.SetProviderBodyParameter("zeta", new JObject
+            {
+                ["z"] = 1,
+                ["a"] = new JArray(
+                    new JObject { ["y"] = 2, ["b"] = 1 },
+                    "tail")
+            });
+            options.SetProviderBodyParameter("alpha", true);
+
+            Assert.AreEqual(
+                "{\"alpha\":true,\"zeta\":{\"a\":[{\"b\":1,\"y\":2},\"tail\"],\"z\":1}}",
+                options.ExtraBodyJson);
+
+            options.SetProviderBodyParameter("explicit_null", JValue.CreateNull());
+            Assert.AreEqual(JTokenType.Null, JObject.Parse(options.ExtraBodyJson)["explicit_null"]?.Type);
+            options.SetProviderBodyParameter("explicit_null", null);
+            Assert.IsNull(JObject.Parse(options.ExtraBodyJson)["explicit_null"]);
+            options.RemoveProviderBodyParameter("alpha");
+            Assert.IsNull(JObject.Parse(options.ExtraBodyJson)["alpha"]);
+        }
+
+        [TestCase("model")]
+        [TestCase("MESSAGES")]
+        [TestCase("stream")]
+        [TestCase("stream_options")]
+        [TestCase("temperature")]
+        [TestCase("max_tokens")]
+        [TestCase("enable_thinking")]
+        [TestCase("thinking_budget")]
+        [TestCase("chat_template_kwargs")]
+        [TestCase("tools")]
+        [TestCase("tool_choice")]
+        public void ProviderBodyParameters_ReservedKey_IsRejectedAtomically(string key)
+        {
+            const string secret = "do-not-print-provider-secret";
+            OpenAiHttpOptions options = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            options.ExtraBodyJson = "{\"safe\":1}";
+
+            System.ArgumentException ex = Assert.Throws<System.ArgumentException>(() =>
+                options.SetProviderBodyParameter(key, secret));
+
+            Assert.AreEqual("{\"safe\":1}", options.ExtraBodyJson);
+            StringAssert.Contains(key, ex.Message);
+            StringAssert.DoesNotContain(secret, ex.ToString());
+        }
+
+        [Test]
+        public void ProviderBodyParameters_InvalidOrDuplicateRawJson_DoesNotMutateOrLeakValues()
+        {
+            const string secretA = "provider-secret-alpha";
+            const string secretB = "provider-secret-beta";
+            OpenAiHttpOptions invalid = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            invalid.ExtraBodyJson = "{\"token\":\"" + secretA + "\"";
+
+            System.ArgumentException invalidEx = Assert.Throws<System.ArgumentException>(() =>
+                invalid.SetProviderBodyParameter("provider", new JObject { ["token"] = secretB }));
+
+            Assert.AreEqual("{\"token\":\"" + secretA + "\"", invalid.ExtraBodyJson);
+            StringAssert.DoesNotContain(secretA, invalidEx.ToString());
+            StringAssert.DoesNotContain(secretB, invalidEx.ToString());
+
+            OpenAiHttpOptions duplicate = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            duplicate.ExtraBodyJson = "{\"route\":\"" + secretA + "\",\"route\":\"" + secretB + "\"}";
+            System.ArgumentException duplicateEx = Assert.Throws<System.ArgumentException>(() =>
+                duplicate.SetProviderBodyParameter("session_id", "opaque-cohort"));
+
+            StringAssert.DoesNotContain(secretA, duplicateEx.ToString());
+            StringAssert.DoesNotContain(secretB, duplicateEx.ToString());
+            StringAssert.Contains("without duplicate property names", duplicateEx.Message);
+        }
+
+        [Test]
+        public async Task GetResponseAsync_SafeProviderParameters_MergeNestedObjectAndArray()
+        {
+            const string body = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                })) { Timeout = System.TimeSpan.FromSeconds(30) };
+
+            OpenAiHttpOptions options = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            options.SetProviderBodyParameter("provider", new JObject
+            {
+                ["order"] = new JArray("cloudflare/fp8"),
+                ["allow_fallbacks"] = false
+            });
+            options.SetProviderBodyParameter("session_id", "coreai-teacher-v3");
+
+            MeaiOpenAiChatClient client = new(options);
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") });
+
+            JObject request = JObject.Parse(capturedJson);
+            Assert.AreEqual("cloudflare/fp8", request["provider"]?["order"]?[0]?.Value<string>());
+            Assert.AreEqual(false, request["provider"]?["allow_fallbacks"]?.Value<bool>());
+            Assert.AreEqual("coreai-teacher-v3", request["session_id"]?.Value<string>());
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_SafeProviderParameters_MergeNestedObjectAndArray()
+        {
+            string capturedJson = null;
+            const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n";
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkEventStream(new MemoryStream(Encoding.UTF8.GetBytes(sse)));
+                })) { Timeout = System.TimeSpan.FromSeconds(30) };
+
+            OpenAiHttpOptions options = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+            options.SetProviderBodyParameter("provider", new JObject
+            {
+                ["order"] = new JArray("cloudflare/fp8"),
+                ["allow_fallbacks"] = false
+            });
+
+            MeaiOpenAiChatClient client = new(options);
+            await foreach (MEAI.ChatResponseUpdate _ in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+            }
+
+            JObject request = JObject.Parse(capturedJson);
+            Assert.AreEqual("cloudflare/fp8", request["provider"]?["order"]?[0]?.Value<string>());
+            Assert.AreEqual(false, request["provider"]?["allow_fallbacks"]?.Value<bool>());
+            Assert.AreEqual(true, request["stream"]?.Value<bool>());
         }
 
         [Test]

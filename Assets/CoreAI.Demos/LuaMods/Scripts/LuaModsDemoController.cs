@@ -1,5 +1,5 @@
 using UnityEngine;
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
@@ -18,7 +18,7 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class LuaModsDemoController : MonoBehaviour
     {
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         private const string WaveDirectorModId = "wave_director";
         private const string DamageTunerModId = "damage_tuner";
         private const string DamageSlot = "damage_formula";
@@ -215,7 +215,7 @@ namespace CoreAI.Demos
 #else
         private void Start()
         {
-            Debug.LogWarning("[LuaModsDemo] COREAI_NO_LUA is set; demo is inactive.");
+            Debug.LogWarning("[LuaModsDemo] COREAI_LUA is not set; demo is inactive.");
             enabled = false;
         }
 #endif

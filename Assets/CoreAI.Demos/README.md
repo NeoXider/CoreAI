@@ -24,7 +24,7 @@ minimal scripts, and a README.
 
 - Every scene has a `CoreAILifetimeScope` (CoreAI's DI composition). Settings come from
   `Resources/CoreAISettings` unless a dedicated asset is assigned in the Inspector.
-- Lua demos require the Lua-CSharp runtime (shipped via the CoreAI.Mods package) and the absence of `COREAI_NO_LUA`.
+- Lua demos require the Lua-CSharp runtime (shipped via the CoreAI.Mods package) and the `COREAI_LUA` define.
 - Lua demos also require a `CoreAiModsLifetimeScope` child under `CoreAILifetimeScope`; the mod
   runtime is package-owned and is not registered in the core container.
 - Every scene **opens** without an LLM. The "Needs LLM" column above marks demos whose

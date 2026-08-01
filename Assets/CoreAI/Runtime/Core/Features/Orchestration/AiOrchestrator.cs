@@ -18,7 +18,7 @@ namespace CoreAI.Ai
     /// Orchestration pipeline: prompts, memory, <see cref="ILlmClient"/> invocation,
     /// optional structured-output retry via <see cref="IRoleStructuredResponsePolicy"/>, command publication.
     /// </summary>
-    public sealed class AiOrchestrator : IAiOrchestrationService
+    public sealed class AiOrchestrator : IAiOrchestrationService, IUnstartedAiTurnRecorder
     {
         /// <summary>
         /// Legacy sentinel for "no history cap". The orchestrator no longer uses it: even with
@@ -88,13 +88,15 @@ namespace CoreAI.Ai
             int contextRetryPass,
             CancellationToken cancellationToken)
         {
-            string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+            string roleId = ResolveRoleId(task);
             string traceId = string.IsNullOrWhiteSpace(task.TraceId)
                 ? Guid.NewGuid().ToString("N")
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
             string systemBase = _promptComposer.GetSystemPrompt(roleId, task?.SystemPrompt);
+            string requestSystemInstructions = BuildRequestSystemInstructions(task?.RequestSystemInstructions);
             string worldState = _promptComposer.BuildRuntimeContext(task, roleId, traceId);
+            string worldStateInstructions = BuildWorldStateInstructions(worldState);
 
             string system = systemBase;
             AgentMemoryState memoryState = null;
@@ -111,14 +113,18 @@ namespace CoreAI.Ai
                 }
 
                 memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
-                system = AppendTailBudgetSection(systemBase, memoryParts.PrefixBlock);
             }
 
             string user = _promptComposer.BuildUserPayload(snap, task);
-            IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
-            tools = FilterToolsForRequest(tools, task);
-            system = AppendToolContract(system, tools, task, roleId);
-            string systemForBudget = AppendTailBudgetSection(system, memoryParts.TailBlock);
+            IReadOnlyList<ILlmTool> roleTools = _memoryPolicy?.GetToolsForRole(roleId);
+            IReadOnlyList<ILlmTool> tools = FilterToolsForRequest(roleTools, task);
+            system = AppendStableToolContract(system, roleTools, task, roleId);
+            string toolAvailability = AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(tools, task);
+            string systemForBudget = AppendTailBudgetSection(system, requestSystemInstructions);
+            systemForBudget = AppendTailBudgetSection(systemForBudget, memoryParts.PrefixBlock);
+            systemForBudget = AppendTailBudgetSection(systemForBudget, memoryParts.TailBlock);
+            systemForBudget = AppendTailBudgetSection(systemForBudget, toolAvailability);
+            systemForBudget = AppendTailBudgetSection(systemForBudget, worldStateInstructions);
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
@@ -206,12 +212,13 @@ namespace CoreAI.Ai
             {
                 _memoryStore.Save(roleId, memoryState);
                 memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
-                system = AppendTailBudgetSection(systemBase, memoryParts.PrefixBlock);
-                system = AppendToolContract(system, tools, task, roleId);
             }
 
+            AppendSystemTailMessage(ref chatHistory, requestSystemInstructions);
+            AppendMemoryTailMessage(ref chatHistory, memoryParts.PrefixBlock);
             AppendMemoryTailMessage(ref chatHistory, memoryParts.TailBlock);
-            AppendWorldStateTailMessage(ref chatHistory, worldState);
+            AppendSystemTailMessage(ref chatHistory, toolAvailability);
+            AppendSystemTailMessage(ref chatHistory, worldStateInstructions);
             string promptText = (system ?? "") + "\n" + (user ?? "") + "\n" + string.Join("\n",
                 (System.Collections.IEnumerable)chatHistory ?? Array.Empty<object>());
             AuditContext.SetPromptHash(traceId, AuditHash.Compute(promptText));
@@ -243,19 +250,22 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
+            if (task == null)
+            {
+                return null;
+            }
+
             if (!_authority.CanRunAiTasks)
             {
+                // WHY: the chat already rendered this user turn. Authority denial is a terminal orchestration
+                // outcome just like provider rejection, so it must not bypass the history teardown boundary.
+                EnsureUserTurnRecorded(null, task, new UserTurnHistoryLatch(), true);
                 string denied = UserFacingChatFailureOrNull(task, "AI execution disabled.");
                 if (denied != null)
                 {
                     return denied;
                 }
 
-                return null;
-            }
-
-            if (task == null)
-            {
                 return null;
             }
 
@@ -272,6 +282,8 @@ namespace CoreAI.Ai
             int contextPass = 0;
             int contextOverflowPasses = 0;
             int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
+            UserTurnHistoryLatch userTurn = new();
+            bool invocationSucceeded = false;
 
             // WHY: Single invocation for non-context failures; bounded tighter-history rebuilds when the
             // provider reports context-length overflow. Network retries remain in LoggingLlmClientDecorator.
@@ -318,6 +330,7 @@ namespace CoreAI.Ai
                         if (!string.IsNullOrEmpty(toolOnlyContent))
                         {
                             result.Content = toolOnlyContent;
+                            invocationSucceeded = true;
                             break;
                         }
                     }
@@ -382,7 +395,18 @@ namespace CoreAI.Ai
 
                 return null;
             }
+            finally
+            {
+                // WHY: every failed exit writes once here. A successful invocation writes unsuppressed below,
+                // so a store failure stops assistant-only persistence without a retry that could duplicate a
+                // commit-then-throw append.
+                if (!invocationSucceeded)
+                {
+                    EnsureUserTurnRecorded(bundle, task, userTurn, true);
+                }
+            }
 
+            EnsureUserTurnRecorded(bundle, task, userTurn);
             string content = result.Content;
             if (_structuredPolicy.ShouldValidate(roleId) &&
                 !_structuredPolicy.TryValidate(roleId, content, out string failReason))
@@ -434,24 +458,64 @@ namespace CoreAI.Ai
             return content;
         }
 
+        /// <summary>
+        /// Per-turn state the streaming teardown needs after the core iterator has stopped producing:
+        /// the last request bundle (role id + role memory config) and the write-once user-turn latch.
+        /// </summary>
+        private sealed class StreamingTurnState
+        {
+            /// <summary>Most recently built request bundle for the turn; null if none was ever built.</summary>
+            public RequestBundle Bundle;
+
+            /// <summary>Keeps user-turn persistence to one store attempt for this turn.</summary>
+            public readonly UserTurnHistoryLatch UserTurn = new();
+        }
+
         /// <inheritdoc />
         public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            if (!_authority.CanRunAiTasks)
-            {
-                yield return new LlmStreamChunk { IsDone = true, Error = "authority denied" };
-                yield break;
-            }
-
             if (task == null)
             {
                 yield return new LlmStreamChunk { IsDone = true, Error = "task is null" };
                 yield break;
             }
 
+            StreamingTurnState turn = new();
+            try
+            {
+                if (!_authority.CanRunAiTasks)
+                {
+                    yield return new LlmStreamChunk { IsDone = true, Error = "authority denied" };
+                    yield break;
+                }
+
+                await foreach (LlmStreamChunk chunk in RunStreamingCoreAsync(task, turn, cancellationToken))
+                {
+                    yield return chunk;
+                }
+            }
+            finally
+            {
+                // WHY: iterator disposal runs this block after error chunks, yield breaks, cancellation and
+                // consumers abandoning enumeration early; the yielding core cannot own universal teardown.
+                EnsureUserTurnRecorded(turn.Bundle, task, turn.UserTurn, true);
+            }
+        }
+
+        /// <summary>
+        /// Streaming turn body: builds the request, pumps provider chunks, handles context-overflow
+        /// rebuilds, and publishes on success. Teardown that must survive a <c>yield break</c> lives in
+        /// <see cref="RunStreamingAsync"/>.
+        /// </summary>
+        private async IAsyncEnumerable<LlmStreamChunk> RunStreamingCoreAsync(
+            AiTaskRequest task,
+            StreamingTurnState turn,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
             int contextPass = 0;
             int contextOverflowPasses = 0;
             int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
@@ -460,6 +524,9 @@ namespace CoreAI.Ai
             {
                 RequestBundle bundle = await BuildRequestAsync(task, contextPass, cancellationToken)
                     .ConfigureAwait(false);
+                // WHY: the teardown in RunStreamingAsync needs the role config of the LAST attempt to know
+                // where (and whether) the user turn is persisted.
+                turn.Bundle = bundle;
                 StringBuilder accumulated = new();
                 int chunkCount = 0;
                 string terminalError = null;
@@ -793,7 +860,9 @@ namespace CoreAI.Ai
                     // WHY: SanitizeAndPublish already records the token-calibration observation from
                     // streamResult.PromptTokens; recording it again here double-applied the EMA and did a
                     // second disk write per streaming turn (the non-streaming path records exactly once).
-                    content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
+                    EnsureUserTurnRecorded(bundle, task, turn.UserTurn);
+                    content = SanitizeAndPublish(
+                        bundle, task, content, bundle.UserPayload, streamResult);
                     bundle.ContextSnapshot?.Commit();
                 }
                 else if (!string.IsNullOrEmpty(terminalError))
@@ -1132,19 +1201,14 @@ namespace CoreAI.Ai
             return (resultSystem, chatHistory, snapshot.WasCompacted, snapshot);
         }
 
-        private static void AppendWorldStateTailMessage(
-            ref List<Microsoft.Extensions.AI.ChatMessage> chatHistory,
-            string worldState)
+        private static string BuildWorldStateInstructions(string worldState)
         {
             if (string.IsNullOrWhiteSpace(worldState))
             {
-                return;
+                return "";
             }
 
-            chatHistory ??= new List<Microsoft.Extensions.AI.ChatMessage>(1);
-            chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
-                Microsoft.Extensions.AI.ChatRole.System,
-                "## World State\n" + worldState.Trim()));
+            return "## World State\n" + worldState.Trim();
         }
 
         private static void AppendMemoryTailMessage(
@@ -1156,10 +1220,29 @@ namespace CoreAI.Ai
                 return;
             }
 
+            AppendSystemTailMessage(ref chatHistory, memoryTailBlock);
+        }
+
+        private static void AppendSystemTailMessage(
+            ref List<Microsoft.Extensions.AI.ChatMessage> chatHistory,
+            string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
             chatHistory ??= new List<Microsoft.Extensions.AI.ChatMessage>(1);
             chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
                 Microsoft.Extensions.AI.ChatRole.System,
-                memoryTailBlock.Trim()));
+                content.Trim()));
+        }
+
+        private static string BuildRequestSystemInstructions(string requestSystemPrompt)
+        {
+            return string.IsNullOrWhiteSpace(requestSystemPrompt)
+                ? ""
+                : "## Request System Instructions\n" + requestSystemPrompt.Trim();
         }
 
         private static string AppendTailBudgetSection(string system, string tailBlock)
@@ -1249,6 +1332,78 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// One-shot latch that permits at most one user-history append attempt per orchestrated turn,
+        /// including stores that commit and then throw.
+        /// </summary>
+        private sealed class UserTurnHistoryLatch
+        {
+            /// <summary>Whether the store append was attempted, including one that committed and then threw.</summary>
+            public bool Attempted;
+        }
+
+        /// <inheritdoc />
+        void IUnstartedAiTurnRecorder.RecordUnstartedUserTurn(AiTaskRequest task)
+        {
+            // WHY: a production queue can terminate admitted work before either public orchestration method
+            // enters. Reuse the exact role/history/attachment policy from normal teardown, while suppressing a
+            // store error so it cannot replace the queue's cancellation/rejection outcome.
+            EnsureUserTurnRecorded(null, task, new UserTurnHistoryLatch(), true);
+        }
+
+        /// <summary>
+        /// Writes the user turn into role chat history once per turn.
+        /// </summary>
+        private void EnsureUserTurnRecorded(
+            RequestBundle bundle,
+            AiTaskRequest task,
+            UserTurnHistoryLatch latch,
+            bool suppressPersistenceErrors = false)
+        {
+            if (latch == null || latch.Attempted || task == null)
+            {
+                return;
+            }
+
+            string roleId = bundle?.RoleId;
+            string traceId = bundle?.TraceId;
+            try
+            {
+                roleId ??= ResolveRoleId(task);
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig = bundle?.RoleConfig ??
+                                                                ResolveRoleConfigForRequest(
+                                                                    _memoryPolicy?.GetRoleConfig(roleId) ??
+                                                                    new AgentMemoryPolicy.RoleMemoryConfig(),
+                                                                    task);
+                if (!roleConfig.WithChatHistory || _memoryStore == null)
+                {
+                    return;
+                }
+
+                // WHY: teardown is later than every context-overflow rebuild, so the in-flight user payload
+                // never re-enters its own request as history. Persist raw intent, not composed live context.
+                // Mark before the call: a store may commit and then throw, making retry unsafe and duplicative.
+                latch.Attempted = true;
+                _memoryStore.AppendChatMessage(roleId, "user",
+                    AppendAttachmentPlaceholders(task.Hint ?? string.Empty, task.Attachments),
+                    roleConfig.PersistChatHistory);
+            }
+            catch (Exception ex) when (suppressPersistenceErrors)
+            {
+                // WHY: failure teardown can run while cancellation/provider failure is unwinding; a store
+                // failure must not replace the original outcome. Successful turns call this unsuppressed.
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] role='{roleId ?? "unknown"}' trace='{traceId ?? "unknown"}' " +
+                    $"could not persist the user turn: {ex.Message}",
+                    LogTag.Llm);
+            }
+        }
+
+        private static string ResolveRoleId(AiTaskRequest task)
+        {
+            return string.IsNullOrWhiteSpace(task?.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+        }
+
+        /// <summary>
         /// ARCH-3 (partial): Shared post-processing for both sync and streaming paths.
         /// Sanitizes tool-call JSON, persists chat history, publishes the game command envelope.
         /// </summary>
@@ -1276,14 +1431,6 @@ namespace CoreAI.Ai
 
             if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
             {
-                // WHY: Persist only the raw user intent, NOT the fully-composed userPayload: the composed payload
-                // carries per-turn context (telemetry envelope, Lua-repair, mutation-state) that must not
-                // accumulate in history — a stale telemetry snapshot on every turn bloats context and confuses
-                // the model about which state is current. Live state is delivered fresh each turn (current
-                // payload) and on demand via the game_state tool, so history stays a clean conversation.
-                _memoryStore.AppendChatMessage(bundle.RoleId, "user",
-                    AppendAttachmentPlaceholders(task.Hint ?? string.Empty, task.Attachments),
-                    bundle.RoleConfig.PersistChatHistory);
                 // WHY: Persist the assistant turn WITHOUT hidden <think> reasoning: chain-of-thought is
                 // per-turn scratch space (observed up to ~16k chars) that bloats the durable store and
                 // re-enters every future prompt. The UI clamp is visual only; strip at the source.
@@ -1402,6 +1549,8 @@ namespace CoreAI.Ai
             {
                 RoleId = task.RoleId,
                 RoutingProfileId = task.RoutingProfileId ?? "",
+                SystemPrompt = task.SystemPrompt ?? "",
+                RequestSystemInstructions = task.RequestSystemInstructions ?? "",
                 Hint = hint,
                 Attachments = task.Attachments,
                 LuaRepairGeneration = task.LuaRepairGeneration,
@@ -1492,9 +1641,9 @@ namespace CoreAI.Ai
             return false;
         }
 
-        private string AppendToolContract(
+        private string AppendStableToolContract(
             string system,
-            IReadOnlyList<ILlmTool> tools,
+            IReadOnlyList<ILlmTool> roleTools,
             AiTaskRequest task,
             string roleId)
         {
@@ -1502,10 +1651,9 @@ namespace CoreAI.Ai
             // runtime re-route), so the tool contract follows an endpoint switch mid-session.
             bool supportsNativeToolCalling =
                 _llm?.SupportsNativeToolCallingForRole(roleId, task?.RoutingProfileId ?? "") == true;
-            return AiToolContractPromptFormatter.AppendToolContract(
+            return AiToolContractPromptFormatter.AppendStableRoleToolContract(
                 system,
-                tools,
-                task,
+                roleTools,
                 _settings,
                 supportsNativeToolCalling);
         }

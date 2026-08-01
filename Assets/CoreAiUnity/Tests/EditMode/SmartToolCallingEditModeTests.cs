@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     [TestFixture]
     public sealed class SmartToolCallingEditModeTests
     {

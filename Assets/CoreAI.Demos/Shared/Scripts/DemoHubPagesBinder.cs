@@ -31,7 +31,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-#if !COREAI_NO_LUA
+#if COREAI_LUA
             if (FindFirstObjectByType<WaveAutoBattlerModsDemoController>(FindObjectsInactive.Include) != null)
             {
                 registry.Register(

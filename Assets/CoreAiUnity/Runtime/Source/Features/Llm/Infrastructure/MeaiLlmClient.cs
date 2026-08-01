@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 #nullable enable
 using System;
 using System.Collections.Generic;
@@ -2682,7 +2682,7 @@ namespace CoreAI.Infrastructure.Llm
             return clone;
         }
 
-        private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)
+        internal List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)
         {
             List<MEAI.AIFunction> result = new();
             if (tools == null)

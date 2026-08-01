@@ -132,9 +132,16 @@ namespace CoreAI.Chat
         private bool _lastPublishedBusy;
 
         /// <summary>
-        /// Monotonic counter incremented at the start of each agent turn. Turn code captures the value
-        /// at start and compares it before mutating shared UI/busy state, so a superseded turn that is
-        /// still unwinding (e.g. after an agent switch) can never write into the newer turn's bubbles.
+        /// True only while this component owns an enabled Unity lifecycle. Set before any OnEnable work and
+        /// cleared before any OnDisable cancellation/busy callback so reentrant submits cannot cross trees.
+        /// </summary>
+        private bool _lifecycleActive;
+
+        /// <summary>
+        /// Monotonic counter incremented when turn/lifecycle ownership changes: start, Stop/abandon, or
+        /// panel disable. Turn code captures the value at start and compares it before mutating shared
+        /// UI/busy state, so a superseded turn that is still unwinding (e.g. after an agent switch or an
+        /// immediate disable/enable cycle) can never write into the newer turn's bubbles.
         /// </summary>
         private int _currentTurnGeneration;
 
@@ -338,6 +345,8 @@ namespace CoreAI.Chat
 
         protected virtual void OnEnable()
         {
+            _lifecycleActive = true;
+
             if (_embeddedHostMode)
             {
                 InitializeEmbeddedHost();
@@ -614,7 +623,17 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            // WHY: BusyStateChanged(false) is raised later by teardown and handlers may submit reentrantly.
+            // Publish lifecycle ownership first so that submit is rejected before it can reach a provider.
+            _lifecycleActive = false;
+            bool invalidatedActiveTurn = InvalidateTurnOwnershipOnDisable();
             CancelActiveRequestOnDisable();
+            if (invalidatedActiveTurn)
+            {
+                // WHY: the stale turn is no longer allowed to clear these flags in its own finally. Reset
+                // them here, under lifecycle ownership, so an immediate OnEnable can start a successor.
+                ResetBusyStateWithoutCancellation();
+            }
 
             if (_embeddedHost != null)
             {
@@ -637,6 +656,19 @@ namespace CoreAI.Chat
             // OnEnable. Leaving the flag set made BuildEmbeddedChatTree() return early, InitializeUiRoot()
             // never ran again and the embedded chat rendered but answered nothing.
             _embeddedTreeBuilt = false;
+        }
+
+        /// <summary>
+        /// Transfers turn ownership away from the lifecycle being disabled before the panel drops its UI tree.
+        /// </summary>
+        private bool InvalidateTurnOwnershipOnDisable()
+        {
+            bool hasActiveTurn = IsRequestInProgress || IsCancellationSourceActive(_activeRequestCts);
+            // WHY: cancellation is cooperative and its continuation may run after an immediate OnEnable.
+            // Move generation on EVERY disable, even if stop already cleared the visible busy flags/CTS,
+            // so every continuation born in the old lifecycle sees itself as stale against a rebound tree.
+            Interlocked.Increment(ref _currentTurnGeneration);
+            return hasActiveTurn;
         }
 
         /// <summary>
@@ -666,6 +698,7 @@ namespace CoreAI.Chat
 
         protected virtual void OnDestroy()
         {
+            _lifecycleActive = false;
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
             AttachRoutingController(null);
             _cts?.Cancel();
@@ -1238,6 +1271,9 @@ namespace CoreAI.Chat
             // WHY: the dot animation belongs to the tree being dropped; leaving it running would keep
             // flipping a class on detached elements until the scheduler collected them.
             StopTypingAnimation();
+            // WHY: embedded trees remain parented across OnDisable. Release before losing the reference so
+            // host queries cannot keep seeing a dead stream as active until the next UI bind.
+            ReleaseActiveStreamingBubble();
             Root = null;
             ChatContainer = null;
             MessageScroll = null;
@@ -1257,7 +1293,6 @@ namespace CoreAI.Chat
             _apiProfileDropdown = null;
             _apiProfileToggle = null;
             _longRequestHint = null;
-            _streamingLabel = null;
             // WHY: those bubbles belonged to the old visual tree; keeping them would hand a host
             // detached elements to post-process.
             _turnStreamingBubbles.Clear();
@@ -1683,10 +1718,12 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual void HydrateStartupMessagesFromStore()
         {
-            if (MessageScroll != null)
+            if (MessageScroll == null)
             {
-                MessageScroll.Clear();
+                return;
             }
+
+            MessageScroll.Clear();
 
             TryAppendPersistedChatHistoryFromStore();
             if (GetMessageScrollChildCount() > 0)
@@ -2259,6 +2296,19 @@ namespace CoreAI.Chat
             return IsChatInputLocked(_isSending, _isStreaming, _isStopping, _isClearing);
         }
 
+        private bool CanStartAgentTurn()
+        {
+            return _lifecycleActive;
+        }
+
+        private bool OwnsActiveTurn(int turnGeneration, CancellationTokenSource requestCts)
+        {
+            return CanStartAgentTurn() &&
+                   !IsStaleTurn(turnGeneration, _currentTurnGeneration) &&
+                   ReferenceEquals(_activeRequestCts, requestCts) &&
+                   IsCancellationSourceActive(requestCts);
+        }
+
         internal static bool ShouldSubmitOnEnter(bool sendOnShiftEnter, bool shiftHeld)
         {
             return sendOnShiftEnter ? shiftHeld : !shiftHeld;
@@ -2334,6 +2384,13 @@ namespace CoreAI.Chat
         {
             options ??= new CoreAiChatExternalSubmitOptions();
 
+            if (!CanStartAgentTurn())
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (panel inactive).");
+                return null;
+            }
+
             if (IsActionInProgress())
             {
                 Logger.LogWarning(GameLogFeature.Core,
@@ -2391,11 +2448,6 @@ namespace CoreAI.Chat
 
         private async Task SendToAIFromUiAsync(string userText)
         {
-            // WHY: mark busy before the first await so TrySendInput/Stop sees IsRequestInProgress even
-            // if the backend completes the first streaming iteration synchronously (stub / zero-delay mock).
-            _isSending = true;
-            _stopRequestedByUser = false;
-            UpdateSendButtonVisualState();
             try
             {
                 await RunAgentTurnAsync(userText, null, GetOrCreateCancellationTokenSource().Token);
@@ -2421,6 +2473,13 @@ namespace CoreAI.Chat
             string simulatedAssistantReply,
             CancellationToken cancellationToken)
         {
+            if (!CanStartAgentTurn())
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatPanel] RunAgentTurnAsync: ignored (panel inactive).");
+                return null;
+            }
+
             if (!string.IsNullOrWhiteSpace(simulatedAssistantReply))
             {
                 ResetLongRequestHint();
@@ -2447,13 +2506,6 @@ namespace CoreAI.Chat
             // already in flight" and drop stale UI appends/finishes (see IsStaleTurn).
             int turnGeneration = Interlocked.Increment(ref _currentTurnGeneration);
             _toolRoundIterationInTurn = 1;
-
-            if (!_isSending)
-            {
-                _isSending = true;
-                UpdateSendButtonVisualState();
-            }
-
             _stopRequestedByUser = false;
             CancellationTokenSource requestCts =
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
@@ -2462,6 +2514,25 @@ namespace CoreAI.Chat
 
             try
             {
+                if (!OwnsActiveTurn(turnGeneration, requestCts))
+                {
+                    return null;
+                }
+
+                if (!_isSending)
+                {
+                    // WHY: generation and the request CTS are installed before publishing busy=true.
+                    // A synchronous handler may StopAgent; the ownership check immediately below then
+                    // prevents this turn from ever entering the provider.
+                    _isSending = true;
+                    UpdateSendButtonVisualState();
+                }
+
+                if (!OwnsActiveTurn(turnGeneration, requestCts))
+                {
+                    return null;
+                }
+
                 ResetLongRequestHint();
                 _nonStreamAssistantOutputStarted = false;
                 _streamingStartedVisible = false;
@@ -2475,7 +2546,7 @@ namespace CoreAI.Chat
                     return await SendStreamingAsync(request, turnGeneration, requestCts.Token);
                 }
 
-                return await SendNonStreamingAsync(request, requestCts.Token);
+                return await SendNonStreamingAsync(request, turnGeneration, requestCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -2629,11 +2700,19 @@ namespace CoreAI.Chat
             // WHY: yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish
             // the enumerator.
             await Task.Yield();
+            if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+            {
+                return null;
+            }
+
             _isStreaming = true;
             UpdateSendButtonVisualState();
 
             string fullResponse = "";
             DateTime lastChunkAt = DateTime.UtcNow;
+            // WHY: the bubbles THIS turn opened, tracked locally because _turnStreamingBubbles is reset by
+            // whichever turn starts next — and an abandoned turn unwinds after that reset.
+            List<Label> ownStreamingBubbles = new();
             try
             {
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
@@ -2726,7 +2805,11 @@ namespace CoreAI.Chat
                             if (!_streamingStartedVisible || _streamingBubbleSealed)
                             {
                                 _streamingStartedVisible = true;
-                                StartStreaming();
+                                Label opened = StartStreaming();
+                                if (opened != null)
+                                {
+                                    ownStreamingBubbles.Add(opened);
+                                }
                             }
 
                             // WHY: fullResponse keeps the complete text for history/handlers; only the
@@ -2777,10 +2860,17 @@ namespace CoreAI.Chat
                     UpdateSendButtonVisualState();
                     ScrollToBottom();
                 }
+                else
+                {
+                    SealAbandonedTurnBubbles(ownStreamingBubbles);
+                }
             }
         }
 
-        private async Task<string?> SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
+        private async Task<string?> SendNonStreamingAsync(
+            AiTaskRequest request,
+            int turnGeneration,
+            CancellationToken ct)
         {
             ShowTypingIndicator();
             _nonStreamAssistantOutputStarted = false;
@@ -2789,6 +2879,11 @@ namespace CoreAI.Chat
             {
                 string response = await _chatService.SendMessageAsync(request, ct);
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
+                if (IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    return null;
+                }
+
                 HideTypingIndicator();
 
                 if (string.IsNullOrEmpty(response))
@@ -2823,8 +2918,11 @@ namespace CoreAI.Chat
                         $"[CoreAiChatPanel] SendNonStreamingAsync finally: UI thread hop: {ex.Message}");
                 }
 
-                HideTypingIndicator();
-                ResetLongRequestHint();
+                if (!IsStaleTurn(turnGeneration, _currentTurnGeneration))
+                {
+                    HideTypingIndicator();
+                    ResetLongRequestHint();
+                }
             }
         }
 
@@ -3349,6 +3447,10 @@ namespace CoreAI.Chat
                 return;
             }
 
+            // WHY: Stop transfers turn ownership before any cancellation/busy callbacks. A reentrant
+            // successor started by BusyStateChanged(false) receives a newer generation and cannot be
+            // mistaken for the turn being stopped.
+            Interlocked.Increment(ref _currentTurnGeneration);
             _isStopping = true;
             ResetLongRequestHint();
             UpdateControlButtonsState();
@@ -3759,19 +3861,43 @@ namespace CoreAI.Chat
             Root.styleSheets.Add(sheet);
         }
 
-        private void StartStreaming()
+        /// <summary>
+        /// USS class marking the ONE bubble a turn is currently streaming into. Hosts may probe the
+        /// transcript for it to tell "a turn is producing text right now" from "the transcript is settled".
+        /// </summary>
+        public const string StreamingActiveUssClassName = "coreai-streaming-active";
+
+        /// <summary>
+        /// Takes the streaming affordance off the currently open bubble and lets go of it.
+        /// </summary>
+        private void ReleaseActiveStreamingBubble()
+        {
+            if (_streamingLabel == null)
+            {
+                return;
+            }
+
+            _streamingLabel.RemoveFromClassList(StreamingActiveUssClassName);
+            _streamingLabel = null;
+        }
+
+        /// <summary>
+        /// Opens a fresh assistant bubble for the in-flight turn and returns it (null when there is no
+        /// message container to render into).
+        /// </summary>
+        private Label StartStreaming()
         {
             HideTypingIndicator();
             ResetLongRequestHint();
             _isStreaming = true;
             RaiseBusyStateChangedIfChanged();
-            _streamingLabel = null;
+            ReleaseActiveStreamingBubble();
             _streamingBubbleSealed = false;
             _streamingRenderCapReached = false;
 
             if (MessageScroll == null)
             {
-                return;
+                return null;
             }
 
             VisualElement templateRow = CreateMessageBubbleRow(false);
@@ -3783,7 +3909,7 @@ namespace CoreAI.Chat
             _streamingLabel.style.whiteSpace = WhiteSpace.Normal;
             _streamingLabel.AddToClassList("coreai-chat-message");
             _streamingLabel.AddToClassList("coreai-ai-message");
-            _streamingLabel.AddToClassList("coreai-streaming-active");
+            _streamingLabel.AddToClassList(StreamingActiveUssClassName);
             MakeTextSelectable(_streamingLabel);
 
             AddBubbleContent(templateRow, contentSlot, _streamingLabel);
@@ -3792,6 +3918,7 @@ namespace CoreAI.Chat
             _turnStreamingBubbles.Add(_streamingLabel);
             MessageScroll.Add(templateRow);
             ScrollToBottom();
+            return _streamingLabel;
         }
 
         /// <summary>
@@ -3830,21 +3957,48 @@ namespace CoreAI.Chat
                 return;
             }
 
-            _streamingLabel.RemoveFromClassList("coreai-streaming-active");
-            _streamingLabel = null;
+            ReleaseActiveStreamingBubble();
             _streamingBubbleSealed = true;
+        }
+
+        /// <summary>
+        /// Brings the bubbles an ABANDONED turn opened to their terminal look.
+        /// </summary>
+        private void SealAbandonedTurnBubbles(List<Label> bubbles)
+        {
+            if (bubbles == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < bubbles.Count; i++)
+            {
+                Label bubble = bubbles[i];
+                if (bubble == null)
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(bubble, _streamingLabel))
+                {
+                    // WHY: the live turn has not opened a bubble of its own yet (StartStreaming reassigns
+                    // this field), so the reference still points at OUR dead bubble — release it properly
+                    // instead of leaving the next turn to orphan it.
+                    ReleaseActiveStreamingBubble();
+                    continue;
+                }
+
+                bubble.RemoveFromClassList(StreamingActiveUssClassName);
+            }
+
+            bubbles.Clear();
         }
 
         private void FinishStreaming()
         {
             _streamingScrollScheduled = false;
-            if (_streamingLabel != null)
-            {
-                _streamingLabel.RemoveFromClassList("coreai-streaming-active");
-            }
-
+            ReleaseActiveStreamingBubble();
             _isStreaming = false;
-            _streamingLabel = null;
             _streamingRenderCapReached = false;
             RaiseBusyStateChangedIfChanged();
         }
@@ -4025,17 +4179,7 @@ namespace CoreAI.Chat
         /// </summary>
         public void StopAgent()
         {
-            bool wasInProgress = IsRequestInProgress;
             StopActiveGeneration();
-
-            if (wasInProgress)
-            {
-                FinishStreaming();
-                HideTypingIndicator();
-                _isSending = false;
-
-                UpdateSendButtonVisualState();
-            }
         }
     }
 }

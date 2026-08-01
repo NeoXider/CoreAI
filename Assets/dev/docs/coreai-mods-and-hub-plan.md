@@ -15,9 +15,10 @@ into a separate `com.neoxider.coreaimods` package, (2) the extensible **CoreAI H
    CoreAI. `CoreAI.Core`/`CoreAI.Source` end up with **zero MoonSharp / zero Lua-execution** references.
    CoreAI keeps the generic tool/agent/skill framework and a thin MoonSharp-free Lua-semantic surface
    (version store, prompt-composer repair, `EnableLuaOnWebGl`).
-2. **Optionality = package presence.** No `COREAI_LUA`/`COREAI_NO_LUA` flag. No package → no Lua code
-   → clean compile. Inside CoreAIMods the `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` guards are
-   dropped (the package only exists with MoonSharp).
+2. **Optionality = package presence + positive opt-in.** No package → no Lua code → clean compile.
+   With `com.neoxider.coreaimods` installed, `COREAI_LUA` explicitly enables the bundled Lua-CSharp
+   runtime and guarded Lua surfaces; without the symbol they compile out. The legacy negative symbol
+   is unsupported. Active guards use `#if COREAI_LUA` and assemblies are not blanket-disabled.
 3. **Extensible CoreAI Hub (pages).** One window with pages (Chat, Settings, Statistics, Mods, …) plus a
    public **page-registry API** so C# modules AND Lua mods can add a page at runtime.
 4. **Bundled, updatable mods** installed on first run (some active by default), categories as a tree,

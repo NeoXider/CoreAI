@@ -12,7 +12,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// Routes LLM requests to profile-specific clients.
     /// </summary>
-    public sealed class RoutingLlmClient : ILlmClient, ILlmPreflightAnnotator
+    public sealed class RoutingLlmClient : ILlmClient, ILlmPreflightAnnotator, ILlmRequestHeaderScope
     {
         private readonly ILlmClientRegistry _registry;
         private readonly IPublisher<LlmBackendSelected> _backendSelectedPublisher;
@@ -47,6 +47,18 @@ namespace CoreAI.Infrastructure.Llm
                 request.AgentRoleId, request.RoutingProfileId);
             request.RoutingProfileId = route.ProfileId;
             request.ContextWindowTokens = route.ContextWindowTokens;
+        }
+
+        IDisposable ILlmRequestHeaderScope.BeginRequestHeaders(LlmCompletionRequest request)
+        {
+            if (request == null)
+            {
+                return null;
+            }
+
+            LlmRoleRouteSnapshot route = _registry.ResolveRouteForRole(
+                request.AgentRoleId, request.RoutingProfileId);
+            return LlmRequestHeaderScopes.Begin(route?.Client, request);
         }
 
         /// <inheritdoc />
@@ -497,7 +509,7 @@ namespace CoreAI.Infrastructure.Llm
                 return "?";
             }
 
-#if !COREAI_NO_LLM
+#if COREAI_LLM
             if (inner is OpenAiChatLlmClient)
             {
                 return "OpenAiHttp";

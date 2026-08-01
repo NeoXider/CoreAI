@@ -104,6 +104,73 @@ namespace CoreAI.Tests.EditMode
                 UnityEngine.Object.DestroyImmediate(settings);
             }
         }
+#endif
+
+        [Test]
+        public void RegisterCorePortable_HostMemoryScopeProviderWinsDefault()
+        {
+            ContainerBuilder builder = CreateMinimalBuilderForPortableStack(out CoreAISettingsAsset settings);
+            FixedScopeProvider hostProvider = new("student-from-host");
+            try
+            {
+                CoreAILifetimeScope.RegisterAgentMemoryScopeProvider(builder, hostProvider);
+                builder.RegisterCorePortable(
+                    false,
+                    false);
+
+                using IObjectResolver container = builder.Build();
+                IAgentMemoryScopeProvider resolved = container.Resolve<IAgentMemoryScopeProvider>();
+                IReadOnlyList<IAgentMemoryScopeProvider> all =
+                    container.Resolve<IReadOnlyList<IAgentMemoryScopeProvider>>();
+
+                Assert.AreSame(hostProvider, resolved);
+                Assert.AreEqual(1, all.Count,
+                    "The portable empty default must not stack with or replace a host provider.");
+                Assert.AreEqual("student-from-host", resolved.GetScope("Teacher").UserId);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void RegisterConversationSummary_HostProviderScopesProductionStore()
+        {
+            ContainerBuilder builder = CreateMinimalBuilderForPortableStack(out CoreAISettingsAsset settings);
+            MutableScopeProvider provider = new();
+            string roleId = "summary-scope-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                CoreAILifetimeScope.RegisterAgentMemoryScopeProvider(builder, provider);
+                CoreAILifetimeScope.RegisterConversationSummaryForCoreAiLifetimeScope(builder);
+                CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
+
+                using IObjectResolver container = builder.Build();
+                IConversationSummaryStore summaries = container.Resolve<IConversationSummaryStore>();
+                Assert.IsInstanceOf<ScopedConversationSummaryStoreDecorator>(summaries);
+                Assert.AreEqual(1, container.Resolve<IReadOnlyList<IConversationSummaryStore>>().Count);
+
+                provider.UserId = "student-a";
+                summaries.SaveSummary(roleId, "summary-a");
+                provider.UserId = "student-b";
+                Assert.AreEqual("", summaries.LoadSummary(roleId));
+                summaries.SaveSummary(roleId, "summary-b");
+                provider.UserId = "student-a";
+                Assert.AreEqual("summary-a", summaries.LoadSummary(roleId));
+                provider.UserId = "student-b";
+                Assert.AreEqual("summary-b", summaries.LoadSummary(roleId));
+
+                provider.UserId = "student-a";
+                summaries.ClearSummary(roleId);
+                provider.UserId = "student-b";
+                summaries.ClearSummary(roleId);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
 
         private static ContainerBuilder CreateMinimalBuilderForPortableStack(out CoreAISettingsAsset settings)
         {
@@ -123,6 +190,30 @@ namespace CoreAI.Tests.EditMode
                 Lifetime.Singleton);
             return builder;
         }
-#endif
+
+        private sealed class FixedScopeProvider : IAgentMemoryScopeProvider
+        {
+            private readonly string _userId;
+
+            public FixedScopeProvider(string userId)
+            {
+                _userId = userId;
+            }
+
+            public AgentMemoryScope GetScope(string roleId)
+            {
+                return new AgentMemoryScope("redoschool", _userId, "", "");
+            }
+        }
+
+        private sealed class MutableScopeProvider : IAgentMemoryScopeProvider
+        {
+            public string UserId { get; set; } = "";
+
+            public AgentMemoryScope GetScope(string roleId)
+            {
+                return new AgentMemoryScope("redoschool", UserId, "", "");
+            }
+        }
     }
 }

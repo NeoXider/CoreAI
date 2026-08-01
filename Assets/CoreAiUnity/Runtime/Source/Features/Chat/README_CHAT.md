@@ -67,6 +67,13 @@ Configure in the Inspector:
 
 The panel is **not** hardwired to a single teaching or player role. Routing uses the **`Role ID`** field on your **`CoreAiChatConfig`**: it must match a role you registered with **`AgentBuilder`** and **`ApplyToPolicy(AgentMemoryPolicy)`** during composition (typically in your **`LifetimeScope`** setup). Requests from the UI go through the **same orchestrator / MEAI pipeline** as `CoreAi.OrchestrateAsync` / `CoreAiChatService` with the same `roleId`.
 
+The stock request sets `CancellationScope = roleId`. When the scene supplies an
+`IAgentMemoryScopeProvider`, `QueuedAiOrchestrator` automatically combines that logical role scope with
+the current tenant/user/session/topic identity. A new Teacher turn for student B therefore does not stop
+student A's concurrent Teacher turn. `CoreAi.StopAgent(roleId)` uses the same scoped stock path. Custom
+domain cancellation scopes should use `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` for an
+explicit identity-aware stop.
+
 **What you do as a host game**
 
 1. Register the role (prompt, tools, memory, chat history, etc.).
@@ -369,6 +376,23 @@ Stop the current reply in two ways:
 
 Under the hood this calls `CoreAi.StopAgent(roleId)` and cancels the active request `CancellationToken`, so both current generation and queued orchestrator tasks for that role stop.
 After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming` / `HideTypingIndicator`) and resets `_isSending` / `_isStreaming`; covered by `CoreAiChatPanelEditModeTests` and `CoreAiChatPanelStopPlayModeTests`.
+
+Disabling the panel advances `CurrentTurnGeneration` before dropping the UI references (and cancels any
+request still active at that point). The old streaming or buffered continuation is therefore stale even if the
+same GameObject is enabled again immediately: it cannot append a timeout/error/answer into the rebound
+tree, release a successor bubble, reset the successor's busy state, or steal focus. Lifecycle teardown
+itself resets the old busy state, so the re-enabled panel can start a new turn without waiting for the
+cancelled provider call to unwind.
+
+Lifecycle and turn ownership are installed before public busy notifications. Consequently:
+
+- `SubmitMessageFromExternalAsync` returns `null` without calling a provider while the component is inactive;
+- `OnDisable` marks the lifecycle inactive before cancellation can publish `BusyStateChanged(false)`, so a
+  reentrant submit from that callback is rejected;
+- `BusyStateChanged(true)` observes the new generation and active request CTS already installed. Calling
+  `StopAgent()` synchronously from that callback cancels ownership before provider entry;
+- a `BusyStateChanged(false)` handler raised by `StopAgent()` may immediately submit a successor turn. Stop
+  has no cleanup tail after that notification, so it cannot clear the successor's busy state, CTS, or bubble.
 
 Since **2.6.x**, the WebGL verification flow also covers the real browser player path:
 
@@ -730,7 +754,7 @@ All CSS classes use the `coreai-` prefix to avoid clashes:
 | `.coreai-chat-fab-icon` | Icon inside FAB |
 | `.coreai-ai-message` | AI bubble |
 | `.coreai-user-message` | User bubble |
-| `.coreai-streaming-active` | Active streaming |
+| `.coreai-streaming-active` | Active streaming; public constant: `CoreAiChatPanel.StreamingActiveUssClassName` |
 | `.coreai-chat-send-button` | Send button |
 | `.coreai-typing-message` | “Typing…” indicator |
 | `.coreai-long-request-hint` | Optional status line under the typing row (long in-flight turns; see collapse / UXML section) |
@@ -766,8 +790,8 @@ bool wasAbandoned = chatPanel.AbandonCurrentTurn();
 | Member | Type | Purpose |
 | --- | --- | --- |
 | `IsBusy` | `bool` (get) | `true` while sending / streaming / stopping / clearing. |
-| `BusyStateChanged` | `event Action<bool>` | Fires on the UI thread on every `IsBusy` transition (not on every flag mutation). |
-| `CurrentTurnGeneration` | `int` (get) | Monotonic counter, incremented at the start of each agent turn. Compare across awaits to detect "a newer turn started". |
+| `BusyStateChanged` | `event Action<bool>` | Fires on the UI thread on every `IsBusy` transition (not on every flag mutation). On `true`, generation + active CTS already belong to the new turn; on `false`, reentrant successor submission is supported while lifecycle is active. |
+| `CurrentTurnGeneration` | `int` (get) | Monotonic ownership counter, incremented on turn start, Stop/abandon, and panel disable. Compare across awaits to detect that ownership moved to a newer turn/lifecycle. |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
 | `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request and **without** moving the turn generation (in contrast to `StopActiveGeneration()` / `StopAgent()` / `AbandonCurrentTurn()`). The turn itself keeps running and still owns the transcript when it finishes. |
 | `AbandonCurrentTurn()` *(Unreleased)* | `bool` | For a host's own watchdog that gives up on the current turn independently of this panel's HTTP timeout. Bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error path recognises itself as stale and stops touching the transcript), cancels the active request the same way the Stop button does, and calls `ResetBusyStateWithoutCancellation()`. Returns `true` only if a turn was actually in flight — this is what stops a host's own "no answer" message from being followed by a second, redundant error bubble once the real request eventually fails. |

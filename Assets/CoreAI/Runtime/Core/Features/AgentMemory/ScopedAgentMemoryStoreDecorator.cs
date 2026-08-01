@@ -1,12 +1,14 @@
-using System.Security.Cryptography;
-using System.Text;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
     /// <summary>
     /// Decorates an existing memory store and maps role ids to scoped keys.
     /// </summary>
-    public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics
+    public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
+        IAtomicAgentMemoryStore
     {
         private readonly IAgentMemoryStore _inner;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
@@ -74,82 +76,21 @@ namespace CoreAI.Ai
             return _inner.GetChatHistory(ToScopedKey(roleId), maxMessages);
         }
 
+        /// <inheritdoc />
+        public Task<TResult> MutateAsync<TResult>(
+            string roleId,
+            Func<AgentMemoryState, TResult> mutator,
+            CancellationToken cancellationToken = default)
+        {
+            // WHY: The extension delegates to an inner IAtomicAgentMemoryStore when available; otherwise it owns
+            // a per-inner-store, per-scoped-key gate. Passing the scoped key here is essential: locking the raw
+            // role id would serialize unrelated students and delegating the raw role would leak their state.
+            return _inner.MutateAsync(ToScopedKey(roleId), mutator, cancellationToken);
+        }
+
         private string ToScopedKey(string roleId)
         {
-            roleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
-            AgentMemoryScope scope = _scopeProvider.GetScope(roleId);
-            if (string.IsNullOrWhiteSpace(scope.TenantId) &&
-                string.IsNullOrWhiteSpace(scope.UserId) &&
-                string.IsNullOrWhiteSpace(scope.SessionId) &&
-                string.IsNullOrWhiteSpace(scope.TopicId))
-            {
-                return roleId;
-            }
-
-            StringBuilder sb = new(128);
-            AppendPart(sb, scope.TenantId);
-            AppendPart(sb, scope.UserId);
-            AppendPart(sb, scope.SessionId);
-            AppendPart(sb, scope.TopicId);
-            AppendPart(sb, roleId);
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Keeps the legacy length-prefixed mapping for values containing only safe characters. Values
-        /// changed by sanitization gain a stable hash of the trimmed raw text and use the raw length as
-        /// their prefix, so a literal hash-suffixed value cannot collide with them.
-        /// </summary>
-        private static void AppendPart(StringBuilder sb, string value)
-        {
-            if (sb.Length > 0)
-            {
-                sb.Append("__");
-            }
-
-            string sanitized = Sanitize(value);
-            string raw = value?.Trim() ?? "";
-            // WHY: An unset segment keeps the legacy "_" key. Lossy hash-suffix schemes post-date 5.6.1,
-            // so hashing their canonical trimmed value changes only unreleased keys while making padding stable.
-            bool lossless = string.Equals(raw, sanitized, System.StringComparison.Ordinal);
-            string encoded = raw.Length == 0 || lossless
-                ? sanitized
-                : sanitized + "-" + StableHash(raw);
-            int lengthPrefix = raw.Length == 0 ? encoded.Length : raw.Length;
-            sb.Append(lengthPrefix).Append(':').Append(encoded);
-        }
-
-        private static string StableHash(string value)
-        {
-            byte[] digest;
-            using (SHA256 sha = SHA256.Create())
-            {
-                digest = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
-            }
-
-            StringBuilder sb = new(12);
-            for (int i = 0; i < 6; i++)
-            {
-                sb.Append(digest[i].ToString("x2"));
-            }
-
-            return sb.ToString();
-        }
-
-        private static string Sanitize(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "_";
-            }
-
-            StringBuilder sb = new(value.Length);
-            foreach (char ch in value.Trim())
-            {
-                sb.Append(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' ? ch : '_');
-            }
-
-            return sb.ToString();
+            return AgentMemoryScopeKey.Resolve(_scopeProvider, roleId);
         }
     }
 }

@@ -1,4 +1,4 @@
-#if !COREAI_NO_LUA
+#if COREAI_LUA
 using System;
 using CoreAI.Hub;
 using UnityEngine;

@@ -1,4 +1,3 @@
-#if !COREAI_NO_LLM
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 
@@ -26,4 +25,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-#endif // !COREAI_NO_LLM

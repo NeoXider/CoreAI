@@ -103,9 +103,9 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 | **Tokens** | Saves (important only) | Spends (full history) |
 | **LLMUnity** | Always works | Only with `useChatHistory: true` |
 | **HTTP/OpenAI** | Works | ❌ No (needs chat object) |
-| **Persistence** | ✅ FileAgentMemoryStore | ✅ FileAgentMemoryStore |
+| **Persistence** | `Persistent`: `FileAgentMemoryStore`; `SessionOnly`: process memory | `Persistent`: `FileAgentMemoryStore`; `SessionOnly`: process memory |
 
-**v1.5.2:** deterministic compaction folds older turns into **`## Conversation Summary`**. **`RegisterCorePortable()`** defaults to **`InMemoryConversationSummaryStore`** (per-role summaries for the process); Unity **`CoreAILifetimeScope`** overrides with **`FileConversationSummaryStore`** (`%persistentDataPath%/CoreAI/ConversationSummaries`) for persistence across launches. **`FileAgentMemoryStore`** implements **`IConversationTranscriptStore`** (structured `ConversationEntry` rows; optional tool lines for future MEAI hooks).
+**v1.5.2:** deterministic compaction folds older turns into **`## Conversation Summary`**. **`RegisterCorePortable()`** defaults to **`InMemoryConversationSummaryStore`** (per-role summaries for the process). Unity **`CoreAILifetimeScope`** defaults to `AgentMemoryPersistenceMode.Persistent`: `FileConversationSummaryStore` on desktop and an in-memory summary on WebGL; memory/chat/transcript use `FileAgentMemoryStore` on both. Call `SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly)` before build to keep all four data sets in memory and create no memory/summary files. Both `FileAgentMemoryStore` and `InMemoryAgentMemoryStore` implement **`IConversationTranscriptStore`**.
 
 **v1.5.3:** optional **LLM-assisted compaction** (Kilocode-style). When **`ICoreAISettings.EnableLlmContextCompaction`** is `true` on **`CoreAISettingsAsset`**, overflowing history may be summarized by an auxiliary LLM call instead of the deterministic bullet rollup. The system is gated at two levels:
 
@@ -154,8 +154,8 @@ Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__Core
 └────────────────────────────────────────────────┘
          ↓
 ┌──────────────────────┐    ┌──────────────────────────┐
-│ InMemoryStore        │    │ FileAgentMemoryStore     │
-│ (tests, Dictionary)  │    │ (Unity, persistentData)  │
+│ InMemoryAgentMemoryStore │ │ FileAgentMemoryStore     │
+│ (SessionOnly, process)   │ │ (Persistent, Unity file)│
 └──────────────────────┘    └──────────────────────────┘
 ```
 
@@ -163,7 +163,7 @@ Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__Core
 
 ## Custom persistence (PlayerPrefs, cloud)
 
-The same `IAgentMemoryStore` contract backs **both** MemoryTool and ChatHistory. The default implementation is `FileAgentMemoryStore` (local JSON). For **PlayerPrefs**, **cloud saves** (REST, UGS, Steam, PlayFab, …), or a **local + upload** composite, implement or wrap `IAgentMemoryStore` and register it in DI instead of `FileAgentMemoryStore`.
+The same `IAgentMemoryStore` contract backs **both** MemoryTool and ChatHistory. `CoreAILifetimeScope` defaults to `FileAgentMemoryStore` (local JSON); `AgentMemoryPersistenceMode.SessionOnly` selects `InMemoryAgentMemoryStore` before the container is built. For **PlayerPrefs**, **cloud saves** (REST, UGS, Steam, PlayFab, …), or a **local + upload** composite, implement or wrap `IAgentMemoryStore` and register it in DI instead of the built-in backing.
 
 See **[MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md)** for constraints, debounced upload, conflict handling, and wiring notes.
 
@@ -287,6 +287,7 @@ policy.SetMemoryToolForAll(false);        // Disable for ALL (ChatHistory only)
 | `MemoryTool.cs` | Microsoft.Extensions.AI function for the model |
 | `AgentMemoryDirectiveParser.cs` | Parses `{"tool":"memory"...}` from responses |
 | `NullAgentMemoryStore.cs` | Stub (saves nothing) — portable default when **`RegisterCorePortable`** is used without a host store; not the default for **`CoreAILifetimeScope`** (which registers **`FileAgentMemoryStore`**, WebGL player included since **v1.6.19**) |
+| `InMemoryAgentMemoryStore.cs` | Process-only memory, flat chat, structured transcript and atomic mutation backing selected by `AgentMemoryPersistenceMode.SessionOnly` |
 | `FileAgentMemoryStore.cs` | Unity: JSON files under persistentDataPath |
 | `MEMORY_STORE_CUSTOM_BACKENDS.md` | PlayerPrefs / cloud / composite `IAgentMemoryStore` patterns |
 | `AiOrchestrator.cs` | Orchestrator: injects memory into system prompt |

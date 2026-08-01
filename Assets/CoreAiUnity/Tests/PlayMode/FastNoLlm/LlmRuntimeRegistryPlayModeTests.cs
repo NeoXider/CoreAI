@@ -515,6 +515,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(failed.IsFaulted);
         }
 
+#if COREAI_LLM
         [UnityTest]
         public IEnumerator UnityReadinessProbe_CompletionsOnlyUsesSharedStatusPolicy()
         {
@@ -570,6 +571,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(server.Disconnected.Task.IsCompleted, "Abort must close the native HTTP connection.");
             Assert.IsTrue(server.Disconnected.Task.Result);
         }
+#endif
 
         [UnityTest]
         public IEnumerator DisabledEndpointWithoutAssignment_DoesNotBreakLegacyFallback()

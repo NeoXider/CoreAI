@@ -65,7 +65,7 @@ namespace CoreAI.Mods.Rbx.Binding
         // WHY: the binder is constructed by RbxWorldHost, not by the container, so the host hands it
         // the composition-scoped logger (see SetLog); the process-wide CoreAI logger backs direct
         // constructions (tests, harnesses) so materialization diagnostics are never silently lost.
-        private ILog Logger => _log ??= CoreAI.Logging.Log.Instance;
+        private ILog Logger => _log ??= Log.Instance;
 
         private sealed class BindingEntry
         {
@@ -581,7 +581,7 @@ namespace CoreAI.Mods.Rbx.Binding
                     // WHY: the primitive cache is static (shared by every binder instance), so there is
                     // no instance logger to reach here — the process-wide CoreAI logger is the only
                     // seam available, and it still routes through the game-log category filter.
-                    CoreAI.Logging.Log.Instance.Error(
+                    Log.Instance.Error(
                         "[CoreAI.RbxApi] A render pipeline is active but its default shader could not be " +
                         "resolved; spawned parts will be invisible. Add the pipeline's Lit shader " +
                         "(e.g. 'Universal Render Pipeline/Lit') to Always Included Shaders.",

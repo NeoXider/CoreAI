@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using CoreAI.Infrastructure.Llm;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using NUnit.Framework;
 using UnityEngine;
 
 namespace CoreAI.Tests.PlayMode
@@ -42,6 +44,8 @@ namespace CoreAI.Tests.PlayMode
         public const string EnvModel = "COREAI_TEST_MODEL";
         public const string EnvStreaming = "COREAI_TEST_STREAMING";
         public const string EnvNativeTools = "COREAI_TEST_NATIVE_TOOLS";
+        public const string EnvExtraBodyJson = "COREAI_TEST_EXTRA_BODY_JSON";
+        public const string EnvPromptCacheProbe = "COREAI_TEST_PROMPT_CACHE";
 
         // ----- Legacy env aliases (kept so existing setups keep working) -----
         private const string LegacyEnvBase = "COREAI_OPENAI_TEST_BASE";
@@ -73,16 +77,26 @@ namespace CoreAI.Tests.PlayMode
             public bool Streaming { get; }
             public bool NativeTools { get; }
 
+            /// <summary>Validated, compact provider-specific body JSON. Empty means no provider overrides.</summary>
+            public string ExtraBodyJson { get; }
+
             /// <summary>True when both base URL and model resolved to non-empty values.</summary>
             public bool IsComplete => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Model);
 
-            internal ResolvedConfig(string baseUrl, string apiKey, string model, bool streaming, bool nativeTools)
+            internal ResolvedConfig(
+                string baseUrl,
+                string apiKey,
+                string model,
+                bool streaming,
+                bool nativeTools,
+                string extraBodyJson)
             {
                 BaseUrl = baseUrl;
                 ApiKey = apiKey ?? "";
                 Model = model;
                 Streaming = streaming;
                 NativeTools = nativeTools;
+                ExtraBodyJson = extraBodyJson ?? "";
             }
         }
 
@@ -118,8 +132,19 @@ namespace CoreAI.Tests.PlayMode
 
             bool streaming = ResolveBool(GetEnv(EnvStreaming), file?.Streaming, true);
             bool nativeTools = ResolveBool(GetEnv(EnvNativeTools), file?.NativeTools, true);
+            string extraBodyJson = FirstNonEmpty(GetEnv(EnvExtraBodyJson), file?.ExtraBodyJson);
+            extraBodyJson = NormalizeSafeExtraBodyJson(extraBodyJson);
 
-            return new ResolvedConfig(baseUrl, apiKey, model, streaming, nativeTools);
+            return new ResolvedConfig(baseUrl, apiKey, model, streaming, nativeTools, extraBodyJson);
+        }
+
+        /// <summary>
+        /// Prompt-cache verification incurs real provider requests and therefore runs only after an explicit
+        /// <c>COREAI_TEST_PROMPT_CACHE=true</c> opt-in.
+        /// </summary>
+        public static bool IsPromptCacheProbeEnabled()
+        {
+            return ParseBool(GetEnv(EnvPromptCacheProbe), false);
         }
 
         /// <summary>
@@ -138,7 +163,7 @@ namespace CoreAI.Tests.PlayMode
                 $"{EnvBaseUrl} + {EnvModel} (and {EnvApiKey} if the provider needs a key), " +
                 $"or create a gitignored '{LocalConfigFileName}' at the project root " +
                 $"(see Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md). " +
-                $"Optional toggles: {EnvStreaming}, {EnvNativeTools}. " +
+                $"Optional fields: {EnvStreaming}, {EnvNativeTools}, {EnvExtraBodyJson}. " +
                 $"A fully configured CoreAISettingsAsset (HTTP backend) is also honored automatically.";
         }
 
@@ -272,20 +297,113 @@ namespace CoreAI.Tests.PlayMode
                     return null;
                 }
 
-                JObject root = JObject.Parse(json);
-                return new LocalFileConfig
-                {
-                    BaseUrl = ReadString(root, "baseUrl", "base_url", "BaseUrl"),
-                    ApiKey = ReadString(root, "apiKey", "api_key", "ApiKey"),
-                    Model = ReadString(root, "model", "Model"),
-                    Streaming = ReadBool(root, "streaming", "Streaming"),
-                    NativeTools = ReadBool(root, "nativeTools", "native_tools", "NativeTools")
-                };
+                return ParseLocalFileJson(json);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Debug.LogWarning($"[PlayModeOpenAiTestConfig] Failed to read '{LocalConfigFileName}': {ex.Message}");
+                Debug.LogWarning(
+                    $"[PlayModeOpenAiTestConfig] '{LocalConfigFileName}' is unreadable or invalid. " +
+                    "No API key or provider-body value was logged; see RUNNING_LIVE_TESTS.md for the schema.");
                 return null;
+            }
+        }
+
+        private static LocalFileConfig ParseLocalFileJson(string json)
+        {
+            JsonLoadSettings loadSettings = new()
+            {
+                DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error,
+                CommentHandling = CommentHandling.Ignore,
+                LineInfoHandling = LineInfoHandling.Ignore
+            };
+            JObject root = JObject.Parse(json, loadSettings);
+            return new LocalFileConfig
+            {
+                BaseUrl = ReadString(root, "baseUrl", "base_url", "BaseUrl"),
+                ApiKey = ReadString(root, "apiKey", "api_key", "ApiKey"),
+                Model = ReadString(root, "model", "Model"),
+                Streaming = ReadBool(root, "streaming", "Streaming"),
+                NativeTools = ReadBool(root, "nativeTools", "native_tools", "NativeTools"),
+                ExtraBodyJson = ReadExtraBodyJson(root)
+            };
+        }
+
+        internal static ResolvedConfig ResolveLocalJsonForTests(string json)
+        {
+            LocalFileConfig file = ParseLocalFileJson(json);
+            return new ResolvedConfig(
+                NormalizeBaseUrl(file.BaseUrl),
+                file.ApiKey ?? "",
+                file.Model?.Trim(),
+                file.Streaming ?? true,
+                file.NativeTools ?? true,
+                NormalizeSafeExtraBodyJson(file.ExtraBodyJson));
+        }
+
+        private static string ReadExtraBodyJson(JObject root)
+        {
+            JToken structured = root["extraBody"] ?? root["extra_body"] ?? root["ExtraBody"];
+            if (structured != null && structured.Type != JTokenType.Null)
+            {
+                if (structured.Type != JTokenType.Object)
+                {
+                    throw new ArgumentException("Live-test extraBody must be a JSON object.");
+                }
+
+                return structured.ToString(Formatting.None);
+            }
+
+            return ReadString(root, "extraBodyJson", "extra_body_json", "ExtraBodyJson");
+        }
+
+        private static string NormalizeSafeExtraBodyJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return "";
+            }
+
+            string normalized = OpenAiProviderBodyParameters.NormalizeRawJson(json);
+            JObject root = JObject.Parse(normalized);
+            foreach (JProperty property in root.Properties())
+            {
+                if (OpenAiProviderBodyParameters.IsReserved(property.Name))
+                {
+                    throw new ArgumentException(
+                        $"Live-test provider body key '{property.Name}' is controlled by CoreAI.");
+                }
+            }
+
+            ValidateOpaqueRoutingId(root["session_id"]);
+            return normalized;
+        }
+
+        private static void ValidateOpaqueRoutingId(JToken sessionId)
+        {
+            if (sessionId == null || sessionId.Type == JTokenType.Null)
+            {
+                return;
+            }
+
+            if (sessionId.Type != JTokenType.String)
+            {
+                throw new ArgumentException("Live-test session_id must be an opaque application/cohort string.");
+            }
+
+            string value = sessionId.Value<string>() ?? "";
+            string lower = value.ToLowerInvariant();
+            bool looksPersonal = value.IndexOf('@') >= 0 ||
+                                 Guid.TryParse(value, out _) ||
+                                 lower.Contains("student") ||
+                                 lower.Contains("learner") ||
+                                 lower.Contains("userid") ||
+                                 lower.Contains("user_id") ||
+                                 lower.Contains("email");
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 128 || looksPersonal)
+            {
+                throw new ArgumentException(
+                    "Live-test session_id must identify an opaque application/agent cohort, never a student, user, " +
+                    "email, GUID, or other PII-derived value.");
             }
         }
 
@@ -336,6 +454,61 @@ namespace CoreAI.Tests.PlayMode
             public string Model;
             public bool? Streaming;
             public bool? NativeTools;
+            public string ExtraBodyJson;
+        }
+    }
+
+    public sealed class PlayModeOpenAiTestConfigOfflineTests
+    {
+        [Test]
+        public void LocalConfig_MapsNestedProviderBodyAndOpaqueCohort()
+        {
+            const string json = @"{
+                'baseUrl':'https://openrouter.ai/api/v1/',
+                'apiKey':'not-logged',
+                'model':'vendor/model',
+                'streaming':false,
+                'nativeTools':true,
+                'extraBody':{
+                    'session_id':'coreai-teacher-v3',
+                    'provider':{'order':['cloudflare/fp8'],'allow_fallbacks':false}
+                }
+            }";
+
+            PlayModeOpenAiTestConfig.ResolvedConfig config =
+                PlayModeOpenAiTestConfig.ResolveLocalJsonForTests(json);
+
+            Assert.AreEqual("https://openrouter.ai/api/v1", config.BaseUrl);
+            Assert.AreEqual("vendor/model", config.Model);
+            Assert.IsFalse(config.Streaming);
+            JObject body = JObject.Parse(config.ExtraBodyJson);
+            Assert.AreEqual("coreai-teacher-v3", body["session_id"]?.Value<string>());
+            Assert.AreEqual("cloudflare/fp8", body["provider"]?["order"]?[0]?.Value<string>());
+            Assert.AreEqual(false, body["provider"]?["allow_fallbacks"]?.Value<bool>());
+        }
+
+        [TestCase("student-123")]
+        [TestCase("learner@example.org")]
+        [TestCase("01234567-89ab-cdef-0123-456789abcdef")]
+        public void LocalConfig_PersonalSessionId_IsRejectedWithoutEchoingIt(string personalId)
+        {
+            string json = "{'baseUrl':'https://example.test/v1','model':'m','extraBody':{'session_id':" +
+                          JsonConvert.SerializeObject(personalId) + "}}";
+
+            ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+                PlayModeOpenAiTestConfig.ResolveLocalJsonForTests(json));
+
+            StringAssert.Contains("never a student", ex.Message);
+            StringAssert.DoesNotContain(personalId, ex.ToString());
+        }
+
+        [Test]
+        public void LocalConfig_ReservedProviderBodyKey_IsRejected()
+        {
+            const string json = "{'baseUrl':'https://example.test/v1','model':'m','extraBody':{'messages':[]}}";
+            ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+                PlayModeOpenAiTestConfig.ResolveLocalJsonForTests(json));
+            StringAssert.Contains("messages", ex.Message);
         }
     }
 }

@@ -114,6 +114,7 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+#if COREAI_LLM
         [Test]
         public async Task DelegateLlmTool_MutateThenThrow_ReturnsErrorAndRecordsNativeTrace()
         {
@@ -176,6 +177,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
             Assert.AreEqual("arg-conversion", policy.ExecutedTraces[0].Source);
         }
+#endif
 
         [Test]
         [Timeout(20_000)]

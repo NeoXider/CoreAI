@@ -25,7 +25,10 @@ namespace CoreAI.Infrastructure.Llm
 
     public sealed class SceneLlmAgentProvider : ILlmAgentProvider
     {
-        public Object Resolve(string agentName) => null;
+        public Object Resolve(string agentName)
+        {
+            return null;
+        }
     }
 #endif
 }

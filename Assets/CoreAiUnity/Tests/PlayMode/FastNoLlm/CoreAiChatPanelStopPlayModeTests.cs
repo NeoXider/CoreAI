@@ -207,6 +207,9 @@ namespace CoreAI.Tests.PlayMode
             CoreAiChatService service = new(orchestrator);
             panel.AssignTest(cfg, service);
             SetPrivateField(panel, "_cts", new CancellationTokenSource());
+            // WHY: This no-UIDocument harness isolates stop/recovery; mark its synthetic lifecycle active
+            // so each submit reaches the streaming pipeline instead of the inactive-panel guard.
+            SetPrivateField(panel, "_lifecycleActive", true);
 
             int completedResponses = 0;
             panel.OnAiResponseCompleted += _ => completedResponses++;

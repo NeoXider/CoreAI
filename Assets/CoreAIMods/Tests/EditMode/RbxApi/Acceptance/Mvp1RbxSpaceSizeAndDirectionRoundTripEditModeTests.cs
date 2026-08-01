@@ -143,17 +143,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
-        private static float NextCoord(System.Random rng)
+        private static float NextCoord(Random rng)
         {
             return (float)(rng.NextDouble() * 2000.0 - 1000.0);
         }
 
-        private static float NextExtent(System.Random rng)
+        private static float NextExtent(Random rng)
         {
             return (float)(rng.NextDouble() * 512.0 + 0.05);
         }
 
-        private static float NextAngle(System.Random rng)
+        private static float NextAngle(Random rng)
         {
             return (float)(rng.NextDouble() * 720.0 - 360.0);
         }

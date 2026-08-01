@@ -19,7 +19,7 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// PlayMode scenarios that verify a multi-agent crafting workflow and isolated role memory.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class MultiAgentCraftingWorkflowPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;

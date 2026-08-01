@@ -134,6 +134,113 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class SnapshotAwareRetryClient : ILlmClient, ILlmRequestHeaderScope
+        {
+            private readonly bool _throwFirst;
+            private string _activeLesson;
+            private int _depth;
+            private int _calls;
+
+            public SnapshotAwareRetryClient(bool throwFirst)
+            {
+                _throwFirst = throwFirst;
+            }
+
+            public string CurrentLesson { get; set; } = "lesson-a";
+
+            public int ScopeCount { get; private set; }
+
+            public List<string> SeenLessons { get; } = new();
+
+            public IDisposable BeginRequestHeaders(LlmCompletionRequest request)
+            {
+                string previous = _activeLesson;
+                if (_depth == 0)
+                {
+                    _activeLesson = CurrentLesson;
+                    ScopeCount++;
+                }
+
+                _depth++;
+                return new HeaderScope(this, previous);
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                using (BeginRequestHeaders(request))
+                {
+                    SeenLessons.Add(_activeLesson);
+                    _calls++;
+                    if (_calls == 1)
+                    {
+                        CurrentLesson = "lesson-b";
+                        if (_throwFirst)
+                        {
+                            throw new LlmClientException(
+                                "retry",
+                                LlmErrorCode.RateLimited,
+                                429,
+                                1);
+                        }
+
+                        return Task.FromResult(new LlmCompletionResult
+                        {
+                            Ok = false,
+                            Error = "retry",
+                            ErrorCode = LlmErrorCode.RateLimited,
+                            HttpStatus = 429,
+                            RetryAfterSeconds = 1
+                        });
+                    }
+
+                    return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
+                }
+            }
+
+            private sealed class HeaderScope : IDisposable
+            {
+                private readonly SnapshotAwareRetryClient _owner;
+                private readonly string _previous;
+
+                public HeaderScope(SnapshotAwareRetryClient owner, string previous)
+                {
+                    _owner = owner;
+                    _previous = previous;
+                }
+
+                public void Dispose()
+                {
+                    _owner._depth--;
+                    _owner._activeLesson = _previous;
+                }
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        [Timeout(20_000)]
+        public async Task RetryLoop_KeepsOneHeaderSnapshotForResultAndExceptionFailures(bool throwFirst)
+        {
+            SnapshotAwareRetryClient inner = new(throwFirst);
+            LoggingLlmClientDecorator sut = new(inner, new SpyLogger(), 0f, 1);
+            LlmCompletionRequest request = new() { AgentRoleId = "Teacher", UserPayload = "hello" };
+
+            LlmCompletionResult result = await sut.CompleteAsync(request);
+
+            Assert.IsTrue(result.Ok);
+            CollectionAssert.AreEqual(new[] { "lesson-a", "lesson-a" }, inner.SeenLessons);
+            Assert.AreEqual(1, inner.ScopeCount);
+
+            inner.CurrentLesson = "lesson-c";
+            LlmCompletionResult later = await sut.CompleteAsync(request);
+
+            Assert.IsTrue(later.Ok);
+            CollectionAssert.AreEqual(new[] { "lesson-a", "lesson-a", "lesson-c" }, inner.SeenLessons);
+            Assert.AreEqual(2, inner.ScopeCount);
+        }
+
         [Test]
         [Timeout(20_000)]
         public async Task FailedCompletion_RateLimited_RetriesAndSucceeds()

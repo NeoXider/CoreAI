@@ -49,7 +49,7 @@ namespace CoreAI.Mods.Rbx.Binding
         // the process-wide CoreAI logger is the sanctioned no-DI seam and CoreServicesInstaller points
         // it at the scoped, settings-filtered logger at startup. SetLog upgrades it when a composition
         // root does resolve one.
-        private ILog Logger => _log ??= CoreAI.Logging.Log.Instance;
+        private ILog Logger => _log ??= Log.Instance;
 
         /// <summary>Supplies the composition-scoped logger this world reports diagnostics through.
         /// Safe before or after <see cref="Initialize"/> — an already-built binder is re-pointed too,

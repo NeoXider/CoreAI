@@ -173,6 +173,9 @@ namespace CoreAI.Tests.EditMode
         {
             GameObject go = new("CoreAiChatPanel_ToolRoundBubble_Test");
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+            // WHY: Plain EditMode tests do not invoke MonoBehaviour lifecycle callbacks, so model the
+            // enabled panel precondition explicitly instead of weakening the production lifecycle guard.
+            SetField(panel, "_lifecycleActive", true);
             return new PanelCtx(go, panel);
         }
 

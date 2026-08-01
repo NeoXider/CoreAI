@@ -20,11 +20,12 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
 
 `.github/workflows/ci.yml` runs on every push/PR to `main`:
 
-- **EditMode tests, two Lua configurations** — `lua` (the default project, with the bundled
-  Lua-CSharp runtime) and `no-lua` (`COREAI_NO_LUA` appended to all platform Scripting Define
-  Symbols, compiling all Lua features out). Both must stay green.
-- **Sandbox coverage gate** — the `lua` job fails if the `SecureLuaSandboxEditModeTests`
+- **EditMode tests, four compile configurations** — `core` (no optional symbols), `llm`
+  (`COREAI_LLM`), `lua` (`COREAI_LUA`), and `full` (both symbols). All four must stay green;
+  define injection is verified for Standalone and WebGL rows.
+- **Module coverage gates** — the `lua` and `full` jobs fail if the `SecureLuaSandboxEditModeTests`
   escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
+  The `llm` and `full` jobs similarly require the LLM installer fixture to execute.
 - **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
   `com.neoxider.coreai` package compiles and tests on its own, without the Unity layer.
 - **`package-graph` job** — fork-safe (no Unity licence needed): checks that all six packages carry
@@ -36,8 +37,8 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
 The workflow requires the standard [GameCI](https://game.ci/docs/github/getting-started) repository
 secrets: `UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
 
-New Lua-dependent test files must be wrapped in `#if !COREAI_NO_LUA` so the
-`no-lua` job compiles.
+New Lua-dependent test files must be wrapped in `#if COREAI_LUA` so `core` and `llm` remain Lua-free.
+New LLM-dependent test files must similarly use `#if COREAI_LLM` so `core` and `lua` compile honestly.
 
 ## Code style
 
@@ -73,7 +74,7 @@ New public symbols follow `CoreAI…`; only the top-level facade keeps `CoreAi`.
 ## Before you commit (checklist)
 
 1. **Reformat** — Rider *Reformat & Cleanup Code* (applies `.editorconfig`, incl. attribute-per-line).
-2. **Tests** — run the EditMode gate green (CI runs `lua` + `no-lua`; run locally in batchmode for a fast pre-push check).
+2. **Tests** — run the EditMode gate green (CI runs `core` + `llm` + `lua` + `full`; run locally in batchmode for a fast pre-push check).
 3. **Changelog** — add an entry under `[Unreleased]` (or the release section) in the affected package `CHANGELOG.md`.
 4. **Version** — for a release run `python tools/bump_version.py <version>`: it sets **all six**
    `package.json` files (and their internal `com.neoxider.*` pins) plus `McpServerInfo.Version` in

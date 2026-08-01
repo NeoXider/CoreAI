@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
@@ -114,6 +115,23 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Provider-specific extra request body JSON.</summary>
         public string ExtraBodyJson => extraBodyJson ?? "";
+
+        /// <summary>
+        /// Safely sets a provider-specific request-body parameter. Passing C# <see langword="null"/> removes it;
+        /// use <see cref="JValue.CreateNull"/> to send JSON <c>null</c>. Invalid input leaves the asset unchanged.
+        /// </summary>
+        public void SetProviderBodyParameter(string key, JToken value)
+        {
+            string normalized = OpenAiProviderBodyParameters.Set(extraBodyJson, key, value);
+            extraBodyJson = normalized;
+        }
+
+        /// <summary>Safely removes a provider-specific request-body parameter.</summary>
+        public void RemoveProviderBodyParameter(string key)
+        {
+            string normalized = OpenAiProviderBodyParameters.Remove(extraBodyJson, key);
+            extraBodyJson = normalized;
+        }
 
         /// <summary>Provider-specific reasoning mode.</summary>
         public LlmReasoningMode ReasoningMode => reasoningMode;

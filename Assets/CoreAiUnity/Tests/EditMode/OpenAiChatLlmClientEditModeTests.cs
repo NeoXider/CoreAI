@@ -12,7 +12,7 @@ namespace CoreAI.Tests.EditMode
     /// <summary>
     /// EditMode coverage for <see cref="OpenAiChatLlmClient"/> and MEAI client factory wiring.
     /// </summary>
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     public sealed class OpenAiChatLlmClientEditModeTests
     {
         [Test]

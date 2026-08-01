@@ -47,15 +47,14 @@
 
 ## 3. Current repository state (normative snapshot)
 
-> **Current architecture note:** the two-layer (`coreai` / `coreaiunity`) boundary below predates the
-> Lua/Hub/Benchmark package split. The repository now ships **six UPM packages** —
+> **Current architecture note (7.0.0):** the repository ships **six UPM packages** —
 > `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
 > `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
 > `com.neoxider.coreaihub` (optional UI Toolkit Hub window), `com.neoxider.coreaibenchmark`
 > (dev/test-only benchmark harness), and `com.neoxider.coreaimcp` (optional in-game MCP server). `CoreAI.Core` has no Lua VM reference at all — the Lua-CSharp sandbox
 > and `execute_lua`/`manage_mods` tools live entirely in `CoreAI.Mods`. See [INSTALL.md](../../../INSTALL.md)
 > and the root [README.md §Architecture](../../../README.md#%EF%B8%8F-architecture) for the current
-> package/dependency graph; treat the rest of this section as historical unless it is updated.
+> package/dependency graph. The package boundary and positive-module contract below are normative.
 
 ### 3.0 Boundary between CoreAI and CoreAIUnity (normative)
 
@@ -64,7 +63,7 @@
 | **Engine-agnostic core** | **`com.neoxider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), typed commands and extension points. **No** `UnityEngine` and no Lua VM implementation; game and Lua bindings are supplied by host/module packages. |
 | **Unity implementation** | **`com.neoxider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Concrete **Unity** implementation: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), Unity console logging, file stores, main-thread marshaling, UI wiring. Depends on **`com.neoxider.coreai`**. |
 
-**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; Lua VM/sandbox implementations reside in **`CoreAI.Mods`** / package **`coreaimods`**; **`CoreAI.Core`** remains portable .NET/C#. **`RegisterCorePortable`** registers a default **`InMemoryConversationSummaryStore`** as **`IConversationSummaryStore`** unless the host suppresses it (**`CoreAILifetimeScope`** registers **`FileConversationSummaryStore`** first and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**). **`RegisterCorePortable`** also registers **`NullAgentMemoryStore`** as **`IAgentMemoryStore`** unless **`suppressDefaultAgentMemoryStore: true`** — **`CoreAILifetimeScope`** always suppresses and then registers **`FileAgentMemoryStore`** on all Unity players (including WebGL, with IDBFS flush via **`CoreAi_PersistFsSync`**) so VContainer never sees two implementations for **`IAgentMemoryStore`**.
+**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; Lua VM/sandbox implementations reside in **`CoreAI.Mods`** / package **`coreaimods`**; **`CoreAI.Core`** remains portable .NET/C#. **`RegisterCorePortable`** registers default **`InMemoryConversationSummaryStore`** and **`NullAgentMemoryStore`** unless the host suppresses them. **`CoreAILifetimeScope`** always calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**, then publishes exactly one scoped summary and memory/transcript facade over the backing selected before build: `Persistent` uses **`FileAgentMemoryStore`** on every Unity player (including WebGL with **`CoreAi_PersistFsSync`**) and a desktop file/WebGL in-memory summary; `SessionOnly` uses process-only memory and summary stores. VContainer therefore never sees competing implementations, and SessionOnly creates no memory/summary files.
 
 ### 3.1 Packages (`Packages/manifest.json`)
 
@@ -77,16 +76,19 @@
 ### 3.2 Assembly `CoreAI.Core` (`Assets/CoreAI/Runtime/Core/CoreAI.Core.asmdef`)
 
 - `noEngineReferences: true`; no Lua, Unity, MessagePipe, or VContainer reference. Composition stays in host/module assemblies.
-- Portable logic: AI contracts, MVP orchestrator, Lua sandbox, session snapshot DTO.
+- Portable logic: AI/chat/tool contracts, queue and orchestrator, scripted/stub clients, memory/context,
+  session snapshot DTO. The required Microsoft.Extensions.AI assemblies remain a Core dependency in all
+  module configurations; Lua VM/sandbox code is not in this assembly.
 
 ### 3.3 Assembly `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)
 
-- References: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**, **undream.llmunity.Runtime** (LLMUnity).
+- References: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**; LLMUnity types
+  compile only when the package-generated `COREAI_HAS_LLMUNITY` and manual `COREAI_LLM` symbols are both active.
 - **R3**, **UniTask** — present in manifest; add to asmdef as code adopts them.
 
 ### 3.4 Composition and scene
 
-- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** broker, `IAiGameCommandSink`; **optionally** **`LlmRoutingManifest`** + **`LlmClientRegistry`** / **`ILlmRoutingController`**, else legacy **OpenAI HTTP** (`OpenAiHttpLlmSettings`) + LLMUnity; then **`ILlmClient`** as **`LoggingLlmClientDecorator`** around **`RoutingLlmClient`** (or directly **OpenAiChatLlmClient** / **MeaiLlmUnityClient** / **StubLlmClient** when routing is off; symbol **`COREAI_NO_LLM`** — no LLMUnity adapter). Decorator: log **`GameLogFeature.Llm`**, log backend **`RoutingLlmClient→…`**, **`TraceId`**, **timeout** (**Llm Request Timeout Seconds**, **0** = disabled). Before **`RegisterCorePortable(...)`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null or **`LoggingAiOrchestrationMetrics`** when **`GameLogFeature.Metrics`**); **`IConversationSummaryStore`** (**`FileConversationSummaryStore`**) is registered on the builder, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`** — sandbox, **`LuaAiEnvelopeProcessor`**, **`AiOrchestrator`** + **`QueuedAiOrchestrator`** as **`IAiOrchestrationService`** (parallelism cap, **`AiTaskRequest.Priority`**, **`CancellationScope`**), **`IRoleStructuredResponsePolicy`** (default no-op), session snapshot, solo authority; **`IGameLuaRuntimeBindings`** / **`ILuaExecutionObserver`**. **`ApplyAiGameCommand`** carries **`TraceId`**; Lua repair preserves it on **`AiTaskRequest`**. Entry points: first **`AiGameCommandRouter`**, then **`CoreAIGameEntryPoint`**. Game feature scopes use **Parent** to this root.
+- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** broker, `IAiGameCommandSink`; portable routing contracts, chat/orchestration, queueing and scripted/stub clients are always registered. With **`COREAI_LLM`**, concrete provider-backed **OpenAI HTTP / MEAI / LLMUnity** clients, transports, readiness probes and resilience decorators compile and can be selected by **`LlmRoutingManifest`** + **`LlmClientRegistry`**. Before **`RegisterCorePortable(...)`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null or **`LoggingAiOrchestrationMetrics`** when **`GameLogFeature.Metrics`**); **`IConversationSummaryStore`** is registered on the builder, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`** — portable orchestration remains active in every configuration, while Lua sandbox and **`LuaAiEnvelopeProcessor`** require **`COREAI_LUA`**. The same `IAgentMemoryScopeProvider` partitions persistence and queue cancellation. **`ApplyAiGameCommand`** carries **`TraceId`**. Entry points: first **`AiGameCommandRouter`**, then **`CoreAIGameEntryPoint`**. Game feature scopes use **Parent** to this root.
 - **v1.5.x additions to composition:** **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) + **`ITokenEstimator`** (`HeuristicTokenEstimator`) allocate **`HistoryTokenBudget`** per role. **`ICoreAISettings.EnableLlmContextCompaction`** (default false) gates optional **`LlmAssistedConversationContextManager`** — auxiliary LLM call to fold evicted history into a rolling summary (per-role toggle via **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**; **`Programmer`** defaults off). **`ConversationContextManagerFactories.Create(...)`** wires **`SelectingConversationContextManager`** when enabled. Timeout in WebGL: **`CancelAfterSlim`** (UniTask PlayerLoop) replaces `CancelAfter` (non-functional in Emscripten). Network retries: exclusively in **`LoggingLlmClientDecorator`** (no orchestrator-level retry multiplier).
 - **`CoreAIGameEntryPoint`**: start + test orchestrator invocation (bootstrap).
 - Core scene: **`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`** (editor display name may be `_mainCoreAI`; add to Build Settings as **startup** for template development if needed).
@@ -225,7 +227,7 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
 - **Goals:** demo and test builds, CI without Ollama, smaller distribution, “host without GPU / without downloaded weights,” store policies “no network calls to LLM.”
 - **Implementation direction (not a commitment of current code):**
   - DI registration of **`ILlmClient`** as a **stub** (the shipped `StubLlmClient`, or a custom heuristic client) yielding **deterministic** or **tabular** responses per role (fallback from ScriptableObject / seed).
-  - Optional compile symbol (**Scripting Define**) **`COREAI_NO_LLM`** — manual opt-out for **full** LLM disable (HTTP + LLMUnity). Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via `versionDefines` in asmdef when package `ai.undream.llm` is present — code depending on LLMUnity types compiles only when present.
+  - Optional compile symbol (**Scripting Define**) **`COREAI_LLM`** — manual positive opt-in only for provider-backed HTTP/MEAI and optional LLMUnity implementations. Without it, portable orchestration/chat, scripted/stub clients and MEAI public contracts remain. Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via `versionDefines` in asmdef when package `ai.undream.llm` is present — code depending on LLMUnity types compiles only when both symbols are present.
   - Orchestrator in “no LLM” mode **shall not fail:** tasks map to heuristics or are marked “skipped” with logging; **MessagePipe** and game logic remain operational.
   - NGO clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is not a neural net but a stub/designer data.
 - Fallback contract details shall follow `ILlmClient` in code; this subclause records a **template design requirement**.
@@ -424,7 +426,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 ## 14. Summary for context (copy-paste)
 
-**CoreAI:** Unity core template for procedural logic and AI. **Done:** **`CoreAI.Core`** in **`Assets/CoreAI`**, **`CoreAI.Source`** in **`Assets/CoreAiUnity`** (LLM routing **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, metrics **`GameLogFeature.Metrics`**); VContainer + MessagePipe + LLMUnity + MCPForUnity in project manifest (Lua-CSharp ships bundled inside `com.neoxider.coreaimods`, no manifest entry needed); host **`Assets/CoreAiUnity`** (scene **`Scenes/_mainCoreAI`**, prompts in **`Resources`**); sample **`RogueliteArena`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** `CoreAI.Tests`; Play Mode: `CoreAI.Tests.PlayMode.FastNoLlm`, `CoreAI.Tests.PlayMode.LlmVerification`, `CoreAI.Tests.PlayMode.Scenarios` (+ `Shared`, `LlmInfra`). **Defines:** `COREAI_NO_LLM` (manual opt-out, §5.2), `COREAI_HAS_LLMUNITY` (auto, versionDefines).
+**CoreAI 7.0.0:** six UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`. **`CoreAI.Core`** in **`Assets/CoreAI`** keeps portable orchestration/chat/tool contracts, queueing, scripted/stub clients and required MEAI references in every build. **`CoreAI.Source`** in **`Assets/CoreAiUnity`** supplies Unity composition, persistence, chat UI and, under **`COREAI_LLM`**, provider-backed HTTP/MEAI/LLMUnity implementations. Lua-CSharp lives only in `coreaimods` and requires **`COREAI_LUA`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** four EditMode matrix legs (`core`, `llm`, `lua`, `full`) plus non-live PlayMode. **Defines:** `COREAI_LLM` (providers), `COREAI_LUA` (Lua), `COREAI_HAS_LLMUNITY` (automatic package presence).
 
 ---
 
@@ -455,4 +457,4 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 | 0.21 | Sources only in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; duplicates removed from **`Packages/`**; **`manifest`**: no **`file:`** to `Assets/` |
 | 0.22 | §3.4: v1.5.x composition additions — context budget policy, `EnableLlmContextCompaction`, `SelectingConversationContextManager`, WebGL `CancelAfterSlim` timeout, single-layer retry |
 | 0.23 | §3.0 invariant: **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore`** on WebGL player (**v1.6.19+**) with IDBFS flush; portable **`NullAgentMemoryStore`** only when host does not suppress default |
-| 0.24 | Lua VM implementation switched to **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading; it ships bundled as `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/`; the previous third-party Lua interpreter dependency and its UPM package entry were removed from the manifest and from `CoreAI ▸ Setup ▸ Modules`; the old Lua auto-define no longer exists — Lua is compiled in by default (`COREAI_NO_LUA` still compiles it out) |
+| 0.24 | Исторически Lua VM была переведена на **Lua-CSharp**, managed/AOT-safe runtime для IL2CPP и WebGL; она поставлялась как `Lua.dll` + `Lua.Annotations.dll` под `Assets/CoreAIMods/Plugins/`, а прежняя сторонняя зависимость и auto-define были удалены. В той версии Lua компилировалась по умолчанию и отключалась через `COREAI_NO_LUA`; начиная с 7.0 применяется только положительный opt-in `COREAI_LUA`. |

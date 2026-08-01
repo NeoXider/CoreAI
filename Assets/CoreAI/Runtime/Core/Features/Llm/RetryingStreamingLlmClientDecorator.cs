@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -23,7 +23,7 @@ namespace CoreAI.Infrastructure.Llm
     /// lives in the outer logging decorator.
     /// </para>
     /// </summary>
-    public sealed class RetryingStreamingLlmClientDecorator : ILlmClient
+    public sealed class RetryingStreamingLlmClientDecorator : ILlmClient, ILlmRequestHeaderScope
     {
         private readonly ILlmClient _inner;
         private readonly int _maxRetryAttempts;
@@ -95,6 +95,7 @@ namespace CoreAI.Infrastructure.Llm
             [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
             for (int attempt = 0;; attempt++)
             {
                 bool committed = false;
@@ -237,6 +238,11 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
             }
+        }
+
+        IDisposable ILlmRequestHeaderScope.BeginRequestHeaders(LlmCompletionRequest request)
+        {
+            return LlmRequestHeaderScopes.Begin(_inner, request);
         }
 
         private static bool IsCommittingChunk(LlmStreamChunk chunk)

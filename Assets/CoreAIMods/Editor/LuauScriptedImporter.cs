@@ -11,7 +11,7 @@ namespace CoreAI.Editor
     /// CoreAiUnity host package, not CoreAIMods.
     /// </summary>
     /// <remarks>
-    /// Text-only, no dependency on the Lua runtime, so it works in no-Lua (<c>COREAI_NO_LUA</c>) builds too.
+    /// Text-only, no dependency on the Lua runtime, so it works when <c>COREAI_LUA</c> is absent too.
     /// </remarks>
     [ScriptedImporter(1, "luau")]
     public sealed class LuauScriptedImporter : ScriptedImporter

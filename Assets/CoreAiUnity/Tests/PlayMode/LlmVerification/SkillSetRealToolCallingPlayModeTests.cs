@@ -22,7 +22,7 @@ namespace CoreAI.Tests.PlayMode
     /// Real LLM test: self-service skills — model calls read_skill on its own,
     /// then uses the skill's tools. Verifies the full Cursor-like pattern.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class SkillSetRealToolCallingPlayModeTests
     {
         private const int ComplexTurnTimeoutSeconds = 240;

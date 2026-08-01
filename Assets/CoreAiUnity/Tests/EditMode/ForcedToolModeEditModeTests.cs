@@ -9,6 +9,7 @@ using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using NUnit.Framework;
+using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -229,12 +230,16 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(llm.LastRequest);
             StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("Available tools:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Role tool definitions:", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("buy_item", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("do not claim that the tool is unavailable", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("This request requires calling tool 'buy_item'", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("itemName", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Available tools:", llm.LastRequest.SystemPrompt);
+            string availability = RequestToolAvailability(llm.LastRequest);
+            StringAssert.Contains("Available tools:", availability);
+            StringAssert.Contains("- buy_item", availability);
+            StringAssert.Contains("Required tool: 'buy_item'.", availability);
         }
 
         [Test]
@@ -264,10 +269,14 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(llm.LastRequest);
             StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("Available tools:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Role tool definitions:", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("Example memory tool call for text-shaped backends", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("{\"name\":\"memory\",\"arguments\"", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Available tools:", llm.LastRequest.SystemPrompt);
+            string availability = RequestToolAvailability(llm.LastRequest);
+            StringAssert.Contains("Available tools:", availability);
+            StringAssert.Contains("- memory", availability);
         }
 
         [Test]
@@ -301,10 +310,34 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("Pass arguments as structured tool arguments", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("After a tool succeeds", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("Available tools:", llm.LastRequest.SystemPrompt);
-            StringAssert.DoesNotContain("schema:", llm.LastRequest.SystemPrompt);
-            StringAssert.DoesNotContain("itemName", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Role tool definitions:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("itemName", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("include a parseable JSON object", llm.LastRequest.SystemPrompt);
             StringAssert.DoesNotContain("Example memory tool call", llm.LastRequest.SystemPrompt);
+            string availability = RequestToolAvailability(llm.LastRequest);
+            StringAssert.Contains("Available tools:", availability);
+            StringAssert.Contains("- buy_item", availability);
+            StringAssert.Contains("Tool selection mode: auto.", availability);
+        }
+
+        private static string RequestToolAvailability(LlmCompletionRequest request)
+        {
+            if (request?.ChatHistory != null)
+            {
+                foreach (ChatMessage message in request.ChatHistory)
+                {
+                    if ((message.Text ?? "").StartsWith(
+                            "## Tool Availability (current request)",
+                            StringComparison.Ordinal))
+                    {
+                        return message.Text;
+                    }
+                }
+            }
+
+            Assert.Fail("Expected current-request tool availability in the volatile system tail.");
+            return "";
         }
 
         [Test]

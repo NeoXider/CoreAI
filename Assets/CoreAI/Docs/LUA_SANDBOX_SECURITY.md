@@ -25,29 +25,26 @@ CoreAI treats Lua as untrusted gameplay logic:
 The sandbox is a defense layer, not a permission system for sensitive server-side
 operations.
 
-## Optional Module (`COREAI_NO_LUA`, since v3.0.0)
+## Optional Module (`COREAI_LUA`, positive opt-in since v7.0.0)
 
-Lua is an **optional module**. Defining the scripting symbol `COREAI_NO_LUA`
-(Project Settings → Player → Scripting Define Symbols) compiles the entire
-Lua-CSharp-based sandbox out of `CoreAI.Core` and `CoreAI.Source`, mirroring the
-existing `COREAI_NO_LLM` opt-out. The core (orchestration, LLM, chat, agent
-memory) builds and runs with no Lua-CSharp usage. Lua ships bundled as
+Lua is an **optional module**. Defining the scripting symbol `COREAI_LUA`
+(Project Settings → Player → Scripting Define Symbols) positively opts the target
+into the Lua-CSharp runtime and guarded Lua surfaces. It is independent of `COREAI_LLM`:
+Lua-only and LLM-only builds are supported, both symbols enable the full runtime, and no
+symbols produce the minimal portable core. Lua ships bundled as
 `Lua.dll` / `Lua.Annotations.dll` inside the CoreAI Mods package
 (`Assets/CoreAIMods/Plugins/`) — there is no external package dependency to
 remove.
 
-When `COREAI_NO_LUA` is set:
+When `COREAI_LUA` is set:
 
-- `LuaCsSecureEnvironment`, `LuaCsCoroutineHandle`, `LuaCsApiRegistry`,
-  `LuaCsExecutionGuard`, `LuaCsAiEnvelopeProcessor`, and `LuaCsCoroutineRunner`
-  (all part of the CoreAI Mods package) are removed from the build.
-- `CorePortableInstaller` / `WorldCommandsInstaller` skip Lua registrations and
-  fall back to the Core no-ops `CoreDefaultLuaRuntimeBindings` /
-  `NullLuaExecutionObserver`, so the DI graph still resolves.
-- `AiGameCommandRouter` drops its `LuaAiEnvelopeProcessor` dependency; AI command
-  routing degrades to world-command execution only.
+- guarded Lua demos, adapters, benchmark paths, and sandbox security tests compile in;
+- `CoreAiModsLifetimeScope` may register the bundled runtime and expose the host-granted Lua APIs;
+- the sandbox escape fixture executes in CI and is required to report test cases.
 
-Default builds (symbol unset) keep Lua enabled and behave exactly as before.
+Default builds leave the symbol unset and therefore keep Lua disabled. This is a breaking v7.0 migration:
+remove the former negative opt-out symbol from project settings and add `COREAI_LUA` only to targets that
+deliberately enable scripting.
 
 ### Unity scene module
 
@@ -59,11 +56,10 @@ losing serialized values; new scenes should configure only the child module.
 
 ### CI matrix
 
-`.github/workflows/ci.yml` runs EditMode tests in both configurations on every
-push/PR: the default project with Lua enabled, and a `no-lua` job that appends
-`COREAI_NO_LUA` to every platform's Scripting Define Symbols before
-compiling — exactly the opt-out procedure described above. The default job
-additionally asserts that the `SecureLuaSandboxEditModeTests` escape-test
+`.github/workflows/ci.yml` runs EditMode tests in four configurations on every
+push/PR: `core` (no optional symbols), `llm` (`COREAI_LLM`), `lua` (`COREAI_LUA`),
+and `full` (both). The `lua` and `full` jobs additionally assert that the
+`LuaCsSecureSandboxEditModeTests` escape-test
 fixture actually executed, so isolation coverage cannot silently drop out of
 the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
 `UNITY_EMAIL`, `UNITY_PASSWORD`) configured in the repository.
@@ -124,8 +120,8 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 
 ## Platform Support
 
-Runtime Lua execution is supported on all platforms, including WebGL player
-builds. On WebGL, Lua is **on by default** — toggle with
+When `COREAI_LUA` is compiled in, runtime Lua execution is supported on all platforms,
+including WebGL player builds. On WebGL, execution is **on by default** — toggle with
 `CoreAISettingsAsset.EnableLuaOnWebGl`. The Full `unity_*` reflection tier
 stays disabled on WebGL; IL2CPP stripping protection (`link.xml` preserving
 `Lua.dll` / `Lua.Annotations.dll`) ships in the package.

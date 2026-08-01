@@ -39,7 +39,7 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-#if !COREAI_NO_LUA
+#if COREAI_LUA
         private SynchronizationContext _savedContext;
 
         [SetUp]

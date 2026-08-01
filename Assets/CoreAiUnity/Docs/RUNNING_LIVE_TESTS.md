@@ -12,8 +12,8 @@ exactly which environment variable or file to set, so unconfigured runs stay gre
 
 ## The one place to configure everything
 
-All four knobs — **base URL**, **API key**, **model**, plus the **streaming** and **native-tools**
-toggles — are resolved by `PlayModeOpenAiTestConfig` and consumed by
+Base URL, API key, model, streaming/native-tools toggles, and optional provider-specific request-body fields
+are resolved by `PlayModeOpenAiTestConfig` and consumed by
 `PlayModeProductionLikeLlmFactory.TryCreate(...)` for the OpenAI-compatible HTTP path.
 
 ### Resolution precedence (highest wins, field by field)
@@ -45,6 +45,8 @@ just the model from the shell.
 | `COREAI_TEST_MODEL`         | Model id                                             | —       |
 | `COREAI_TEST_STREAMING`     | `true` / `false`                                     | `true`  |
 | `COREAI_TEST_NATIVE_TOOLS`  | `true` / `false` (native function calling)           | `true`  |
+| `COREAI_TEST_EXTRA_BODY_JSON` | Safe provider fields as one JSON object            | `""`    |
+| `COREAI_TEST_PROMPT_CACHE`  | Explicitly enable the paid prompt-cache live probe    | `false` |
 
 Booleans accept `true/false`, `1/0`, `yes/no`, `on/off`, `enabled/disabled` (case-insensitive).
 
@@ -59,6 +61,8 @@ export COREAI_TEST_API_KEY="sk-or-...your-key..."
 export COREAI_TEST_MODEL="openai/gpt-4o-mini"
 export COREAI_TEST_STREAMING=true
 export COREAI_TEST_NATIVE_TOOLS=true
+export COREAI_TEST_EXTRA_BODY_JSON='{"session_id":"coreai-teacher-v3","provider":{"order":["cloudflare/fp8"],"allow_fallbacks":false}}'
+export COREAI_TEST_PROMPT_CACHE=true
 # then run Unity PlayMode tests (Test Runner, or -runTests in batch mode)
 ```
 
@@ -83,12 +87,44 @@ This path is already in `.gitignore`, so a real API key never gets committed.
   "apiKey": "sk-or-...your-key...",
   "model": "openai/gpt-4o-mini",
   "streaming": true,
-  "nativeTools": true
+  "nativeTools": true,
+  "extraBody": {
+    "session_id": "coreai-teacher-v3",
+    "provider": {
+      "order": ["cloudflare/fp8"],
+      "allow_fallbacks": false
+    }
+  }
 }
 ```
 
 Keys are case-insensitive and accept `snake_case` aliases (`base_url`, `api_key`, `native_tools`).
 You can also point at a file in a custom location with `COREAI_TEST_CONFIG=/abs/path/to/config.json`.
+
+`extraBody` проходит тот же safe API, что production code: root должен быть объектом, duplicate properties и
+CoreAI-owned keys (`messages`, `model`, `stream`, `tools`, …) отклоняются до запроса. Значения и API key не
+печатаются при ошибке. Для обратной совместимости файл также принимает строковый `extraBodyJson`, но после
+разбора применяет каждый верхнеуровневый ключ через safe setter.
+
+`session_id` должен быть непрозрачным id приложения/когорты агента — никогда `studentId`, email, login, GUID
+ученика или другое PII. Пример выше одновременно фиксирует OpenRouter на одном endpoint для воспроизводимого
+измерения. `allow_fallbacks: false` отключает failover: не переносите pin в production без отдельного решения по
+доступности. Если throughput требует шардирования, используйте малый фиксированный набор cohort id, а не id
+каждого ученика.
+
+### Оплачиваемая проверка prompt cache
+
+`PromptCacheLivePlayModeTests.ThreeDifferentStudentTails_ReuseStableRolePrefix_ByThirdRequest` не запускается
+в обычном CI. Для него нужны полностью настроенный HTTP endpoint и явный
+`COREAI_TEST_PROMPT_CACHE=true`. Тест делает ровно три запроса с output cap 32 и timeout 90 секунд, оставляет
+длинный реальный role/tool `SystemPrompt` byte-identical, меняет только синтетический student tail и ждёт короткую
+bounded pause между запросами. К третьему запросу provider должен вернуть `CacheReadTokens > 0`; если он
+экспонирует cache writes, они также выводятся. Failure содержит endpoint host, configured/served model,
+prompt/completion/cache-read/cache-write по каждой попытке, но не key и не provider body.
+
+Этот green доказывает только выбранную пару model/endpoint. Повторите probe для всех production routes. Без
+точного pin OpenRouter может прогреть несколько физических кешей; это корректное поведение router-а, а не
+per-student cache CoreAI.
 
 ---
 
@@ -123,7 +159,7 @@ Live tests skip with a clear, actionable reason:
 > (and `COREAI_TEST_API_KEY` if the provider needs a key), or create a gitignored
 > `coreai-live-tests.local.json` at the project root (see
 > `Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md`). Optional toggles: `COREAI_TEST_STREAMING`,
-> `COREAI_TEST_NATIVE_TOOLS`. A fully configured CoreAISettingsAsset (HTTP backend) is also honored
+> `COREAI_TEST_NATIVE_TOOLS`, `COREAI_TEST_EXTRA_BODY_JSON`. A fully configured CoreAISettingsAsset (HTTP backend) is also honored
 > automatically.
 
 ---

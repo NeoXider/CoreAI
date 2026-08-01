@@ -20,7 +20,7 @@ namespace CoreAI.Tests.PlayMode
     /// PlayMode : Merchant ()  get_inventory    .
     ///   NPC  :  + .
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class MerchantWithToolCallingPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;

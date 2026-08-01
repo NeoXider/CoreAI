@@ -125,6 +125,8 @@ namespace CoreAI.Infrastructure.Llm
                 routing.PreflightAnnotate(request);
             }
 
+            using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
+
             string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
             string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
                 ? "(role not set)"
@@ -518,6 +520,8 @@ namespace CoreAI.Infrastructure.Llm
             {
                 routing.PreflightAnnotate(request);
             }
+
+            using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
 
             string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
             string role = string.IsNullOrWhiteSpace(request.AgentRoleId)

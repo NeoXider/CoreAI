@@ -162,7 +162,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 
 - EditMode: `SecureLuaSandboxEditModeTests`, `LuaModRuntimeEditModeTests`, binding tests
 - PlayMode: `LuaCoroutineRunnerPlayModeTests`, FastNoLlm integrations
-- CI: default (Lua enabled) / `COREAI_NO_LUA` matrix
+- CI: default (Lua disabled) / `COREAI_LUA` opt-in matrix
 
 ---
 
@@ -216,7 +216,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 - [ ] Custom bindings are registered with the correct `requiredCapabilities`
 - [ ] Slots are declared in C# before `logic_define`
 - [ ] Escape tests / EditMode sandbox tests pass
-- [ ] `COREAI_NO_LUA` build is checked if Lua is optional
+- [ ] Both the default no-Lua build and the `COREAI_LUA` build are checked
 - [ ] Programmer prompt lists **only** real APIs
 
 ---
@@ -229,4 +229,3 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 | World command pipeline | `Assets/CoreAI.Demos/WorldCommands/` |
 | Live LLM -> mechanics | `Assets/CoreAI.Demos/LiveMechanics/` |
 | Full reflection | `Assets/CoreAI.Demos/FullAccess/` |
-

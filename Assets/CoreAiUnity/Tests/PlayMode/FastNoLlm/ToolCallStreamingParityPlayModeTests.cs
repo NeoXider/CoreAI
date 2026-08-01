@@ -30,7 +30,7 @@ namespace CoreAI.Tests.PlayMode
     /// These complement the EditMode unit tests with a real Unity player frame so the
     /// async streaming machinery behaves the same way it does at runtime.
     /// </summary>
-#if !COREAI_NO_LLM
+#if COREAI_LLM
     public sealed class ToolCallStreamingParityPlayModeTests
     {
         [TearDown]

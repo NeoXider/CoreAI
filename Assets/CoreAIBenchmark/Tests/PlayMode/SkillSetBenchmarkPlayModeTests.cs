@@ -23,7 +23,7 @@ namespace CoreAI.Tests.PlayMode
     /// The agent is a "Game Master" with 4 skills: Crafting, Combat, Lore, Trading.
     /// Each skill has its own tools and long instructions.
     /// </summary>
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_LLM && !UNITY_WEBGL
     public sealed class SkillSetBenchmarkPlayModeTests
     {
         private const float BenchmarkTurnTimeoutSeconds = 240f;

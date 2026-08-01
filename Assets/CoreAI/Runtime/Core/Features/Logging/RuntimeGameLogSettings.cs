@@ -57,8 +57,7 @@ namespace CoreAI.Infrastructure.Logging
                 {
                     return;
                 }
-            }
-            while (Interlocked.CompareExchange(ref _enabledFeatures, updated, current) != current);
+            } while (Interlocked.CompareExchange(ref _enabledFeatures, updated, current) != current);
         }
 
         /// <summary>Reports whether every bit of the supplied category is currently enabled.</summary>

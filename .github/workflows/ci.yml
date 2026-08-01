@@ -9,7 +9,7 @@ on:
 
 jobs:
   # F-22 package isolation (fork-safe, no Unity license): prove every shipped package.json is a
-  # self-consistent UPM graph - all five packages versioned in lockstep and every internal
+  # self-consistent UPM graph - all six packages versioned in lockstep and every internal
   # com.neoxider.* dependency pin matches the pinned package's actual version. Catches a half-done
   # version bump (one of A-01/A-02's failure classes) before it reaches a consumer.
   package-graph:
@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Lua positive opt-in contract
+        run: python3 tools/check_positive_module_opt_in.py
       - name: Verify package versions are in lockstep and internal deps resolve
         shell: bash
         run: |
@@ -84,22 +86,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Explicit include list (no cross-product). Three configurations must stay green:
-        #   lua        - default project with the bundled Lua-CSharp runtime.
-        #   no-lua     - COREAI_NO_LUA build so every Lua feature compiles out.
-        #   no-llm     - COREAI_NO_LLM build so the layer under #if !COREAI_NO_LLM compiles out.
+        # Explicit include list (no cross-product). Both optional modules use positive opt-in
+        # symbols, so all four compile combinations must stay green:
+        #   core - neither optional module.
+        #   llm  - COREAI_LLM only.
+        #   lua  - COREAI_LUA only.
+        #   full - COREAI_LLM + COREAI_LUA.
         include:
+          - name: core
+            llm: false
+            lua: false
+          - name: llm
+            llm: true
+            lua: false
           - name: lua
-            lua: lua
-            no_llm: false
-          - name: no-lua
-            lua: no-lua
-            no_llm: false
-          - name: no-llm
-            lua: lua
-            no_llm: true
+            llm: false
+            lua: true
+          - name: full
+            llm: true
+            lua: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Normalize repository demo module defines
+        run: |
+          # The repository project intentionally opens with the full demo graph, while each CI leg
+          # must prove one exact package-consumer combination from a symbol-free baseline.
+          sed -Ei '/^  scriptingDefineSymbols:/,/^  [^ ]/ { s/;COREAI_LLM//g; s/COREAI_LLM;//g; s/;COREAI_LUA//g; s/COREAI_LUA;//g; }' ProjectSettings/ProjectSettings.asset
+          if sed -n '/^  scriptingDefineSymbols:/,/^  [^ ]/p' ProjectSettings/ProjectSettings.asset | grep -Eq 'COREAI_LLM|COREAI_LUA'; then
+            echo 'Module define normalization failed'
+            exit 1
+          fi
 
       - name: Check UNITY_LICENSE availability for this run
         id: unity-license-check
@@ -117,24 +134,28 @@ jobs:
             echo "run_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Define COREAI_NO_LUA
-        if: matrix.lua == 'no-lua'
+      - name: Define COREAI_LUA
+        if: matrix.lua == true
         run: |
           # The Lua-CSharp runtime ships bundled inside the CoreAI Mods package (Lua.dll), so there
-          # is no package to remove — this job proves the project compiles with every Lua feature
-          # compiled out via the COREAI_NO_LUA define (documented opt-out in
-          # Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md).
-          # Append the define to every per-platform scriptingDefineSymbols entry.
-          sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LUA/' ProjectSettings/ProjectSettings.asset
-          grep -q 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LUA injection failed'; exit 1; }
+          # is no package to add — this job opts into the runtime through the documented positive
+          # COREAI_LUA define.
+          # Append the define to every per-platform scriptingDefineSymbols entry, including
+          # active targets that already carry another symbol (Standalone/WebGL currently have
+          # COREAI_HAS_HUB).  The old `: DOTWEEN$` replacement skipped those targets and made
+          # this matrix leg silently run the default no-Lua build.
+          sed -i '/^  scriptingDefineSymbols:/,/^  [^ ]/ s/^\(    [^:]*: .*\)$/\1;COREAI_LUA/' ProjectSettings/ProjectSettings.asset
+          grep -Eq '^    Standalone: .*COREAI_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LUA Standalone injection failed'; exit 1; }
+          grep -Eq '^    WebGL: .*COREAI_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LUA WebGL injection failed'; exit 1; }
 
-      - name: Define COREAI_NO_LLM
-        if: matrix.no_llm
+      - name: Define COREAI_LLM
+        if: matrix.llm == true
         run: |
-          # Compile out the LLM layer (real code lives under #if !COREAI_NO_LLM) so the
-          # no-LLM build can't silently break. Mirrors the COREAI_NO_LUA injection above.
-          sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LLM/' ProjectSettings/ProjectSettings.asset
-          grep -q 'COREAI_NO_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LLM injection failed'; exit 1; }
+          # The LLM pipeline is a positive opt-in. Append the define to every target row so
+          # Standalone and WebGL compile the same requested module graph.
+          sed -i '/^  scriptingDefineSymbols:/,/^  [^ ]/ s/^\(    [^:]*: .*\)$/\1;COREAI_LLM/' ProjectSettings/ProjectSettings.asset
+          grep -Eq '^    Standalone: .*COREAI_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LLM Standalone injection failed'; exit 1; }
+          grep -Eq '^    WebGL: .*COREAI_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LLM WebGL injection failed'; exit 1; }
 
       - uses: actions/cache@v4
         with:
@@ -157,7 +178,7 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce Lua sandbox escape-test coverage
-        if: matrix.lua == 'lua' && matrix.no_llm == false && steps.unity-license-check.outputs.run_tests == 'true'
+        if: matrix.lua == true && steps.unity-license-check.outputs.run_tests == 'true'
         run: |
           # The sandbox isolation suite must actually have run — a green build with
           # 0 executed escape tests (filter typo, asmdef regression, define drift)
@@ -166,6 +187,16 @@ jobs:
           echo "LuaCsSecureSandboxEditModeTests occurrences in results: $count"
           if [ "$count" -lt 3 ]; then
             echo "::error::Lua sandbox escape tests did not run (expected the LuaCsSecureSandboxEditModeTests fixture in EditMode results)."
+            exit 1
+          fi
+
+      - name: Enforce LLM test coverage
+        if: matrix.llm == true && steps.unity-license-check.outputs.run_tests == 'true'
+        run: |
+          count=$(grep -o 'LlmPipelineInstallerEditModeTests' artifacts-${{ matrix.name }}/editmode-results.xml | wc -l)
+          echo "LlmPipelineInstallerEditModeTests occurrences in results: $count"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::LLM tests did not run (expected LlmPipelineInstallerEditModeTests in EditMode results)."
             exit 1
           fi
 
@@ -183,6 +214,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Normalize repository demo module defines
+        run: |
+          sed -Ei '/^  scriptingDefineSymbols:/,/^  [^ ]/ { s/;COREAI_LLM//g; s/COREAI_LLM;//g; s/;COREAI_LUA//g; s/COREAI_LUA;//g; }' ProjectSettings/ProjectSettings.asset
+          if sed -n '/^  scriptingDefineSymbols:/,/^  [^ ]/p' ProjectSettings/ProjectSettings.asset | grep -Eq 'COREAI_LLM|COREAI_LUA'; then
+            echo 'Module define normalization failed'
+            exit 1
+          fi
+
+      - name: Define COREAI_LLM
+        run: |
+          # FastNoLlm means no live model/backend; it still exercises the compiled LLM/chat pipeline.
+          sed -i '/^  scriptingDefineSymbols:/,/^  [^ ]/ s/^\(    [^:]*: .*\)$/\1;COREAI_LLM/' ProjectSettings/ProjectSettings.asset
+          grep -Eq '^    Standalone: .*COREAI_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LLM Standalone injection failed'; exit 1; }
+          grep -Eq '^    WebGL: .*COREAI_LLM' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_LLM WebGL injection failed'; exit 1; }
 
       - name: Check UNITY_LICENSE availability for this run
         id: unity-license-check

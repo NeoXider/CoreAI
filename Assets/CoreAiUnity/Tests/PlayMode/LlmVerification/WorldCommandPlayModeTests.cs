@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
+﻿#if COREAI_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
