@@ -282,7 +282,8 @@ namespace CoreAI.Tests.EditMode
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
                 LlmCompletionRequest request,
-                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 using (BeginRequestHeaders(request))
                 {

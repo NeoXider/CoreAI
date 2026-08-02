@@ -967,6 +967,7 @@ namespace CoreAI.Ai
                 {
                     scopeTokens.Add(entry.Cancellation);
                 }
+
                 _scopeTokens.Clear();
 
                 drainedPending = new List<WorkItem>(_pending);
