@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using CoreAI.Infrastructure.Logging;
 using Cysharp.Threading.Tasks;
@@ -21,10 +20,12 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         public const float DefaultAutoSaveIntervalSeconds = 60f;
 
-#if UNITY_WEBGL && !UNITY_EDITOR
-        [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsSync();
-#endif
+        /// <summary>
+        /// WebGL IDBFS→IndexedDB flush invoked after durable file mutations; returns false when the
+        /// flush failed. Internal set accessor is the test seam (InternalsVisibleTo) used to observe
+        /// the flush without a browser.
+        /// </summary>
+        internal Func<bool> WebGlFlushSync { get; set; } = CoreAiWebGlPersistence.Sync;
 
         /// <summary>
         /// On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a
@@ -33,10 +34,9 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         private bool PersistFsForWebGl()
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
             try
             {
-                CoreAi_PersistFsSync();
+                return WebGlFlushSync();
             }
             catch (Exception ex)
             {
@@ -44,8 +44,6 @@ namespace CoreAI.Infrastructure.World
                     $"[WorldState] IndexedDB flush failed after save: {ex.Message}");
                 return false;
             }
-#endif
-            return true;
         }
 
         private static readonly Color NoColor = new(-1f, -1f, -1f, -1f);
@@ -525,6 +523,13 @@ namespace CoreAI.Infrastructure.World
             {
                 _logger.LogWarning(GameLogFeature.Core,
                     $"[WorldState] Reset: failed to delete save file: {ex.Message}");
+            }
+            finally
+            {
+                // WHY: Without the flush the WebGL IndexedDB still holds the deleted save, so the old
+                // world state would resurrect on the next page reload. Finally, so a delete that
+                // succeeded before a later delete threw is still persisted.
+                PersistFsForWebGl();
             }
 
             StateReset?.Invoke();

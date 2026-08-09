@@ -13,9 +13,11 @@ namespace CoreAI.Ai.Logging
     /// agent can read <c>print</c>/<c>warn</c>/<c>error</c>/runtime-error output from Lua mods during
     /// play — independent of the Unity console — to diagnose and self-repair a misbehaving mod.
     /// <para>
-    /// TODO: wire into the tool registry (e.g. <c>CoreAiModsInstaller.RegisterCoreAiMods</c>, alongside
-    /// <c>execute_lua</c>/<c>manage_mods</c>) once <see cref="ILuaLogService"/> is threaded through the
-    /// mod runtime's Append calls; this class is currently unregistered and unused.
+    /// Production wiring: <c>CoreAiModsInstaller.RegisterCoreAiMods</c> registers the
+    /// <see cref="ILuaLogService"/> singleton, threads it through <c>LuaCsModStackOptions</c> into the
+    /// mod runtime's Append calls, and attaches this tool to the built-in Programmer role alongside
+    /// <c>execute_lua</c>/<c>manage_mods</c>; the MCP server resolves the same singleton for its
+    /// <c>get_mod_logs</c> tool.
     /// </para>
     /// </summary>
     public sealed class GetModLogsLlmTool : IAIFunctionLlmTool
@@ -46,7 +48,7 @@ namespace CoreAI.Ai.Logging
 
         /// <inheritdoc />
         public string Description =>
-            "Read Lua mod logs (print/warn/error/runtime-error) captured independently of the Unity " +
+            "Read Lua mod logs (print/error/runtime-error) captured independently of the Unity " +
             "console, so you can inspect what a mod printed or which error it threw during play and " +
             "repair it. Read-only. Params: mod_id (optional filter), level (optional minimum severity: " +
             "print, warn, error, runtime_error), since_sequence (optional, only entries newer than this " +

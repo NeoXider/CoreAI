@@ -1,4 +1,4 @@
-﻿#if UNITY_WEBGL && !UNITY_EDITOR
+#if UNITY_WEBGL && !UNITY_EDITOR
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -356,7 +356,7 @@ namespace CoreAI.Infrastructure.Llm
             public void SignalCancelled(CancellationToken cancellationToken)
             {
                 _cancelled = true;
-                var ex = new OperationCanceledException(cancellationToken);
+                OperationCanceledException ex = new OperationCanceledException(cancellationToken);
                 _stream.SetError(ex);
                 _signal.Set();
                 _stream.PumpPendingRead();

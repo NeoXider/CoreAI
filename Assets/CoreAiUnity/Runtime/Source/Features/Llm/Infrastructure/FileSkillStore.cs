@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
@@ -26,18 +25,6 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class FileSkillStore : ISkillStore, IAtomicSkillStore, IDisposable
     {
-#if UNITY_WEBGL && !UNITY_EDITOR
-        [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsSync();
-#endif
-
-        private static void PersistFsForWebGl()
-        {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
-#endif
-        }
-
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
             Formatting = Formatting.Indented
@@ -140,7 +127,7 @@ namespace CoreAI.Infrastructure.Llm
                         if (File.Exists(path))
                         {
                             File.Delete(path);
-                            PersistFsForWebGl();
+                            CoreAiWebGlPersistence.Sync();
                         }
                     }
                     else if (mutation.Save && mutation.Record != null)
@@ -176,7 +163,7 @@ namespace CoreAI.Infrastructure.Llm
 
             string json = JsonConvert.SerializeObject(record, JsonSettings);
             AtomicWriteAllText(GetSkillPath(id), json, _log);
-            PersistFsForWebGl();
+            CoreAiWebGlPersistence.Sync();
         }
 
         /// <inheritdoc />
@@ -263,7 +250,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (File.Exists(path))
                 {
                     File.Delete(path);
-                    PersistFsForWebGl();
+                    CoreAiWebGlPersistence.Sync();
                 }
             }
             catch (Exception ex)

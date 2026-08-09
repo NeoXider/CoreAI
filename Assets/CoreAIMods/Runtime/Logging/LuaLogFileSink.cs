@@ -9,8 +9,8 @@ namespace CoreAI.Ai.Logging
     /// Optional file sink for <see cref="ILuaLogService"/>: off by default. Construct and call
     /// <see cref="Attach"/> to start appending every logged entry as one line to a rolling text file
     /// under <c>persistentDataPath/CoreAI/Logs</c>; call <see cref="Detach"/> or <see cref="Dispose"/>
-    /// to stop. Not wired into any composition root — see the TODO on <c>GetModLogsLlmTool</c> for the
-    /// same "core ships standalone, runtime wiring pending" status.
+    /// to stop. The service itself is wired by <c>CoreAiModsInstaller.RegisterCoreAiMods</c>; this sink
+    /// stays a deliberate host opt-in and is not attached by any composition root.
     /// </summary>
     public sealed class LuaLogFileSink : IDisposable
     {

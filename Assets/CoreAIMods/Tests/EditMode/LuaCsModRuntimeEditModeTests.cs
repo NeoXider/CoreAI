@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using CoreAI.Ai;
+using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
@@ -119,7 +120,8 @@ namespace CoreAI.Tests.EditMode
             IAiGameCommandSink sink = null,
             LuaCapabilities caps = LuaCapabilities.All,
             int handlerMaxSteps = 0,
-            int handlerTimeoutMs = 0)
+            int handlerTimeoutMs = 0,
+            ILuaLogService logService = null)
         {
             LuaCsModStackOptions options = new()
             {
@@ -127,7 +129,8 @@ namespace CoreAI.Tests.EditMode
                 CommandSink = sink,
                 ModStore = store,
                 Capabilities = caps,
-                OneOffCapabilities = caps
+                OneOffCapabilities = caps,
+                LogService = logService
             };
             if (handlerMaxSteps > 0)
             {
@@ -140,6 +143,108 @@ namespace CoreAI.Tests.EditMode
             }
 
             return LuaCsModRuntimeFactory.Create(options);
+        }
+
+        [Test]
+        public void LuaCs_PrintAndReport_AreAppendedToLogService()
+        {
+            LuaLogService logService = new();
+            LuaCsModStack stack = BuildStack(logService: logService);
+
+            stack.Runtime.LoadMod("log_mod", "print('p1')\nreport('r1')", persistToStore: false);
+
+            IReadOnlyList<LuaLogEntry> entries = logService.Query(new LuaLogQuery { ModId = "log_mod" });
+            Assert.AreEqual(2, entries.Count,
+                "print and report at load time must each produce one log-service entry.");
+            Assert.IsTrue(entries.All(e => e.Level == LuaLogLevel.Print),
+                "print/report emissions must be captured at the Print level.");
+            Assert.IsTrue(entries.All(e => e.ModId == "log_mod"));
+            Assert.AreEqual("p1", entries[0].Message);
+            Assert.AreEqual("r1", entries[1].Message);
+        }
+
+        [Test]
+        public void LuaCs_HandlerError_IsAppendedToLogServiceAsRuntimeError()
+        {
+            LuaLogService logService = new();
+            LuaCsModStack stack = BuildStack(logService: logService);
+            stack.Runtime.LoadMod("err_mod",
+                "hooks_every(0.05, function() error('kaput') end)", persistToStore: false);
+
+            stack.Runtime.Tick(0.1);
+
+            IReadOnlyList<LuaLogEntry> entries = logService.Query(
+                new LuaLogQuery { ModId = "err_mod", MinLevel = LuaLogLevel.RuntimeError });
+            Assert.AreEqual(1, entries.Count);
+            Assert.AreEqual(LuaLogLevel.RuntimeError, entries[0].Level);
+            StringAssert.Contains("kaput", entries[0].Message);
+        }
+
+        [Test]
+        public void LuaCs_LoadParseError_IsAppendedToLogService_AndStillThrows()
+        {
+            LuaLogService logService = new();
+            LuaCsModStack stack = BuildStack(logService: logService);
+
+            Assert.Catch(() => stack.Runtime.LoadMod("bad_mod", "this is not lua ((", persistToStore: false));
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("bad_mod"),
+                "A failed load must still leave no mod behind — the log entry is additive.");
+            IReadOnlyList<LuaLogEntry> entries = logService.Query(
+                new LuaLogQuery { ModId = "bad_mod", MinLevel = LuaLogLevel.RuntimeError });
+            Assert.AreEqual(1, entries.Count);
+            StringAssert.Contains("load failed", entries[0].Message);
+        }
+
+        [Test]
+        public void LuaCs_Quarantine_IsAppendedToLogServiceAsError()
+        {
+            LuaLogService logService = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = new MemoryStore(),
+                LogService = logService,
+                MaxErrorsBeforeQuarantine = 1
+            });
+            stack.Runtime.LoadMod("q_mod",
+                "hooks_every(0.05, function() error('boom') end)", persistToStore: false);
+
+            stack.Runtime.Tick(0.1);
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined);
+            IReadOnlyList<LuaLogEntry> entries = logService.Query(
+                new LuaLogQuery { ModId = "q_mod", MinLevel = LuaLogLevel.Error });
+            bool hasRuntimeError = false;
+            bool hasQuarantineEntry = false;
+            foreach (LuaLogEntry entry in entries)
+            {
+                if (entry.Level == LuaLogLevel.RuntimeError && entry.Message.Contains("boom"))
+                {
+                    hasRuntimeError = true;
+                }
+
+                if (entry.Level == LuaLogLevel.Error && entry.Message.Contains("quarantined"))
+                {
+                    hasQuarantineEntry = true;
+                }
+            }
+
+            Assert.IsTrue(hasRuntimeError, "The handler failure itself must be logged as RuntimeError.");
+            Assert.IsTrue(hasQuarantineEntry, "The quarantine transition must be logged as Error.");
+        }
+
+        [Test]
+        public void LuaCs_NullLogService_ReportAndErrorPipelinesStillWork()
+        {
+            LuaCsModStack stack = BuildStack();
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod("plain_mod",
+                "print('ok')\nreport('ok2')\nhooks_every(0.05, function() error('x') end)",
+                persistToStore: false));
+            Assert.DoesNotThrow(() => stack.Runtime.Tick(0.1));
+            Assert.AreEqual(2, stack.Runtime.GetRecentReports("plain_mod").Count);
+            Assert.AreEqual(1, stack.Runtime.GetRecentHandlerErrors("plain_mod").Count);
         }
 
         [Test]

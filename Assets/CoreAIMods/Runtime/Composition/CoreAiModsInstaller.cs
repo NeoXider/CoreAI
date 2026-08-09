@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
@@ -15,7 +16,8 @@ namespace CoreAI.Composition
     /// the native world-command executors, while this module installer — living in the
     /// <c>com.neoxider.coreaimods</c> package — adds the Lua-CSharp mod stack (sandbox + gameplay
     /// bindings + persistent runtime + one-off executor) and attaches the <c>execute_lua</c> +
-    /// <c>manage_mods</c> tools (and the Lua Modding skill) to the built-in Programmer role.
+    /// <c>manage_mods</c> + <c>get_mod_logs</c> tools (and the Lua Modding skill) to the built-in
+    /// Programmer role.
     /// <para>
     /// The active VM is Lua-CSharp (<see cref="LuaCsModRuntime"/>): a managed, AOT-safe runtime that
     /// works on IL2CPP/WebGL. Consumers reach it through the VM-agnostic <see cref="ILuaModRuntime"/>
@@ -76,6 +78,13 @@ namespace CoreAI.Composition
             // IBundledModSource entries (StreamingAssets, Addressables, remote) to extend the set.
             builder.Register<IBundledModSource>(_ => new ResourcesBundledModSource(), Lifetime.Singleton);
 
+            // WHY: one mod log ring buffer per container backs get_mod_logs (LLM tool + MCP tool); it is
+            // consumed via ResolveOrDefault at the stack factory below, so a host that registers its own
+            // ILuaLogService wins — the same override story as the mod stores. No mirrorLogger: the mod
+            // runtime already writes errors to the scoped log unconditionally, and in production the
+            // mirror would resolve to the same game-log sink and duplicate every error entry.
+            builder.Register(c => new LuaLogService(), Lifetime.Singleton).As<ILuaLogService>();
+
             // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
             builder.Register(c =>
@@ -129,6 +138,7 @@ namespace CoreAI.Composition
                     ModStore = c.ResolveOrDefault<ILuaModStore>(),
                     ModSourceStore = c.ResolveOrDefault<ILuaModSourceStore>(),
                     Log = c.ResolveOrDefault<Logging.ILog>(),
+                    LogService = c.ResolveOrDefault<ILuaLogService>(),
                     ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
@@ -301,6 +311,8 @@ namespace CoreAI.Composition
                         new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaModsLlmTool(container.Resolve<ILuaModRuntime>(), settings, log, scriptCapabilities));
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
 
                     TextAsset skillOverride = Resources.Load<TextAsset>("AgentSkills/LuaModding");
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(

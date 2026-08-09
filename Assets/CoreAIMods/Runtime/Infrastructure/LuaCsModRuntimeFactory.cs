@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Ai.Logging;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
@@ -83,6 +84,14 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Runtime logger for load/unload/error diagnostics.</summary>
         public ILog Log;
+
+        /// <summary>
+        /// Optional mod-log ring buffer the persistent runtime appends <c>print</c>/<c>report</c>
+        /// output, handler/dispatch failures, load (parse) failures, and quarantine events to — the
+        /// data the <c>get_mod_logs</c> tool reads back for the self-repair loop. Null = only the
+        /// Unity-console/event pipeline (the previous behavior).
+        /// </summary>
+        public ILuaLogService LogService;
 
         /// <summary>Observer notified by the one-off <c>execute_lua</c> executor (null =&gt; no-op).</summary>
         public ILuaExecutionObserver ExecutionObserver;
@@ -234,7 +243,8 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: Handing the shared slot surface to the runtime closes the teardown loop: a mod's
                 // logic_define overrides are cleared on unload/reload/quarantine and override failures are
                 // attributed into the mod's diagnostics channel.
-                bindings.LogicSlots);
+                bindings.LogicSlots,
+                options.LogService);
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,

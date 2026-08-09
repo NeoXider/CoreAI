@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -27,22 +26,6 @@ namespace CoreAI.Infrastructure.AiMemory
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IAtomicAgentMemoryStore,
         IConversationTranscriptStore, IDisposable
     {
-#if UNITY_WEBGL && !UNITY_EDITOR
-        [DllImport("__Internal")]
-        private static extern void CoreAi_PersistFsSync();
-#endif
-
-        /// <summary>
-        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a reload.
-        /// On other platforms this method compiles to a no-op.
-        /// </summary>
-        private static void PersistFsForWebGl()
-        {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
-#endif
-        }
-
         /// <summary>
         /// Process-wide mutation locks keyed by each role's persisted file path, one entry per distinct
         /// role id ever mutated. Entries are intentionally never evicted: a caller could already hold the
@@ -307,7 +290,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
                 string newJson = JsonUtility.ToJson(p, true);
                 AtomicWriteAllText(path, newJson);
-                PersistFsForWebGl();
+                CoreAiWebGlPersistence.Sync();
             }
             catch (Exception ex)
             {
@@ -400,7 +383,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         !HasTranscriptPayload(p.transcriptEntriesJson))
                     {
                         File.Delete(path);
-                        PersistFsForWebGl();
+                        CoreAiWebGlPersistence.Sync();
                         return;
                     }
 
@@ -409,7 +392,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     p.systemPromptMemorySnapshot = "";
                     p.systemPromptMemoryVersion++;
                     AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
-                    PersistFsForWebGl();
+                    CoreAiWebGlPersistence.Sync();
                 }
             }
             catch (Exception ex)
@@ -531,7 +514,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         p.chatHistoryJson = "";
                         p.transcriptEntriesJson = "";
                         AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
-                        PersistFsForWebGl();
+                        CoreAiWebGlPersistence.Sync();
                     }
                 }
             }
@@ -822,7 +805,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
                 string finalJson = JsonUtility.ToJson(p, true);
                 AtomicWriteAllText(path, finalJson);
-                PersistFsForWebGl();
+                CoreAiWebGlPersistence.Sync();
             }
             catch (Exception ex)
             {

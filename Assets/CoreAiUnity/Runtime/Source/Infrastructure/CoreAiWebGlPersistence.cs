@@ -19,7 +19,11 @@ namespace CoreAI.Infrastructure
         /// reload or tab close that never runs <c>Application.Quit</c>. On other platforms this is a
         /// no-op (the OS filesystem is already durable once the write call returns).
         /// </summary>
-        public static void Sync()
+        /// <returns>
+        /// False only when the WebGL flush threw (already logged here), so callers that need to report
+        /// durability honestly can; true otherwise, including on non-WebGL platforms.
+        /// </returns>
+        public static bool Sync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
             try
@@ -32,8 +36,10 @@ namespace CoreAI.Infrastructure
                 // that must be visible in the console instead of silently losing the data.
                 UnityEngine.Debug.LogWarning(
                     $"[CoreAiWebGlPersistence] IndexedDB flush failed; last write may not survive a reload: {ex.Message}");
+                return false;
             }
 #endif
+            return true;
         }
     }
 }

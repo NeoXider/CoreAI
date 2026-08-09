@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai.Logging;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -12,6 +13,7 @@ namespace CoreAI.Tests.EditMode
     /// Covers <see cref="LuaLogService"/>: per-mod/global ring-buffer eviction order and caps, the
     /// <see cref="LuaLogQuery"/> filter matrix, <see cref="LuaLogEntry.Sequence"/> monotonicity,
     /// <see cref="ILuaLogService.EntryAppended"/> firing, and a concurrent append/query smoke test.
+    /// The tail covers <see cref="GetModLogsLlmTool"/>, the LLM-facing read surface over the service.
     /// </summary>
     public sealed class LuaLogServiceEditModeTests
     {
@@ -315,6 +317,35 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(totalExpected, perModTotal,
                 "No entry may be lost or duplicated across per-mod buffers under concurrent append.");
+        }
+
+        [Test]
+        public async Task GetModLogsLlmTool_ReturnsFormattedEntriesAfterAppends()
+        {
+            LuaLogService service = new();
+            service.Append(Entry("m", LuaLogLevel.Print, "hello from mod"));
+            service.Append(Entry("m", LuaLogLevel.RuntimeError, "boom"));
+            GetModLogsLlmTool tool = new(service);
+
+            string json = await tool.ExecuteAsync(mod_id: "m");
+            JObject result = JObject.Parse(json);
+
+            Assert.IsTrue(result.Value<bool>("success"), json);
+            Assert.AreEqual(2, result.Value<int>("count"));
+            string logs = result.Value<string>("logs");
+            StringAssert.Contains("hello from mod", logs);
+            StringAssert.Contains("boom", logs);
+        }
+
+        [Test]
+        public async Task GetModLogsLlmTool_UnknownLevel_ReturnsFailureJson_NotException()
+        {
+            GetModLogsLlmTool tool = new(new LuaLogService());
+
+            string json = await tool.ExecuteAsync(level: "chatty");
+            JObject result = JObject.Parse(json);
+
+            Assert.IsFalse(result.Value<bool>("success"), json);
         }
     }
 }

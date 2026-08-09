@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
@@ -216,6 +217,55 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.IsTrue(HasTool(tools, "execute_lua"), "Programmer must get execute_lua");
                 Assert.IsTrue(HasTool(tools, "manage_mods"), "Programmer must get manage_mods");
+            }
+            finally
+            {
+                Object.DestroyImmediate(registry);
+            }
+        }
+
+        [Test]
+        public void RegisterCoreAiMods_RegistersLogService_AttachesGetModLogs_AndFeedsItFromTheRuntime()
+        {
+            // WHY: this container has no RbxWorldHost — headless is deliberate (see
+            // RegisterCoreAiMods_AttachesLuaTools_ToProgrammerRole).
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            try
+            {
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
+                builder.RegisterInstance<ILog>(_log);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+                builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+                builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+                builder.RegisterInstance<ICoreAISettings>(_settings);
+                builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+
+                builder.RegisterWorldCommands(registry);
+                builder.RegisterCoreAiMods();
+
+                using IObjectResolver container = builder.Build();
+
+                ILuaLogService logService = container.Resolve<ILuaLogService>();
+                Assert.IsInstanceOf<LuaLogService>(logService);
+                Assert.AreSame(logService, container.Resolve<ILuaLogService>(),
+                    "ILuaLogService must be a container singleton so the runtime, the LLM tool and the " +
+                    "MCP tool all share one buffer.");
+
+                AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+                IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole(BuiltInAgentRoleIds.Programmer);
+                Assert.IsTrue(HasTool(tools, "get_mod_logs"), "Programmer must get get_mod_logs");
+
+                // WHY: end-to-end proof the DI graph is closed — a mod's print must land in the SAME
+                // service instance the get_mod_logs tool reads. persistToStore: false keeps the shared
+                // EditMode file store untouched.
+                container.Resolve<LuaCsModRuntime>().LoadMod(
+                    "log_probe", "print('hello-from-probe')", persistToStore: false);
+                IReadOnlyList<LuaLogEntry> entries = logService.Query(new LuaLogQuery { ModId = "log_probe" });
+                Assert.AreEqual(1, entries.Count);
+                Assert.AreEqual(LuaLogLevel.Print, entries[0].Level);
+                StringAssert.Contains("hello-from-probe", entries[0].Message);
             }
             finally
             {

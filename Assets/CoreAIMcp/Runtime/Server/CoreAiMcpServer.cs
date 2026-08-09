@@ -80,6 +80,12 @@ namespace CoreAI.Mcp.Server
         /// <summary>True while the underlying HTTP listener is running.</summary>
         public bool IsRunning => _server is { IsRunning: true };
 
+        /// <summary>
+        /// True in a WebGL player, where a loopback HttpListener socket cannot be opened from inside
+        /// the browser sandbox, so the dev-time MCP server can never come up there.
+        /// </summary>
+        internal static bool IsWebGlPlayer => Application.platform == RuntimePlatform.WebGLPlayer;
+
         /// <summary>The loopback URL clients connect to, or null when not running.</summary>
         public string Url => _server?.Url;
 
@@ -179,6 +185,16 @@ namespace CoreAI.Mcp.Server
         {
             if (IsRunning)
             {
+                return;
+            }
+
+            if (IsWebGlPlayer)
+            {
+                // WHY: HttpListener cannot bind a loopback socket from inside the browser sandbox, so
+                // the dev-time MCP server can never come up in a WebGL player; degrade to a logged
+                // no-op instead of shipping the listener and Task.Run accept loop there.
+                Log.Instance.Warn(
+                    "[CoreAI MCP] The MCP server is not available in WebGL builds; server not started.");
                 return;
             }
 

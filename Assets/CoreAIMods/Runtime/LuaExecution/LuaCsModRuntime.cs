@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using CoreAI.Ai.Logging;
 using CoreAI.Logging;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -176,6 +177,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly ILuaTransactionScope _transactionScope;
         private readonly bool _autoPersistMods;
         private readonly ILog _log;
+        private readonly ILuaLogService _logService;
         private readonly List<Mod> _tickScratch = new();
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
@@ -309,6 +311,13 @@ namespace CoreAI.Ai.LuaCs
         /// overrides on unload/reload/quarantine (<see cref="ModTearingDown"/>) and records override
         /// failures in the same diagnostics channel as handler errors, attributed to the owning mod.
         /// </param>
+        /// <param name="logService">
+        /// Optional mod-log sink (see <see cref="ILuaLogService"/>). When supplied, report/print
+        /// emissions, handler/dispatch failures, load (parse) failures, and quarantine events are
+        /// appended to it in ADDITION to the existing console/event pipeline, so an in-game agent can
+        /// read them back via the <c>get_mod_logs</c> tool. Null keeps the previous behavior (console
+        /// log + events + bounded recent buffers only).
+        /// </param>
         public LuaCsModRuntime(
             Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
@@ -322,11 +331,13 @@ namespace CoreAI.Ai.LuaCs
             long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
             IScriptEngine engine = null,
             int maxErrorsBeforeQuarantine = DefaultMaxErrorsBeforeQuarantine,
-            LuaCsLogicSlots logicSlots = null)
+            LuaCsLogicSlots logicSlots = null,
+            ILuaLogService logService = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
             _log = log;
+            _logService = logService;
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
@@ -515,38 +526,49 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
 
-            // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau syntax
-            // (compound assignment, continue, string interpolation, if-expressions, type annotations);
-            // keyed by mod id so a downlevel error maps to the right source and throws out of the load,
-            // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
-            // round-trip the Luau the user wrote.
-            string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
-
-            IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
-            RegisterGameplayBindings(registry, capabilities, modId);
-            RegisterModApis(registry, mod);
-
-            // WHY: Create the state BEFORE running the chunk; the mod-core callbacks capture `mod` and read
-            // mod.State (set here) only when they later run, so self-referential cross-mod calls made
-            // during load resolve correctly.
-            mod.State = _engine.CreateState();
-            registry.ApplyTo(mod.State);
-
-            // WHY: Run the load chunk on its own transaction frame (mirroring the MoonSharp runtime's
-            // per-run reset) so a transaction left open by a failing load is discarded with the frame and
-            // cannot bleed into later scripts — and a transaction leaked elsewhere cannot swallow this
-            // chunk's world commands.
-            PushTransactionScope();
             try
             {
-                _engine.RunChunk(mod.State, compileSource);
-            }
-            finally
-            {
-                PopTransactionScope();
-            }
+                // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau syntax
+                // (compound assignment, continue, string interpolation, if-expressions, type annotations);
+                // keyed by mod id so a downlevel error maps to the right source and throws out of the load,
+                // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
+                // round-trip the Luau the user wrote.
+                string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
 
-            return mod;
+                IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
+                RegisterGameplayBindings(registry, capabilities, modId);
+                RegisterModApis(registry, mod);
+
+                // WHY: Create the state BEFORE running the chunk; the mod-core callbacks capture `mod` and read
+                // mod.State (set here) only when they later run, so self-referential cross-mod calls made
+                // during load resolve correctly.
+                mod.State = _engine.CreateState();
+                registry.ApplyTo(mod.State);
+
+                // WHY: Run the load chunk on its own transaction frame (mirroring the MoonSharp runtime's
+                // per-run reset) so a transaction left open by a failing load is discarded with the frame and
+                // cannot bleed into later scripts — and a transaction leaked elsewhere cannot swallow this
+                // chunk's world commands.
+                PushTransactionScope();
+                try
+                {
+                    _engine.RunChunk(mod.State, compileSource);
+                }
+                finally
+                {
+                    PopTransactionScope();
+                }
+
+                return mod;
+            }
+            catch (Exception ex)
+            {
+                // WHY: A failed load/parse never reaches the tick-time error channel, yet it is the
+                // self-repair loop's most important signal — record it before rethrowing so get_mod_logs
+                // can show WHY the mod never came up.
+                AppendLog(modId, LuaLogLevel.RuntimeError, $"load failed: {SingleLineErrorMessage(ex)}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -870,6 +892,8 @@ namespace CoreAI.Ai.LuaCs
                         // per-frame tick for the other mods.
                         mod.ErrorCount++;
                         _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' event dispatch failed: {ex}");
+                        AppendLog(mod.Id, LuaLogLevel.RuntimeError,
+                            $"event dispatch failed: {SingleLineErrorMessage(ex)}");
                     }
                 }
 
@@ -906,6 +930,13 @@ namespace CoreAI.Ai.LuaCs
             _log?.Warn(
                 $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.ErrorCount} consecutive handler " +
                 "errors: dispatch suspended, mod kept loaded; reload it to clear the quarantine.");
+
+            // WHY: Error, not RuntimeError — the quarantine is a host-side lifecycle event, not a VM
+            // exception; the underlying failures were already appended as RuntimeError by the handler
+            // error channel.
+            AppendLog(mod.Id, LuaLogLevel.Error,
+                $"mod quarantined after {mod.ErrorCount} consecutive handler errors; " +
+                "dispatch suspended until reload.");
 
             TeardownModEffects(mod.Id, LuaModTeardownReason.Quarantine);
             RaiseModQuarantined(mod.Id, mod.ErrorCount);
@@ -1069,11 +1100,7 @@ namespace CoreAI.Ai.LuaCs
                     $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed " +
                     $"({(memoryTrip ? "memory-budget trip" : "error")} {mod.ErrorCount}/{MaxErrorsBeforeQuarantine}): {ex}");
 
-                string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
-                if (message.Length == 0)
-                {
-                    message = ex.GetType().Name;
-                }
+                string message = SingleLineErrorMessage(ex);
 
                 // WHY: Buffer the failure so the agent can poll it next turn, independent of any host-side
                 // ModHandlerErrored subscriber.
@@ -1973,6 +2000,42 @@ namespace CoreAI.Ai.LuaCs
 
                 _recentHandlerErrors.Enqueue(entry);
             }
+
+            AppendLog(modId, LuaLogLevel.RuntimeError, message);
+        }
+
+        /// <summary>
+        /// Best-effort append to the optional mod-log sink. Same isolation policy as the event raises:
+        /// a throwing log consumer must never break a mod's report call, a load, or the tick loop.
+        /// </summary>
+        private void AppendLog(string modId, LuaLogLevel level, string message)
+        {
+            if (_logService == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _logService.Append(new LuaLogEntry
+                {
+                    ModId = modId ?? "",
+                    Level = level,
+                    Message = message ?? ""
+                });
+            }
+            catch
+            {
+                // WHY: A logging sink must never throw out of a mod's print/report or error path and
+                // break gameplay.
+            }
+        }
+
+        /// <summary>Collapses an exception message onto one line, falling back to the type name.</summary>
+        private static string SingleLineErrorMessage(Exception ex)
+        {
+            string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            return message.Length == 0 ? ex.GetType().Name : message;
         }
 
         /// <summary>
@@ -2058,6 +2121,8 @@ namespace CoreAI.Ai.LuaCs
 
                 _recentReports.Enqueue(entry);
             }
+
+            AppendLog(modId, LuaLogLevel.Print, message);
         }
 
         /// <summary>
