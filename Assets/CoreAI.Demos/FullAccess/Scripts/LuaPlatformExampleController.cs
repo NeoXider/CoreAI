@@ -12,7 +12,8 @@ namespace CoreAI.Demos
     /// GUI-less scene driver for "Lua as a second game language": creates every Lua script itself and
     /// loads it into <see cref="ILuaModRuntime"/> — a two-mod platform self-test (timers, tick alias,
     /// variables/closures, store, cross-mod events, coroutines) plus a self-playing 3D falling-blocks
-    /// game ("Tetris") built entirely from one Lua mod on the WorldEdit API. No LLM is involved; this is
+    /// game ("Tetris") built entirely from one Lua mod on the Rbx API (Instance.new / Part), the
+    /// production world surface. No LLM is involved; this is
     /// the deterministic reference the chat agent is later asked to reproduce via manage_mods tool calls.
     /// The retained-mode UI lives in <see cref="LuaPlatformHubPage"/>, which drives this component and
     /// reflects its live state through the public read-only properties below.
@@ -361,13 +362,18 @@ end)
         /// <summary>
         /// The whole game is this one mod: board state in Lua tables, gravity on a hooks_every timer,
         /// autoplay drift, line clears, and a score that persists in the mod store across restarts.
-        /// World interaction is exclusively coreai_world_* (WorldEdit tier — no Full needed).
+        /// World interaction is exclusively the Rbx API (Instance.new / Part / Folder,
+        /// workspace.CurrentCamera) — the production surface; the coreai_world_* build bindings are
+        /// withheld in production.
         /// </summary>
         private const string TetrisSource = @"
 -- name: Tetris 3D
 -- description: 3D falling-blocks game in one Lua mod. A/D move, W rotate, S soft-drop, Space hard-drop; autopilot after 5 s idle.
 local W = 8
 local H = 14
+-- The Rbx API works in studs (RbxSpace: 1 stud = 0.28 m, locked). The board was authored in
+-- meters for the old world API; M converts so the layout lands on the same world spots.
+local M = 1 / 0.28
 local OX = -16.0
 local OY = 0.5
 local OZ = 6.0
@@ -389,46 +395,58 @@ local score = tonumber(store_get('tetris_score')) or 0
 local total_lines = tonumber(store_get('tetris_lines')) or 0
 local games = tonumber(store_get('tetris_games')) or 0
 
--- Per-load generation for every spawned name. Unity destroys deferred (end of frame), so a
--- reload that destroyed the old field and respawned identical names in the same frame would
--- collide; unique names per generation make destroy+rebuild order-independent.
+-- Per-load generation for every spawned name. A reload rebuilds the field from scratch; unique
+-- names per generation make destroy+rebuild order-independent and keep the store demo alive.
 local gen = (tonumber(store_get('tetris_gen')) or 0) + 1
 store_set('tetris_gen', tostring(gen))
 local ROOT = 'TetrisRoot_g' .. gen
 local function nm(s) return 'tz' .. gen .. s end
 
-local function world_x(x) return OX + x end
-local function world_y(y) return OY + (y - 1) end
+local function world_x(x) return (OX + x) * M end
+local function world_y(y) return (OY + (y - 1)) * M end
+local function world_z() return OZ * M end
 
-local function draw_cell(name, x, y)
-  coreai_world_change(name, { x = world_x(x), y = world_y(y), z = OZ })
+local function place_cell(p, x, y)
+  p.Position = Vector3.new(world_x(x), world_y(y), world_z())
 end
 
--- Build the playfield. Destroying the previous generation's root removes its whole field
--- (walls, active piece, landed cubes) in one command, so reloads never leave orphans.
-local prev = 'TetrisRoot_g' .. (gen - 1)
-if coreai_world_exists(prev) then coreai_world_destroy(prev) end
-if coreai_world_exists('TetrisRoot') then coreai_world_destroy('TetrisRoot') end
-coreai_world_spawn({ prefab = 'empty', name = ROOT, x = 0, y = 0, z = 0 })
+-- Build the playfield under one Folder the mod owns. Destroying the previous generation's root
+-- removes its whole field (walls, active piece, landed cubes) in one call, so reloads never
+-- leave orphans; unload/reload also sweeps mod-owned instances automatically.
+local prev = workspace:FindFirstChild('TetrisRoot_g' .. (gen - 1))
+if prev then prev:Destroy() end
+
+local root = Instance.new('Folder')
+root.Name = ROOT
+root.Parent = workspace
+
+local WALL_COLOR = Color3.fromHex('#4A4A55')
+
+local function spawn_cube(name, x, y, size_m)
+  local p = Instance.new('Part')
+  p.Name = name
+  p.Size = Vector3.new(size_m * M, size_m * M, size_m * M)
+  p.Position = Vector3.new(x, y, world_z())
+  p.Anchored = true
+  p.Parent = root
+  return p
+end
+
 for y = 1, H do
-  local wl = nm('_wl' .. y)
-  local wr = nm('_wr' .. y)
-  coreai_world_spawn({ prefab = 'cube', name = wl, parent = ROOT,
-    x = world_x(-1), y = world_y(y), z = OZ, scale = 0.95 })
-  coreai_world_spawn({ prefab = 'cube', name = wr, parent = ROOT,
-    x = world_x(W), y = world_y(y), z = OZ, scale = 0.95 })
-  coreai_world_set_color(wl, '#4A4A55')
-  coreai_world_set_color(wr, '#4A4A55')
+  local wl = spawn_cube(nm('_wl' .. y), world_x(-1), world_y(y), 0.95)
+  local wr = spawn_cube(nm('_wr' .. y), world_x(W), world_y(y), 0.95)
+  wl.Color = WALL_COLOR
+  wr.Color = WALL_COLOR
 end
 for x = -1, W do
-  local fc = nm('_wf' .. (x + 2))
-  coreai_world_spawn({ prefab = 'cube', name = fc, parent = ROOT,
-    x = world_x(x), y = world_y(0), z = OZ, scale = 0.95 })
-  coreai_world_set_color(fc, '#4A4A55')
+  local fc = spawn_cube(nm('_wf' .. (x + 2)), world_x(x), world_y(0), 0.95)
+  fc.Color = WALL_COLOR
 end
+
+-- Four persistent cubes for the active piece, reused every piece and parked below the board.
+local piece_parts = {}
 for i = 1, 4 do
-  coreai_world_spawn({ prefab = 'cube', name = nm('_a' .. i), parent = ROOT,
-    x = world_x(0), y = -6, z = OZ, scale = 0.98 })
+  piece_parts[i] = spawn_cube(nm('_a' .. i), world_x(0), -6 * M, 0.98)
 end
 
 local function occupied(x, y)
@@ -451,10 +469,7 @@ local last_vx, last_vy = 1e9, 1e9
 
 local function draw_piece()
   for i = 1, #piece.cells do
-    coreai_world_change(nm('_a' .. i), {
-      x = world_x(vis_x + piece.cells[i][1]),
-      y = world_y(vis_y + piece.cells[i][2]),
-      z = OZ })
+    place_cell(piece_parts[i], vis_x + piece.cells[i][1], vis_y + piece.cells[i][2])
   end
 end
 
@@ -468,9 +483,9 @@ end
 local function reset_board()
   for y = 1, H do
     for x = 0, W - 1 do
-      local name = board[y][x]
-      if name then
-        coreai_world_destroy(name)
+      local p = board[y][x]
+      if p then
+        p:Destroy()
         board[y][x] = nil
       end
     end
@@ -486,15 +501,15 @@ local function clear_lines()
     end
     if full then
       for x = 0, W - 1 do
-        coreai_world_destroy(board[y][x])
+        board[y][x]:Destroy()
         board[y][x] = nil
       end
       for yy = y + 1, H do
         for x = 0, W - 1 do
-          local name = board[yy][x]
-          board[yy - 1][x] = name
+          local p = board[yy][x]
+          board[yy - 1][x] = p
           board[yy][x] = nil
-          if name then draw_cell(name, x, yy - 1) end
+          if p then place_cell(p, x, yy - 1) end
         end
       end
       total_lines = total_lines + 1
@@ -511,13 +526,12 @@ local function lock_piece()
     local y = piece.y + piece.cells[i][2]
     if y >= 1 and y <= H then
       next_id = next_id + 1
-      local name = nm('_c' .. next_id)
-      coreai_world_spawn({ prefab = 'cube', name = name, parent = ROOT,
-        x = world_x(x), y = world_y(y), z = OZ, scale = 0.98 })
-      coreai_world_set_color(name, piece.color)
-      board[y][x] = name
+      local p = spawn_cube(nm('_c' .. next_id), world_x(x), world_y(y), 0.98)
+      p.Color = Color3.fromHex(piece.color)
+      board[y][x] = p
     end
-    coreai_world_change(nm('_a' .. i), { y = -6 })
+    local parked = piece_parts[i].Position
+    piece_parts[i].Position = Vector3.new(parked.X, -6 * M, parked.Z)
   end
   score = score + 4
   piece = nil
@@ -542,7 +556,7 @@ local function spawn_piece()
   end
   vis_x, vis_y = piece.x, piece.y + 2
   for i = 1, #piece.cells do
-    coreai_world_set_color(nm('_a' .. i), piece.color)
+    piece_parts[i].Color = Color3.fromHex(piece.color)
   end
   draw_piece()
 end
@@ -675,23 +689,24 @@ end)
 
 hooks_every(5.0, publish_hud)
 
--- Camera: slow orbit around the board, always facing its center. Pure world API — the
--- parametrization keeps yaw analytic (ry = -deg(a)), no atan needed.
-local CAM = 'Main Camera'
-local cam_cx = OX + (W - 1) / 2
-local cam_cy = OY + H / 2
-local cam_r = 24.0
-local cam_h = 7.0
+-- Camera: slow orbit around the board, always facing its center. CFrame.lookAt replaces the old
+-- euler parametrization; at h=7 / r=24 the look-down pitch lands within half a degree of rx=16,
+-- so the framing matches the old orbit.
+local cam = workspace.CurrentCamera
+local cam_cx = (OX + (W - 1) / 2) * M
+local cam_cy = (OY + H / 2) * M
+local cam_r = 24.0 * M
+local cam_h = 7.0 * M
 local cam_a = 0.0
-if coreai_world_exists(CAM) then
+if cam then
+  cam.CameraType = Enum.CameraType.Scriptable
   hooks_every(0.05, function()
     cam_a = cam_a + 0.010
-    coreai_world_change(CAM, {
-      x = cam_cx + cam_r * math.sin(cam_a),
-      y = cam_cy + cam_h,
-      z = OZ - cam_r * math.cos(cam_a),
-      rx = 16, ry = -math.deg(cam_a), rz = 0,
-    })
+    local eye = Vector3.new(
+      cam_cx + cam_r * math.sin(cam_a),
+      cam_cy + cam_h,
+      world_z() - cam_r * math.cos(cam_a))
+    cam.CFrame = CFrame.lookAt(eye, Vector3.new(cam_cx, cam_cy, world_z()))
   end)
 end
 ";

@@ -1,19 +1,37 @@
 -- Wave director: a persistent Lua mod (LuaCapabilities: Read | WorldEdit).
--- Reacts to the game's "wave_started" event, spawns a wave of enemies in a
--- single transaction, persists the wave counter in the per-mod store, and
--- periodically recolors the Boss via the world-command pipeline.
+-- Reacts to the game's "wave_started" event, spawns a wave of enemies as Rbx
+-- parts, persists the wave counter in the per-mod store, and periodically
+-- recolors the Boss through an Rbx overlay part. World building uses the Rbx
+-- API (Instance.new / Part): the coreai_world_* build bindings are withheld in
+-- production, while coreai_world_exists (Read tier) stays available.
+
+-- Rbx positions and sizes are studs; RbxSpace is locked at 0.28 m per stud, so
+-- meter-authored values are multiplied to land on the same world spots.
+local STUDS = 1 / 0.28
+
+local function spawn_enemy(name, x_m)
+    local enemy = Instance.new("Part")
+    enemy.Name = name
+    -- enemy.basic was a standing capsule 0.6 m wide and 1.0 m tall; the Rbx
+    -- cylinder's axis runs along X, so rotate it upright.
+    enemy.Shape = Enum.PartType.Cylinder
+    enemy.Size = Vector3.new(1.0 * STUDS, 0.6 * STUDS, 0.6 * STUDS)
+    enemy.CFrame = CFrame.new(x_m * STUDS, 1.5 * STUDS, 8 * STUDS)
+        * CFrame.Angles(0, 0, math.rad(90))
+    enemy.Color = Color3.fromRGB(255, 255, 255)
+    enemy.Anchored = true
+    enemy.Parent = workspace
+end
 
 hooks_on("wave_started", function(evt, payload)
     local wave = (tonumber(store_get("wave")) or 0) + 1
     store_set("wave", tostring(wave))
 
     local count = 2 + wave
-    coreai_world_begin()
     for i = 1, count do
         local x = (i - (count + 1) / 2) * 1.6
-        coreai_world_spawn({ prefab = "enemy.basic", name = "wave" .. wave .. "_enemy" .. i, x = x, y = 1.5, z = 8 })
+        spawn_enemy("wave" .. wave .. "_enemy" .. i, x)
     end
-    coreai_world_commit()
 
     events_emit("wave_spawned", tostring(count))
     report("[wave_director] wave " .. wave .. ": spawned " .. count .. " enemies")
@@ -21,8 +39,22 @@ end)
 
 hooks_every(4.0, function()
     if coreai_world_exists("Boss") then
+        -- The scene Boss cube (2 m at (0, 1, 12)) is not an Rbx instance, so the
+        -- Rbx API cannot recolor it directly. Overlay it with a same-spot part
+        -- the mod owns (a hair larger, so coplanar faces never z-fight) and
+        -- recolor that instead.
+        local boss = workspace:FindFirstChild("Boss")
+        if boss == nil then
+            boss = Instance.new("Part")
+            boss.Name = "Boss"
+            boss.Size = Vector3.new(2.05 * STUDS, 2.05 * STUDS, 2.05 * STUDS)
+            boss.Position = Vector3.new(0, 1 * STUDS, 12 * STUDS)
+            boss.Color = Color3.fromRGB(255, 255, 255)
+            boss.Anchored = true
+            boss.Parent = workspace
+        end
         local colors = { "#ff3300", "#ffaa00", "#33ccff", "#aa66ff" }
         local wave = tonumber(store_get("wave")) or 0
-        coreai_world_set_color("Boss", colors[(wave % 4) + 1])
+        boss.Color = Color3.fromHex(colors[(wave % 4) + 1])
     end
 end)

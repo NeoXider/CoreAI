@@ -6,16 +6,17 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 
 - **`LuaModsDemoController`** resolves `ILuaModRuntime` and `LuaCsLogicSlots` from DI and draws an OnGUI panel.
 - **`WaveDirectorMod.lua.txt`** is a mod with the `Read | WorldEdit` level:
-  - `hooks_on("wave_started", ...)` spawns a wave of enemies in one transaction
-    (`coreai_world_begin/commit`), and stores the wave counter in persistent store (`store_set/get`);
-  - `hooks_every(4.0, ...)` recolors `Boss` through `coreai_world_set_color`;
+  - `hooks_on("wave_started", ...)` spawns a wave of enemies as Rbx parts
+    (`Instance.new("Part")`, an upright cylinder matching the old `enemy.basic` capsule),
+    and stores the wave counter in persistent store (`store_set/get`);
+  - `hooks_every(4.0, ...)` recolors `Boss` through an Rbx overlay part (the scene Boss is
+    not an Rbx instance, so the mod covers it with a same-spot part it owns and colors that);
   - `events_emit("wave_spawned", n)` sends an event back to the game (`ModEventEmitted`).
 
-  > ⚠️ **The spawn and recolor halves of this mod no longer run on the default composition.**
-  > `CoreAiModsInstaller` sets `RegisterWorldEditBuildBindings = false`, so `coreai_world_begin`,
-  > `coreai_world_spawn`, `coreai_world_commit` and `coreai_world_set_color` are withheld stubs that
-  > raise an actionable error. `coreai_world_exists`, the store, hooks and events are unaffected.
-  > Migrating the mod to `Instance.new('Part')` ([Rbx API](../../CoreAI/Docs/RBX_API.md)) is pending.
+  > The mod builds exclusively through the Rbx API: `CoreAiModsInstaller` sets
+  > `RegisterWorldEditBuildBindings = false`, so the `coreai_world_*` build APIs are withheld
+  > stubs in production. `coreai_world_exists` (Read tier) is unaffected and still guards the
+  > Boss recolor. See [RBX_API.md](../../CoreAI/Docs/RBX_API.md).
 - **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
   `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every
   frame and shows which formula is active: Lua override or C# default.

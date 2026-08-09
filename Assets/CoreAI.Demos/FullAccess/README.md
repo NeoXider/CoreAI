@@ -73,16 +73,13 @@ its panel with **F6**.
 - **Run self-test** — loads a two-mod pair that checks timers, the `hooks_on('tick')` alias,
   variables/closures, varargs, coroutines, the `store_*` roundtrip, cross-mod events, and the
   `input_*` API, then reports a PASS/FAIL verdict per check.
-- **Start/Restart/Stop Tetris** — ⚠️ **currently broken on the default composition.** The mod this
-  button loads is written against the classic `coreai_world_*` build API, which
-  `CoreAiModsInstaller` no longer registers (`RegisterWorldEditBuildBindings = false`), so the load
-  fails with `coreai_world_spawn requires the WorldEdit build bindings, which are disabled for this
-  mod`. The intent — a self-playing 3D falling-blocks game entirely in Lua, with board state in
-  tables, gravity/animation/camera on `hooks_every` timers and steering through the `input_*` API —
-  is unchanged, but the source needs migrating to the [Rbx API](../../CoreAI/Docs/RBX_API.md).
-  **The working equivalent today is the bundled `sample_tetris3d` mod** (pure Rbx API, same
-  controls), enabled from the **Hub → Mods** tab. Tracked in
-  [KNOWN_ISSUES.md](../../CoreAiUnity/Docs/KNOWN_ISSUES.md).
+- **Start/Restart/Stop Tetris** — loads a self-playing 3D falling-blocks game entirely in Lua:
+  board state in tables, gravity/animation/camera on `hooks_every` timers, steering through the
+  `input_*` API, and the score persisted in the mod store across restarts. The mod builds the
+  playfield through the Rbx API (`Instance.new('Part')`, `workspace.CurrentCamera`) — the
+  production surface, since `CoreAiModsInstaller` withholds the classic `coreai_world_*` build
+  bindings (`RegisterWorldEditBuildBindings = false`). The bundled `sample_tetris3d` mod
+  (Hub → Mods tab) is a second, pure-Rbx take on the same game.
 
 WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample", "RunSelfTest" |
 "StartTetris" | "StopTetris" | "DumpStatus")`.
