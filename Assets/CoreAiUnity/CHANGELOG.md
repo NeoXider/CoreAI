@@ -2,6 +2,24 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [Unreleased]
+
+### Fixed
+
+- **WebGL: `WorldStateManager.Reset()` больше не воскрешает удалённый сейв.** Reset удалял save-файл и
+  `.tmp`, но не делал flush файловой системы, поэтому на WebGL удалённый сейв возвращался из IndexedDB
+  после перезагрузки страницы. Теперь Reset вызывает `CoreAiWebGlPersistence.Sync()` так же, как `Save()`;
+  регрессия закрыта `WorldStateManagerResetPersistenceEditModeTests`.
+- **`bundleVersion` синхронизирован с пакетами** (6.11.1 → 7.0.0 в `ProjectSettings.asset`).
+- **Демо-моды переведены с withheld `coreai_world_*` build API на Rbx API.** FullAccess Tetris
+  (встроенный источник в `LuaPlatformExampleController.cs`) и LuaMods `WaveDirectorMod.lua.txt` падали в
+  production-конфигурации (`RegisterWorldEditBuildBindings = false`); теперь используют
+  `Instance.new('Part')`, `Position`/`CFrame`, `Color3.fromHex`, `instance:Destroy()`. Регрессия закрыта
+  `DemoModProductionSurfaceEditModeTests` (линт источников + headless-загрузка в production-конфигурации);
+  раздел в `KNOWN_ISSUES.md` удалён как решённый.
+- Документация: в `Docs/ARCHITECTURE_RULES.md` исправлены устаревшие идентификаторы
+  `RobloxSpace`/`RobloxApi` → `RbxSpace`/`RbxApi`.
+
 ## [7.0.0] - 2026-08-01
 
 ### Breaking

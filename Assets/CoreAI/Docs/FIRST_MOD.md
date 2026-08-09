@@ -26,22 +26,26 @@ A mod has two halves:
 ## A minimal mod (copy-paste)
 
 ```lua
--- name: greeter
--- description: Logs a line when a wave starts and counts how many it has seen.
+--[[@coreai
+id: greeter
+name: Greeter
+description: Logs a line when a wave starts and counts how many it has seen.
+]]
 hooks_on("wave_started", function(evt, payload)
   local seen = tonumber(store_get("waves") or "0") + 1
   store_set("waves", tostring(seen))
-  log_info("greeter: wave " .. payload .. " started (wave #" .. seen .. ")")
+  print("greeter: wave " .. payload .. " started (wave #" .. seen .. ")")
 end)
 
 hooks_every(5.0, function()
-  log_info("greeter: still running, " .. (store_get("waves") or "0") .. " waves so far")
+  print("greeter: still running, " .. (store_get("waves") or "0") .. " waves so far")
 end)
 ```
 
-That mod needs only the `Read` tier for `log_info`; `hooks_on`, `hooks_every`, and `store_*` are part
-of the mod-runtime surface and are available to **every** loaded mod regardless of capability tier
-(even a mod loaded with no capabilities at all) — see the table below.
+That mod calls no capability-gated game bindings at all: `print` (routed to the mod's log/report
+pipeline), `hooks_on`, `hooks_every`, and `store_*` are part of the mod-runtime surface and are
+available to **every** loaded mod regardless of capability tier (even a mod loaded with no
+capabilities at all) — see the table below.
 
 `hooks_on("tick", fn)` is a convenience alias for `hooks_every(0.05, fn)` (a per-frame-ish callback at
 20 Hz) — useful for reading `input_*` state (`Gameplay` tier) every tick instead of writing your own
@@ -57,17 +61,17 @@ absent from the mod's globals.
 
 | Tier | What it unlocks |
 |---|---|
-| `Read` | `log_*`, world queries (`coreai_world_exists/pos/find/...`), versions |
+| `Read` | world queries (`coreai_world_exists/pos/find/list_prefabs/raycast`), version stores (`coreai_lua_*`/`coreai_data_*`) |
 | `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
-| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md) — how a mod creates world objects |
+| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md) — how a mod creates world objects. The classic `coreai_world_spawn`/`_change`/`_destroy` build functions are **disabled in the default production composition** (a stub errors and points at the Rbx API); they exist only on hosts that deliberately opt in |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | reflection (`unity_*`) — **opt-in, off by default** |
 
 `LuaCapabilities.All` is every tier **except** `Full`. Full is granted only when the host explicitly
 enables it (see the security note at the end).
 
-The mod APIs — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`,
-`mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id` — aren't in this table:
+The mod APIs — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `print`/`report`, `events_emit`,
+`mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `mod_id` — aren't in this table:
 they belong to the mod runtime itself, not to a capability-gated game binding group, so any loaded
 mod has them regardless of tier.
 
@@ -80,14 +84,14 @@ accepts these actions: `list`, `get_source`, `load`, `reload`, `unload`, `export
 `versions`, `revert`, `diagnostics`.
 
 ```json
-{ "action": "load", "mod_id": "greeter", "code": "-- name: greeter\nhooks_on(\"wave_started\", function(evt, payload) log_info(payload) end)" }
+{ "action": "load", "mod_id": "greeter", "code": "--[[@coreai\nid: greeter\n]]\nhooks_on(\"wave_started\", function(evt, payload) print(payload) end)" }
 ```
 
 A mod loaded this way is **auto-persisted**: its source and manifest are written to the source store,
 so it **survives a restart** (see "How persistence works"). The agent can never raise the capability
 tier — the host fixes the tier when it registers the tool.
 
-### (b) In C# — `LuaModRuntime.LoadMod`
+### (b) In C# — `LuaCsModRuntime.LoadMod`
 
 ```csharp
 modRuntime.LoadMod(
@@ -125,7 +129,7 @@ package out as:
     main.lua        -- the mod source (entry-point file)
 ```
 
-On startup the host calls `LuaModRuntime.RehydrateFromStore(hostGrant)`: every stored package whose
+On startup the host calls `LuaCsModRuntime.RehydrateFromStore(hostGrant)`: every stored package whose
 manifest is `Active` is re-loaded automatically, with its requested capabilities masked down to the
 host grant (and stripped of `Full` unless the host explicitly allows it). So a mod you loaded once via
 chat is back the next time you press Play — no manual reload.
@@ -142,10 +146,10 @@ the mod store persists the *mod's runtime variables*.
 
 Two ways:
 
-1. **Export / import a bundle.** `manage_mods export` (or `LuaModRuntime.ExportMod(id)`) returns a
+1. **Export / import a bundle.** `manage_mods export` (or `LuaCsModRuntime.ExportMod(id)`) returns a
    single JSON bundle of the shape `{"manifest":{...},"source":"..."}`. Send that string to another
-   player; they run `manage_mods import` with it (or `LuaModRuntime.ImportMod(bundleJson, hostGrant)`)
-   and the mod loads on their machine. Use `manage_mods forget` (`LuaModRuntime.ForgetMod(id)`) to
+   player; they run `manage_mods import` with it (or `LuaCsModRuntime.ImportMod(bundleJson, hostGrant)`)
+   and the mod loads on their machine. Use `manage_mods forget` (`LuaCsModRuntime.ForgetMod(id)`) to
    permanently delete a stored package.
 
    ```json
@@ -168,13 +172,16 @@ Most mods never need `Full`. When you genuinely need reflection (`unity_*`) — 
 reach a component CoreAI does not expose through `coreai_world_*` — a Full mod looks like this:
 
 ```lua
--- name: light_dimmer
--- description: Halves the directional light intensity once on load (Full mode).
+--[[@coreai
+id: light_dimmer
+name: Light Dimmer
+description: Halves the directional light intensity once on load (Full mode).
+]]
 local id = unity_find("Directional Light")
 if id then
   local intensity = unity_get_member(id, "Light", "intensity")
   unity_set_member(id, "Light", "intensity", intensity * 0.5)
-  log_info("light_dimmer: dimmed the sun")
+  print("light_dimmer: dimmed the sun")
 end
 ```
 

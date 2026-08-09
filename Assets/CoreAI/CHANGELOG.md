@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Пайплайн логов модов подключён end-to-end.** `LuaLogService` регистрируется как singleton
+  `ILuaLogService` в `RegisterCoreAiMods` и протянут через `LuaCsModStackOptions.LogService` в
+  `LuaCsModRuntime`: `print`/`report` пишутся с уровнем Print, ошибки обработчиков/событий/загрузки —
+  RuntimeError, карантин — Error. Инструмент `get_mod_logs` (`GetModLogsLlmTool`) прикреплён к роли
+  Programmer рядом с `execute_lua`/`manage_mods`, а MCP-инструмент `get_mod_logs` теперь резолвит тот же
+  singleton без изменений на стороне MCP. Раньше весь слой `ILuaLogService` был не подключён, и оба
+  инструмента читали пустоту.
+- **Пять дублированных DllImport `CoreAi_PersistFsSync` удалены** (`FileLuaModStore`,
+  `FileLuaModSourceStore`, `FileSkillStore`, `FileAgentMemoryStore`, `WorldStateManager`): все вызовы идут
+  через общий `CoreAiWebGlPersistence.Sync()` (теперь возвращает `bool`), а ошибки flush всегда логируются —
+  молчаливый swallow в сторах модов/скиллов/памяти устранён.
+- **MCP HTTP-сервер не стартует в WebGL-плеере.** `CoreAiMcpServer.StartListening()` завершается с
+  предупреждением в лог при `Application.platform == WebGLPlayer` вместо попытки поднять loopback-сокет,
+  который на WebGL невозможен.
+- **Документация по моддингу приведена к стеку Lua-CSharp.** FIRST_MOD, LUA_ACCESS_MODES, LUA_GAME_API,
+  LUA_NATIVE_APIS, LUA_BEST_PRACTICES, LUA_SANDBOX_SECURITY, LLM_TOOLS и AGENT_BUILDER больше не ссылаются
+  на удалённые API эпохи MoonSharp (`LuaModRuntime`, `SecureLuaEnvironment`, `log_info`,
+  `GameLuaBindingsExtensibility`, `-- name:` заголовки), исправлены tier-описания и бюджеты (10 с / 50M
+  шагов, карантин вместо выгрузки), уровень языка — Lua 5.2 + Luau downleveler, а примеры с withheld
+  `coreai_world_*` build API помечены как opt-in-only.
+
 ## [7.0.0] - 2026-08-01
 
 ### Breaking

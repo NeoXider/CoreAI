@@ -397,12 +397,13 @@ analyzer.ApplyToPolicy(policy);
 
 ### Recipe 5: Game Master (generates game mechanics on the fly)
 
-Combining `AgentBuilder` and `LuaLlmTool` lets agents **write and change game rules at runtime.** If your game keeps some logic in a global `SecureLuaEnvironment` (e.g. damage calculation, spawn odds, or item prices), you can expose that environment to a Game Master agent.
+Combining `AgentBuilder` and `LuaLlmTool` lets agents **write and change game rules at runtime.** If your game keeps some logic in a global `LuaCsSecureEnvironment` (e.g. damage calculation, spawn odds, or item prices), you can expose that environment to a Game Master agent.
 
 ```csharp
 // 1. You have a shared Lua sandbox the game uses for damage
-SecureLuaEnvironment sandbox = new();
-sandbox.RunChunk(sandbox.CreateScript(new LuaApiRegistry()), "function calculate_damage() return 10 end");
+LuaCsSecureEnvironment sandbox = new();
+LuaState state = sandbox.Create(new LuaCsApiRegistry());
+sandbox.RunChunk(state, "function calculate_damage() return 10 end");
 
 // 2. Create a tool for the agent with access to that sandbox
 var master = new AgentBuilder("GameMaster")

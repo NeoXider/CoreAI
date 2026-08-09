@@ -15,6 +15,7 @@ player on device?"**
 
 ## Conventions (enforced)
 
+- **Explicit types**: never use `var` for C# locals, fields, or return values — declare explicit types. Only exception: anonymous types (`var x = new { ... }`), where an explicit type is impossible.
 - **Comments**: only `/// <summary>` XML docs, `// WHY:`, `// TODO:`, `// HACK:`. No narrative or
   change-description comments.
 - **No audit reports live in the repo** — findings become `TODO.md` items; report files get deleted.

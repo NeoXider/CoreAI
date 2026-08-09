@@ -1,7 +1,7 @@
 # CoreAI Lua Access Modes
 
 Date: 2026-07-15. Related implementation: `LuaCapabilities`,
-`AggregatingGameLuaRuntimeBindings`, `CoreAiFullUnityLuaRuntimeBindings`,
+`LuaCsGameplayBindings`, `LuaCsFullUnityRuntimeBindings`,
 `CoreAiLuaWorldModule`.
 
 ## Concept
@@ -12,16 +12,16 @@ If a capability is absent, the corresponding functions are physically absent fro
 
 | Mode | Flag | What Lua can do |
 |---|---|---|
-| Read-only | `Read` | Logs, world queries, versions, with no side effects |
-| Gameplay | `Gameplay` | Time scale, UI text, sound, animations, `input_*` (keyboard/mouse, read-only) |
-| WorldEdit | `WorldEdit` | Spawn/move/destroy, scenes, batch world commands |
+| Read-only | `Read` | Logs (`print`/`report`), world queries, version stores, with no side effects |
+| Gameplay | `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
+| WorldEdit | `WorldEdit` | The [Rbx API](RBX_API.md) — `Instance.new`, `workspace`, `instance:Destroy()` — is how a mod spawns/moves/destroys world objects. The classic `coreai_world_*` build commands (spawn/change/destroy, scenes, batch/grid, transactions, sound/animation) are **not registered in the default production composition** (`RegisterWorldEditBuildBindings = false`): each one is a stub that raises an error pointing at the Rbx API. They only work on a host that deliberately opts in |
 | Logic | `LogicOverride` | `logic_define`/`logic_reset`/`logic_list` |
 | Full | `Full` | Reflection-style access to `GameObject`/components through `unity_*` APIs |
 
-The mod-runtime surface itself — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`,
-`mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id` — is **available to
+The mod-runtime surface itself — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `print`/`report`,
+`events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `mod_id` — is **available to
 every loaded mod regardless of capability tier**, including a mod loaded with `LuaCapabilities.None`.
-These are not game bindings gated by `AggregatingGameLuaRuntimeBindings`; `LuaModRuntime` registers
+These are not game bindings gated by `LuaCsGameplayBindings`; `LuaCsModRuntime` registers
 them unconditionally when it builds a mod's script. The capability tier only controls which *game*
 APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and timers can then call.
 
@@ -33,7 +33,7 @@ APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and t
 
 **Persisted and shared mods are non-Full by default.** A mod that is rehydrated from the source store
 on startup, imported from a bundle, or copied between players never auto-acquires `Full`:
-`LuaModRuntime.RehydrateFromStore` and `ImportMod` intersect the mod's requested capabilities with the
+`LuaCsModRuntime.RehydrateFromStore` and `ImportMod` intersect the mod's requested capabilities with the
 host grant and then strip `Full` unless the host explicitly passes `allowFull: true`. A shared
 capability set is only ever a request; the receiving host decides. See
 [LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md) and [FIRST_MOD.md](FIRST_MOD.md).
@@ -89,7 +89,7 @@ file APIs that a host game exposes through components.
 
 - Full mode is opt-in.
 - Lua chunks and mod handlers still run with the Lua-CSharp sandbox and instruction/time limits.
-- `CoreAiFullUnityLuaRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
+- `LuaCsFullUnityRuntimeBindings` caches `Type` and `MemberInfo` lookups, but does not bypass
   sandbox limits.
 - Mod error budget still applies to persistent mods: repeated failures quarantine the mod (kept loaded, dispatch suspended; reload clears it).
 - `Allowed Scenes` on `CoreAiLuaWorldModule` constrains scene-loading commands.
@@ -102,9 +102,9 @@ file APIs that a host game exposes through components.
 ## Mod LLM Tools
 
 `manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
-`versions`, `revert`, `diagnostics`) and `execute_lua` are registered in `WorldCommandsInstaller`.
-Mod source is retrieved through
-`LuaModRuntime.TryGetModSource`; `export`/`import`/`forget` move mods between players through the
+`versions`, `revert`, `diagnostics`) and `execute_lua` are attached to the built-in Programmer role by
+`CoreAiModsInstaller.RegisterCoreAiMods`. Mod source is retrieved through
+`LuaCsModRuntime.TryGetModSource`; `export`/`import`/`forget` move mods between players through the
 source store.
 
 Programmer guidance keeps these tools direct: run a one-shot `execute_lua` diagnostic first, inspect
@@ -136,7 +136,7 @@ DI-registered assemblies (template — replace the assembly name):
 
 ```xml
 <linker>
-  <!-- your assembly with IGameLuaRuntimeBindings implementations or VContainer-registered types -->
+  <!-- your assembly with Lua runtime-bindings classes or VContainer-registered types -->
   <assembly fullname="YourGame.Mods" preserve="all"/>
 </linker>
 ```
@@ -150,9 +150,9 @@ in the package `link.xml`):
 - `UnityEngine.CoreModule`: `UnityEngine.Resources` and `UnityEngine.TextAsset` —
   the Lua script loader reaches them purely via reflection; stripping them
   crashes the player with `RuntimeError: null function`.
-- Every `IGameLuaRuntimeBindings` implementation the player uses
-  (`CoreAiWorldLuaRuntimeBindings`, `CoreAiWorldQueryLuaBindings`, `LuaTimeBindings`,
-  `CoreAiInputLuaRuntimeBindings`, `CoreAiFullUnityLuaRuntimeBindings`, ...) — their callback
+- Every Lua-CSharp runtime-bindings class the player uses
+  (`LuaCsWorldRuntimeBindings`, `LuaCsWorldQueryBindings`, `LuaCsTimeBindings`,
+  `LuaCsInputRuntimeBindings`, `LuaCsFullUnityRuntimeBindings`, ...) — their callback
   bodies are reflection-invoked by the Lua-CSharp runtime.
 
 DI note: VContainer's `Register<T>()` finds constructors via reflection; under Medium stripping

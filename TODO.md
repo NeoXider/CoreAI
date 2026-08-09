@@ -1,15 +1,223 @@
 # TODO
 
-> Updated 2026-08-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-09. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.0.
+> Released: 7.0.0 (2026-08-01, all six packages in lockstep, `McpServerInfo.Version` included).
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
-## Turn teardown + positive module opt-in wave (2026-08-01) — release candidate 7.0.0
+## Post-7.0.0 audit fix wave (2026-08-09) — unreleased
+
+Done (compile gates green via `dotnet build`; EditMode suite runs on next editor start — verification gate):
+
+- [x] **WebGL: `WorldStateManager.Reset()` flushed nothing after deleting the save file**, so the deleted
+      save resurrected from IndexedDB on reload. Reset now calls `CoreAiWebGlPersistence.Sync()` like `Save()`
+      does; regression pinned by `WorldStateManagerResetPersistenceEditModeTests` (new seam:
+      internal `WebGlFlushSync`).
+- [x] **Mod-log pipeline wired end-to-end.** `LuaLogService` is registered as singleton `ILuaLogService`
+      in `RegisterCoreAiMods`, threaded through `LuaCsModStackOptions.LogService` into `LuaCsModRuntime`
+      (print/report → Print, handler/event/load errors → RuntimeError, quarantine → Error), and
+      `get_mod_logs` (`GetModLogsLlmTool`) is attached to the Programmer role. MCP `get_mod_logs` now
+      resolves the same singleton with no MCP-side change. Tests: installer wiring + five runtime-append
+      tests + two tool tests.
+- [x] **Five duplicate `CoreAi_PersistFsSync` DllImport wrappers deleted** (FileLuaModStore,
+      FileLuaModSourceStore, FileSkillStore, FileAgentMemoryStore, WorldStateManager); all call the shared
+      `CoreAiWebGlPersistence.Sync()` (now returns `bool`), and flush failures are always logged — the
+      silent swallow in the mod/skill/memory stores is gone.
+- [x] **MCP HTTP server no longer starts on WebGL players** — `CoreAiMcpServer.StartListening()` early-outs
+      with a logged warning when `Application.platform == WebGLPlayer` (pinned by
+      `CoreAiMcpServerWebGlEditModeTests`).
+- [x] **Repo hygiene per AGENTS.md "no audit reports in repo":** deleted root `PROGRESS.*.md` (3),
+      `Docs/Audits/2026-07-16/` (8), finished audit/investigation reports in `dev-docs/` (9) and
+      `Assets/CoreAI/Docs/PERF_REVIEW_2026-06-12.md`; `dev-docs/README.md` no longer sanctions audit notes.
+      Deleted empty husk folders (`Assets/Tests/Edit`, `Assets/_source`, 7 empty dirs under
+      `Assets/CoreAI/Runtime/Core/`). `bundleVersion` synced 6.11.1 → 7.0.0.
+- [x] **Convention/doc nits:** `var` → explicit in `FetchSseOpenAiTransport.cs`; `Docs/ARCHITECTURE_RULES.md`
+      stale `RobloxSpace`/`RobloxApi` identifiers → `RbxSpace`/`RbxApi`.
+- [x] **Demo mods ported off the withheld `coreai_world_*` build APIs.** FullAccess Tetris
+      (`LuaPlatformExampleController.cs` embedded source) and LuaMods `WaveDirectorMod.lua.txt` now use the
+      Rbx API (`Instance.new('Part')`, `Position`/`CFrame`, `Color3.fromHex`, `instance:Destroy()`);
+      `coreai_world_exists` (Read tier) intentionally kept. Regression pinned by new
+      `DemoModProductionSurfaceEditModeTests` (source lint + headless load in production configuration).
+      `KNOWN_ISSUES.md` Tetris/WaveDirector section removed as resolved.
+- [x] **Lua mod-authoring docs audited and fixed against the Lua-CSharp stack** (FIRST_MOD,
+      LUA_ACCESS_MODES, LUA_GAME_API, LUA_NATIVE_APIS, LUA_BEST_PRACTICES, LUA_SANDBOX_SECURITY, LLM_TOOLS,
+      AGENT_BUILDER recipe 5): dead MoonSharp-era names (`LuaModRuntime`, `SecureLuaEnvironment`,
+      `log_info`, `GameLuaBindingsExtensibility`, `-- name:` headers), wrong tiers/budgets (10 s / 50M
+      steps, quarantine-not-unload), Lua 5.4 → 5.2 + Luau downleveler, withheld-API examples fenced as
+      opt-in-only. Logging README `warn` claim dropped (no `warn` binding exists).
+- [x] **Engine-free tests executed outside Unity** (editor holds the project lock): a NUnitLite
+      runner under `Temp/nunitlite-runner` ran **93 passed / 0 failed** — all 7
+      `Assets/CoreAI/Tests/EditMode` fixtures (67), `LuaLogServiceEditModeTests` (19, incl. the two new
+      `get_mod_logs` tool tests), the 5 new `LuaCsModRuntime` log-append tests, and the new
+      `DemoModProductionSurface` Tetris tests (source lint + full headless autopilot game under the exact
+      production composition). Excluded as Unity-native (ECall: ScriptableObject/GameObject/
+      Application.dataPath): WaveDirector runtime test, `LuaModsLlmToolEditModeTests`,
+      `WorldStateManagerResetPersistenceEditModeTests`, `CoreAiMcpServerWebGlEditModeTests` — these run in
+      the editor Test Runner on next editor start (verification gate).
+- [x] **Full EditMode suite executed in Unity batchmode (2026-08-09, editor closed):**
+      **2658 test cases — 2649 passed / 0 failed / 9 skipped** in 125.8 s (via a temporary
+      `TestRunnerApi` batch entry point, deleted after the run; standard `-runTests` CLI is ignored by
+      UTF 1.6 in this environment). Includes all wave tests: `WorldStateManagerResetPersistence`,
+      `DemoModProductionSurface` (all 4), `LuaModsLlmTool` wiring, `CoreAiMcpServerWebGl`. Note for future
+      batch runs: this shell needs standard Windows env vars restored (`SystemDrive`, `ProgramData`,
+      `ComSpec`, …) or Unity's UPM IPC fails; `TEMP`/`TMP` must be Windows-style paths.
+
+Open:
+
+- [ ] **Comment-convention cleanup wave (~3,208 narrative comment lines in ~2,015 blocks / ~340 files,
+      plus 38 `/* */` blocks).** Convert rationale blocks to `// WHY:`, delete section banners and
+      change-description narration. Heaviest: `CoreAIBenchmark/.../GameCreationBenchmarkHarness.cs` (236),
+      `MeaiLlmClient.cs` (150), `ToolExecutionPolicy.cs` (109), `ToolExecutionPolicyEditModeTests.cs` (89),
+      `MeaiOpenAiChatClientSseEditModeTests.cs` (72); `CoreAiUnity/Tests` and `CoreAIBenchmark` hold the bulk.
+      NOTE: `tools/strip_non_doc_comments.py` exists but deletes `// WHY:`/`// HACK:` too and only covers
+      2 packages — fix or replace it before any mass run.
+- [ ] **`SemaphoreSlim.Wait()` reentrancy on WebGL**: synchronous main-thread gates in
+      `FileAgentMemoryStore`, `FileLuaModSourceStore`, `FileLuaModStore`, `FileSkillStore`,
+      `FileLuaScriptVersionStore`, `ISkillStore` have no reentrancy protection — a mod callback re-entering
+      the same store self-deadlocks the single WASM thread. Decide: guard (reentrancy detection) or document.
+- [ ] **WebGL canary for the Lua↔C# sync-over-async bridge**: `LuaCsExecutionGuard.cs:143,177`,
+      `LuaCsSecureEnvironment.cs:205,390`, `LuaCsCoroutineHandle.cs:198` rely on Lua-CSharp ≥ 0.5.6
+      completing suspended resumes synchronously. Add a WebGL-build canary test so a broken upstream
+      invariant fails CI instead of deadlocking players.
+- [ ] **WebGL persistence decision for conversation summaries + token calibration**:
+      `FileConversationSummaryStore` and `FileTokenCalibrationStore` never flush and are excluded on WebGL
+      only by DI gating (`CoreAILifetimeScope.cs:381-417`); `CoreAI.Core` cannot reference
+      `CoreAiWebGlPersistence` (`references: []`). Decide: won't-fix (document) or injectable flush sink.
+- [ ] **Editor tooling has zero test coverage** (16/20 editor classes unreferenced): scene creators,
+      `CoreAIModuleManager`, build guards, `LuaScriptedImporter`/`LuauScriptedImporter` — the primary
+      onboarding path. Add EditMode coverage for the top user-facing paths.
+- [ ] **Untested MCP tools**: `GetModLogsMcpTool` (now live — cover it), `ManageModsMcpTool`,
+      `WorldCommandMcpTool`, `MainCameraScreenshotSource`. Untested Hub UI: `HubAboutPage`,
+      `HubBuiltInPages`, `HubPageWidgets`.
+- [ ] **Vision wire-format unverified live**: `VisionSelfProbe.cs:100` image-content shape never checked
+      against a real backend; `HubSettingsPage.cs:1381` probe round-trip likewise. Run one live probe per
+      supported backend.
+
+## Deleted-audit residue (verified 2026-08-09) — findings still open after the dev-docs cleanup
+
+> Source: the nine audit/investigation reports deleted from `dev-docs/` per AGENTS.md
+> (ARCH_AUDIT, CODE_AUDIT v6.4/v6.6, LUA_PERF_AUDIT, PERF_AUDIT_ITER2, ROBLOX_API_CONFORMANCE,
+> ROBLOX_CONFORMANCE_REAUDIT, COORD_ROTATION_INVESTIGATION, ALLOC_BACKSTOP_FLAKE). Every finding
+> below was re-verified against the current code on 2026-08-09 and is still present; everything
+> the audits flagged that is NOT listed here was confirmed fixed (mostly in the 6.8.0 wave).
+
+**Architecture (from ARCH_AUDIT):**
+
+- [ ] **`CoreAiChatPanel` god-view (H1, grew 3636 → 4185 lines).** Extract `ChatTranscriptRenderer`
+      (bubbles/streaming/render-cap + think filter), `ChatRoutingUiController` (agent + API-profile
+      dropdowns; `ICoreAiRoutingUiController` seam exists), `ChatInputGate` (`IsChatInputAllowed`
+      already static-internal). Panel becomes a thin wiring view.
+- [ ] **Service-locator leak past the composition edge (M1).** No shared scene-scope seam exists;
+      `FindAnyObjectByType<CoreAILifetimeScope>` + `Container.Resolve` is re-implemented at 7
+      production sites (`CoreAiChatService.cs:55`, `TokenBudgetRuntimeSource.cs:75`, `CoreAi.cs:820`,
+      `InGameChatPanel.cs:36`, `VisionSelfProbe.cs:216`, `AiScheduledTaskTrigger.cs:90`,
+      `LlmUnityAutoDisableIfNoModel.cs:61`; `CoreAiBackend.cs:666` at least funnels through one
+      private helper). Introduce `CoreAiSceneScopeLocator`; only the facade calls it.
+- [ ] **Oversized adapters (M2, both grew).** `MeaiLlmClient.cs` 2790 lines (push transport creation
+      into `LlmEndpointClientFactory`, hybrid-JSON parsing behind `LlmToolCallTextExtractor`);
+      `LuaCsModRuntime.cs` 2194 lines (extract `ModPersistenceCoordinator` + `CrossModExportBridge`).
+- [ ] **Stale MoonSharp dual-VM docs (L2).** `LuaCsModRuntime.cs:30-34` class summary still claims
+      "both VMs coexist"; `LuaModsLlmTool.cs:91` still teaches "MoonSharp/Lua callback syntax".
+      MoonSharp was removed in 5.4.0 — rewrite to the single-VM reality.
+- [ ] **Ambient mutable statics (L3).** `Log.Instance`, `CoreAISettings.Instance`,
+      `CoreAISettingsAsset.Instance`, `GameLoggerUnscopedFallback.Instance` are public mutable
+      statics; `CoreAiBackend.cs:583/588/672` still falls back to them. Constrain so logic never
+      reads them instead of injected dependencies.
+- [ ] **Copy-paste XML doc (L4).** `MeaiLlmClient.cs:37-41` — `LiveUiStreamMaxCharsPerChunk` summary
+      contains a stray "Initializes a new instance of the current component." sentence.
+- [ ] **Stale generated csproj (L5).** `CoreAI.RobloxApi.{Binding,Datatypes,Instances,Unity}.csproj`
+      at repo root are leftovers from the Rbx rename (no matching asmdef) — delete/gitignore.
+
+**Correctness (from CODE_AUDIT v6.4 / v6.6):**
+
+- [ ] **Connection registry never prunes dead connections (v6.4 MEDIUM-1).** `RbxScriptConnection.
+      Disconnect` and `:Once` auto-disconnect remove the connection from the signal but not from
+      `ModConnectionRegistry._byMod` — a chatty long-lived mod leaks dead entries until teardown.
+      Notify the registry on disconnect or compact `!Connected` entries.
+- [ ] **Connection-registry threading invariant is assumed, not enforced (v6.4 MEDIUM-3).**
+      `ModConnectionRegistry`/`RbxScriptSignal` are unsynchronized while `DisconnectOwnedBy` can be
+      driven from mod-lifecycle tool paths. Assert main-thread at `Track`/`DisconnectOwnedBy` (dev
+      builds) or lock; verify `manage_mods` marshals to the main thread.
+- [ ] **Bare `catch { }` blocks (v6.6 core #5).** `AiOrchestrator.cs:1057` (also 780, 1956),
+      `ToolExecutionPolicy.cs:309` (also 786, 852, 893) — a cancelled predecessor is
+      indistinguishable from a faulted one; outer cancel does not short-circuit serialized calls.
+- [ ] **`CoreAISettings` lock asymmetry (v6.6 core #8).** `ResetOverrides` locks, ~30 readers don't;
+      partially-reset override set is observable (now documented in a WHY comment — decide: fix or
+      accept explicitly).
+- [ ] **IMGUI overlay in shipped demo scenes (v6.6 unity #10, partial).** `CoreAiTokenBudgetOverlay`
+      still referenced in `MiniRpgModsDemo.unity` + `LiveMechanicsModsChatDemo.unity`; UITK
+      replacement exists. `OrchestrationDashboard`/`AiDashboardPresenter` no longer in any scene.
+- [ ] **Test quality leftovers (v6.6).** `GameConfigPlayModeTests.cs:62,71,97,119` still `.Result`
+      on the main thread in `[UnityTest]`; `PlayModeTestAwait` 3-arg overload still leaks the task
+      on timeout (4-arg overload fixed); machine-mangled comments in ~18 test files (fold into the
+      comment-cleanup wave above, but note Cyrillic restoration, not just re-tagging).
+- [ ] **Hub duplication/dead code (v6.6).** `MakeGgufModelDropdown`/`MakeEndpointGgufDropdown`
+      byte-identical twins (`HubSettingsPage.cs:1791/1834`); `SetPlaceholder` installs a 200 ms
+      polling timer per text field (~13 sites).
+
+**Lua/Rbx performance (from PERF_AUDIT_ITER2 + LUA_PERF_AUDIT):**
+
+- [ ] **Boxing guard seam on the hot path (ITER2 HIGH-2 rest + MEDIUM-1 + MEDIUM-2).**
+      `InvokeGuarded` (`LuaCsModRuntime.cs:1076`) routes every timer/event call through the boxing
+      `IScriptExecutionGuard.Invoke` and discards the result — add a non-boxing void overload +
+      reusable scratch `LuaValue[]`; `handlers.ToArray()` snapshot per event (:1051) — reuse the
+      `RbxScriptSignal.Dispatch` scratch-buffer pattern; `InvokeGuarded(mod, fn, evt.Key,
+      evt.Value)` (:1068) allocates `new object[2]` — add a non-params overload.
+- [ ] **`DynamicInvoke` per call on the polled binding surface (LUA_PERF #3, largest remaining).**
+      `LuaCsApiRegistry.cs:207` uses reflection invoke for the whole `unity_*`/`input_*` surface.
+- [ ] **Per-property-read dispatch probes (LUA_PERF #5).** `LuaCsRbxInstanceBindings.cs:149-207`
+      read path does up to five type probes ending in a `ClassCatalog.IsA` ancestry walk per read;
+      compute a class-kind bitmask once at wrap time.
+- [ ] **Double allocation per datatype crossing (LUA_PERF #1).** `LuaCsRbxValues.Box` boxes the
+      struct then wraps the box — a generic `LuaCsRbxValueBox<T>` halves it (identity documented
+      non-semantic).
+- [ ] **Adaptive hook batch (LUA_PERF §4, measured 2.65× speedup available, needs design).**
+      Re-arm the count hook sized by allocation-budget headroom; feasibility proven upstream
+      (`SetHook` from inside a hook works on Lua-CSharp v0.5.6). Open items: charge step budget by
+      the batch actually in force; `EndGuard` must restore the enclosing window; ship only with an
+      allocation-bomb test at several live-heap sizes. Relates to `TODO(guard-tight-loop-latency)`.
+- [ ] **World-command JSON alloc per command (ITER2 MEDIUM-3, guardrail/docs).**
+      `LuaCsWorldRuntimeBindings.cs:584-599` — `JsonUtility.ToJson` + envelope + command per call;
+      document that per-frame animation belongs on the zero-alloc Rbx part sink, not
+      `coreai_world_change`.
+- [ ] **Guard-overhead microbenchmark (LUA_PERF §6).** No checked-in EditMode benchmark (no-hook /
+      batch-4 / batch-64 fixed loop) — fold into F-20.
+
+**Roblox conformance (from ROBLOX_API_CONFORMANCE + REAUDIT + COORD_ROTATION):**
+
+- [ ] **`DataModel:BindToClose(fn)` silently discards its callback (#2.9).**
+      `LuaCsRbxInstanceBindings.cs:435-439` passes `null`, never reads arg 1, no error — the only
+      *silent* Roblox-argument drop. Store the callback for a shutdown hook or raise
+      NOT_IMPLEMENTED.
+- [ ] **BasePart `Material`/`Orientation`/`Rotation` loud stubs (#2.5).** Needs the material
+      catalog + Euler decomposition; add to the ladder or an explicit follow-up (loud today, so not
+      a trap — but untracked).
+- [ ] **Scene-level handedness golden test (COORD_ROTATION follow-up 1).** The Rbx→Unity bridge was
+      proven correct analytically; lock it with a `[Test]` reproducing the §3 trace (eye=(0,9,-14),
+      target=(0,2,18), parts at ±X, screen-side agreement) — current goldens cover only
+      identity/yaw poses.
+- [ ] **Samples hard-code world-axis movement (COORD_ROTATION follow-up 2).**
+      `sample_lane_racer.lua` uses `LANE_X = {-4,0,4}` + fixed camera with a justifying comment;
+      teach the `camera.CFrame.RightVector`-derived pattern instead (samples are teaching material).
+- [ ] **Rung ambiguity:** TODO ladder lists `WaitForChild` under rung 2 (MVP1) while the code stub
+      (`LuaCsRbxInstanceBindings.cs:316-330`) gates the yield to MVP2 — align the rung assignment.
+
+**Deferred by the audits themselves (no action needed now, recorded so the context survives):**
+
+- v6.4 MEDIUM-2 (RenderStepped fired last in the pump) and LOW-1 (delta boxed before the
+      `HasConnections` gates) — both deferred to the MVP2 scheduler rewrite by design.
+- v6.4 LOW-2/LOW-3/LOW-4 (tetris `occupied()` allocs, lane-racer collision tunneling at large dt,
+      tetris `gravAccum` reset-vs-subtract) — sample polish, batch into a samples cleanup.
+- ALLOC_BACKSTOP_FLAKE — resolved: `GC.GetAllocatedBytesForCurrentThread` re-verified returning 0
+      on the current editor (recorded in `LuaCsExecutionGuard.cs:287`); the first-growth limitation
+      is the tracked item at "Allocation guard is a per-call first-growth backstop" below. The
+      flaky test stays as the honest trip-wire per the report's own recommendation.
+
+## Turn teardown + positive module opt-in wave (2026-08-01) — shipped in 7.0.0
 
 - [x] Breaking provider/Lua define migration uses independent positive `COREAI_LLM` and `COREAI_LUA` symbols.
       No symbols retain portable orchestration/chat, scripted/stub clients, and required MEAI contracts;

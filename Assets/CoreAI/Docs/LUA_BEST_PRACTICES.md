@@ -1,4 +1,4 @@
-﻿# CoreAI Lua: Best Practices and Anti-Patterns
+# CoreAI Lua: Best Practices and Anti-Patterns
 
 > Current for v4.x. See also [LUA_GAME_API.md](LUA_GAME_API.md), [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md), [LUA_NATIVE_APIS.md](LUA_NATIVE_APIS.md).
 
@@ -35,7 +35,7 @@ Benefits: fail-open (broken overrides are removed), the C# default always exists
 
 ### 2. Long-Lived Rules Through Mods
 
-Wave directors, day/night, progression: `LuaModRuntime.LoadMod` + `hooks_on` / `hooks_every`:
+Wave directors, day/night, progression: `LuaCsModRuntime.LoadMod` + `hooks_on` / `hooks_every`:
 
 ```csharp
 modRuntime.LoadMod("wave_director", luaCode,
@@ -53,32 +53,26 @@ When one mod needs another mod's help: `events_emit`/`hooks_on` for a fire-and-f
 (broadcast, no reply), `mods_export`/`mods_get`/`mods_call` when a mod needs to read or call another
 mod's state directly by id (see [LUA_GAME_API.md § Cross-mod Exports](LUA_GAME_API.md#cross-mod-exports)).
 
-### 3. Custom Functions Through `GameLuaBindingsExtensibility`
+### 3. Custom Functions Through Typed Delegates
 
-Typed `Func`/`Action`, with no reflection in Lua:
+Typed `Func`/`Action`, with no reflection in Lua. The MoonSharp-era global
+`GameLuaBindingsExtensibility.Register` hook was removed with the old VM; the gameplay bindings are
+now assembled inside `LuaCsModRuntimeFactory`, and wiring a game's own binding group into that stack
+is a follow-up feature. The binding pattern itself is a `LuaCsApiRegistry` of typed delegates
+(see [LUA_NATIVE_APIS.md § Registering a Native API](LUA_NATIVE_APIS.md)):
 
 ```csharp
-public sealed class HealthLuaBindings : IGameLuaRuntimeBindings
+var registry = new LuaCsApiRegistry();
+registry.Register("health_get", new Func<string, double>(name =>
 {
-    public void RegisterGameplayApis(LuaApiRegistry registry)
-    {
-        registry.Register("health_get", new Func<string, double>(name =>
-        {
-            var h = GameObject.Find(name)?.GetComponent<Health>();
-            return h != null ? h.Current : -1;
-        }));
-        registry.Register("health_set", new Action<string, double>((name, v) =>
-        {
-            var h = GameObject.Find(name)?.GetComponent<Health>();
-            h?.Set(Mathf.Clamp((float)v, 0f, h.Max));
-        }));
-    }
-}
-
-// Before scene load / in early bootstrap:
-GameLuaBindingsExtensibility.Register(
-    new HealthLuaBindings(),
-    LuaCapabilities.Gameplay);  // only scripts with Gameplay+
+    var h = GameObject.Find(name)?.GetComponent<Health>();
+    return h != null ? h.Current : -1;
+}));
+registry.Register("health_set", new Action<string, double>((name, v) =>
+{
+    var h = GameObject.Find(name)?.GetComponent<Health>();
+    h?.Set(Mathf.Clamp((float)v, 0f, h.Max));
+}));
 ```
 
 Lua-CSharp marshals delegates directly; do not wrap them in `DynamicInvoke` yourself.
@@ -118,12 +112,13 @@ From Lua (WorldEdit): publish an envelope through the existing sink or add a thi
 | Formulas / mods | `+ LogicOverride` |
 | Arbitrary components | `+ Full` (dev / trusted builds only) |
 
-Configuration: caps on `AggregatingGameLuaRuntimeBindings`, `LoadMod(..., caps)`, and the `CoreAILifetimeScope` inspector.
+Configuration: caps on the stack (`LuaCsModStackOptions.Capabilities`), `LoadMod(..., caps)`, and the
+`CoreAiLuaWorldModule` inspector.
 
 ### 6. Host-Side Whitelists
 
 - Prefab spawn: `CoreAiPrefabRegistryAsset`
-- Load scene: `luaAllowedScenes` on `CoreAILifetimeScope`
+- Load scene: `allowedScenes` on `CoreAiLuaWorldModule`
 - Full: `enableFullLuaAccess` (off by default)
 
 ### 7. Full Mode: Diagnose Before Editing
@@ -160,7 +155,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 
 ### 10. Tests
 
-- EditMode: `SecureLuaSandboxEditModeTests`, `LuaModRuntimeEditModeTests`, binding tests
+- EditMode: `LuaCsSecureSandboxEditModeTests`, `LuaCsModRuntimeEditModeTests`, binding tests
 - PlayMode: `LuaCoroutineRunnerPlayModeTests`, FastNoLlm integrations
 - CI: default (Lua disabled) / `COREAI_LUA` opt-in matrix
 
@@ -176,7 +171,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 | Full mode without `IFullLuaAccessBlacklistPolicy` | Any CLR type/member reachable from Lua |
 | Full mode in production multiplayer without review | Any script can touch any component |
 | Trust `pcall` in Lua instead of a C# guard | `ErrorHandling` is intentionally disabled; the host must catch errors |
-| Skip `luaAllowedScenes` in public chat mode | The LLM can request any scene from Build Settings |
+| Skip `allowedScenes` in public chat mode | The LLM can request any scene from Build Settings |
 | Weaken `StripRiskyGlobals` "for convenience" | package/load/collectgarbage are escape vectors |
 
 ### Game Architecture

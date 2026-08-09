@@ -2,28 +2,6 @@
 
 This file tracks accepted warning debt and project-level issues that are not runtime regressions.
 
-## FullAccess demo: "Start Tetris" throws
-
-Symptom: pressing **Start Tetris** in the FullAccess demo reports
-`Tetris load failed: coreai_world_spawn: coreai_world_spawn requires the WorldEdit build bindings,
-which are disabled for this mod`.
-
-Cause: `LuaPlatformExampleController.cs` embeds a Tetris written against the classic
-`coreai_world_*` build API. The default composition (`CoreAiModsInstaller`) sets
-`RegisterWorldEditBuildBindings = false`, so those functions are withheld stubs in every shipping
-game — the demo source was never migrated. The demo's self-test path is unaffected and still passes.
-
-Workaround: the bundled **`sample_tetris3d`** mod is the same game written in the
-[Rbx API](../../CoreAI/Docs/RBX_API.md); enable it from the **Hub → Mods** tab.
-
-Recommended follow-up: rewrite the embedded demo source on `Instance.new`, or have the demo load the
-bundled mod instead of carrying its own copy.
-
-The **LuaMods demo** has the same defect: `WaveDirectorMod.lua.txt` builds its wave through
-`coreai_world_begin` / `coreai_world_spawn` / `coreai_world_commit` and recolors through
-`coreai_world_set_color`, so pressing **Emit 'wave_started'** raises the same withheld-API error.
-Its store, hooks, events and `coreai_world_exists` halves still work.
-
 ## LLMUnity throws on WebGL startup
 
 Symptom: a WebGL player logs `ArgumentException: Unknown platform Unix <version>` from

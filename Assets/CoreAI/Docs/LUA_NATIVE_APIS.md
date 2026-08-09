@@ -1,7 +1,9 @@
 # Lua-CSharp: Native Capabilities vs Our Implementation
 
-> Runtime: [Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) — a managed, AOT-safe Lua 5.4 VM that
-> runs under IL2CPP and WebGL. It ships **bundled** as `Lua.dll` + `Lua.Annotations.dll` inside the
+> Runtime: [Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) — a managed, AOT-safe Lua VM that
+> runs under IL2CPP and WebGL. CoreAI targets the **Lua 5.2** language level: a Luau → Lua 5.2
+> downlevel preprocessor (`LuauSourceGate`, default-on) runs before every compile so mods may write
+> Roblox-style Luau syntax. It ships **bundled** as `Lua.dll` + `Lua.Annotations.dll` inside the
 > CoreAI Mods package at `Assets/CoreAIMods/Plugins/`. There is no external Lua package to install.
 
 Goal: expose host functionality to secured Lua scripts through the registry rather than opening the
@@ -13,7 +15,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 |---|---|---|
 | **Secured environment** | `LuaCsSecureEnvironment` builds a curated global table (string/math/table subset, no io/os/load/debug) | Lua-CSharp lets the host own `LuaState.Environment`; we only add what is safe |
 | **One-shot limits** | `LuaCsExecutionGuard` (instruction / time budget) | Hard step/time cap for untrusted AI scripts; yields back to Unity |
-| **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua 5.4 coroutine pattern; the handle only drives Resume per frame |
+| **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua coroutine pattern; the handle only drives Resume per frame |
 | **API registration** | `LuaCsApiRegistry.Register(name, delegate)` / `RegisterCallback` | Typed host delegates marshalled to `LuaFunction`; no CLR surface leaks |
 | **Logic slots / mod hooks** | C# guarded invoke + `LuaCsExecutionGuard` | Errors surface host-side; scripts cannot silently swallow failures |
 | **Optional module** | `#if COREAI_LUA` | Define to enable Lua; default build keeps stub/null DI surfaces |
@@ -50,7 +52,7 @@ registry.ApplyToEnvironment(state); // writes each name into state.Environment
 ```
 
 ```lua
--- In Lua (5.4):
+-- In Lua (5.2; Luau syntax is downleveled automatically):
 forge_spawn("knight", -5, 0)
 local n = forge_count("enemy")
 ```
@@ -67,10 +69,13 @@ reflection wrapper (public members by default) gated behind explicit access mode
 type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see `LUA_ACCESS_MODES.md`). It stays
 disabled on WebGL. Prefer registering explicit typed APIs over the Full tier for anything shipped.
 
-## Lua 5.4 Semantics (Lua-CSharp)
+## Lua Language Level (Lua-CSharp)
 
-- Lua-CSharp implements **Lua 5.4**: distinct integer/float number subtypes, integer division `//`,
-  and native bitwise operators (`&`, `|`, `~`, `<<`, `>>`) — no `bit32` shim needed.
+- CoreAI targets **Lua 5.2**: the bundled VM parses Lua 5.2 source. Luau-only constructs — type
+  annotations, compound assignments (`+=`), `continue`, string interpolation, if-expressions, floor
+  division `//`, Luau-only number literals — are rewritten to Lua 5.2 equivalents by the
+  `LuauDownleveler` preprocessor before compilation (default-on; plain Lua 5.2 passes through
+  byte-identically), so mod authors can write Roblox-style Luau.
 - A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, …);
   `io`/`os`/`debug`/`package` are withheld from the secured environment.
 - Standard `coroutine.*` is available; long-lived scripts should `coroutine.yield()` across frames

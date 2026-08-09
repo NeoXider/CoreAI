@@ -24,7 +24,7 @@ Every substantial feature ships as up to three assemblies with references pointi
 ```
 
 - Roblox-API mapping: Instance registry, datatypes (Vector3/CFrame/Color3), scheduler,
-  signal semantics = **Domain** (pure Roblox math, deterministic). `RobloxSpace` and
+  signal semantics = **Domain** (pure Roblox math, deterministic). `RbxSpace` and
   component bridges = the **Unity adapter** and the single conversion boundary (locked in
   the roadmap). The Lua VM stays behind `Runtime/Scripting` seams (`IScriptEngine` et al.);
   `Scripting/LuaCs` is the only assembly folder allowed to `using Lua;`.
@@ -79,8 +79,8 @@ Every substantial feature ships as up to three assemblies with references pointi
   (no engine/VM/framework types outside the adapter — grep- or reflection-based, like the
   existing seam-honesty test).
 - Roblox-API conformance tests follow the roadmap layout
-  (`Tests/EditMode/RobloxApi/{Datatypes,Instances,Scheduler,Services,Networking,Corpus}` +
-  `PlayMode/RobloxApi`) and are **named by normative rule ID** (`R4_2_...`, `M3_8_...`,
+  (`Tests/EditMode/RbxApi/{Datatypes,Instances,Scheduler,Services,Networking,Corpus}` +
+  `PlayMode/RbxApi`) and are **named by normative rule ID** (`R4_2_...`, `M3_8_...`,
   `S1_7_...`) so a failing test names the violated Roblox rule.
 - PlayMode tests that need editor focus/environment must self-skip (`Assert.Ignore`),
   never flake.

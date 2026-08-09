@@ -1,6 +1,6 @@
 # Lua mod logging
 
-Captures Lua mod output (`print`/`warn`/`error`, uncaught runtime errors) independent of the Unity
+Captures Lua mod output (`print`/`error`, uncaught runtime errors) independent of the Unity
 console, so it can be read back through a plain C# API and surfaced to an in-game LLM agent
 (`GetModLogsLlmTool`) that inspects what a mod said and self-repairs it while the game runs. Built to
 `Docs/ARCHITECTURE_RULES.md`.

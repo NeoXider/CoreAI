@@ -79,11 +79,11 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 
 ## Additional hardening (current implementation)
 
-- `string.rep` is now capped via a replaced implementation in `SecureLuaEnvironment`.
-  `SecureLuaEnvironment.MaxStringRepLength` is `1_000_000`; attempts that exceed this
+- `string.rep` is now capped via a replaced implementation in `LuaCsSecureEnvironment`.
+  `LuaCsSecureEnvironment.MaxStringRepLength` is `1_000_000`; attempts that exceed this
   limit fail fast with an explicit error.
 - `table.concat` is capped the same way (`MaxTableConcatLength`, same `1_000_000` value): the
-  replacement mirrors the real `table.concat` algorithm for both VMs but aborts as soon as the
+  replacement mirrors the real `table.concat` algorithm but aborts as soon as the
   in-progress result exceeds the cap, instead of finishing a potentially huge build first.
 - **Total per-execution allocation budget (default 64MB, F-08).** `string.rep`,
   `string.format`, and `table.concat` are capped at their library call site, but plain string
@@ -112,11 +112,14 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
 - `LuaAiEnvelopeProcessor` normalizes and truncates results:
   result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
 - `LuaCsApiRegistry` wraps host callbacks and converts host validation exceptions into `LuaRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
-- `coreai_world_load_scene` supports an optional scene whitelist check.
-- World bindings validate coordinate inputs before touching state:
-  coordinates must be finite and `abs(value) <= 100000`.
+- `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
+  build bindings: in the default production composition it is **disabled** — a stub raises an error
+  pointing at the Rbx API — and the whitelist only matters on hosts that opt into the build bindings.)
+- The classic world build bindings (same opt-in caveat) validate coordinate inputs before touching state:
+  coordinates must be finite and `abs(value) <= 100000`. The always-available `coreai_world_raycast`
+  query also rejects non-finite arguments.
 - `time_set_scale` validates input: `NaN`/`Infinity` are rejected and valid scales are clamped to `[0, 10]`.
-- `play_sound` clamps volume to `[0, 1]`.
+- `coreai_world_play_sound` (opt-in build binding, as above) clamps volume to `[0, 1]`.
 
 ## Platform Support
 
