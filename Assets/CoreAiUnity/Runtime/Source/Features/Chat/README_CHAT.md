@@ -56,6 +56,9 @@ Configure in the Inspector:
 
 `CoreAiChatPanel` supports both host components. On Unity 6.5+ it listens for `PanelRenderer` UI reloads through
 `RegisterUIReloadCallback`. On older Unity 6.x versions it uses the existing `UIDocument.rootVisualElement` path.
+The custom `CoreAiChatMessageBubbleElement` uses the `[UxmlElement]` / `[UxmlAttribute]` serialization path
+(available since Unity 6000.0 and the only one left in Unity 6.6+, where the engine removed legacy UXML
+factories and traits), so the package baseline stays at Unity 6000.0+.
 
 ### WebGL (browser build)
 

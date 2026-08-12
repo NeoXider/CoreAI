@@ -47,7 +47,7 @@
 
 ## 3. Current repository state (normative snapshot)
 
-> **Current architecture note (7.0.0):** the repository ships **six UPM packages** —
+> **Current architecture note (7.0.1):** the repository ships **six UPM packages** —
 > `com.neoxider.coreai` (portable core, no Lua), `com.neoxider.coreaiunity` (Unity host),
 > `com.neoxider.coreaimods` (optional Lua sandbox + mod runtime, depends on the first two),
 > `com.neoxider.coreaihub` (optional UI Toolkit Hub window), `com.neoxider.coreaibenchmark`
@@ -426,7 +426,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 ## 14. Summary for context (copy-paste)
 
-**CoreAI 7.0.0:** six UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`. **`CoreAI.Core`** in **`Assets/CoreAI`** keeps portable orchestration/chat/tool contracts, queueing, scripted/stub clients and required MEAI references in every build. **`CoreAI.Source`** in **`Assets/CoreAiUnity`** supplies Unity composition, persistence, chat UI and, under **`COREAI_LLM`**, provider-backed HTTP/MEAI/LLMUnity implementations. Lua-CSharp lives only in `coreaimods` and requires **`COREAI_LUA`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** four EditMode matrix legs (`core`, `llm`, `lua`, `full`) plus non-live PlayMode. **Defines:** `COREAI_LLM` (providers), `COREAI_LUA` (Lua), `COREAI_HAS_LLMUNITY` (automatic package presence).
+**CoreAI 7.0.1:** six UPM packages: `coreai`, `coreaiunity`, optional `coreaimods`, `coreaihub`, `coreaibenchmark`, `coreaimcp`. **`CoreAI.Core`** in **`Assets/CoreAI`** keeps portable orchestration/chat/tool contracts, queueing, scripted/stub clients and required MEAI references in every build. **`CoreAI.Source`** in **`Assets/CoreAiUnity`** supplies Unity composition, persistence, chat UI and, under **`COREAI_LLM`**, provider-backed HTTP/MEAI/LLMUnity implementations. Lua-CSharp lives only in `coreaimods` and requires **`COREAI_LUA`**. **Networking:** NGO (§5.1). **Roles:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Guide:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Tests:** four EditMode matrix legs (`core`, `llm`, `lua`, `full`) plus non-live PlayMode. **Defines:** `COREAI_LLM` (providers), `COREAI_LUA` (Lua), `COREAI_HAS_LLMUNITY` (automatic package presence). **UI Toolkit:** custom elements use `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+; the only UXML path left in Unity 6.6+).
 
 ---
 

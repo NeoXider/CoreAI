@@ -8,6 +8,13 @@ namespace CoreAI.Infrastructure.Logging
     public sealed class UnityGameLogSink : IGameLogSink
     {
         private const string Prefix = "[CoreAI] ";
+        private readonly IGameLogSettings _settings;
+
+        /// <summary>Initializes a sink with optional formatting settings.</summary>
+        public UnityGameLogSink(IGameLogSettings settings = null)
+        {
+            _settings = settings;
+        }
 
         /// <inheritdoc />
         public void Write(GameLogLevel level, string message, Object context = null)
@@ -18,37 +25,48 @@ namespace CoreAI.Infrastructure.Logging
                 case GameLogLevel.Info:
                     if (context != null)
                     {
-                        Debug.Log(Prefix + message, context);
+                        Debug.Log(Format(message), context);
                     }
                     else
                     {
-                        Debug.Log(Prefix + message);
+                        Debug.Log(Format(message));
                     }
 
                     break;
                 case GameLogLevel.Warning:
                     if (context != null)
                     {
-                        Debug.LogWarning(Prefix + message, context);
+                        Debug.LogWarning(Format(message), context);
                     }
                     else
                     {
-                        Debug.LogWarning(Prefix + message);
+                        Debug.LogWarning(Format(message));
                     }
 
                     break;
                 case GameLogLevel.Error:
                     if (context != null)
                     {
-                        Debug.LogError(Prefix + message, context);
+                        Debug.LogError(Format(message), context);
                     }
                     else
                     {
-                        Debug.LogError(Prefix + message);
+                        Debug.LogError(Format(message));
                     }
 
                     break;
             }
+        }
+
+        private string Format(string message)
+        {
+            if (_settings is IGameLogFormattingSettings formattingSettings &&
+                !formattingSettings.IncludeCoreAiPrefix)
+            {
+                return message;
+            }
+
+            return Prefix + message;
         }
     }
 }

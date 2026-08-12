@@ -17,42 +17,9 @@ namespace CoreAI.Chat
     /// <summary>
     /// Authorable UI Toolkit chat bubble used by CoreAiChatPanel and editable in UI Builder.
     /// </summary>
-    public sealed class CoreAiChatMessageBubbleElement : VisualElement, ICoreAiChatMessageBubble
+    [UxmlElement]
+    public sealed partial class CoreAiChatMessageBubbleElement : VisualElement, ICoreAiChatMessageBubble
     {
-        public new class UxmlFactory : UxmlFactory<CoreAiChatMessageBubbleElement, UxmlTraits>
-        {
-        }
-
-        public new class UxmlTraits : VisualElement.UxmlTraits
-        {
-            private readonly UxmlBoolAttributeDescription _isUser = new()
-            {
-                name = "is-user",
-                defaultValue = false
-            };
-
-            private readonly UxmlStringAttributeDescription _messageText = new()
-            {
-                name = "message-text",
-                defaultValue = "Message text"
-            };
-
-            private readonly UxmlAssetAttributeDescription<Sprite> _avatarSprite = new()
-            {
-                name = "avatar-sprite"
-            };
-
-            public override void Init(VisualElement element, IUxmlAttributes bag, CreationContext cc)
-            {
-                base.Init(element, bag, cc);
-
-                CoreAiChatMessageBubbleElement bubble = (CoreAiChatMessageBubbleElement)element;
-                bubble.IsUser = _isUser.GetValueFromBag(bag, cc);
-                bubble.MessageText = _messageText.GetValueFromBag(bag, cc);
-                bubble.AvatarSprite = _avatarSprite.GetValueFromBag(bag, cc);
-            }
-        }
-
         private readonly VisualElement _avatar;
         private readonly VisualElement _contentSlot;
         private readonly Label _messageLabel;
@@ -61,6 +28,7 @@ namespace CoreAI.Chat
         private Sprite _avatarSprite;
         private string _messageText = "Message text";
 
+        [UxmlAttribute("is-user")]
         public bool IsUser
         {
             get => _isUser;
@@ -71,6 +39,7 @@ namespace CoreAI.Chat
             }
         }
 
+        [UxmlAttribute("avatar-sprite")]
         public Sprite AvatarSprite
         {
             get => _avatarSprite;
@@ -81,6 +50,7 @@ namespace CoreAI.Chat
             }
         }
 
+        [UxmlAttribute("message-text")]
         public string MessageText
         {
             get => _messageText;

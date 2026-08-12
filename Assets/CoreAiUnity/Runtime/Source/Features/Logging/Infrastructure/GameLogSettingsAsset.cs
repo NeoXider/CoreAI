@@ -11,7 +11,7 @@ namespace CoreAI.Infrastructure.Logging
     /// changes never write back into this asset.
     /// </summary>
     [CreateAssetMenu(fileName = "GameLogSettings", menuName = "CoreAI/Logging/Game Log Settings")]
-    public sealed class GameLogSettingsAsset : ScriptableObject, IGameLogSettings
+    public sealed class GameLogSettingsAsset : ScriptableObject, IGameLogSettings, IGameLogFormattingSettings
     {
         private const int CurrentSettingsVersion = 1;
 
@@ -29,9 +29,25 @@ namespace CoreAI.Infrastructure.Logging
         [SerializeField]
         private GameLogLevel minimumLevel = GameLogLevel.Debug;
 
+        [InspectorName("Omit [CoreAI] Prefix")]
+        [Tooltip("Removes the library prefix from Unity output. Enable when the application logging facade already identifies each message.")]
+        [SerializeField]
+        private bool omitCoreAiPrefix;
+
+        [InspectorName("Omit Feature Prefix")]
+        [Tooltip("Removes prefixes such as [Core] from messages. Enable when the application logging facade already identifies each message.")]
+        [SerializeField]
+        private bool omitFeaturePrefix;
+
         [HideInInspector]
         [SerializeField]
         private int settingsVersion = CurrentSettingsVersion;
+
+        /// <inheritdoc />
+        public bool IncludeCoreAiPrefix => !omitCoreAiPrefix;
+
+        /// <inheritdoc />
+        public bool IncludeFeaturePrefix => !omitFeaturePrefix;
 
         private void OnValidate()
         {
@@ -95,7 +111,9 @@ namespace CoreAI.Infrastructure.Logging
             return new GameLogSettingsOptions
             {
                 EnabledFeatures = enabledFeatures,
-                MinimumLevel = minimumLevel
+                MinimumLevel = minimumLevel,
+                IncludeCoreAiPrefix = IncludeCoreAiPrefix,
+                IncludeFeaturePrefix = IncludeFeaturePrefix
             };
         }
 
@@ -112,6 +130,8 @@ namespace CoreAI.Infrastructure.Logging
 
             enabledFeatures = options.EnabledFeatures;
             minimumLevel = options.MinimumLevel;
+            omitCoreAiPrefix = !options.IncludeCoreAiPrefix;
+            omitFeaturePrefix = !options.IncludeFeaturePrefix;
         }
     }
 }

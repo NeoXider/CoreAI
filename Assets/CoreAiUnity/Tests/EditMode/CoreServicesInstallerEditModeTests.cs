@@ -5,8 +5,10 @@ using CoreAI.Composition;
 using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
+using CoreAI.Logging;
 using CoreAI.Messaging;
 using NUnit.Framework;
+using UnityEngine;
 using VContainer;
 
 namespace CoreAI.Tests.EditMode
@@ -40,6 +42,50 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
+                if (container is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+        }
+
+        [Test]
+        public void RegisterCore_PassesFormattingSettingsToFinalUnitySink()
+        {
+            ILog savedLog = Log.Instance;
+            string token = "coreai-di-prefix-probe-" + Guid.NewGuid().ToString("N");
+            string captured = null;
+            GameLogSettingsOptions settings = new()
+            {
+                EnabledFeatures = GameLogFeature.All,
+                MinimumLevel = GameLogLevel.Debug,
+                IncludeCoreAiPrefix = false,
+                IncludeFeaturePrefix = false
+            };
+            ContainerBuilder builder = new();
+            builder.RegisterInstance<IGameLogSettings>(settings);
+            builder.RegisterCore();
+
+            void Handler(string condition, string stackTrace, LogType type)
+            {
+                if (condition != null && condition.Contains(token))
+                {
+                    captured = condition;
+                }
+            }
+
+            IObjectResolver container = builder.Build();
+            Application.logMessageReceived += Handler;
+            try
+            {
+                container.Resolve<IGameLogger>().LogInfo(GameLogFeature.Core, token);
+
+                Assert.AreEqual(token, captured);
+            }
+            finally
+            {
+                Application.logMessageReceived -= Handler;
+                Log.Instance = savedLog;
                 if (container is IDisposable disposable)
                 {
                     disposable.Dispose();

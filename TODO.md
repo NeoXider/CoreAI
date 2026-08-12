@@ -1,13 +1,46 @@
 # TODO
 
-> Updated 2026-08-09. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-12. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 7.0.0 (2026-08-01, all six packages in lockstep, `McpServerInfo.Version` included).
+> Released: 7.0.3 (2026-08-12, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## Independent log-prefix controls (2026-08-12) — 7.0.3
+
+- [x] `[CoreAI]` and feature prefixes are independently optional while both remain enabled by default.
+      `IGameLogSettings` is unchanged; the optional formatting contract preserves external implementations.
+- [x] Game Log Settings exposes clear omission checkboxes for hosts whose own logging facade identifies messages.
+      Scoped DI and the unscoped fallback pass the live settings through the real logger/sink chain.
+- [x] Package checks are green: analyzer `dotnet test` 8/8, positive-module contract PASS, and 7.0.3
+      package/MCP lockstep PASS.
+- [x] **Verification gate:** Unity 6000.3.14f1 full EditMode is 2654 passed / 0 failed / 9 skipped
+      (2663 total, 118.609 s). All four exact final-output cases and the DI sink case pass. The shared
+      LlmInfra `ChatMessage` collision is fixed with an explicit CoreAI alias; the DI test restores
+      process-wide `Log.Instance` so later tests keep their authored prefix expectations.
+- [x] Unity-regenerated dotnet gates pass sequentially: Core 0 warnings / 0 errors; Source 0 / 0;
+      Core.Tests 2 / 0; Tests 4 / 0. The prior `AiAttachment` CS0246 errors disappeared after successful
+      Unity compilation regenerated project inputs.
+
+## Unity 6.6 UI Toolkit UXML wave (2026-08-12) — 7.0.1
+
+- [x] `CoreAiChatMessageBubbleElement` переведён с удалённых в Unity 6.6 `UxmlFactory` / `UxmlTraits` на
+      `[UxmlElement]` + `partial` + `[UxmlAttribute]`. UXML-имена атрибутов (`is-user`, `message-text`,
+      `avatar-sprite`), полное имя типа в `CoreAiChatMessageBubble.uxml`, значения по умолчанию и открытый
+      конструктор без параметров сохранены. Аудит остального репозитория legacy UITK API не нашёл.
+- [x] Unity 6.0–6.6 Input System защищён двойным gate: `ENABLE_INPUT_SYSTEM` включает backend только при
+      пакетном `COREAI_HAS_INPUT_SYSTEM`; Unity 6.7+ использует встроенный модуль по version define. Это
+      сохраняет компиляцию старых проектов с New/Both в Player Settings, но без UPM-пакета, и не возвращает
+      тихое отключение ввода на 6.7. License-free package-graph gate фиксирует все три asmdef и восемь `#if`.
+- [ ] **Verification gate (следующая сессия редактора)**: прогнать `CoreAiChatMessageBubbleElementEditModeTests`
+      (включая новый пин UXML-контракта) и полный EditMode-набор. Статическая проверка на установленном
+      Unity 6000.3.14f1 пройдена: UI Toolkit generator создал `UxmlSerializedData`, а Input backend собран
+      отдельно с пакетом и без него. Полный `dotnet build CoreAI.Source.csproj` пока блокируют устаревшие
+      Unity-сгенерированные project inputs (`AiAttachment` и удалённый `CoreAiBackendPanel.cs`); Unity в этой
+      проверке не запускался по прямому ограничению задачи.
 
 ## Post-7.0.0 audit fix wave (2026-08-09) — unreleased
 
@@ -34,7 +67,7 @@ Done (compile gates green via `dotnet build`; EditMode suite runs on next editor
       `Docs/Audits/2026-07-16/` (8), finished audit/investigation reports in `dev-docs/` (9) and
       `Assets/CoreAI/Docs/PERF_REVIEW_2026-06-12.md`; `dev-docs/README.md` no longer sanctions audit notes.
       Deleted empty husk folders (`Assets/Tests/Edit`, `Assets/_source`, 7 empty dirs under
-      `Assets/CoreAI/Runtime/Core/`). `bundleVersion` synced 6.11.1 → 7.0.0.
+      `Assets/CoreAI/Runtime/Core/`). `bundleVersion` synced 6.11.1 → 7.0.3 (lockstep).
 - [x] **Convention/doc nits:** `var` → explicit in `FetchSseOpenAiTransport.cs`; `Docs/ARCHITECTURE_RULES.md`
       stale `RobloxSpace`/`RobloxApi` identifiers → `RbxSpace`/`RbxApi`.
 - [x] **Demo mods ported off the withheld `coreai_world_*` build APIs.** FullAccess Tetris

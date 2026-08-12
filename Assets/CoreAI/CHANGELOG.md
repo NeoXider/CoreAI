@@ -25,6 +25,27 @@
   шагов, карантин вместо выгрузки), уровень языка — Lua 5.2 + Luau downleveler, а примеры с withheld
   `coreai_world_*` build API помечены как opt-in-only.
 
+## [7.0.3] - 2026-08-12
+
+### Added
+
+- **Log formatting can opt out of the library and feature prefixes independently.**
+  `GameLogSettingsOptions`, `RuntimeGameLogSettings`, and `GameLogFilter` expose
+  `IncludeCoreAiPrefix` and `IncludeFeaturePrefix`, both defaulting to `true`.
+  The optional `IGameLogFormattingSettings` contract leaves `IGameLogSettings` unchanged, so existing
+  third-party settings implementations retain source compatibility and the legacy format.
+
+## [7.0.1] - 2026-08-12
+
+### Changed
+
+- **Patch-релиз синхронизирован в lockstep-графе пакетов.** Версия portable core и внутренние зависимости
+  обновлены до 7.0.1 вместе с исправлением Unity 6.6 UI Toolkit в `com.neoxider.coreaiunity`;
+  публичный API portable core не менялся.
+- **Релизный гейт `tools/check_positive_module_opt_in.py` переведён на 7.0.1.** Ожидаемая lockstep-версия
+  и строки ROADMAP / DEVELOPER_GUIDE теперь собираются из констант `LOCKSTEP_VERSION` / `LOCKSTEP_DATE`,
+  поэтому CI-джоб `Package graph (lockstep + deps)` не падает после каждого бампа версии.
+
 ## [7.0.0] - 2026-08-01
 
 ### Breaking
