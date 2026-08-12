@@ -1,13 +1,25 @@
 # TODO
 
-> Updated 2026-08-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-12. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.0.
+> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.1.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## Unity 6.6 UI Toolkit UXML wave (2026-08-12) — 7.0.1
+
+- [x] `CoreAiChatMessageBubbleElement` переведён с удалённых в Unity 6.6 `UxmlFactory` / `UxmlTraits` на
+      `[UxmlElement]` + `partial` + `[UxmlAttribute]`. UXML-имена атрибутов (`is-user`, `message-text`,
+      `avatar-sprite`), полное имя типа в `CoreAiChatMessageBubble.uxml`, значения по умолчанию и открытый
+      конструктор без параметров сохранены. Аудит остального репозитория legacy UITK API не нашёл.
+- [ ] **Verification gate (следующая сессия редактора)**: прогнать `CoreAiChatMessageBubbleElementEditModeTests`
+      (включая новый пин UXML-контракта) и полный EditMode-набор. На момент правки проверка не выполнялась:
+      редактор CoreAI закрыт, а `dotnet build CoreAI.Source.csproj` падает на устаревшем
+      Unity-сгенерированном `CoreAI.Core.csproj` (в нём нет `AiAttachment.cs`) — csproj пересоберётся при
+      следующем старте редактора.
 
 ## Turn teardown + positive module opt-in wave (2026-08-01) — release candidate 7.0.0
 

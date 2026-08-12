@@ -9,32 +9,29 @@
 
 Инструкции по доработке форка [NeoXider/MarkdownRenderer](https://github.com/NeoXider/MarkdownRenderer): исправление ошибок, переименование пакета и план улучшений перед интеграцией в NeoxiderTools.
 
-**Поддерживаемая версия Unity:** 2022.3 и выше.
+**Поддерживаемая версия Unity:** 6000.0 и выше — `[UxmlElement]` / `[UxmlAttribute]` доступны с Unity 6000.0
+и остаются единственным UXML-путём в Unity 6.6+, где legacy-фабрики удалены.
 
 ---
 
-## 1. Ошибка CS0246: UxmlElement / UxmlElementAttribute
+## 1. Миграция UXML-элемента для Unity 6.6+
 
-**Причина:** `[UxmlElement]` и `partial class` — API Unity 6. В Unity 2022.3+ используется паттерн **UxmlFactory** + **UxmlTraits**.
+**Причина:** Unity 6.6 полностью удалил legacy-фабрики и traits. Пользовательские элементы регистрируются через `[UxmlElement]`, а UXML-свойства — через `[UxmlAttribute]`; класс должен быть `partial` и иметь открытый конструктор без параметров.
 
 **Файлы в форке** (правка в обоих, если есть): `Editor/VideoElement/VideoPlayerElement.cs` и `MarkdownRenderer/Editor/VideoElement/VideoPlayerElement.cs`
 
-**Было:**
+**Требуемый вид:**
 ```csharp
 [UxmlElement]
 public partial class VideoPlayerElement : VisualElement
 {
+    public VideoPlayerElement()
+    {
+    }
+}
 ```
 
-**Нужно заменить на:**
-```csharp
-public class VideoPlayerElement : VisualElement
-{
-    public new class UxmlFactory : UxmlFactory<VideoPlayerElement, UxmlTraits> { }
-    public new class UxmlTraits : VisualElement.UxmlTraits { }
-```
-
-Класс больше не должен быть `partial`. После правки проект собирается в Unity 2022.3 и выше.
+После правки генератор Unity создаёт сериализованные UXML-данные, и проект собирается на Unity 6000.0+, включая 6.6+, где удалён legacy API.
 
 ---
 

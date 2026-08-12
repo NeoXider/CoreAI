@@ -112,7 +112,8 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 ### 4.1 Open the project
 
 1. **Unity Hub** → **Add** → select the `CoreAI` folder
-2. Open the project (Unity **6000.0+**)
+2. Open the project (Unity **6000.0+**; custom UI Toolkit elements use `[UxmlElement]` / `[UxmlAttribute]`,
+   the only UXML path left in Unity 6.6+)
 
 ### 4.2 Open the scene
 

@@ -34,7 +34,9 @@ in the base in every configuration. The required Microsoft.Extensions.AI assembl
 a Core dependency; `COREAI_LLM` controls the concrete HTTP/MEAI/LLMUnity provider implementations,
 not whether orchestration or chat types exist.
 
-Requirements: **Unity 6000.0+**.
+Requirements: **Unity 6000.0+**. Пользовательские UI Toolkit элементы используют UXML-путь
+`[UxmlElement]` / `[UxmlAttribute]` — он доступен с Unity 6000.0 и остаётся единственным в Unity 6.6+,
+где legacy `UxmlFactory` / `UxmlTraits` удалены из движка.
 
 ---
 

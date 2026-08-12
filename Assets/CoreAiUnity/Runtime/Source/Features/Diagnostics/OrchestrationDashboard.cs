@@ -2,7 +2,7 @@
 using System.Text;
 using CoreAI.Ai;
 using UnityEngine;
-#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+#if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
 
@@ -68,7 +68,7 @@ namespace CoreAI.Diagnostics
                 return true;
             }
 #endif
-#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+#if ENABLE_INPUT_SYSTEM
             Keyboard kb = Keyboard.current;
             if (kb != null)
             {
@@ -82,7 +82,7 @@ namespace CoreAI.Diagnostics
             return false;
         }
 
-#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+#if ENABLE_INPUT_SYSTEM
         /// <summary>
         /// Maps a legacy <see cref="KeyCode"/> value to the Input System key enum.
         /// </summary>

@@ -5,8 +5,8 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-08-01. Current lockstep package version: **7.0.0 release candidate**.
-The release is a major compile-contract and multi-user isolation update; see [Release plan](#4-release-plan).
+Last updated: 2026-08-12. Current lockstep package version: **7.0.1**.
+The patch restores Unity 6.6 UI Toolkit compilation; see [Release plan](#4-release-plan).
 
 ---
 
@@ -52,7 +52,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep (all currently 7.0.0 release candidates):
+Six UPM packages, released in lockstep (all currently 7.0.1):
 
 | Package | What it is |
 |---|---|
@@ -241,10 +241,12 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 
 ## 4. Release plan
 
-- **7.0.0 (current release candidate, 2026-08-01).** Breaking migration to independent positive
+- **7.0.1 (current, 2026-08-12).** Patch release migrating the chat bubble custom UI Toolkit element
+  to `[UxmlElement]` / `[UxmlAttribute]` for Unity 6.6 while preserving existing UXML type and attribute names.
+- **7.0.0 (2026-08-01).** Breaking migration to independent positive
   provider/Lua symbols, full-demo repository baseline, four-leg CI matrix, opaque multi-user
   persistence keys, scope-aware cancellation, session-only persistence, prompt-cache layering and
-  chat lifecycle hardening. All six packages remain lockstep at 7.0.0.
+  chat lifecycle hardening. This remains the 7.x breaking baseline.
 - **7.x minors.** Subsequent Roblox API and runtime-UI rungs ship as compatible 7.x minors. Patch
   releases carry fixes only; every release passes the full EditMode/PlayMode gates and updates the
   changelog for every touched package.

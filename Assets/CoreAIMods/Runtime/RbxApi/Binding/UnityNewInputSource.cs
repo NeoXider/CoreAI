@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
-#if COREAI_HAS_INPUT_SYSTEM
+#if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 #endif
@@ -23,7 +23,7 @@ namespace CoreAI.Mods.Rbx.Binding
     // this backend can be replaced (legacy Input or a custom poll) without touching the Lua API.
     public sealed class UnityNewInputSource : IInputSource
     {
-#if COREAI_HAS_INPUT_SYSTEM
+#if ENABLE_INPUT_SYSTEM
         private static readonly (Key Key, int KeyCode)[] KeyMap = BuildKeyMap();
         private static readonly Dictionary<int, Key> KeyByKeyCode = BuildKeyByKeyCode();
 
@@ -178,8 +178,9 @@ namespace CoreAI.Mods.Rbx.Binding
             return byKeyCode;
         }
 #else
-        // WHY: compile-safe fallback for a project without com.unity.inputsystem — the Lua surface
-        // stays intact (loads, connects, polls) and simply reports no input.
+        // WHY: compile-safe fallback when the Input System backend is off (Active Input Handling =
+        // Input Manager (Old), so ENABLE_INPUT_SYSTEM is undefined and Keyboard/Mouse/Gamepad would
+        // be null anyway) — the Lua surface stays intact (loads, connects, polls) and reports no input.
         public void CollectPressedKeyCodes(ICollection<int> buffer)
         {
         }

@@ -31,11 +31,6 @@
       "name": "ai.undream.llm",
       "expression": "1.0.0",
       "define": "COREAI_HAS_LLMUNITY"
-    },
-    {
-      "name": "com.unity.inputsystem",
-      "expression": "1.0.0",
-      "define": "COREAI_HAS_INPUT_SYSTEM"
     }
   ],
   "noEngineReferences": false

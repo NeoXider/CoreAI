@@ -29,7 +29,8 @@ HISTORICAL_FILES = {
 }
 DGF_SPEC = Path("Assets/CoreAiUnity/Docs/DGF_SPEC.md")
 DGF_HISTORY_HEADING = "## 15. Document revision history"
-LOCKSTEP_VERSION = "7.0.0"
+LOCKSTEP_VERSION = "7.0.1"
+LOCKSTEP_DATE = "2026-08-12"
 PACKAGE_JSON_FILES = (
     Path("Assets/CoreAI/package.json"),
     Path("Assets/CoreAiUnity/package.json"),
@@ -219,7 +220,7 @@ def verify_current_release_docs() -> None:
             fail(f"{relative.as_posix()} does not document both positive module symbols")
 
     roadmap = (ROOT / "Docs/ROADMAP.md").read_text(encoding="utf-8-sig")
-    if "Six UPM packages, released in lockstep (all currently 7.0.0 release candidates):" not in roadmap:
+    if f"Six UPM packages, released in lockstep (all currently {LOCKSTEP_VERSION}):" not in roadmap:
         fail("roadmap package count/version is stale")
     if "Five UPM packages" in roadmap or "CoreAI 5.9 uses" in roadmap:
         fail("roadmap still contains a stale current release statement")
@@ -227,7 +228,7 @@ def verify_current_release_docs() -> None:
     guide = (ROOT / "Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md").read_text(encoding="utf-8-sig")
     if not guide.startswith("# CoreAI Developer Guide") or "CoreAI 7.0 uses endpoint/profile/role separation" not in guide:
         fail("developer guide current-version introduction is stale")
-    if "**Version of this guide:** 7.0.0 (2026-08-01)" not in guide:
+    if f"**Version of this guide:** {LOCKSTEP_VERSION} ({LOCKSTEP_DATE})" not in guide:
         fail("developer guide footer is not current")
 
     for relative in (Path("Assets/CoreAI/CHANGELOG.md"), Path("Assets/CoreAiUnity/CHANGELOG.md")):

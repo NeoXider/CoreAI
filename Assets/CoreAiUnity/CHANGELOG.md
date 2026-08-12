@@ -2,6 +2,40 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [7.0.1] - 2026-08-12
+
+### Fixed
+
+- **Исправлена компиляция UI Toolkit на Unity 6.6.** `CoreAiChatMessageBubbleElement` переведён с удалённых
+  `UxmlFactory` / `UxmlTraits` на `[UxmlElement]`, `partial` и `[UxmlAttribute]`; UXML-имена `is-user`,
+  `message-text` и `avatar-sprite`, значения по умолчанию и открытый конструктор без параметров сохранены.
+- **Зафиксирован UXML-контракт chat bubble.** EditMode-тест клонирует штатный `CoreAiChatMessageBubble.uxml`
+  и проверяет полное имя пользовательского элемента и значения его стабильных атрибутов.
+
+### Changed
+
+- **Минимальная версия Unity в манифесте осознанно оставлена на `6000.0`.** `[UxmlElement]` и
+  `[UxmlAttribute]` доступны с Unity 6000.0 — в 6.6 сломался ровно старый путь, а не новый. Мигрированный
+  код собирается на всём диапазоне 6000.0+, поэтому сужать поддержку в патч-релизе не за что.
+- **Наличие Input System определяется встроенным `ENABLE_INPUT_SYSTEM`, а не `versionDefines` по пакету.**
+  В Unity 6.7 `com.unity.inputsystem` перестаёт быть обычным UPM-пакетом и становится встроенным
+  precompiled-модулем движка (проектам с жёсткой зависимостью выдаётся shim-пакет 2.0.0), то есть версии
+  пакета, по которой срабатывал `versionDefines`, у него больше нет. Символ `COREAI_HAS_INPUT_SYSTEM`
+  молча перестал бы определяться, и `OrchestrationDashboard`, `CoreAiTokenBudgetOverlay` и
+  `UnityNewInputSource` так же молча ушли бы в ветку «Input System нет»: горячие клавиши диагностических
+  панелей и Lua-`UserInputService` перестали бы работать без единой ошибки в консоли. Запись
+  `com.unity.inputsystem` убрана из `versionDefines` в `CoreAI.Source`, `CoreAI.Mods` и
+  `CoreAI.RbxApi.Binding`, а все `#if` переведены на встроенный `ENABLE_INPUT_SYSTEM`, который движок
+  выставляет сам по *Active Input Handling* в Player Settings. Символ существует с Unity 2019.x, поэтому
+  поддержка старых версий не сужается. Ссылка на сборку `Unity.InputSystem` в `references` сохранена:
+  в 6.7 сборка присутствует всегда, а нерезолвнутая ссылка на отсутствующую сборку компиляцию asmdef
+  не ломает (так же устроен, например, `Unity.VisualScripting.Core`).
+- **`UnityNewInputSource` следует *Active Input Handling*, а не факту установки пакета.** При
+  `Input Manager (Old)` backend компилируется в no-op-заглушку вместо опроса `Keyboard.current` /
+  `Mouse.current` / `Gamepad.current`, которые в этом режиме всё равно отдают `null`. Lua-поверхность
+  `UserInputService` не меняется: она по-прежнему грузится, подключается и опрашивается, просто
+  сообщает об отсутствии ввода.
+
 ## [7.0.0] - 2026-08-01
 
 ### Breaking
