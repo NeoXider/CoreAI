@@ -2,6 +2,21 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [7.0.2] - 2026-08-12
+
+### Fixed
+
+- **Восстановлена сборка на Unity 6.0–6.6, где пакет Input System не установлен.** В 7.0.1 гейт был
+  сведён к одному `ENABLE_INPUT_SYSTEM`, но движок выставляет этот символ по настройке
+  *Active Input Handling*, а не по факту наличия пакета. До 6.7 `com.unity.inputsystem` — обычный
+  UPM-пакет, поэтому конфигурация «Active Input Handling = New/Both, пакета нет» давала `CS0246`
+  на `using UnityEngine.InputSystem;`. Условие стало
+  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`: до 6.7 нужны и
+  включённый бэкенд, и реально установленный пакет; с 6.7, где Input System становится встроенным
+  модулем движка и `versionDefines` перестаёт срабатывать, достаточно версии редактора. Так закрыты
+  оба провала сразу — ошибка сборки на старых версиях и молчаливое отключение ввода на новых.
+  `versionDefines` в трёх asmdef возвращены, но больше не являются единственной опорой.
+
 ## [7.0.1] - 2026-08-12
 
 ### Fixed
@@ -17,24 +32,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **Минимальная версия Unity в манифесте осознанно оставлена на `6000.0`.** `[UxmlElement]` и
   `[UxmlAttribute]` доступны с Unity 6000.0 — в 6.6 сломался ровно старый путь, а не новый. Мигрированный
   код собирается на всём диапазоне 6000.0+, поэтому сужать поддержку в патч-релизе не за что.
-- **Наличие Input System определяется встроенным `ENABLE_INPUT_SYSTEM`, а не `versionDefines` по пакету.**
+- **Input System определяется `ENABLE_INPUT_SYSTEM` вместе с доступностью реализации для версии Unity.**
   В Unity 6.7 `com.unity.inputsystem` перестаёт быть обычным UPM-пакетом и становится встроенным
   precompiled-модулем движка (проектам с жёсткой зависимостью выдаётся shim-пакет 2.0.0), то есть версии
   пакета, по которой срабатывал `versionDefines`, у него больше нет. Символ `COREAI_HAS_INPUT_SYSTEM`
   молча перестал бы определяться, и `OrchestrationDashboard`, `CoreAiTokenBudgetOverlay` и
   `UnityNewInputSource` так же молча ушли бы в ветку «Input System нет»: горячие клавиши диагностических
   панелей и Lua-`UserInputService` перестали бы работать без единой ошибки в консоли. Запись
-  `com.unity.inputsystem` убрана из `versionDefines` в `CoreAI.Source`, `CoreAI.Mods` и
-  `CoreAI.RbxApi.Binding`, а все `#if` переведены на встроенный `ENABLE_INPUT_SYSTEM`, который движок
-  выставляет сам по *Active Input Handling* в Player Settings. Символ существует с Unity 2019.x, поэтому
+  `com.unity.inputsystem` сохранена в `versionDefines` для Unity 6.0–6.6, а все `#if` требуют
+  `ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)`. Первый символ движок
+  выставляет по *Active Input Handling*, второй подтверждает пакет на старых редакторах, а ветка версии
+  включает встроенный модуль начиная с 6.7. `ENABLE_INPUT_SYSTEM` существует с Unity 2019.x, поэтому
   поддержка старых версий не сужается. Ссылка на сборку `Unity.InputSystem` в `references` сохранена:
   в 6.7 сборка присутствует всегда, а нерезолвнутая ссылка на отсутствующую сборку компиляцию asmdef
   не ломает (так же устроен, например, `Unity.VisualScripting.Core`).
-- **`UnityNewInputSource` следует *Active Input Handling*, а не факту установки пакета.** При
-  `Input Manager (Old)` backend компилируется в no-op-заглушку вместо опроса `Keyboard.current` /
-  `Mouse.current` / `Gamepad.current`, которые в этом режиме всё равно отдают `null`. Lua-поверхность
-  `UserInputService` не меняется: она по-прежнему грузится, подключается и опрашивается, просто
-  сообщает об отсутствии ввода.
+- **`UnityNewInputSource` следует *Active Input Handling*, когда реализация Input System доступна.** При
+  `Input Manager (Old)` или отсутствующем пакете на Unity до 6.7 backend компилируется в no-op-заглушку
+  вместо обращения к недоступным `Keyboard` / `Mouse` / `Gamepad`. Lua-поверхность `UserInputService`
+  не меняется: она по-прежнему грузится, подключается и опрашивается, просто сообщает об отсутствии ввода.
 
 ## [7.0.0] - 2026-08-01
 

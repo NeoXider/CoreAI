@@ -15,11 +15,16 @@
       `[UxmlElement]` + `partial` + `[UxmlAttribute]`. UXML-имена атрибутов (`is-user`, `message-text`,
       `avatar-sprite`), полное имя типа в `CoreAiChatMessageBubble.uxml`, значения по умолчанию и открытый
       конструктор без параметров сохранены. Аудит остального репозитория legacy UITK API не нашёл.
+- [x] Unity 6.0–6.6 Input System защищён двойным gate: `ENABLE_INPUT_SYSTEM` включает backend только при
+      пакетном `COREAI_HAS_INPUT_SYSTEM`; Unity 6.7+ использует встроенный модуль по version define. Это
+      сохраняет компиляцию старых проектов с New/Both в Player Settings, но без UPM-пакета, и не возвращает
+      тихое отключение ввода на 6.7. License-free package-graph gate фиксирует все три asmdef и восемь `#if`.
 - [ ] **Verification gate (следующая сессия редактора)**: прогнать `CoreAiChatMessageBubbleElementEditModeTests`
-      (включая новый пин UXML-контракта) и полный EditMode-набор. На момент правки проверка не выполнялась:
-      редактор CoreAI закрыт, а `dotnet build CoreAI.Source.csproj` падает на устаревшем
-      Unity-сгенерированном `CoreAI.Core.csproj` (в нём нет `AiAttachment.cs`) — csproj пересоберётся при
-      следующем старте редактора.
+      (включая новый пин UXML-контракта) и полный EditMode-набор. Статическая проверка на установленном
+      Unity 6000.3.14f1 пройдена: UI Toolkit generator создал `UxmlSerializedData`, а Input backend собран
+      отдельно с пакетом и без него. Полный `dotnet build CoreAI.Source.csproj` пока блокируют устаревшие
+      Unity-сгенерированные project inputs (`AiAttachment` и удалённый `CoreAiBackendPanel.cs`); Unity в этой
+      проверке не запускался по прямому ограничению задачи.
 
 ## Turn teardown + positive module opt-in wave (2026-08-01) — release candidate 7.0.0
 

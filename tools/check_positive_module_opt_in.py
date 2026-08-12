@@ -29,7 +29,7 @@ HISTORICAL_FILES = {
 }
 DGF_SPEC = Path("Assets/CoreAiUnity/Docs/DGF_SPEC.md")
 DGF_HISTORY_HEADING = "## 15. Document revision history"
-LOCKSTEP_VERSION = "7.0.1"
+LOCKSTEP_VERSION = "7.0.2"
 LOCKSTEP_DATE = "2026-08-12"
 PACKAGE_JSON_FILES = (
     Path("Assets/CoreAI/package.json"),
@@ -39,6 +39,17 @@ PACKAGE_JSON_FILES = (
     Path("Assets/CoreAIBenchmark/package.json"),
     Path("Assets/CoreAIMcp/package.json"),
 )
+INPUT_SYSTEM_ASMDEFS = (
+    Path("Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef"),
+    Path("Assets/CoreAIMods/Runtime/CoreAI.Mods.asmdef"),
+    Path("Assets/CoreAIMods/Runtime/RbxApi/Binding/CoreAI.RbxApi.Binding.asmdef"),
+)
+INPUT_SYSTEM_SOURCES = {
+    Path("Assets/CoreAiUnity/Runtime/Source/Features/Diagnostics/OrchestrationDashboard.cs"): 3,
+    Path("Assets/CoreAiUnity/Runtime/Source/Features/Diagnostics/CoreAiTokenBudgetOverlay.cs"): 3,
+    Path("Assets/CoreAIMods/Runtime/RbxApi/Binding/UnityNewInputSource.cs"): 2,
+}
+INPUT_SYSTEM_GATE = "#if ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)"
 
 
 def fail(message: str) -> None:
@@ -173,6 +184,26 @@ def verify_asmdefs_are_not_blanket_gated() -> None:
         fail(f"assemblies must not be blanket-disabled by module symbols: {', '.join(offenders)}")
 
 
+def verify_input_system_compatibility_gate() -> None:
+    for relative in INPUT_SYSTEM_ASMDEFS:
+        data = json.loads((ROOT / relative).read_text(encoding="utf-8-sig"))
+        version_defines = data.get("versionDefines", [])
+        if not any(
+            item.get("name") == "com.unity.inputsystem"
+            and item.get("expression") == "1.0.0"
+            and item.get("define") == "COREAI_HAS_INPUT_SYSTEM"
+            for item in version_defines
+        ):
+            fail(f"{relative.as_posix()} lacks the pre-6.7 Input System package gate")
+
+    for relative, expected_count in INPUT_SYSTEM_SOURCES.items():
+        source = (ROOT / relative).read_text(encoding="utf-8-sig")
+        if source.count(INPUT_SYSTEM_GATE) != expected_count:
+            fail(f"{relative.as_posix()} does not use the version-safe Input System gate everywhere")
+        if "#if ENABLE_INPUT_SYSTEM\n" in source:
+            fail(f"{relative.as_posix()} has an unsafe bare ENABLE_INPUT_SYSTEM gate")
+
+
 def verify_project_baseline() -> None:
     settings = (ROOT / "ProjectSettings/ProjectSettings.asset").read_text(encoding="utf-8-sig")
     for symbol in (LEGACY_LUA_SYMBOL, LEGACY_LLM_SYMBOL):
@@ -246,6 +277,7 @@ def main() -> None:
     verify_security_fixture_guard()
     verify_llm_fixture_guard()
     verify_asmdefs_are_not_blanket_gated()
+    verify_input_system_compatibility_gate()
     verify_project_baseline()
     verify_current_release_docs()
     print("Positive module opt-in contract: PASS")
