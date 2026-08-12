@@ -64,8 +64,14 @@ namespace CoreAI.Infrastructure.Logging
             _sink.Write(GameLogLevel.Error, Format(feature, message), context);
         }
 
-        private static string Format(GameLogFeature feature, string message)
+        private string Format(GameLogFeature feature, string message)
         {
+            if (_settings is IGameLogFormattingSettings formattingSettings &&
+                !formattingSettings.IncludeFeaturePrefix)
+            {
+                return message;
+            }
+
             return $"[{feature}] {message}";
         }
     }

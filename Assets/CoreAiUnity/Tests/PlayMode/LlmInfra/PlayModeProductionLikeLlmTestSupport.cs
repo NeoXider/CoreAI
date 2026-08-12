@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
+using AgentChatMessage = CoreAI.Ai.ChatMessage;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using Newtonsoft.Json.Linq;
@@ -81,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class InMemoryStore : IAgentMemoryStore
     {
         public readonly Dictionary<string, AgentMemoryState> States = new();
-        public readonly Dictionary<string, List<ChatMessage>> ChatHistories = new();
+        public readonly Dictionary<string, List<AgentChatMessage>> ChatHistories = new();
 
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
@@ -105,20 +106,20 @@ namespace CoreAI.Tests.PlayMode
 
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<AgentChatMessage> list))
             {
-                list = new List<ChatMessage>();
+                list = new List<AgentChatMessage>();
                 ChatHistories[roleId] = list;
             }
 
-            list.Add(new ChatMessage(role, content ?? ""));
+            list.Add(new AgentChatMessage(role, content ?? ""));
         }
 
-        public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        public AgentChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<AgentChatMessage> list))
             {
-                return Array.Empty<ChatMessage>();
+                return Array.Empty<AgentChatMessage>();
             }
 
             if (maxMessages <= 0)

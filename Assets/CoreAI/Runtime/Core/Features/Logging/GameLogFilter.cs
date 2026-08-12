@@ -23,7 +23,9 @@ namespace CoreAI.Infrastructure.Logging
         private static volatile GameLogSettingsOptions _authored = new()
         {
             EnabledFeatures = GameLogDefaults.EnabledFeatures,
-            MinimumLevel = GameLogDefaults.MinimumLevel
+            MinimumLevel = GameLogDefaults.MinimumLevel,
+            IncludeCoreAiPrefix = true,
+            IncludeFeaturePrefix = true
         };
 
         /// <summary>Live settings instance every CoreAI logger filters against.</summary>
@@ -41,6 +43,20 @@ namespace CoreAI.Infrastructure.Logging
         {
             get => RuntimeSettings.MinimumLevel;
             set => RuntimeSettings.MinimumLevel = value;
+        }
+
+        /// <summary>Whether Unity output starts with the library-level [CoreAI] prefix.</summary>
+        public static bool IncludeCoreAiPrefix
+        {
+            get => RuntimeSettings.IncludeCoreAiPrefix;
+            set => RuntimeSettings.IncludeCoreAiPrefix = value;
+        }
+
+        /// <summary>Whether messages passed to a sink start with their feature prefix.</summary>
+        public static bool IncludeFeaturePrefix
+        {
+            get => RuntimeSettings.IncludeFeaturePrefix;
+            set => RuntimeSettings.IncludeFeaturePrefix = value;
         }
 
         /// <summary>Turns a single category on or off without disturbing the others.</summary>
@@ -71,7 +87,9 @@ namespace CoreAI.Infrastructure.Logging
             _authored = new GameLogSettingsOptions
             {
                 EnabledFeatures = authored?.EnabledFeatures ?? GameLogDefaults.EnabledFeatures,
-                MinimumLevel = authored?.MinimumLevel ?? GameLogDefaults.MinimumLevel
+                MinimumLevel = authored?.MinimumLevel ?? GameLogDefaults.MinimumLevel,
+                IncludeCoreAiPrefix = authored?.IncludeCoreAiPrefix ?? true,
+                IncludeFeaturePrefix = authored?.IncludeFeaturePrefix ?? true
             };
 
             RuntimeSettings.Apply(_authored);

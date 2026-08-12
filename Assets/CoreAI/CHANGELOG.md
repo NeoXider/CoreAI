@@ -1,5 +1,15 @@
 # Changelog
 
+## [7.0.3] - 2026-08-12
+
+### Added
+
+- **Log formatting can opt out of the library and feature prefixes independently.**
+  `GameLogSettingsOptions`, `RuntimeGameLogSettings`, and `GameLogFilter` expose
+  `IncludeCoreAiPrefix` and `IncludeFeaturePrefix`, both defaulting to `true`.
+  The optional `IGameLogFormattingSettings` contract leaves `IGameLogSettings` unchanged, so existing
+  third-party settings implementations retain source compatibility and the legacy format.
+
 ## [7.0.1] - 2026-08-12
 
 ### Changed

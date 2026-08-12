@@ -41,7 +41,9 @@ namespace CoreAI.Infrastructure.Logging
 
                 // WHY: The same live filter the container registers, so runtime GameLogFilter changes
                 // reach the many call sites that log without a resolved scope.
-                _instance = new FilteringGameLogger(new UnityGameLogSink(), GameLogFilter.Settings);
+                _instance = new FilteringGameLogger(
+                    new UnityGameLogSink(GameLogFilter.Settings),
+                    GameLogFilter.Settings);
 
                 if (Log.Instance is NullLog)
                 {

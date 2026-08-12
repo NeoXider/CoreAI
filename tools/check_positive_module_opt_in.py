@@ -29,7 +29,7 @@ HISTORICAL_FILES = {
 }
 DGF_SPEC = Path("Assets/CoreAiUnity/Docs/DGF_SPEC.md")
 DGF_HISTORY_HEADING = "## 15. Document revision history"
-LOCKSTEP_VERSION = "7.0.2"
+LOCKSTEP_VERSION = "7.0.3"
 LOCKSTEP_DATE = "2026-08-12"
 PACKAGE_JSON_FILES = (
     Path("Assets/CoreAI/package.json"),

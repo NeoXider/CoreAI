@@ -2,12 +2,28 @@
 
 > Updated 2026-08-12. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.1.
+> Released: 6.14.0 (2026-07-31, all six packages in lockstep). Unreleased packages are aligned at 7.0.3.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## Independent log-prefix controls (2026-08-12) — 7.0.3
+
+- [x] `[CoreAI]` and feature prefixes are independently optional while both remain enabled by default.
+      `IGameLogSettings` is unchanged; the optional formatting contract preserves external implementations.
+- [x] Game Log Settings exposes clear omission checkboxes for hosts whose own logging facade identifies messages.
+      Scoped DI and the unscoped fallback pass the live settings through the real logger/sink chain.
+- [x] Package checks are green: analyzer `dotnet test` 8/8, positive-module contract PASS, and 7.0.3
+      package/MCP lockstep PASS.
+- [x] **Verification gate:** Unity 6000.3.14f1 full EditMode is 2654 passed / 0 failed / 9 skipped
+      (2663 total, 118.609 s). All four exact final-output cases and the DI sink case pass. The shared
+      LlmInfra `ChatMessage` collision is fixed with an explicit CoreAI alias; the DI test restores
+      process-wide `Log.Instance` so later tests keep their authored prefix expectations.
+- [x] Unity-regenerated dotnet gates pass sequentially: Core 0 warnings / 0 errors; Source 0 / 0;
+      Core.Tests 2 / 0; Tests 4 / 0. The prior `AiAttachment` CS0246 errors disappeared after successful
+      Unity compilation regenerated project inputs.
 
 ## Unity 6.6 UI Toolkit UXML wave (2026-08-12) — 7.0.1
 

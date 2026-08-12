@@ -97,6 +97,9 @@ Recommendation for a title: keep settings in one or two ScriptableObject assets 
 - **Changing the filter while the game runs:** **`GameLogFilter`** (static, thread-safe, works in a player).
   `GameLogFilter.MinimumLevel = GameLogLevel.Debug`, `GameLogFilter.EnabledFeatures = GameLogFeature.Llm | GameLogFeature.Metrics`,
   `GameLogFilter.SetFeatureEnabled(GameLogFeature.Llm, false)`, `GameLogFilter.Snapshot()`, `GameLogFilter.ResetToAuthored()`.
+  Prefixes can also be changed independently: set `GameLogFilter.IncludeCoreAiPrefix` and
+  `GameLogFilter.IncludeFeaturePrefix`, or use the two omission checkboxes on `GameLogSettingsAsset` when
+  an application logging facade already identifies the message. Both default to `true` for compatibility.
   **`CoreAILifetimeScope`** copies **`GameLogSettingsAsset`** into that filter while building the container and registers the
   copy as **`IGameLogSettings`**, so the scoped logger **and** **`GameLoggerUnscopedFallback`** obey the same live rules and the
   **`.asset`** is never mutated at runtime. Without an assigned asset the scope warns **once** and falls back to every category
@@ -773,4 +776,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 7.0.2 (2026-08-12) — six-package topology; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.0.3 (2026-08-12) — six-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

@@ -55,7 +55,10 @@ namespace CoreAI.Tests.EditMode
             GameLogSettingsAsset asset = ScriptableObject.CreateInstance<GameLogSettingsAsset>();
             try
             {
-                Assert.AreEqual(GameLogFeature.All, asset.ToOptions().EnabledFeatures);
+                GameLogSettingsOptions options = asset.ToOptions();
+                Assert.AreEqual(GameLogFeature.All, options.EnabledFeatures);
+                Assert.IsTrue(options.IncludeCoreAiPrefix);
+                Assert.IsTrue(options.IncludeFeaturePrefix);
             }
             finally
             {
@@ -165,6 +168,51 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(1, sink.Entries.Count);
             Assert.AreEqual(GameLogLevel.Info, sink.Entries[0].Level);
+        }
+
+        #endregion
+
+        #region Final Output Formatting
+
+        [TestCase(true, true, "[CoreAI] [Core] ")]
+        [TestCase(true, false, "[CoreAI] ")]
+        [TestCase(false, true, "[Core] ")]
+        [TestCase(false, false, "")]
+        public void PrefixOptions_WriteExpectedFinalUnityMessage(
+            bool includeCoreAiPrefix,
+            bool includeFeaturePrefix,
+            string expectedPrefix)
+        {
+            string token = "coreai-prefix-probe-" + Guid.NewGuid().ToString("N");
+            string captured = null;
+            GameLogSettingsOptions settings = new()
+            {
+                EnabledFeatures = GameLogFeature.All,
+                MinimumLevel = GameLogLevel.Debug,
+                IncludeCoreAiPrefix = includeCoreAiPrefix,
+                IncludeFeaturePrefix = includeFeaturePrefix
+            };
+
+            void Handler(string condition, string stackTrace, LogType type)
+            {
+                if (condition != null && condition.Contains(token))
+                {
+                    captured = condition;
+                }
+            }
+
+            Application.logMessageReceived += Handler;
+            try
+            {
+                FilteringGameLogger logger = new(new UnityGameLogSink(settings), settings);
+                logger.LogInfo(GameLogFeature.Core, token);
+
+                Assert.AreEqual(expectedPrefix + token, captured);
+            }
+            finally
+            {
+                Application.logMessageReceived -= Handler;
+            }
         }
 
         #endregion

@@ -2,6 +2,22 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [7.0.3] - 2026-08-12
+
+### Added
+
+- **`[CoreAI]` and feature prefixes such as `[Core]` can be omitted independently.** Game Log Settings
+  exposes two opt-in omission checkboxes for applications whose own logging facade already identifies
+  messages. Both prefixes remain enabled by default. The scoped DI logger and the unscoped fallback pass
+  the same live formatting settings through `FilteringGameLogger` and `UnityGameLogSink`; four EditMode
+  cases assert the exact final Unity message for every prefix combination.
+
+### Fixed
+
+- **LLMUnity-enabled test projects compile without a `ChatMessage` type collision.** The shared PlayMode
+  test memory store now aliases `CoreAI.Ai.ChatMessage` explicitly instead of colliding with
+  `LLMUnity.ChatMessage`; this also restores its exact `IAgentMemoryStore.GetChatHistory` return type.
+
 ## [7.0.2] - 2026-08-12
 
 ### Fixed
