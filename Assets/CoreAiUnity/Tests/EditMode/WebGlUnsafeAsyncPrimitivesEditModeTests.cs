@@ -104,14 +104,25 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.TaskDelay)] =
                 "унаследовано: инструмент «подожди», смысл которого и есть задержка",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs", Primitive.PoolContinuations)] =
-                "унаследовано: очередь задач оркестратора, на WebGL не проверялась",
+                "ПРОВЕРЕНО и безвредно (2026-08-20): это сигнал AsyncChunkQueue, введённый как раз " +
+                "ПОЧИНКА WebGL взамен SemaphoreSlim.WaitAsync. Флаг здесь ничего не ломает, потому что " +
+                "читатель ждёт БЕЗ ConfigureAwait(false): awaiter захватил SynchronizationContext хоста, " +
+                "и запрет инлайна означает Post в цикл Unity, а не постановку в несуществующий пул. " +
+                "Снимать флаг НЕЛЬЗЯ наивно — TCS завершаются рядом с общим lock",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs", Primitive.TaskDelay)] =
-                "унаследовано: Task.Delay(Timeout.Infinite, ct) как ожидание отмены в той же очереди",
+                "ПРОВЕРЕНО и безвредно (2026-08-20): Task.Delay(Timeout.Infinite, ct) как ожидание " +
+                "отмены. Бесконечная задержка таймер не заводит вовсе — она резолвится только " +
+                "регистрацией токена, поэтому отсутствие System.Threading.Timer в WebGL на неё не влияет",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/ScriptedLlmClient.cs", Primitive.TaskDelay)] =
                 "тестовый двойник: Task.Delay(0) как точка уступки, в реальный плеер не попадает",
             [("Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmClientRegistry.cs",
                 Primitive.PoolContinuations)] =
-                "унаследовано: ожидание активации клиента; тот же класс дефекта, разбирается отдельной задачей",
+                "ЧАСТИЧНО проверено (2026-08-20): в AwaitWithoutCancellingSharedActivation флаг безвреден — " +
+                "там ждут БЕЗ ConfigureAwait(false), то есть через SynchronizationContext хоста. " +
+                "В AwaitActivationForCallerAsync тот же TCS ждут С ConfigureAwait(false), и это дефект " +
+                "того же класса, что чинился в ToolExecutionPolicy 7.0.5: на пути ОТМЕНЫ активации " +
+                "эндпоинта в WebGL продолжение уйдёт в несуществующий пул. Путь не воспроизводился " +
+                "на проде, поэтому вынесен в отдельную задачу, а не правится вслепую",
             [("Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/UnityWebRequestOpenAiTransport.cs",
                 Primitive.PoolContinuations)] =
                 "унаследовано: транспорт на UnityWebRequest, в браузере вместо него FetchSseOpenAiTransport"

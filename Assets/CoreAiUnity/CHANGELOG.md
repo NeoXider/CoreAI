@@ -4,6 +4,27 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.0.5] - 2026-08-20
+
+### Fixed
+
+- **Версия пакетов поднята до 7.0.5: 7.0.4 закрыл на пути инструмента таймеры, но не потерю
+  продолжения.** Софтлок брифинга воспроизвёлся в свежем WebGL-билде b241 уже с 7.0.4 на борту.
+  Настоящая причина оказалась не в `System.Threading.Timer`, а в `ConfigureAwait(false)`:
+  в WebGL-плеере пула потоков нет, поэтому продолжение такого `await` не выполняется НИКОГДА.
+  Пока каждый инструмент завершался синхронно, приостановки не возникало; первый же ОЖИДАЮЩИЙ
+  инструмент (карточка квиза ждёт ответа ученика) вешал ход учителя насмерть — вечный индикатор
+  набора текста и заблокированный ввод. Подробности и полный разбор — в changelog `com.neoxider.coreai`.
+  Версия проставлена во всех шести `package.json` (включая межпакетные зависимости), в
+  `McpServerInfo.Version` и в `bundleVersion`.
+- **Замечание по стражу.** `WebGlUnsafeAsyncPrimitivesEditModeTests` этот дефект поймать не мог: он
+  сканирует четыре примитива (`RunContinuationsAsynchronously`, `CancelAfter`, `Task.Delay`,
+  `Task.Run`), а `ConfigureAwait(false)` не входит ни в его список, ни в зону анализатора `CAIU001`
+  (тот покрывает только `CoreAiUnity`, а `ToolExecutionPolicy` живёт в переносимом `CoreAI`). Записи
+  списка исключений уточнены: у `QueuedAiOrchestrator` и `LlmClientRegistry.AwaitWithoutCancelling…`
+  `RunContinuationsAsynchronously` **проверен и безвреден** — их читатели ждут БЕЗ
+  `ConfigureAwait(false)`, поэтому продолжение уходит в `SynchronizationContext` хоста, а не в пул.
+
 ## [7.0.4] - 2026-08-19
 
 ### Fixed

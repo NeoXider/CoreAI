@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+## [7.0.5] - 2026-08-20
+
+### Fixed
+
+- **`ToolExecutionPolicy` больше не теряет продолжение после ОЖИДАЮЩЕГО инструмента в WebGL.**
+  7.0.4 починил на этом пути таймеры (`CancelAfter` → `ILlmAsyncMarshaler.DelayAsync`) и один
+  `RunContinuationsAsynchronously`, но дефект остался и воспроизвёлся в билде b241: учитель показывал
+  карточку квиза, ученик отвечал, и ход учителя не завершался НИКОГДА — вечный индикатор набора
+  текста, заблокированный ввод, второго запроса к модели в сети нет.
+  Причина — не таймер, а `ConfigureAwait(false)`: в Unity WebGL-плеере пула потоков нет, а
+  `SynchronizationContext.Current` есть (`UnitySynchronizationContext`), поэтому продолжение
+  `await x.ConfigureAwait(false)` признаётся неинлайнимым и ставится в очередь пула — то есть НЕ
+  ВЫПОЛНЯЕТСЯ НИКОГДА. Пока каждый инструмент завершался синхронно, приостановки не было и дефект не
+  проявлялся; первый же инструмент, который реально ждёт (ответ ученика на карточку), вешал ход
+  насмерть. Отказ безмолвный — не исключение, а вечное ожидание. В редакторе не воспроизводится
+  вовсе: там пул потоков есть.
+  Убраны все 18 `ConfigureAwait(false)` в `ToolExecutionPolicy` — и на потоковом пути
+  (`ExecuteStreamedAsync` → `CompleteStreamedTurnAsync`), и на пакетном (`ExecuteBatchAsync`), и в
+  `ExecuteSingleAsync`, включая гонку `Task.WhenAny(invokeTask, timeoutDelay)`: без этой правки
+  per-call таймаут инструмента из 7.0.4 в WebGL всё равно не срабатывал — задержка планировалась
+  правильно, а её продолжение всё так же уходило в несуществующий пул. То же правило и та же
+  формулировка уже записаны в `MeaiOpenAiChatClient`, `AiOrchestrator`, `QueuedAiOrchestrator`,
+  `LoggingLlmClientDecorator` и `FetchSseOpenAiTransport`; `ToolExecutionPolicy` был последним файлом
+  на пути LLM, где правило не соблюдалось. Для переносимых хостов без `SynchronizationContext`
+  поведение не меняется: захватывать там нечего.
+  **Важно для потребителя:** одной этой правки мало, если тело ожидающего инструмента отдаёт
+  результат через `UniTask.AsTask()`. Первое продолжение после тела принадлежит MEAI
+  (`AIFunction.InvokeAsync` ждёт с `ConfigureAwait(false)`), а MEAI поставляется бинарём — значит
+  публиковать результат хост обязан со снятым `SynchronizationContext`. В RedoSchool это сделано в
+  `ChatInteractiveAwaitChannel`.
+
 ## [7.0.4] - 2026-08-19
 
 ### Fixed

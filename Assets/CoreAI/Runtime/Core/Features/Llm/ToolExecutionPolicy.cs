@@ -20,6 +20,24 @@ namespace CoreAI.Infrastructure.Llm
     /// <see cref="IToolExecutionNotifier"/> wrapper.
     /// Used by both <see cref="SmartToolCallingChatClient"/> (non-streaming)
     /// and the streaming path to keep behavior consistent.
+    /// <para>
+    /// <b>Ни одного <c>ConfigureAwait(false)</c> в этом файле — это требование, а не стиль.</b>
+    /// В Unity WebGL-плеере пула потоков нет, а <c>SynchronizationContext.Current</c> есть
+    /// (<c>UnitySynchronizationContext</c>). Из-за этого продолжение <c>await x.ConfigureAwait(false)</c>
+    /// признаётся «неинлайнимым» (<c>SynchronizationContext</c> не базового типа) и ставится в очередь
+    /// пула — то есть НЕ ВЫПОЛНЯЕТСЯ НИКОГДА. Отказ безмолвный: не исключение, а вечное ожидание.
+    /// Пока каждый инструмент завершался синхронно, суспенда не было и дефект не проявлялся; первый
+    /// же ОЖИДАЮЩИЙ инструмент (карточка квиза, которая ждёт ответа ученика) вешал ход учителя
+    /// навсегда — ученик оставался с вечным индикатором «печатает» и заблокированным вводом.
+    /// Тот же вывод уже записан в <c>MeaiOpenAiChatClient</c>, <c>AiOrchestrator</c>,
+    /// <c>QueuedAiOrchestrator</c>, <c>LoggingLlmClientDecorator</c> и <c>FetchSseOpenAiTransport</c>;
+    /// этот файл был последним на пути LLM, где правило не соблюдалось.
+    /// </para>
+    /// <para>
+    /// Практическое следствие: продолжения возвращаются на цикл хоста (в Unity — на player loop).
+    /// Для переносимых хостов без <c>SynchronizationContext</c> поведение не меняется вовсе — там
+    /// захватывать нечего, и продолжение резюмируется ровно так же, как с <c>ConfigureAwait(false)</c>.
+    /// </para>
     /// </summary>
     public sealed class ToolExecutionPolicy
     {
@@ -533,16 +551,16 @@ namespace CoreAI.Infrastructure.Llm
                         Task<object> invokeTask = marshaler
                             .InvokeAsync<object>(
                                 async () =>
-                                    await aiFunc.InvokeAsync(args, cts.Token).ConfigureAwait(false),
+                                    await aiFunc.InvokeAsync(args, cts.Token),
                                 cts.Token);
 
-                        await Task.WhenAny(invokeTask, timeoutDelay).ConfigureAwait(false);
+                        await Task.WhenAny(invokeTask, timeoutDelay);
 
                         // Whoever lost the race stops here: on a timeout this cancellation is what makes the
                         // tool body observe the deadline, on a normal finish it releases the delay the host
                         // still has scheduled. Cancel is idempotent, so one unconditional call covers both.
                         cts.Cancel();
-                        result = await invokeTask.ConfigureAwait(false);
+                        result = await invokeTask;
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -570,12 +588,9 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
-                    result = await marshaler
-                        .InvokeAsync<object>(
-                            async () =>
-                                await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false),
-                            cancellationToken)
-                        .ConfigureAwait(false);
+                    result = await marshaler.InvokeAsync<object>(
+                        async () => await aiFunc.InvokeAsync(args, cancellationToken),
+                        cancellationToken);
                 }
 
                 sw.Stop();
@@ -1009,7 +1024,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     ToolCallResult r = duplicatePlan.IsDuplicateIndex[i]
                         ? duplicatePlan.IndexedResults[i]
-                        : await ExecuteSingleAsync(toolCalls[i], chatOptions, cancellationToken).ConfigureAwait(false);
+                        : await ExecuteSingleAsync(toolCalls[i], chatOptions, cancellationToken);
                     duplicatePlan.IndexedResults[i] = r;
                     seqResults.Add(r.Result);
                     if (!r.Succeeded)
@@ -1081,7 +1096,7 @@ namespace CoreAI.Infrastructure.Llm
                         // here (it is observed via its own slot) so chaining never throws on a failure.
                         try
                         {
-                            await waitFor.ConfigureAwait(false);
+                            await waitFor;
                         }
                         catch (OperationCanceledException)
                         {
@@ -1096,11 +1111,11 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
 
-                    await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    await gate.WaitAsync(cancellationToken);
                     try
                     {
                         indexed[index] =
-                            await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                            await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
                     }
                     finally
                     {
@@ -1110,7 +1125,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Awaiting WhenAll surfaces OperationCanceledException on outer cancellation (never swallowed).
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await Task.WhenAll(tasks);
 
             // 3. Collate strictly in original call order.
             List<MEAI.AIContent> results = new(indexed.Length);
@@ -1333,7 +1348,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 // Sequential fast-path: byte-identical to the pre-parallel streamed behavior.
                 ToolCallResult executed =
-                    await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                    await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
                 slot.Set(executed);
                 return executed;
             }
@@ -1365,7 +1380,7 @@ namespace CoreAI.Infrastructure.Llm
                     // fault/cancellation here (it is observed via its own slot) so chaining never throws.
                     try
                     {
-                        await waitFor.ConfigureAwait(false);
+                        await waitFor;
                     }
                     catch
                     {
@@ -1373,11 +1388,10 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                await turn.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await turn.Gate.WaitAsync(cancellationToken);
                 try
                 {
-                    slot.Set(await ExecuteSingleAsync(fc, chatOptions, cancellationToken)
-                        .ConfigureAwait(false));
+                    slot.Set(await ExecuteSingleAsync(fc, chatOptions, cancellationToken));
                 }
                 finally
                 {
@@ -1478,10 +1492,9 @@ namespace CoreAI.Infrastructure.Llm
                     try
                     {
                         deferred.Slot.Set(await ExecuteSingleAsync(
-                                deferred.FunctionCall,
-                                deferred.ChatOptions,
-                                cancellationToken)
-                            .ConfigureAwait(false));
+                            deferred.FunctionCall,
+                            deferred.ChatOptions,
+                            cancellationToken));
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
@@ -1538,9 +1551,8 @@ namespace CoreAI.Infrastructure.Llm
                         : null;
 
                     await (graceDelay == null
-                            ? Task.WhenAny(allInFlight, drainSignal.Task)
-                            : Task.WhenAny(allInFlight, drainSignal.Task, graceDelay))
-                        .ConfigureAwait(false);
+                        ? Task.WhenAny(allInFlight, drainSignal.Task)
+                        : Task.WhenAny(allInFlight, drainSignal.Task, graceDelay));
 
                     if (graceDelay != null)
                     {
@@ -1564,7 +1576,7 @@ namespace CoreAI.Infrastructure.Llm
                     // the "no timeout" choice and wait for natural completion.
                     try
                     {
-                        await allInFlight.ConfigureAwait(false);
+                        await allInFlight;
                     }
                     catch (Exception)
                     {
@@ -1597,7 +1609,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                await task.ConfigureAwait(false);
+                await task;
             }
             catch
             {
