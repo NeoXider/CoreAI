@@ -522,15 +522,27 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     using CancellationTokenSource cts =
                         CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    cts.CancelAfter(toolTimeoutMs);
+
+                    // WHY NOT CancelAfter: it is backed by System.Threading.Timer, which never fires in a
+                    // Unity WebGL player. The per-call tool timeout would then not exist there at all — a
+                    // tool body that never returns would hang the whole turn instead of failing with the
+                    // message below. The host schedules this delay on its own loop, where no timer is needed.
+                    Task timeoutDelay = marshaler.DelayAsync(toolTimeoutMs, cts.Token);
                     try
                     {
-                        result = await marshaler
+                        Task<object> invokeTask = marshaler
                             .InvokeAsync<object>(
                                 async () =>
                                     await aiFunc.InvokeAsync(args, cts.Token).ConfigureAwait(false),
-                                cts.Token)
-                            .ConfigureAwait(false);
+                                cts.Token);
+
+                        await Task.WhenAny(invokeTask, timeoutDelay).ConfigureAwait(false);
+
+                        // Whoever lost the race stops here: on a timeout this cancellation is what makes the
+                        // tool body observe the deadline, on a normal finish it releases the delay the host
+                        // still has scheduled. Cancel is idempotent, so one unconditional call covers both.
+                        cts.Cancel();
+                        result = await invokeTask.ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -547,6 +559,13 @@ namespace CoreAI.Infrastructure.Llm
                             Result = new MEAI.FunctionResultContent(fc.CallId, timeoutMsg),
                             Succeeded = false
                         };
+                    }
+                    finally
+                    {
+                        // The losing delay is FAULTED, not merely cancelled, whenever a host bridges a
+                        // cancelled UniTask into a Task (AsTask turns cancellation into an exception), so it
+                        // has to be observed in every outcome or it resurfaces as UnobservedTaskException.
+                        _ = ObserveAsync(timeoutDelay);
                     }
                 }
                 else
@@ -1491,17 +1510,52 @@ namespace CoreAI.Infrastructure.Llm
                     // CancellationToken.None abort path (a cancellation-ignoring tool can't wedge it).
                     using CancellationTokenSource deadline =
                         CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    if (toolTimeoutMs > 0)
-                    {
-                        deadline.CancelAfter(toolTimeoutMs + DrainGraceMarginMs);
-                    }
 
-                    TaskCompletionSource<object> drainSignal =
-                        new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    // WHY NOT RunContinuationsAsynchronously: it forbids inline resumption, so the
+                    // awaiting continuation is handed to the thread pool. A Unity WebGL player has no
+                    // thread pool, and the continuation is then never run at all — the drain parks
+                    // forever and the caller's chat UI animates with no response. Exactly the defect
+                    // already fixed once in FetchSseOpenAiTransport.StreamState; this was the second
+                    // instance of it.
+                    // The price of inline resumption is explicit and accepted: this signal is set from the
+                    // registration below, i.e. from inside whatever code calls Cancel() on the caller's
+                    // token, so the rest of this method (FinalizeStreamedTurn plus the caller's await tail
+                    // up to its next real asynchronous point) runs synchronously on that canceller's stack.
+                    // There is no lock held across it, so no deadlock — and a drain that never resumes at
+                    // all is not a trade worth making to avoid it.
+                    TaskCompletionSource<object> drainSignal = new();
                     using CancellationTokenRegistration registration = deadline.Token.Register(
                         state => ((TaskCompletionSource<object>)state).TrySetResult(null),
                         drainSignal);
-                    await Task.WhenAny(allInFlight, drainSignal.Task).ConfigureAwait(false);
+
+                    // WHY NOT CancelAfter: it is backed by System.Threading.Timer, which does not fire
+                    // in WebGL — the grace deadline this method advertises would simply not exist there,
+                    // leaving a tool body that ignores its token able to wedge finalization forever.
+                    // The host-provided delay runs on the frame loop where there is no timer.
+                    Task graceDelay = toolTimeoutMs > 0
+                        ? (_settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance)
+                            .DelayAsync(toolTimeoutMs + DrainGraceMarginMs, deadline.Token)
+                        : null;
+
+                    await (graceDelay == null
+                            ? Task.WhenAny(allInFlight, drainSignal.Task)
+                            : Task.WhenAny(allInFlight, drainSignal.Task, graceDelay))
+                        .ConfigureAwait(false);
+
+                    if (graceDelay != null)
+                    {
+                        // Stop the grace delay explicitly: disposing a CancellationTokenSource does NOT
+                        // cancel it, so without this the delay would keep the host's loop scheduling it for
+                        // the full grace window after the drain has already finished. Cancel is idempotent,
+                        // so this is equally safe when the deadline is the thing that just fired.
+                        deadline.Cancel();
+
+                        // Observe the delay in EVERY outcome, including the one where it won the race:
+                        // cancellation is not "not a fault" here, because a host that bridges a cancelled
+                        // UniTask into a Task (AsTask) reports it as an exception, and a delay left
+                        // unobserved resurfaces as UnobservedTaskException in an unrelated frame.
+                        _ = ObserveAsync(graceDelay);
+                    }
                 }
                 else if (!allInFlight.IsCompleted)
                 {
@@ -1520,24 +1574,35 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                if (allInFlight.IsCompleted)
-                {
-                    // Observe faults/cancellations so worker exceptions (only outer-cancellation
-                    // OCEs escape ExecuteSingleAsync) never surface as UnobservedTaskException.
-                    _ = allInFlight.Exception;
-                }
-                else
-                {
-                    // Gave up waiting (token fired first): observe the eventual fault off-line.
-                    _ = allInFlight.ContinueWith(
-                        t => _ = t.Exception,
-                        CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                        TaskScheduler.Default);
-                }
+                // Observe faults/cancellations so worker exceptions (only outer-cancellation OCEs escape
+                // ExecuteSingleAsync) never surface as UnobservedTaskException — both when the drain
+                // finished and when it gave up waiting and the fault is still to come.
+                _ = ObserveAsync(allInFlight);
             }
 
             return FinalizeStreamedTurn(turn);
+        }
+
+        /// <summary>
+        /// Observes the eventual outcome of a task nobody awaits, so a fault never resurfaces as an
+        /// <c>UnobservedTaskException</c> in an unrelated frame.
+        /// <para>
+        /// WHY NOT <c>ContinueWith(..., TaskScheduler.Default)</c>: <c>ExecuteSynchronously</c> is a hint,
+        /// not a guarantee — the TPL is free to queue the continuation to the thread pool instead, and a
+        /// Unity WebGL player has no thread pool, so the fault would stay unobserved there forever. An
+        /// <c>await</c> needs no scheduler at all.
+        /// </para>
+        /// </summary>
+        private static async Task ObserveAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Observing IS the purpose: real outcomes are reported through the per-call slots.
+            }
         }
 
         /// <summary>

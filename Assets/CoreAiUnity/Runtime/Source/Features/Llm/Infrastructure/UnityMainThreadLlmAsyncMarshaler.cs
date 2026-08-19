@@ -22,6 +22,19 @@ namespace CoreAI.Infrastructure.Llm
         {
         }
 
+        /// <summary>
+        /// Player-loop delay instead of the default <see cref="Task.Delay(int, CancellationToken)"/>.
+        /// <para>
+        /// A Unity WebGL player has no <c>System.Threading.Timer</c>, so a timer-backed delay never
+        /// fires there and any deadline built on it is silently absent. <c>UniTask.Delay</c> is driven
+        /// by the player loop, which runs in every player including WebGL. <see cref="DelayType.Realtime"/>
+        /// so a paused or time-scaled game does not stretch an internal deadline.
+        /// </para>
+        /// </summary>
+        public Task DelayAsync(int milliseconds, CancellationToken cancellationToken) =>
+            UniTask.Delay(milliseconds, DelayType.Realtime, PlayerLoopTiming.Update, cancellationToken)
+                .AsTask();
+
         public async Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
         {
 #if UNITY_EDITOR

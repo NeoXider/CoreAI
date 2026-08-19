@@ -6,6 +6,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
+- **Unity-хост планирует внутренние задержки LLM кадровым циклом, а не таймером.**
+  `UnityMainThreadLlmAsyncMarshaler` реализует новый хук `ILlmAsyncMarshaler.DelayAsync` через
+  `UniTask.Delay(DelayType.Realtime, PlayerLoopTiming.Update)`. В WebGL-плеере нет
+  `System.Threading.Timer`, поэтому дедлайны на `CancelAfter`/`Task.Delay` там не срабатывали вовсе:
+  дренаж отложенных tool-вызовов и per-call таймаут инструмента (`ToolExecutionPolicy`) висели молча, и
+  после интерактивного инструмента ученик видел бесконечный индикатор набора текста. `DelayType.Realtime`
+  — чтобы пауза или изменённый `timeScale` не растягивали внутренний дедлайн.
+- **Страж на мёртвые в WebGL асинхронные примитивы.** `WebGlUnsafeAsyncPrimitivesEditModeTests`
+  сканирует `Assets/CoreAI/Runtime` и `Assets/CoreAiUnity/Runtime` на `RunContinuationsAsynchronously`,
+  `CancelAfter`, `Task.Delay` и `Task.Run`: вырезает комментарии и строковые литералы и отбрасывает
+  только те ветки препроцессора, которых в WebGL-сборке ДОСТОВЕРНО нет (условия считаются трёхзначно —
+  неизвестный define и `#else` к нему остаются под проверкой). Исключения заморожены парой
+  «файл + примитив», каждое с причиной; сам сканер, вычислитель условий и разметка достижимости покрыты
+  подсадными случаями, иначе поломка стража выглядела бы как «нарушений не найдено». Новый
+  `StreamedTurnDeferredToolEditModeTests` закрывает непокрытую форму — инструмент, который завершается
+  внешним сигналом уже во время дренажа.
 - **WebGL: `WorldStateManager.Reset()` больше не воскрешает удалённый сейв.** Reset удалял save-файл и
   `.tmp`, но не делал flush файловой системы, поэтому на WebGL удалённый сейв возвращался из IndexedDB
   после перезагрузки страницы. Теперь Reset вызывает `CoreAiWebGlPersistence.Sync()` так же, как `Save()`;
