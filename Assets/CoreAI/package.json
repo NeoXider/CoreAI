@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreai",
-  "version": "7.0.3",
+  "version": "7.0.4",
   "displayName": "CoreAI",
   "unity": "6000.0",
   "description": "Portable C# core with no UnityEngine dependency. Orchestration, chat/tool contracts, scripted/stub clients, and required MEAI references are always present; COREAI_LLM adds provider-backed HTTP/MEAI implementations and COREAI_LUA adds Lua. Unity integration ships in com.neoxider.coreaiunity.",

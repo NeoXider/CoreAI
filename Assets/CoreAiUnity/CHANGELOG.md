@@ -4,8 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.0.4] - 2026-08-19
+
 ### Fixed
 
+- **Версия пакетов поднята до 7.0.4, чтобы исправление дренажа tool-вызовов доехало до игры.**
+  Правка `ToolExecutionPolicy` + `ILlmAsyncMarshaler.DelayAsync` лежала в `[Unreleased]`, а
+  потребитель (RedoSchool) закреплён на git-теге, поэтому в браузере продолжал работать код 7.0.3:
+  после интерактивного инструмента ученик видел бесконечный индикатор набора текста. Версия
+  проставлена во всех шести `package.json` (включая межпакетные зависимости), в `McpServerInfo.Version`
+  и в `bundleVersion`.
 - **Unity-хост планирует внутренние задержки LLM кадровым циклом, а не таймером.**
   `UnityMainThreadLlmAsyncMarshaler` реализует новый хук `ILlmAsyncMarshaler.DelayAsync` через
   `UniTask.Delay(DelayType.Realtime, PlayerLoopTiming.Update)`. В WebGL-плеере нет
