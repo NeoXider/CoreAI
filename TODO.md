@@ -1,13 +1,25 @@
 # TODO
 
-> Updated 2026-08-12. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-26. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
+> Prepared: 7.0.6 (2026-08-26, all six packages in lockstep; not committed or released).
 > Released: 7.0.3 (2026-08-12, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## AgentBuilder per-request system prompt declaration (2026-08-26) — 7.0.6 prepared
+
+- [x] `WithPerRequestSystemPrompt()` explicitly declares that every call supplies
+      `AiTaskRequest.SystemPrompt`; `MissingSystemPrompt` is suppressed only for that declaration.
+- [x] The genuine custom-role warning and built-in fallback behavior remain pinned by the existing tests;
+      a new regression pins the per-request declaration branch.
+- [x] `CoreAI.Core.csproj` and `CoreAI.Tests.csproj` compile with 0 errors; package/MCP lockstep and
+      `git diff --check` pass.
+- [ ] **Verification gate (next editor session):** run the focused `AgentBuilderEditModeTests` fixture.
+      Unity Editor was not opened by requirement for this fix wave.
 
 ## Independent log-prefix controls (2026-08-12) — 7.0.3
 

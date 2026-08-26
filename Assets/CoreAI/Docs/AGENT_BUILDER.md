@@ -18,6 +18,33 @@
 
 ---
 
+## Per-request system prompts and validation
+
+A custom role normally reports `AgentBuilderIssueCode.MissingSystemPrompt` when it has no
+builder-level prompt or built-in fallback. If the host intentionally supplies a non-empty
+`AiTaskRequest.SystemPrompt` on every call, declare that contract explicitly:
+
+```csharp
+AgentConfig teacher = new AgentBuilder("Teacher")
+    .WithPerRequestSystemPrompt()
+    .WithOverrideUniversalPrefix()
+    .Build();
+
+await orchestrator.RunTaskAsync(new AiTaskRequest
+{
+    RoleId = teacher.RoleId,
+    SystemPrompt = serverPrompt,
+    Hint = playerMessage
+});
+```
+
+`WithPerRequestSystemPrompt()` does not store or inject prompt text. It only tells builder validation
+that the host owns the per-request prompt contract. Without either `WithSystemPrompt(...)`, this explicit
+declaration, or a built-in fallback, `MissingSystemPrompt` is still reported. No indirect setting such as
+`WithOverrideUniversalPrefix()` suppresses the issue.
+
+---
+
 ## Skills (v2.1)
 
 `SkillSet` — a group of tools + instructions that the model loads **on demand** via two meta-tools:
@@ -998,6 +1025,7 @@ async Task AskMerchant(string playerMessage)
 | `WithSystemPrompt(string)` | Replace the builder-level Layer 3 prompt fragment | `.WithSystemPrompt("You are...")` |
 | `AppendSystemPrompt(string)` | Append to the builder-level Layer 3 prompt fragment | `.AppendSystemPrompt("Use short examples.")` |
 | `WithSystemPrompt(string, SystemPromptWriteMode)` | Replace or append explicitly | `.WithSystemPrompt("Extra rules", SystemPromptWriteMode.Append)` |
+| `WithPerRequestSystemPrompt()` | Declare that every call supplies `AiTaskRequest.SystemPrompt`; suppresses only `MissingSystemPrompt` validation | `.WithPerRequestSystemPrompt()` |
 | `WithTool(ILlmTool)` | Add a tool | `.WithTool(new InventoryLlmTool(...))` |
 | `WithTools(IEnumerable<ILlmTool>)` | Add multiple tools | `.WithTools(tools)` |
 | `WithAction(string, string, Delegate)` | ADD tool from C# delegate | `.WithAction("heal", "desc", () => Heal())` |

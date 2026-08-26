@@ -322,6 +322,20 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ValidateOnBuild_CustomRole_WithPerRequestSystemPrompt_SkipsMissingPrompt()
+        {
+            AgentBuilder builder = new("CustomNpc")
+            {
+                SuppressBuildWarnings = true
+            };
+            builder.WithPerRequestSystemPrompt();
+
+            IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
+
+            Assert.That(issues.Any(i => i.Code == AgentBuilderIssueCode.MissingSystemPrompt), Is.False);
+        }
+
+        [Test]
         public void ValidateOnBuild_BuiltInRole_WithoutSystemPrompt_SkipsMissingPrompt()
         {
             AgentBuilder builder = new(BuiltInAgentRoleIds.Creator)

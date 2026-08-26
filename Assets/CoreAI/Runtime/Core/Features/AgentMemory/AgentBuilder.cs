@@ -41,6 +41,7 @@ namespace CoreAI.Ai
         private readonly List<ILlmTool> _tools = new();
         private readonly List<SkillSet> _skills = new();
         private string _systemPrompt;
+        private bool _withPerRequestSystemPrompt;
 
         private AgentMode _mode = AgentMode.ToolsAndChat;
 
@@ -117,6 +118,17 @@ namespace CoreAI.Ai
         public AgentBuilder AppendSystemPrompt(string prompt)
         {
             return WithSystemPrompt(prompt, SystemPromptWriteMode.Append);
+        }
+
+        /// <summary>
+        /// Явно объявляет, что непустой системный промпт будет задан в каждом
+        /// <see cref="AiTaskRequest.SystemPrompt"/>. Метод не задаёт текст промпта;
+        /// ответственность за его передачу остаётся у вызывающего кода.
+        /// </summary>
+        public AgentBuilder WithPerRequestSystemPrompt()
+        {
+            _withPerRequestSystemPrompt = true;
+            return this;
         }
 
         /// <summary>
@@ -579,7 +591,7 @@ namespace CoreAI.Ai
 
         private void CollectIssues(List<AgentBuilderIssue> issues)
         {
-            if (string.IsNullOrWhiteSpace(_systemPrompt))
+            if (string.IsNullOrWhiteSpace(_systemPrompt) && !_withPerRequestSystemPrompt)
             {
                 bool hasManifestFallback = !string.IsNullOrEmpty(_roleId)
                                            && BuiltInAgentRoleIds.IsBuiltIn(_roleId);
@@ -587,7 +599,8 @@ namespace CoreAI.Ai
                 {
                     issues.Add(new AgentBuilderIssue(
                         AgentBuilderIssueCode.MissingSystemPrompt,
-                        "WithSystemPrompt(...) was not called and the role has no built-in fallback. " +
+                        "Neither WithSystemPrompt(...) nor WithPerRequestSystemPrompt() was declared, " +
+                        "and the role has no built-in fallback. " +
                         "The agent will rely solely on the universal prefix (Layer 1) and any manifest entry (Layer 2). " +
                         "If neither exists, the model gets an empty role prompt."));
                 }
