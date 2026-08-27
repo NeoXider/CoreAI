@@ -114,15 +114,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_PromotesReasoningToVisibleText()
+        public void ParseCompletion_EmptyContent_KeepsReasoningOutOfVisibleText()
         {
-            // Reasoning-only model, non-streaming: the answer lives in reasoning_content and content
-            // is empty. The reasoning must surface as TextReasoningContent AND be promoted to the
-            // visible text so the turn never ends as LlmErrorCode.EmptyResponse.
+            // WHY: В RedoSchool reasoning_content сохранялся как готовая заметка ученика; пустой
+            // content обязан остаться пустым, а рассуждения доступны только для диагностики.
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Hello from reasoning\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("Hello from reasoning", r.Text);
+            Assert.AreEqual("", r.Text);
             Assert.AreEqual("Hello from reasoning",
                 r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
@@ -154,13 +153,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_InlineThinkOnlyContent_PromotesThinkTextAndExposesReasoning()
+        public void ParseCompletion_InlineThinkOnlyContent_KeepsThinkTextOutOfVisibleText()
         {
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"<think>inline plan</think>\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("inline plan", r.Text,
-                "A think-only answer must be promoted instead of surfacing as empty.");
+            Assert.AreEqual("", r.Text,
+                "Think-only content must remain hidden reasoning, not an assistant answer.");
             Assert.AreEqual("inline plan",
                 r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
@@ -175,12 +174,22 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ParseCompletion_EmptyContent_PromotesReasoningToVisibleText_CamelCase()
+        public void ParseCompletion_ContentWithoutReasoning_ReturnsContentUnchanged()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"plain answer\"}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("plain answer", r.Text);
+            Assert.IsEmpty(r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>());
+        }
+
+        [Test]
+        public void ParseCompletion_EmptyContent_KeepsCamelCaseReasoningOutOfVisibleText()
         {
             const string json =
                 "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoningContent\":\"Hello camel\"}}]}";
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
-            Assert.AreEqual("Hello camel", r.Text);
+            Assert.AreEqual("", r.Text);
             Assert.AreEqual("Hello camel",
                 r.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
@@ -276,13 +285,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task GetStreamingResponseAsync_ReasoningOnlyStream_PromotesReasoningToNonEmptyAnswer()
+        public async Task GetStreamingResponseAsync_ReasoningOnlyStream_KeepsVisibleTextEmpty()
         {
-            // A reasoning-only model (DeepSeek/Qwen style: only delta.reasoning_content, content
-            // stays null) previously parsed ZERO deltas -> empty-stream retry -> non-stream fallback
-            // -> EmptyResponse. Now the reasoning deltas count as real deltas (no retry/fallback:
-            // DoneSentinelTransport throws on any non-streaming call) and the accumulated reasoning
-            // is promoted to one final visible TextContent, so the turn is never empty.
+            // WHY: В RedoSchool поток рассуждений доезжал до потребителя как заметка. Дельты
+            // reasoning_content считаются реальными, но никогда не повышаются до видимого текста.
             const string sse =
                 "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I am \"}}]}\n\n" +
                 "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n" +
@@ -311,8 +317,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("I am thinking", reasoningParts.ToString(),
                 "Every reasoning delta must surface as TextReasoningContent.");
-            Assert.AreEqual("I am thinking", string.Concat(visibleParts).Trim(),
-                "A reasoning-only turn must end with the reasoning promoted to a visible answer.");
+            Assert.AreEqual("", string.Concat(visibleParts),
+                "A reasoning-only turn must not emit visible assistant text.");
         }
 
         [Test]

@@ -591,9 +591,6 @@ namespace CoreAI.Infrastructure.Llm
                     bool sawNonCommentLine = false;
                     bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
-                    bool sawVisibleContentDelta = false;
-                    bool sawToolCallDelta = false;
-                    StringBuilder accumulatedReasoning = new();
 
                     // WHY: buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
@@ -645,25 +642,6 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             parsedSseDeltas++;
                             string updateText = update?.Text ?? "";
-                            // WHY: whitespace-aware, matching the non-streaming promotion check
-                            // (IsNullOrWhiteSpace) — a lone "\n" content delta from a reasoning-only
-                            // model must NOT suppress promoting the reasoning to the visible answer.
-                            if (!string.IsNullOrWhiteSpace(updateText))
-                            {
-                                sawVisibleContentDelta = true;
-                            }
-
-                            if (update?.Contents != null)
-                            {
-                                foreach (MEAI.AIContent c in update.Contents)
-                                {
-                                    if (c is MEAI.TextReasoningContent trc && !string.IsNullOrEmpty(trc.Text))
-                                    {
-                                        accumulatedReasoning.Append(trc.Text);
-                                    }
-                                }
-                            }
-
                             bool textOnly = !string.IsNullOrEmpty(updateText)
                                             && (update.Contents == null
                                                 || update.Contents.Count == 0
@@ -702,7 +680,6 @@ namespace CoreAI.Infrastructure.Llm
                         if (completedCalls != null)
                         {
                             parsedSseDeltas++;
-                            sawToolCallDelta = true;
                             yield return completedCalls;
                         }
 
@@ -723,7 +700,6 @@ namespace CoreAI.Infrastructure.Llm
                     if (flushed != null)
                     {
                         parsedSseDeltas++;
-                        sawToolCallDelta = true;
                         yield return flushed;
                     }
 
@@ -757,22 +733,8 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 
-                    if (!sawVisibleContentDelta && !sawToolCallDelta && accumulatedReasoning.Length > 0)
-                    {
-                        // WHY: Never-empty guarantee for reasoning-only turns: the model spent the
-                        // whole turn in reasoning_content and produced no visible content and no tool
-                        // calls. Promote the accumulated reasoning to ONE final visible TextContent so
-                        // the consumer gets an answer instead of an empty stream.
-                        string promotedReasoning = accumulatedReasoning.ToString().Trim();
-                        if (promotedReasoning.Length > 0)
-                        {
-                            _log.Info(
-                                "MeaiOpenAiChatClient: stream carried only reasoning deltas (no visible content, no tool calls) - promoting the accumulated reasoning to the visible answer.",
-                                LogTag.Llm);
-                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, promotedReasoning);
-                        }
-                    }
-
+                    // WHY: В инциденте RedoSchool reasoning_content сохранился как готовая заметка
+                    // ученика. Даже reasoning-only поток остаётся диагностикой и не становится TextContent.
                     yield break;
                 }
             }
@@ -1570,20 +1532,9 @@ namespace CoreAI.Infrastructure.Llm
                 JArray toolCalls = msg?["tool_calls"] as JArray;
                 bool hasToolCalls = toolCalls != null && toolCalls.Count > 0;
 
-                if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(reasoning) &&
-                    !hasToolCalls)
-                {
-                    // WHY: Reasoning-only models (DeepSeek/Qwen) can put the whole answer in
-                    // reasoning_content and leave content empty. Promoting it keeps response.Text
-                    // non-empty so the turn does not surface as LlmErrorCode.EmptyResponse. Tool-call
-                    // turns are exempt: their reasoning must never masquerade as the assistant answer.
-                    content = reasoning.Trim();
-                }
-
                 List<MEAI.AIContent> contents = new();
-                // WHY: the reasoning is ALSO exposed as a TextReasoningContent even when promoted to
-                // the visible answer, so a UI can still render a collapsible thinking section — the
-                // promoted text populates response.Text, the reasoning block feeds the thinking view.
+                // WHY: В инциденте RedoSchool reasoning_content попал в сохраняемую заметку вместо
+                // ответа. Оставляем рассуждения только в диагностическом TextReasoningContent.
                 if (!string.IsNullOrEmpty(reasoning))
                 {
                     contents.Add(new MEAI.TextReasoningContent(reasoning));

@@ -333,15 +333,26 @@ await orch.RunTaskAsync(new AiTaskRequest
 });
 
 // Or via a manual LLM client (for tests / custom pipeline):
-var client = MeaiLlmClient.CreateHttp(coreAiSettings, logger, memoryStore);
-var result = await client.CompleteAsync(new LlmCompletionRequest
+MeaiLlmClient client = MeaiLlmClient.CreateHttp(coreAiSettings, logger, memoryStore);
+LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
 {
     AgentRoleId = "Blacksmith",
     SystemPrompt = merchant.SystemPrompt,
     UserPayload = "Show me your swords",
     Tools = merchant.Tools
 });
+
+// WHY: UI and persistence consume only the assistant answer.
+Debug.Log(result.Content);
+
+// WHY: Reasoning is optional ephemeral diagnostics, never agent memory or chat history.
+Debug.Log(result.ReasoningContent);
 ```
+
+> **Response contract (7.0.7+):** `LlmCompletionResult.Content` is the only final assistant answer.
+> Provider `reasoning_content`, `reasoning`, `reasoningContent`, and inline `<think>` spans live only in
+> `ReasoningContent`. Empty provider content stays empty (and may surface as `LlmErrorCode.EmptyResponse`);
+> CoreAI never substitutes reasoning as an answer.
 
 > 🛡️ **Built-in spam protection (call cancellation):**
 > Both methods (`AskWithCallback` and `AskAsync`) automatically pass `CancellationScope = Agent.RoleId` to the orchestrator.
@@ -539,6 +550,13 @@ var analyzer = new AgentBuilder("BackgroundAnalyzer")
 
 **What it is:** Long-term agent memory. Persists across sessions.
 
+> **Security rule:** model reasoning is per-turn scratch space, not knowledge. Never pass
+> `LlmCompletionResult.ReasoningContent` or `LlmStreamChunk.ReasoningText` to the `memory` tool,
+> `IAgentMemoryStore`, generated student/player notes, `ApplyAiGameCommand`, or automatic assistant records.
+> Persist only explicit tool arguments intentionally chosen as facts and visible `Content` / `Text`.
+> If a host needs reasoning for debugging, keep it in a separate opt-in diagnostic channel with its own
+> redaction and retention policy.
+
 **Use for:**
 - What the player bought
 - Which quests were completed
@@ -565,6 +583,9 @@ var agent = new AgentBuilder("Merchant")
 ### ChatHistory — conversation history
 
 **What it is:** Full dialogue context for a role. The framework **automatically** appends user and assistant turns to `IAgentMemoryStore` (same abstraction as MemoryTool). For **LLMUnity**, messages are also fed into `LLMAgent` during the play session so the model sees prior lines.
+
+Assistant history is built only from visible `LlmCompletionResult.Content` / accumulated
+`LlmStreamChunk.Text`. Reasoning fields must not be copied into history, even when visible content is empty.
 
 **Use for:**
 - Remember what the player asked five minutes ago

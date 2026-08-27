@@ -387,6 +387,25 @@ ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJ
 
 Provider failures use `LlmErrorCode` on `LlmCompletionResult`, `LlmStreamChunk`, and `LlmRequestCompleted`, so callers can handle `QuotaExceeded`, `AuthExpired`, `RateLimited`, `BackendUnavailable`, and other stable categories without parsing error text.
 
+### 4.1 Assistant text and reasoning contract (7.0.7+)
+
+The public LLM result has two deliberately separate channels:
+
+| Buffered completion | Streaming completion | Contract |
+|---|---|---|
+| `LlmCompletionResult.Content` | `LlmStreamChunk.Text` | The only visible assistant answer. Build UI text, commands, notes, and assistant chat history from this channel only. |
+| `LlmCompletionResult.ReasoningContent` | `LlmStreamChunk.ReasoningText` | Ephemeral diagnostics from provider `reasoning_content` / `reasoning` / `reasoningContent` or inline `<think>` spans. Never merge into the visible answer. |
+
+When provider content is empty and reasoning is non-empty, CoreAI preserves the reasoning field but does
+not promote it. The buffered path reports `LlmErrorCode.EmptyResponse`; the streaming path can deliver
+reasoning diagnostic chunks and then an `EmptyResponse` terminal chunk without visible text.
+
+**Persistence boundary:** reasoning must never enter MemoryTool, `IAgentMemoryStore` chat history,
+generated student/player notes, `ApplyAiGameCommand.JsonPayload`, `AgentTurnTrace.AssistantResponse`, or
+any other automatic assistant record. Those paths consume only `Content` / accumulated `Text`. A host may
+show reasoning in an explicitly diagnostic UI, but any durable diagnostic capture must be separate,
+opt-in, redacted, and governed by its own retention policy.
+
 For mixed routing, create profiles such as `player_server`, `analyzer_limited`, and `creator_local`, then map role ids to those profiles. A single request always resolves to one concrete backend, but the scene can keep multiple profiles active.
 
 Symbol **`COREAI_LLM`** (manual positive opt-in, since v7.0.0): compiles provider-backed HTTP/MEAI and available LLMUnity client implementations, provider transports, and their focused tests. Portable orchestration/queueing, scripted and stub clients, chat contracts/UI, tool contracts, and the required Microsoft.Extensions.AI assemblies remain in Core without the symbol. Add or remove it via **CoreAI → Setup → Modules → LLM Providers** or **Project Settings → Player → Scripting Define Symbols**.
@@ -514,6 +533,12 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 |--------|--------|----------------|
 | **CoreAI.Tests** | Test Runner → Edit Mode | Prompts, stub LLM, Lua sandbox, envelope parser, **`LuaAiEnvelopeProcessor`**, repair composer, **`LuaProgrammerPipelineEndToEndEditModeTests`** (orchestrator → envelope → Lua → error → Programmer retry → success). |
 | **PlayMode assemblies** (`CoreAI.Tests.PlayMode.*`) | Test Runner → Play Mode (**filter by assembly**) | **`FastNoLlm`** — quick stub coverage; **`LlmVerification`** — streaming/HTTP/tool/memory probes (env **`COREAI_OPENAI_TEST_*`** / LLMUNITY — see LLMUNITY doc); **`Scenarios`** — crafting / merchant narratives. Shared helpers: **`Shared`**, **`LlmInfra`**. |
+
+Reasoning-isolation runtime regression: in Test Runner select **PlayMode** and filter by
+`CoreAI.Tests.PlayMode.ReasoningIsolationPlayModeTests` (assembly
+`CoreAI.Tests.PlayMode.FastNoLlm`). Its fake `IOpenAiHttpTransport` exercises the real provider adapter,
+LLM adapter, orchestrator, chat service, consumer callback, and history boundary without a model, API key,
+or network request.
 
 Recommendation: run **Edit Mode** before a PR; Play Mode when DI/scene or the HTTP client changes.
 

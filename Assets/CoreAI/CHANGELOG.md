@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [7.0.7] - 2026-08-27
+
+### Fixed
+
+- **OpenAI-совместимый `reasoning_content` больше не становится текстом ответа.** В боевой базе
+  RedoSchool внутренний ход мысли модели сохранялся как готовая заметка ученика, а настоящий ответ
+  обрывался после исчерпания бюджета. `MeaiOpenAiChatClient.ParseResponse` теперь создаёт видимый
+  `TextContent` только из `message.content`; `reasoning_content`, `reasoning` и `reasoningContent`
+  остаются отдельным `TextReasoningContent`. При пустом `content` reasoning не используется как
+  запасной ответ: потребитель получает честный empty-response, а не внутренние сомнения модели.
+- **SSE reasoning остаётся только диагностическим потоком.** Дельты reasoning по-прежнему считаются
+  реальными дельтами и передаются отдельно, но завершение reasoning-only потока больше не добавляет
+  накопленные рассуждения как финальный видимый `TextContent`. Это одинаково работает при
+  `ProviderDefault`, включённом и выключенном reasoning mode: режим меняет request body, не правила
+  разбора ответа.
+- **Публичный контракт результата теперь явно фиксирует границу хранения.** Только
+  `LlmCompletionResult.Content` / `LlmStreamChunk.Text` являются ответом для UI, команд, заметок и
+  истории. `ReasoningContent` / `ReasoningText` — краткоживущая диагностика; её запрещено автоматически
+  переносить в MemoryTool, ChatHistory, `ApplyAiGameCommand`, assistant trace и другие долговременные
+  записи.
+
 ## [7.0.6] - 2026-08-26
 
 ### Fixed

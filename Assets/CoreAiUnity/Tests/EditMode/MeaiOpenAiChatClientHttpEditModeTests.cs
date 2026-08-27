@@ -168,10 +168,10 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task GetResponseAsync_ExtraBodyJson_MergesProviderFields()
+        public async Task GetResponseAsync_EnabledReasoning_MergesProviderFieldsAndKeepsReasoningSeparate()
         {
             const string body =
-                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"final answer\",\"reasoning_content\":\"hidden plan\"}}]}";
             string capturedJson = null;
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
                 new DelegateHttpHandler(req =>
@@ -188,7 +188,8 @@ namespace CoreAI.Tests.EditMode
                 ExtraBodyJsonValue = "{\"top_k\":20,\"chat_template_kwargs\":{\"custom\":true}}",
                 ReasoningModeValue = LlmReasoningMode.Enabled
             });
-            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
 
             Assert.NotNull(capturedJson);
             JObject request = JObject.Parse(capturedJson);
@@ -196,6 +197,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(true, request["enable_thinking"]?.Value<bool>());
             Assert.AreEqual(true, request["chat_template_kwargs"]?["custom"]?.Value<bool>());
             Assert.AreEqual(true, request["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
+            Assert.AreEqual("final answer", response.Text);
+            Assert.AreEqual("hidden plan",
+                response.Messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
         }
 
         [Test]

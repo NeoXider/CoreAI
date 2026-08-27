@@ -4,6 +4,23 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.0.7] - 2026-08-27
+
+### Fixed
+
+- **Версия пакетов поднята до 7.0.7 для исправления утечки reasoning в ответы RedoSchool.** Все шесть
+  `package.json`, внутренние зависимости и `McpServerInfo.Version` синхронизированы штатным
+  `tools/bump_version.py`. Нестримовый результат сохраняет рассуждения только в
+  `LlmCompletionResult.ReasoningContent`, потоковый — только в `LlmStreamChunk.ReasoningText`; текст,
+  который UI показывает и consumer собирает как финальный ответ, формируется исключительно из
+  provider `content`.
+- **8 EditMode- и 4 PlayMode-регрессии закрывают маршрут provider → consumer.** Новый детерминированный
+  `ReasoningIsolationPlayModeTests` в `CoreAI.Tests.PlayMode.FastNoLlm` проводит подставной transport
+  через реальные `MeaiOpenAiChatClient`, `MeaiLlmClient`, `AiOrchestrator` и `CoreAiChatService` без
+  модели и сети. Проверены content+reasoning, reasoning-only, живые SSE-дельты, отдельная диагностика,
+  ChatHistory и command publication. Пакетные руководства фиксируют запрет долговременной и любой
+  автоматической записи reasoning.
+
 ## [7.0.5] - 2026-08-20
 
 ### Fixed

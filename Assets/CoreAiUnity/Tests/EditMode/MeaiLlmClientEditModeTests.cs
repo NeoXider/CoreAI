@@ -379,6 +379,48 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_ReasoningContent_RemainsSeparateFromAnswer()
+        {
+            ReasoningChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "sys",
+                UserPayload = "briefing"
+            }, CancellationToken.None);
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("final note", result.Content);
+            Assert.AreEqual("draft reasoning", result.ReasoningContent);
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_ReasoningDelta_NeverJoinsConsumerText()
+        {
+            // WHY: В RedoSchool потоковый consumer сохранял рассуждения как заметку; публичный Text
+            // должен собираться только из content, а reasoning остаётся отдельной диагностикой.
+            ReasoningChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "sys",
+                UserPayload = "briefing"
+            };
+            List<LlmStreamChunk> chunks = new();
+
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual("final note", string.Concat(chunks.Select(chunk => chunk.Text ?? "")));
+            Assert.AreEqual("draft reasoning", string.Concat(chunks.Select(chunk => chunk.ReasoningText ?? "")));
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_SingleLargeInnerDelta_FansOutToMultipleTextChunks()
         {
             const int len = 150;
@@ -888,6 +930,50 @@ namespace CoreAI.Tests.EditMode
                 LastOptions = options;
                 LastMessages = chatMessages.ToList();
                 yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "ok");
+                await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class ReasoningChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                List<MEAI.AIContent> contents = new()
+                {
+                    new MEAI.TextReasoningContent("draft reasoning"),
+                    new MEAI.TextContent("final note")
+                };
+                return Task.FromResult(
+                    new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents)));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                MEAI.ChatResponseUpdate reasoning = new(MEAI.ChatRole.Assistant, "")
+                {
+                    Contents = new List<MEAI.AIContent>
+                    {
+                        new MEAI.TextReasoningContent("draft reasoning")
+                    }
+                };
+                yield return reasoning;
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "final note");
                 await Task.Yield();
             }
 

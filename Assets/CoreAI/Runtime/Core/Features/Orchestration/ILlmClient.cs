@@ -248,14 +248,19 @@ namespace CoreAI.Ai
         /// <summary>When <c>false</c>, inspect <see cref="Error"/>.</summary>
         public bool Ok { get; set; }
 
-        /// <summary>Raw model text (or JSON command payload).</summary>
+        /// <summary>
+        /// Visible assistant answer (or JSON command payload). This is the only completion field that
+        /// consumers may display, publish, or append to agent memory/history. Provider reasoning is never
+        /// promoted into this field, including when the provider returns empty content.
+        /// </summary>
         public string Content { get; set; } = "";
 
         /// <summary>
         /// Hidden model reasoning for this completion (provider <c>reasoning_content</c> and/or
         /// inline <c>&lt;think&gt;</c> blocks). Empty when the model produced none. Kept separate
         /// from <see cref="Content"/> so hosts can render a collapsible "thinking" section without
-        /// polluting the visible answer.
+        /// polluting the visible answer. Treat this as ephemeral diagnostics: never copy it into
+        /// MemoryTool, chat history, generated notes, command payloads, or automatic assistant records.
         /// </summary>
         public string ReasoningContent { get; set; } = "";
 
@@ -310,13 +315,18 @@ namespace CoreAI.Ai
     /// <summary>One streaming chunk: text fragment and completion markers.</summary>
     public sealed class LlmStreamChunk
     {
-        /// <summary>Text delta (may be empty on terminal chunks).</summary>
+        /// <summary>
+        /// Visible assistant text delta (may be empty on terminal chunks). Consumers build the displayed
+        /// and persistable answer from this field only.
+        /// </summary>
         public string Text { get; set; } = "";
 
         /// <summary>
         /// Hidden reasoning delta (provider <c>reasoning_content</c> or inline <c>&lt;think&gt;</c>
         /// spans). Never part of <see cref="Text"/>: consumers that only read <see cref="Text"/>
-        /// keep a clean visible answer, while UIs may accumulate this into a "thinking" section.
+        /// keep a clean visible answer, while UIs may accumulate this into an ephemeral "thinking"
+        /// section. Never append it to MemoryTool, chat history, generated notes, command payloads,
+        /// or automatic assistant records.
         /// </summary>
         public string ReasoningText { get; set; } = "";
 

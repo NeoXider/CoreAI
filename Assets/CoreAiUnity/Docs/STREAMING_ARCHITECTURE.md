@@ -81,7 +81,7 @@ Key files:
 
 ## 3. Think-block filter
 
-Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. **OpenAI-compatible HTTP (LM Studio, vLLM, etc.)** may instead stream a separate `delta.reasoning_content` field; `MeaiOpenAiChatClient` does **not** forward that to MEAI/Chat (it never becomes `update.Text` for the think filter). The tag-based filter only sees **in-content** tags.
+Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. **OpenAI-compatible HTTP (LM Studio, vLLM, etc.)** may instead stream a separate `delta.reasoning_content` field. `MeaiOpenAiChatClient` maps that field to MEAI `TextReasoningContent` (never `ChatResponseUpdate.Text`), and `MeaiLlmClient` exposes it as `LlmStreamChunk.ReasoningText` (never `LlmStreamChunk.Text`). The tag-based filter handles only **in-content** tags and moves their spans to the same reasoning channel.
 
 For hybrid-thinking local models, keep `CoreAISettingsAsset` **Reasoning Mode** at **Provider Default**
 unless you need to override backend behavior. **Disabled** sends provider-specific request fields such as
@@ -119,6 +119,18 @@ if (!string.IsNullOrEmpty(tail)) ui.Append(tail);
 ```
 
 Covered by **24 EditMode tests** (`ThinkBlockStreamFilterEditModeTests`) including split-tag boundary cases.
+
+### Response and persistence boundary (7.0.7+)
+
+- Build visible incremental and final text only from `LlmStreamChunk.Text`.
+- Treat `LlmStreamChunk.ReasoningText` as optional, ephemeral diagnostics. It may feed an explicitly
+  diagnostic “thinking” view, but it must never be concatenated into the assistant answer.
+- A reasoning-only stream is not an answer. It ends with no visible text and an `EmptyResponse` terminal
+  chunk; CoreAI does not promote accumulated reasoning.
+- Never append `ReasoningText` to MemoryTool, `IAgentMemoryStore` chat history, generated notes,
+  `ApplyAiGameCommand`, assistant traces, analytics payloads, or other automatic records. Those sinks use
+  visible `Text` only. Durable reasoning diagnostics, if a host truly needs them, require a separate
+  opt-in store with explicit redaction and retention.
 
 ---
 
@@ -167,12 +179,16 @@ Covered by `CoreAiChatServiceEditModeTests`.
 Programmatic consumers can bypass the panel entirely:
 
 ```csharp
-await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "SmartChat", ct))
+await foreach (LlmStreamChunk chunk in service.SendMessageStreamingAsync("Hello", "SmartChat", ct))
 {
     if (!string.IsNullOrEmpty(chunk.Text)) label.text += chunk.Text;
+    if (!string.IsNullOrEmpty(chunk.ReasoningText)) diagnostics.Append(chunk.ReasoningText);
     if (chunk.IsDone) break;
 }
 ```
+
+`diagnostics` above is a transient diagnostic buffer, not the chat bubble, MemoryTool, ChatHistory, or a
+generated note. Most consumers should ignore `ReasoningText` entirely.
 
 Or use the static `CoreAi` singleton (see [`COREAI_SINGLETON_API.md`](COREAI_SINGLETON_API.md)) — no manual service resolution:
 
@@ -203,9 +219,9 @@ Inside `AiOrchestrator.RunStreamingAsync`:
 
 1. Build snapshot + prompt composer (shared with `RunTaskAsync`, factored into `BuildRequest`).
 2. Create `LlmCompletionRequest` with tools, history, temperature.
-3. `await foreach` on `ILlmClient.CompleteStreamingAsync` (already includes `ThinkBlockStreamFilter` in `MeaiLlmClient`).
-4. Accumulate full text in a `StringBuilder` (required for step 5).
-5. When the stream ends — structured validation, publish `ApplyAiGameCommand`, append chat history, record metrics.
+3. `await foreach` on `ILlmClient.CompleteStreamingAsync` (already includes `ThinkBlockStreamFilter` in `MeaiLlmClient`); forward `ReasoningText` for diagnostics without adding it to visible text.
+4. Accumulate only `Text` in a `StringBuilder` (required for step 5).
+5. When the stream ends — validate and publish only accumulated visible text, append only that text to chat history, and record metrics.
 
 `QueuedAiOrchestrator.RunStreamingAsync` forwards through its own producer/consumer queue (`AsyncChunkQueue` on `SemaphoreSlim` + `ConcurrentQueue` — no `System.Threading.Channels`, which is unavailable in this Unity build), respecting `MaxConcurrent` and `CancellationScope`.
 
