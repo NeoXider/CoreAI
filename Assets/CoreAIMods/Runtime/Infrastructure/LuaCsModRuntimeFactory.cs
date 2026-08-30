@@ -244,7 +244,8 @@ namespace CoreAI.Ai.LuaCs
                 // logic_define overrides are cleared on unload/reload/quarantine and override failures are
                 // attributed into the mod's diagnostics channel.
                 bindings.LogicSlots,
-                options.LogService);
+                options.LogService,
+                options.RbxApi);
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,

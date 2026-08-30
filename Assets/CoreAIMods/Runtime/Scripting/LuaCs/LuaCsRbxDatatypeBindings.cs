@@ -1016,16 +1016,25 @@ namespace CoreAI.Ai.LuaCs
                     "pass a handler function, got " + Describe(handlerValue) + " at argument 1");
             }
 
-            Action<object[]> wrapper =
-                BuildSignalHandler(ctx.State, handlerValue.Read<LuaFunction>(), signal.SignalName);
+            LuaCsRbxModContext signalOwner = null;
+            if (Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox))
+            {
+                signalOwner = signalBox.SignalOwner;
+            }
+
+            LuaState handlerState = signalOwner == null
+                ? ctx.State
+                : signalOwner.Bindings.ResolveSchedulerOwnerState(ctx.State);
+            Action<object[]> wrapper = BuildSignalHandler(
+                handlerState, handlerValue.Read<LuaFunction>(), signal.SignalName);
             RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
 
             // WHY: attribute the connection to the mod that opened it so composition teardown can
             // Disconnect it on unload/reload/quarantine — otherwise the handler keeps firing against the
             // torn-down mod (INSTANCE_DESTROYED). A context-free wrap or a mod-less one-off records nothing.
-            if (Arg(ctx, 0).TryRead(out LuaCsRbxValueBox signalBox) && signalBox.SignalOwner != null)
+            if (signalOwner != null)
             {
-                signalBox.SignalOwner.TrackConnection(connection);
+                signalOwner.TrackConnection(connection);
             }
 
             return Wrap(connection);

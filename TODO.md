@@ -1,14 +1,150 @@
 # TODO
 
-> Updated 2026-08-27. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-08-30. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
-> Prepared: 7.0.7 (2026-08-27, all six packages in lockstep; not committed or released).
-> Released: 7.0.3 (2026-08-12, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
+> Prepared: 7.1.0 (2026-08-30, all six packages in lockstep; UNCOMMITTED, release pending the EditMode gate).
+> Released: 7.0.7 (2026-08-27, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## MVP1 residue closed + MVP2 scheduler core (2026-08-30) — 7.1.0 prepared
+
+- [x] Every open item in the "Roblox conformance" block below is closed; see it for what each one
+      actually turned out to be. Two of those findings were themselves wrong and are corrected in
+      place rather than silently dropped: `BindToClose` was never a silent argument drop, and the
+      recorded handedness trace had flipped Z signs.
+- [x] `BasePart.Orientation` (YXZ) and `BasePart.Rotation` (XYZ) are wired in degrees over the
+      existing `RbxCFrame` decomposition; setters preserve `Position`. Seven regressions in
+      `RbxApiLuaBindingsEditModeTests` cover the pair; of those exactly TWO pin the ORDER rather than
+      a round trip — one asserts the built CFrame equals `CFrame.fromOrientation(...)`, the other
+      that `Rotation` and `Orientation` genuinely disagree on a multi-axis rotation, so wiring both
+      to one decomposition fails. The rest cover round trips, position preservation, and the
+      single-axis case where the two orders legitimately coincide.
+- [x] `BasePart.Material` remains a loud stub, now naming the tracked phase `MVP2 (materials
+      catalog)` and matching ladder deliverable §5.2.1 item 12.
+- [x] **MVP2 scheduler core (task 2 of §5.2.1) — engine-free `ModScheduler` in
+      `RbxApi/Instances/Scheduling/`.** Canonical R4.2 pipeline as one ordered stage table
+      (PreAnimation → PreSimulation → PostSimulation → resume delayed → Heartbeat → PreRender, with
+      deferred drains at the §5.2.3 points), binary min-heaps for wait/delay keyed
+      `(deadline, earliestFrame, sequence)`, `ScheduleWaitUntil` over a nonblocking completion token,
+      per-thread owning mod id, and `KillOwnedBy` so a budget kill takes one mod without disturbing
+      others in the same frame. 19 deterministic tests. Design: `dev-docs/MVP2_SCHEDULER_PLAN.md`.
+- [x] Architecture decision for that core: it does NOT reference `IScriptCoroutine` (that type lives
+      in `CoreAI.Mods`, so referencing it would invert the assembly dependency). It defines its own
+      `IRbxScriptThread` / `IRbxScriptThreadFactory` / `IRbxTimeSource` ports, matching the existing
+      `IPartPropertySink` / `IInputSource` pattern. Time is injected, so every test is deterministic.
+- [x] **The scheduler is WIRED and live.** `LuaCsRbxSchedulerAdapter` implements the ports over
+      `IScriptCoroutine`; `task.wait/spawn/defer/delay/cancel` call the real scheduler; the tick driver
+      advances it once per frame with the scaled delta in R4.2 order (scheduler phases → delayed
+      resumption → existing input/RunService pump at the Heartbeat boundary → PreRender); teardown
+      calls `KillOwnedBy` where the mod's connections are severed. Two product defects surfaced ONLY
+      in the real editor run — the coroutine seam dropped resume arguments (so `spawn/defer/delay`
+      lost their varargs) and the protected-resume `true` flag leaked into the yield continuation (so
+      `task.wait` returned `true` instead of the elapsed time R4.8 requires). Both fixed in the
+      product; the tests that caught them were left untouched.
+- [ ] **Top-level `task.wait` — DELIBERATELY its own rung, not a loose end of this wave.** In Roblox a
+      script's main chunk IS a scheduler thread, so `task.wait()` at the top level works there; ours
+      refuses. Making mod entry scheduler-owned is not a small wiring change: `LoadMod` would stop
+      running the chunk synchronously to completion, which moves error reporting off the load call and
+      changes `IsLoaded`, quarantine-on-load-failure and every synchronous `LoadFails` assertion.
+      Measured blast radius: **20 EditMode test files call `LoadMod(`, the largest fixture 38 times.** That is a design pass with its own acceptance criteria, not something to bolt onto
+      the end of a release — attempting it here would either be reckless or would quietly weaken the
+      tests that currently pin synchronous load errors.
+- [ ] **Deferred drain points must be revisited when signals arrive** — R5.4–R5.7 add a drain between
+      the delayed resumption and Heartbeat, on top of the R4.8 drains that shipped in this wave.
+- [x] Both samples derive their axes from the camera; three deferred v6.4 audit findings
+      (LOW-2/LOW-3/LOW-4) closed in the same wave. Mod versions bumped so the seeder delivers them.
+- [x] `Docs/ROADMAP.md` and `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` re-synced with reality: current
+      version, MVP1 landed in 6.3.0, the `WaitForChild` rung split, the Lua log service recorded as
+      wired end-to-end (it is: `CoreAiModsInstaller.cs:86/143/335`), decision **D10**, and a §6.6
+      test tree that matches the directories that actually exist.
+- [x] Lua-CSharp checked for updates: **none available.** v0.5.6 (2026-07-29) is still the newest
+      release and the newest NuGet package; upstream `main` is 2 commits ahead with an unreleased
+      `LightAsyncValueTaskMethodBuilder<T>` allocation fix (PR #339) touching the perf area of our
+      issue #338. Not adopted — building from an untagged `main` would re-create exactly the local
+      patched DLL we retired in 6.13.1. Revisit when v0.5.7 ships.
+- [x] File-only gates green: `CoreAI.Core` / `Source` / `Mods` / `RbxApi.Instances` / `Mcp` /
+      `Mods.Tests` all 0 errors. Note the trap this wave walked into: Unity had not regenerated the
+      project files, so the new `Scheduling/` sources and the new handedness test were absent from
+      every generated `.csproj` and a plain `dotnet build` compiled NONE of them while reporting
+      green. Their `<Compile Include>` entries were added by hand before the gates above were run
+      (those files are gitignored build artifacts; Unity overwrites them on its next refresh).
+      Also note `CoreAI.Tests.csproj` is the CORE test assembly — mod tests live in
+      `CoreAI.Mods.Tests.csproj`, and building the wrong one proves nothing about them.
+- [x] **CLOSED — unimplemented surface that was not a loud stub.** `ClassCatalog` now carries a
+      data-driven, inheritance-aware catalog of known Roblox members with a phase and workaround each,
+      and the binding dispatch raises a structured `NOT_IMPLEMENTED` for them. A genuinely unknown
+      name still raises the invalid-member error — both directions are pinned by tests, because
+      turning every typo into "coming soon" would be worse than the original bug. The sweep found more
+      than the audit listed: `Model.WorldPivot`, `Workspace.SignalBehavior`, BasePart collision/physics
+      and six surface properties, `Lighting` holes and six `RunService` methods. Rung proposals still
+      needing a decision: dynamic BasePart/collision → MVP8, deprecated surface properties → explicit
+      non-goal, `Lighting` → MVP15; `Terrain` stays the documented non-goal.
+      Original finding:  Principle 5
+      says unimplemented API must fail with a structured `NOT_IMPLEMENTED` naming its roadmap phase.
+      A row-by-row re-verification of the Lua-visible surface table found members that are neither
+      wired NOR stubbed: they fall through to the generic `X is not a valid member of Y` path
+      (`LuaCsRbxInstanceBindings.cs:204`, and the spatial fallthrough at `:674`). Confirmed cases:
+      `Model.PrimaryPart`; `Workspace.Gravity` / `Raycast` / `GetServerTimeNow` / `Terrain`;
+      `BasePart.Velocity` / `AssemblyLinearVelocity` / `Massless`, constraints and surface properties;
+      container behaviour beyond storage. This is worse than a doc bug and it is AI-facing: the model
+      is told the member DOES NOT EXIST, so it invents a workaround instead of picking an implemented
+      alternative or waiting for the rung. The roadmap table now separates shipped / loud-stubbed /
+      absent honestly, but the runtime still lies. Fix: give each known-Roblox-but-unimplemented
+      member a phase-naming stub, driven by the class catalog rather than a hand-written list.
+      `Model` pivot got its rung in this wave (§5.2.1 item 13, phase `MVP2 (Model pivot)`); the rest
+      still need one.
+- [x] **Verification gate — DONE via batchmode (2026-08-30).** Unity 6000.3.14f1 batchmode, full
+      EditMode, latest run: **2744 total / 2735 passed / 0 failed / 9 skipped**
+      (`artifacts/testresults/editmode8.xml`). The run before the wiring was 2708/2699/0/9; the run
+      immediately after it was 2730/2716/**5 failed** — three of those five were product defects, not
+      test bugs, and none of them showed up in compilation or in the out-of-editor harness. Confirmed
+      from the result XML that the new fixtures actually ran rather than the suite merely being
+      green: `ModScheduler` 19, `SceneHandedness` 4, `BasePartOrientation` 4, `BasePartRotation` 3,
+      `BasePartMaterial` 1, `BindToClose` 2, Model-pivot 2 — zero non-passing cases overall. This
+      also closes the earlier gap where the `LuaBindings` group could not run outside the editor at
+      all (a Unity native ECall during mod-stack construction), so those tests were compile-verified
+      only. The Unity MCP bridge was unavailable all session, but the lockfile turned out to be
+      STALE (no live editor process), so batchmode was free to run and gives more than MCP would.
+      Artifacts: `artifacts/testresults/editmode.xml` + `.log`.
+- [ ] **PlayMode gate — non-live part green, LIVE part BLOCKED on the local LLM backend.** Two
+      batchmode runs: before the `task.*` wiring **112 / 106 passed / 2 failed / 4 skipped** (270 s),
+      after it **112 / 104 / 4 / 4** (15 s). The count of failures grew because the backend got worse
+      mid-session, not the code: the first run failed with `HTTP 400: Invalid model identifier
+      "qwen_qwen3.5-4b"`, the second with `HTTP 400: No models loaded. Please load a model` — so two
+      more live tests that had scraped by now fail too, and the whole run finishes in 15 s because
+      nothing reaches a model. All four failures name the LLM backend
+      (`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`,
+      `CoreAiChatDemo_RealModel_StreamsStopAndRecovers`,
+      `OfflineScope_SwitchedToLiveHttp_AnswersThroughRealModel`,
+      `CraftingMemoryOpenAi_ThreeCrafts_AllUnique`); none touch Lua, the Rbx API or the scheduler.
+      **To close this gate:** load a model in LM Studio and point `COREAI_TEST_MODEL` / the settings
+      preset at it, then re-run PlayMode. Until then the live portion is unverified — it is NOT
+      evidence that the wave is fine, only that the failures are attributable elsewhere.
+      Artifacts: `artifacts/testresults/playmode.xml`, `playmode2.xml` + logs.
+- [x] **CLOSED — the bundled samples now have regression coverage.**
+      `BundledLuaSamplesEditModeTests` reads the REAL resources: it pins each `@coreai` header and
+      version (so a future edit cannot silently drop the bump the seeder needs), that both load and
+      run under the real Lua runtime without hitting a loud stub, that Lane Racer's swept collision
+      catches a large-`dt` crossing without false-positiving on a normal frame, and all three Tetris
+      gravity properties including the normal↔soft-drop transition. Both of its initial failures were
+      test bugs, not sample bugs — the rescale arithmetic was re-derived by hand
+      (`0.59 → 0.0491667 → 0.59`, phase preserved in both directions) before either expectation moved.
+      Original finding:  Two
+      behaviour fixes shipped in them this wave (Lane Racer swept collision, Tetris gravity remainder
+      + soft-drop transition) and the repo rule is that every bug fix ships with a regression test.
+      Nothing tests them: `BundledModSeederEditModeTests` uses fake sources and
+      `DemoModProductionSurfaceEditModeTests` loads a different Tetris source — neither reads
+      `Runtime/Resources/CoreAIMods/sample_*.lua`, verified by grep. An earlier version of this
+      section claimed those two fixtures covered the sample version bumps; that was false and is
+      corrected above. Needed: a fixture that loads the real resource, asserts its `@coreai` header
+      (id/version/capabilities), and drives the deterministic parts — obstacle tunnelling at a large
+      `dt`, the gravity remainder and per-frame cap, and the normal↔soft-drop interval transition.
+- [ ] **Play-test both samples in Play Mode.** The camera-axis rewrites and the Lane Racer collision
+      change were verified by hand-walking the arithmetic, not by playing them.
 
 ## OpenAI-compatible reasoning isolation (2026-08-27) — 7.0.7 prepared
 
@@ -255,29 +391,44 @@ Open:
 
 **Roblox conformance (from ROBLOX_API_CONFORMANCE + REAUDIT + COORD_ROTATION):**
 
-- [ ] **`DataModel:BindToClose(fn)` silently discards its callback (#2.9).**
-      `LuaCsRbxInstanceBindings.cs:435-439` passes `null`, never reads arg 1, no error — the only
-      *silent* Roblox-argument drop. Store the callback for a shutdown hook or raise
-      NOT_IMPLEMENTED.
-- [ ] **BasePart `Material`/`Orientation`/`Rotation` loud stubs (#2.5).** Needs the material
-      catalog + Euler decomposition; add to the ladder or an explicit follow-up (loud today, so not
-      a trap — but untracked).
-- [ ] **Scene-level handedness golden test (COORD_ROTATION follow-up 1).** The Rbx→Unity bridge was
-      proven correct analytically; lock it with a `[Test]` reproducing the §3 trace (eye=(0,9,-14),
-      target=(0,2,18), parts at ±X, screen-side agreement) — current goldens cover only
-      identity/yaw poses.
-- [ ] **Samples hard-code world-axis movement (COORD_ROTATION follow-up 2).**
-      `sample_lane_racer.lua` uses `LANE_X = {-4,0,4}` + fixed camera with a justifying comment;
-      teach the `camera.CFrame.RightVector`-derived pattern instead (samples are teaching material).
-- [ ] **Rung ambiguity:** TODO ladder lists `WaitForChild` under rung 2 (MVP1) while the code stub
-      (`LuaCsRbxInstanceBindings.cs:316-330`) gates the yield to MVP2 — align the rung assignment.
+- [x] **`game:BindToClose(fn)` now validates its argument (#2.9, 7.1.0).** The finding as written was
+      wrong: `RbxDataModel.BindToClose` already raised a loud `NOT_IMPLEMENTED` (phase MVP5), so the
+      call was never silent. What was missing is argument checking — the binding passed `null` and
+      never read arg 1. It now raises `BAD_ARGUMENT` naming the received type for a non-function and
+      reaches the MVP5 stub for a function. Implementing the callback itself stays MVP5.
+- [x] **BasePart `Orientation`/`Rotation` wired; `Material` is now tracked (#2.5, 7.1.0).**
+      `Orientation` (YXZ, degrees) and `Rotation` (XYZ, degrees) go through the existing
+      `RbxCFrame.ToOrientation`/`ToEulerAnglesXYZ`; setters preserve `Position`. `Material` stays a
+      loud stub but its phase string is now `MVP2 (materials catalog)`, matching a real ladder
+      deliverable (ROBLOX_API_ROADMAP §5.2.1 item 12) — no longer untracked work. The `Rotation`
+      Euler order is an inference, recorded as decision **D10**: the offline mirror documents only
+      "degrees for the three axes" and the API dump gives no order.
+- [x] **Scene-level handedness golden test landed (COORD_ROTATION follow-up 1, 7.1.0).**
+      `RbxSpaceSceneHandednessGoldenEditModeTests` pins screen-side agreement in both spaces,
+      `mod z = -(Unity z)` on every trace point in both directions, and the right-handed→left-handed
+      chirality flip, under both RobloxSpace scales. **The trace recorded here was wrong**: with
+      eye=(0,9,-14) → target=(0,2,18) the camera looks along +Z, so `RightVector` is (-1,0,0) and
+      Roblox +X is on the LEFT. The test uses the real Lane Racer camera instead — eye=(0,9,14) →
+      target=(0,2,-18), where `RightVector` is (+1,0,0).
+- [x] **Both samples now derive their axes from the camera (COORD_ROTATION follow-up 2, 7.1.0).**
+      Lane Racer builds lane/track axes from `CurrentCamera.CFrame.RightVector`/`LookVector`
+      projected onto the ground; Tetris 3D does the same for its horizontal/depth axes while its grid
+      logic stays integer and camera-independent. Both mod versions were bumped so the bundled-mod
+      seeder actually delivers the fix to installed copies.
+- [x] **Rung ambiguity resolved (7.1.0).** `WaitForChild` is MVP1 for an existing child; the yield,
+      the 5 s `Infinite yield possible` warning and the timeout overload are MVP2. Stated
+      unambiguously everywhere it appears in ROBLOX_API_ROADMAP.
 
 **Deferred by the audits themselves (no action needed now, recorded so the context survives):**
 
 - v6.4 MEDIUM-2 (RenderStepped fired last in the pump) and LOW-1 (delta boxed before the
       `HasConnections` gates) — both deferred to the MVP2 scheduler rewrite by design.
-- v6.4 LOW-2/LOW-3/LOW-4 (tetris `occupied()` allocs, lane-racer collision tunneling at large dt,
-      tetris `gravAccum` reset-vs-subtract) — sample polish, batch into a samples cleanup.
+- v6.4 LOW-2/LOW-3/LOW-4 — **done in 7.1.0** with the camera-axis sample wave. Tetris returns piece
+      cells as scalars instead of allocating five tables per frame; Lane Racer tests whether the
+      obstacle's movement SEGMENT crossed the car band instead of sampling its endpoint, so a frame
+      spike can no longer tunnel a block through the car; Tetris subtracts the gravity interval
+      instead of zeroing the accumulator, steps every elapsed interval, caps catch-up at eight steps
+      per frame and drops the surplus when that cap is hit.
 - ALLOC_BACKSTOP_FLAKE — resolved: `GC.GetAllocatedBytesForCurrentThread` re-verified returning 0
       on the current editor (recorded in `LuaCsExecutionGuard.cs:287`); the first-growth limitation
       is the tracked item at "Allocation guard is a per-call first-growth backstop" below. The
@@ -376,11 +527,12 @@ Open:
       `LuaCsModRuntimeEditModeTests`, `List_QuarantinedMod_SurfacesQuarantineFlagAndHint` in
       `LuaModsLlmToolEditModeTests`, and the full EditMode suite on next editor start (compile gates
       green via `dotnet build`: Mods, Source, Mods.Tests, Tests, Demos, Mods.Hub, Benchmarking).
-- [ ] 2. Instance/DataModel registry *(rung: MVP1)* — `game`, `workspace`, `Instance.new`, `.Parent`,
-      `FindFirstChild`, `WaitForChild`, `GetChildren/GetDescendants`, `Clone`, `Destroy`, attributes;
-      multiplayer-ready ids (`InstanceRegistry` owns identity; reserves Mirror `netId` + world-command
-      name fields).
-- [ ] 3. Core datatypes *(rung: MVP1)* — `Vector3`, `CFrame`, `Color3`, `UDim2`, `Enum.*` (current Roblox API shape).
+- [x] 2. Instance/DataModel registry *(rung: MVP1)* — LANDED 6.3.0. `game`, `workspace`,
+      `Instance.new`, `.Parent`, `FindFirstChild`, `GetChildren/GetDescendants`, `Clone`, `Destroy`,
+      attributes; multiplayer-ready ids (`InstanceRegistry` owns identity; reserves Mirror `netId` +
+      world-command name fields). `WaitForChild` resolves an existing child here; its yield is MVP2.
+- [x] 3. Core datatypes *(rung: MVP1)* — LANDED 6.3.0. `Vector3`, `CFrame`, `Color3`, `UDim2`,
+      `Enum.*` with golden fixtures against documented Roblox values.
 - [ ] 4. Task scheduler *(rung: MVP2)* — `task.wait/spawn/defer/delay`, legacy `wait`, on the existing coroutine
       substrate; `RunService.Heartbeat/PostSimulation`; connection objects with `:Disconnect()`.
 - [ ] 5. `game:GetService` *(rung: MVP2)* — whitelist registry; unimplemented services = loud stubs.

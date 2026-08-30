@@ -350,6 +350,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Exception ex = LoadFails(stack, "m", "local x = workspace.NoSuchChildHere");
             StringAssert.Contains(
                 "NoSuchChildHere is not a valid member of Workspace \"Workspace\"", FullText(ex));
+            StringAssert.DoesNotContain("NOT_IMPLEMENTED", FullText(ex));
+        }
+
+        [TestCase("GetService")]
+        [TestCase("FindService")]
+        [TestCase("BindToClose")]
+        public void Lua_Folder_ServiceProviderMember_RemainsInvalidMember(string member)
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m",
+                "local folder = Instance.new('Folder'); local value = folder." + member);
+            string fullText = FullText(ex);
+            StringAssert.Contains(
+                member + " is not a valid member of Folder \"Folder\"", fullText);
+            StringAssert.DoesNotContain("NOT_IMPLEMENTED", fullText);
         }
 
         [Test]
@@ -538,6 +553,119 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_BasePartOrientation_RoundTripsDegreesYxz()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-3 end
+                local p = Instance.new('Part')
+                p.Orientation = Vector3.new(20, 30, 40)
+                local value = p.Orientation
+                assert(near(value.X, 20) and near(value.Y, 30) and near(value.Z, 40))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartOrientation_SetMatchesCFrameFromOrientationYxz()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-4 end
+                local p = Instance.new('Part')
+                p.Orientation = Vector3.new(20, 30, 40)
+                local actual = { p.CFrame:GetComponents() }
+                local expected = {
+                    CFrame.fromOrientation(math.rad(20), math.rad(30), math.rad(40)):GetComponents()
+                }
+                for i = 1, 12 do
+                    assert(near(actual[i], expected[i]))
+                end");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartOrientation_SetPreservesPosition()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local p = Instance.new('Part')
+                p.Position = Vector3.new(7, 8, 9)
+                p.Orientation = Vector3.new(15, 25, 35)
+                assert(p.Position == Vector3.new(7, 8, 9))
+                assert(p.CFrame.Position == Vector3.new(7, 8, 9))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartOrientation_Yaw90_MatchesDocumentedAxes()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-4 end
+                local p = Instance.new('Part')
+                p.Orientation = Vector3.new(0, 90, 0)
+                local look = p.CFrame.LookVector
+                local right = p.CFrame.RightVector
+                assert(near(look.X, -1) and near(look.Y, 0) and near(look.Z, 0))
+                assert(near(right.X, 0) and near(right.Y, 0) and near(right.Z, -1))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartRotation_RoundTripsDegreesXyz_AndMatchesOrientationOnSingleAxis()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-3 end
+                local p = Instance.new('Part')
+                p.Rotation = Vector3.new(10, 20, 30)
+                local value = p.Rotation
+                assert(near(value.X, 10) and near(value.Y, 20) and near(value.Z, 30))
+                p.Orientation = Vector3.new(30, 0, 0)
+                local orientationCFrame = p.CFrame
+                p.Rotation = Vector3.new(30, 0, 0)
+                assert(p.CFrame == orientationCFrame)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartRotation_SetPreservesPosition()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local p = Instance.new('Part')
+                p.Position = Vector3.new(7, 8, 9)
+                p.Rotation = Vector3.new(15, 25, 35)
+                assert(p.Position == Vector3.new(7, 8, 9))
+                assert(p.CFrame.Position == Vector3.new(7, 8, 9))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_BasePartRotation_MultiAxisDiffersFromOrientation_AndMatchesCFrameAnglesXyz()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-4 end
+                local p = Instance.new('Part')
+                local rotation = Vector3.new(20, 30, 40)
+                p.Rotation = rotation
+                local orientation = p.Orientation
+                assert(not (
+                    near(orientation.X, rotation.X)
+                    and near(orientation.Y, rotation.Y)
+                    and near(orientation.Z, rotation.Z)))
+                local actual = { p.CFrame:GetComponents() }
+                local expected = {
+                    CFrame.Angles(math.rad(20), math.rad(30), math.rad(40)):GetComponents()
+                }
+                for i = 1, 12 do
+                    assert(near(actual[i], expected[i]))
+                end");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
         public void Lua_BasePartPreset_SetInCSharp_ReadableFromLua()
         {
             LuaCsRbxApiBindings roblox = new();
@@ -561,7 +689,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_BasePartUnwiredProperty_RaisesLoudStub()
+        public void Lua_BasePartMaterial_LoudStubNamesMvp2Catalog()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "m", @"
@@ -569,6 +697,146 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 p.Material = Enum.Material.Wood");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
             StringAssert.Contains("BasePart.Material", FullText(ex));
+            StringAssert.Contains("MVP2 (materials catalog)", FullText(ex));
+            StringAssert.Contains("Color / Transparency", FullText(ex));
+        }
+
+        [TestCase(
+            "local model = Instance.new('Model'); local value = model.PrimaryPart",
+            "Model.PrimaryPart", "MVP2 (Model pivot)")]
+        [TestCase(
+            "local value = workspace.Gravity",
+            "Workspace.Gravity", "MVP8")]
+        [TestCase(
+            "local value = workspace.Raycast",
+            "WorldRoot:Raycast", "MVP8")]
+        [TestCase(
+            "workspace:GetServerTimeNow()",
+            "Workspace:GetServerTimeNow", "MVP2")]
+        public void Lua_PlannedUnimplementedMember_RaisesExactPhaseNamingStub(
+            string code, string feature, string phase)
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m", code);
+            string fullText = FullText(ex);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains(feature + " is planned for " + phase + ".", fullText);
+            StringAssert.Contains("| fix: ", fullText);
+        }
+
+        [TestCase(
+            "local part = Instance.new('Part'); local value = part.AssemblyLinearVelocity",
+            "BasePart.AssemblyLinearVelocity")]
+        [TestCase(
+            "local part = Instance.new('Part'); part.Massless = true",
+            "BasePart.Massless")]
+        [TestCase(
+            "local value = game:GetService('Lighting').ClockTime",
+            "Lighting.ClockTime")]
+        public void Lua_BacklogMember_RaisesUnassignedRungStatus(string code, string feature)
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m", code);
+            string fullText = FullText(ex);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains(
+                feature + " is a known Rbx member, but no roadmap rung is assigned.", fullText);
+            StringAssert.DoesNotContain("is planned for", fullText);
+        }
+
+        [Test]
+        public void Lua_UnsupportedTerrain_RaisesDistinctUnsupportedStatus()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m", "local value = workspace.Terrain");
+            string fullText = FullText(ex);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains(
+                "Workspace.Terrain is a known Rbx member deliberately unsupported by CoreAI.",
+                fullText);
+            StringAssert.DoesNotContain("is planned for", fullText);
+        }
+
+        [Test]
+        public void Lua_WorkspaceSignalBehavior_ReadsDeferred()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                assert(workspace.SignalBehavior == Enum.SignalBehavior.Deferred)
+                assert(tostring(workspace.SignalBehavior) == 'Enum.SignalBehavior.Deferred')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_WorkspaceSignalBehavior_WriteIsUnsupported()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(
+                stack, "m", "workspace.SignalBehavior = Enum.SignalBehavior.Immediate");
+            string fullText = FullText(ex);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains(
+                "Workspace.SignalBehavior is a known Rbx member deliberately unsupported by CoreAI.",
+                fullText);
+            StringAssert.Contains("signal mode is Deferred-only", fullText);
+            StringAssert.DoesNotContain("is planned for", fullText);
+        }
+
+        [TestCase("PivotTo")]
+        [TestCase("GetPivot")]
+        public void Lua_Folder_PvInstanceMember_RemainsInvalidMember(string member)
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m",
+                "local folder = Instance.new('Folder'); local value = folder." + member);
+            string fullText = FullText(ex);
+            StringAssert.Contains(
+                member + " is not a valid member of Folder \"Folder\"", fullText);
+            StringAssert.DoesNotContain("NOT_IMPLEMENTED", fullText);
+        }
+
+        [Test]
+        public void Lua_ModelPivotTo_LoudStubNamesMvp2ModelPivot()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m", @"
+                local model = Instance.new('Model')
+                model:PivotTo(CFrame.new())");
+            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
+            StringAssert.Contains("PVInstance:PivotTo", FullText(ex));
+            StringAssert.Contains("MVP2 (Model pivot)", FullText(ex));
+        }
+
+        [Test]
+        public void Lua_ModelGetPivot_LoudStubNamesMvp2ModelPivot()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "m", @"
+                local model = Instance.new('Model')
+                model:GetPivot()");
+            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
+            StringAssert.Contains("PVInstance:GetPivot", FullText(ex));
+            StringAssert.Contains("MVP2 (Model pivot)", FullText(ex));
+        }
+
+        [Test]
+        public void Lua_DataModelBindToClose_ValidatesFunctionBeforeMvp5Stub()
+        {
+            LuaCsModStack badArgumentStack = BuildStack(new LuaCsRbxApiBindings());
+            Exception badArgument = LoadFails(
+                badArgumentStack, "bad", "game:BindToClose('not a function')");
+            StringAssert.Contains("BAD_ARGUMENT", FullText(badArgument));
+            StringAssert.Contains(
+                "game:BindToClose expects a function at argument 1, got string",
+                FullText(badArgument));
+            StringAssert.Contains("pass the function to run at shutdown", FullText(badArgument));
+
+            LuaCsModStack notImplementedStack = BuildStack(new LuaCsRbxApiBindings());
+            Exception notImplemented = LoadFails(
+                notImplementedStack, "stub", "game:BindToClose(function() end)");
+            StringAssert.Contains("NOT_IMPLEMENTED", FullText(notImplemented));
+            StringAssert.Contains("game:BindToClose", FullText(notImplemented));
+            StringAssert.Contains("MVP5", FullText(notImplemented));
         }
 
         [Test]
@@ -654,17 +922,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_TaskWait_LoudStubNamesMvp2_AndParallelSwitchesAreNoOps()
+        public void Lua_TaskWait_TopLevelSuspendsAndResumes_AndParallelSwitchesAreNoOps()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
             stack.Runtime.LoadMod("noop", @"
                 task.synchronize()
                 task.desynchronize()");
             Assert.IsTrue(stack.Runtime.IsLoaded("noop"), "DEV-5: parallel switches must be no-ops");
 
-            Exception ex = LoadFails(stack, "waiter", "task.wait(1)");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("MVP2", FullText(ex));
+            stack.Runtime.LoadMod("waiter", @"
+                store_set('phase', 'waiting')
+                task.wait(1)
+                store_set('phase', 'resumed')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("waiter"));
+            Assert.AreEqual("waiting", store.Get("waiter", "phase"));
+
+            bindings.Scheduler.Advance(0.5d);
+            Assert.AreEqual("waiting", store.Get("waiter", "phase"));
+
+            bindings.Scheduler.Advance(0.5d);
+            Assert.AreEqual("resumed", store.Get("waiter", "phase"));
         }
 
         [Test]

@@ -67,12 +67,14 @@ namespace CoreAI.Sandbox.LuaCs
         /// <param name="budgetPerResume">Instruction-step budget re-armed before every resume.</param>
         /// <param name="resumeTimeoutMs">Wall-clock budget, in ms, for a single resume.</param>
         /// <param name="totalLifetimeSteps">Cap on instruction steps across the whole coroutine lifetime.</param>
+        /// <param name="isProtectedMode">Whether Lua errors are returned as protected resume results.</param>
         public LuaCsCoroutineHandle(
             LuaState ownerState,
             LuaFunction function,
             int budgetPerResume = DefaultBudgetPerResume,
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
-            long totalLifetimeSteps = DefaultTotalLifetimeSteps)
+            long totalLifetimeSteps = DefaultTotalLifetimeSteps,
+            bool isProtectedMode = true)
         {
             if (ownerState == null)
             {
@@ -88,11 +90,7 @@ namespace CoreAI.Sandbox.LuaCs
             _resumeTimeoutMs = resumeTimeoutMs > 0 ? resumeTimeoutMs : DefaultResumeTimeoutMs;
             _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
 
-            // WHY: isProtectedMode: true means a hook/runtime error is converted to an [ok=false, error]
-            // result and the thread transitions to Dead + disposes itself SYNCHRONOUSLY, instead of
-            // throwing a C# exception that would leave the thread half-executed. That is exactly the
-            // self-cleaning, no-hang behaviour we want for a host-driven top-level coroutine.
-            _coroutine = ownerState.CreateCoroutine(function, true);
+            _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
         }
@@ -103,9 +101,11 @@ namespace CoreAI.Sandbox.LuaCs
             LuaFunction function,
             int budgetPerResume = DefaultBudgetPerResume,
             int resumeTimeoutMs = DefaultResumeTimeoutMs,
-            long totalLifetimeSteps = DefaultTotalLifetimeSteps)
+            long totalLifetimeSteps = DefaultTotalLifetimeSteps,
+            bool isProtectedMode = true)
         {
-            return new LuaCsCoroutineHandle(ownerState, function, budgetPerResume, resumeTimeoutMs, totalLifetimeSteps);
+            return new LuaCsCoroutineHandle(ownerState, function, budgetPerResume, resumeTimeoutMs,
+                totalLifetimeSteps, isProtectedMode);
         }
 
         /// <summary>Current Lua-CSharp thread status (Suspended/Normal/Running/Dead), or Dead once killed.</summary>

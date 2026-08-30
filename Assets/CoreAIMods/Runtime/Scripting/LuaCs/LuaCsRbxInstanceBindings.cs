@@ -128,16 +128,23 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal static class LuaCsRbxInstanceBindings
     {
-        /// <summary>BasePart members still awaiting their own slice: Material needs the
-        /// material catalog, Orientation/Rotation need Euler decomposition.</summary>
-        private static readonly HashSet<string> UnwiredSpatialProperties = new(StringComparer.Ordinal)
+        private readonly struct RbxMethodBinding
         {
-            "Material", "Orientation", "Rotation"
-        };
+            public RbxMethodBinding(LuaValue value, string declaringClassName)
+            {
+                Value = value;
+                DeclaringClassName = declaringClassName;
+            }
+
+            public LuaValue Value { get; }
+
+            public string DeclaringClassName { get; }
+        }
 
         public static LuaTable BuildInstanceMeta(LuaCsRbxModContext context)
         {
-            Dictionary<string, LuaValue> methods = BuildMethods(context);
+            Dictionary<string, RbxMethodBinding> methods = BuildMethods(context);
+            RbxEnumItem deferredSignalBehavior = EnsureDeferredSignalBehavior(context.Bindings.Enums);
 
             LuaTable meta = new();
             meta[Metamethods.Index] = Fn("Instance.__index", ctx =>
@@ -165,9 +172,15 @@ namespace CoreAI.Ai.LuaCs
                         return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged);
                 }
 
-                if (methods.TryGetValue(key, out LuaValue method))
+                if (methods.TryGetValue(key, out RbxMethodBinding method)
+                    && (method.DeclaringClassName == null || self.IsA(method.DeclaringClassName)))
                 {
-                    return method;
+                    return method.Value;
+                }
+
+                if (key == "SignalBehavior" && self.IsA("Workspace"))
+                {
+                    return LuaCsRbxDatatypeBindings.Wrap(deferredSignalBehavior);
                 }
 
                 if (TryReadCamera(context, self, key, out LuaValue cameraValue))
@@ -193,6 +206,13 @@ namespace CoreAI.Ai.LuaCs
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
                 {
                     return spatial;
+                }
+
+                RbxError knownMemberError = GetKnownUnimplementedMemberError(
+                    context, self, key, RbxKnownUnimplementedMemberAccess.Read);
+                if (knownMemberError != null)
+                {
+                    throw knownMemberError;
                 }
 
                 RbxInstance child = self.FindFirstChild(key);
@@ -262,6 +282,14 @@ namespace CoreAI.Ai.LuaCs
                     return LuaValue.Nil;
                 }
 
+                RbxError knownMemberError = GetKnownUnimplementedMemberError(
+                    context, self, key, RbxKnownUnimplementedMemberAccess.Write);
+                if (knownMemberError != null)
+                {
+                    context.RequireWorldEditForWrite(self.ClassName, key);
+                    throw knownMemberError;
+                }
+
                 throw RbxError.BadArgument(
                     key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
                     "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
@@ -277,18 +305,20 @@ namespace CoreAI.Ai.LuaCs
             return Lock(meta);
         }
 
-        private static Dictionary<string, LuaValue> BuildMethods(LuaCsRbxModContext context)
+        private static Dictionary<string, RbxMethodBinding> BuildMethods(LuaCsRbxModContext context)
         {
-            Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal);
+            Dictionary<string, RbxMethodBinding> methods = new(StringComparer.Ordinal);
 
-            void Method(string name, Func<LuaFunctionExecutionContext, RbxInstance, LuaValue> body)
+            void Method(string name, Func<LuaFunctionExecutionContext, RbxInstance, LuaValue> body,
+                string declaringClassName = null)
             {
-                methods[name] = new LuaValue(Fn("Instance." + name, ctx =>
-                {
-                    RbxInstance self = Self(ctx, context);
-                    ThrowIfDestroyedForLua(self, name);
-                    return body(ctx, self);
-                }));
+                LuaValue value = new(Fn("Instance." + name, ctx =>
+                    {
+                        RbxInstance self = Self(ctx, context);
+                        ThrowIfDestroyedForLua(self, name);
+                        return body(ctx, self);
+                    }));
+                methods[name] = new RbxMethodBinding(value, declaringClassName);
             }
 
             // ---- Navigation ----
@@ -429,23 +459,24 @@ namespace CoreAI.Ai.LuaCs
 
             // ---- ServiceProvider (DataModel) ----
             Method("GetService", (ctx, self) => context.WrapInstance(
-                RequireDataModel(self, "GetService").GetService(ReadString(ctx, 1, "GetService"))));
+                    RequireDataModel(self, "GetService").GetService(ReadString(ctx, 1, "GetService"))),
+                "ServiceProvider");
             Method("FindService", (ctx, self) => context.WrapInstance(
-                RequireDataModel(self, "FindService").FindService(ReadString(ctx, 1, "FindService"))));
+                    RequireDataModel(self, "FindService").FindService(ReadString(ctx, 1, "FindService"))),
+                "ServiceProvider");
             Method("BindToClose", (ctx, self) =>
             {
-                RequireDataModel(self, "BindToClose").BindToClose(null);
-                return LuaValue.Nil;
-            });
+                LuaValue callback = Arg(ctx, 1);
+                if (callback.Type != LuaValueType.Function)
+                {
+                    throw RbxError.BadArgument(
+                        "game:BindToClose expects a function at argument 1, got " + Describe(callback),
+                        "pass the function to run at shutdown");
+                }
 
-            // ---- Model pivot ----
-            // TODO: MVP2 — Model pivot aggregates child-part CFrames; single-part CFrame is wired.
-            Method("PivotTo", (_, self) => throw RbxError.NotImplemented(
-                self.ClassName + ":PivotTo", "the Model pivot follow-up",
-                "set part.CFrame directly; Model-level pivot aggregation lands in MVP2"));
-            Method("GetPivot", (_, self) => throw RbxError.NotImplemented(
-                self.ClassName + ":GetPivot", "the Model pivot follow-up",
-                "read part.CFrame directly; Model-level pivot aggregation lands in MVP2"));
+                RequireDataModel(self, "BindToClose").BindToClose(callback.Read<LuaFunction>());
+                return LuaValue.Nil;
+            }, "DataModel");
 
             return methods;
         }
@@ -525,6 +556,54 @@ namespace CoreAI.Ai.LuaCs
                 member + " is not a valid member of " + instance.ClassName
                 + " \"" + instance.GetFullName() + "\"",
                 "call " + member + " on the game DataModel, e.g. game:" + member + "(...)");
+        }
+
+        private static RbxError GetKnownUnimplementedMemberError(LuaCsRbxModContext context,
+            RbxInstance instance, string memberName, RbxKnownUnimplementedMemberAccess access)
+        {
+            if (!context.Bindings.Registry.Catalog.TryGetKnownUnimplementedMember(
+                    instance.ClassName, memberName, access,
+                    out string declaringClassName,
+                    out RbxKnownUnimplementedMemberDescriptor descriptor))
+            {
+                return null;
+            }
+
+            string separator = descriptor.IsMethod ? ":" : ".";
+            string feature = declaringClassName + separator + memberName;
+            switch (descriptor.Status)
+            {
+                case RbxKnownUnimplementedMemberStatus.Planned:
+                    return RbxError.NotImplemented(
+                        feature, descriptor.Phase, descriptor.Workaround);
+                case RbxKnownUnimplementedMemberStatus.Backlog:
+                    return new RbxError(
+                        RbxErrorCode.NotImplemented,
+                        feature + " is a known Rbx member, but no roadmap rung is assigned.",
+                        descriptor.Workaround);
+                case RbxKnownUnimplementedMemberStatus.Unsupported:
+                    return new RbxError(
+                        RbxErrorCode.NotImplemented,
+                        feature + " is a known Rbx member deliberately unsupported by CoreAI.",
+                        descriptor.Workaround);
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(descriptor.Status), descriptor.Status, null);
+            }
+        }
+
+        private static RbxEnumItem EnsureDeferredSignalBehavior(RbxEnumRegistry enums)
+        {
+            if (enums.TryGet("SignalBehavior", out RbxEnum signalBehavior)
+                && signalBehavior.TryGetItem("Deferred", out RbxEnumItem deferred))
+            {
+                return deferred;
+            }
+
+            signalBehavior = new RbxEnum("SignalBehavior",
+                ("Default", 0), ("Immediate", 1), ("Deferred", 2), ("AncestryDeferred", 3));
+            enums.Register(signalBehavior);
+            return signalBehavior["Deferred"];
         }
 
         private static RbxInstance ReadOptionalInstance(LuaValue value, string what)
@@ -611,8 +690,7 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- BasePart spatial/appearance (part-property sink) -------------------------------
 
-        /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype; throws
-        /// the loud stub for still-unwired members (Material/Orientation/Rotation).</summary>
+        /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype.</summary>
         private static bool TryReadSpatial(LuaCsRbxModContext context, RbxInstance self, string key,
             out LuaValue value)
         {
@@ -637,6 +715,20 @@ namespace CoreAI.Ai.LuaCs
                 case "CFrame":
                     value = LuaCsRbxDatatypeBindings.Wrap(properties.CFrame);
                     return true;
+                case "Orientation":
+                    (float rx, float ry, float rz) orientation = properties.CFrame.ToOrientation();
+                    value = LuaCsRbxDatatypeBindings.Wrap(new RbxVector3(
+                        orientation.rx * 180f / MathF.PI,
+                        orientation.ry * 180f / MathF.PI,
+                        orientation.rz * 180f / MathF.PI));
+                    return true;
+                case "Rotation":
+                    (float rx, float ry, float rz) rotation = properties.CFrame.ToEulerAnglesXYZ();
+                    value = LuaCsRbxDatatypeBindings.Wrap(new RbxVector3(
+                        rotation.rx * 180f / MathF.PI,
+                        rotation.ry * 180f / MathF.PI,
+                        rotation.rz * 180f / MathF.PI));
+                    return true;
                 case "Color":
                     value = LuaCsRbxDatatypeBindings.Wrap(properties.Color);
                     return true;
@@ -650,11 +742,6 @@ namespace CoreAI.Ai.LuaCs
                     value = properties.CanCollide;
                     return true;
                 default:
-                    if (UnwiredSpatialProperties.Contains(key))
-                    {
-                        throw SpatialStub(key);
-                    }
-
                     value = LuaValue.Nil;
                     return false;
             }
@@ -690,6 +777,28 @@ namespace CoreAI.Ai.LuaCs
                     context.RequireWorldEditForWrite(self.ClassName, "CFrame");
                     sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
                     return true;
+                case "Orientation":
+                    context.RequireWorldEditForWrite(self.ClassName, "Orientation");
+                    RbxVector3 orientation = ReadVector3Value(value, "Part.Orientation assignment");
+                    PartProperties orientationProperties = sink.GetPartPropertiesOrDefault(id);
+                    RbxCFrame orientationCFrame = RbxCFrame.FromOrientation(
+                        orientation.X * MathF.PI / 180f,
+                        orientation.Y * MathF.PI / 180f,
+                        orientation.Z * MathF.PI / 180f);
+                    sink.SetCFrame(id,
+                        RbxCFrame.FromPosition(orientationProperties.Position) * orientationCFrame);
+                    return true;
+                case "Rotation":
+                    context.RequireWorldEditForWrite(self.ClassName, "Rotation");
+                    RbxVector3 rotation = ReadVector3Value(value, "Part.Rotation assignment");
+                    PartProperties rotationProperties = sink.GetPartPropertiesOrDefault(id);
+                    RbxCFrame rotationCFrame = RbxCFrame.FromEulerAnglesXYZ(
+                        rotation.X * MathF.PI / 180f,
+                        rotation.Y * MathF.PI / 180f,
+                        rotation.Z * MathF.PI / 180f);
+                    sink.SetCFrame(id,
+                        RbxCFrame.FromPosition(rotationProperties.Position) * rotationCFrame);
+                    return true;
                 case "Color":
                     context.RequireWorldEditForWrite(self.ClassName, "Color");
                     sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
@@ -707,12 +816,6 @@ namespace CoreAI.Ai.LuaCs
                     sink.SetCanCollide(id, value.ToBoolean());
                     return true;
                 default:
-                    if (UnwiredSpatialProperties.Contains(key))
-                    {
-                        context.RequireWorldEditForWrite(self.ClassName, key);
-                        throw SpatialStub(key);
-                    }
-
                     return false;
             }
         }
@@ -1068,12 +1171,5 @@ namespace CoreAI.Ai.LuaCs
                 "pass a number, got " + Describe(value));
         }
 
-        private static RbxError SpatialStub(string property)
-        {
-            return RbxError.NotImplemented(
-                "BasePart." + property,
-                "the BasePart material + orientation follow-up",
-                "set Shape/CFrame/Position/Size/Color/Transparency/Anchored/CanCollide, which are wired now");
-        }
     }
 }

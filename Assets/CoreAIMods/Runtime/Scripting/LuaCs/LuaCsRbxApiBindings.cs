@@ -1,10 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 using Lua;
 using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
@@ -23,6 +27,28 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsRbxApiBindings
     {
+        private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
+
+        internal sealed class ModLoadCandidate
+        {
+            public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
+                int previousGeneration, HashSet<RbxScriptConnection> existingConnections)
+            {
+                OwnerModId = ownerModId;
+                HadPreviousGeneration = hadPreviousGeneration;
+                PreviousGeneration = previousGeneration;
+                ExistingConnections = existingConnections;
+            }
+
+            public string OwnerModId { get; }
+
+            public bool HadPreviousGeneration { get; }
+
+            public int PreviousGeneration { get; }
+
+            public HashSet<RbxScriptConnection> ExistingConnections { get; }
+        }
+
         private readonly InstanceRegistry _registry;
         private readonly RbxDataModel _game;
         private readonly RbxInstance _workspace;
@@ -33,8 +59,17 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxRunService _runService;
         private readonly IClickPickSource _pickSource;
         private readonly ModConnectionRegistry _connections;
+        private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
+        private readonly ModScheduler _scheduler;
+        private readonly HashSet<string> _legacySchedulerDeprecationOwners =
+            new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Dictionary<int, HashSet<IRbxScriptThread>>>
+            _scheduledThreadsByMod = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _currentSchedulerGenerationByMod =
+            new(StringComparer.Ordinal);
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
+        private float _runServiceElapsed;
 
         private bool _mouseButton1Down;
 
@@ -59,6 +94,9 @@ namespace CoreAI.Ai.LuaCs
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
+            _schedulerThreadFactory = new LuaCsRbxScriptThreadFactory();
+            _scheduler = new ModScheduler(
+                _schedulerThreadFactory, new RbxAccumulatingTimeSource());
             // WHY: no camera/physics behind the headless default, so clicks resolve to nothing until
             // a live UnityClickPickSource is wired at composition (mirrors the camera-rig default).
             _pickSource = pickSource ?? new InMemoryClickPickSource();
@@ -149,9 +187,103 @@ namespace CoreAI.Ai.LuaCs
         public ModConnectionRegistry Connections => _connections;
 
         /// <summary>
+        /// Shared logical task scheduler advanced once per scaled host frame by the runtime driver.
+        /// </summary>
+        public ModScheduler Scheduler => _scheduler;
+
+        internal ModLoadCandidate BeginModLoadCandidate(string ownerModId)
+        {
+            string owner = string.IsNullOrWhiteSpace(ownerModId)
+                ? throw new ArgumentException("Owner mod id is required.", nameof(ownerModId))
+                : ownerModId;
+            bool hadPreviousGeneration = _currentSchedulerGenerationByMod.TryGetValue(
+                owner, out int previousGeneration);
+            HashSet<RbxScriptConnection> existingConnections =
+                new(_connections.GetOwnedBy(owner));
+            return new ModLoadCandidate(owner, hadPreviousGeneration,
+                previousGeneration, existingConnections);
+        }
+
+        internal void RollbackModLoadCandidate(ModLoadCandidate candidate)
+        {
+            if (candidate == null)
+            {
+                throw new ArgumentNullException(nameof(candidate));
+            }
+
+            string ownerModId = candidate.OwnerModId;
+            if (_currentSchedulerGenerationByMod.TryGetValue(
+                    ownerModId, out int candidateGeneration)
+                && (!candidate.HadPreviousGeneration
+                    || candidateGeneration != candidate.PreviousGeneration))
+            {
+                CancelScheduledGeneration(ownerModId, candidateGeneration);
+            }
+
+            if (candidate.HadPreviousGeneration)
+            {
+                _currentSchedulerGenerationByMod[ownerModId] =
+                    candidate.PreviousGeneration;
+            }
+            else
+            {
+                _currentSchedulerGenerationByMod.Remove(ownerModId);
+            }
+
+            IReadOnlyList<RbxScriptConnection> currentConnections =
+                _connections.GetOwnedBy(ownerModId);
+            for (int index = 0; index < currentConnections.Count; index++)
+            {
+                RbxScriptConnection connection = currentConnections[index];
+                if (!candidate.ExistingConnections.Contains(connection))
+                {
+                    connection.Disconnect();
+                }
+            }
+        }
+
+        /// <summary>Runs a persistent mod's main chunk as an immediately resumed scheduler thread.</summary>
+        public void RunModChunk(IScriptState ownerState, string ownerModId, string source,
+            IExecutionBudget resumeBudget)
+        {
+            string owner = string.IsNullOrWhiteSpace(ownerModId)
+                ? throw new ArgumentException("Owner mod id is required.", nameof(ownerModId))
+                : ownerModId;
+            if (!_currentSchedulerGenerationByMod.TryGetValue(owner, out int generation))
+            {
+                generation = _connections.BeginGeneration(owner);
+                _currentSchedulerGenerationByMod[owner] = generation;
+            }
+
+            _schedulerThreadFactory.PrepareWaitBindings(ownerState);
+            object callable = _schedulerThreadFactory.CaptureChunk(
+                ownerState, source, resumeBudget);
+            IRbxScriptThread thread = _scheduler.Spawn(
+                owner, callable, Array.Empty<object>());
+            if (thread is LuaCsRbxScriptThread luaThread)
+            {
+                if (luaThread.LastException != null)
+                {
+                    ExceptionDispatchInfo.Capture(luaThread.LastException).Throw();
+                }
+
+                if (luaThread.LastFailure != null)
+                {
+                    throw luaThread.LastFailure;
+                }
+            }
+
+            TrackScheduledThread(owner, generation, thread);
+        }
+
+        internal LuaState ResolveSchedulerOwnerState(LuaState fallbackState)
+        {
+            return _schedulerThreadFactory.ResolveOwnerState(fallbackState);
+        }
+
+        /// <summary>
         /// Per-frame input pump: polls the input source, diffs, and fires
-        /// InputBegan/InputEnded/InputChanged. The host composition calls this once per frame
-        /// BEFORE the mod runtime tick so handlers observe this frame's events.
+        /// InputBegan/InputEnded/InputChanged after the Heartbeat signal.
         /// </summary>
         // TODO: MVP2 — the general signal scheduler replaces this pump.
         public void PumpInput()
@@ -160,17 +292,53 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Per-frame pump carrying the frame delta: runs the input pump then fires the RunService
-        /// game-loop signals (Heartbeat/Stepped/RenderStepped) with <paramref name="dt"/>. The host
-        /// composition calls this once per frame BEFORE the mod runtime tick so handlers observe
-        /// this frame's events and per-frame loops advance on the frame clock.
+        /// Fires legacy Stepped at the scheduler's PreSimulation boundary.
         /// </summary>
         // TODO: MVP2 — the general signal scheduler replaces this pump.
+        public void PumpPreSimulation(float dt)
+        {
+            if (_runService == null || _runService.IsDestroyed)
+            {
+                return;
+            }
+
+            _runServiceElapsed += dt;
+            if (_runService.Stepped.HasConnections)
+            {
+                _runService.Stepped.Fire(_runServiceElapsed, dt);
+            }
+        }
+
+        /// <summary>Fires legacy Heartbeat, then polls input at the scheduler Heartbeat boundary.</summary>
+        public void PumpHeartbeat(float dt)
+        {
+            if (_runService != null && !_runService.IsDestroyed
+                && _runService.Heartbeat.HasConnections)
+            {
+                _runService.Heartbeat.Fire(dt);
+            }
+
+            PumpInput();
+        }
+
+        /// <summary>Fires legacy RenderStepped and completes click picking at PreRender.</summary>
+        public void PumpPreRender(float dt)
+        {
+            if (_runService != null && !_runService.IsDestroyed
+                && _runService.RenderStepped.HasConnections)
+            {
+                _runService.RenderStepped.Fire(dt);
+            }
+
+            PumpClicks();
+        }
+
+        /// <summary>Runs the split frame pumps in their observable scheduler order.</summary>
         public void PumpFrame(float dt)
         {
-            _userInputService?.Step();
-            _runService?.Step(dt);
-            PumpClicks();
+            PumpPreSimulation(dt);
+            PumpHeartbeat(dt);
+            PumpPreRender(dt);
         }
 
         /// <summary>
@@ -309,6 +477,11 @@ namespace CoreAI.Ai.LuaCs
                     "session-" + Interlocked.Increment(ref _consoleInvocationCounter));
 
             LuaCsRbxModContext context = new(this, capabilities, ownerModId, originTag);
+            if (!string.IsNullOrWhiteSpace(ownerModId))
+            {
+                _currentSchedulerGenerationByMod[ownerModId] =
+                    context.ConnectionGeneration;
+            }
 
             luaRegistry.RegisterValue("Vector3", LuaCsRbxDatatypeBindings.BuildVector3Global);
             luaRegistry.RegisterValue("Vector2", LuaCsRbxDatatypeBindings.BuildVector2Global);
@@ -329,6 +502,13 @@ namespace CoreAI.Ai.LuaCs
             }
 
             luaRegistry.RegisterValue("task", () => BuildTaskGlobal(context));
+            luaRegistry.RegisterValue("wait", () => new LuaValue(Fn(
+                "wait", ctx => ScheduleWait(
+                    context, ctx, "wait", LegacySchedulerMinimumDelaySeconds, true))));
+            luaRegistry.RegisterValue("spawn", () => new LuaValue(Fn(
+                "spawn", ctx => LegacySpawn(context, ctx))));
+            luaRegistry.RegisterValue("delay", () => new LuaValue(Fn(
+                "delay", ctx => LegacyDelay(context, ctx))));
             // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
             // capability message instead of "attempt to call a nil value".
             luaRegistry.RegisterValue("camera_set_cframe",
@@ -422,17 +602,44 @@ namespace CoreAI.Ai.LuaCs
             return new LuaValue(t);
         }
 
-        // ---- task.* (MVP2 scheduler stubs) --------------------------------------------------
-
         private LuaValue BuildTaskGlobal(LuaCsRbxModContext context)
         {
             LuaTable t = new();
-            // TODO: MVP2 — ModScheduler + TaskLibrary replace these stubs.
-            t["wait"] = SchedulerStub("task.wait");
-            t["spawn"] = SchedulerStub("task.spawn");
-            t["defer"] = SchedulerStub("task.defer");
-            t["delay"] = SchedulerStub("task.delay");
-            t["cancel"] = SchedulerStub("task.cancel");
+            LuaTable threadMeta = Lock(new LuaTable());
+            t["wait"] = Fn("task.wait", ctx => ScheduleWait(
+                context, ctx, "task.wait", 0d, false));
+            t["_resumeValue"] = Fn("task._resumeValue", ctx =>
+                ReadWaitResumeValue(context, ctx));
+            t["_realtime"] = Fn("task._realtime", _ =>
+                LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble));
+            t["spawn"] = Fn("task.spawn", ctx => WrapTaskThread(
+                TrackScheduledThread(context,
+                    _scheduler.Spawn(
+                        RequireTaskOwner(context),
+                        ReadTaskCallable(ctx, 0, "task.spawn"),
+                        ReadTaskArguments(ctx, 1))),
+                threadMeta));
+            t["defer"] = Fn("task.defer", ctx => WrapTaskThread(
+                TrackScheduledThread(context,
+                    _scheduler.Defer(
+                        RequireTaskOwner(context),
+                        ReadTaskCallable(ctx, 0, "task.defer"),
+                        ReadTaskArguments(ctx, 1))),
+                threadMeta));
+            t["delay"] = Fn("task.delay", ctx => WrapTaskThread(
+                TrackScheduledThread(context,
+                    _scheduler.Delay(
+                        RequireTaskOwner(context),
+                        ReadDouble(ctx, 0, "task.delay"),
+                        ReadTaskCallable(ctx, 1, "task.delay"),
+                        ReadTaskArguments(ctx, 2))),
+                threadMeta));
+            t["cancel"] = Fn("task.cancel", ctx =>
+            {
+                IRbxScriptThread thread = ReadTaskThread(ctx, 0);
+                _scheduler.Cancel(thread);
+                return LuaValue.Nil;
+            });
 
             // WHY: DEV-5 — Parallel Luau context switches are no-ops with a once-per-mod note, so
             // parallel-annotated corpus scripts keep running instead of failing.
@@ -453,11 +660,349 @@ namespace CoreAI.Ai.LuaCs
             return new LuaValue(t);
         }
 
-        private static LuaFunction SchedulerStub(string name)
+        private LuaValue LegacySpawn(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
         {
-            return Fn(name, _ => throw RbxError.NotImplemented(
-                name, "MVP2",
-                "the task scheduler lands in MVP2; use hooks_every for periodic work until then"));
+            string ownerModId = RequireTaskOwner(context);
+            LogLegacySchedulerDeprecation(ownerModId);
+            LuaValue callback = ReadLegacyCallback(ctx, 0, "spawn");
+            double scheduledAt = _scheduler.CurrentTime;
+            LuaFunction timedCallback = new("spawn.callback", async (callbackContext, ct) =>
+            {
+                LuaValue[] callbackArguments =
+                {
+                    LuaCsValueMarshaller.Unbox(_scheduler.CurrentTime - scheduledAt),
+                    LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble)
+                };
+                LuaValue[] results = await callbackContext.State.CallAsync(
+                    callback, callbackArguments.AsSpan(), ct);
+                return callbackContext.Return(results);
+            });
+            object callable = _schedulerThreadFactory.CaptureCallable(
+                ctx.State, new LuaValue(timedCallback));
+            TrackScheduledThread(context, _scheduler.Delay(
+                ownerModId, LegacySchedulerMinimumDelaySeconds,
+                callable, Array.Empty<object>()));
+            return LuaValue.Nil;
+        }
+
+        private LuaValue LegacyDelay(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            string ownerModId = RequireTaskOwner(context);
+            LogLegacySchedulerDeprecation(ownerModId);
+            double duration = Math.Max(
+                ReadDouble(ctx, 0, "delay"), LegacySchedulerMinimumDelaySeconds);
+            LuaValue callback = ReadLegacyCallback(ctx, 1, "delay");
+            object callable = _schedulerThreadFactory.CaptureCallable(ctx.State, callback);
+            TrackScheduledThread(context, _scheduler.Delay(
+                ownerModId, duration, callable, Array.Empty<object>()));
+            return LuaValue.Nil;
+        }
+
+        private LuaValue ScheduleWait(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx, string functionName,
+            double minimumDuration, bool legacy)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                if (legacy)
+                {
+                    LogLegacySchedulerDeprecation(ownerModId);
+                }
+
+                IRbxScriptThread caller = _schedulerThreadFactory.CurrentThread;
+                if (caller == null)
+                {
+                    throw RbxError.NotImplemented(
+                        functionName + " inside a directly invoked signal/runtime callback",
+                        "MVP2 scheduler-owned signal callbacks rung",
+                        "start yielding callback work with task.spawn, task.defer, task.delay, " +
+                        "spawn, or delay until signal callbacks are scheduler-owned");
+                }
+
+                if (!(caller is LuaCsRbxScriptThread luaThread)
+                    || !string.Equals(luaThread.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        functionName + " caller is not owned by mod " + ownerModId,
+                        "wait only from a live scheduler thread owned by the current mod");
+                }
+
+                LuaValue durationValue = Arg(ctx, 0);
+                double duration = durationValue.Type == LuaValueType.Nil
+                    ? minimumDuration
+                    : Math.Max(ReadDouble(ctx, 0, functionName), minimumDuration);
+                _scheduler.ScheduleWait(caller, duration);
+                return LuaValue.Nil;
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaValue ReadWaitResumeValue(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
+                    || !string.Equals(caller.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        "task.wait resumed outside its owning scheduler thread",
+                        "resume waiting threads through ModScheduler.Advance");
+                }
+
+                object elapsed = caller.ReadCurrentResumeArgument(0);
+                if (elapsed == null)
+                {
+                    throw RbxError.BadArgument(
+                        "task.wait resumed without an elapsed-time value",
+                        "resume waiting threads through ModScheduler.Advance");
+                }
+
+                return LuaCsValueMarshaller.Unbox(elapsed);
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private void LogLegacySchedulerDeprecation(string ownerModId)
+        {
+            bool firstUse;
+            lock (_legacySchedulerDeprecationOwners)
+            {
+                firstUse = _legacySchedulerDeprecationOwners.Add(ownerModId);
+            }
+
+            if (firstUse)
+            {
+                _log?.Invoke(
+                    "[RbxApi] wait/spawn/delay are deprecated; use task.wait/task.spawn/task.delay " +
+                    "instead. (Logged once per mod.)");
+            }
+        }
+
+        private string RequireTaskOwner(LuaCsRbxModContext context)
+        {
+            if (string.IsNullOrWhiteSpace(context.OwnerModId))
+            {
+                throw new RbxError(
+                    RbxErrorCode.ContextViolation,
+                    "task scheduling requires a persistent owning mod id",
+                    "run task.* from a loaded mod instead of the ownerless one-off executor");
+            }
+
+            return context.OwnerModId;
+        }
+
+        /// <summary>Kills every scheduler thread owned by a mod on unload or quarantine.</summary>
+        public int KillAllScheduledOwnedBy(string ownerModId)
+        {
+            int killed = _scheduler.KillOwnedBy(ownerModId);
+            _scheduledThreadsByMod.Remove(ownerModId);
+            _currentSchedulerGenerationByMod.Remove(ownerModId);
+            return killed;
+        }
+
+        /// <summary>Kills only scheduler threads from generations preceding a reload replacement.</summary>
+        public int KillOutgoingScheduledGenerations(string ownerModId)
+        {
+            if (string.IsNullOrWhiteSpace(ownerModId)
+                || !_scheduledThreadsByMod.TryGetValue(
+                    ownerModId,
+                    out Dictionary<int, HashSet<IRbxScriptThread>> generations))
+            {
+                return 0;
+            }
+
+            int liveGeneration = _currentSchedulerGenerationByMod.TryGetValue(
+                ownerModId, out int current)
+                ? current
+                : int.MinValue;
+            List<int> removed = new();
+            int killed = 0;
+            foreach (KeyValuePair<int, HashSet<IRbxScriptThread>> generation in generations)
+            {
+                if (generation.Key == liveGeneration)
+                {
+                    PruneDeadThreads(generation.Value);
+                    continue;
+                }
+
+                foreach (IRbxScriptThread thread in generation.Value)
+                {
+                    if (thread == null || thread.IsDead
+                        || thread.Status == RbxScriptThreadStatus.Dead)
+                    {
+                        continue;
+                    }
+
+                    _scheduler.Cancel(thread);
+                    killed++;
+                }
+
+                removed.Add(generation.Key);
+            }
+
+            for (int index = 0; index < removed.Count; index++)
+            {
+                generations.Remove(removed[index]);
+            }
+
+            if (generations.Count == 0)
+            {
+                _scheduledThreadsByMod.Remove(ownerModId);
+            }
+
+            return killed;
+        }
+
+        private int CancelScheduledGeneration(string ownerModId, int generation)
+        {
+            if (!_scheduledThreadsByMod.TryGetValue(
+                    ownerModId,
+                    out Dictionary<int, HashSet<IRbxScriptThread>> generations)
+                || !generations.TryGetValue(
+                    generation, out HashSet<IRbxScriptThread> threads))
+            {
+                return 0;
+            }
+
+            int killed = 0;
+            foreach (IRbxScriptThread thread in threads)
+            {
+                if (thread == null || thread.IsDead
+                    || thread.Status == RbxScriptThreadStatus.Dead)
+                {
+                    continue;
+                }
+
+                _scheduler.Cancel(thread);
+                killed++;
+            }
+
+            generations.Remove(generation);
+            if (generations.Count == 0)
+            {
+                _scheduledThreadsByMod.Remove(ownerModId);
+            }
+
+            return killed;
+        }
+
+        private IRbxScriptThread TrackScheduledThread(
+            LuaCsRbxModContext context, IRbxScriptThread thread)
+        {
+            string ownerModId = RequireTaskOwner(context);
+            return TrackScheduledThread(
+                ownerModId, context.ConnectionGeneration, thread);
+        }
+
+        private IRbxScriptThread TrackScheduledThread(
+            string ownerModId, int generation, IRbxScriptThread thread)
+        {
+            if (!_scheduledThreadsByMod.TryGetValue(
+                    ownerModId,
+                    out Dictionary<int, HashSet<IRbxScriptThread>> generations))
+            {
+                generations = new Dictionary<int, HashSet<IRbxScriptThread>>();
+                _scheduledThreadsByMod[ownerModId] = generations;
+            }
+
+            if (!generations.TryGetValue(
+                    generation, out HashSet<IRbxScriptThread> threads))
+            {
+                threads = new HashSet<IRbxScriptThread>();
+                generations[generation] = threads;
+            }
+
+            if (thread != null && !thread.IsDead
+                && thread.Status != RbxScriptThreadStatus.Dead)
+            {
+                threads.Add(thread);
+            }
+
+            return thread;
+        }
+
+        private static void PruneDeadThreads(HashSet<IRbxScriptThread> threads)
+        {
+            threads.RemoveWhere(thread => thread == null || thread.IsDead
+                                          || thread.Status == RbxScriptThreadStatus.Dead);
+        }
+
+        private object ReadTaskCallable(LuaFunctionExecutionContext ctx, int index, string what)
+        {
+            LuaValue callable = Arg(ctx, index);
+            try
+            {
+                return _schedulerThreadFactory.CaptureCallable(ctx.State, callable);
+            }
+            catch (RbxError error)
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a function or thread at argument " + (index + 1),
+                    error.Fix);
+            }
+        }
+
+        private static LuaValue ReadLegacyCallback(
+            LuaFunctionExecutionContext ctx, int index, string what)
+        {
+            LuaValue callback = Arg(ctx, index);
+            if (callback.Type == LuaValueType.Function)
+            {
+                return callback;
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a function at argument " + (index + 1),
+                "pass a function, got " + Describe(callback) + " at argument " + (index + 1));
+        }
+
+        private static object[] ReadTaskArguments(LuaFunctionExecutionContext ctx, int startIndex)
+        {
+            int count = Math.Max(0, ctx.ArgumentCount - startIndex);
+            if (count == 0)
+            {
+                return Array.Empty<object>();
+            }
+
+            object[] arguments = new object[count];
+            for (int index = 0; index < count; index++)
+            {
+                arguments[index] = ctx.GetArgument(startIndex + index);
+            }
+
+            return arguments;
+        }
+
+        private static LuaValue WrapTaskThread(IRbxScriptThread thread, LuaTable threadMeta)
+        {
+            return Box(thread, threadMeta);
+        }
+
+        private static IRbxScriptThread ReadTaskThread(
+            LuaFunctionExecutionContext ctx, int index)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (TryUnbox(value, out IRbxScriptThread thread))
+            {
+                return thread;
+            }
+
+            throw RbxError.BadArgument(
+                "task.cancel expects a thread at argument " + (index + 1),
+                "pass the live thread returned by task.spawn, task.defer, or task.delay");
         }
     }
 }

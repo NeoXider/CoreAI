@@ -110,7 +110,9 @@ namespace CoreAI.Composition
                     rbxApi = new LuaCsRbxApiBindings(
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
-                        pickSource: rbxHost.PickSource);
+                        pickSource: rbxHost.PickSource,
+                        log: msg => rbxLog.Warn(
+                            "[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
                 else
                 {
@@ -152,10 +154,10 @@ namespace CoreAI.Composition
                     RegisterWorldEditBuildBindings = false
                 });
 
-                // WHY (audit H1): an unloaded mod must not leak the Rbx instances it created, nor keep its
-                // signal connections firing after teardown. This single ModTearingDown handler releases both
-                // in the safe order: connections FIRST, instance sweep SECOND, so no still-connected handler
-                // fires against a just-destroyed instance (INSTANCE_DESTROYED) during the sweep.
+                // WHY (audit H1): an unloaded mod must not leak the Rbx instances or scheduled threads it
+                // created, nor keep its signal connections firing after teardown. This single
+                // ModTearingDown handler stops threads and connections before the instance sweep, so no
+                // surviving execution can observe a just-destroyed instance during the sweep.
                 //
                 // Connections: mod-owned Connect/Once handles are Disconnected on EVERY reason — Unload,
                 // Reload, AND Quarantine — because unlike instances the re-run chunk re-Connects fresh
@@ -174,6 +176,15 @@ namespace CoreAI.Composition
                         // WHY: on RELOAD the replacement chunk has ALREADY re-Connected (BuildMod runs
                         // before this teardown), so only the outgoing chunk's connections are dropped here,
                         // not the new generation's; Unload/Quarantine have no new chunk, so everything goes.
+                        if (reason == LuaModTeardownReason.Reload)
+                        {
+                            rbxApi?.KillOutgoingScheduledGenerations(modId);
+                        }
+                        else
+                        {
+                            rbxApi?.KillAllScheduledOwnedBy(modId);
+                        }
+
                         ownedConnections?.DisconnectOwnedBy(
                             modId, reason == LuaModTeardownReason.Reload);
 
@@ -265,11 +276,20 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
-                            // WHY: the per-frame pump runs as the driver's pre-tick so UserInputService
-                            // events and the RunService game-loop signals (Heartbeat/Stepped/
-                            // RenderStepped) fire with the frame delta before mod dispatch each frame.
+                            // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
+                            // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
                             tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
-                                runtime, stackRbxApi != null ? stackRbxApi.PumpFrame : (System.Action<float>)null);
+                                runtime,
+                                stackRbxApi?.Scheduler,
+                                stackRbxApi != null
+                                    ? stackRbxApi.PumpPreSimulation
+                                    : (System.Action<float>)null,
+                                stackRbxApi != null
+                                    ? stackRbxApi.PumpHeartbeat
+                                    : (System.Action<float>)null,
+                                stackRbxApi != null
+                                    ? stackRbxApi.PumpPreRender
+                                    : (System.Action<float>)null);
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate

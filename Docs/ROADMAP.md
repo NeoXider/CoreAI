@@ -5,8 +5,8 @@
 > [`TODO.md`](../TODO.md); shipped work in the package changelogs
 > (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-08-12. Current lockstep package version: **7.0.1**.
-The patch restores Unity 6.6 UI Toolkit compilation; see [Release plan](#4-release-plan).
+Last updated: 2026-08-30. Latest RELEASED lockstep version: **7.0.7**; **7.1.0 is prepared in the working tree and not yet committed or released** (`TODO.md` carries its status).
+The patch keeps provider reasoning diagnostic-only instead of promoting it to visible or persistent content; see [Release plan](#4-release-plan).
 
 ---
 
@@ -52,7 +52,7 @@ world state, mods, memories, (soon) UI — is versioned, persisted, revertible, 
 
 ## 2. Package map
 
-Six UPM packages, released in lockstep (all currently 7.0.3):
+Six UPM packages, released in lockstep. Last released together at 7.0.7; the working tree carries the prepared, uncommitted 7.1.0:
 
 | Package | What it is |
 |---|---|
@@ -84,13 +84,14 @@ with exactly one conversion boundary (`RobloxSpace`).
 **Current state.** MVP0 (engine abstraction seam: neutral `CoreAI.Scripting` contracts, `LuaCs*`
 adapters as the single VM layer, seam-honesty tests) has landed, plus the quarantine error
 policy, the Luau→Lua 5.2 downlevel preprocessor (standalone, 93 EditMode tests), the Lua log
-service core, and editor Lua/Luau syntax highlighting. The **MVP1 core** — pure-spec datatypes,
-`InstanceRegistry`/`RbxDataModel`, the `RobloxSpace` conversion boundary (1 stud = 0.28 m
-default), the GameObject materialization binder, and the Lua Instance/datatype surface — is on
-disk with its Lua wiring in progress.
+service, and editor Lua/Luau syntax highlighting. **MVP1 landed in 6.3.0 with the §5.1.8
+acceptance gate green**, including the pulled-forward Roblox-1:1 `UserInputService` slice,
+`workspace.CurrentCamera`, and `Part.Shape`. Sample needs also pulled forward `RbxScriptSignal`
+dispatch for RunService, UserInputService, and ClickDetector plus `ModConnectionRegistry`;
+general deferred dispatch remains MVP2.
 
-**Next milestones.** Finish MVP1 (Lua wiring + §5.1.8 acceptance gate), MVP2 (task scheduler,
-signals, clocks, `game:GetService` with loud stubs), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
+**Next milestones.** Start MVP2 (task scheduler, signals, clocks, `game:GetService` catalog,
+materials catalog, shared JSON contract, loopback remotes), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
 DataStore, input, Mirror, replication, dedicated server, GUI, audio/FX, in-game console,
 performance/WebGL).
 
@@ -153,12 +154,12 @@ memory, self-service skills (`read_skill`/`manage_skills`, ~91% token savings vs
 runtime multi-endpoint LLM routing (dynamic endpoint/profile CRUD, per-role/per-agent/per-request
 profiles, secret hygiene via `SecretReference`), streaming that survives small-model reality,
 resilience decorators, and the quarantine-not-unload mod error policy with auto-repair prompts.
-The standalone Lua log service (`ILuaLogService`, `get_mod_logs` read-only tool, LLM-friendly
-formatter) has its core landed but is not yet wired into the mod runtime's print/error capture,
-DI, or the Programmer tool set.
+The Lua log service is wired end-to-end: singleton `ILuaLogService` flows into the mod runtime's
+print/report, handler/load errors, and quarantine capture, while the `get_mod_logs` read-only tool
+is registered for the Programmer role and shares that same service.
 
-**Next milestones.** Wire the Lua log service end-to-end; the skill-equals-docs artifact with a
-generated implemented-vs-stub API manifest (MVP6); the in-game console + closed AI self-repair
+**Next milestones.** The skill-equals-docs artifact with a generated implemented-vs-stub API
+manifest (MVP6); the in-game console + closed AI self-repair
 loop (MVP16); the **async agent workflow** — play and task the AI in parallel, in any role:
 background generation already landed (Esc collapses the Hub, generation continues); remaining
 are a task queue (new instructions enqueue instead of blocking or derailing current work) and
@@ -241,8 +242,9 @@ ROBLOX_API_ROADMAP §MVP17/§6.5.
 
 ## 4. Release plan
 
-- **7.0.1 (current, 2026-08-12).** Patch release migrating the chat bubble custom UI Toolkit element
-  to `[UxmlElement]` / `[UxmlAttribute]` for Unity 6.6 while preserving existing UXML type and attribute names.
+- **7.0.7 (latest released, 2026-08-27).** Patch release keeping OpenAI-compatible reasoning fields
+  diagnostic-only: neither non-streaming nor SSE reasoning is promoted into the visible response
+  or carried into persistent history and other long-lived records.
 - **7.0.0 (2026-08-01).** Breaking migration to independent positive
   provider/Lua symbols, full-demo repository baseline, four-leg CI matrix, opaque multi-user
   persistence keys, scope-aware cancellation, session-only persistence, prompt-cache layering and

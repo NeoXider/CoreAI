@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
@@ -14,25 +15,78 @@ namespace CoreAI.Infrastructure.Lua
     public sealed class LuaModRuntimeTickDriver : MonoBehaviour
     {
         private ILuaModRuntime _runtime;
-        private System.Action<float> _preTick;
+        private System.Action<float> _preSimulation;
+        private System.Action<float> _heartbeat;
+        private System.Action<float> _preRender;
+        private ModScheduler _scheduler;
 
-        /// <summary>Attaches the runtime this driver ticks every frame, plus an optional
-        /// pre-tick pump (the Roblox input + RunService pump) that must observe device state and
-        /// fire the per-frame signals before mod dispatch, carrying this frame's delta so
-        /// RunService.Heartbeat handlers receive it.</summary>
-        public void Initialize(ILuaModRuntime runtime, System.Action<float> preTick = null)
+        /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
+        public void Initialize(ILuaModRuntime runtime, ModScheduler scheduler = null,
+            System.Action<float> preSimulation = null,
+            System.Action<float> heartbeat = null,
+            System.Action<float> preRender = null)
         {
+            if (_scheduler != null)
+            {
+                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
+            }
+
             _runtime = runtime;
-            _preTick = preTick;
+            _scheduler = scheduler;
+            _preSimulation = preSimulation;
+            _heartbeat = heartbeat;
+            _preRender = preRender;
+            if (_scheduler != null)
+            {
+                _scheduler.PhaseReached += OnSchedulerPhaseReached;
+            }
         }
 
         private void Update()
         {
-            // WHY: one delta for both the pre-tick pump (RunService.Step wants the frame delta) and
-            // the runtime tick, so the game loop and mod timers advance on the same clock.
-            float dt = Time.deltaTime;
-            _preTick?.Invoke(dt);
-            _runtime?.Tick(dt);
+            PumpFrame(Time.deltaTime);
+        }
+
+        private void OnDestroy()
+        {
+            if (_scheduler != null)
+            {
+                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
+            }
+        }
+
+        /// <summary>Advances one scaled host frame in scheduler, signal, then runtime order.</summary>
+        public void PumpFrame(float deltaSeconds)
+        {
+            if (_scheduler != null)
+            {
+                _scheduler.Advance(deltaSeconds);
+            }
+            else
+            {
+                _preSimulation?.Invoke(deltaSeconds);
+                _heartbeat?.Invoke(deltaSeconds);
+                _preRender?.Invoke(deltaSeconds);
+            }
+
+            _runtime?.Tick(deltaSeconds);
+        }
+
+        private void OnSchedulerPhaseReached(SchedulerPhase phase, double deltaSeconds)
+        {
+            float frameDelta = (float)deltaSeconds;
+            switch (phase)
+            {
+                case SchedulerPhase.PreSimulation:
+                    _preSimulation?.Invoke(frameDelta);
+                    return;
+                case SchedulerPhase.Heartbeat:
+                    _heartbeat?.Invoke(frameDelta);
+                    return;
+                case SchedulerPhase.PreRender:
+                    _preRender?.Invoke(frameDelta);
+                    return;
+            }
         }
     }
 }

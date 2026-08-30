@@ -3,8 +3,10 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
@@ -91,15 +93,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             }
         }
 
+        private sealed class TeardownProbe
+        {
+            public int KilledThreads { get; set; } = -1;
+        }
+
         /// <summary>
-        /// Builds a stack wired to a shared connection ledger and the same ModTearingDown teardown the
-        /// CoreAiModsInstaller installs: disconnect a mod's connections on every reason, KEEPING the
-        /// current generation on Reload (the replacement chunk has already re-Connected by then).
+        /// Builds a stack wired to the same ModTearingDown cleanup as CoreAiModsInstaller: scheduler
+        /// threads die beside connections, while Reload keeps the current connection generation.
         /// </summary>
-        private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildWiredStack(out LuaCsRbxApiBindings roblox,
+            MemoryStore store, IInputSource inputSource = null,
+            TeardownProbe teardownProbe = null)
         {
             ModConnectionRegistry connections = new();
-            roblox = new LuaCsRbxApiBindings(connections: connections);
+            LuaCsRbxApiBindings bindings = new(
+                connections: connections, inputSource: inputSource);
+            roblox = bindings;
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
@@ -109,9 +119,194 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 RbxApi = roblox
             });
 
-            stack.Runtime.ModTearingDown += (modId, reason) => connections.DisconnectOwnedBy(
-                modId, reason == LuaModTeardownReason.Reload);
+            stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                int killedThreads = reason == LuaModTeardownReason.Reload
+                    ? bindings.KillOutgoingScheduledGenerations(modId)
+                    : bindings.KillAllScheduledOwnedBy(modId);
+                if (teardownProbe != null)
+                {
+                    teardownProbe.KilledThreads = killedThreads;
+                }
+
+                connections.DisconnectOwnedBy(
+                    modId, reason == LuaModTeardownReason.Reload);
+            };
             return stack;
+        }
+
+        private static LuaModRuntimeTickDriver CreateFrameDriver(
+            LuaCsModStack stack, LuaCsRbxApiBindings roblox)
+        {
+            GameObject driverObject = new("LuaModRuntimeTickDriver");
+            LuaModRuntimeTickDriver driver = driverObject.AddComponent<LuaModRuntimeTickDriver>();
+            driver.Initialize(stack.Runtime, roblox.Scheduler,
+                roblox.PumpPreSimulation, roblox.PumpHeartbeat, roblox.PumpPreRender);
+            return driver;
+        }
+
+        [Test]
+        public void ProductionDriver_EmitsObservableR4PhaseOrder()
+        {
+            InMemoryInputSource inputSource = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(
+                out LuaCsRbxApiBindings roblox, store, inputSource);
+            LuaModRuntimeTickDriver driver = CreateFrameDriver(stack, roblox);
+            try
+            {
+                stack.Runtime.LoadMod("m", @"
+                    local run_service = game:GetService('RunService')
+                    local input_service = game:GetService('UserInputService')
+                    run_service.Stepped:Connect(function()
+                        store_set('order', store_get('order') .. 'S')
+                    end)
+                    run_service.Heartbeat:Connect(function()
+                        store_set('order', store_get('order') .. 'H')
+                    end)
+                    run_service.RenderStepped:Connect(function()
+                        store_set('order', store_get('order') .. 'R')
+                    end)
+                    input_service.InputBegan:Connect(function()
+                        store_set('order', store_get('order') .. 'I')
+                    end)
+                    task.delay(0, function()
+                        store_set('order', store_get('order') .. 'D')
+                    end)");
+
+                inputSource.SetMouseButton(0, true);
+                driver.PumpFrame(0.1f);
+
+                Assert.AreEqual("SDHIR", store.Get("m", "order"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(driver.gameObject);
+            }
+        }
+
+        [Test]
+        public void HostFramePump_TaskWaitResumesAfterEnoughScaledFrames()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+            LuaModRuntimeTickDriver driver = CreateFrameDriver(stack, roblox);
+            try
+            {
+                stack.Runtime.LoadMod("m", @"
+                    task.spawn(function()
+                        store_set('wait_state', 'waiting')
+                        task.wait(0.2)
+                        store_set('wait_state', 'resumed')
+                    end)");
+
+                Assert.AreEqual("waiting", store.Get("m", "wait_state"));
+                driver.PumpFrame(0.1f);
+                Assert.AreEqual("waiting", store.Get("m", "wait_state"));
+                driver.PumpFrame(0.1f);
+                Assert.AreEqual("resumed", store.Get("m", "wait_state"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(driver.gameObject);
+            }
+        }
+
+        [Test]
+        public void HostFramePump_TaskDelayFiresAfterEnoughScaledFrames()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+            LuaModRuntimeTickDriver driver = CreateFrameDriver(stack, roblox);
+            try
+            {
+                stack.Runtime.LoadMod("m", @"
+                    local run_service = game:GetService('RunService')
+                    run_service.Heartbeat:Connect(function()
+                        store_set('order', store_get('order') .. 'H')
+                    end)
+                    task.delay(0.25, function()
+                        store_set('delay_fired', 'yes')
+                        store_set('order', store_get('order') .. 'D')
+                    end)");
+
+                driver.PumpFrame(0.1f);
+                driver.PumpFrame(0.1f);
+                Assert.AreEqual("", store.Get("m", "delay_fired"));
+                Assert.AreEqual("HH", store.Get("m", "order"));
+                driver.PumpFrame(0.1f);
+                Assert.AreEqual("yes", store.Get("m", "delay_fired"));
+                Assert.AreEqual("HHDH", store.Get("m", "order"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(driver.gameObject);
+            }
+        }
+
+        [Test]
+        public void Unload_KillsPendingSchedulerThreadsWithoutTouchingOtherMods()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+            LuaModRuntimeTickDriver driver = CreateFrameDriver(stack, roblox);
+            try
+            {
+                const string delayedWrite = @"
+                    task.delay(1, function()
+                        store_set('delay_fired', 'yes')
+                    end)";
+                stack.Runtime.LoadMod("alpha", delayedWrite);
+                stack.Runtime.LoadMod("beta", delayedWrite);
+
+                Assert.IsTrue(stack.Runtime.UnloadMod("alpha"));
+                driver.PumpFrame(1f);
+
+                Assert.AreEqual("", store.Get("alpha", "delay_fired"));
+                Assert.AreEqual("yes", store.Get("beta", "delay_fired"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(driver.gameObject);
+            }
+        }
+
+        [Test]
+        public void Reload_KillsOutgoingSchedulerGenerationAndKeepsReplacement()
+        {
+            MemoryStore store = new();
+            TeardownProbe teardownProbe = new();
+            LuaCsModStack stack = BuildWiredStack(
+                out LuaCsRbxApiBindings roblox, store,
+                teardownProbe: teardownProbe);
+            LuaModRuntimeTickDriver driver = CreateFrameDriver(stack, roblox);
+            try
+            {
+                stack.Runtime.LoadMod("m", @"
+                    local scheduled = false
+                    game:GetService('RunService').Heartbeat:Connect(function()
+                        if scheduled then return end
+                        scheduled = true
+                        task.delay(1, function()
+                            store_set('outgoing_fired', 'yes')
+                        end)
+                    end)");
+                driver.PumpFrame(0.1f);
+                stack.Runtime.ReloadMod("m", @"
+                    task.delay(1, function()
+                        store_set('replacement_fired', 'yes')
+                    end)");
+
+                driver.PumpFrame(1f);
+
+                Assert.AreEqual(1, teardownProbe.KilledThreads);
+                Assert.AreEqual("", store.Get("m", "outgoing_fired"));
+                Assert.AreEqual("yes", store.Get("m", "replacement_fired"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(driver.gameObject);
+            }
         }
 
         [Test]

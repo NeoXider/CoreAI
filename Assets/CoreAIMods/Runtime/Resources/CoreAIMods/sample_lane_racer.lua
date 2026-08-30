@@ -1,7 +1,7 @@
 --[[@coreai
 id: sample_lane_racer
 name: Lane Racer (sample)
-version: 2.1.0
+version: 2.3.0
 active: false
 capabilities: All
 category: Samples
@@ -12,19 +12,35 @@ description: Opt-in playable sample. A 3-lane dodging mini-game - steer with A/D
 -- A complete playable mod in the SAME API Roblox uses. The game loop is RunService.Heartbeat (per
 -- frame, dt in seconds) so motion is smooth and frame-rate independent; speeds are in studs/second.
 -- Input is UserInputService with rising-edge detection (held key = one lane per press). The camera is
--- a scripted CFrame.lookAt framed so world +X is SCREEN RIGHT, so A=left / D=right feel correct.
+-- framed first, then its RightVector and LookVector are projected onto the ground once to define the
+-- lane and track axes. Building positions from those axes keeps A/D aligned with screen left/right
+-- when the camera framing changes instead of coupling controls to a world axis.
 -- Parts are Anchored (no physics) during play and unanchored on a crash so the wreck scatters. Every
 -- part lives under one Folder the mod owns, so disable/unload destroys the whole game.
 
 local RunService = game:GetService("RunService")
 local uis = game:GetService("UserInputService")
 
-local LANE_X = { -4, 0, 4 }          -- world X of lanes 1..3 (lane 3 = +X = screen right)
-local SPAWN_Z = -60                  -- blocks appear this far down the track (far end of the view)
-local DESPAWN_Z = 8                  -- and are recycled once this far past the car
+local LANE_OFFSET = { -4, 0, 4 }
+local SPAWN_DISTANCE = 60            -- blocks appear this far down the track (far end of the view)
+local DESPAWN_DISTANCE = -8          -- and are recycled once this far past the car
 local SPEED = 20                     -- studs PER SECOND a block travels toward the car
 local SPAWN_INTERVAL = 0.8           -- seconds between spawns
 local MAX_OBSTACLES = 6
+
+local cam = workspace.CurrentCamera
+cam.CameraType = Enum.CameraType.Scriptable
+cam.CFrame = CFrame.lookAt(Vector3.new(0, 9, 14), Vector3.new(0, 2, -18))
+
+local cameraRight = cam.CFrame.RightVector
+local cameraForward = cam.CFrame.LookVector
+local LANE_AXIS = Vector3.new(cameraRight.X, 0, cameraRight.Z).Unit
+local TRACK_AXIS = Vector3.new(cameraForward.X, 0, cameraForward.Z).Unit
+local TRACK_ORIGIN = Vector3.new(0, 1, 0)
+
+local function track_position(laneOffset, distance)
+    return TRACK_ORIGIN + LANE_AXIS * laneOffset + TRACK_AXIS * distance
+end
 
 local root = Instance.new("Folder")
 root.Name = "LaneRacer"
@@ -38,15 +54,11 @@ car.Anchored = true
 car.Parent = root
 
 local lane = 2
-local carX = LANE_X[lane]                 -- visual X, eased toward the target lane for a smooth slide
+local carOffset = LANE_OFFSET[lane]       -- visual offset, eased toward the target lane for a smooth slide
 local LANE_EASE = 12                       -- higher = snappier lane changes
-car.Position = Vector3.new(carX, 1, 0)
+car.Position = track_position(carOffset, 0)
 
-local cam = workspace.CurrentCamera
-cam.CameraType = Enum.CameraType.Scriptable
-cam.CFrame = CFrame.lookAt(Vector3.new(0, 9, 14), Vector3.new(0, 2, -18))
-
-local obstacles = {}                 -- { {part=, lane=, z=} , ... }
+local obstacles = {}                 -- { {part=, lane=, distance=} , ... }
 local prevLeft, prevRight, prevRestart = false, false, false
 local spawnTimer = 0
 local score = 0
@@ -68,10 +80,10 @@ local function spawn_obstacle()
     p.Name = "Block"
     p.Size = Vector3.new(2, 2, 2)
     p.Color = Color3.fromRGB(230, 70, 70)
-    p.Position = Vector3.new(LANE_X[l], 1, SPAWN_Z)
+    p.Position = track_position(LANE_OFFSET[l], SPAWN_DISTANCE)
     p.Anchored = true
     p.Parent = root
-    obstacles[#obstacles + 1] = { part = p, lane = l, z = SPAWN_Z }
+    obstacles[#obstacles + 1] = { part = p, lane = l, distance = SPAWN_DISTANCE }
 end
 
 local function crash()
@@ -88,9 +100,9 @@ end
 local function restart()
     clear_obstacles()
     lane, score, spawnTimer, alive = 2, 0, 0, true
-    carX = LANE_X[lane]
+    carOffset = LANE_OFFSET[lane]
     car.Anchored = true
-    car.Position = Vector3.new(carX, 1, 0)
+    car.Position = track_position(carOffset, 0)
     print("[lane_racer] restarted - go!")
 end
 
@@ -112,26 +124,28 @@ RunService.Heartbeat:Connect(function(dt)
     if left and not prevLeft then lane = math.max(1, lane - 1) end
     if right and not prevRight then lane = math.min(3, lane + 1) end
     prevLeft, prevRight = left, right
-    -- Ease the visual X toward the target lane so the car slides instead of teleporting.
-    carX = carX + (LANE_X[lane] - carX) * math.min(1, dt * LANE_EASE)
-    car.Position = Vector3.new(carX, 1, 0)
+    -- Ease the visual offset toward the target lane so the car slides instead of teleporting.
+    carOffset = carOffset + (LANE_OFFSET[lane] - carOffset) * math.min(1, dt * LANE_EASE)
+    car.Position = track_position(carOffset, 0)
 
     -- Advance blocks toward the car by dt (smooth); recycle passed ones, detect a same-lane hit.
     for i = #obstacles, 1, -1 do
         local o = obstacles[i]
-        o.z = o.z + SPEED * dt
-        o.part.Position = Vector3.new(LANE_X[o.lane], 1, o.z)
+        local previousDistance = o.distance
+        o.distance = o.distance - SPEED * dt
+        o.part.Position = track_position(LANE_OFFSET[o.lane], o.distance)
 
-        if o.z >= DESPAWN_Z then
+        local crossedCar = previousDistance >= -1.5 and o.distance <= 1.5
+        if o.lane == lane and crossedCar then
+            crash()
+            break
+        elseif o.distance <= DESPAWN_DISTANCE then
             o.part:Destroy()
             table.remove(obstacles, i)
             score = score + 1
             if score % 5 == 0 then
                 print("[lane_racer] score " .. score)
             end
-        elseif o.lane == lane and o.z <= 1.5 and o.z >= -1.5 then
-            crash()
-            break
         end
     end
 

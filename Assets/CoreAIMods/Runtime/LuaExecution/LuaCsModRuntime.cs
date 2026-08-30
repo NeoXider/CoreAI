@@ -178,6 +178,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly bool _autoPersistMods;
         private readonly ILog _log;
         private readonly ILuaLogService _logService;
+        private readonly LuaCsRbxApiBindings _rbxApi;
+        private readonly IExecutionBudget _scriptExecutionBudget;
         private readonly List<Mod> _tickScratch = new();
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
@@ -332,12 +334,14 @@ namespace CoreAI.Ai.LuaCs
             IScriptEngine engine = null,
             int maxErrorsBeforeQuarantine = DefaultMaxErrorsBeforeQuarantine,
             LuaCsLogicSlots logicSlots = null,
-            ILuaLogService logService = null)
+            ILuaLogService logService = null,
+            LuaCsRbxApiBindings rbxApi = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
             _log = log;
             _logService = logService;
+            _rbxApi = rbxApi;
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
@@ -356,8 +360,9 @@ namespace CoreAI.Ai.LuaCs
             // direct construction (tests, fixtures) working without an explicit engine.
             _engine = engine ?? new LuaCsScriptEngine();
             _marshaller = _engine.Marshaller;
-            _handlerGuard = _engine.CreateGuard(
-                new ExecutionBudget(handlerTimeoutMs, handlerMaxSteps, handlerMaxAllocatedBytes));
+            _scriptExecutionBudget = new ExecutionBudget(
+                handlerTimeoutMs, handlerMaxSteps, handlerMaxAllocatedBytes);
+            _handlerGuard = _engine.CreateGuard(_scriptExecutionBudget);
         }
 
         /// <summary>The <see cref="ILuaScriptVersionStore"/> key for a mod's revision history.</summary>
@@ -525,6 +530,7 @@ namespace CoreAI.Ai.LuaCs
                 Caps = capabilities,
                 LoadedAtUtc = DateTime.UtcNow
             };
+            LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
 
             try
             {
@@ -534,6 +540,7 @@ namespace CoreAI.Ai.LuaCs
                 // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
                 // round-trip the Luau the user wrote.
                 string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
+                rbxLoadCandidate = _rbxApi?.BeginModLoadCandidate(modId);
 
                 IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
                 RegisterGameplayBindings(registry, capabilities, modId);
@@ -552,7 +559,15 @@ namespace CoreAI.Ai.LuaCs
                 PushTransactionScope();
                 try
                 {
-                    _engine.RunChunk(mod.State, compileSource);
+                    if (_rbxApi == null)
+                    {
+                        _engine.RunChunk(mod.State, compileSource);
+                    }
+                    else
+                    {
+                        _rbxApi.RunModChunk(
+                            mod.State, modId, compileSource, _scriptExecutionBudget);
+                    }
                 }
                 finally
                 {
@@ -563,6 +578,18 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
+                if (rbxLoadCandidate != null)
+                {
+                    try
+                    {
+                        _rbxApi.RollbackModLoadCandidate(rbxLoadCandidate);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        _log?.Error($"[LuaCsModRuntime] Failed-load rollback for '{modId}' failed: {rollbackException}");
+                    }
+                }
+
                 // WHY: A failed load/parse never reaches the tick-time error channel, yet it is the
                 // self-repair loop's most important signal — record it before rethrowing so get_mod_logs
                 // can show WHY the mod never came up.

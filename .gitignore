@@ -142,3 +142,9 @@ PROGRESS.*.md.meta
 
 # Отчёты локальных прогонов тестов
 coreai-*.xml
+
+# Unity/VS generated component manifest
+.vsconfig
+
+# Local build + test artifacts (batchmode results, logs, compile checks)
+artifacts/
