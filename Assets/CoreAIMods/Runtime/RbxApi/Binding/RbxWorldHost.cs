@@ -87,7 +87,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
             RbxSpace.Configure(_metersPerStud);
             Binder = new InstanceGameObjectBinder(transform, Logger);
-            Registry = new InstanceRegistry(null, Binder);
+            WorldInstanceAdapter worldInstanceAdapter = new(Binder);
+            Registry = new InstanceRegistry(null, Binder, worldInstanceAdapter: worldInstanceAdapter);
             // WHY: InstanceRegistry stays engine-free and only exposes an Action<string> hook, so the
             // Unity-side host is what adapts that hook onto the CoreAI logger — the registry never
             // learns about UnityEngine or the logging stack. Resolved per call, so a later SetLog wins.

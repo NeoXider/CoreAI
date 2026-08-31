@@ -88,6 +88,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public CompletionWaitEntry CompletionWait { get; set; }
 
             public RbxInstance ReadableTombstone { get; set; }
+
+            public long SignalWaitGeneration { get; set; }
         }
 
         private sealed class SignalInvocation
@@ -154,6 +156,21 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             public object[] Arguments { get; }
+        }
+
+        private sealed class SignalWaitTimeoutEntry : TimedEntry
+        {
+            public SignalWaitTimeoutEntry(ThreadRecord record, long generation,
+                Func<object[]> resumeArguments, double deadline, long earliestFrame, long sequence)
+                : base(record, deadline, earliestFrame, sequence)
+            {
+                Generation = generation;
+                ResumeArguments = resumeArguments;
+            }
+
+            public long Generation { get; }
+
+            public Func<object[]> ResumeArguments { get; }
         }
 
         private sealed class CompletionWaitEntry
@@ -330,6 +347,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly List<CompletionWaitEntry> _completionBuffer = new();
         private readonly MinHeap<WaitEntry> _waitHeap;
         private readonly MinHeap<DelayEntry> _delayHeap;
+        private readonly MinHeap<SignalWaitTimeoutEntry> _signalWaitTimeoutHeap;
         private Func<string, string> _actorIdResolver;
 
         private long _frameIndex;
@@ -370,6 +388,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 (WaitEntry left, WaitEntry right) => CompareTimedEntries(left, right));
             _delayHeap = new MinHeap<DelayEntry>(
                 (DelayEntry left, DelayEntry right) => CompareTimedEntries(left, right));
+            _signalWaitTimeoutHeap = new MinHeap<SignalWaitTimeoutEntry>(
+                (SignalWaitTimeoutEntry left, SignalWaitTimeoutEntry right) =>
+                    CompareTimedEntries(left, right));
         }
 
         /// <summary>Configures actor attribution and the per-actor live-thread quota.</summary>
@@ -399,6 +420,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 }
             }
         }
+
+        internal int LiveThreadCount => _records.Count;
 
         /// <summary>Raised at each observable phase boundary in canonical pipeline order.</summary>
         public event Action<SchedulerPhase, double> PhaseReached;
@@ -467,7 +490,29 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         internal void ScheduleSignalWait(IRbxScriptThread caller)
         {
             ThreadRecord record = GetSchedulableRecord(caller, "signal:Wait", true);
+            record.SignalWaitGeneration++;
             record.State = ThreadScheduleState.WaitingForSignal;
+        }
+
+        /// <summary>Marks a signal waiter yielded and schedules its owning-thread timeout.</summary>
+        internal void ScheduleSignalWait(IRbxScriptThread caller, double seconds,
+            Func<object[]> timeoutResumeArguments)
+        {
+            if (timeoutResumeArguments == null)
+            {
+                throw RbxError.BadArgument(
+                    "signal:Wait timeout requires resume arguments",
+                    "provide the timeout result factory from the active Lua binding");
+            }
+
+            double duration = ValidateAndNormalizeDuration(seconds, "signal:Wait timeout");
+            ThreadRecord record = GetSchedulableRecord(caller, "signal:Wait", true);
+            record.SignalWaitGeneration++;
+            record.State = ThreadScheduleState.WaitingForSignal;
+            SignalWaitTimeoutEntry entry = new(record, record.SignalWaitGeneration,
+                timeoutResumeArguments, CurrentTime + duration, GetEarliestTimerFrame(),
+                NextSequence());
+            _signalWaitTimeoutHeap.Add(entry);
         }
 
         /// <summary>Resumes one signal waiter with the arguments captured at fire time.</summary>
@@ -958,18 +1003,37 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             {
                 WaitEntry wait = PeekEligibleWait();
                 DelayEntry delay = PeekEligibleDelay();
-                if (wait == null && delay == null)
+                SignalWaitTimeoutEntry signalTimeout = PeekEligibleSignalWaitTimeout();
+                if (wait == null && delay == null && signalTimeout == null)
                 {
                     break;
                 }
 
-                if (delay == null || wait != null && CompareTimedEntries(wait, delay) <= 0)
+                TimedEntry earliest = wait;
+                if (earliest == null
+                    || delay != null && CompareTimedEntries(delay, earliest) < 0)
+                {
+                    earliest = delay;
+                }
+
+                if (earliest == null
+                    || signalTimeout != null
+                    && CompareTimedEntries(signalTimeout, earliest) < 0)
+                {
+                    earliest = signalTimeout;
+                }
+
+                if (ReferenceEquals(earliest, wait))
                 {
                     _delayedBatchBuffer.Add(_waitHeap.Pop());
                 }
-                else
+                else if (ReferenceEquals(earliest, delay))
                 {
                     _delayedBatchBuffer.Add(_delayHeap.Pop());
+                }
+                else
+                {
+                    _delayedBatchBuffer.Add(_signalWaitTimeoutHeap.Pop());
                 }
             }
 
@@ -992,11 +1056,26 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         continue;
                     }
 
-                    DelayEntry delay = (DelayEntry)entry;
-                    if (delay.Record.State == ThreadScheduleState.Delayed
-                        && _records.ContainsKey(delay.Record.Thread))
+                    DelayEntry delay = entry as DelayEntry;
+                    if (delay != null)
                     {
-                        ResumeThread(delay.Record, delay.Arguments);
+                        if (delay.Record.State == ThreadScheduleState.Delayed
+                            && _records.ContainsKey(delay.Record.Thread))
+                        {
+                            ResumeThread(delay.Record, delay.Arguments);
+                        }
+
+                        continue;
+                    }
+
+                    SignalWaitTimeoutEntry signalTimeout =
+                        (SignalWaitTimeoutEntry)entry;
+                    if (signalTimeout.Record.State == ThreadScheduleState.WaitingForSignal
+                        && signalTimeout.Record.SignalWaitGeneration == signalTimeout.Generation
+                        && _records.ContainsKey(signalTimeout.Record.Thread))
+                    {
+                        ResumeThread(signalTimeout.Record,
+                            CopyArguments(signalTimeout.ResumeArguments()));
                     }
                 }
             }
@@ -1028,11 +1107,25 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     continue;
                 }
 
-                DelayEntry delay = (DelayEntry)entry;
-                if (delay.Record.State == ThreadScheduleState.Delayed
-                    && _records.ContainsKey(delay.Record.Thread))
+                DelayEntry delay = entry as DelayEntry;
+                if (delay != null)
                 {
-                    _delayHeap.Add(delay);
+                    if (delay.Record.State == ThreadScheduleState.Delayed
+                        && _records.ContainsKey(delay.Record.Thread))
+                    {
+                        _delayHeap.Add(delay);
+                    }
+
+                    continue;
+                }
+
+                SignalWaitTimeoutEntry signalTimeout =
+                    (SignalWaitTimeoutEntry)entry;
+                if (signalTimeout.Record.State == ThreadScheduleState.WaitingForSignal
+                    && signalTimeout.Record.SignalWaitGeneration == signalTimeout.Generation
+                    && _records.ContainsKey(signalTimeout.Record.Thread))
+                {
+                    _signalWaitTimeoutHeap.Add(signalTimeout);
                 }
             }
         }
@@ -1066,6 +1159,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             DelayEntry entry = _delayHeap.Peek();
+            return IsEligible(entry) ? entry : null;
+        }
+
+        private SignalWaitTimeoutEntry PeekEligibleSignalWaitTimeout()
+        {
+            if (_signalWaitTimeoutHeap.Count == 0)
+            {
+                return null;
+            }
+
+            SignalWaitTimeoutEntry entry = _signalWaitTimeoutHeap.Peek();
             return IsEligible(entry) ? entry : null;
         }
 
@@ -1171,6 +1275,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             int touchedCount = _waitHeap.RemoveWhere(
                 entry => ReferenceEquals(entry.Record, record));
             touchedCount += _delayHeap.RemoveWhere(
+                entry => ReferenceEquals(entry.Record, record));
+            touchedCount += _signalWaitTimeoutHeap.RemoveWhere(
                 entry => ReferenceEquals(entry.Record, record));
             lock (_completionGate)
             {

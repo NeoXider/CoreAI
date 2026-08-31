@@ -11,9 +11,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
     /// Part.Shape materialization (MVP1 shape slice): Ball maps to Unity's unit sphere and
     /// Block to the unit cube directly on the part GameObject; Cylinder corrects Unity's
     /// 2-unit-tall Y-axis mesh onto Roblox's X-axis stud-per-unit cylinder via a rotated,
-    /// height-halved mesh child; Wedge uses a custom normalized ramp mesh on the root while
-    /// CornerWedge still falls back to Cube until its custom mesh lands. Shape switches rebuild
-    /// the visual while keeping the GameObject identity.
+    /// height-halved mesh child; Wedge and CornerWedge use custom normalized meshes on the root.
+    /// Shape switches rebuild the visual while keeping the GameObject identity.
     /// </summary>
     [TestFixture]
     public sealed class PartShapeMaterializationEditModeTests
@@ -187,11 +186,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
-        public void CornerWedge_FallsBackToCube()
+        public void CornerWedge_MaterializesCustomTwoSlopeMesh_WithExactConvexCollider()
         {
             RbxInstance corner = CreatePartInWorld();
             _binder.SetShape(corner.Id, RbxPartShape.CornerWedge);
-            Assert.AreEqual("Cube", BoundObject(corner).GetComponent<MeshFilter>().sharedMesh.name);
+            _binder.SetSize(corner.Id, new RbxVector3(2f, 4f, 6f));
+
+            GameObject cornerGo = BoundObject(corner);
+            Mesh mesh = cornerGo.GetComponent<MeshFilter>().sharedMesh;
+            Assert.AreEqual("CoreAiCornerWedge", mesh.name);
+            Assert.AreEqual(1f, mesh.bounds.size.x, Epsilon);
+            Assert.AreEqual(1f, mesh.bounds.size.y, Epsilon);
+            Assert.AreEqual(1f, mesh.bounds.size.z, Epsilon);
+            Assert.AreEqual(18, mesh.triangles.Length,
+                "a corner wedge has a quad base and four triangular faces, not a cube shell");
+
+            Vector3 frontSlope = new Vector3(0f, 1f, 1f).normalized;
+            Vector3 rightSlope = new Vector3(1f, 1f, 0f).normalized;
+            bool hasFrontSlope = false;
+            bool hasRightSlope = false;
+            Vector3[] normals = mesh.normals;
+            for (int i = 0; i < normals.Length; i++)
+            {
+                hasFrontSlope |= Vector3.Dot(normals[i], frontSlope) > 0.999f;
+                hasRightSlope |= Vector3.Dot(normals[i], rightSlope) > 0.999f;
+            }
+
+            Assert.IsTrue(hasFrontSlope, "one face must slope toward local +Z");
+            Assert.IsTrue(hasRightSlope, "one face must slope toward local +X");
+            MeshCollider collider = cornerGo.GetComponent<MeshCollider>();
+            Assert.IsNotNull(collider);
+            Assert.IsTrue(collider.convex);
+            Assert.AreSame(mesh, collider.sharedMesh);
+            Assert.IsNull(cornerGo.GetComponent<BoxCollider>(), "CornerWedge must not collide as a block");
+
+            Vector3 scale = cornerGo.transform.localScale;
+            Assert.AreEqual(0.56f, scale.x, Epsilon);
+            Assert.AreEqual(1.12f, scale.y, Epsilon);
+            Assert.AreEqual(1.68f, scale.z, Epsilon);
         }
 
         [Test]

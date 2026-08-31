@@ -48,10 +48,18 @@ namespace CoreAI.Ai.LuaCs
             local resumeValue = task._resumeValue
             local scheduleSignalWait = task._scheduleSignalWait
             local signalResumeValues = task._signalResumeValues
+            local scheduleRemoteInvokeServer = task._scheduleRemoteInvokeServer
+            local scheduleRemoteInvokeClient = task._scheduleRemoteInvokeClient
+            local remoteFunctionResumeValues = task._remoteFunctionResumeValues
+            local warnInfiniteYield = task._warnInfiniteYield
             local realtime = task._realtime
             task._resumeValue = nil
             task._scheduleSignalWait = nil
             task._signalResumeValues = nil
+            task._scheduleRemoteInvokeServer = nil
+            task._scheduleRemoteInvokeClient = nil
+            task._remoteFunctionResumeValues = nil
+            task._warnInfiniteYield = nil
             task._realtime = nil
             task.wait = function(duration)
                 scheduleTaskWait(duration)
@@ -68,6 +76,80 @@ namespace CoreAI.Ai.LuaCs
                 coroutine.yield()
                 local values = signalResumeValues()
                 return table.unpack(values, 1, values.n)
+            end
+            local function readRemoteFunctionResponse()
+                local values = remoteFunctionResumeValues()
+                if not values.ok then
+                    error(values.error, 2)
+                end
+                return table.unpack(values, 1, values.n)
+            end
+            task._remoteFunctionInvokeServerBridge = function(remote, ...)
+                scheduleRemoteInvokeServer(remote, ...)
+                coroutine.yield()
+                return readRemoteFunctionResponse()
+            end
+            task._remoteFunctionInvokeClientBridge = function(remote, player, ...)
+                scheduleRemoteInvokeClient(remote, player, ...)
+                coroutine.yield()
+                return readRemoteFunctionResponse()
+            end
+            local function timedSignalWait(signal, duration)
+                scheduleSignalWait(signal, duration)
+                coroutine.yield()
+                local values = signalResumeValues()
+                return values.timedOut, values.elapsed, table.unpack(values, 1, values.n)
+            end
+            task._waitForChildBridge = function(instance, childName, timeout)
+                local child = instance:FindFirstChild(childName)
+                if child ~= nil then
+                    return child
+                end
+                if timeout ~= nil and timeout <= 0 then
+                    return nil
+                end
+
+                local remaining = timeout
+                local warningRemaining = nil
+                if timeout == nil then
+                    warningRemaining = 5
+                end
+
+                while true do
+                    local duration = remaining
+                    if duration == nil then
+                        duration = warningRemaining
+                    end
+                    local timedOut, elapsed, added = timedSignalWait(
+                        instance.ChildAdded, duration)
+                    if added ~= nil and added.Name == childName then
+                        return added
+                    end
+
+                    child = instance:FindFirstChild(childName)
+                    if child ~= nil then
+                        return child
+                    end
+
+                    if timedOut then
+                        if remaining ~= nil then
+                            return nil
+                        end
+                        warnInfiniteYield(instance, childName)
+                        warningRemaining = nil
+                    elseif remaining ~= nil then
+                        remaining = remaining - elapsed
+                        if remaining <= 0 then
+                            return nil
+                        end
+                    elseif warningRemaining ~= nil then
+                        warningRemaining = warningRemaining - elapsed
+                        if warningRemaining <= 0 then
+                            warnInfiniteYield(instance, childName)
+                            warningRemaining = nil
+                        end
+                    end
+                end
             end";
 
         private readonly IScriptEngine _scriptEngine;
@@ -222,6 +304,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsRbxSchedulerCallable _launch;
         private IScriptCoroutine _coroutine;
         private object[] _resumeArguments = Array.Empty<object>();
+        private long _remoteFunctionWaitGeneration;
         private bool _killed;
 
         internal LuaCsRbxScriptThread(LuaCsRbxScriptThreadFactory factory,
@@ -335,6 +418,12 @@ namespace CoreAI.Ai.LuaCs
             return index >= 0 && index < _resumeArguments.Length
                 ? _resumeArguments[index]
                 : null;
+        }
+
+        internal long AdvanceRemoteFunctionWaitGeneration()
+        {
+            _remoteFunctionWaitGeneration = checked(_remoteFunctionWaitGeneration + 1L);
+            return _remoteFunctionWaitGeneration;
         }
 
         /// <inheritdoc />

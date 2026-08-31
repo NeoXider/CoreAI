@@ -1,20 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
+using CoreAI.Unity.Logging;
+using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
+using VContainer;
 
 namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 {
@@ -102,6 +110,89 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             }
         }
 
+        private sealed class EmptySourceStore : ILuaModSourceStore
+        {
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                source = null;
+                manifest = null;
+                return false;
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                return Array.Empty<LuaModManifest>();
+            }
+
+            public void SetActive(string id, bool active)
+            {
+            }
+
+            public void Delete(string id)
+            {
+            }
+        }
+
+        private sealed class TrackingNetworkBridge : INetworkBridge
+        {
+            private readonly List<string> _actors = new();
+            private Action<RbxNetworkEventMessage> _eventReceived;
+            private Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> _requestReceived;
+
+            public RbxNetworkTopology Topology => RbxNetworkTopology.Solo;
+
+            public IReadOnlyList<string> ActorIds => _actors;
+
+            public int EventSubscriberCount => _eventReceived?.GetInvocationList().Length ?? 0;
+
+            public int RequestSubscriberCount => _requestReceived?.GetInvocationList().Length ?? 0;
+
+            public event Action<RbxNetworkEventMessage> EventReceived
+            {
+                add => _eventReceived += value;
+                remove => _eventReceived -= value;
+            }
+
+            public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived
+            {
+                add => _requestReceived += value;
+                remove => _requestReceived -= value;
+            }
+
+            public void RegisterActor(string actorId)
+            {
+                if (!_actors.Contains(actorId))
+                {
+                    _actors.Add(actorId);
+                }
+            }
+
+            public void UnregisterActor(string actorId)
+            {
+                _actors.Remove(actorId);
+            }
+
+            public void SendEvent(RbxNetworkEventMessage message)
+            {
+                _eventReceived?.Invoke(message);
+            }
+
+            public void SendRequest(RbxNetworkRequestMessage message,
+                Action<RbxNetworkResponse> response)
+            {
+                Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> receiver =
+                    _requestReceived;
+                if (receiver != null)
+                {
+                    receiver(message, new RbxNetworkRequestResponder(response));
+                }
+            }
+        }
+
         private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox,
             MemoryStore store = null, LuaCapabilities caps = LuaCapabilities.All)
         {
@@ -153,6 +244,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             return record;
         }
 
+        private static LuaTool.LuaResult ExecuteMutation(LuaCsModStack stack,
+            ActorContext actorContext, MutationEnvelope envelope, string source)
+        {
+            return stack.ToolExecutor.ExecuteAsync(
+                    source, actorContext, envelope, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+
         private static void RunActorLua(LuaCsRbxApiBindings bindings, ActorContext actorContext,
             string modId, string source,
             params (string Name, RbxInstance Instance)[] instanceGlobals)
@@ -171,6 +270,909 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             IScriptState state = engine.CreateState();
             registry.ApplyTo(state);
             engine.RunChunk(state, source);
+        }
+
+        private sealed class ProductionNetworkHarness : IDisposable
+        {
+            private const string MissingWorldHostLog =
+                "[CoreAI] [Core] [CoreAiMods] RbxWorldHost NOT resolved — mods run headless. " +
+                "Instance.new / workspace mutations produce no GameObjects. " +
+                "Check: (1) RbxWorldHost component exists in the scene, " +
+                "(2) CoreAiModsLifetimeScope.robloxWorldHost is wired to it, " +
+                "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.";
+
+            public ProductionNetworkHarness(INetworkBridge networkBridge = null)
+            {
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(new FakeGameLogger());
+                GameLogSettingsOptions logSettings = new();
+                IGameLogger compositionLogger = new FilteringGameLogger(
+                    new UnityGameLogSink(logSettings), logSettings);
+                builder.RegisterInstance<CoreAI.Logging.ILog>(new UnityLog(compositionLogger));
+                builder.Register<NoopCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.RegisterCoreAiMods(applicationIsPlayingProvider: () => false);
+                Store = new MemoryStore();
+                builder.RegisterInstance<ILuaModStore>(Store);
+                builder.RegisterInstance<ILuaModSourceStore>(new EmptySourceStore());
+                if (networkBridge != null)
+                {
+                    builder.RegisterInstance<INetworkBridge>(networkBridge);
+                }
+
+                Container = builder.Build();
+                LogAssert.Expect(LogType.Error, MissingWorldHostLog);
+                Runtime = Container.Resolve<ILuaModRuntime>();
+                LuaCsModStack stack = Container.Resolve<LuaCsModStack>();
+                Bindings = stack.GameplayBindings.RbxApi;
+            }
+
+            public IObjectResolver Container { get; }
+
+            public ILuaModRuntime Runtime { get; }
+
+            public LuaCsRbxApiBindings Bindings { get; }
+
+            public MemoryStore Store { get; }
+
+            public void PumpFrames(int frameCount)
+            {
+                ActorContext hostActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                for (int frame = 0; frame < frameCount; frame++)
+                {
+                    Bindings.Scheduler.Advance(0.016d);
+                    Runtime.Tick(hostActor, 0.016d);
+                }
+            }
+
+            public void Dispose()
+            {
+                Container.Dispose();
+            }
+        }
+
+        private sealed class NoopCommandSink : IAiGameCommandSink
+        {
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
+        }
+
+        [Test]
+        public void ExecuteLua_ProductionToolEntry_UsesMutationEnvelopeAndReplaysFirstResult()
+        {
+            const string actorId = "production-envelope-actor";
+            CoreAISettingsOptions settings = new();
+            ContainerBuilder builder = new();
+            builder.RegisterInstance<IGameLogger>(new FakeGameLogger());
+            builder.RegisterInstance<CoreAI.Logging.ILog>(CoreAI.Logging.NullLog.Instance);
+            builder.Register<NoopCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+            builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+            builder.RegisterInstance<ICoreAISettings>(settings);
+            builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+            builder.RegisterInstance<IActorIdentityProvider>(new LocalActorIdentityProvider(
+                actorId, "production-envelope-session", "", ActorGrantSet.None,
+                AgentMemoryScope.Empty));
+            builder.RegisterCoreAiMods(
+                applicationIsPlayingProvider: () => false,
+                skillTextProvider: _ => null);
+            builder.RegisterInstance<ILuaModStore>(new MemoryStore());
+            builder.RegisterInstance<ILuaModSourceStore>(new EmptySourceStore());
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                LuaCsModStack stack = container.Resolve<LuaCsModStack>();
+                InstanceRegistry registry = stack.GameplayBindings.RbxApi.Registry;
+                RbxInstance target = registry.Create(
+                    "Folder", accessScope: InstanceAccessScope.SharedWritable);
+                target.Name = "ProductionEnvelopeTarget";
+                target.Parent = registry.WorldRoot;
+                long initialRevision = Record(registry, target).Revision;
+                ILlmTool executeLua = null;
+                foreach (ILlmTool tool in container.Resolve<AgentMemoryPolicy>()
+                             .GetToolsForRole(BuiltInAgentRoleIds.Programmer))
+                {
+                    if (tool.Name == LuaTool.ExecuteLuaToolName)
+                    {
+                        executeLua = tool;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(executeLua,
+                    "The shipped Programmer composition must expose execute_lua.");
+                Assert.IsInstanceOf<IAIFunctionLlmTool>(executeLua);
+                AIFunction function = ((IAIFunctionLlmTool)executeLua).CreateAIFunction();
+                AIFunctionArguments arguments = new()
+                {
+                    ["code"] = @"
+                        local target = workspace:FindFirstChild('ProductionEnvelopeTarget')
+                        local count = target:GetAttribute('Count') or 0
+                        target:SetAttribute('Count', count + 1)
+                        return target:GetAttribute('Count')",
+                    ["operation_id"] = "production-entry-operation",
+                    ["target_instance_id"] = target.Id.Value.ToString(),
+                    ["expected_revision"] = initialRevision
+                };
+
+                object firstRaw = function.InvokeAsync(arguments).GetAwaiter().GetResult();
+                object replayRaw = function.InvokeAsync(arguments).GetAwaiter().GetResult();
+                JObject first = JObject.Parse(firstRaw.ToString());
+                JObject replay = JObject.Parse(replayRaw.ToString());
+
+                Assert.IsTrue(first.Value<bool>("Success"), first.ToString());
+                Assert.IsTrue(replay.Value<bool>("Success"), replay.ToString());
+                Assert.AreEqual("1", first.Value<string>("Output"));
+                Assert.AreEqual("1", replay.Value<string>("Output"));
+                Assert.AreEqual(1d, target.GetAttribute("Count"));
+                Assert.AreEqual(initialRevision + 1L, Record(registry, target).Revision);
+                Assert.AreEqual(1, registry.RetainedMutationOperationCount);
+            }
+            finally
+            {
+                container.Dispose();
+            }
+        }
+
+        [Test]
+        public void MutationEnvelope_ResultRetention_IsBoundedPerActor()
+        {
+            const int expectedPerActorLimit =
+                InstanceRegistry.DefaultMutationReplayCapacityPerActor;
+            const string actorId = "bounded-cache-actor";
+            InstanceRegistry registry = new();
+            RbxInstance target = registry.Create(
+                "Folder", accessScope: InstanceAccessScope.SharedWritable);
+            long revision = Record(registry, target).Revision;
+
+            for (int index = 0; index <= expectedPerActorLimit; index++)
+            {
+                MutationEnvelope envelope = new(
+                    actorId,
+                    target.Id,
+                    "bounded-operation-" + index,
+                    revision);
+                registry.ApplyMutation(envelope, () =>
+                {
+                    revision = registry.AdvanceRevision(target.Id);
+                    return index;
+                });
+            }
+
+            Assert.LessOrEqual(registry.RetainedMutationOperationCount, expectedPerActorLimit);
+        }
+
+        [Test]
+        public void MutationEnvelope_UnparentedInstanceNew_AdvancesCreationAnchorRevision()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            LuaCsModStack stack = BuildStack(bindings);
+            RbxInstance anchor = registry.Create(
+                "Folder", accessScope: InstanceAccessScope.SharedWritable);
+            anchor.Name = "CreationAnchor";
+            anchor.Parent = registry.WorldRoot;
+            ActorContext actor = Actor("create-actor");
+            long initialRevision = Record(registry, anchor).Revision;
+            int initialCount = registry.Count;
+            MutationEnvelope firstEnvelope = new(
+                actor.ActorId, anchor.Id, "create-operation-1", initialRevision);
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                stack, actor, firstEnvelope,
+                "local created=Instance.new('Folder'); return created.ClassName");
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreEqual("Folder", first.Output);
+            Assert.Greater(registry.Count, initialCount);
+            int countAfterFirst = registry.Count;
+            Assert.AreEqual(initialRevision + 1L, Record(registry, anchor).Revision);
+
+            MutationEnvelope staleEnvelope = new(
+                actor.ActorId, anchor.Id, "create-operation-2", initialRevision);
+            LuaTool.LuaResult stale = ExecuteMutation(
+                stack, actor, staleEnvelope,
+                "Instance.new('Folder'); return 'unexpected'");
+
+            Assert.IsFalse(stale.Success);
+            StringAssert.Contains("stale expected revision", stale.Error);
+            Assert.AreEqual(countAfterFirst, registry.Count);
+        }
+
+        [Test]
+        public void MutationEnvelope_Clone_AdvancesSourceRevision()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            LuaCsModStack stack = BuildStack(bindings);
+            RbxInstance source = registry.Create(
+                "Folder", accessScope: InstanceAccessScope.SharedWritable);
+            source.Name = "CloneRevisionSource";
+            source.Parent = registry.WorldRoot;
+            ActorContext actor = Actor("clone-actor");
+            long initialRevision = Record(registry, source).Revision;
+            int initialCount = registry.Count;
+            MutationEnvelope firstEnvelope = new(
+                actor.ActorId, source.Id, "clone-operation-1", initialRevision);
+            const string cloneSource = @"
+                local source = workspace:FindFirstChild('CloneRevisionSource')
+                local copy = source:Clone()
+                return copy.Name";
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                stack, actor, firstEnvelope, cloneSource);
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreEqual("CloneRevisionSource", first.Output);
+            Assert.Greater(registry.Count, initialCount);
+            int countAfterFirst = registry.Count;
+            Assert.AreEqual(initialRevision + 1L, Record(registry, source).Revision);
+
+            MutationEnvelope staleEnvelope = new(
+                actor.ActorId, source.Id, "clone-operation-2", initialRevision);
+            LuaTool.LuaResult stale = ExecuteMutation(
+                stack, actor, staleEnvelope, cloneSource);
+
+            Assert.IsFalse(stale.Success);
+            StringAssert.Contains("stale expected revision", stale.Error);
+            Assert.AreEqual(countAfterFirst, registry.Count);
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteEventDeliversEveryDirectionWithPlayerFirst()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("delivery-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, "network-delivery-server", @"
+                local Players = game:GetService('Players')
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'DeliveryRemote'
+                remote.Parent = workspace
+                remote.OnServerEvent:Connect(function(player, payload)
+                    store_set('server', tostring(player.UserId) .. ':' .. payload)
+                end)
+                task.defer(function()
+                    task.wait()
+                    local listed = Players:GetPlayers()
+                    local player = listed[#listed]
+                    remote:FireClient(player, 'one')
+                    remote:FireAllClients('all')
+                end)", persistToStore: false);
+
+            harness.Runtime.LoadMod(clientActor, "network-delivery-client", @"
+                local Players = game:GetService('Players')
+                local localPlayer = Players.LocalPlayer
+                local listed = Players:GetPlayers()
+                assert(localPlayer ~= nil)
+                assert(listed[#listed] == localPlayer)
+                assert(Players.PlayerAdded ~= nil and Players.PlayerRemoving ~= nil)
+
+                local remote = workspace:FindFirstChild('DeliveryRemote')
+                local clientValues = {}
+                remote.OnClientEvent:Connect(function(payload)
+                    table.insert(clientValues, payload)
+                    store_set('client', table.concat(clientValues, ','))
+                end)
+                remote:FireServer('server-payload')", persistToStore: false);
+
+            harness.PumpFrames(4);
+
+            Assert.IsInstanceOf<NullNetworkBridge>(harness.Bindings.NetworkBridge);
+            Assert.AreEqual("2:server-payload",
+                harness.Store.Get("network-delivery-server", "server"));
+            Assert.AreEqual("one,all",
+                harness.Store.Get("network-delivery-client", "client"));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_DirectionAuthorityRefusesWrongSideWithActorAndReason()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("direction-client-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(clientActor, "network-direction-client", @"
+                local Players = game:GetService('Players')
+                local player = Players.LocalPlayer
+                local event = Instance.new('RemoteEvent')
+                local remote = Instance.new('RemoteFunction')
+                remote.OnClientInvoke = function()
+                    return 'client'
+                end
+                local function capture(name, callback)
+                    local ok, failure = pcall(callback)
+                    store_set(name .. '_ok', tostring(ok))
+                    store_set(name .. '_error', tostring(failure))
+                end
+                capture('fire_client', function() event:FireClient(player) end)
+                capture('fire_all_clients', function() event:FireAllClients() end)
+                capture('on_server_event', function()
+                    return event.OnServerEvent
+                end)
+                capture('on_server_invoke', function()
+                    remote.OnServerInvoke = function() return 'server' end
+                end)
+                capture('invoke_client', function()
+                    return remote:InvokeClient(player)
+                end)", persistToStore: false);
+
+            harness.Runtime.LoadMod(serverActor, "network-direction-server", @"
+                local event = Instance.new('RemoteEvent')
+                local remote = Instance.new('RemoteFunction')
+                remote.OnServerInvoke = function()
+                    return 'server'
+                end
+                local function capture(name, callback)
+                    local ok, failure = pcall(callback)
+                    store_set(name .. '_ok', tostring(ok))
+                    store_set(name .. '_error', tostring(failure))
+                end
+                capture('fire_server', function() event:FireServer() end)
+                capture('on_client_event', function()
+                    return event.OnClientEvent
+                end)
+                capture('on_client_invoke', function()
+                    remote.OnClientInvoke = function() return 'client' end
+                end)
+                capture('invoke_server', function()
+                    return remote:InvokeServer()
+                end)", persistToStore: false);
+
+            harness.PumpFrames(8);
+
+            string[] clientServerOnlyMembers =
+            {
+                "fire_client", "fire_all_clients", "on_server_event",
+                "on_server_invoke", "invoke_client"
+            };
+            for (int index = 0; index < clientServerOnlyMembers.Length; index++)
+            {
+                string member = clientServerOnlyMembers[index];
+                Assert.AreEqual("false",
+                    harness.Store.Get("network-direction-client", member + "_ok"));
+                string refusal = harness.Store.Get(
+                    "network-direction-client", member + "_error");
+                StringAssert.Contains("actor '" + clientActor.ActorId + "'", refusal);
+                StringAssert.Contains("server-only", refusal);
+            }
+
+            string[] serverClientOnlyMembers =
+            {
+                "fire_server", "on_client_event", "on_client_invoke", "invoke_server"
+            };
+            for (int index = 0; index < serverClientOnlyMembers.Length; index++)
+            {
+                string member = serverClientOnlyMembers[index];
+                Assert.AreEqual("false",
+                    harness.Store.Get("network-direction-server", member + "_ok"));
+                string refusal = harness.Store.Get(
+                    "network-direction-server", member + "_error");
+                StringAssert.Contains("actor '" + serverActor.ActorId + "'", refusal);
+                StringAssert.Contains("client-only", refusal);
+            }
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_Tac020ServerScriptObservesNilLocalPlayer()
+        {
+            string fixturePath = Path.Combine(
+                Directory.GetCurrentDirectory(), "Assets", "CoreAIMods", "Tests", "EditMode",
+                "RbxApi", "CompatibilityCorpus", "Fixtures",
+                "TAC-020-players-localplayer.lua");
+            string source = File.ReadAllText(fixturePath);
+            using ProductionNetworkHarness harness = new();
+            ActorContext hostActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            Exception exception = Assert.Catch(() => harness.Runtime.LoadMod(
+                hostActor, "TAC-020-players-localplayer", source, persistToStore: false));
+            StringAssert.Contains("attempt to index a nil value (local 'player')",
+                FullText(exception));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_ReliableRemoteEventPreservesOrdering()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("ordering-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, "network-ordering-server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'OrderingRemote'
+                remote.Parent = workspace
+                local received = ''
+                remote.OnServerEvent:Connect(function(_, value)
+                    received = received .. tostring(value)
+                    store_set('received', received)
+                end)
+            ", persistToStore: false);
+            harness.Runtime.LoadMod(clientActor, "network-ordering-client", @"
+                local remote = workspace:FindFirstChild('OrderingRemote')
+                for value = 1, 6 do
+                    remote:FireServer(value)
+                end", persistToStore: false);
+
+            harness.PumpFrames(1);
+
+            Assert.AreEqual("123456",
+                harness.Store.Get("network-ordering-server", "received"));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RateRefusalNamesActorAndReason()
+        {
+            NullNetworkBridge bridge = new(2, () => 0d);
+            using ProductionNetworkHarness harness = new(bridge);
+            ActorContext actorContext = Actor("rate-actor");
+
+            harness.Runtime.LoadMod(actorContext, "network-rate", @"
+                local remote = Instance.new('RemoteEvent')
+                remote:FireServer(1)
+                remote:FireServer(2)
+                local ok, refusal = pcall(function()
+                    remote:FireServer(3)
+                end)
+                store_set('ok', tostring(ok))
+                store_set('refusal', tostring(refusal))", persistToStore: false);
+
+            Assert.AreSame(bridge, harness.Bindings.NetworkBridge);
+            Assert.AreEqual("false", harness.Store.Get("network-rate", "ok"));
+            string refusal = harness.Store.Get("network-rate", "refusal");
+            StringAssert.Contains("actor 'rate-actor'", refusal);
+            StringAssert.Contains(
+                "network request rate quota reached (limit 2 requests/s)", refusal);
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_CodecRejectsDepthCyclesAndAggregateOverflow()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext actorContext = Actor("codec-limits-actor");
+
+            harness.Runtime.LoadMod(actorContext, "network-codec-limits", @"
+                local remote = Instance.new('RemoteEvent')
+                local function capture(name, value)
+                    local ok, failure = pcall(function()
+                        remote:FireServer(value)
+                    end)
+                    store_set(name .. '_ok', tostring(ok))
+                    store_set(name .. '_error', tostring(failure))
+                end
+
+                local deep = {}
+                local cursor = deep
+                for index = 1, 65 do
+                    local child = {}
+                    cursor.child = child
+                    cursor = child
+                end
+                capture('depth', deep)
+
+                local cyclic = {}
+                cyclic.self = cyclic
+                capture('cycle', cyclic)
+
+                local oversized = {}
+                for index = 1, 100001 do
+                    oversized[tostring(index)] = index
+                end
+                capture('entries', oversized)", persistToStore: false);
+
+            Assert.AreEqual("false",
+                harness.Store.Get("network-codec-limits", "depth_ok"));
+            StringAssert.Contains("64 level limit",
+                harness.Store.Get("network-codec-limits", "depth_error"));
+            Assert.AreEqual("false",
+                harness.Store.Get("network-codec-limits", "cycle_ok"));
+            StringAssert.Contains("cyclic table",
+                harness.Store.Get("network-codec-limits", "cycle_error"));
+            Assert.AreEqual("false",
+                harness.Store.Get("network-codec-limits", "entries_ok"));
+            StringAssert.Contains("100000 aggregate entry limit",
+                harness.Store.Get("network-codec-limits", "entries_error"));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_R510SanitizesTablesAndInstancesAcrossBoundary()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("sanitization-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, "network-sanitization-server", @"
+                local part = Instance.new('Part')
+                part.Name = 'BoundaryPart'
+                part.Parent = workspace
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'SanitizationRemote'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(_, payload, instance)
+                    store_set('instance_same', tostring(instance == part))
+                    store_set('instance_key_stringified',
+                        tostring(payload.BoundaryPart == 'keyed'))
+                    store_set('metatable_lost', tostring(getmetatable(payload) == nil))
+                    store_set('function_removed', tostring(payload.callback == nil))
+                    payload.server_mutation = 'received'
+                    return payload, instance
+                end", persistToStore: false);
+
+            harness.Runtime.LoadMod(clientActor, "network-sanitization-client", @"
+                local part = workspace:FindFirstChild('BoundaryPart')
+                local remote = workspace:FindFirstChild('SanitizationRemote')
+                local payload = setmetatable({
+                    [part] = 'keyed',
+                    direct = 'value',
+                    callback = function() return 'not replicated' end
+                }, {
+                    __index = { inherited = 'metatable-only' }
+                })
+                local returned, returnedInstance = remote:InvokeServer(payload, part)
+                store_set('copy_identity', tostring(returned ~= payload))
+                store_set('sender_unchanged', tostring(payload.server_mutation == nil))
+                store_set('returned_mutation', tostring(returned.server_mutation))
+                store_set('returned_instance_same', tostring(returnedInstance == part))
+
+                local cyclic = {}
+                cyclic.self = cyclic
+                local ok, failure = pcall(function()
+                    return remote:InvokeServer(cyclic, part)
+                end)
+                store_set('cycle_ok', tostring(ok))
+                store_set('cycle_error', tostring(failure))", persistToStore: false);
+
+            harness.PumpFrames(8);
+
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-server", "instance_same"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-server", "instance_key_stringified"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-server", "metatable_lost"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-server", "function_removed"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-client", "copy_identity"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-client", "sender_unchanged"));
+            Assert.AreEqual("received", harness.Store.Get(
+                "network-sanitization-client", "returned_mutation"));
+            Assert.AreEqual("true", harness.Store.Get(
+                "network-sanitization-client", "returned_instance_same"));
+            Assert.AreEqual("false", harness.Store.Get(
+                "network-sanitization-client", "cycle_ok"));
+            StringAssert.Contains("cyclic table", harness.Store.Get(
+                "network-sanitization-client", "cycle_error"));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionYieldsAndPropagatesReturnsAndErrors()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("function-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, "network-function-server", @"
+                local Players = game:GetService('Players')
+                local server = Instance.new('RemoteFunction')
+                server.Name = 'ServerFunction'
+                server.Parent = workspace
+                server.OnServerInvoke = function(sender, left, right)
+                    task.wait()
+                    return left + right, 'server'
+                end
+
+                local client = Instance.new('RemoteFunction')
+                client.Name = 'ClientFunction'
+                client.Parent = workspace
+
+                local failing = Instance.new('RemoteFunction')
+                failing.Name = 'FailingFunction'
+                failing.Parent = workspace
+                failing.OnServerInvoke = function()
+                    task.wait()
+                    error('receiver exploded')
+                end
+
+                task.defer(function()
+                    task.wait()
+                    local listed = Players:GetPlayers()
+                    local player = listed[#listed]
+                    local doubled, clientLabel = client:InvokeClient(player, 11)
+                    store_set('client', tostring(doubled) .. ':' .. clientLabel)
+                end)", persistToStore: false);
+
+            harness.Runtime.LoadMod(clientActor, "network-function-client", @"
+                local server = workspace:FindFirstChild('ServerFunction')
+                local client = workspace:FindFirstChild('ClientFunction')
+                local failing = workspace:FindFirstChild('FailingFunction')
+
+                client.OnClientInvoke = function(value)
+                    task.wait()
+                    return value * 2, 'client'
+                end
+
+                local total, serverLabel = server:InvokeServer(8, 13)
+                store_set('server', tostring(total) .. ':' .. serverLabel)
+                local ok, failure = pcall(function()
+                    return failing:InvokeServer()
+                end)
+                store_set('failure_ok', tostring(ok))
+                store_set('failure', tostring(failure))", persistToStore: false);
+
+            harness.PumpFrames(12);
+
+            Assert.AreEqual("21:server",
+                harness.Store.Get("network-function-client", "server"));
+            Assert.AreEqual("22:client",
+                harness.Store.Get("network-function-server", "client"));
+            Assert.AreEqual("false",
+                harness.Store.Get("network-function-client", "failure_ok"));
+            StringAssert.Contains(
+                "receiver exploded",
+                harness.Store.Get("network-function-client", "failure"));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionNoResponderReleasesWaitState()
+        {
+            const string modId = "network-no-responder";
+            using ProductionNetworkHarness harness = new();
+            ActorContext actorContext = Actor("no-responder-actor");
+
+            harness.Runtime.LoadMod(actorContext, modId, @"
+                local remote = Instance.new('RemoteFunction')
+                local ok, failure = pcall(function()
+                    return remote:InvokeServer()
+                end)
+                store_set('ok', tostring(ok))
+                store_set('failure', tostring(failure))", persistToStore: false);
+            harness.PumpFrames(4);
+
+            int liveThreadsBeforeUnload = harness.Bindings.Scheduler.LiveThreadCount;
+            int liveConnectionsBeforeUnload =
+                harness.Bindings.Connections.GetOwnedBy(modId).Count;
+            int waitsBeforeUnload =
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(modId);
+            bool unloaded = harness.Runtime.UnloadMod(actorContext, modId);
+
+            Assert.IsTrue(unloaded);
+            Assert.AreEqual("false", harness.Store.Get(modId, "ok"));
+            StringAssert.Contains("OnServerInvoke is not set",
+                harness.Store.Get(modId, "failure"));
+            Assert.AreEqual(0, liveThreadsBeforeUnload);
+            Assert.AreEqual(0, liveConnectionsBeforeUnload);
+            Assert.AreEqual(0, waitsBeforeUnload,
+                "A terminal missing-callback response must release its caller wait generation.");
+            Assert.AreEqual(0, harness.Bindings.CountRemoteFunctionWaitsOwnedBy(modId));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionThrowingResponderReleasesLifecycleState()
+        {
+            const string serverModId = "network-throwing-responder-server";
+            const string clientModId = "network-throwing-responder-client";
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("throwing-responder-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, serverModId, @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'ThrowingLifecycleRemote'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function()
+                    task.wait()
+                    error('hostile responder threw')
+                end", persistToStore: false);
+            harness.Runtime.LoadMod(clientActor, clientModId, @"
+                local remote = workspace:FindFirstChild('ThrowingLifecycleRemote')
+                local ok, failure = pcall(function()
+                    return remote:InvokeServer()
+                end)
+                store_set('ok', tostring(ok))
+                store_set('failure', tostring(failure))", persistToStore: false);
+            harness.PumpFrames(8);
+
+            int liveThreadsBeforeUnload = harness.Bindings.Scheduler.LiveThreadCount;
+            int liveConnectionsBeforeUnload =
+                harness.Bindings.Connections.GetOwnedBy(clientModId).Count;
+            int waitsBeforeUnload =
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(clientModId);
+            int callbacksBeforeUnload =
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId);
+            bool clientUnloaded = harness.Runtime.UnloadMod(clientActor, clientModId);
+            bool serverUnloaded = harness.Runtime.UnloadMod(serverActor, serverModId);
+
+            Assert.IsTrue(clientUnloaded);
+            Assert.IsTrue(serverUnloaded);
+            Assert.AreEqual("false", harness.Store.Get(clientModId, "ok"));
+            StringAssert.Contains("hostile responder threw",
+                harness.Store.Get(clientModId, "failure"));
+            Assert.AreEqual(0, liveThreadsBeforeUnload);
+            Assert.AreEqual(0, liveConnectionsBeforeUnload);
+            Assert.AreEqual(0, waitsBeforeUnload,
+                "A throwing callback must release its caller wait generation.");
+            Assert.AreEqual(1, callbacksBeforeUnload,
+                "The live mod keeps its assigned callback until lifecycle teardown.");
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(clientModId));
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionNeverAnsweringResponderIsReleasedOnTeardown()
+        {
+            const string serverModId = "network-never-answering-responder-server";
+            const string clientModId = "network-never-answering-responder-client";
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("never-answering-responder-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, serverModId, @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'NeverAnsweringLifecycleRemote'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function()
+                    task.wait(1000000)
+                    return 'unreachable'
+                end", persistToStore: false);
+            harness.Runtime.LoadMod(clientActor, clientModId, @"
+                local remote = workspace:FindFirstChild('NeverAnsweringLifecycleRemote')
+                remote:InvokeServer()
+                store_set('unexpected', 'resumed')", persistToStore: false);
+            harness.PumpFrames(2);
+
+            int liveThreadsBeforeUnload = harness.Bindings.Scheduler.LiveThreadCount;
+            int liveConnectionsBeforeUnload =
+                harness.Bindings.Connections.GetOwnedBy(clientModId).Count;
+            int waitsBeforeUnload =
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(clientModId);
+            int callbacksBeforeUnload =
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId);
+            bool clientUnloaded = harness.Runtime.UnloadMod(clientActor, clientModId);
+            bool serverUnloaded = harness.Runtime.UnloadMod(serverActor, serverModId);
+
+            Assert.IsTrue(clientUnloaded);
+            Assert.IsTrue(serverUnloaded);
+            Assert.AreEqual("", harness.Store.Get(clientModId, "unexpected"));
+            Assert.AreEqual(2, liveThreadsBeforeUnload,
+                "The caller and never-returning callback remain live until teardown.");
+            Assert.AreEqual(1, liveConnectionsBeforeUnload);
+            Assert.AreEqual(1, waitsBeforeUnload);
+            Assert.AreEqual(1, callbacksBeforeUnload);
+            Assert.AreEqual(0, harness.Bindings.Scheduler.LiveThreadCount);
+            Assert.AreEqual(0,
+                harness.Bindings.Connections.GetOwnedBy(clientModId).Count);
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(clientModId));
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionReloadDoesNotRetainOutgoingCallback()
+        {
+            const string serverModId = "network-reload-callback-server";
+            const string clientModId = "network-reload-callback-client";
+            using ProductionNetworkHarness harness = new();
+            ActorContext clientActor = Actor("reload-callback-actor");
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            harness.Runtime.LoadMod(serverActor, serverModId, @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'ReloadRemote'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function()
+                    return 'outgoing callback'
+                end", persistToStore: false);
+            Assert.AreEqual(1,
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId));
+
+            harness.Runtime.ReloadMod(serverActor, serverModId, @"
+                local remote = workspace:FindFirstChild('ReloadRemote')");
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionCallbacksOwnedBy(serverModId));
+
+            harness.Runtime.LoadMod(clientActor, clientModId, @"
+                local remote = workspace:FindFirstChild('ReloadRemote')
+                local ok, failure = pcall(function()
+                    return remote:InvokeServer()
+                end)
+                store_set('ok', tostring(ok))
+                store_set('failure', tostring(failure))", persistToStore: false);
+
+            harness.PumpFrames(4);
+
+            Assert.AreEqual("false", harness.Store.Get(clientModId, "ok"));
+            StringAssert.Contains("OnServerInvoke is not set",
+                harness.Store.Get(clientModId, "failure"));
+            Assert.AreEqual(0,
+                harness.Bindings.CountRemoteFunctionWaitsOwnedBy(clientModId));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_BindingDisposalUnsubscribesInjectedBridge()
+        {
+            TrackingNetworkBridge bridge = new();
+            ProductionNetworkHarness harness = new(bridge);
+
+            Assert.AreEqual(1, bridge.EventSubscriberCount);
+            Assert.AreEqual(1, bridge.RequestSubscriberCount);
+
+            harness.Dispose();
+
+            Assert.AreEqual(0, bridge.EventSubscriberCount);
+            Assert.AreEqual(0, bridge.RequestSubscriberCount);
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_UnreliableRemoteEventMayDropAndReorder()
+        {
+            NullNetworkBridge droppingBridge = new(
+                unreliableBehavior: RbxNullNetworkUnreliableBehavior.DropAll);
+            using ProductionNetworkHarness droppingHarness = new(droppingBridge);
+            ActorContext droppingClientActor = Actor("drop-actor");
+            ActorContext droppingServerActor =
+                CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            droppingHarness.Runtime.LoadMod(
+                droppingServerActor, "network-drop-server", @"
+                local remote = Instance.new('UnreliableRemoteEvent')
+                remote.Name = 'DroppingRemote'
+                remote.Parent = workspace
+                store_set('received', '0')
+                remote.OnServerEvent:Connect(function()
+                    store_set('received', '1')
+                end)", persistToStore: false);
+            droppingHarness.Runtime.LoadMod(
+                droppingClientActor, "network-drop-client", @"
+                local remote = workspace:FindFirstChild('DroppingRemote')
+                remote:FireServer('drop-me')", persistToStore: false);
+            droppingHarness.PumpFrames(1);
+
+            Assert.AreSame(droppingBridge, droppingHarness.Bindings.NetworkBridge);
+            Assert.AreEqual("0",
+                droppingHarness.Store.Get("network-drop-server", "received"));
+
+            NullNetworkBridge reorderingBridge = new(
+                unreliableBehavior: RbxNullNetworkUnreliableBehavior.ReverseAdjacentPairs);
+            using ProductionNetworkHarness reorderingHarness = new(reorderingBridge);
+            ActorContext reorderingClientActor = Actor("reorder-actor");
+            ActorContext reorderingServerActor =
+                CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            reorderingHarness.Runtime.LoadMod(
+                reorderingServerActor, "network-reorder-server", @"
+                local remote = Instance.new('UnreliableRemoteEvent')
+                remote.Name = 'ReorderingRemote'
+                remote.Parent = workspace
+                local received = ''
+                remote.OnServerEvent:Connect(function(_, value)
+                    received = received .. tostring(value)
+                    store_set('received', received)
+                end)", persistToStore: false);
+            reorderingHarness.Runtime.LoadMod(
+                reorderingClientActor, "network-reorder-client", @"
+                local remote = workspace:FindFirstChild('ReorderingRemote')
+                remote:FireServer(1)
+                remote:FireServer(2)", persistToStore: false);
+            reorderingHarness.PumpFrames(1);
+
+            Assert.AreSame(reorderingBridge, reorderingHarness.Bindings.NetworkBridge);
+            Assert.AreEqual("21",
+                reorderingHarness.Store.Get("network-reorder-server", "received"));
         }
 
         // ---- Datatypes ----------------------------------------------------------------------
@@ -311,6 +1313,108 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         // ---- Instance surface ---------------------------------------------------------------
 
         [Test]
+        public void Lua_R1_1_ProductionPath_ScriptGlobalIsItsExecutingRegistryInstance()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            stack.Runtime.LoadMod(Actor("script-global-actor-a"), "script-global-a", @"
+                assert(script ~= nil)
+                assert(script.ClassName == 'Script')
+                assert(script:IsA('BaseScript'))
+                assert(script:IsA('LuaSourceContainer'))
+                assert(script.Name == 'script-global-a')
+                assert(script.Parent.ClassName == 'Folder')
+                assert(script.Parent.Parent == game:GetService('ServerScriptService'))
+                script:SetAttribute('Executing', true)
+                local child = Instance.new('Folder', script.Parent)
+                child.Name = 'AuthoredChild'", persistToStore: false);
+            stack.Runtime.LoadMod(Actor("script-global-actor-b"), "script-global-b", @"
+                assert(script.Name == 'script-global-b')
+                assert(script:GetAttribute('Executing') == nil)", persistToStore: false);
+
+            RbxInstance serverScripts = roblox.Game.FindFirstChildOfClass("ServerScriptService");
+            RbxInstance firstContainer = serverScripts.FindFirstChild("script-global-a");
+            RbxInstance secondContainer = serverScripts.FindFirstChild("script-global-b");
+            RbxInstance first = firstContainer?.FindFirstChildOfClass("Script");
+            RbxInstance second = secondContainer?.FindFirstChildOfClass("Script");
+
+            Assert.IsNotNull(first);
+            Assert.IsNotNull(second);
+            Assert.AreNotSame(first, second);
+            Assert.AreEqual(true, first.GetAttribute("Executing"));
+            Assert.AreEqual(1, roblox.Registry.GetOwnedBy("script-global-a").Count,
+                "runtime infrastructure must not appear as mod-authored content");
+            Assert.IsTrue(roblox.Registry.TryGetRecord(first.Id, out InstanceRecord firstRecord));
+            Assert.IsTrue(firstRecord.IsRuntimeInfrastructure);
+            Assert.IsNull(firstRecord.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.SharedWritable, firstRecord.AccessScope,
+                "the proxy must not become a foreign ACL container for its actor");
+        }
+
+        [Test]
+        public void Lua_ProductionPath_Tac015ScriptParentFixturePassesUnmodified()
+        {
+            string fixturePath = Path.Combine(
+                Directory.GetCurrentDirectory(), "Assets", "CoreAIMods", "Tests", "EditMode",
+                "RbxApi", "CompatibilityCorpus", "Fixtures",
+                "TAC-015-script-parent-property-signal.lua");
+            string source = File.ReadAllText(fixturePath);
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+
+            stack.Runtime.LoadMod("TAC-015-script-parent-property-signal", source,
+                persistToStore: false);
+            roblox.Scheduler.Advance(0d);
+
+            RbxInstance workspace = roblox.Game.FindFirstChildOfClass("Workspace");
+            Assert.AreEqual("TAC-015-script-parent-property-signal",
+                workspace.GetAttribute("TierACorpusResult"));
+        }
+
+        [Test]
+        public void Lua_ProductionPath_Tac016GeneralizedIterationFixturePassesUnmodified()
+        {
+            string fixturePath = Path.Combine(
+                Directory.GetCurrentDirectory(), "Assets", "CoreAIMods", "Tests", "EditMode",
+                "RbxApi", "CompatibilityCorpus", "Fixtures",
+                "TAC-016-generic-for-descendants.lua");
+            string source = File.ReadAllText(fixturePath);
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+
+            stack.Runtime.LoadMod("TAC-016-generic-for-descendants", source,
+                persistToStore: false);
+
+            RbxInstance workspace = roblox.Game.FindFirstChildOfClass("Workspace");
+            Assert.AreEqual("TAC-016-generic-for-descendants",
+                workspace.GetAttribute("TierACorpusResult"));
+        }
+
+        [Test]
+        public void Lua_ProductionPath_GeneralizedIterationHonorsIterMetamethod()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(), store);
+            stack.Runtime.LoadMod("generalized-iteration", @"
+                local values = { 3, 5, 7 }
+                setmetatable(values, { __iter = function(t)
+                    local i = #t + 1
+                    return function()
+                        i = i - 1
+                        if i > 0 then return i, t[i] end
+                    end
+                end })
+                local result = ''
+                for i, value in values do
+                    result = result .. i .. ':' .. value .. ';'
+                end
+                store_set('result', result)");
+
+            Assert.AreEqual("3:7;2:5;1:3;",
+                store.Get("generalized-iteration", "result"));
+        }
+
+        [Test]
         public void Lua_InstanceNew_CreatesParentsAndNavigates()
         {
             LuaCsRbxApiBindings roblox = new();
@@ -401,11 +1505,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             Exception ex = LoadFails(stack, "stub-context", @"
                 local missing = 'NeverThere'
-                workspace:WaitForChild(missing)");
+                Instance.fromExisting(missing)");
             string fullText = FullText(ex);
             StringAssert.Contains("[mod:stub-context script:main.lua line:3]", fullText);
             StringAssert.Contains("NOT_IMPLEMENTED", fullText);
-            StringAssert.Contains("MVP2", fullText);
+            StringAssert.Contains("backlog", fullText);
         }
 
         [Test]
@@ -648,16 +1752,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             registry.BindActorAttribution(
                 "instance-new-mod-b", OriginTag.FromMod("instance-new-mod-b"), actorB.ActorId);
 
-            Exception error = Assert.Catch(() => stack.Runtime.LoadMod(
-                actorB,
-                "instance-new-mod-b",
-                "Instance.new('Folder', workspace:FindFirstChild('ForeignContainer'))",
-                persistToStore: false));
+            Exception error = null;
+            try
+            {
+                stack.Runtime.LoadMod(
+                    actorB,
+                    "instance-new-mod-b",
+                    "Instance.new('Folder', workspace:FindFirstChild('ForeignContainer'))",
+                    persistToStore: false);
+            }
+            catch (Exception exception)
+            {
+                error = exception;
+            }
 
-            StringAssert.Contains("reparent destination", FullText(error));
-            StringAssert.Contains("Owned by actor 'instance-new-parent-a'", FullText(error));
             Assert.AreEqual(0, containerA.GetChildren().Count);
             Assert.AreEqual(0, registry.GetOwnedBy("instance-new-mod-b").Count);
+            Assert.IsNotNull(error, "foreign-container creation must be denied");
+            StringAssert.Contains(
+                "cannot create child on Folder 'Workspace.ForeignContainer'", FullText(error));
+            StringAssert.Contains("Owned by actor 'instance-new-parent-a'", FullText(error));
         }
 
         [Test]
@@ -1275,13 +2389,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_WaitForChild_AbsentChild_LoudStubNamesMvp2()
+        public void Lua_WaitForChild_TimeoutZeroReturnsNilImmediately()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m", "workspace:WaitForChild('NeverThere')");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("MVP2", FullText(ex));
-            StringAssert.Contains("FindFirstChild", FullText(ex));
+            stack.Runtime.LoadMod("m",
+                "assert(workspace:WaitForChild('NeverThere', 0) == nil)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
         // ---- Shared world -------------------------------------------------------------------

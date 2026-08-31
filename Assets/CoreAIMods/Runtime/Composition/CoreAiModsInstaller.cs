@@ -7,6 +7,7 @@ using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -55,6 +56,14 @@ namespace CoreAI.Composition
         /// ACL schema assigned to a newly composed Rbx world. Pass null only when opening a legacy
         /// world whose persisted metadata has no ACL version.
         /// </param>
+        /// <param name="applicationIsPlayingProvider">
+        /// Optional host seam for determining whether startup should create the runtime ticker. Null uses
+        /// <see cref="Application.isPlaying"/>; headless composition tests provide a false-returning delegate.
+        /// </param>
+        /// <param name="skillTextProvider">
+        /// Optional host seam for loading a Resources skill override by path. Null uses
+        /// <see cref="Resources.Load{T}(string)"/>; headless composition tests provide a null-returning delegate.
+        /// </param>
         public static void RegisterCoreAiMods(
             this IContainerBuilder builder,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
@@ -62,7 +71,9 @@ namespace CoreAI.Composition
             bool enableFullLuaPrivateAccess = false,
             IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null,
             string modStoreId = null,
-            int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion)
+            int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
+            System.Func<bool> applicationIsPlayingProvider = null,
+            System.Func<string, string> skillTextProvider = null)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -98,6 +109,7 @@ namespace CoreAI.Composition
 
             // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
+            LuaCsRbxApiBindings[] rbxApiHolder = new LuaCsRbxApiBindings[1];
             builder.Register(c =>
             {
                 // WHY: a scene that references a RbxWorldHost gets a VISIBLE Rbx world — its registry/
@@ -112,6 +124,8 @@ namespace CoreAI.Composition
                 IRbxRuntimeObservabilitySink observability =
                     c.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
                     ?? NullRbxRuntimeObservabilitySink.Instance;
+                INetworkBridge networkBridge = c.ResolveOrDefault<INetworkBridge>()
+                    ?? new NullNetworkBridge();
                 LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
@@ -127,6 +141,7 @@ namespace CoreAI.Composition
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
                         pickSource: rbxHost.PickSource,
                         observability: observability,
+                        networkBridge: networkBridge,
                         log: msg => rbxLog.Warn(
                             "[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
@@ -145,8 +160,11 @@ namespace CoreAI.Composition
                         registry: registry,
                         game: game,
                         observability: observability,
+                        networkBridge: networkBridge,
                         log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
+
+                rbxApiHolder[0] = rbxApi;
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
@@ -215,7 +233,8 @@ namespace CoreAI.Composition
                             return;
                         }
 
-                        foreach (Mods.Rbx.Instances.RbxInstance owned in ownedRegistry.GetOwnedBy(modId))
+                        foreach (Mods.Rbx.Instances.RbxInstance owned in
+                                 ownedRegistry.GetTeardownOwnedBy(modId))
                         {
                             try
                             {
@@ -232,6 +251,12 @@ namespace CoreAI.Composition
 
                 return luaCsStack;
             }, Lifetime.Singleton);
+
+            builder.RegisterDisposeCallback(_ =>
+            {
+                rbxApiHolder[0]?.Dispose();
+                rbxApiHolder[0] = null;
+            });
 
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)
                 .AsSelf();
@@ -271,7 +296,10 @@ namespace CoreAI.Composition
                         $"[CoreAI] CoreAiMods (Lua-CSharp): capability grant = {scriptCapabilities} " +
                         $"(enableFullLuaAccess={enableFullLuaAccess})");
 
-                    if (Application.isPlaying)
+                    bool applicationIsPlaying = applicationIsPlayingProvider != null
+                        ? applicationIsPlayingProvider()
+                        : Application.isPlaying;
+                    if (applicationIsPlaying)
                     {
                         LuaCsModStack stack = container.Resolve<LuaCsModStack>();
                         LuaCsModRuntime runtime = stack.Runtime;
@@ -367,7 +395,13 @@ namespace CoreAI.Composition
                         container.ResolveOrDefault<IActorIdentityProvider>() ?? fallbackHostIdentityProvider;
 
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
+                        new LuaLlmTool(
+                            container.Resolve<LuaTool.ILuaExecutor>(),
+                            settings,
+                            log,
+                            limiter,
+                            actorIdentityProvider,
+                            BuiltInAgentRoleIds.Programmer));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaModsLlmTool(
                             container.Resolve<ILuaModRuntime>(),
@@ -380,25 +414,29 @@ namespace CoreAI.Composition
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
 
-                    TextAsset skillOverride = Resources.Load<TextAsset>("AgentSkills/LuaModding");
+                    string skillOverride = skillTextProvider != null
+                        ? skillTextProvider("AgentSkills/LuaModding")
+                        : Resources.Load<TextAsset>("AgentSkills/LuaModding")?.text;
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInLuaModdingSkillText.SkillName,
                         BuiltInLuaModdingSkillText.SkillDescription,
-                        skillOverride != null ? skillOverride.text : BuiltInLuaModdingSkillText.Instructions));
+                        skillOverride ?? BuiltInLuaModdingSkillText.Instructions));
 
-                    TextAsset rbxSkillOverride = Resources.Load<TextAsset>("AgentSkills/RbxApi");
+                    string rbxSkillOverride = skillTextProvider != null
+                        ? skillTextProvider("AgentSkills/RbxApi")
+                        : Resources.Load<TextAsset>("AgentSkills/RbxApi")?.text;
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInRbxApiSkillText.SkillName,
                         BuiltInRbxApiSkillText.SkillDescription,
-                        rbxSkillOverride != null ? rbxSkillOverride.text : BuiltInRbxApiSkillText.Instructions));
+                        rbxSkillOverride ?? BuiltInRbxApiSkillText.Instructions));
 
-                    TextAsset fullLuaSkillOverride = Resources.Load<TextAsset>("AgentSkills/FullLua");
+                    string fullLuaSkillOverride = skillTextProvider != null
+                        ? skillTextProvider("AgentSkills/FullLua")
+                        : Resources.Load<TextAsset>("AgentSkills/FullLua")?.text;
                     policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                         BuiltInFullLuaSkillText.SkillName,
                         BuiltInFullLuaSkillText.SkillDescription,
-                        fullLuaSkillOverride != null
-                            ? fullLuaSkillOverride.text
-                            : BuiltInFullLuaSkillText.Instructions));
+                        fullLuaSkillOverride ?? BuiltInFullLuaSkillText.Instructions));
                 }
                 catch (VContainerException)
                 {

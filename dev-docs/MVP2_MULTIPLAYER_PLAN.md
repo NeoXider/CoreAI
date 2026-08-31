@@ -89,9 +89,9 @@ lockstep rule (`CONTRIBUTING.md:79`).
 6. **Scheduler and registry cost** — event-fed completion promotion (thread safety, deterministic
    ordering, teardown races, WebGL single-thread), teardown without rescans.
 7. **MVP2 API core** — diagnostics/error formatter → general signal dispatch (removes the
-   `SupportsDispatch` split; deferred drain after delayed resumptions, before Heartbeat, per
-   R5.4–R5.7) → `WaitForChild` yield, `signal:Wait()`, `Destroying` order → budget/quarantine. Also
-   fixes `task.wait` inside signal callbacks.
+   `SupportsDispatch` split; the deferred queue flushes at **every live R5.5 script-resumption
+   point**, per R5.4–R5.8) → `WaitForChild` yield, `signal:Wait()`, `Destroying` order →
+   budget/quarantine. Also fixes `task.wait` inside signal callbacks.
 8. **Services and data** — `ServiceCatalog`; clock surface D9; shared JSON + `HttpService`, deciding
    the JSON and `os.clock()` conflicts explicitly.
 9. **Loopback networking** — `INetworkBridge`, `NullNetworkBridge`, `RemoteEvent` /
@@ -176,6 +176,17 @@ it from the per-instruction hook and measured VM throughput; kept a "cooperative
 that is a different product rather than a downgrade; scheduled fairness but not provider capacity;
 missed that shared-world mutation is unauthorized even though `InstanceRecord` already carries the
 owner; and proposed a breaking interface change that would have forced 8.0.0 when DI scoping suffices.
+
+**v5 — this document, corrected 2026-08-31 from a measured failure.** Step 7 said the deferred queue
+drains "after delayed resumptions, before Heartbeat", describing **one** drain point. R5.5 lists nine
+resumption points and the reference implementation notes require the queue to flush at *every* one.
+The implementation followed this plan and was therefore wrong: a handler connected to
+`RunService.Heartbeat` was queued at the Heartbeat stage and not drained until the next frame. All
+four bundled samples run their whole game loop in `Heartbeat`, so the defect surfaced as seven failing
+sample tests — the observable frame order read `DS` where R4.2 requires `SD`, because `Stepped` fires
+at PreSimulation while `task.delay` resumes later at ResumeDelayed. The plan, not just the code, was
+the source of the error; the wording above is now fixed. Lesson: a build-order line that names a
+single mechanism where the normative rule names nine is not a summary, it is a specification bug.
 
 
 ## 11. `ActorContext` — specified, not left to interpretation

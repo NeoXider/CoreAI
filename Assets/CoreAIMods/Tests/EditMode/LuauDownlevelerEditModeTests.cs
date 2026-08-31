@@ -62,6 +62,25 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void GeneralizedIteration_InsertsAdapterAndPreservesLineCount()
+        {
+            string luau = "local values = { 1, 2 }\nfor i, value in values do\nprint(i, value)\nend";
+            DownlevelResult result = ProcessOk(luau);
+
+            Assert.IsTrue(result.Changed);
+            StringAssert.Contains("for i, value in __luau_t0(values) do", result.LuaSource);
+            Assert.AreEqual(CountOccurrences(luau, "\n"), CountOccurrences(result.LuaSource, "\n"));
+            bool mentioned = false;
+            foreach (DownlevelDiagnostic diagnostic in result.Diagnostics)
+            {
+                mentioned |= diagnostic.Severity == DownlevelSeverity.Info
+                    && diagnostic.Message.Contains("generalized iteration");
+            }
+
+            Assert.IsTrue(mentioned);
+        }
+
+        [Test]
         public void PlainLua_EmptySource_PassesThrough()
         {
             AssertUnchanged("");
@@ -181,9 +200,14 @@ namespace CoreAI.Tests.EditMode
         public void ForLoopAnnotations_AreStripped()
         {
             AssertRewrites("for i: number = 1, 10 do print(i) end", "for i = 1, 10 do print(i) end");
-            AssertRewrites(
-                "for k: string, v: number in pairs(t) do print(k, v) end",
-                "for k, v in pairs(t) do print(k, v) end");
+            DownlevelResult genericResult = ProcessOk(
+                "for k: string, v: number in pairs(t) do print(k, v) end");
+            Assert.IsTrue(genericResult.Changed);
+            StringAssert.Contains(
+                "for k, v in __luau_t0(pairs(t)) do print(k, v) end",
+                genericResult.LuaSource);
+            StringAssert.DoesNotContain("k: string", genericResult.LuaSource);
+            StringAssert.DoesNotContain("v: number", genericResult.LuaSource);
         }
 
         [Test]

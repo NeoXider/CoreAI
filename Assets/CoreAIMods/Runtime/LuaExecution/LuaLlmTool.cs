@@ -1,6 +1,7 @@
 using CoreAI.Ai;
 using Microsoft.Extensions.AI;
 using CoreAI.Logging;
+using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
@@ -13,9 +14,13 @@ namespace CoreAI.Ai
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
         private readonly LuaGenerationRateLimiter _rateLimiter;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
+        private readonly string _roleId;
 
         public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, ILog logger,
-            LuaGenerationRateLimiter rateLimiter = null)
+            LuaGenerationRateLimiter rateLimiter = null,
+            IActorIdentityProvider actorIdentityProvider = null,
+            string roleId = null)
         {
             _executor = executor;
             _settings = settings;
@@ -23,6 +28,8 @@ namespace CoreAI.Ai
             // WHY: Owned here (not in CreateAIFunction) so the sliding window survives repeated
             // AIFunction creation; pass the envelope pipeline's limiter to share one budget.
             _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
+            _actorIdentityProvider = actorIdentityProvider;
+            _roleId = roleId;
         }
 
         /// <inheritdoc />
@@ -39,21 +46,37 @@ namespace CoreAI.Ai
         public string Description => LuaTool.ExecuteLuaDescription;
 
         /// <inheritdoc />
-        public string ParametersSchema =>
-            "{" +
-            "  \"type\": \"object\"," +
-            "  \"properties\": {" +
-            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
-            "  }," +
-            "  \"required\": [\"code\"]" +
-            "}";
+        public string ParametersSchema => _actorIdentityProvider == null
+            ? "{" +
+              "  \"type\": \"object\"," +
+              "  \"properties\": {" +
+              "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
+              "  }," +
+              "  \"required\": [\"code\"]" +
+              "}"
+            : "{" +
+              "  \"type\": \"object\"," +
+              "  \"properties\": {" +
+              "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute against the declared mutation target.\" }," +
+              "    \"operation_id\": { \"type\": \"string\", \"description\": \"Caller-generated idempotency key unique for this actor and logical operation.\" }," +
+              "    \"target_instance_id\": { \"type\": \"string\", \"description\": \"Stable target InstanceId encoded as an unsigned decimal string.\" }," +
+              "    \"expected_revision\": { \"type\": \"integer\", \"minimum\": 0, \"description\": \"Target revision observed before submitting this operation.\" }" +
+              "  }," +
+              "  \"required\": [\"code\", \"operation_id\", \"target_instance_id\", \"expected_revision\"]" +
+              "}";
 
         /// <summary>
         /// Creates the MEAI function delegated to <see cref="LuaTool"/>.
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            LuaTool tool = new(_executor, _settings, _logger, _rateLimiter);
+            LuaTool tool = new(
+                _executor,
+                _settings,
+                _logger,
+                _rateLimiter,
+                _actorIdentityProvider,
+                _roleId);
             return tool.CreateAIFunction();
         }
     }

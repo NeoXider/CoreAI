@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -145,6 +147,51 @@ namespace CoreAI.Tests.EditMode
             }
 
             return LuaCsModRuntimeFactory.Create(options);
+        }
+
+        /// <summary>Builds the shipped one-off executor over a supplied strict Rbx world.</summary>
+        private static LuaCsModStack BuildMutationStack(LuaCsRbxApiBindings bindings)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+        }
+
+        /// <summary>Issues a reconnectable restricted actor with an explicit connection id.</summary>
+        private static ActorContext MutationActor(string actorId, string sessionId)
+        {
+            return new LocalActorIdentityProvider(
+                    actorId, sessionId, "", ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>Creates shared content after the Rbx bindings bootstrap Workspace.</summary>
+        private static RbxInstance CreateMutationTarget(InstanceRegistry registry, string name)
+        {
+            RbxInstance target = registry.Create(
+                "Folder", accessScope: InstanceAccessScope.SharedWritable);
+            target.Name = name;
+            target.Parent = registry.WorldRoot;
+            return target;
+        }
+
+        private static InstanceRecord MutationRecord(
+            InstanceRegistry registry, RbxInstance target)
+        {
+            Assert.IsTrue(registry.TryGetRecord(target.Id, out InstanceRecord record));
+            return record;
+        }
+
+        private static LuaTool.LuaResult ExecuteMutation(LuaCsModStack stack,
+            ActorContext actorContext, MutationEnvelope envelope, string source)
+        {
+            return stack.ToolExecutor.ExecuteAsync(
+                    source, actorContext, envelope, CancellationToken.None)
+                .GetAwaiter().GetResult();
         }
 
         [Test]
@@ -300,9 +347,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LuaCs_RegisteredInstanceQuota_IsPerActorAtNAndNPlusOne()
         {
+            LuaCsRbxApiBindings rbxApi = new();
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
-                RbxApi = new LuaCsRbxApiBindings(),
+                RbxApi = rbxApi,
                 MaxRegisteredInstancesPerActor = 2
             });
             ActorContext actor = new LocalActorIdentityProvider("instance-actor")
@@ -313,6 +361,8 @@ namespace CoreAI.Tests.EditMode
                 "instance-a-1",
                 "Instance.new('Folder')\nInstance.new('Folder')",
                 persistToStore: false));
+            Assert.AreEqual(2, rbxApi.Registry.GetOwnedBy("instance-a-1").Count,
+                "the per-mod Script proxy must not replace a user-content quota slot");
 
             Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
                 actor,
@@ -479,6 +529,271 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(LuaCsModRuntime.IsSupported, "Lua-CSharp runtime must report supported.");
             Assert.IsTrue(LuaCsGameToolExecutor.IsSupported, "Lua-CSharp one-off executor must report supported.");
             Assert.AreEqual(LuaCapabilities.All, stack.GameplayBindings.Capabilities);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_DuplicateOperationId_ReturnsFirstProductionResult()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack stack = BuildMutationStack(bindings);
+            RbxInstance target = CreateMutationTarget(registry, "DuplicateTarget");
+            ActorContext actor = MutationActor("duplicate-actor", "session-1");
+            long initialRevision = MutationRecord(registry, target).Revision;
+            MutationEnvelope envelope = new(
+                actor.ActorId, target.Id, "duplicate-operation", initialRevision);
+            const string source = @"
+                local target = workspace:FindFirstChild('DuplicateTarget')
+                local count = target:GetAttribute('Count') or 0
+                target:SetAttribute('Count', count + 1)
+                return target:GetAttribute('Count')";
+
+            LuaTool.LuaResult first = ExecuteMutation(stack, actor, envelope, source);
+            LuaTool.LuaResult replay = ExecuteMutation(stack, actor, envelope, source);
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreSame(first, replay, "A duplicate must return the first production result object.");
+            Assert.AreEqual("1", replay.Output);
+            Assert.AreEqual(1d, target.GetAttribute("Count"));
+            Assert.AreEqual(initialRevision + 1L, MutationRecord(registry, target).Revision);
+            Assert.AreEqual(1, registry.RetainedMutationOperationCount);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_StaleRevision_IsRefusedBeforeProductionMutation()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack stack = BuildMutationStack(bindings);
+            RbxInstance target = CreateMutationTarget(registry, "StaleTarget");
+            ActorContext actor = MutationActor("stale-actor", "session-1");
+            long currentRevision = MutationRecord(registry, target).Revision;
+            MutationEnvelope envelope = new(
+                actor.ActorId, target.Id, "stale-operation", currentRevision - 1L);
+
+            LuaTool.LuaResult result = ExecuteMutation(
+                stack, actor, envelope,
+                "workspace:FindFirstChild('StaleTarget').Name = 'AppliedUnexpectedly'");
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains("actor 'stale-actor'", result.Error);
+            StringAssert.Contains("stale expected revision", result.Error);
+            StringAssert.Contains("current revision is " + currentRevision, result.Error);
+            Assert.AreEqual("StaleTarget", target.Name);
+            Assert.AreEqual(currentRevision, MutationRecord(registry, target).Revision);
+            Assert.AreEqual(0, registry.RetainedMutationOperationCount);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_UnparentedInstanceNew_AdvancesCreationAnchorRevision()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack stack = BuildMutationStack(bindings);
+            RbxInstance anchor = CreateMutationTarget(registry, "CreationAnchor");
+            ActorContext actor = MutationActor("create-actor", "session-1");
+            long initialRevision = MutationRecord(registry, anchor).Revision;
+            int initialCount = registry.Count;
+            MutationEnvelope firstEnvelope = new(
+                actor.ActorId, anchor.Id, "create-operation-1", initialRevision);
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                stack, actor, firstEnvelope,
+                "local created=Instance.new('Folder'); return created.ClassName");
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreEqual("Folder", first.Output);
+            Assert.Greater(registry.Count, initialCount);
+            int countAfterFirst = registry.Count;
+            Assert.AreEqual(initialRevision + 1L,
+                MutationRecord(registry, anchor).Revision);
+
+            MutationEnvelope staleEnvelope = new(
+                actor.ActorId, anchor.Id, "create-operation-2", initialRevision);
+            LuaTool.LuaResult stale = ExecuteMutation(
+                stack, actor, staleEnvelope,
+                "Instance.new('Folder'); return 'unexpected'");
+
+            Assert.IsFalse(stale.Success);
+            StringAssert.Contains("stale expected revision", stale.Error);
+            Assert.AreEqual(countAfterFirst, registry.Count);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_Clone_AdvancesSourceRevision()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack stack = BuildMutationStack(bindings);
+            RbxInstance source = CreateMutationTarget(registry, "CloneRevisionSource");
+            ActorContext actor = MutationActor("clone-actor", "session-1");
+            long initialRevision = MutationRecord(registry, source).Revision;
+            int initialCount = registry.Count;
+            MutationEnvelope firstEnvelope = new(
+                actor.ActorId, source.Id, "clone-operation-1", initialRevision);
+            const string cloneSource = @"
+                local source = workspace:FindFirstChild('CloneRevisionSource')
+                local copy = source:Clone()
+                return copy.Name";
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                stack, actor, firstEnvelope, cloneSource);
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreEqual("CloneRevisionSource", first.Output);
+            Assert.Greater(registry.Count, initialCount);
+            int countAfterFirst = registry.Count;
+            Assert.AreEqual(initialRevision + 1L,
+                MutationRecord(registry, source).Revision);
+
+            MutationEnvelope staleEnvelope = new(
+                actor.ActorId, source.Id, "clone-operation-2", initialRevision);
+            LuaTool.LuaResult stale = ExecuteMutation(
+                stack, actor, staleEnvelope, cloneSource);
+
+            Assert.IsFalse(stale.Success);
+            StringAssert.Contains("stale expected revision", stale.Error);
+            Assert.AreEqual(countAfterFirst, registry.Count);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_ConcurrentSameRevision_DeterministicallyOrdersFirstEntrant()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            ManualResetEventSlim firstEntered = new(false);
+            ManualResetEventSlim releaseFirst = new(false);
+            ManualResetEventSlim secondStarted = new(false);
+            LuaCsModStack firstStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                AdditionalGameplayBindings = (apiRegistry, capabilities) =>
+                    apiRegistry.Register("test_hold_mutation", new Action(() =>
+                    {
+                        firstEntered.Set();
+                        releaseFirst.Wait();
+                    }))
+            });
+            LuaCsModStack secondStack = BuildMutationStack(bindings);
+            RbxInstance target = CreateMutationTarget(registry, "ConcurrentTarget");
+            ActorContext firstActor = MutationActor("concurrent-a", "session-a");
+            ActorContext secondActor = MutationActor("concurrent-b", "session-b");
+            long initialRevision = MutationRecord(registry, target).Revision;
+            MutationEnvelope firstEnvelope = new(
+                firstActor.ActorId, target.Id, "concurrent-a-operation", initialRevision);
+            MutationEnvelope secondEnvelope = new(
+                secondActor.ActorId, target.Id, "concurrent-b-operation", initialRevision);
+            Task<LuaTool.LuaResult> firstTask = Task.Run(() =>
+            {
+                return ExecuteMutation(firstStack, firstActor, firstEnvelope,
+                    "test_hold_mutation(); "
+                    + "local t=workspace:FindFirstChild('ConcurrentTarget'); "
+                    + "t:SetAttribute('Winner','a'); return 'a'");
+            });
+            bool firstDidEnter = firstEntered.Wait(TimeSpan.FromSeconds(5));
+            if (!firstDidEnter)
+            {
+                releaseFirst.Set();
+            }
+
+            Assert.IsTrue(firstDidEnter,
+                "Actor A did not enter the production mutation before the timeout.");
+            Task<LuaTool.LuaResult> secondTask = Task.Run(() =>
+            {
+                secondStarted.Set();
+                return ExecuteMutation(secondStack, secondActor, secondEnvelope,
+                    "local t=workspace:FindFirstChild('ConcurrentTarget'); "
+                    + "t:SetAttribute('Winner','b'); return 'b'");
+            });
+
+            bool secondDidStart = secondStarted.Wait(TimeSpan.FromSeconds(5));
+            releaseFirst.Set();
+            Assert.IsTrue(secondDidStart,
+                "Actor B did not start its concurrent production mutation before the timeout.");
+            Task.WaitAll(firstTask, secondTask);
+            LuaTool.LuaResult first = firstTask.Result;
+            LuaTool.LuaResult second = secondTask.Result;
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.IsFalse(second.Success);
+            Assert.AreEqual("a", first.Output);
+            Assert.AreEqual("a", target.GetAttribute("Winner"));
+            StringAssert.Contains("stale expected revision", second.Error);
+            Assert.AreEqual(initialRevision + 1L, MutationRecord(registry, target).Revision);
+            Assert.AreEqual(1, registry.RetainedMutationOperationCount);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_ReconnectingDurableActor_DoesNotDoubleApplyOrForkState()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack firstStack = BuildMutationStack(bindings);
+            LuaCsModStack reconnectedStack = BuildMutationStack(bindings);
+            RbxInstance target = CreateMutationTarget(registry, "ReconnectTarget");
+            ActorContext firstConnection = MutationActor("durable-actor", "session-before");
+            ActorContext reconnected = MutationActor("durable-actor", "session-after");
+            long initialRevision = MutationRecord(registry, target).Revision;
+            MutationEnvelope envelope = new(
+                firstConnection.ActorId, target.Id, "reconnect-operation", initialRevision);
+            const string source = @"
+                local target = workspace:FindFirstChild('ReconnectTarget')
+                local count = target:GetAttribute('Count') or 0
+                target:SetAttribute('Count', count + 1)
+                return target:GetAttribute('Count')";
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                firstStack, firstConnection, envelope, source);
+            LuaTool.LuaResult replay = ExecuteMutation(
+                reconnectedStack, reconnected, envelope, source);
+
+            Assert.AreNotEqual(firstConnection.SessionId, reconnected.SessionId);
+            Assert.AreEqual(firstConnection.ActorId, reconnected.ActorId);
+            Assert.AreNotSame(firstStack.ToolExecutor, reconnectedStack.ToolExecutor);
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreSame(first, replay);
+            Assert.AreEqual(1d, target.GetAttribute("Count"));
+            Assert.AreEqual(initialRevision + 1L, MutationRecord(registry, target).Revision);
+            Assert.AreEqual(1, registry.RetainedMutationOperationCount);
+        }
+
+        [Test]
+        public void LuaCs_MutationEnvelope_WorldTeardown_ClearsRetainedOperationState()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            LuaCsModStack stack = BuildMutationStack(bindings);
+            RbxInstance target = CreateMutationTarget(registry, "TeardownTarget");
+            ActorContext actor = MutationActor("teardown-actor", "session-1");
+            MutationEnvelope envelope = new(
+                actor.ActorId, target.Id, "teardown-operation",
+                MutationRecord(registry, target).Revision);
+
+            LuaTool.LuaResult first = ExecuteMutation(
+                stack, actor, envelope,
+                "local t=workspace:FindFirstChild('TeardownTarget'); "
+                + "t:SetAttribute('Touched',true); return 'applied'");
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.AreEqual(1, registry.RetainedMutationOperationCount);
+
+            registry.MarkDetached();
+
+            Assert.AreEqual(0, registry.RetainedMutationOperationCount);
+            LuaTool.LuaResult afterTeardown = ExecuteMutation(
+                stack, actor, envelope, "return 'must not replay'");
+            Assert.IsFalse(afterTeardown.Success);
+            StringAssert.Contains("WORLD_DETACHED", afterTeardown.Error);
+            StringAssert.Contains("actor 'teardown-actor'", afterTeardown.Error);
         }
 
         [Test]

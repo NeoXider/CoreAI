@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -25,19 +27,51 @@ namespace CoreAI.Ai.LuaCs
     /// <see cref="IScriptFunctionRegistry"/> seam; value globals use the Lua-CSharp registry's
     /// engine-specific value escape hatch, which is why this class lives in the adapter layer.
     /// </summary>
-    public sealed class LuaCsRbxApiBindings
+    public sealed class LuaCsRbxApiBindings : IDisposable
     {
         private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
+
+        private sealed class ExecutingScriptBacking
+        {
+            public ExecutingScriptBacking(RbxInstance container, RbxInstance script)
+            {
+                Container = container;
+                Script = script;
+            }
+
+            public RbxInstance Container { get; }
+
+            public RbxInstance Script { get; }
+        }
+
+        private sealed class RemoteFunctionCallbackRegistration
+        {
+            public RemoteFunctionCallbackRegistration(LuaCsRbxModContext context,
+                IScriptState ownerState, LuaValue callback)
+            {
+                Context = context ?? throw new ArgumentNullException(nameof(context));
+                OwnerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
+                Callback = callback;
+            }
+
+            public LuaCsRbxModContext Context { get; }
+
+            public IScriptState OwnerState { get; }
+
+            public LuaValue Callback { get; }
+        }
 
         internal sealed class ModLoadCandidate
         {
             public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
-                int previousGeneration, HashSet<RbxScriptConnection> existingConnections)
+                int previousGeneration, HashSet<RbxScriptConnection> existingConnections,
+                bool hadExecutingScriptBacking)
             {
                 OwnerModId = ownerModId;
                 HadPreviousGeneration = hadPreviousGeneration;
                 PreviousGeneration = previousGeneration;
                 ExistingConnections = existingConnections;
+                HadExecutingScriptBacking = hadExecutingScriptBacking;
             }
 
             public string OwnerModId { get; }
@@ -47,6 +81,8 @@ namespace CoreAI.Ai.LuaCs
             public int PreviousGeneration { get; }
 
             public HashSet<RbxScriptConnection> ExistingConnections { get; }
+
+            public bool HadExecutingScriptBacking { get; }
         }
 
         private readonly InstanceRegistry _registry;
@@ -61,15 +97,30 @@ namespace CoreAI.Ai.LuaCs
         private readonly ModConnectionRegistry _connections;
         private readonly LuaCsRbxScriptThreadFactory _schedulerThreadFactory;
         private readonly ModScheduler _scheduler;
+        private readonly INetworkBridge _networkBridge;
+        private readonly RbxPlayers _players;
+        private readonly LuaCsRbxNetworkCodec _networkCodec;
+        private readonly RbxScriptSignal _networkRequestSignal;
+        private readonly RbxScriptConnection _networkRequestConnection;
+        private readonly Dictionary<InstanceId, RemoteFunctionCallbackRegistration>
+            _serverRemoteCallbacks = new();
+        private readonly Dictionary<InstanceId,
+            Dictionary<string, RemoteFunctionCallbackRegistration>>
+            _clientRemoteCallbacks = new();
+        private readonly Dictionary<IRbxScriptThread, long>
+            _remoteFunctionWaitGenerations = new();
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, Dictionary<int, HashSet<IRbxScriptThread>>>
             _scheduledThreadsByMod = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _currentSchedulerGenerationByMod =
             new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ExecutingScriptBacking> _executingScriptsByMod =
+            new(StringComparer.Ordinal);
         private readonly Action<string> _log;
         private int _consoleInvocationCounter;
         private float _runServiceElapsed;
+        private bool _disposed;
 
         private bool _mouseButton1Down;
 
@@ -91,7 +142,8 @@ namespace CoreAI.Ai.LuaCs
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
             IRbxCameraRig cameraRig = null, IInputSource inputSource = null,
             ModConnectionRegistry connections = null, IClickPickSource pickSource = null,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            INetworkBridge networkBridge = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
@@ -111,6 +163,21 @@ namespace CoreAI.Ai.LuaCs
                          ?? throw new ArgumentException(
                              "the game tree has no Workspace child", nameof(game));
             _enums = enums ?? RbxEnumRegistry.CreateWithBuiltins();
+            _networkBridge = networkBridge ?? new NullNetworkBridge();
+            _players = _game.FindFirstChildOfClass("Players") as RbxPlayers;
+            if (_players == null && _registry.Catalog.TryGet("Players", out _))
+            {
+                _players = (RbxPlayers)_registry.Create("Players");
+                _players.Parent = _game;
+            }
+
+            if (_players == null)
+            {
+                throw new ArgumentException(
+                    "the game tree has no Players service", nameof(game));
+            }
+
+            _networkCodec = new LuaCsRbxNetworkCodec(_registry, _enums, _log);
             _partSink = partSink ?? new InMemoryPartPropertySink();
             _cameraRig = cameraRig ?? new InMemoryCameraRig();
             _log = log;
@@ -166,6 +233,16 @@ namespace CoreAI.Ai.LuaCs
                 _runService.RenderStepped.BindScheduler(_scheduler);
             }
 
+            _players.PlayerAdded.BindScheduler(_scheduler);
+            _players.PlayerRemoving.BindScheduler(_scheduler);
+            _networkRequestSignal = new RbxScriptSignal("NetworkBridge.RequestReceived");
+            _networkRequestSignal.BindScheduler(_scheduler);
+            _networkRequestConnection = _networkRequestSignal.Connect(
+                (Action<object[]>)DeliverNetworkRequest);
+            _networkBridge.EventReceived += DeliverNetworkEvent;
+            _networkBridge.RequestReceived += QueueNetworkRequest;
+            _registry.Unregistered += OnInstanceUnregistered;
+
             _scheduler.PhaseReached += PumpSchedulerPhase;
 
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
@@ -213,6 +290,86 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public ModScheduler Scheduler => _scheduler;
 
+        /// <summary>Transport-neutral bridge used by the production Lua remote surface.</summary>
+        public INetworkBridge NetworkBridge => _networkBridge;
+
+        /// <summary>Players service populated from trusted network actor contexts.</summary>
+        public RbxPlayers Players => _players;
+
+        internal int CountRemoteFunctionWaitsOwnedBy(string ownerModId)
+        {
+            int count = 0;
+            foreach (IRbxScriptThread thread in _remoteFunctionWaitGenerations.Keys)
+            {
+                if (thread is LuaCsRbxScriptThread luaThread && string.Equals(
+                        luaThread.OwnerModId, ownerModId, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        internal int CountRemoteFunctionCallbacksOwnedBy(string ownerModId)
+        {
+            int count = 0;
+            foreach (RemoteFunctionCallbackRegistration registration
+                     in _serverRemoteCallbacks.Values)
+            {
+                if (string.Equals(registration.Context.OwnerModId,
+                        ownerModId, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            foreach (Dictionary<string, RemoteFunctionCallbackRegistration> callbacks
+                     in _clientRemoteCallbacks.Values)
+            {
+                foreach (RemoteFunctionCallbackRegistration registration in callbacks.Values)
+                {
+                    if (string.Equals(registration.Context.OwnerModId,
+                            ownerModId, StringComparison.Ordinal))
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>Releases bridge subscriptions, scheduler work, and captured Lua callback state.</summary>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _networkBridge.EventReceived -= DeliverNetworkEvent;
+            _networkBridge.RequestReceived -= QueueNetworkRequest;
+            _registry.Unregistered -= OnInstanceUnregistered;
+            _scheduler.PhaseReached -= PumpSchedulerPhase;
+            _networkRequestConnection.Disconnect();
+
+            List<string> owners = new(_scheduledThreadsByMod.Keys);
+            for (int index = 0; index < owners.Count; index++)
+            {
+                string ownerModId = owners[index];
+                KillAllScheduledOwnedBy(ownerModId);
+                _connections.DisconnectOwnedBy(ownerModId);
+            }
+
+            _serverRemoteCallbacks.Clear();
+            _clientRemoteCallbacks.Clear();
+            _remoteFunctionWaitGenerations.Clear();
+            _scheduledThreadsByMod.Clear();
+            _currentSchedulerGenerationByMod.Clear();
+        }
+
         internal ModLoadCandidate BeginModLoadCandidate(string ownerModId)
         {
             string owner = string.IsNullOrWhiteSpace(ownerModId)
@@ -222,8 +379,9 @@ namespace CoreAI.Ai.LuaCs
                 owner, out int previousGeneration);
             HashSet<RbxScriptConnection> existingConnections =
                 new(_connections.GetOwnedBy(owner));
+            bool hadExecutingScriptBacking = TryGetExecutingScriptBacking(owner, out _);
             return new ModLoadCandidate(owner, hadPreviousGeneration,
-                previousGeneration, existingConnections);
+                previousGeneration, existingConnections, hadExecutingScriptBacking);
         }
 
         internal void RollbackModLoadCandidate(ModLoadCandidate candidate)
@@ -261,6 +419,15 @@ namespace CoreAI.Ai.LuaCs
                 {
                     connection.Disconnect();
                 }
+            }
+
+            if (!candidate.HadExecutingScriptBacking
+                && TryGetExecutingScriptBacking(ownerModId,
+                    out ExecutingScriptBacking createdBacking))
+            {
+                _executingScriptsByMod.Remove(ownerModId);
+                createdBacking.Script.Destroy();
+                createdBacking.Container.Destroy();
             }
         }
 
@@ -314,6 +481,336 @@ namespace CoreAI.Ai.LuaCs
             string ownerModId = RequireTaskOwner(context);
             TrackScheduledThread(context, _scheduler.SpawnSignal(
                 ownerModId, callable, arguments));
+        }
+
+        internal RbxPlayer GetLocalPlayer(LuaCsRbxModContext context)
+        {
+            if (context.IsNetworkServer)
+            {
+                return null;
+            }
+
+            return EnsureNetworkActor(context.ActorContext.ActorId);
+        }
+
+        internal void FireRemoteServer(LuaCsRbxModContext context,
+            RbxRemoteEvent remote, LuaFunctionExecutionContext ctx)
+        {
+            byte[] payload = _networkCodec.EncodeArguments(
+                ReadRemoteArguments(ctx, 1));
+            remote.FireServer(_networkBridge, context.ActorContext.ActorId, payload);
+        }
+
+        internal void FireRemoteClient(RbxRemoteEvent remote, RbxPlayer player,
+            LuaFunctionExecutionContext ctx)
+        {
+            byte[] payload = _networkCodec.EncodeArguments(
+                ReadRemoteArguments(ctx, 2));
+            remote.FireClient(_networkBridge, player, payload);
+        }
+
+        internal void FireRemoteAllClients(RbxRemoteEvent remote,
+            LuaFunctionExecutionContext ctx)
+        {
+            byte[] payload = _networkCodec.EncodeArguments(
+                ReadRemoteArguments(ctx, 1));
+            remote.FireAllClients(_networkBridge, payload);
+        }
+
+        internal LuaValue ReadRemoteFunctionCallback(LuaCsRbxModContext context,
+            RbxRemoteFunction remote, bool serverCallback)
+        {
+            RemoteFunctionCallbackRegistration registration;
+            if (serverCallback)
+            {
+                return _serverRemoteCallbacks.TryGetValue(remote.Id, out registration)
+                       && ReferenceEquals(registration.Context, context)
+                    ? registration.Callback
+                    : LuaValue.Nil;
+            }
+
+            string actorId = context.ActorContext.ActorId;
+            if (_clientRemoteCallbacks.TryGetValue(remote.Id,
+                    out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks)
+                && callbacks.TryGetValue(actorId, out registration)
+                && ReferenceEquals(registration.Context, context))
+            {
+                return registration.Callback;
+            }
+
+            return LuaValue.Nil;
+        }
+
+        internal void WriteRemoteFunctionCallback(LuaCsRbxModContext context,
+            RbxRemoteFunction remote, bool serverCallback, LuaState state, LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                if (serverCallback)
+                {
+                    _serverRemoteCallbacks.Remove(remote.Id);
+                }
+                else if (_clientRemoteCallbacks.TryGetValue(remote.Id,
+                             out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks))
+                {
+                    callbacks.Remove(context.ActorContext.ActorId);
+                    if (callbacks.Count == 0)
+                    {
+                        _clientRemoteCallbacks.Remove(remote.Id);
+                    }
+                }
+
+                return;
+            }
+
+            if (value.Type != LuaValueType.Function)
+            {
+                string member = serverCallback ? "OnServerInvoke" : "OnClientInvoke";
+                throw RbxError.BadArgument(
+                    "RemoteFunction." + member + " expects a function or nil, got "
+                    + Describe(value),
+                    "assign a callback function or nil");
+            }
+
+            LuaState ownerState = ResolveSchedulerOwnerState(state);
+            object captured = CaptureSignalCallable(ownerState, value);
+            if (!(captured is LuaCsRbxSchedulerCallable schedulerCallable)
+                || !(schedulerCallable.Callable is LuaValue callback))
+            {
+                throw RbxError.BadArgument(
+                    "RemoteFunction callback could not be captured for the scheduler",
+                    "assign the callback from a live persistent mod");
+            }
+
+            RemoteFunctionCallbackRegistration registration = new(
+                context, schedulerCallable.OwnerState, callback);
+            if (serverCallback)
+            {
+                _serverRemoteCallbacks[remote.Id] = registration;
+                return;
+            }
+
+            if (!_clientRemoteCallbacks.TryGetValue(remote.Id,
+                    out Dictionary<string, RemoteFunctionCallbackRegistration> clientCallbacks))
+            {
+                clientCallbacks = new Dictionary<string, RemoteFunctionCallbackRegistration>(
+                    StringComparer.Ordinal);
+                _clientRemoteCallbacks.Add(remote.Id, clientCallbacks);
+            }
+
+            clientCallbacks[context.ActorContext.ActorId] = registration;
+        }
+
+        private RbxPlayer EnsureNetworkActor(string actorId)
+        {
+            _networkBridge.RegisterActor(actorId);
+            return _players.EnsureActor(_registry, actorId);
+        }
+
+        private void DeliverNetworkEvent(RbxNetworkEventMessage message)
+        {
+            try
+            {
+                if (message == null
+                    || !_registry.TryGet(message.RemoteId, out RbxInstance instance)
+                    || !(instance is RbxRemoteEvent remote)
+                    || remote.IsDestroyed)
+                {
+                    _log?.Invoke("Network event targeted an unknown RemoteEvent.");
+                    return;
+                }
+
+                if (remote.Reliability != message.Reliability)
+                {
+                    _log?.Invoke(
+                        "Network event reliability does not match " + remote.GetFullName() + ".");
+                    return;
+                }
+
+                object[] arguments = _networkCodec.DecodeArguments(message.Payload);
+                remote.AttachScheduler(_scheduler);
+                switch (message.Direction)
+                {
+                    case RbxNetworkDirection.ClientToServer:
+                        RbxPlayer player = EnsureNetworkActor(message.SenderActorId);
+                        remote.DeliverToServer(player, arguments);
+                        return;
+                    case RbxNetworkDirection.ServerToClient:
+                        remote.DeliverToClient(message.RecipientActorId, arguments);
+                        return;
+                    case RbxNetworkDirection.ServerToAllClients:
+                        IReadOnlyList<string> actorIds = _networkBridge.ActorIds;
+                        for (int index = 0; index < actorIds.Count; index++)
+                        {
+                            remote.DeliverToClient(actorIds[index], arguments);
+                        }
+
+                        return;
+                    default:
+                        _log?.Invoke("Network event has an unknown delivery direction.");
+                        return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke("Network event delivery failed: " + ex.Message);
+            }
+        }
+
+        private void QueueNetworkRequest(RbxNetworkRequestMessage message,
+            RbxNetworkRequestResponder responder)
+        {
+            _networkRequestSignal.Fire(message, responder);
+        }
+
+        private void OnInstanceUnregistered(InstanceRecord record)
+        {
+            if (record == null)
+            {
+                return;
+            }
+
+            _serverRemoteCallbacks.Remove(record.Id);
+            _clientRemoteCallbacks.Remove(record.Id);
+        }
+
+        private void DeliverNetworkRequest(object[] arguments)
+        {
+            RbxNetworkRequestMessage message = arguments != null && arguments.Length > 0
+                ? arguments[0] as RbxNetworkRequestMessage
+                : null;
+            RbxNetworkRequestResponder responder = arguments != null && arguments.Length > 1
+                ? arguments[1] as RbxNetworkRequestResponder
+                : null;
+            if (responder == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (message == null
+                    || !_registry.TryGet(message.RemoteId, out RbxInstance instance)
+                    || !(instance is RbxRemoteFunction remote)
+                    || remote.IsDestroyed)
+                {
+                    responder.Fail("RemoteFunction request targeted an unknown remote");
+                    return;
+                }
+
+                RemoteFunctionCallbackRegistration registration =
+                    ResolveRemoteFunctionCallback(message);
+                if (registration == null)
+                {
+                    string member = message.Direction == RbxNetworkDirection.ClientToServer
+                        ? "OnServerInvoke"
+                        : "OnClientInvoke";
+                    responder.Fail(remote.GetFullName() + "." + member + " is not set");
+                    return;
+                }
+
+                object[] decoded = _networkCodec.DecodeArguments(message.Payload);
+                int prefixCount = message.Direction == RbxNetworkDirection.ClientToServer ? 1 : 0;
+                object[] callbackArguments = new object[decoded.Length + prefixCount];
+                int destinationIndex = 0;
+                if (prefixCount == 1)
+                {
+                    callbackArguments[0] = registration.Context.WrapInstance(
+                        EnsureNetworkActor(message.SenderActorId));
+                    destinationIndex = 1;
+                }
+
+                for (int index = 0; index < decoded.Length; index++)
+                {
+                    callbackArguments[destinationIndex + index] =
+                        _networkCodec.ToLuaValue(registration.Context, decoded[index]);
+                }
+
+                SpawnRemoteFunctionCallback(registration, callbackArguments, responder);
+            }
+            catch (Exception ex)
+            {
+                if (!responder.IsCompleted)
+                {
+                    responder.Fail(ex.Message);
+                }
+            }
+        }
+
+        private RemoteFunctionCallbackRegistration ResolveRemoteFunctionCallback(
+            RbxNetworkRequestMessage message)
+        {
+            switch (message.Direction)
+            {
+                case RbxNetworkDirection.ClientToServer:
+                    return _serverRemoteCallbacks.TryGetValue(
+                        message.RemoteId, out RemoteFunctionCallbackRegistration server)
+                        ? server
+                        : null;
+                case RbxNetworkDirection.ServerToClient:
+                    if (_clientRemoteCallbacks.TryGetValue(message.RemoteId,
+                            out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks)
+                        && callbacks.TryGetValue(message.RecipientActorId,
+                            out RemoteFunctionCallbackRegistration client))
+                    {
+                        return client;
+                    }
+
+                    return null;
+                default:
+                    return null;
+            }
+        }
+
+        private void SpawnRemoteFunctionCallback(
+            RemoteFunctionCallbackRegistration registration, object[] arguments,
+            RbxNetworkRequestResponder responder)
+        {
+            LuaFunction callbackRunner = new("RemoteFunction.callback", async (ctx, ct) =>
+            {
+                try
+                {
+                    LuaValue[] callbackArguments = ctx.Arguments.ToArray();
+                    LuaValue[] results = await ctx.State.CallAsync(
+                        registration.Callback, callbackArguments.AsSpan(), ct);
+                    responder.Complete(_networkCodec.EncodeArguments(results));
+                }
+                catch (Exception ex)
+                {
+                    if (!responder.IsCompleted)
+                    {
+                        responder.Fail(ex.Message);
+                    }
+                }
+
+                return ctx.Return();
+            });
+            LuaCsRbxSchedulerCallable callable = new(
+                registration.OwnerState, new LuaValue(callbackRunner));
+            try
+            {
+                TrackScheduledThread(registration.Context, _scheduler.SpawnSignal(
+                    RequireTaskOwner(registration.Context), callable, arguments));
+            }
+            catch (Exception ex)
+            {
+                if (!responder.IsCompleted)
+                {
+                    responder.Fail(ex.Message);
+                }
+            }
+        }
+
+        private static List<LuaValue> ReadRemoteArguments(
+            LuaFunctionExecutionContext ctx, int startIndex)
+        {
+            List<LuaValue> arguments = new();
+            for (int index = startIndex; index < ctx.ArgumentCount; index++)
+            {
+                arguments.Add(Arg(ctx, index));
+            }
+
+            return arguments;
         }
 
         /// <summary>
@@ -492,6 +989,22 @@ namespace CoreAI.Ai.LuaCs
         public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
             string ownerModId = null)
         {
+            RegisterCore(registry, capabilities, ownerModId, null, null);
+        }
+
+        /// <summary>
+        /// Registers an actor-scoped one-off mutation surface without changing the legacy
+        /// ownerless registration signature used by consumers that do not submit envelopes.
+        /// </summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext actorContext, MutationEnvelope mutationEnvelope)
+        {
+            RegisterCore(registry, capabilities, ownerModId, actorContext, mutationEnvelope);
+        }
+
+        private void RegisterCore(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext? actorContext, MutationEnvelope? mutationEnvelope)
+        {
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
@@ -517,7 +1030,12 @@ namespace CoreAI.Ai.LuaCs
                 : OriginTag.FromConsole(
                     "session-" + Interlocked.Increment(ref _consoleInvocationCounter));
 
-            LuaCsRbxModContext context = new(this, capabilities, ownerModId, originTag);
+            LuaCsRbxModContext context = actorContext.HasValue && mutationEnvelope.HasValue
+                ? new LuaCsRbxModContext(
+                    this, capabilities, ownerModId, originTag,
+                    actorContext.Value, mutationEnvelope.Value)
+                : new LuaCsRbxModContext(this, capabilities, ownerModId, originTag);
+            EnsureNetworkActor(context.ActorContext.ActorId);
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
                 _currentSchedulerGenerationByMod[ownerModId] =
@@ -532,6 +1050,12 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("UDim2", LuaCsRbxDatatypeBindings.BuildUDim2Global);
             luaRegistry.RegisterValue("Random", LuaCsRbxDatatypeBindings.BuildRandomGlobal);
             luaRegistry.RegisterValue("Enum", () => LuaCsRbxDatatypeBindings.BuildEnumGlobal(_enums));
+            if (!string.IsNullOrWhiteSpace(ownerModId))
+            {
+                luaRegistry.RegisterValue("script", () =>
+                    context.WrapInstance(GetOrCreateExecutingScript(context)));
+            }
+
             luaRegistry.RegisterValue("game", () => context.WrapInstance(_game));
             luaRegistry.RegisterValue("workspace", () => context.WrapInstance(_workspace));
             // WHY: input reads are open at the Read tier (observing input mutates nothing); the
@@ -563,15 +1087,69 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        private bool TryGetExecutingScriptBacking(string ownerModId,
+            out ExecutingScriptBacking backing)
+        {
+            if (_executingScriptsByMod.TryGetValue(ownerModId, out backing)
+                && !backing.Container.IsDestroyed && !backing.Script.IsDestroyed)
+            {
+                return true;
+            }
+
+            _executingScriptsByMod.Remove(ownerModId);
+            backing = null;
+            return false;
+        }
+
+        private RbxInstance GetOrCreateExecutingScript(LuaCsRbxModContext context)
+        {
+            if (TryGetExecutingScriptBacking(context.OwnerModId,
+                    out ExecutingScriptBacking existing))
+            {
+                return existing.Script;
+            }
+
+            RbxInstance serverScripts = _game.FindFirstChildOfClass("ServerScriptService")
+                ?? throw new InvalidOperationException(
+                    "the game tree has no ServerScriptService for the executing Script");
+            RbxInstance container = null;
+            RbxInstance script = null;
+            try
+            {
+                container = _registry.Create(
+                    "Folder", context.OwnerModId, context.OriginTag,
+                    isRuntimeInfrastructure: true);
+                container.Name = context.OwnerModId;
+                script = _registry.Create(
+                    "Script", context.OwnerModId, context.OriginTag,
+                    isRuntimeInfrastructure: true);
+                script.Name = context.OwnerModId;
+                script.Parent = container;
+                container.Parent = serverScripts;
+
+                ExecutingScriptBacking backing = new(container, script);
+                _executingScriptsByMod[context.OwnerModId] = backing;
+                return script;
+            }
+            catch
+            {
+                script?.Destroy();
+                container?.Destroy();
+                throw;
+            }
+        }
+
         // ---- camera_* convenience globals ---------------------------------------------------
 
         private LuaFunction BuildCameraSetCFrame(LuaCsRbxModContext context)
         {
             return Fn("camera_set_cframe", ctx =>
             {
-                context.RequireWorldEdit("camera_set_cframe");
+                RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
+                context.RequireWorldEditForWrite(camera, "CFrame");
                 RbxCFrame cframe = ReadCFrame(ctx, 0, "camera_set_cframe");
                 _cameraRig.SetCFrame(cframe);
+                context.RecordMutation(camera);
                 return LuaValue.Nil;
             });
         }
@@ -580,11 +1158,13 @@ namespace CoreAI.Ai.LuaCs
         {
             return Fn("camera_follow", ctx =>
             {
-                context.RequireWorldEdit("camera_follow");
+                RbxInstance camera = _workspace.FindFirstChildOfClass("Camera");
+                context.RequireWorldEditForWrite(camera, "CameraSubject");
                 LuaValue target = Arg(ctx, 0);
                 if (target.Type == LuaValueType.Nil)
                 {
                     SetCameraSubject(null);
+                    context.RecordMutation(camera);
                     return LuaValue.Nil;
                 }
 
@@ -597,6 +1177,7 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 SetCameraSubject(proxy.Instance);
+                context.RecordMutation(camera);
                 return LuaValue.Nil;
             });
         }
@@ -609,10 +1190,9 @@ namespace CoreAI.Ai.LuaCs
             t["new"] = Fn("Instance.new", ctx =>
             {
                 string className = ReadString(ctx, 0, "Instance.new");
-                RbxInstance instance = _registry.CreateScripted(
-                    className, context.OwnerModId, context.OriginTag);
-
                 LuaValue parentValue = Arg(ctx, 1);
+                RbxInstance parentInstance = null;
+                RbxInstance creationAnchor = null;
                 if (parentValue.Type != LuaValueType.Nil)
                 {
                     if (!context.HasLoggedInstanceNewParentDeprecation)
@@ -626,25 +1206,39 @@ namespace CoreAI.Ai.LuaCs
 
                     if (!TryGetInstance(parentValue, out LuaCsRbxInstanceProxy parent))
                     {
-                        instance.Destroy();
                         throw RbxError.BadArgument(
                             "Instance.new expects an Instance at argument 2",
                             "pass an Instance parent, got " + Describe(parentValue) + " at argument 2");
                     }
 
-                    try
-                    {
-                        context.RequireReparent(instance, parent.Instance);
-                        instance.Parent = parent.Instance;
-                    }
-                    catch
-                    {
-                        instance.Destroy();
-                        throw;
-                    }
+                    parentInstance = parent.Instance;
+                    context.RequireCreateUnder(parentInstance);
+                }
+                else
+                {
+                    creationAnchor = context.RequireUnparentedCreationAnchor();
                 }
 
-                return context.WrapInstance(instance);
+                RbxInstance instance = _registry.CreateScripted(
+                    className, context.OwnerModId, context.OriginTag);
+                try
+                {
+                    if (parentInstance != null)
+                    {
+                        instance.Parent = parentInstance;
+                    }
+                    else if (creationAnchor != null)
+                    {
+                        context.RecordMutation(creationAnchor);
+                    }
+
+                    return context.WrapInstance(instance);
+                }
+                catch
+                {
+                    instance.Destroy();
+                    throw;
+                }
             }, context);
             // TODO: backlog — Instance.fromExisting (not scheduled; Clone covers the corpus).
             t["fromExisting"] = Fn("Instance.fromExisting", _ => throw RbxError.NotImplemented(
@@ -665,6 +1259,14 @@ namespace CoreAI.Ai.LuaCs
                 ScheduleSignalWait(context, ctx));
             t["_signalResumeValues"] = Fn("task._signalResumeValues", ctx =>
                 ReadSignalResumeValues(context, ctx));
+            t["_scheduleRemoteInvokeServer"] = Fn("task._scheduleRemoteInvokeServer", ctx =>
+                ScheduleRemoteFunctionInvoke(context, ctx, true));
+            t["_scheduleRemoteInvokeClient"] = Fn("task._scheduleRemoteInvokeClient", ctx =>
+                ScheduleRemoteFunctionInvoke(context, ctx, false));
+            t["_remoteFunctionResumeValues"] = Fn("task._remoteFunctionResumeValues", ctx =>
+                ReadRemoteFunctionResumeValues(context, ctx));
+            t["_warnInfiniteYield"] = Fn("task._warnInfiniteYield", ctx =>
+                WarnInfiniteYield(context, ctx));
             t["_realtime"] = Fn("task._realtime", _ =>
                 LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble));
             t["spawn"] = Fn("task.spawn", ctx => WrapTaskThread(
@@ -854,17 +1456,30 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 signal.BindScheduler(_scheduler);
-                _scheduler.ScheduleSignalWait(caller);
-                RbxScriptConnection connection = signal.Wait(arguments =>
+                double scheduledAt = _scheduler.CurrentTime;
+                RbxScriptConnection connection = null;
+                LuaValue timeoutValue = Arg(ctx, 1);
+                if (timeoutValue.Type == LuaValueType.Nil)
                 {
-                    LuaTable values = new();
-                    for (int index = 0; index < arguments.Length; index++)
+                    _scheduler.ScheduleSignalWait(caller);
+                }
+                else
+                {
+                    double timeout = ReadDouble(ctx, 1, "signal timed wait");
+                    _scheduler.ScheduleSignalWait(caller, timeout, () =>
                     {
-                        values[index + 1] = LuaCsRbxDatatypeBindings.MarshalSignalArg(
-                            context, arguments[index]);
-                    }
+                        connection?.Disconnect();
+                        LuaTable timeoutValues = BuildSignalResumeValues(
+                            context, Array.Empty<object>(), true,
+                            _scheduler.CurrentTime - scheduledAt);
+                        return new object[] { new LuaValue(timeoutValues) };
+                    });
+                }
 
-                    values["n"] = arguments.Length;
+                connection = signal.Wait(arguments =>
+                {
+                    LuaTable values = BuildSignalResumeValues(
+                        context, arguments, false, _scheduler.CurrentTime - scheduledAt);
                     _scheduler.ResumeSignalWait(caller,
                         new object[] { new LuaValue(values) });
                 });
@@ -875,6 +1490,22 @@ namespace CoreAI.Ai.LuaCs
             {
                 throw ToLuaError(ctx.State, ex);
             }
+        }
+
+        private static LuaTable BuildSignalResumeValues(LuaCsRbxModContext context,
+            object[] arguments, bool timedOut, double elapsed)
+        {
+            LuaTable values = new();
+            for (int index = 0; index < arguments.Length; index++)
+            {
+                values[index + 1] = LuaCsRbxDatatypeBindings.MarshalSignalArg(
+                    context, arguments[index]);
+            }
+
+            values["n"] = arguments.Length;
+            values["timedOut"] = timedOut;
+            values["elapsed"] = elapsed;
+            return values;
         }
 
         private LuaValue ReadSignalResumeValues(LuaCsRbxModContext context,
@@ -901,6 +1532,199 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 return LuaCsValueMarshaller.Unbox(values);
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaValue ScheduleRemoteFunctionInvoke(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx, bool invokeServer)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                context.RequireNetworkSide(
+                    invokeServer
+                        ? "RemoteFunction:InvokeServer"
+                        : "RemoteFunction:InvokeClient",
+                    !invokeServer);
+                if (!TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy remoteProxy)
+                    || !(remoteProxy.Instance is RbxRemoteFunction remote))
+                {
+                    throw RbxError.BadArgument(
+                        "RemoteFunction invoke expects a RemoteFunction as self",
+                        "call InvokeServer or InvokeClient with a colon");
+                }
+
+                IRbxScriptThread caller = _schedulerThreadFactory.CurrentThread;
+                if (!(caller is LuaCsRbxScriptThread luaThread)
+                    || !string.Equals(luaThread.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        "RemoteFunction invoke caller is not owned by mod " + ownerModId,
+                        "invoke only from a live scheduler thread owned by the current mod");
+                }
+
+                long generation = luaThread.AdvanceRemoteFunctionWaitGeneration();
+                _remoteFunctionWaitGenerations[caller] = generation;
+
+                RbxScriptSignal responseSignal = new(
+                    "RemoteFunction.Response[" + remote.Id.Value + "]");
+                responseSignal.BindScheduler(_scheduler);
+                RbxScriptConnection responseConnection = responseSignal.Wait(arguments =>
+                {
+                    if (!_remoteFunctionWaitGenerations.TryGetValue(
+                            caller, out long activeGeneration)
+                        || activeGeneration != generation)
+                    {
+                        return;
+                    }
+
+                    _remoteFunctionWaitGenerations.Remove(caller);
+
+                    RbxNetworkResponse response = arguments != null && arguments.Length > 0
+                        ? arguments[0] as RbxNetworkResponse
+                        : null;
+                    LuaTable values = BuildRemoteFunctionResumeValues(context, response);
+                    _scheduler.ResumeSignalWait(caller,
+                        new object[] { new LuaValue(values) });
+                });
+                context.TrackConnection(responseConnection);
+
+                Action<RbxNetworkResponse> receiveResponse = response =>
+                    responseSignal.Fire(response);
+                try
+                {
+                    if (invokeServer)
+                    {
+                        byte[] payload = _networkCodec.EncodeArguments(
+                            ReadRemoteArguments(ctx, 1));
+                        remote.InvokeServer(_networkBridge,
+                            context.ActorContext.ActorId, payload, receiveResponse);
+                    }
+                    else
+                    {
+                        if (!TryGetInstance(Arg(ctx, 1), out LuaCsRbxInstanceProxy playerProxy)
+                            || !(playerProxy.Instance is RbxPlayer player))
+                        {
+                            throw RbxError.BadArgument(
+                                "RemoteFunction:InvokeClient expects a Player at argument 1",
+                                "pass a Player returned by Players:GetPlayers()");
+                        }
+
+                        byte[] payload = _networkCodec.EncodeArguments(
+                            ReadRemoteArguments(ctx, 2));
+                        remote.InvokeClient(_networkBridge, player, payload, receiveResponse);
+                    }
+
+                    _scheduler.ScheduleSignalWait(caller);
+                }
+                catch
+                {
+                    if (_remoteFunctionWaitGenerations.TryGetValue(
+                            caller, out long activeGeneration)
+                        && activeGeneration == generation)
+                    {
+                        _remoteFunctionWaitGenerations.Remove(caller);
+                    }
+
+                    responseConnection.Disconnect();
+                    throw;
+                }
+
+                return LuaValue.Nil;
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaTable BuildRemoteFunctionResumeValues(LuaCsRbxModContext context,
+            RbxNetworkResponse response)
+        {
+            LuaTable values = new();
+            if (response == null || !response.Succeeded)
+            {
+                values["ok"] = false;
+                values["error"] = response?.Error ?? "RemoteFunction returned no response";
+                values["n"] = 0;
+                return values;
+            }
+
+            try
+            {
+                object[] decoded = _networkCodec.DecodeArguments(response.Payload);
+                for (int index = 0; index < decoded.Length; index++)
+                {
+                    values[index + 1] = _networkCodec.ToLuaValue(context, decoded[index]);
+                }
+
+                values["ok"] = true;
+                values["n"] = decoded.Length;
+                return values;
+            }
+            catch (Exception ex)
+            {
+                values["ok"] = false;
+                values["error"] = ex.Message;
+                values["n"] = 0;
+                return values;
+            }
+        }
+
+        private LuaValue ReadRemoteFunctionResumeValues(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
+                    || !string.Equals(caller.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        "RemoteFunction resumed outside its owning scheduler thread",
+                        "resume remote invocations through the deferred network response signal");
+                }
+
+                object values = caller.ReadCurrentResumeArgument(0);
+                if (values == null)
+                {
+                    throw RbxError.BadArgument(
+                        "RemoteFunction resumed without response values",
+                        "resume remote invocations through the production network bridge");
+                }
+
+                return LuaCsValueMarshaller.Unbox(values);
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaValue WarnInfiniteYield(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            try
+            {
+                RequireTaskOwner(context);
+                if (!TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy proxy))
+                {
+                    throw RbxError.BadArgument(
+                        "WaitForChild infinite-yield warning expects an Instance",
+                        "invoke WaitForChild through an Instance method");
+                }
+
+                string childName = ReadString(ctx, 1, "WaitForChild");
+                _log?.Invoke(
+                    "Infinite yield possible on '" + proxy.Instance.GetFullName()
+                    + ":WaitForChild(\"" + childName + "\")'");
+                return LuaValue.Nil;
             }
             catch (Exception ex)
             {
@@ -941,6 +1765,8 @@ namespace CoreAI.Ai.LuaCs
         public int KillAllScheduledOwnedBy(string ownerModId)
         {
             int killed = _scheduler.KillOwnedBy(ownerModId);
+            RemoveRemoteFunctionWaitsOwnedBy(ownerModId, null);
+            RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, null);
             _scheduledThreadsByMod.Remove(ownerModId);
             _currentSchedulerGenerationByMod.Remove(ownerModId);
             return killed;
@@ -949,10 +1775,7 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Kills only scheduler threads from generations preceding a reload replacement.</summary>
         public int KillOutgoingScheduledGenerations(string ownerModId)
         {
-            if (string.IsNullOrWhiteSpace(ownerModId)
-                || !_scheduledThreadsByMod.TryGetValue(
-                    ownerModId,
-                    out Dictionary<int, HashSet<IRbxScriptThread>> generations))
+            if (string.IsNullOrWhiteSpace(ownerModId))
             {
                 return 0;
             }
@@ -961,6 +1784,19 @@ namespace CoreAI.Ai.LuaCs
                 ownerModId, out int current)
                 ? current
                 : int.MinValue;
+            if (!_scheduledThreadsByMod.TryGetValue(
+                    ownerModId,
+                    out Dictionary<int, HashSet<IRbxScriptThread>> generations))
+            {
+                RemoveRemoteFunctionWaitsOwnedBy(ownerModId, null);
+                RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, liveGeneration);
+                return 0;
+            }
+
+            HashSet<IRbxScriptThread> liveThreads = generations.TryGetValue(
+                liveGeneration, out HashSet<IRbxScriptThread> currentThreads)
+                ? currentThreads
+                : null;
             List<int> removed = new();
             int killed = 0;
             foreach (KeyValuePair<int, HashSet<IRbxScriptThread>> generation in generations)
@@ -996,6 +1832,9 @@ namespace CoreAI.Ai.LuaCs
                 _scheduledThreadsByMod.Remove(ownerModId);
             }
 
+            RemoveRemoteFunctionWaitsOwnedBy(ownerModId, liveThreads);
+            RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, liveGeneration);
+
             return killed;
         }
 
@@ -1029,7 +1868,115 @@ namespace CoreAI.Ai.LuaCs
                 _scheduledThreadsByMod.Remove(ownerModId);
             }
 
+            RemoveRemoteFunctionWaits(threads);
+            RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, generation, true);
+
             return killed;
+        }
+
+        private void RemoveRemoteFunctionWaitsOwnedBy(string ownerModId,
+            HashSet<IRbxScriptThread> waitsToKeep)
+        {
+            List<IRbxScriptThread> removed = new();
+            foreach (IRbxScriptThread thread in _remoteFunctionWaitGenerations.Keys)
+            {
+                if (thread is LuaCsRbxScriptThread luaThread
+                    && string.Equals(luaThread.OwnerModId, ownerModId,
+                        StringComparison.Ordinal)
+                    && (waitsToKeep == null || !waitsToKeep.Contains(thread)
+                        || thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead))
+                {
+                    removed.Add(thread);
+                }
+            }
+
+            RemoveRemoteFunctionWaits(removed);
+        }
+
+        private void RemoveRemoteFunctionWaits(IEnumerable<IRbxScriptThread> threads)
+        {
+            foreach (IRbxScriptThread thread in threads)
+            {
+                _remoteFunctionWaitGenerations.Remove(thread);
+            }
+        }
+
+        private void RemoveRemoteFunctionCallbacksOwnedBy(string ownerModId,
+            int? generation)
+        {
+            RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, generation, false);
+        }
+
+        private void RemoveRemoteFunctionCallbacksOwnedBy(string ownerModId,
+            int? generation, bool removeMatchingGeneration)
+        {
+            List<InstanceId> removedServerIds = new();
+            foreach (KeyValuePair<InstanceId, RemoteFunctionCallbackRegistration> pair
+                     in _serverRemoteCallbacks)
+            {
+                if (ShouldRemoveRemoteFunctionCallback(
+                        pair.Value, ownerModId, generation, removeMatchingGeneration))
+                {
+                    removedServerIds.Add(pair.Key);
+                }
+            }
+
+            for (int index = 0; index < removedServerIds.Count; index++)
+            {
+                _serverRemoteCallbacks.Remove(removedServerIds[index]);
+            }
+
+            List<InstanceId> emptyRemoteIds = new();
+            foreach (KeyValuePair<InstanceId,
+                         Dictionary<string, RemoteFunctionCallbackRegistration>> remotePair
+                     in _clientRemoteCallbacks)
+            {
+                List<string> removedActors = new();
+                foreach (KeyValuePair<string, RemoteFunctionCallbackRegistration> actorPair
+                         in remotePair.Value)
+                {
+                    if (ShouldRemoveRemoteFunctionCallback(
+                            actorPair.Value, ownerModId, generation,
+                            removeMatchingGeneration))
+                    {
+                        removedActors.Add(actorPair.Key);
+                    }
+                }
+
+                for (int index = 0; index < removedActors.Count; index++)
+                {
+                    remotePair.Value.Remove(removedActors[index]);
+                }
+
+                if (remotePair.Value.Count == 0)
+                {
+                    emptyRemoteIds.Add(remotePair.Key);
+                }
+            }
+
+            for (int index = 0; index < emptyRemoteIds.Count; index++)
+            {
+                _clientRemoteCallbacks.Remove(emptyRemoteIds[index]);
+            }
+        }
+
+        private static bool ShouldRemoveRemoteFunctionCallback(
+            RemoteFunctionCallbackRegistration registration, string ownerModId,
+            int? generation, bool removeMatchingGeneration)
+        {
+            if (!string.Equals(registration.Context.OwnerModId,
+                    ownerModId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!generation.HasValue)
+            {
+                return true;
+            }
+
+            bool matches = registration.Context.ConnectionGeneration == generation.Value;
+            return removeMatchingGeneration ? matches : !matches;
         }
 
         private IRbxScriptThread TrackScheduledThread(

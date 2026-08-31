@@ -169,7 +169,7 @@ namespace CoreAI.Mods.Rbx.Instances
             string implementedServiceHint =
                 "use implemented services until this service lands";
             catalog.RegisterStub("RunService", "MVP2", implementedServiceHint);
-            catalog.RegisterStub("HttpService", "MVP2", implementedServiceHint);
+            catalog.RegisterTreeBacked("HttpService");
             catalog.RegisterTreeBacked("Players");
             catalog.RegisterStub("TweenService", "MVP8", implementedServiceHint);
             catalog.RegisterStub("CollectionService", "MVP8", implementedServiceHint);

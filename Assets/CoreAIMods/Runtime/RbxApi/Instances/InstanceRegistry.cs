@@ -3,6 +3,12 @@ using System.Collections.Generic;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
+    /// <summary>Runtime bridge that can lazily wrap a host world object into this registry.</summary>
+    public interface IWorldInstanceAdapter
+    {
+        bool TryWrap(InstanceRegistry registry, string worldName, out RbxInstance instance);
+    }
+
     /// <summary>
     /// Single owner of instance identity (roadmap §3.3): allocates ids, holds one
     /// <see cref="InstanceRecord"/> per live instance, reconciles the three identity spaces
@@ -15,20 +21,82 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InstanceRegistry
     {
+        private readonly struct MutationOperationKey : IEquatable<MutationOperationKey>
+        {
+            public MutationOperationKey(string actorId, string operationId)
+            {
+                ActorId = actorId;
+                OperationId = operationId;
+            }
+
+            private string ActorId { get; }
+
+            private string OperationId { get; }
+
+            public bool Equals(MutationOperationKey other)
+            {
+                return string.Equals(ActorId, other.ActorId, StringComparison.Ordinal)
+                       && string.Equals(OperationId, other.OperationId, StringComparison.Ordinal);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is MutationOperationKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int actorHash = StringComparer.Ordinal.GetHashCode(ActorId);
+                    int operationHash = StringComparer.Ordinal.GetHashCode(OperationId);
+                    return (actorHash * 397) ^ operationHash;
+                }
+            }
+        }
+
+        private sealed class MutationOperationRecord
+        {
+            public MutationOperationRecord(MutationEnvelope envelope, Type resultType, object result)
+            {
+                Envelope = envelope;
+                ResultType = resultType;
+                Result = result;
+            }
+
+            public MutationEnvelope Envelope { get; }
+
+            public Type ResultType { get; }
+
+            public object Result { get; }
+        }
+
         public const int CurrentWorldAclVersion = 1;
+
+        /// <summary>Maximum completed mutation results retained for each durable actor.</summary>
+        public const int DefaultMutationReplayCapacityPerActor = 64;
 
         private readonly Dictionary<InstanceId, InstanceRecord> _byId = new();
         private readonly Dictionary<uint, InstanceRecord> _byNetId = new();
         private readonly Dictionary<string, InstanceRecord> _byWorldName = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _actorByOwnerModId = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _actorByOriginTag = new(StringComparer.Ordinal);
+        private readonly Dictionary<MutationOperationKey, MutationOperationRecord>
+            _mutationOperations = new();
+        private readonly Dictionary<string, Queue<MutationOperationKey>>
+            _mutationOperationOrderByActor = new(StringComparer.Ordinal);
+        private readonly object _mutationGate = new();
         private readonly IInstanceBackingBinder _binder;
+        private readonly IWorldInstanceAdapter _worldInstanceAdapter;
+        private readonly int _mutationReplayCapacityPerActor;
 
         private RbxInstance _worldRoot;
         private RbxInstance _sceneRoot;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
-            InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "")
+            InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "",
+            IWorldInstanceAdapter worldInstanceAdapter = null,
+            int mutationReplayCapacityPerActor = DefaultMutationReplayCapacityPerActor)
         {
             if (worldAclVersion.HasValue && worldAclVersion.Value != CurrentWorldAclVersion)
             {
@@ -36,10 +104,19 @@ namespace CoreAI.Mods.Rbx.Instances
                     "Unsupported world ACL version.");
             }
 
+            if (mutationReplayCapacityPerActor <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(mutationReplayCapacityPerActor),
+                    mutationReplayCapacityPerActor,
+                    "Mutation replay capacity per actor must be positive.");
+            }
+
             Catalog = catalog ?? ClassCatalog.CreateMvp1();
             Allocator = allocator ?? new InstanceIdAllocator();
             Tags = new InstanceTagStore();
             _binder = binder ?? NullInstanceBackingBinder.Instance;
+            _worldInstanceAdapter = worldInstanceAdapter;
+            _mutationReplayCapacityPerActor = mutationReplayCapacityPerActor;
             WorldAclVersion = worldAclVersion;
             WorldId = worldId?.Trim() ?? "";
         }
@@ -96,7 +173,26 @@ namespace CoreAI.Mods.Rbx.Instances
         /// the whole DataModel tree materializes, but only Workspace content is the active world.</summary>
         public RbxInstance WorldRoot => _worldRoot;
 
+        /// <summary>All live records, including host objects and runtime infrastructure.</summary>
         public int Count => _byId.Count;
+
+        /// <summary>Live user/mod-authored records, excluding host objects and runtime infrastructure.</summary>
+        public int AuthoredCount
+        {
+            get
+            {
+                int count = 0;
+                foreach (InstanceRecord record in _byId.Values)
+                {
+                    if (record.IsAuthoredContent)
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        }
 
         /// <summary>
         /// True once the world this registry backs was torn down with its host. Scripts keep a direct
@@ -111,12 +207,141 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public void MarkDetached()
         {
-            IsDetached = true;
+            lock (_mutationGate)
+            {
+                IsDetached = true;
+                _mutationOperations.Clear();
+                _mutationOperationOrderByActor.Clear();
+            }
+        }
+
+        /// <summary>Number of idempotency results retained across all actors in the live world.</summary>
+        public int RetainedMutationOperationCount
+        {
+            get
+            {
+                lock (_mutationGate)
+                {
+                    return _mutationOperations.Count;
+                }
+            }
         }
 
         public event Action<InstanceRecord> Registered;
 
         public event Action<InstanceRecord> Unregistered;
+
+        /// <summary>
+        /// Serializes one enveloped mutation, rejects stale observations, and returns the first
+        /// completed result when the durable actor retries the same operation id while it remains
+        /// in that actor's FIFO retention window. Once evicted, the result is unavailable and the
+        /// request is evaluated against its original expected revision as a first-seen request. A
+        /// state-changing replay is therefore rejected as stale; a true no-op whose target revision
+        /// never advanced may execute again.
+        /// </summary>
+        public T ApplyMutation<T>(MutationEnvelope envelope, Func<T> operation)
+        {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            lock (_mutationGate)
+            {
+                if (IsDetached)
+                {
+                    throw RbxError.WorldDetached(
+                        "actor '" + envelope.ActorId + "' operation '"
+                        + envelope.OperationId + "'");
+                }
+
+                MutationOperationKey key = new(envelope.ActorId, envelope.OperationId);
+                if (_mutationOperations.TryGetValue(
+                        key, out MutationOperationRecord completed))
+                {
+                    EnsureReplayMatches(envelope, completed);
+                    if (completed.ResultType != typeof(T))
+                    {
+                        throw MutationDenied(envelope,
+                            "the operation id was already completed with a different result type");
+                    }
+
+                    return completed.Result == null ? default : (T)completed.Result;
+                }
+
+                if (!_byId.TryGetValue(
+                        envelope.TargetInstanceId, out InstanceRecord targetRecord))
+                {
+                    throw MutationDenied(envelope,
+                        "the target has no live instance record");
+                }
+
+                if (targetRecord.Revision != envelope.ExpectedRevision)
+                {
+                    throw MutationDenied(envelope,
+                        "stale expected revision " + envelope.ExpectedRevision
+                        + "; current revision is " + targetRecord.Revision);
+                }
+
+                T result = operation();
+                _mutationOperations.Add(
+                    key, new MutationOperationRecord(envelope, typeof(T), result));
+                RetainMutationOperation(envelope.ActorId, key);
+                return result;
+            }
+        }
+
+        private void RetainMutationOperation(string actorId, MutationOperationKey key)
+        {
+            if (!_mutationOperationOrderByActor.TryGetValue(
+                    actorId, out Queue<MutationOperationKey> actorOperations))
+            {
+                actorOperations = new Queue<MutationOperationKey>(
+                    _mutationReplayCapacityPerActor);
+                _mutationOperationOrderByActor.Add(actorId, actorOperations);
+            }
+
+            actorOperations.Enqueue(key);
+            while (actorOperations.Count > _mutationReplayCapacityPerActor)
+            {
+                MutationOperationKey evicted = actorOperations.Dequeue();
+                _mutationOperations.Remove(evicted);
+            }
+        }
+
+        /// <summary>Advances and returns the revision for a successful instance mutation.</summary>
+        public long AdvanceRevision(InstanceId id)
+        {
+            lock (_mutationGate)
+            {
+                InstanceRecord record = RequireRecord(id);
+                record.Revision = checked(record.Revision + 1L);
+                return record.Revision;
+            }
+        }
+
+        private static void EnsureReplayMatches(MutationEnvelope envelope,
+            MutationOperationRecord completed)
+        {
+            MutationEnvelope first = completed.Envelope;
+            if (first.TargetInstanceId != envelope.TargetInstanceId
+                || first.ExpectedRevision != envelope.ExpectedRevision)
+            {
+                throw MutationDenied(envelope,
+                    "the operation id was already used for target instance id "
+                    + first.TargetInstanceId.Value + " at expected revision "
+                    + first.ExpectedRevision);
+            }
+        }
+
+        private static RbxError MutationDenied(MutationEnvelope envelope, string reason)
+        {
+            return RbxError.BadArgument(
+                "actor '" + envelope.ActorId + "' cannot apply operation '"
+                + envelope.OperationId + "' to instance id "
+                + envelope.TargetInstanceId.Value + ": " + reason,
+                "refresh the target revision and submit a new caller-generated operation id");
+        }
 
         // ---- Creation -----------------------------------------------------------------------
 
@@ -127,11 +352,11 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public RbxInstance Create(string className, string ownerModId = null, string originTag = null,
             InstanceIdAuthority authority = InstanceIdAuthority.Server, string ownerActorId = null,
-            InstanceAccessScope? accessScope = null)
+            InstanceAccessScope? accessScope = null, bool isRuntimeInfrastructure = false)
         {
             ClassDescriptor descriptor = ResolveConcrete(className);
             return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
-                ownerActorId, accessScope);
+                ownerActorId, accessScope, isRuntimeInfrastructure);
         }
 
         /// <summary>Roblox Instance.new semantics: unknown/abstract/non-creatable class names
@@ -158,7 +383,7 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
-                ownerActorId, accessScope);
+                ownerActorId, accessScope, false);
         }
 
         /// <summary>
@@ -184,7 +409,7 @@ namespace CoreAI.Mods.Rbx.Instances
             ClassDescriptor descriptor = ResolveConcrete(className);
             Allocator.EnsureNotBelow(id);
             return RegisterNew(Instantiate(descriptor), id, ownerModId, originTag, ownerActorId,
-                accessScope);
+                accessScope, false);
         }
 
         private ClassDescriptor ResolveConcrete(string className)
@@ -213,7 +438,8 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         private RbxInstance RegisterNew(RbxInstance instance, InstanceId id, string ownerModId,
-            string originTag, string ownerActorId, InstanceAccessScope? accessScope)
+            string originTag, string ownerActorId, InstanceAccessScope? accessScope,
+            bool isRuntimeInfrastructure)
         {
             if (!OriginTag.IsValid(originTag))
             {
@@ -223,11 +449,15 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             instance.Attach(this, id);
-            string resolvedOwnerActorId = ResolveOwnerActorId(ownerModId, originTag, ownerActorId);
+            string resolvedOwnerActorId = isRuntimeInfrastructure
+                ? null
+                : ResolveOwnerActorId(ownerModId, originTag, ownerActorId);
             InstanceAccessScope resolvedAccessScope = accessScope
-                ?? DefaultAccessScope(instance, resolvedOwnerActorId);
+                ?? (isRuntimeInfrastructure
+                    ? InstanceAccessScope.SharedWritable
+                    : DefaultAccessScope(instance, resolvedOwnerActorId));
             InstanceRecord record = new(id, instance, ownerModId, originTag, resolvedOwnerActorId,
-                resolvedAccessScope);
+                resolvedAccessScope, isRuntimeInfrastructure);
             _byId.Add(id, record);
             Registered?.Invoke(record);
             return instance;
@@ -431,6 +661,13 @@ namespace CoreAI.Mods.Rbx.Instances
                 return true;
             }
 
+            if (worldName != null && _worldInstanceAdapter != null
+                                  && _worldInstanceAdapter.TryWrap(this, worldName, out instance))
+            {
+                BindWorldName(instance.Id, worldName);
+                return true;
+            }
+
             instance = null;
             return false;
         }
@@ -481,8 +718,24 @@ namespace CoreAI.Mods.Rbx.Instances
             return record;
         }
 
-        /// <summary>Hot-reload teardown sweep (roadmap §3.3 / MVP5).</summary>
+        /// <summary>Returns mod-authored content, excluding host-created runtime infrastructure.</summary>
         public IReadOnlyList<RbxInstance> GetOwnedBy(string modId)
+        {
+            List<RbxInstance> result = new();
+            foreach (InstanceRecord record in _byId.Values)
+            {
+                if (record.IsAuthoredContent
+                    && string.Equals(record.OwnerModId, modId, StringComparison.Ordinal))
+                {
+                    result.Add(record.Instance);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>Hot-reload teardown sweep including per-mod runtime infrastructure.</summary>
+        public IReadOnlyList<RbxInstance> GetTeardownOwnedBy(string modId)
         {
             List<RbxInstance> result = new();
             foreach (InstanceRecord record in _byId.Values)

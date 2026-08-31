@@ -136,6 +136,95 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_R6_9_WaitForChild_YieldsForNamedChildAndReturnsIt()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                task.delay(0, function()
+                    local unrelated = Instance.new('Folder')
+                    unrelated.Name = 'Unrelated'
+                    unrelated.Parent = workspace
+                    local expected = Instance.new('Folder')
+                    expected.Name = 'Expected'
+                    expected.Parent = workspace
+                end)
+                store_set('phase', 'waiting')
+                local child = workspace:WaitForChild('Expected')
+                store_set('phase', child.Name)");
+
+            Assert.AreEqual("waiting", store.Get("m", "phase"));
+            bindings.Scheduler.Advance(0d);
+            Assert.AreEqual("Expected", store.Get("m", "phase"));
+        }
+
+        [Test]
+        public void Lua_R6_9_WaitForChild_TimeoutReturnsNilOnOwningScheduler()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local child = workspace:WaitForChild('NeverThere', 0.25)
+                store_set('timed_out', tostring(child == nil))");
+
+            bindings.Scheduler.Advance(0.24d);
+            Assert.AreEqual("", store.Get("m", "timed_out"));
+            bindings.Scheduler.Advance(0.01d);
+            Assert.AreEqual("true", store.Get("m", "timed_out"));
+        }
+
+        [Test]
+        public void Lua_R6_9_WaitForChild_WarnsAtFiveSecondsThenStillReturnsChild()
+        {
+            List<string> log = new();
+            LuaCsRbxApiBindings bindings = new(log: log.Add);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                task.delay(5.5, function()
+                    local child = Instance.new('Folder')
+                    child.Name = 'Late'
+                    child.Parent = workspace
+                end)
+                local child = workspace:WaitForChild('Late')
+                store_set('result', child.Name)");
+
+            bindings.Scheduler.Advance(4.9d);
+            int warningCount = CountInfiniteYieldWarnings(log, "Late");
+            Assert.AreEqual(0, warningCount);
+
+            bindings.Scheduler.Advance(0.1d);
+            warningCount = CountInfiniteYieldWarnings(log, "Late");
+            Assert.AreEqual(1, warningCount);
+            Assert.AreEqual("", store.Get("m", "result"));
+
+            bindings.Scheduler.Advance(0.5d);
+            Assert.AreEqual("Late", store.Get("m", "result"));
+            Assert.AreEqual(1, CountInfiniteYieldWarnings(log, "Late"));
+        }
+
+        private static int CountInfiniteYieldWarnings(List<string> log, string childName)
+        {
+            string expected = "Infinite yield possible on 'Workspace:WaitForChild(\""
+                              + childName + "\")'";
+            int count = 0;
+            for (int index = 0; index < log.Count; index++)
+            {
+                if (log[index].Contains(expected))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        [Test]
         public void Lua_ModMainChunk_NonYieldingError_StillThrowsFromLoadMod()
         {
             LuaCsRbxApiBindings bindings = new();

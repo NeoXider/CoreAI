@@ -13,7 +13,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         AdvanceImmediate,
         AdvanceQuarterSecond,
         PumpThreeFrames,
+        PumpSixSeconds,
         PressE
+    }
+
+    internal enum TierAFixtureExpectedOutcome
+    {
+        Completion,
+        DiagnosticFailure,
+        IndefiniteYield
     }
 
     internal sealed class TierAFixtureSpec
@@ -21,7 +29,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         public TierAFixtureSpec(string id, string fileName,
             TierAFixtureClassification classification, TierAFixtureDriver driver,
             string accommodation, string why, string apiGap,
-            string expectedFailureText, string reference)
+            string expectedFailureText, string reference,
+            TierAFixtureExpectedOutcome? expectedOutcome = null)
         {
             Id = id;
             FileName = fileName;
@@ -32,6 +41,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             ApiGap = apiGap;
             ExpectedFailureText = expectedFailureText;
             Reference = reference;
+            ExpectedOutcome = expectedOutcome ??
+                (classification == TierAFixtureClassification.Failing
+                    ? TierAFixtureExpectedOutcome.DiagnosticFailure
+                    : TierAFixtureExpectedOutcome.Completion);
         }
 
         public string Id { get; }
@@ -51,6 +64,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         public string ExpectedFailureText { get; }
 
         public string Reference { get; }
+
+        public TierAFixtureExpectedOutcome ExpectedOutcome { get; }
 
         public override string ToString()
         {
@@ -209,32 +224,32 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             new TierAFixtureSpec(
                 "TAC-015-script-parent-property-signal",
                 "TAC-015-script-parent-property-signal.lua",
-                TierAFixtureClassification.Modified,
+                TierAFixtureClassification.Unmodified,
                 TierAFixtureDriver.AdvanceImmediate,
-                "Replaced `local part = script.Parent` with creation and parenting of the same named Part.",
-                "CoreAI loaded mods have no Roblox Script instance and no `script` global.",
-                "script global and executable Script instance",
+                "None.",
+                "The global is bound to this mod's registry-backed executing Script instance.",
                 "",
-                "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/Object.yaml; Docs/CoreAIMods/RobloxReference/01_SCRIPTS_AND_SCHEDULER.md R1.1"),
+                "",
+                "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/globals/RobloxGlobals.yaml:67; Docs/CoreAIMods/RobloxReference/01_SCRIPTS_AND_SCHEDULER.md R1.1"),
             new TierAFixtureSpec(
                 "TAC-016-generic-for-descendants",
                 "TAC-016-generic-for-descendants.lua",
-                TierAFixtureClassification.Modified,
+                TierAFixtureClassification.Unmodified,
                 TierAFixtureDriver.None,
-                "Replaced `for _, descendant in model:GetDescendants() do` with `for _, descendant in ipairs(model:GetDescendants()) do`.",
-                "Lua-CSharp 0.5.6 is Lua 5.2 and the production Luau downleveler does not rewrite generalized iteration.",
-                "Luau generalized iteration",
+                "None.",
+                "The production Luau downleveler preserves iterator triples and adapts direct tables and __iter.",
                 "",
-                "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/Instance.yaml:767; Docs/CoreAIMods/RobloxReference/01_SCRIPTS_AND_SCHEDULER.md R6.10"),
+                "",
+                "D:/Git/RobloxDocs/creator-docs/content/en-us/luau/control-structures.md:165; D:/Git/RobloxDocs/creator-docs/content/en-us/luau/metatables.md:121"),
             new TierAFixtureSpec(
                 "TAC-017-waitforchild-yield",
                 "TAC-017-waitforchild-yield.lua",
-                TierAFixtureClassification.Failing,
-                TierAFixtureDriver.None,
-                "None; the documented Roblox script is intentionally retained.",
-                "CoreAI only handles WaitForChild when the child already exists and rejects the yielding path.",
-                "Instance:WaitForChild absent-child yield",
-                "WaitForChild",
+                TierAFixtureClassification.Unmodified,
+                TierAFixtureDriver.PumpThreeFrames,
+                "None.",
+                "Runs unmodified: WaitForChild yields until the delayed child is parented.",
+                "",
+                "",
                 "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/Instance.yaml; Docs/CoreAIMods/RobloxReference/01_SCRIPTS_AND_SCHEDULER.md R6.9"),
             new TierAFixtureSpec(
                 "TAC-018-contextaction-bind",
@@ -262,10 +277,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 TierAFixtureClassification.Failing,
                 TierAFixtureDriver.None,
                 "None; the documented LocalScript idiom is intentionally retained.",
-                "Players is a loud planned-service stub and LocalPlayer/PlayerGui are unavailable.",
-                "Players.LocalPlayer and PlayerGui",
-                "Players",
-                "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/Players.yaml; Docs/CoreAIMods/RobloxReference/03_SERVICES_AND_DATA.md S2.2, S6.8")
+                "The corpus executes a server Script, where Roblox defines Players.LocalPlayer as nil; the fixture requires a client LocalScript context before PlayerGui can be reached.",
+                "Client LocalScript execution and Player.PlayerGui (MVP8)",
+                "attempt to index a nil value (local 'player')",
+                "D:/Git/RobloxDocs/creator-docs/content/en-us/reference/engine/classes/Players.yaml; Docs/CoreAIMods/RobloxReference/03_SERVICES_AND_DATA.md S2.2, S6.8",
+                TierAFixtureExpectedOutcome.DiagnosticFailure)
         };
     }
 }

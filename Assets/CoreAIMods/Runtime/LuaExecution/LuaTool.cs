@@ -5,6 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using CoreAI.Logging;
+using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Instances;
+using System.Globalization;
 
 namespace CoreAI.Ai
 {
@@ -35,14 +38,28 @@ namespace CoreAI.Ai
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
         private readonly LuaGenerationRateLimiter _rateLimiter;
+        private readonly IMutationExecutor _mutationExecutor;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
+        private readonly string _roleId;
 
         public LuaTool(ILuaExecutor executor, ICoreAISettings settings, ILog logger,
-            LuaGenerationRateLimiter rateLimiter = null)
+            LuaGenerationRateLimiter rateLimiter = null,
+            IActorIdentityProvider actorIdentityProvider = null,
+            string roleId = null)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
+            _actorIdentityProvider = actorIdentityProvider;
+            _roleId = roleId;
+            _mutationExecutor = executor as IMutationExecutor;
+            if (_actorIdentityProvider != null && _mutationExecutor == null)
+            {
+                throw new ArgumentException(
+                    "Actor-scoped execute_lua composition requires a mutation-envelope executor.",
+                    nameof(executor));
+            }
         }
 
         /// <summary>Rate limiter shared with (or mirroring) the envelope pipeline.</summary>
@@ -51,6 +68,18 @@ namespace CoreAI.Ai
         /// <summary>Builds the MEAI tool surface for <c>execute_lua</c>.</summary>
         public AIFunction CreateAIFunction()
         {
+            if (_actorIdentityProvider != null)
+            {
+                Func<string, string, string, long, CancellationToken, Task<string>> mutationFunc =
+                    ExecuteMutationAsync;
+                AIFunctionFactoryOptions mutationOptions = new()
+                {
+                    Name = ExecuteLuaToolName,
+                    Description = ExecuteLuaDescription
+                };
+                return AIFunctionFactory.Create(mutationFunc, mutationOptions);
+            }
+
             Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
@@ -68,6 +97,71 @@ namespace CoreAI.Ai
                 "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics.")]
             string code,
             CancellationToken cancellationToken = default)
+        {
+            return await ExecuteCoreAsync(
+                code,
+                token => _executor.ExecuteAsync(code, token),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Runs an actor-scoped Lua mutation under optimistic concurrency and idempotency checks.</summary>
+        public async Task<string> ExecuteMutationAsync(
+            [Description("Lua code to execute against the declared mutation target.")]
+            string code,
+            [Description("Caller-generated idempotency key, unique for this actor and logical operation.")]
+            string operation_id,
+            [Description("Stable target InstanceId encoded as an unsigned decimal string.")]
+            string target_instance_id,
+            [Description("Target revision observed before submitting this operation.")]
+            long expected_revision,
+            CancellationToken cancellationToken = default)
+        {
+            if (_actorIdentityProvider == null || _mutationExecutor == null)
+            {
+                return SerializeResult(new LuaResult
+                {
+                    Success = false,
+                    Error = "Actor-scoped execute_lua is not configured."
+                });
+            }
+
+            if (!ulong.TryParse(target_instance_id, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out ulong targetValue)
+                || targetValue == 0UL)
+            {
+                return SerializeResult(new LuaResult
+                {
+                    Success = false,
+                    Error = "target_instance_id must be a non-zero unsigned decimal InstanceId."
+                });
+            }
+
+            ActorContext actorContext;
+            MutationEnvelope envelope;
+            try
+            {
+                actorContext = _actorIdentityProvider.GetActorContext(_roleId);
+                envelope = new MutationEnvelope(
+                    actorContext.ActorId,
+                    new InstanceId(targetValue),
+                    operation_id,
+                    expected_revision);
+            }
+            catch (Exception ex)
+            {
+                return SerializeResult(new LuaResult { Success = false, Error = ex.Message });
+            }
+
+            return await ExecuteCoreAsync(
+                code,
+                token => _mutationExecutor.ExecuteAsync(code, actorContext, envelope, token),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<string> ExecuteCoreAsync(
+            string code,
+            Func<CancellationToken, Task<LuaResult>> execute,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(code))
             {
@@ -99,7 +193,7 @@ namespace CoreAI.Ai
 
             try
             {
-                LuaResult result = await _executor.ExecuteAsync(code, cancellationToken).ConfigureAwait(false);
+                LuaResult result = await execute(cancellationToken).ConfigureAwait(false);
 
                 if (_settings.LogToolCallResults)
                 {
@@ -165,6 +259,13 @@ namespace CoreAI.Ai
         public interface ILuaExecutor
         {
             Task<LuaResult> ExecuteAsync(string code, CancellationToken cancellationToken);
+        }
+
+        /// <summary>Actor-scoped mutation executor used by the shipped persistent-mod composition.</summary>
+        public interface IMutationExecutor
+        {
+            Task<LuaResult> ExecuteAsync(string code, ActorContext actorContext,
+                MutationEnvelope mutationEnvelope, CancellationToken cancellationToken);
         }
     }
 }

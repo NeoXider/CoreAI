@@ -27,6 +27,8 @@ namespace CoreAI.Sandbox.LuaCs
 
         private readonly Dictionary<string, Func<LuaValue>> _valueFactories = new(StringComparer.Ordinal);
 
+        private readonly List<Action<LuaState>> _environmentDecorators = new();
+
         /// <summary>Registers a typed host delegate with the target runtime registry.</summary>
         public void Register(string name, Delegate callback)
         {
@@ -59,6 +61,17 @@ namespace CoreAI.Sandbox.LuaCs
             _apis.Remove(name);
             _callbacks.Remove(name);
             _luaFunctions.Remove(name);
+        }
+
+        /// <summary>
+        /// Registers an engine-specific per-state decorator that runs after every ordinary global
+        /// has been materialized. Adapter surfaces use this to extend state-local metatables without
+        /// mutating VM-global behavior or bypassing production registry composition.
+        /// </summary>
+        public void RegisterEnvironmentDecorator(Action<LuaState> decorator)
+        {
+            _environmentDecorators.Add(
+                decorator ?? throw new ArgumentNullException(nameof(decorator)));
         }
 
         /// <summary>Registers an engine-neutral var-args callback (raw arguments, multiple returns).</summary>
@@ -193,6 +206,11 @@ namespace CoreAI.Sandbox.LuaCs
             foreach (KeyValuePair<string, Func<LuaValue>> kv in _valueFactories)
             {
                 state.Environment[kv.Key] = kv.Value();
+            }
+
+            for (int index = 0; index < _environmentDecorators.Count; index++)
+            {
+                _environmentDecorators[index](state);
             }
         }
 

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 
@@ -25,6 +27,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsFullUnityRuntimeBindings _full;
         private readonly LuaCsInputRuntimeBindings _input;
         private readonly LuaCsRbxApiBindings _roblox;
+        private readonly LuaCsRbxHttpServiceAdapter _rbxHttp;
         private readonly bool _registerWorldEditBuildBindings;
         private readonly LuaCsLogicSlots _logicSlots = new();
 
@@ -40,7 +43,13 @@ namespace CoreAI.Ai.LuaCs
             bool allowNonPublicFullMembers = false,
             LuaCapabilities capabilities = LuaCapabilities.All,
             LuaCsRbxApiBindings rbxApi = null,
-            bool registerWorldEditBuildBindings = true)
+            bool registerWorldEditBuildBindings = true,
+            IRbxHttpRequestPolicy rbxHttpPolicy = null,
+            IRbxHttpTransport rbxHttpTransport = null,
+            IRbxHttpDestinationResolver rbxHttpResolver = null,
+            int rbxHttpRequestsPerWindow = LuaCsRbxHttpServiceAdapter.DefaultRequestsPerWindow,
+            double rbxHttpRateWindowSeconds = LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds,
+            Func<double> rbxMonotonicClock = null)
             : this(
                 logger,
                 new LuaCsVersioningRuntimeBindings(
@@ -57,7 +66,13 @@ namespace CoreAI.Ai.LuaCs
                 new LuaCsInputRuntimeBindings(),
                 new LuaCsDefaultRuntimeBindings(),
                 rbxApi,
-                registerWorldEditBuildBindings)
+                registerWorldEditBuildBindings,
+                rbxHttpPolicy,
+                rbxHttpTransport,
+                rbxHttpResolver,
+                rbxHttpRequestsPerWindow,
+                rbxHttpRateWindowSeconds,
+                rbxMonotonicClock)
         {
         }
 
@@ -73,7 +88,13 @@ namespace CoreAI.Ai.LuaCs
             LuaCsInputRuntimeBindings input = null,
             LuaCsDefaultRuntimeBindings defaultBindings = null,
             LuaCsRbxApiBindings rbxApi = null,
-            bool registerWorldEditBuildBindings = true)
+            bool registerWorldEditBuildBindings = true,
+            IRbxHttpRequestPolicy rbxHttpPolicy = null,
+            IRbxHttpTransport rbxHttpTransport = null,
+            IRbxHttpDestinationResolver rbxHttpResolver = null,
+            int rbxHttpRequestsPerWindow = LuaCsRbxHttpServiceAdapter.DefaultRequestsPerWindow,
+            double rbxHttpRateWindowSeconds = LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds,
+            Func<double> rbxMonotonicClock = null)
         {
             _capabilities = capabilities;
             _default = defaultBindings ?? new LuaCsDefaultRuntimeBindings();
@@ -86,6 +107,13 @@ namespace CoreAI.Ai.LuaCs
             _full = full;
             _input = input;
             _roblox = rbxApi;
+            _rbxHttp = rbxApi == null
+                ? null
+                : new LuaCsRbxHttpServiceAdapter(
+                    rbxApi, rbxHttpPolicy, rbxHttpTransport,
+                    rbxHttpResolver,
+                    rbxHttpRequestsPerWindow, rbxHttpRateWindowSeconds,
+                    rbxMonotonicClock);
             _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
         }
 
@@ -115,6 +143,19 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities, string ownerModId)
         {
+            RegisterCore(registry, capabilities, ownerModId, null, null);
+        }
+
+        /// <summary>Registers the one-off Rbx surface for a trusted actor mutation envelope.</summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext actorContext, MutationEnvelope mutationEnvelope)
+        {
+            RegisterCore(registry, capabilities, ownerModId, actorContext, mutationEnvelope);
+        }
+
+        private void RegisterCore(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext? actorContext, MutationEnvelope? mutationEnvelope)
+        {
             LuaCapabilities effective = _capabilities & capabilities;
 
             _default.Register(registry, effective);
@@ -128,7 +169,19 @@ namespace CoreAI.Ai.LuaCs
 
             // WHY: the Roblox surface trims itself (Read gate inside, Instance.new under WorldEdit)
             // and threads the owner mod id so created instances land in the ownership ledger.
-            _roblox?.Register(registry, effective, ownerModId);
+            if (_roblox != null)
+            {
+                if (actorContext.HasValue && mutationEnvelope.HasValue)
+                {
+                    _roblox.Register(registry, effective, ownerModId,
+                        actorContext.Value, mutationEnvelope.Value);
+                }
+                else
+                {
+                    _roblox.Register(registry, effective, ownerModId);
+                }
+            }
+            _rbxHttp?.Register(registry);
 
             // WHY: a composition may keep the WorldEdit capability (the Rbx surface needs it for
             // Instance.new) while withholding the low-level coreai_world_*/component build APIs.

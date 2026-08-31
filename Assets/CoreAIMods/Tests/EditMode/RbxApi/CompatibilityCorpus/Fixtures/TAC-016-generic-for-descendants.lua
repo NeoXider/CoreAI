@@ -9,7 +9,7 @@ end
 
 model.Parent = workspace
 local destroyed = 0
-for _, descendant in ipairs(model:GetDescendants()) do
+for _, descendant in model:GetDescendants() do
     if descendant:IsA("BasePart") then
         descendant:Destroy()
         destroyed = destroyed + 1

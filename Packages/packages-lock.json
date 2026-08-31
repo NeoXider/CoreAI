@@ -24,7 +24,7 @@
         "com.unity.nuget.newtonsoft-json": "3.0.2",
         "com.unity.test-framework": "1.1.31"
       },
-      "hash": "bd72241ab91c664176091789c9408d676783abec"
+      "hash": "c21bf496bca87d54e75bad048563c3adb1782081"
     },
     "com.cysharp.messagepipe": {
       "version": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
@@ -65,7 +65,7 @@
         "com.unity.inputsystem": "1.14.2",
         "com.unity.ugui": "1.0.0"
       },
-      "hash": "f4cb40d26517c7c1213fda9a6c0954b328d71d36"
+      "hash": "34fd5146edc4c726c305046cbfac9ff8e9594d4b"
     },
     "com.unity.ai.navigation": {
       "version": "2.0.12",

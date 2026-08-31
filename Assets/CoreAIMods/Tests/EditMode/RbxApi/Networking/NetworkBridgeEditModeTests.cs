@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Networking
@@ -11,6 +12,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
     public sealed class NetworkBridgeEditModeTests
     {
         private const string ActorId = "actor-loopback";
+
+        private sealed class UnusedThreadFactory : IRbxScriptThreadFactory
+        {
+            public IRbxScriptThread Create(string ownerModId, object callable)
+            {
+                throw new InvalidOperationException(
+                    "The networking signal probe must not create script threads.");
+            }
+        }
 
         [Test]
         public void BridgeTypes_LiveInTheEngineFreeInstancesAssembly()
@@ -44,9 +54,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         {
             INetworkBridge bridge = CreateBridge();
             List<byte> received = new();
-            bridge.EventReceived += message => received.Add(message.Payload[0]);
+            bridge.EventReceived += message =>
+            {
+                byte value = message.Payload[0];
+                received.Add(value);
+                if (value == 0)
+                {
+                    bridge.SendEvent(Event(new byte[] { 1 },
+                        RbxNetworkReliability.ReliableOrdered));
+                    bridge.SendEvent(Event(new byte[] { 2 },
+                        RbxNetworkReliability.ReliableOrdered));
+                }
+            };
 
-            for (byte value = 0; value < 16; value++)
+            bridge.SendEvent(Event(new byte[] { 0 },
+                RbxNetworkReliability.ReliableOrdered));
+            for (byte value = 3; value < 16; value++)
             {
                 bridge.SendEvent(Event(new byte[] { value },
                     RbxNetworkReliability.ReliableOrdered));
@@ -84,7 +107,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         }
 
         [Test]
-        public void RateAdmission_AtLimitSucceedsThenRefusesWithActorAndReason()
+        public void RateAdmission_IsPerActorAndRemoteTypeThenRefusesWithActorAndReason()
         {
             INetworkBridge bridge = CreateBridge(maxClientRequestsPerSecond: 2);
             List<RbxNetworkEventMessage> received = new();
@@ -92,22 +115,36 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             bridge.SendEvent(Event(new byte[] { 1 },
                 RbxNetworkReliability.ReliableOrdered));
             bridge.SendEvent(Event(new byte[] { 2 },
+                RbxNetworkReliability.ReliableOrdered));
+            bridge.SendEvent(Event(new byte[] { 3 },
                 RbxNetworkReliability.UnreliableUnordered));
+            bridge.SendEvent(Event(new byte[] { 4 },
+                RbxNetworkReliability.UnreliableUnordered));
+            bridge.SendRequest(Request(), _ => { });
+            bridge.SendRequest(Request(), _ => { });
 
-            RbxError error = Assert.Throws<RbxError>(() =>
-                bridge.SendEvent(Event(new byte[] { 3 },
+            RbxError reliableError = Assert.Throws<RbxError>(() =>
+                bridge.SendEvent(Event(new byte[] { 5 },
                     RbxNetworkReliability.ReliableOrdered)));
+            RbxError unreliableError = Assert.Throws<RbxError>(() =>
+                bridge.SendEvent(Event(new byte[] { 6 },
+                    RbxNetworkReliability.UnreliableUnordered)));
+            RbxError functionError = Assert.Throws<RbxError>(() =>
+                bridge.SendRequest(Request(), _ => { }));
 
-            Assert.AreEqual(RbxErrorCode.BudgetExceeded, error.Code);
-            StringAssert.Contains("actor '" + ActorId + "'", error.RawMessage);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, reliableError.Code);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, unreliableError.Code);
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, functionError.Code);
+            StringAssert.Contains("actor '" + ActorId + "'", reliableError.RawMessage);
             StringAssert.Contains(
-                "network request rate quota reached (limit 2 requests/s)", error.RawMessage);
+                "network request rate quota reached (limit 2 requests/s)",
+                reliableError.RawMessage);
 
             bridge.RegisterActor("actor-independent");
-            bridge.SendEvent(Event(new byte[] { 4 }, RbxNetworkReliability.ReliableOrdered,
+            bridge.SendEvent(Event(new byte[] { 7 }, RbxNetworkReliability.ReliableOrdered,
                 "actor-independent"));
 
-            Assert.AreEqual(3, received.Count);
+            Assert.AreEqual(5, received.Count);
         }
 
         [Test]
@@ -116,6 +153,67 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             NullNetworkBridge bridge = new();
 
             Assert.AreEqual(500, bridge.MaxClientRequestsPerSecond);
+        }
+
+        [Test]
+        public void OnServerEvent_QueuesRealPlayerAsFirstArgument()
+        {
+            InstanceRegistry registry = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            RbxPlayers players = (RbxPlayers)game.GetService("Players");
+            RbxPlayer player = players.EnsureActor(registry, ActorId);
+            RbxRemoteEvent remote = (RbxRemoteEvent)registry.Create("RemoteEvent");
+            ModScheduler scheduler = new(
+                new UnusedThreadFactory(), new RbxAccumulatingTimeSource());
+            remote.AttachScheduler(scheduler);
+            object[] received = null;
+            remote.OnServerEvent.Connect((Action<object[]>)(arguments =>
+                received = arguments));
+
+            remote.DeliverToServer(player, new object[] { "payload", 7d });
+
+            Assert.IsNull(received);
+            scheduler.Advance(0.016d);
+            Assert.IsNotNull(received);
+            Assert.AreSame(player, received[0]);
+            Assert.AreEqual("payload", received[1]);
+            Assert.AreEqual(7d, received[2]);
+        }
+
+        [Test]
+        public void RemoteFunction_PropagatesReturnPayloadAndReceiverError()
+        {
+            InstanceRegistry registry = new();
+            RbxRemoteFunction remote = (RbxRemoteFunction)registry.Create("RemoteFunction");
+            NullNetworkBridge returningBridge = (NullNetworkBridge)CreateBridge();
+            returningBridge.RequestReceived +=
+                (RbxNetworkRequestMessage message, RbxNetworkRequestResponder responder) =>
+                {
+                    Assert.AreEqual(remote.Id, message.RemoteId);
+                    CollectionAssert.AreEqual(new byte[] { 1, 2 }, message.Payload);
+                    responder.Complete(new byte[] { 8, 13 });
+                };
+            RbxNetworkResponse returned = null;
+
+            remote.InvokeServer(returningBridge, ActorId, new byte[] { 1, 2 },
+                response => returned = response);
+
+            Assert.IsNotNull(returned);
+            Assert.IsTrue(returned.Succeeded);
+            CollectionAssert.AreEqual(new byte[] { 8, 13 }, returned.Payload);
+
+            NullNetworkBridge failingBridge = (NullNetworkBridge)CreateBridge();
+            failingBridge.RequestReceived +=
+                (RbxNetworkRequestMessage message, RbxNetworkRequestResponder responder) =>
+                    throw new InvalidOperationException("receiver exploded");
+            RbxNetworkResponse failed = null;
+
+            remote.InvokeServer(failingBridge, ActorId, Array.Empty<byte>(),
+                response => failed = response);
+
+            Assert.IsNotNull(failed);
+            Assert.IsFalse(failed.Succeeded);
+            Assert.AreEqual("receiver exploded", failed.Error);
         }
 
         private static INetworkBridge CreateBridge(
@@ -140,6 +238,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
                 actorId,
                 null,
                 payload);
+        }
+
+        private static RbxNetworkRequestMessage Request(string actorId = ActorId)
+        {
+            return new RbxNetworkRequestMessage(
+                new InstanceId(2UL),
+                RbxNetworkDirection.ClientToServer,
+                actorId,
+                null,
+                Array.Empty<byte>());
         }
     }
 }

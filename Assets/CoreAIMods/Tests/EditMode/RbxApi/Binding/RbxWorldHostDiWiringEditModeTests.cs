@@ -166,6 +166,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                     "the part must be materialized as a GameObject while the mod is loaded");
                 Assert.AreEqual(1, host.Registry.GetOwnedBy("leaker").Count,
                     "the created instance must be tagged as owned by the mod");
+                Assert.AreEqual(3, host.Registry.GetTeardownOwnedBy("leaker").Count,
+                    "teardown ownership must include the authored part plus the runtime Folder/Script proxy");
 
                 // WHY: Unload routes through TeardownModEffects(Unload) -> ModTearingDown -> the installer's
                 // ownership sweep, so the mod's instances (and their GameObjects) must be destroyed — no leak.
@@ -175,6 +177,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                     "unloading the mod must release the backing GameObject of the instance it owned");
                 Assert.IsNull(host.Registry.WorldRoot.FindFirstChild("LeakPart"),
                     "the destroyed part must no longer be in the world tree after unload");
+                Assert.AreEqual(0, host.Registry.GetTeardownOwnedBy("leaker").Count,
+                    "unload must also remove the mod's runtime Folder/Script proxy");
             }
             finally
             {

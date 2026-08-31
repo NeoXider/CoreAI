@@ -45,6 +45,7 @@ namespace CoreAI.Infrastructure.Luau
             }
 
             RewriteContext ctx = new(source);
+            ctx.ChunkInsertionPosition = tokens.Count > 0 ? tokens[0].Start : 0;
             try
             {
                 new LuauRewriteParser(ctx, tokens).ParseChunk();
@@ -141,7 +142,8 @@ namespace CoreAI.Infrastructure.Luau
 
                         break;
                     case LuauTokenKind.Name:
-                        if (t.Text == "continue" || t.Text == "type" || t.Text == "export")
+                        if (t.Text == "continue" || t.Text == "type" || t.Text == "export"
+                            || t.Text == "for")
                         {
                             return true;
                         }

@@ -23,9 +23,8 @@ namespace CoreAI.Mods.Rbx.Binding
     /// RbxSpace (D2) — this class holds the binder's single call sites allowed by the lint.
     /// Shapes: Block maps to the unit cube, Ball to the unit sphere (both directly on the part
     /// GameObject, localScale = Size * MetersPerStud); Cylinder needs an axis correction, so its
-    /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge uses a custom
-    /// normalized ramp mesh on the root (see <see cref="BuildWedgeVisual"/>).
-    /// TODO: MVP1 follow-up — custom normalized CornerWedge mesh (still falls back to Cube today).
+    /// mesh lives on a rotated child (see <see cref="BuildCylinderVisual"/>); Wedge and CornerWedge
+    /// use custom normalized meshes on the root.
     /// TODO: MVP1 follow-up — a Part parented under another Part inherits the parent's Size-driven
     /// localScale (compound world scale); Roblox Size is absolute regardless of ancestry, so parts
     /// should materialize under an unscaled container (generalize the Cylinder Shape-child pattern).
@@ -42,6 +41,7 @@ namespace CoreAI.Mods.Rbx.Binding
         // only stud-authored asset the scale rule allows, §2) and share the single mesh across all
         // wedge parts — the root's Size-driven localScale carries the dimensions like Block/Ball.
         private static Mesh _wedgeMesh;
+        private static Mesh _cornerWedgeMesh;
 
         private static Mesh _cubeMesh;
         private static Mesh _sphereMesh;
@@ -73,8 +73,8 @@ namespace CoreAI.Mods.Rbx.Binding
             public GameObject GameObject;
             public bool IsPart;
 
-            /// <summary>False only for the DataModel entry, which reuses the host GameObject —
-            /// teardown must never destroy, rename, or re-parent it.</summary>
+            /// <summary>False for the DataModel host and lazily adopted world objects; teardown
+            /// must never destroy, rename, or re-parent GameObjects owned outside the binder.</summary>
             public bool OwnsGameObject;
 
             /// <summary>Shape whose visual is currently built; null until the first Apply.</summary>
@@ -142,6 +142,54 @@ namespace CoreAI.Mods.Rbx.Binding
 
             gameObject = null;
             return false;
+        }
+
+        /// <summary>Adopts an existing meter-authored host object as a Part backing without
+        /// duplicating or taking ownership of it. Initial Part state is read through the inverse
+        /// RbxSpace boundary so subsequent Lua reads and writes use the normal property sink.</summary>
+        public void AdoptWorldObject(InstanceId id, GameObject gameObject)
+        {
+            if (!id.IsValid)
+            {
+                throw new System.ArgumentException("A valid instance id is required.", nameof(id));
+            }
+
+            if (gameObject == null)
+            {
+                throw new System.ArgumentNullException(nameof(gameObject));
+            }
+
+            if (_bindings.ContainsKey(id))
+            {
+                throw new System.InvalidOperationException("The instance already has a backing GameObject.");
+            }
+
+            if (TryGetInstanceId(gameObject, out InstanceId existingId))
+            {
+                throw new System.InvalidOperationException(
+                    "The host GameObject is already bound to instance " + existingId.Value + ".");
+            }
+
+            Transform transform = gameObject.transform;
+            Collider collider = gameObject.GetComponent<Collider>();
+            Rigidbody rigidbody = gameObject.GetComponent<Rigidbody>();
+            PartProperties properties = PartProperties.CreateDefault();
+            properties.CFrame = RbxSpace.FromUnity(transform.position, transform.rotation);
+            properties.Size = RbxSpace.SizeFromUnity(transform.localScale);
+            properties.Anchored = rigidbody == null;
+            properties.CanCollide = collider == null || collider.enabled;
+
+            BindingEntry entry = new()
+            {
+                GameObject = gameObject,
+                IsPart = true,
+                OwnsGameObject = false,
+                MaterializedShape = properties.Shape,
+                Rigidbody = rigidbody
+            };
+            CacheVisualComponents(entry);
+            _partProperties.Add(id, properties);
+            _bindings.Add(id, entry);
         }
 
         /// <summary>
@@ -484,7 +532,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private static void ApplyShape(BindingEntry entry, RbxPartShape shape)
         {
-            RbxPartShape normalized = NormalizeShape(shape);
+            RbxPartShape normalized = shape;
             if (entry.MaterializedShape == normalized)
             {
                 return;
@@ -502,6 +550,9 @@ namespace CoreAI.Mods.Rbx.Binding
                 case RbxPartShape.Wedge:
                     BuildWedgeVisual(entry.GameObject);
                     break;
+                case RbxPartShape.CornerWedge:
+                    BuildCornerWedgeVisual(entry.GameObject);
+                    break;
                 default:
                     BuildRootPrimitiveVisual(entry.GameObject, PrimitiveType.Cube);
                     break;
@@ -512,7 +563,7 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         // WHY: resolve the renderer/collider from THIS part's own visual — the root for
-        // Block/Ball/Wedge, or the binder-owned ShapeChild for Cylinder (held by reference, never
+        // Block/Ball/Wedge/CornerWedge, or the binder-owned ShapeChild for Cylinder (held by reference, never
         // found by name) — so neither a nested child part nor a user child named "Shape" can be
         // mistaken for the visual. Cached so appearance/collide setters skip the scan on every write.
         private static void CacheVisualComponents(BindingEntry entry)
@@ -522,14 +573,6 @@ namespace CoreAI.Mods.Rbx.Binding
                 : entry.GameObject.transform;
             entry.Renderer = visual.GetComponent<Renderer>();
             entry.Collider = visual.GetComponent<Collider>();
-        }
-
-        // TODO: MVP1 follow-up — custom normalized CornerWedge mesh; it still falls back to Cube.
-        private static RbxPartShape NormalizeShape(RbxPartShape shape)
-        {
-            return shape == RbxPartShape.CornerWedge
-                ? RbxPartShape.Block
-                : shape;
         }
 
         /// <summary>Removes the previous shape's mesh/collider (root components and the binder-owned
@@ -712,6 +755,72 @@ namespace CoreAI.Mods.Rbx.Binding
             mesh.RecalculateBounds();
             _wedgeMesh = mesh;
             return _wedgeMesh;
+        }
+
+        /// <summary>Roblox CornerWedge: a convex solid with a square base, one raised corner,
+        /// two vertical triangular sides, and two sloped triangular sides. Extents stay normalized
+        /// to one unit so the part root remains the only scale boundary.</summary>
+        private static void BuildCornerWedgeVisual(GameObject gameObject)
+        {
+            Mesh mesh = GetCornerWedgeMesh();
+            MeshFilter filter = gameObject.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = DefaultLitMaterial();
+            MeshCollider collider = gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = mesh;
+            collider.convex = true;
+        }
+
+        // WHY: flat facets need face-local vertices and normals. The raised local -X/-Z corner
+        // slopes toward +X and +Z; the two slope faces share the raised-to-opposite diagonal.
+        private static Mesh GetCornerWedgeMesh()
+        {
+            if (_cornerWedgeMesh != null)
+            {
+                return _cornerWedgeMesh;
+            }
+
+            Vector3 a = new(-0.5f, -0.5f, -0.5f);
+            Vector3 b = new(0.5f, -0.5f, -0.5f);
+            Vector3 c = new(-0.5f, -0.5f, 0.5f);
+            Vector3 d = new(0.5f, -0.5f, 0.5f);
+            Vector3 e = new(-0.5f, 0.5f, -0.5f);
+            Vector3 frontSlopeNormal = new Vector3(0f, 1f, 1f).normalized;
+            Vector3 rightSlopeNormal = new Vector3(1f, 1f, 0f).normalized;
+
+            Vector3[] vertices =
+            {
+                a, b, d, c,
+                a, e, b,
+                a, c, e,
+                e, c, d,
+                e, d, b
+            };
+            Vector3[] normals =
+            {
+                Vector3.down, Vector3.down, Vector3.down, Vector3.down,
+                Vector3.back, Vector3.back, Vector3.back,
+                Vector3.left, Vector3.left, Vector3.left,
+                frontSlopeNormal, frontSlopeNormal, frontSlopeNormal,
+                rightSlopeNormal, rightSlopeNormal, rightSlopeNormal
+            };
+            int[] triangles =
+            {
+                0, 1, 2, 0, 2, 3,
+                4, 5, 6,
+                7, 8, 9,
+                10, 11, 12,
+                13, 14, 15
+            };
+
+            Mesh mesh = new() { name = "CoreAiCornerWedge" };
+            mesh.SetVertices(new List<Vector3>(vertices));
+            mesh.SetNormals(new List<Vector3>(normals));
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            _cornerWedgeMesh = mesh;
+            return _cornerWedgeMesh;
         }
 
         private static Material DefaultLitMaterial()

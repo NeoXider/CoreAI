@@ -28,6 +28,8 @@ namespace CoreAI.Infrastructure.Luau
         public readonly List<DownlevelDiagnostic> Diagnostics = new();
         public readonly List<RewriteNote> Notes = new();
         public int TempCounter;
+        public int ChunkInsertionPosition;
+        public string GeneralizedIteratorName;
 
         public sealed class RewriteNote
         {
@@ -632,8 +634,12 @@ namespace CoreAI.Infrastructure.Luau
                     MaybeStripAnnotation();
                 }
 
-                ExpectKeyword("in");
-                ParseExprList();
+                LuauToken inToken = ExpectKeyword("in");
+                int iteratorStart = Cur.Start;
+                int iteratorEnd = ParseExprList();
+                string iterator = EnsureGeneralizedIterator(inToken);
+                Insert(iteratorStart, iterator + "(");
+                Insert(iteratorEnd, ")");
             }
 
             LuauToken doTok = ExpectKeyword("do");
@@ -642,6 +648,26 @@ namespace CoreAI.Infrastructure.Luau
             LuauToken endTok = ExpectKeyword("end");
             PopLoop();
             FinalizeDoLoop(frame, doTok, endTok);
+        }
+
+        private string EnsureGeneralizedIterator(LuauToken at)
+        {
+            if (_ctx.GeneralizedIteratorName == null)
+            {
+                _ctx.GeneralizedIteratorName = NextTemp();
+                string helper = "local " + _ctx.GeneralizedIteratorName
+                    + " = (function(__s,__g,__t,__r,__n) return function(...) "
+                    + "if __s('#', ...) ~= 1 then return ... end "
+                    + "local __v = ... local __m = __g(__v) "
+                    + "local __i = __t(__m) == 'table' and __r(__m, '__iter') or nil "
+                    + "if __i ~= nil then return __i(__v) end "
+                    + "if __t(__v) == 'table' then return __n, __v, nil end "
+                    + "return __v end end)(select,getmetatable,type,rawget,next);";
+                Insert(_ctx.ChunkInsertionPosition, helper);
+            }
+
+            _ctx.Note("generalized iteration", at);
+            return _ctx.GeneralizedIteratorName;
         }
 
         private void ParseRepeatStatement()

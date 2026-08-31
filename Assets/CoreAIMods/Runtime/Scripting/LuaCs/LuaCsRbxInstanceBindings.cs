@@ -6,6 +6,7 @@ using CoreAI.Composition;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using Lua;
 using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
@@ -19,6 +20,7 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal sealed class LuaCsRbxModContext
     {
+        private readonly MutationEnvelope? _mutationEnvelope;
         private readonly Dictionary<RbxInstance, LuaValue> _proxyCache = new();
         private readonly LuaTable _instanceMeta;
 
@@ -31,6 +33,21 @@ namespace CoreAI.Ai.LuaCs
 
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag, ActorContext actorContext)
+            : this(bindings, capabilities, ownerModId, originTag, actorContext, null)
+        {
+        }
+
+        public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
+            string ownerModId, string originTag, ActorContext actorContext,
+            MutationEnvelope mutationEnvelope)
+            : this(bindings, capabilities, ownerModId, originTag, actorContext,
+                (MutationEnvelope?)mutationEnvelope)
+        {
+        }
+
+        private LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
+            string ownerModId, string originTag, ActorContext actorContext,
+            MutationEnvelope? mutationEnvelope)
         {
             if (!actorContext.IsTrusted)
             {
@@ -38,11 +55,23 @@ namespace CoreAI.Ai.LuaCs
                     "Actor context was not issued by an identity provider.");
             }
 
+            if (mutationEnvelope.HasValue
+                && !string.Equals(mutationEnvelope.Value.ActorId, actorContext.ActorId,
+                    StringComparison.Ordinal))
+            {
+                throw RbxError.BadArgument(
+                    "actor '" + actorContext.ActorId + "' cannot apply operation '"
+                    + mutationEnvelope.Value.OperationId + "': the mutation envelope belongs to actor '"
+                    + mutationEnvelope.Value.ActorId + "'",
+                    "create the envelope with the durable actor id from the trusted actor context");
+            }
+
             Bindings = bindings;
             Capabilities = capabilities;
             OwnerModId = ownerModId;
             OriginTag = originTag;
             ActorContext = actorContext;
+            _mutationEnvelope = mutationEnvelope;
             if (!IsHost)
             {
                 bindings.Registry.BindActorAttribution(ownerModId, originTag, actorContext.ActorId);
@@ -106,6 +135,28 @@ namespace CoreAI.Ai.LuaCs
 
         public bool CanWorldEdit => (Capabilities & LuaCapabilities.WorldEdit) != 0;
 
+        public bool IsNetworkServer => Bindings.NetworkBridge.Topology != RbxNetworkTopology.Client
+                                       && IsHost;
+
+        public void RequireNetworkSide(string member, bool serverOnly)
+        {
+            bool actualServer = IsNetworkServer;
+            if (actualServer == serverOnly)
+            {
+                return;
+            }
+
+            string requiredSide = serverOnly ? "server" : "client";
+            string actualSide = actualServer ? "server" : "client";
+            throw new RbxError(
+                RbxErrorCode.NotAuthority,
+                "actor '" + ActorContext.ActorId + "' cannot use " + member
+                + " because " + member + " is " + requiredSide
+                + "-only and this actor runs as " + actualSide,
+                "call " + member + " from a " + requiredSide + " script context",
+                OwnerModId);
+        }
+
         /// <summary>Sink storing BasePart spatial/appearance state in Roblox space (shared world).</summary>
         public IPartPropertySink PartSink => Bindings.PartSink;
 
@@ -162,6 +213,7 @@ namespace CoreAI.Ai.LuaCs
                 RequireWorldEdit("setting " + target.ClassName + "." + member);
             }
 
+            RequireMutationTarget(target, "write property");
             WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
                 WorldAclDecision.WriteProperty, "write property");
         }
@@ -169,6 +221,7 @@ namespace CoreAI.Ai.LuaCs
         public void RequireMetadataMutation(RbxInstance target, string operation)
         {
             RequireWorldEdit(operation);
+            RequireMutationTarget(target, operation);
             WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
                 WorldAclDecision.MutateMetadata, operation);
         }
@@ -176,6 +229,7 @@ namespace CoreAI.Ai.LuaCs
         public void RequireReparent(RbxInstance target, RbxInstance destination)
         {
             RequireWorldEdit("setting Instance.Parent");
+            RequireMutationTarget(target, "reparent");
             if (target.IsDestroyed)
             {
                 return;
@@ -197,9 +251,43 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        public void RequireCreateUnder(RbxInstance destination)
+        {
+            RequireWorldEdit("Instance.new parent assignment");
+            RequireMutationTarget(destination, "create child");
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, destination,
+                WorldAclDecision.AcceptChild, "create child");
+        }
+
+        /// <summary>
+        /// Resolves and authorizes the envelope target as the revision anchor for an unparented
+        /// <c>Instance.new</c>. Legacy non-enveloped scripts have no creation anchor.
+        /// </summary>
+        public RbxInstance RequireUnparentedCreationAnchor()
+        {
+            if (!_mutationEnvelope.HasValue)
+            {
+                return null;
+            }
+
+            MutationEnvelope envelope = _mutationEnvelope.Value;
+            if (!Bindings.Registry.TryGet(
+                    envelope.TargetInstanceId, out RbxInstance creationAnchor))
+            {
+                throw RbxError.BadArgument(
+                    "actor '" + ActorContext.ActorId + "' cannot create an instance: operation '"
+                    + envelope.OperationId + "' targets no live instance",
+                    "refresh the target revision and submit a new caller-generated operation id");
+            }
+
+            RequireCreateUnder(creationAnchor);
+            return creationAnchor;
+        }
+
         public void RequireDestroyTree(RbxInstance target, string operation)
         {
             RequireWorldEdit(operation);
+            RequireMutationTarget(target, operation);
             WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
                 WorldAclDecision.Destroy, operation);
             foreach (RbxInstance descendant in target.GetDescendants())
@@ -213,6 +301,7 @@ namespace CoreAI.Ai.LuaCs
             IReadOnlyList<RbxInstance> roots, string operation)
         {
             RequireWorldEdit(operation);
+            RequireMutationTarget(container, operation);
             WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, container,
                 WorldAclDecision.AcceptChild, operation + " container");
             for (int rootIndex = 0; rootIndex < roots.Count; rootIndex++)
@@ -226,6 +315,34 @@ namespace CoreAI.Ai.LuaCs
                         WorldAclDecision.Destroy, operation);
                 }
             }
+        }
+
+        public void RequireMutationTarget(RbxInstance target, string operation)
+        {
+            if (!_mutationEnvelope.HasValue)
+            {
+                return;
+            }
+
+            MutationEnvelope envelope = _mutationEnvelope.Value;
+            if (target != null && target.Id == envelope.TargetInstanceId)
+            {
+                return;
+            }
+
+            string actualTarget = target == null
+                ? "no instance"
+                : "instance id " + target.Id.Value;
+            throw RbxError.BadArgument(
+                "actor '" + ActorContext.ActorId + "' cannot " + operation + " on "
+                + actualTarget + ": operation '" + envelope.OperationId
+                + "' targets instance id " + envelope.TargetInstanceId.Value,
+                "submit a separate mutation envelope for each target instance");
+        }
+
+        public void RecordMutation(RbxInstance target)
+        {
+            Bindings.Registry.AdvanceRevision(target.Id);
         }
     }
 
@@ -350,8 +467,8 @@ namespace CoreAI.Ai.LuaCs
     /// <summary>
     /// Lua member dispatch for <see cref="RbxInstance"/> proxies (roadmap §5.1.3): properties,
     /// navigation, lifecycle, attributes, tags, child-by-name sugar, ServiceProvider members on
-    /// the DataModel, BasePart spatial/appearance properties over the part-property sink, and loud
-    /// stubs for surface that lands in later slices (including absent-child WaitForChild yield).
+    /// the DataModel, BasePart spatial/appearance properties over the part-property sink, and the
+    /// scheduler-backed yielding navigation surface.
     /// Destroyed instances follow DEV-7 at the Lua boundary: every member access raises
     /// INSTANCE_DESTROYED except for Name/ClassName/Parent inside destruction-queued handlers.
     /// </summary>
@@ -400,6 +517,13 @@ namespace CoreAI.Ai.LuaCs
                         return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged, context);
                     case "AttributeChanged":
                         return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged, context);
+                    case "WaitForChild": return ReadWaitForChildBridge(ctx);
+                }
+
+                if (TryReadNetworkMember(context, self, key, ctx,
+                        out LuaValue networkValue))
+                {
+                    return networkValue;
                 }
 
                 if (methods.TryGetValue(key, out RbxMethodBinding method)
@@ -496,6 +620,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 ThrowIfDestroyedForLua(self, key);
+                if (TryWriteNetworkMember(context, self, key, ctx.State, value))
+                {
+                    return LuaValue.Nil;
+                }
+
                 if (TryWriteCamera(context, self, key, value))
                 {
                     return LuaValue.Nil;
@@ -540,6 +669,159 @@ namespace CoreAI.Ai.LuaCs
             return Lock(meta);
         }
 
+        private static LuaValue ReadWaitForChildBridge(LuaFunctionExecutionContext ctx)
+        {
+            LuaValue taskValue = ctx.State.Environment["task"];
+            if (taskValue.Type != LuaValueType.Table)
+            {
+                throw RbxError.BadArgument(
+                    "Instance.WaitForChild requires the task scheduler bridge",
+                    "run WaitForChild from a loaded mod scheduler thread");
+            }
+
+            LuaValue bridge = taskValue.Read<LuaTable>()["_waitForChildBridge"];
+            if (bridge.Type != LuaValueType.Function)
+            {
+                throw RbxError.BadArgument(
+                    "Instance.WaitForChild bridge is unavailable",
+                    "run WaitForChild after the mod scheduler initializes");
+            }
+
+            return bridge;
+        }
+
+        private static bool TryReadNetworkMember(LuaCsRbxModContext context,
+            RbxInstance instance, string member, LuaFunctionExecutionContext ctx,
+            out LuaValue value)
+        {
+            if (instance is RbxPlayers players)
+            {
+                switch (member)
+                {
+                    case "LocalPlayer":
+                        value = context.WrapInstance(context.Bindings.GetLocalPlayer(context));
+                        return true;
+                    case "PlayerAdded":
+                        value = LuaCsRbxDatatypeBindings.Wrap(players.PlayerAdded, context);
+                        return true;
+                    case "PlayerRemoving":
+                        value = LuaCsRbxDatatypeBindings.Wrap(players.PlayerRemoving, context);
+                        return true;
+                }
+            }
+
+            if (instance is RbxPlayer player && member == "UserId")
+            {
+                value = (double)player.UserId;
+                return true;
+            }
+
+            if (instance is RbxRemoteEvent remoteEvent)
+            {
+                switch (member)
+                {
+                    case "OnServerEvent":
+                        context.RequireNetworkSide(
+                            remoteEvent.ClassName + ".OnServerEvent", true);
+                        value = LuaCsRbxDatatypeBindings.Wrap(
+                            remoteEvent.OnServerEvent, context);
+                        return true;
+                    case "OnClientEvent":
+                        context.RequireNetworkSide(
+                            remoteEvent.ClassName + ".OnClientEvent", false);
+                        value = LuaCsRbxDatatypeBindings.Wrap(
+                            remoteEvent.GetOnClientEvent(context.ActorContext.ActorId), context);
+                        return true;
+                }
+            }
+
+            if (instance is RbxRemoteFunction remoteFunction)
+            {
+                switch (member)
+                {
+                    case "OnServerInvoke":
+                        context.RequireNetworkSide(
+                            "RemoteFunction.OnServerInvoke", true);
+                        value = context.Bindings.ReadRemoteFunctionCallback(
+                            context, remoteFunction, true);
+                        return true;
+                    case "OnClientInvoke":
+                        context.RequireNetworkSide(
+                            "RemoteFunction.OnClientInvoke", false);
+                        value = context.Bindings.ReadRemoteFunctionCallback(
+                            context, remoteFunction, false);
+                        return true;
+                    case "InvokeServer":
+                        context.RequireNetworkSide(
+                            "RemoteFunction:InvokeServer", false);
+                        value = ReadRemoteFunctionInvokeBridge(ctx, true);
+                        return true;
+                    case "InvokeClient":
+                        context.RequireNetworkSide(
+                            "RemoteFunction:InvokeClient", true);
+                        value = ReadRemoteFunctionInvokeBridge(ctx, false);
+                        return true;
+                }
+            }
+
+            value = LuaValue.Nil;
+            return false;
+        }
+
+        private static bool TryWriteNetworkMember(LuaCsRbxModContext context,
+            RbxInstance instance, string member, LuaState state, LuaValue value)
+        {
+            if (!(instance is RbxRemoteFunction remoteFunction))
+            {
+                return false;
+            }
+
+            switch (member)
+            {
+                case "OnServerInvoke":
+                    context.RequireNetworkSide("RemoteFunction.OnServerInvoke", true);
+                    context.RequireMetadataMutation(instance, "set server invoke callback");
+                    context.Bindings.WriteRemoteFunctionCallback(
+                        context, remoteFunction, true, state, value);
+                    context.RecordMutation(instance);
+                    return true;
+                case "OnClientInvoke":
+                    context.RequireNetworkSide("RemoteFunction.OnClientInvoke", false);
+                    context.RequireMetadataMutation(instance, "set client invoke callback");
+                    context.Bindings.WriteRemoteFunctionCallback(
+                        context, remoteFunction, false, state, value);
+                    context.RecordMutation(instance);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static LuaValue ReadRemoteFunctionInvokeBridge(
+            LuaFunctionExecutionContext ctx, bool invokeServer)
+        {
+            LuaValue taskValue = ctx.State.Environment["task"];
+            if (taskValue.Type != LuaValueType.Table)
+            {
+                throw RbxError.BadArgument(
+                    "RemoteFunction invoke requires the task scheduler bridge",
+                    "invoke from a loaded mod scheduler thread");
+            }
+
+            string bridgeName = invokeServer
+                ? "_remoteFunctionInvokeServerBridge"
+                : "_remoteFunctionInvokeClientBridge";
+            LuaValue bridge = taskValue.Read<LuaTable>()[bridgeName];
+            if (bridge.Type != LuaValueType.Function)
+            {
+                throw RbxError.BadArgument(
+                    "RemoteFunction scheduler bridge is unavailable",
+                    "invoke after the mod scheduler initializes");
+            }
+
+            return bridge;
+        }
+
         private static Dictionary<string, RbxMethodBinding> BuildMethods(LuaCsRbxModContext context)
         {
             Dictionary<string, RbxMethodBinding> methods = new(StringComparer.Ordinal);
@@ -578,26 +860,12 @@ namespace CoreAI.Ai.LuaCs
             Method("IsAncestorOf", (ctx, self) => self.IsAncestorOf(
                 ReadOptionalInstance(Arg(ctx, 1), "IsAncestorOf")));
             Method("GetFullName", (_, self) => self.GetFullName());
-            Method("WaitForChild", (ctx, self) =>
-            {
-                string childName = ReadString(ctx, 1, "WaitForChild");
-                RbxInstance child = self.FindFirstChild(childName);
-                if (child != null)
-                {
-                    return context.WrapInstance(child);
-                }
-
-                // TODO: MVP2 — scheduler yield
-                throw RbxError.NotImplemented(
-                    self.ClassName + ":WaitForChild(\"" + childName + "\") with the child absent",
-                    "MVP2",
-                    "the yield lands in MVP2; create the child first or check with FindFirstChild");
-            });
 
             // ---- Lifecycle ----
             Method("Clone", (_, self) =>
             {
                 context.RequireWorldEdit("Instance:Clone");
+                context.RequireMutationTarget(self, "clone");
                 if (IsProtectedSingleton(self))
                 {
                     // WHY: Roblox marks singletons non-archivable, so Clone yields nil here
@@ -611,10 +879,19 @@ namespace CoreAI.Ai.LuaCs
                     return LuaValue.Nil;
                 }
 
-                context.Bindings.Registry.SetAccessControl(copy, context.OwnerActorId,
-                    InstanceAccessScope.Owned, true);
-                CopyPartSinkState(context.PartSink, self, copy);
-                return context.WrapInstance(copy);
+                try
+                {
+                    context.RecordMutation(self);
+                    context.Bindings.Registry.SetAccessControl(copy, context.OwnerActorId,
+                        InstanceAccessScope.Owned, true);
+                    CopyPartSinkState(context.PartSink, self, copy);
+                    return context.WrapInstance(copy);
+                }
+                catch
+                {
+                    copy.Destroy();
+                    throw;
+                }
             });
             Method("Destroy", (_, self) =>
             {
@@ -727,7 +1004,46 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             }, "DataModel");
 
+            Method("GetPlayers", (_, self) => WrapList(
+                context, ((RbxPlayers)self).GetPlayers()), "Players");
+
+            Method("FireServer", (ctx, self) =>
+            {
+                context.RequireNetworkSide(self.ClassName + ":FireServer", false);
+                context.Bindings.FireRemoteServer(
+                    context, (RbxRemoteEvent)self, ctx);
+                return LuaValue.Nil;
+            }, "BaseRemoteEvent");
+            Method("FireClient", (ctx, self) =>
+            {
+                context.RequireNetworkSide(self.ClassName + ":FireClient", true);
+                context.Bindings.FireRemoteClient(
+                    (RbxRemoteEvent)self,
+                    ReadPlayer(ctx, 1, self.ClassName + ":FireClient"), ctx);
+                return LuaValue.Nil;
+            }, "BaseRemoteEvent");
+            Method("FireAllClients", (ctx, self) =>
+            {
+                context.RequireNetworkSide(self.ClassName + ":FireAllClients", true);
+                context.Bindings.FireRemoteAllClients((RbxRemoteEvent)self, ctx);
+                return LuaValue.Nil;
+            }, "BaseRemoteEvent");
+
             return methods;
+        }
+
+        private static RbxPlayer ReadPlayer(LuaFunctionExecutionContext ctx,
+            int index, string functionName)
+        {
+            if (TryGetInstance(Arg(ctx, index), out LuaCsRbxInstanceProxy proxy)
+                && proxy.Instance is RbxPlayer player)
+            {
+                return player;
+            }
+
+            throw RbxError.BadArgument(
+                functionName + " expects a Player at argument " + index,
+                "pass a Player returned by Players:GetPlayers()");
         }
 
         private static RbxInstance Self(LuaFunctionExecutionContext ctx, LuaCsRbxModContext context)
@@ -1028,23 +1344,28 @@ namespace CoreAI.Ai.LuaCs
                 case "Shape":
                     context.RequireWorldEditForWrite(self, "Shape");
                     sink.SetShape(id, ReadPartShapeValue(value));
+                    context.RecordMutation(self);
                     return true;
                 case "Material":
                     context.RequireWorldEditForWrite(self, "Material");
                     RbxMaterialId material = ReadMaterialValue(value);
                     sink.SetMaterial(id, in material);
+                    context.RecordMutation(self);
                     return true;
                 case "Position":
                     context.RequireWorldEditForWrite(self, "Position");
                     sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "Size":
                     context.RequireWorldEditForWrite(self, "Size");
                     sink.SetSize(id, ReadVector3Value(value, "Part.Size assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "CFrame":
                     context.RequireWorldEditForWrite(self, "CFrame");
                     sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "Orientation":
                     context.RequireWorldEditForWrite(self, "Orientation");
@@ -1056,6 +1377,7 @@ namespace CoreAI.Ai.LuaCs
                         orientation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
                         RbxCFrame.FromPosition(orientationProperties.Position) * orientationCFrame);
+                    context.RecordMutation(self);
                     return true;
                 case "Rotation":
                     context.RequireWorldEditForWrite(self, "Rotation");
@@ -1067,22 +1389,27 @@ namespace CoreAI.Ai.LuaCs
                         rotation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
                         RbxCFrame.FromPosition(rotationProperties.Position) * rotationCFrame);
+                    context.RecordMutation(self);
                     return true;
                 case "Color":
                     context.RequireWorldEditForWrite(self, "Color");
                     sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "Transparency":
                     context.RequireWorldEditForWrite(self, "Transparency");
                     sink.SetTransparency(id, ReadNumberValue(value, "Part.Transparency assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "Anchored":
                     context.RequireWorldEditForWrite(self, "Anchored");
                     sink.SetAnchored(id, value.ToBoolean());
+                    context.RecordMutation(self);
                     return true;
                 case "CanCollide":
                     context.RequireWorldEditForWrite(self, "CanCollide");
                     sink.SetCanCollide(id, value.ToBoolean());
+                    context.RecordMutation(self);
                     return true;
                 default:
                     return false;
@@ -1236,6 +1563,7 @@ namespace CoreAI.Ai.LuaCs
             if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "MouseBehavior")
             {
                 service.MouseBehavior = item;
+                context.RecordMutation(self);
                 return true;
             }
 
@@ -1336,6 +1664,7 @@ namespace CoreAI.Ai.LuaCs
 
             context.RequireWorldEditForWrite(self, "MaxActivationDistance");
             detector.MaxActivationDistance = ReadNumberValue(value, "ClickDetector.MaxActivationDistance");
+            context.RecordMutation(self);
             return true;
         }
 
@@ -1390,15 +1719,18 @@ namespace CoreAI.Ai.LuaCs
                     context.RequireWorldEditForWrite(self, "CFrame");
                     context.Bindings.CameraRig.SetCFrame(
                         ReadCFrameValue(value, "Camera.CFrame assignment"));
+                    context.RecordMutation(self);
                     return true;
                 case "CameraType":
                     context.RequireWorldEditForWrite(self, "CameraType");
                     context.Bindings.CameraTypeItem = ReadCameraTypeValue(value);
+                    context.RecordMutation(self);
                     return true;
                 case "CameraSubject":
                     context.RequireWorldEditForWrite(self, "CameraSubject");
                     context.Bindings.SetCameraSubject(
                         ReadOptionalInstance(value, "Camera.CameraSubject assignment"));
+                    context.RecordMutation(self);
                     return true;
                 default:
                     return false;

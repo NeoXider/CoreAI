@@ -173,6 +173,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
 
             public bool Failed => Exception != null || Failures.Count > 0;
 
+            public bool QuietlyIncomplete => !Failed && Completion == null;
+
             public string FailureText()
             {
                 List<string> diagnostics = new(Failures);
@@ -218,6 +220,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                     return;
                 case TierAFixtureDriver.PumpThreeFrames:
                     for (int frame = 0; frame < 3; frame++)
+                    {
+                        harness.RbxApi.PumpFrame(1f / 60f);
+                        harness.RbxApi.Scheduler.Advance(0d);
+                    }
+
+                    return;
+                case TierAFixtureDriver.PumpSixSeconds:
+                    for (int frame = 0; frame < 360; frame++)
                     {
                         harness.RbxApi.PumpFrame(1f / 60f);
                         harness.RbxApi.Scheduler.Advance(0d);
@@ -287,6 +297,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                     Assert.AreEqual("None.", fixture.Accommodation);
                     Assert.IsEmpty(fixture.ApiGap);
                     Assert.IsEmpty(fixture.ExpectedFailureText);
+                    Assert.AreEqual(TierAFixtureExpectedOutcome.Completion,
+                        fixture.ExpectedOutcome);
                 }
                 else if (fixture.Classification == TierAFixtureClassification.Modified)
                 {
@@ -294,11 +306,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                         fixture.Id + " must state its exact source edit.");
                     Assert.IsNotEmpty(fixture.ApiGap);
                     Assert.IsEmpty(fixture.ExpectedFailureText);
+                    Assert.AreEqual(TierAFixtureExpectedOutcome.Completion,
+                        fixture.ExpectedOutcome);
                 }
                 else
                 {
                     Assert.IsNotEmpty(fixture.ApiGap);
-                    Assert.IsNotEmpty(fixture.ExpectedFailureText);
+                    Assert.AreNotEqual(TierAFixtureExpectedOutcome.Completion,
+                        fixture.ExpectedOutcome);
+                    if (fixture.ExpectedOutcome ==
+                        TierAFixtureExpectedOutcome.DiagnosticFailure)
+                    {
+                        Assert.IsNotEmpty(fixture.ExpectedFailureText);
+                    }
+                    else
+                    {
+                        Assert.AreEqual(TierAFixtureExpectedOutcome.IndefiniteYield,
+                            fixture.ExpectedOutcome);
+                        Assert.IsEmpty(fixture.ExpectedFailureText);
+                    }
                 }
             }
 
@@ -314,13 +340,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             ExecutionOutcome outcome = Execute(fixture);
             string failureText = outcome.FailureText();
 
-            if (fixture.Classification == TierAFixtureClassification.Failing)
+            if (fixture.ExpectedOutcome == TierAFixtureExpectedOutcome.DiagnosticFailure)
             {
                 Assert.IsTrue(outcome.Failed,
                     fixture.Id + " no longer produces its recorded failure. Completion: " +
                     (outcome.Completion ?? "<none>"));
                 StringAssert.Contains(fixture.ExpectedFailureText, failureText,
                     fixture.Id + " failed for a reason other than its recorded API gap.\n" + failureText);
+                return;
+            }
+
+            if (fixture.ExpectedOutcome == TierAFixtureExpectedOutcome.IndefiniteYield)
+            {
+                Assert.IsTrue(outcome.QuietlyIncomplete,
+                    fixture.Id + " no longer produces its recorded indefinite yield. Completion: " +
+                    (outcome.Completion ?? "<none>") + "\n" + failureText);
                 return;
             }
 

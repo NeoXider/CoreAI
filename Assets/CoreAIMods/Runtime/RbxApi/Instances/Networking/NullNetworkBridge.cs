@@ -14,11 +14,21 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
     /// <summary>
     /// In-process solo bridge. Reliable events are delivered FIFO; unreliable events carry the
-    /// weaker contract but the null transport is free to deliver them unchanged.
+    /// weaker contract but the null transport is free to deliver them unchanged. Client admission
+    /// uses Roblox's per-client, same-event-type grouping for reliable and unreliable events.
+    /// OURS: RemoteFunction uses a third independent bucket with the same configurable limit because
+    /// the offline Roblox reference does not specify its quota.
     /// </summary>
     public sealed class NullNetworkBridge : INetworkBridge
     {
         public const int DefaultMaxClientRequestsPerSecond = 500;
+
+        private enum RateGroup
+        {
+            ReliableRemoteEvent,
+            UnreliableRemoteEvent,
+            RemoteFunction
+        }
 
         private sealed class RateWindow
         {
@@ -30,7 +40,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         private readonly Func<double> _clockSeconds;
         private readonly HashSet<string> _actors = new(StringComparer.Ordinal);
         private readonly List<string> _actorOrder = new();
-        private readonly Dictionary<string, RateWindow> _rateWindows =
+        private readonly Dictionary<string, Dictionary<RateGroup, RateWindow>> _rateWindows =
             new(StringComparer.Ordinal);
         private readonly Queue<RbxNetworkEventMessage> _eventQueue = new();
         private readonly RbxNullNetworkUnreliableBehavior _unreliableBehavior;
@@ -100,7 +110,11 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
             ValidateRoute(message.Direction, message.SenderActorId,
                 message.RecipientActorId);
-            AdmitClientRequest(message.Direction, message.SenderActorId);
+            RateGroup rateGroup = message.Reliability
+                                  == RbxNetworkReliability.UnreliableUnordered
+                ? RateGroup.UnreliableRemoteEvent
+                : RateGroup.ReliableRemoteEvent;
+            AdmitClientRequest(message.Direction, message.SenderActorId, rateGroup);
             if (message.Reliability == RbxNetworkReliability.UnreliableUnordered)
             {
                 if (_unreliableBehavior == RbxNullNetworkUnreliableBehavior.DropAll)
@@ -136,7 +150,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
             ValidateRoute(message.Direction, message.SenderActorId,
                 message.RecipientActorId);
-            AdmitClientRequest(message.Direction, message.SenderActorId);
+            AdmitClientRequest(message.Direction, message.SenderActorId,
+                RateGroup.RemoteFunction);
 
             Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> receiver =
                 RequestReceived;
@@ -181,7 +196,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
         }
 
-        private void AdmitClientRequest(RbxNetworkDirection direction, string actorId)
+        private void AdmitClientRequest(RbxNetworkDirection direction, string actorId,
+            RateGroup rateGroup)
         {
             if (direction != RbxNetworkDirection.ClientToServer)
             {
@@ -190,12 +206,19 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
             string actor = RequireRegisteredActor(actorId, "send a client request");
             double now = _clockSeconds();
-            if (!_rateWindows.TryGetValue(actor, out RateWindow window)
+            if (!_rateWindows.TryGetValue(actor,
+                    out Dictionary<RateGroup, RateWindow> actorWindows))
+            {
+                actorWindows = new Dictionary<RateGroup, RateWindow>();
+                _rateWindows.Add(actor, actorWindows);
+            }
+
+            if (!actorWindows.TryGetValue(rateGroup, out RateWindow window)
                 || now - window.StartedAt >= 1d
                 || now < window.StartedAt)
             {
                 window = new RateWindow { StartedAt = now };
-                _rateWindows[actor] = window;
+                actorWindows[rateGroup] = window;
             }
 
             if (window.Accepted >= _maxClientRequestsPerSecond)
@@ -203,11 +226,27 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 throw new RbxError(
                     RbxErrorCode.BudgetExceeded,
                     "actor '" + actor + "' cannot send a client network request: network request "
-                    + "rate quota reached (limit " + _maxClientRequestsPerSecond + " requests/s)",
+                    + "rate quota reached (limit " + _maxClientRequestsPerSecond
+                    + " requests/s) for " + RateGroupName(rateGroup),
                     "reduce the request rate or configure a higher loopback admission limit");
             }
 
             window.Accepted++;
+        }
+
+        private static string RateGroupName(RateGroup rateGroup)
+        {
+            switch (rateGroup)
+            {
+                case RateGroup.ReliableRemoteEvent:
+                    return "RemoteEvent";
+                case RateGroup.UnreliableRemoteEvent:
+                    return "UnreliableRemoteEvent";
+                case RateGroup.RemoteFunction:
+                    return "RemoteFunction (OURS)";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(rateGroup), rateGroup, null);
+            }
         }
 
         private void QueueReversedUnreliablePair(RbxNetworkEventMessage message)

@@ -1017,6 +1017,11 @@ namespace CoreAI.Ai.LuaCs
 
         private void OnInstanceRegistered(InstanceRecord record)
         {
+            if (record.IsRuntimeInfrastructure)
+            {
+                return;
+            }
+
             string actorId = ResolveInstanceQuotaActorId(record);
             string rejection = null;
             lock (_instanceQuotaGate)

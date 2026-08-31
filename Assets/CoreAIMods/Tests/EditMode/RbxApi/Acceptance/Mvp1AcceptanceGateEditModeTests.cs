@@ -163,7 +163,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void Gate_Destroy_RemovesRecordAndReleasesTheBackingGameObject()
         {
-            int baseline = _world.Registry.Count;
+            int baseline = _world.Registry.AuthoredCount;
             _world.Stack.Runtime.LoadMod("builder", @"
                 local rig = Instance.new('Model')
                 rig.Name = 'DoomedRig'
@@ -178,7 +178,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             InstanceId partId = part.Id;
             GameObject rigGo = _world.BoundObject(rig);
             GameObject partGo = _world.BoundObject(part);
-            Assert.AreEqual(baseline + 2, _world.Registry.Count);
+            Assert.AreEqual(baseline + 2, _world.Registry.AuthoredCount);
 
             _world.Stack.Runtime.LoadMod("destroyer",
                 "workspace:FindFirstChild('DoomedRig'):Destroy()");
@@ -192,7 +192,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse(_world.Binder.TryGetBoundObject(partId, out _));
             Assert.IsTrue(rigGo == null && partGo == null,
                 "the backing GameObjects must be released (R6.2 step 6)");
-            Assert.AreEqual(baseline, _world.Registry.Count,
+            Assert.AreEqual(baseline, _world.Registry.AuthoredCount,
                 "a full build+destroy cycle leaves the registry at its baseline");
         }
 

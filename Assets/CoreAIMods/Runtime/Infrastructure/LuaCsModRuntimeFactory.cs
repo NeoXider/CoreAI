@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai.Logging;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -54,6 +56,34 @@ namespace CoreAI.Ai.LuaCs
         /// the same instance world. Null = the Roblox globals are not installed.
         /// </summary>
         public LuaCsRbxApiBindings RbxApi;
+
+        /// <summary>
+        /// Host-owned outbound authorization policy. Null keeps mod HTTP disabled by default.
+        /// </summary>
+        public IRbxHttpRequestPolicy RbxHttpPolicy;
+
+        /// <summary>
+        /// Host-owned outbound transport. Null keeps the production transport refusing loudly even
+        /// when a host policy is configured.
+        /// </summary>
+        public IRbxHttpTransport RbxHttpTransport;
+
+        /// <summary>
+        /// Host-owned DNS resolver. Null keeps domain resolution refusing even when policy and
+        /// transport are configured.
+        /// </summary>
+        public IRbxHttpDestinationResolver RbxHttpResolver;
+
+        /// <summary>Maximum outbound requests accepted per actor in one rate window.</summary>
+        public int RbxHttpRequestsPerWindow =
+            LuaCsRbxHttpServiceAdapter.DefaultRequestsPerWindow;
+
+        /// <summary>Length of the per-actor outbound request rate window in seconds.</summary>
+        public double RbxHttpRateWindowSeconds =
+            LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds;
+
+        /// <summary>Optional monotonic clock shared by os.clock and HTTP rate accounting.</summary>
+        public Func<double> RbxMonotonicClock;
 
         /// <summary>
         /// When false, the low-level WorldEdit build/edit APIs (<c>coreai_world_spawn</c>/... and the
@@ -219,7 +249,13 @@ namespace CoreAI.Ai.LuaCs
                 allowNonPublicFullMembers: options.AllowNonPublicFullMembers,
                 capabilities: options.Capabilities,
                 rbxApi: options.RbxApi,
-                registerWorldEditBuildBindings: options.RegisterWorldEditBuildBindings);
+                registerWorldEditBuildBindings: options.RegisterWorldEditBuildBindings,
+                rbxHttpPolicy: options.RbxHttpPolicy,
+                rbxHttpTransport: options.RbxHttpTransport,
+                rbxHttpResolver: options.RbxHttpResolver,
+                rbxHttpRequestsPerWindow: options.RbxHttpRequestsPerWindow,
+                rbxHttpRateWindowSeconds: options.RbxHttpRateWindowSeconds,
+                rbxMonotonicClock: options.RbxMonotonicClock);
 
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
@@ -287,7 +323,8 @@ namespace CoreAI.Ai.LuaCs
         /// VM-agnostic <see cref="ILuaCsGameRuntimeBindings"/> at a fixed capability tier, forwarding the
         /// transaction-reset seam so a leaked <c>coreai_world_begin</c> can be cleared between chunks.
         /// </summary>
-        private sealed class CapabilityScopedGameRuntimeBindings : ILuaCsGameRuntimeBindings, ILuaTransactionScope
+        private sealed class CapabilityScopedGameRuntimeBindings : ILuaCsGameRuntimeBindings,
+            IActorScopedLuaCsGameRuntimeBindings, ILuaTransactionScope
         {
             private readonly LuaCsGameplayBindings _bindings;
             private readonly LuaCapabilities _capabilities;
@@ -306,6 +343,16 @@ namespace CoreAI.Ai.LuaCs
             public void RegisterGameplayApis(LuaCsApiRegistry registry)
             {
                 _bindings.Register(registry, _capabilities);
+                _additional?.Invoke(registry, _capabilities);
+            }
+
+            public InstanceRegistry MutationRegistry => _bindings.RbxApi?.Registry;
+
+            public void RegisterGameplayApis(LuaCsApiRegistry registry,
+                ActorContext actorContext, MutationEnvelope mutationEnvelope)
+            {
+                _bindings.Register(registry, _capabilities, null,
+                    actorContext, mutationEnvelope);
                 _additional?.Invoke(registry, _capabilities);
             }
 

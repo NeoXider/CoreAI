@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -23,6 +25,14 @@ namespace CoreAI.Ai.LuaCs
     {
         /// <summary>Registers gameplay-facing Lua-CSharp APIs in the provided registry.</summary>
         void RegisterGameplayApis(LuaCsApiRegistry registry);
+    }
+
+    internal interface IActorScopedLuaCsGameRuntimeBindings
+    {
+        InstanceRegistry MutationRegistry { get; }
+
+        void RegisterGameplayApis(LuaCsApiRegistry registry, ActorContext actorContext,
+            MutationEnvelope mutationEnvelope);
     }
 
     /// <summary>Registers the default Lua-CSharp runtime APIs (mirrors <c>CoreDefaultLuaRuntimeBindings</c>).</summary>
@@ -46,7 +56,7 @@ namespace CoreAI.Ai.LuaCs
     /// notifications, same result/error caps). State persists through the C#-side APIs the bindings
     /// expose (logic slots, mods, world commands), not through Lua globals.
     /// </summary>
-    public sealed class LuaCsGameToolExecutor : LuaTool.ILuaExecutor
+    public sealed class LuaCsGameToolExecutor : LuaTool.ILuaExecutor, LuaTool.IMutationExecutor
     {
         private readonly IScriptEngine _engine;
         private readonly ILuaCsGameRuntimeBindings _bindings;
@@ -100,13 +110,70 @@ namespace CoreAI.Ai.LuaCs
         /// <inheritdoc />
         public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken cancellationToken)
         {
+            LuaTool.LuaResult result = ExecuteCore(
+                code, cancellationToken, _bindings.RegisterGameplayApis);
+            return Task.FromResult(result);
+        }
+
+        /// <summary>
+        /// Executes one actor-scoped world mutation under optimistic revision and idempotency checks.
+        /// Kept as an overload so existing executor consumers do not need to reference the envelope
+        /// assembly unless they opt into the mutation protocol.
+        /// </summary>
+        public Task<LuaTool.LuaResult> ExecuteAsync(string code, ActorContext actorContext,
+            MutationEnvelope mutationEnvelope, CancellationToken cancellationToken)
+        {
+            if (!actorContext.IsTrusted)
+            {
+                return Task.FromResult(CreateFailure(
+                    "actor '<untrusted>' cannot apply operation '"
+                    + mutationEnvelope.OperationId
+                    + "': actor context was not issued by an identity provider"));
+            }
+
+            if (!string.Equals(actorContext.ActorId, mutationEnvelope.ActorId,
+                    StringComparison.Ordinal))
+            {
+                return Task.FromResult(CreateFailure(
+                    "actor '" + actorContext.ActorId + "' cannot apply operation '"
+                    + mutationEnvelope.OperationId + "': the mutation envelope belongs to actor '"
+                    + mutationEnvelope.ActorId + "'"));
+            }
+
+            if (!(_bindings is IActorScopedLuaCsGameRuntimeBindings scopedBindings)
+                || scopedBindings.MutationRegistry == null)
+            {
+                return Task.FromResult(CreateFailure(
+                    "actor '" + actorContext.ActorId + "' cannot apply operation '"
+                    + mutationEnvelope.OperationId
+                    + "': the production Rbx mutation surface is not configured"));
+            }
+
+            try
+            {
+                LuaTool.LuaResult result = scopedBindings.MutationRegistry.ApplyMutation(
+                    mutationEnvelope,
+                    () => ExecuteCore(code, cancellationToken,
+                        registry => scopedBindings.RegisterGameplayApis(
+                            registry, actorContext, mutationEnvelope)));
+                return Task.FromResult(result);
+            }
+            catch (Exception ex)
+            {
+                return Task.FromResult(CreateFailure(ex.Message));
+            }
+        }
+
+        private LuaTool.LuaResult ExecuteCore(string code, CancellationToken cancellationToken,
+            Action<LuaCsApiRegistry> registerGameplayApis)
+        {
             if (!IsSupported)
             {
-                return Task.FromResult(new LuaTool.LuaResult
+                return new LuaTool.LuaResult
                 {
                     Success = false,
                     Error = "CoreAI Lua execution is disabled on this platform."
-                });
+                };
             }
 
             // WHY: The world bindings are a shared singleton: a prior chunk that died between
@@ -117,7 +184,7 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 LuaCsApiRegistry registry = new();
-                _bindings.RegisterGameplayApis(registry);
+                registerGameplayApis(registry);
                 IScriptState state = _engine.CreateState();
                 registry.ApplyTo(state);
 
@@ -129,20 +196,25 @@ namespace CoreAI.Ai.LuaCs
                 string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
                 _observer.OnLuaSuccess(summary);
                 LuaExecutedSuccessfully?.Invoke(code ?? "");
-                return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = summary });
+                return new LuaTool.LuaResult { Success = true, Output = summary };
             }
             catch (Exception ex)
             {
-                string flat = Truncate(
-                    (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim(),
-                    LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
-                _observer.OnLuaFailure(flat);
-                return Task.FromResult(new LuaTool.LuaResult { Success = false, Error = flat });
+                return CreateFailure(ex.Message);
             }
             finally
             {
                 (_bindings as ILuaTransactionScope)?.ResetTransactions();
             }
+        }
+
+        private LuaTool.LuaResult CreateFailure(string message)
+        {
+            string flat = Truncate(
+                (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim(),
+                LuaCsAiEnvelopeProcessor.MaxErrorMessageLength);
+            _observer.OnLuaFailure(flat);
+            return new LuaTool.LuaResult { Success = false, Error = flat };
         }
 
         /// <summary>Renders the chunk's first return value into a printable summary (VM-agnostic).</summary>

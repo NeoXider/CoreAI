@@ -1,6 +1,4 @@
-local part = Instance.new("Part")
-part.Name = "TierAPropertySource"
-part.Parent = workspace
+local part = script.Parent
 
 part:GetPropertyChangedSignal("Name"):Connect(function()
     assert(part.Name == "TierAPropertyRenamed")

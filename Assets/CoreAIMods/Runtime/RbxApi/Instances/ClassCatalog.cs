@@ -339,6 +339,14 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             ClassCatalog catalog = new();
             catalog.Register(new ClassDescriptor("Instance", null, true, false, false));
+            catalog.Register(new ClassDescriptor(
+                "LuaSourceContainer", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor(
+                "BaseScript", "LuaSourceContainer", true, false, false));
+            catalog.Register(new ClassDescriptor(
+                "Script", "BaseScript", false, false, false));
+            catalog.Register(new ClassDescriptor(
+                "LocalScript", "Script", false, false, false));
             catalog.Register(new ClassDescriptor("BaseRemoteEvent", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("RemoteEvent", "BaseRemoteEvent", false, true, false,
                 descriptor => new RbxRemoteEvent(descriptor)));
@@ -380,6 +388,9 @@ namespace CoreAI.Mods.Rbx.Instances
             // RenderStepped); behavior class fires the signals from the host's per-frame Step pump.
             catalog.Register(new ClassDescriptor("RunService", "Instance", false, false, true,
                 descriptor => new RbxRunService(descriptor)));
+            // WHY: MVP2 exposes local JSON/GUID/URL helpers and a fail-closed outbound policy seam;
+            // the production transport still refuses loudly until the host installs a safe one.
+            catalog.Register(new ClassDescriptor("HttpService", "Instance", false, false, true));
             // WHY: ClickDetector is a normal creatable Instance (superclass Instance, NOT a service) —
             // a mod does Instance.new("ClickDetector") and parents it under a Part; the behavior class
             // carries the MouseClick signal the host pick pump fires when that part is clicked.

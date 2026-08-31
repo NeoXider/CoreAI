@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -45,7 +46,28 @@ namespace CoreAI.Ai.LuaCs
     internal sealed class LuaCsRbxNetworkCodec
     {
         private const string TypeKey = "$rbx";
+        internal const int MaxNestingDepth = 64;
+        internal const int MaxAggregateEntries = 100_000;
+        private const int MaxJsonEnvelopeDepth = MaxNestingDepth * 2 + 4;
         private static readonly UTF8Encoding Utf8 = new(false);
+
+        private sealed class TraversalState
+        {
+            private int _aggregateEntries;
+
+            public void ConsumeEntries(int count, string path)
+            {
+                if (count < 0 || count > MaxAggregateEntries - _aggregateEntries)
+                {
+                    throw RbxError.BadArgument(
+                        "remote payload exceeds CoreAI's " + MaxAggregateEntries
+                        + " aggregate entry limit at " + path,
+                        "send fewer total arguments and table entries");
+                }
+
+                _aggregateEntries += count;
+            }
+        }
 
         private sealed class LuaTableReferenceComparer : IEqualityComparer<LuaTable>
         {
@@ -75,12 +97,14 @@ namespace CoreAI.Ai.LuaCs
         public byte[] EncodeArguments(IReadOnlyList<LuaValue> arguments)
         {
             JArray root = new();
+            TraversalState state = new();
             HashSet<LuaTable> activeTables = new(new LuaTableReferenceComparer());
             int count = arguments?.Count ?? 0;
+            state.ConsumeEntries(count, "$");
             for (int index = 0; index < count; index++)
             {
-                root.Add(EncodeValue(arguments[index], activeTables,
-                    "$[" + index + "]"));
+                root.Add(EncodeValue(arguments[index], state, activeTables,
+                    0, "$[" + index + "]"));
             }
 
             string json = root.ToString(Formatting.None);
@@ -93,7 +117,19 @@ namespace CoreAI.Ai.LuaCs
             JToken token;
             try
             {
-                token = JToken.Parse(json);
+                using StringReader stringReader = new(json);
+                using JsonTextReader reader = new(stringReader)
+                {
+                    DateParseHandling = DateParseHandling.None,
+                    FloatParseHandling = FloatParseHandling.Double,
+                    MaxDepth = MaxJsonEnvelopeDepth
+                };
+                token = JToken.ReadFrom(reader);
+                if (reader.Read())
+                {
+                    throw new JsonReaderException(
+                        "Additional text follows the remote payload envelope.");
+                }
             }
             catch (Exception ex)
             {
@@ -110,9 +146,12 @@ namespace CoreAI.Ai.LuaCs
             }
 
             object[] arguments = new object[array.Count];
+            TraversalState state = new();
+            state.ConsumeEntries(array.Count, "$");
             for (int index = 0; index < array.Count; index++)
             {
-                arguments[index] = DecodeValue(array[index], "$[" + index + "]");
+                arguments[index] = DecodeValue(
+                    array[index], state, 0, "$[" + index + "]");
             }
 
             return arguments;
@@ -153,8 +192,8 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private JToken EncodeValue(LuaValue value, HashSet<LuaTable> activeTables,
-            string path)
+        private JToken EncodeValue(LuaValue value, TraversalState state,
+            HashSet<LuaTable> activeTables, int depth, string path)
         {
             switch (value.Type)
             {
@@ -169,15 +208,24 @@ namespace CoreAI.Ai.LuaCs
                 case LuaValueType.Function:
                     return JValue.CreateNull();
                 case LuaValueType.Table:
-                    return EncodeTable(value.Read<LuaTable>(), activeTables, path);
+                    return EncodeTable(
+                        value.Read<LuaTable>(), state, activeTables, depth, path);
                 default:
                     return EncodeUserData(value);
             }
         }
 
-        private JToken EncodeTable(LuaTable table, HashSet<LuaTable> activeTables,
-            string path)
+        private JToken EncodeTable(LuaTable table, TraversalState state,
+            HashSet<LuaTable> activeTables, int depth, string path)
         {
+            if (depth >= MaxNestingDepth)
+            {
+                throw RbxError.BadArgument(
+                    "remote payload table nesting exceeds CoreAI's "
+                    + MaxNestingDepth + " level limit at " + path,
+                    "flatten the table before firing or invoking the remote");
+            }
+
             if (!activeTables.Add(table))
             {
                 throw RbxError.BadArgument(
@@ -192,6 +240,7 @@ namespace CoreAI.Ai.LuaCs
                 bool hasOtherKeys = false;
                 foreach (KeyValuePair<LuaValue, LuaValue> pair in table)
                 {
+                    state.ConsumeEntries(1, path);
                     pairs.Add(pair);
                     if (IsArrayIndex(pair.Key, out _))
                     {
@@ -211,8 +260,8 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 return hasNumericKeys
-                    ? EncodeArrayTable(pairs, activeTables, path)
-                    : EncodeDictionaryTable(pairs, activeTables, path);
+                    ? EncodeArrayTable(pairs, state, activeTables, depth, path)
+                    : EncodeDictionaryTable(pairs, state, activeTables, depth, path);
             }
             finally
             {
@@ -221,7 +270,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         private JToken EncodeArrayTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
-            HashSet<LuaTable> activeTables, string path)
+            TraversalState state, HashSet<LuaTable> activeTables, int depth, string path)
         {
             JToken[] ordered = new JToken[pairs.Count];
             for (int index = 0; index < pairs.Count; index++)
@@ -237,8 +286,8 @@ namespace CoreAI.Ai.LuaCs
                         "remove nil holes and non-contiguous numeric indices");
                 }
 
-                JToken encoded = EncodeValue(pair.Value, activeTables,
-                    path + "[" + arrayIndex + "]");
+                JToken encoded = EncodeValue(pair.Value, state, activeTables,
+                    depth + 1, path + "[" + arrayIndex + "]");
                 if (encoded.Type == JTokenType.Null)
                 {
                     throw RbxError.BadArgument(
@@ -272,15 +321,15 @@ namespace CoreAI.Ai.LuaCs
         }
 
         private JToken EncodeDictionaryTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
-            HashSet<LuaTable> activeTables, string path)
+            TraversalState state, HashSet<LuaTable> activeTables, int depth, string path)
         {
             JObject values = new();
             for (int index = 0; index < pairs.Count; index++)
             {
                 KeyValuePair<LuaValue, LuaValue> pair = pairs[index];
                 string key = StringifyKey(pair.Key);
-                values[key] = EncodeValue(pair.Value, activeTables,
-                    path + "." + key);
+                values[key] = EncodeValue(pair.Value, state, activeTables,
+                    depth + 1, path + "." + key);
             }
 
             return new JObject
@@ -347,7 +396,8 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private object DecodeValue(JToken token, string path)
+        private object DecodeValue(JToken token, TraversalState state,
+            int depth, string path)
         {
             switch (token.Type)
             {
@@ -362,7 +412,7 @@ namespace CoreAI.Ai.LuaCs
                 case JTokenType.String:
                     return token.Value<string>();
                 case JTokenType.Object:
-                    return DecodeTagged((JObject)token, path);
+                    return DecodeTagged((JObject)token, state, depth, path);
                 default:
                     throw RbxError.BadArgument(
                         "remote payload contains unsupported JSON token " + token.Type
@@ -371,13 +421,14 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private object DecodeTagged(JObject tagged, string path)
+        private object DecodeTagged(JObject tagged, TraversalState state,
+            int depth, string path)
         {
             string type = tagged.Value<string>(TypeKey);
             switch (type)
             {
                 case "table":
-                    return DecodeTable(tagged, path);
+                    return DecodeTable(tagged, state, depth, path);
                 case "Instance":
                     return DecodeInstance(tagged, path);
                 case "Vector3":
@@ -414,16 +465,26 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private object DecodeTable(JObject tagged, string path)
+        private object DecodeTable(JObject tagged, TraversalState state,
+            int depth, string path)
         {
+            if (depth >= MaxNestingDepth)
+            {
+                throw RbxError.BadArgument(
+                    "remote payload table nesting exceeds CoreAI's "
+                    + MaxNestingDepth + " level limit at " + path,
+                    "decode a shallower remote payload");
+            }
+
             string kind = tagged.Value<string>("kind");
             JToken values = tagged["values"];
             if (kind == "array" && values is JArray array)
             {
+                state.ConsumeEntries(array.Count, path);
                 List<object> decoded = new(array.Count);
                 for (int index = 0; index < array.Count; index++)
                 {
-                    decoded.Add(DecodeValue(array[index],
+                    decoded.Add(DecodeValue(array[index], state, depth + 1,
                         path + "[" + (index + 1) + "]"));
                 }
 
@@ -432,11 +493,13 @@ namespace CoreAI.Ai.LuaCs
 
             if (kind == "dictionary" && values is JObject dictionary)
             {
+                state.ConsumeEntries(dictionary.Count, path);
                 List<KeyValuePair<string, object>> decoded = new();
                 foreach (JProperty property in dictionary.Properties())
                 {
                     decoded.Add(new KeyValuePair<string, object>(property.Name,
-                        DecodeValue(property.Value, path + "." + property.Name)));
+                        DecodeValue(property.Value, state, depth + 1,
+                            path + "." + property.Name)));
                 }
 
                 return new LuaCsRbxNetworkTable(decoded);

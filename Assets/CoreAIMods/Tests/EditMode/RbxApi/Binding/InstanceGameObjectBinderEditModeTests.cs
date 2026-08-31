@@ -306,27 +306,48 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         {
             // WHY: §5.1.8 item 11 — switching 0.28 <-> 1:1 touches zero assets; the same
             // binder code path must yield stud-numeric localScale at 1:1.
-            RbxSpace.ResetForTests(1f);
-            GameObject root = new("OneToOneRoot");
-            try
+            float[] metersPerStudValues = { 0.28f, 1f };
+            RbxPartShape[] shapes =
             {
-                InstanceGameObjectBinder binder = new(root.transform);
-                InstanceRegistry registry = new(null, binder);
-                RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-                RbxInstance part = registry.Create("Part");
-                part.Parent = registry.WorldRoot;
-                binder.SetSize(part.Id, new RbxVector3(4f, 1f, 2f));
+                RbxPartShape.Block,
+                RbxPartShape.Wedge,
+                RbxPartShape.CornerWedge
+            };
+            string[] expectedMeshNames = { "Cube", "CoreAiWedge", "CoreAiCornerWedge" };
 
-                Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject partGo));
-                Vector3 scale = partGo.transform.localScale;
-                Assert.AreEqual(4f, scale.x, Epsilon);
-                Assert.AreEqual(1f, scale.y, Epsilon);
-                Assert.AreEqual(2f, scale.z, Epsilon);
-                game.Destroy();
-            }
-            finally
+            for (int scaleIndex = 0; scaleIndex < metersPerStudValues.Length; scaleIndex++)
             {
-                Object.DestroyImmediate(root);
+                float metersPerStud = metersPerStudValues[scaleIndex];
+                RbxSpace.ResetForTests(metersPerStud);
+                GameObject root = new("AssetRuleRoot" + scaleIndex);
+                RbxDataModel game = null;
+                try
+                {
+                    InstanceGameObjectBinder binder = new(root.transform);
+                    InstanceRegistry registry = new(null, binder);
+                    game = DataModelBootstrap.CreateGame(registry);
+                    for (int shapeIndex = 0; shapeIndex < shapes.Length; shapeIndex++)
+                    {
+                        RbxInstance part = registry.Create("Part");
+                        part.Parent = registry.WorldRoot;
+                        binder.SetShape(part.Id, shapes[shapeIndex]);
+                        binder.SetSize(part.Id, new RbxVector3(4f, 1f, 2f));
+
+                        Assert.IsTrue(binder.TryGetBoundObject(part.Id, out GameObject partGo));
+                        Assert.AreEqual(expectedMeshNames[shapeIndex],
+                            partGo.GetComponent<MeshFilter>().sharedMesh.name,
+                            shapes[shapeIndex] + " must use its normalized unit mesh at both scales");
+                        Vector3 scale = partGo.transform.localScale;
+                        Assert.AreEqual(4f * metersPerStud, scale.x, Epsilon);
+                        Assert.AreEqual(1f * metersPerStud, scale.y, Epsilon);
+                        Assert.AreEqual(2f * metersPerStud, scale.z, Epsilon);
+                    }
+                }
+                finally
+                {
+                    game?.Destroy();
+                    Object.DestroyImmediate(root);
+                }
             }
         }
 

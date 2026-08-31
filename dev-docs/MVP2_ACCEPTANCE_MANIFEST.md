@@ -74,7 +74,7 @@ A run reporting zero for any of these **fails**, regardless of its timings:
 | G9 engine-free ports | ports resolve | asmdef test: the engine-free assembly references no Unity assembly, transitively |
 | G10 chat throughput | ≥95% of offered load served, p95 ≤ 5 s | 0 cross-actor cancellations; no actor starved > 60 s |
 | G11 WebGL | §6.5 checklist in a real browser run | a static checklist alone does not satisfy G11 |
-| G12 corpus | fixed fixture ids (listed at Phase 10), ≥30% unmodified | — |
+| G12 corpus | fixed fixture ids (listed at Phase 10), ≥30% unmodified; measured 2026-09-01: **15/20 = 75%** (2 modified, 3 failing) | — |
 
 ## 6. Frame budget — derived, with the arithmetic shown
 

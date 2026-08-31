@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -98,6 +99,60 @@ namespace CoreAI.Infrastructure.World
             }
 
             return truncated;
+        }
+
+        /// <summary>Returns the first exact-name object in the same bounded depth-first order used
+        /// by <see cref="CollectByName"/>. Active and inactive scene objects are both eligible.</summary>
+        public static bool TryFindExact(
+            IReadOnlyList<GameObject> rootObjects,
+            string objectName,
+            out GameObject result)
+        {
+            if (string.IsNullOrEmpty(objectName))
+            {
+                result = null;
+                return false;
+            }
+
+            Stack<GameObject> stack = new();
+            int scheduled = 0;
+            for (int i = rootObjects.Count - 1; i >= 0 && scheduled < MaxVisitedNodes; i--)
+            {
+                if (rootObjects[i] != null)
+                {
+                    stack.Push(rootObjects[i]);
+                    scheduled++;
+                }
+            }
+
+            int visited = 0;
+            while (stack.Count > 0 && visited < MaxVisitedNodes)
+            {
+                GameObject current = stack.Pop();
+                if (current == null)
+                {
+                    continue;
+                }
+
+                visited++;
+                if (string.Equals(current.name, objectName, StringComparison.Ordinal))
+                {
+                    result = current;
+                    return true;
+                }
+
+                Transform transform = current.transform;
+                for (int i = transform.childCount - 1;
+                     i >= 0 && scheduled < MaxVisitedNodes;
+                     i--)
+                {
+                    stack.Push(transform.GetChild(i).gameObject);
+                    scheduled++;
+                }
+            }
+
+            result = null;
+            return false;
         }
     }
 }

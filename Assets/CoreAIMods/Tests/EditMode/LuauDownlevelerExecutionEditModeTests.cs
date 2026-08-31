@@ -129,6 +129,35 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void GeneralizedIteration_DirectTableUsesNativeKeysAndValues()
+        {
+            Assert.AreEqual(66, RunNumber(
+                "local total = 0 for i, v in { 10, 20, 30 } do total = total + i + v end return total"));
+        }
+
+        [Test]
+        public void GeneralizedIteration_IterMetamethodSuppliesCustomIterator()
+        {
+            string luau =
+                "local values = { 2, 4, 8 }\n" +
+                "setmetatable(values, { __iter = function(t)\n" +
+                "    local i = #t + 1\n" +
+                "    return function() i = i - 1 if i > 0 then return i, t[i] end end\n" +
+                "end })\n" +
+                "local encoded = 0\n" +
+                "for i, v in values do encoded = encoded * 10 + i + v end\n" +
+                "return encoded\n";
+            Assert.AreEqual(1163, RunNumber(luau));
+        }
+
+        [Test]
+        public void GeneralizedIteration_PreservesOrdinaryIteratorTriples()
+        {
+            Assert.AreEqual(15, RunNumber(
+                "local total = 0 for _, v in ipairs({ 4, 5, 6 }) do total = total + v end return total"));
+        }
+
+        [Test]
         public void ContinueAndBreakInSameLoop_BothWork()
         {
             string luau =

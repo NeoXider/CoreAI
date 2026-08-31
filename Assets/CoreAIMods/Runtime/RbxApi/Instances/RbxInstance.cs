@@ -67,6 +67,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
                 _name = nextName;
                 Registry?.OnNameChanged(this);
+                Registry?.AdvanceRevision(Id);
                 FireSignal("GetPropertyChangedSignal(Name)");
             }
         }
@@ -88,6 +89,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
 
                 _archivable = value;
+                Registry?.AdvanceRevision(Id);
                 FireSignal("GetPropertyChangedSignal(Archivable)");
             }
         }
@@ -147,6 +149,10 @@ namespace CoreAI.Mods.Rbx.Instances
             oldParent?._children.Remove(this);
             _parent = newParent;
             newParent?._children.Add(this);
+
+            Registry?.AdvanceRevision(Id);
+            oldParent?.Registry?.AdvanceRevision(oldParent.Id);
+            newParent?.Registry?.AdvanceRevision(newParent.Id);
 
             Registry?.OnParentChanged(this, wasInScene);
             oldParent?.FireSignal("ChildRemoved", this);
@@ -498,6 +504,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 _attributes[attribute] = normalized;
             }
 
+            Registry?.AdvanceRevision(Id);
             FireSignal("AttributeChanged", attribute);
             FireSignal("GetAttributeChangedSignal(" + attribute + ")");
         }
@@ -513,13 +520,23 @@ namespace CoreAI.Mods.Rbx.Instances
         public void AddTag(string tag)
         {
             ThrowIfDestroyed("AddTag");
+            bool alreadyTagged = Registry.Tags.HasTag(Id, tag);
             Registry.Tags.AddTag(Id, tag);
+            if (!alreadyTagged)
+            {
+                Registry.AdvanceRevision(Id);
+            }
         }
 
         public void RemoveTag(string tag)
         {
             ThrowIfDestroyed("RemoveTag");
+            bool wasTagged = Registry.Tags.HasTag(Id, tag);
             Registry.Tags.RemoveTag(Id, tag);
+            if (wasTagged)
+            {
+                Registry.AdvanceRevision(Id);
+            }
         }
 
         public bool HasTag(string tag)

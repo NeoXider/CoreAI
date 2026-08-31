@@ -5,6 +5,10 @@
     "CoreAI.Core",
     "CoreAI.Source",
     "CoreAI.Mods",
+    "CoreAI.RbxApi.Unity",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Binding",
+    "CoreAI.RbxApi.Instances",
     "CoreAI.Mods.Hub",
     "CoreAI.Hub.UI",
     "VContainer"
