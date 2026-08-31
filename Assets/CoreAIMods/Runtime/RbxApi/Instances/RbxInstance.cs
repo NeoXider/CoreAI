@@ -326,19 +326,31 @@ namespace CoreAI.Mods.Rbx.Instances
                 return null;
             }
 
-            return CloneSubtree();
+            return CloneSubtree(false, null, null);
         }
 
-        private RbxInstance CloneSubtree()
+        /// <summary>Deep-copies this subtree under the supplied teardown owner and provenance.</summary>
+        public RbxInstance Clone(string ownerModId, string originTag)
         {
-            // WHY: the clone inherits owner/origin from the source record so the ownership
-            // ledger keeps attributing clone-created content to whoever created the original.
+            ThrowIfDestroyed("Clone");
+            if (!_archivable)
+            {
+                return null;
+            }
+
+            return CloneSubtree(true, ownerModId, originTag);
+        }
+
+        private RbxInstance CloneSubtree(bool overrideOwnership, string ownerModId, string originTag)
+        {
             InstanceRecord sourceRecord = Registry.GetRecord(Id);
             InstanceIdAuthority authority = Id.IsServerAssigned
                 ? InstanceIdAuthority.Server
                 : InstanceIdAuthority.Local;
-            RbxInstance copy = Registry.Create(ClassName, sourceRecord.OwnerModId,
-                sourceRecord.OriginTag, authority);
+            string resolvedOwnerModId = overrideOwnership ? ownerModId : sourceRecord.OwnerModId;
+            string resolvedOriginTag = overrideOwnership ? originTag : sourceRecord.OriginTag;
+            RbxInstance copy = Registry.Create(
+                ClassName, resolvedOwnerModId, resolvedOriginTag, authority);
             copy._name = _name;
             copy._archivable = _archivable;
             foreach (KeyValuePair<string, object> attribute in _attributes)
@@ -358,7 +370,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     continue;
                 }
 
-                RbxInstance childCopy = child.CloneSubtree();
+                RbxInstance childCopy = child.CloneSubtree(
+                    overrideOwnership, ownerModId, originTag);
                 childCopy.SetParent(copy);
             }
 

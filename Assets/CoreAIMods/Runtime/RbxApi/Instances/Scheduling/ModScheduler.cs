@@ -23,6 +23,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
     /// </summary>
     public sealed class ModScheduler
     {
+        public const int DefaultMaxThreadsPerActor = 256;
+        public const int EmergencyMaxThreads = 4096;
+
         private enum PipelineStage
         {
             DrainDeferred,
@@ -284,6 +287,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly List<CompletionWaitEntry> _completionBuffer = new();
         private readonly MinHeap<WaitEntry> _waitHeap;
         private readonly MinHeap<DelayEntry> _delayHeap;
+        private Func<string, string> _actorIdResolver;
 
         private long _frameIndex;
         private long _sequence;
@@ -291,6 +295,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private bool _delayedBatchStarted;
         private bool _promotingCompletions;
         private PipelineStage? _currentStage;
+
+        /// <summary>Configured per-actor live-thread quota.</summary>
+        public int MaxThreadsPerActor { get; private set; } = DefaultMaxThreadsPerActor;
 
         public ModScheduler(IRbxScriptThreadFactory threadFactory, IRbxTimeSource timeSource)
         {
@@ -315,6 +322,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 (WaitEntry left, WaitEntry right) => CompareTimedEntries(left, right));
             _delayHeap = new MinHeap<DelayEntry>(
                 (DelayEntry left, DelayEntry right) => CompareTimedEntries(left, right));
+        }
+
+        /// <summary>Configures actor attribution and the per-actor live-thread quota.</summary>
+        public void ConfigureActorQuota(int maxThreadsPerActor, Func<string, string> actorIdResolver)
+        {
+            MaxThreadsPerActor = Math.Max(1, maxThreadsPerActor);
+            _actorIdResolver = actorIdResolver;
         }
 
         /// <summary>Current logical frame number; the first <see cref="Advance"/> enters frame one.</summary>
@@ -1028,6 +1042,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     "pass a function or resumable thread");
             }
 
+            string actorId = ResolveActorId(ownerModId);
+            if (_records.Count >= EmergencyMaxThreads)
+            {
+                throw new RbxError(
+                    RbxErrorCode.ThreadCap,
+                    "actor '" + actorId + "' cannot create a scheduler thread for mod '"
+                    + ownerModId + "': emergency live scheduler threads ceiling reached ("
+                    + EmergencyMaxThreads + ")",
+                    "finish or cancel live threads before scheduling more work");
+            }
+
+            if (CountThreadsForActor(actorId) >= MaxThreadsPerActor)
+            {
+                throw new RbxError(
+                    RbxErrorCode.ThreadCap,
+                    "actor '" + actorId + "' cannot create a scheduler thread for mod '"
+                    + ownerModId + "': live scheduler threads quota reached (limit "
+                    + MaxThreadsPerActor + ")",
+                    "finish or cancel live threads before scheduling more work");
+            }
+
             IRbxScriptThread thread = _threadFactory.Create(ownerModId, callable);
             if (thread == null)
             {
@@ -1053,6 +1088,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             ThreadRecord record = new(thread, ownerModId);
             _records.Add(thread, record);
             return record;
+        }
+
+        private int CountThreadsForActor(string actorId)
+        {
+            int count = 0;
+            foreach (ThreadRecord record in _records.Values)
+            {
+                if (string.Equals(ResolveActorId(record.OwnerModId), actorId,
+                        StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private string ResolveActorId(string ownerModId)
+        {
+            string actorId = _actorIdResolver?.Invoke(ownerModId);
+            return string.IsNullOrWhiteSpace(actorId) ? "host/system" : actorId.Trim();
         }
 
         private ThreadRecord GetSchedulableRecord(IRbxScriptThread thread, string operation,

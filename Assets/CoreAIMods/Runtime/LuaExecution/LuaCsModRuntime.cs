@@ -4,6 +4,7 @@ using System.Threading;
 using CoreAI.Ai.Logging;
 using CoreAI.Authority;
 using CoreAI.Logging;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -77,7 +78,13 @@ namespace CoreAI.Ai.LuaCs
         public const int DefaultMaxMods = 32;
         public const int BenchmarkMaxMods = 200;
         public const int EmergencyMaxMods = 256;
+        public const int DefaultMaxRegisteredInstancesPerActor = 2048;
+        public const int EmergencyMaxRegisteredInstances = 16384;
         public const int DefaultMaxHandlersPerMod = 64;
+        public const int DefaultMaxEventSubscriptionsPerActor =
+            DefaultMaxMods * DefaultMaxHandlersPerMod;
+        public const int EmergencyMaxEventSubscriptions =
+            EmergencyMaxMods * DefaultMaxHandlersPerMod;
         public const int DefaultMaxTimersPerMod = 16;
         public const int DefaultMaxQueuedEventsPerMod = 256;
         public const int DefaultMaxEventsDispatchedPerTick = 64;
@@ -150,6 +157,7 @@ namespace CoreAI.Ai.LuaCs
             public readonly object EventGate = new();
             public string Id = "";
             public string OwnerActorId = "";
+            public bool OwnerHasHostAuthority;
             public IScriptState State;
             public string Source = "";
             public LuaCapabilities Caps;
@@ -177,7 +185,10 @@ namespace CoreAI.Ai.LuaCs
         private readonly object _subscriptionGate = new();
         private readonly Dictionary<string, Mod> _mods = new(StringComparer.Ordinal);
         private readonly Dictionary<string, List<Mod>> _subscriptions = new(StringComparer.Ordinal);
+        private Dictionary<string, Mod[]> _subscriptionSnapshot = new(StringComparer.Ordinal);
         private readonly List<Mod> _modsInLoadOrder = new();
+        private readonly Dictionary<string, string> _quotaActorByOwnerModId =
+            new(StringComparer.Ordinal);
         private readonly IScriptEngine _engine;
         private readonly IValueMarshaller _marshaller;
         private readonly IScriptExecutionGuard _handlerGuard;
@@ -194,16 +205,15 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly IExecutionBudget _scriptExecutionBudget;
         private readonly List<Mod> _tickScratch = new();
+        private readonly object _instanceQuotaGate = new();
+        private readonly Dictionary<InstanceId, string> _quotaActorByInstanceId = new();
+        private readonly Dictionary<string, int> _registeredInstancesByActor =
+            new(StringComparer.Ordinal);
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
         private readonly Queue<LuaModReport> _recentReports = new();
 
-        /// <summary>
-        /// Round-robin start index for charging the global event dispatch budget so, under sustained
-        /// saturation, every mod is reached over a bounded number of ticks instead of the tail
-        /// starving forever.
-        /// </summary>
-        private int _dispatchRotation;
+        private int _registeredInstanceCount;
         private long _nextLoadOrder;
         private long _subscriptionEntriesTouched;
 
@@ -263,8 +273,17 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public static bool IsSupported => true;
 
-        /// <summary>Host-configured mod capacity, independently bounded by <see cref="EmergencyMaxMods"/>.</summary>
+        /// <summary>Host-configured per-actor mod capacity, independently bounded by <see cref="EmergencyMaxMods"/>.</summary>
         public int MaxMods { get; }
+
+        /// <summary>Host-configured per-actor live scheduler-thread capacity.</summary>
+        public int MaxSchedulerThreadsPerActor { get; }
+
+        /// <summary>Host-configured per-actor registered-instance capacity.</summary>
+        public int MaxRegisteredInstancesPerActor { get; }
+
+        /// <summary>Host-configured per-actor named-event subscription capacity.</summary>
+        public int MaxEventSubscriptionsPerActor { get; }
 
         /// <summary>
         /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined.
@@ -339,11 +358,14 @@ namespace CoreAI.Ai.LuaCs
         /// log + events + bounded recent buffers only).
         /// </param>
         /// <param name="maxMods">
-        /// Host-configured mod capacity. Defaults to <see cref="DefaultMaxMods"/>; benchmark hosts may
+        /// Host-configured per-actor mod capacity. Defaults to <see cref="DefaultMaxMods"/>; benchmark hosts may
         /// use <see cref="BenchmarkMaxMods"/>. Values above <see cref="EmergencyMaxMods"/> never bypass
         /// the independent emergency ceiling.
         /// </param>
         /// <param name="observability">Optional production counter sink.</param>
+        /// <param name="maxSchedulerThreadsPerActor">Per-actor live scheduler-thread quota.</param>
+        /// <param name="maxRegisteredInstancesPerActor">Per-actor registered-instance quota.</param>
+        /// <param name="maxEventSubscriptionsPerActor">Per-actor named-event subscription quota.</param>
         public LuaCsModRuntime(
             Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
@@ -361,7 +383,10 @@ namespace CoreAI.Ai.LuaCs
             ILuaLogService logService = null,
             LuaCsRbxApiBindings rbxApi = null,
             int maxMods = DefaultMaxMods,
-            IRbxRuntimeObservabilitySink observability = null)
+            IRbxRuntimeObservabilitySink observability = null,
+            int maxSchedulerThreadsPerActor = ModScheduler.DefaultMaxThreadsPerActor,
+            int maxRegisteredInstancesPerActor = DefaultMaxRegisteredInstancesPerActor,
+            int maxEventSubscriptionsPerActor = DefaultMaxEventSubscriptionsPerActor)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -376,7 +401,18 @@ namespace CoreAI.Ai.LuaCs
             _autoPersistMods = autoPersistMods;
             _transactionScope = transactionScope;
             MaxMods = Math.Max(1, maxMods);
+            MaxSchedulerThreadsPerActor = Math.Max(1, maxSchedulerThreadsPerActor);
+            MaxRegisteredInstancesPerActor = Math.Max(1, maxRegisteredInstancesPerActor);
+            MaxEventSubscriptionsPerActor = Math.Max(1, maxEventSubscriptionsPerActor);
             MaxErrorsBeforeQuarantine = Math.Max(1, maxErrorsBeforeQuarantine);
+            if (_rbxApi != null)
+            {
+                _rbxApi.Scheduler.ConfigureActorQuota(
+                    MaxSchedulerThreadsPerActor, ResolveSchedulerActorId);
+                _rbxApi.Registry.Registered += OnInstanceRegistered;
+                _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
+            }
+
             _logicSlots = logicSlots;
             if (_logicSlots != null)
             {
@@ -424,7 +460,9 @@ namespace CoreAI.Ai.LuaCs
             bool persistToStore = true)
         {
             DemandModAccess(caller, "load", id);
-            LoadModForActor(id, luaCode, caller.ActorId, capabilities, persistToStore);
+            LoadModInternal(
+                id, luaCode, caller.ActorId, capabilities, persistToStore,
+                caller.Grants.IsUnrestricted);
         }
 
         /// <inheritdoc />
@@ -470,7 +508,9 @@ namespace CoreAI.Ai.LuaCs
             }
 
             DemandModAccess(caller, "import", modId);
-            return ImportModForActor(bundleJson, caller.ActorId, hostGrant, allowFull);
+            return ImportModInternal(
+                bundleJson, caller.ActorId, hostGrant, allowFull,
+                caller.Grants.IsUnrestricted);
         }
 
         /// <inheritdoc />
@@ -876,7 +916,7 @@ namespace CoreAI.Ai.LuaCs
             LuaCapabilities capabilities = LuaCapabilities.All,
             bool persistToStore = true)
         {
-            LoadModInternal(id, luaCode, "", capabilities, persistToStore);
+            LoadModInternal(id, luaCode, "", capabilities, persistToStore, true);
         }
 
         /// <inheritdoc />
@@ -892,23 +932,161 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentException("Owner actor id is required.", nameof(ownerActorId));
             }
 
-            LoadModInternal(id, luaCode, ownerActorId.Trim(), capabilities, persistToStore);
+            LoadModInternal(id, luaCode, ownerActorId.Trim(), capabilities, persistToStore, false);
         }
 
         private void EnsureModCapacity(string modId, string ownerActorId)
         {
-            string actorId = ownerActorId.Length == 0 ? "host/system" : ownerActorId;
+            string actorId = NormalizeQuotaActorId(ownerActorId);
             if (_mods.Count >= EmergencyMaxMods)
             {
                 throw new InvalidOperationException(
                     $"load: actor '{actorId}' cannot load mod '{modId}': emergency mod ceiling reached ({EmergencyMaxMods}).");
             }
 
-            if (_mods.Count >= MaxMods)
+            int actorModCount = 0;
+            foreach (Mod loadedMod in _mods.Values)
+            {
+                if (string.Equals(
+                        NormalizeQuotaActorId(loadedMod.OwnerActorId), actorId,
+                        StringComparison.Ordinal))
+                {
+                    actorModCount++;
+                }
+            }
+
+            if (actorModCount >= MaxMods)
             {
                 throw new InvalidOperationException(
-                    $"load: actor '{actorId}' cannot load mod '{modId}': configured mod limit reached ({MaxMods}).");
+                    $"load: actor '{actorId}' cannot load mod '{modId}': loaded mods quota reached (limit {MaxMods}).");
             }
+        }
+
+        private void BindActorAttribution(
+            string modId,
+            string ownerActorId,
+            bool ownerHasHostAuthority)
+        {
+            string actorId = NormalizeQuotaActorId(ownerActorId);
+            lock (_gate)
+            {
+                _quotaActorByOwnerModId[modId] = actorId;
+            }
+
+            if (_rbxApi == null || ownerHasHostAuthority || string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                return;
+            }
+
+            _rbxApi.Registry.BindActorAttribution(
+                modId, OriginTag.FromMod(modId), ownerActorId);
+        }
+
+        private string ResolveSchedulerActorId(string ownerModId)
+        {
+            lock (_gate)
+            {
+                return _quotaActorByOwnerModId.TryGetValue(ownerModId, out string actorId)
+                    ? actorId
+                    : "host/system";
+            }
+        }
+
+        private string ResolveInstanceQuotaActorId(InstanceRecord record)
+        {
+            if (!string.IsNullOrWhiteSpace(record.OwnerActorId))
+            {
+                return record.OwnerActorId.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(record.OwnerModId))
+            {
+                lock (_gate)
+                {
+                    if (_quotaActorByOwnerModId.TryGetValue(
+                            record.OwnerModId, out string actorId))
+                    {
+                        return actorId;
+                    }
+                }
+            }
+
+            return "host/system";
+        }
+
+        private void OnInstanceRegistered(InstanceRecord record)
+        {
+            string actorId = ResolveInstanceQuotaActorId(record);
+            string rejection = null;
+            lock (_instanceQuotaGate)
+            {
+                _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
+                if (_registeredInstanceCount >= EmergencyMaxRegisteredInstances)
+                {
+                    rejection =
+                        $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"emergency registered instances ceiling reached ({EmergencyMaxRegisteredInstances}).";
+                }
+                else if (actorCount >= MaxRegisteredInstancesPerActor)
+                {
+                    rejection =
+                        $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"registered instances quota reached (limit {MaxRegisteredInstancesPerActor}).";
+                }
+                else
+                {
+                    _quotaActorByInstanceId.Add(record.Id, actorId);
+                    _registeredInstancesByActor[actorId] = actorCount + 1;
+                    _registeredInstanceCount++;
+                }
+            }
+
+            if (rejection == null)
+            {
+                return;
+            }
+
+            Exception cleanupError = null;
+            try
+            {
+                record.Instance.Destroy();
+            }
+            catch (Exception ex)
+            {
+                cleanupError = ex;
+            }
+
+            throw new InvalidOperationException(rejection, cleanupError);
+        }
+
+        private void OnInstanceUnregistered(InstanceRecord record)
+        {
+            lock (_instanceQuotaGate)
+            {
+                if (!_quotaActorByInstanceId.TryGetValue(record.Id, out string actorId))
+                {
+                    return;
+                }
+
+                _quotaActorByInstanceId.Remove(record.Id);
+                _registeredInstanceCount--;
+                int nextActorCount = _registeredInstancesByActor[actorId] - 1;
+                if (nextActorCount == 0)
+                {
+                    _registeredInstancesByActor.Remove(actorId);
+                }
+                else
+                {
+                    _registeredInstancesByActor[actorId] = nextActorCount;
+                }
+            }
+        }
+
+        private static string NormalizeQuotaActorId(string ownerActorId)
+        {
+            return string.IsNullOrWhiteSpace(ownerActorId)
+                ? "host/system"
+                : ownerActorId.Trim();
         }
 
         private void LoadModInternal(
@@ -916,7 +1094,8 @@ namespace CoreAI.Ai.LuaCs
             string luaCode,
             string ownerActorId,
             LuaCapabilities capabilities,
-            bool persistToStore)
+            bool persistToStore,
+            bool ownerHasHostAuthority)
         {
             string modId = Normalize(id);
             if (modId.Length == 0)
@@ -939,7 +1118,8 @@ namespace CoreAI.Ai.LuaCs
                 EnsureModCapacity(modId, ownerActorId);
             }
 
-            Mod mod = BuildMod(modId, luaCode, capabilities, ownerActorId);
+            Mod mod = BuildMod(
+                modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority);
 
             lock (_gate)
             {
@@ -955,6 +1135,7 @@ namespace CoreAI.Ai.LuaCs
                 lock (_subscriptionGate)
                 {
                     ActivateSubscriptionsLocked(mod);
+                    PublishSubscriptionSnapshotLocked();
                 }
             }
 
@@ -978,12 +1159,18 @@ namespace CoreAI.Ai.LuaCs
         /// runs the chunk (hook registration happens there). Errors propagate to the caller and the mod
         /// is never added, so a failed build leaves no handlers behind.
         /// </summary>
-        private Mod BuildMod(string modId, string luaCode, LuaCapabilities capabilities, string ownerActorId)
+        private Mod BuildMod(
+            string modId,
+            string luaCode,
+            LuaCapabilities capabilities,
+            string ownerActorId,
+            bool ownerHasHostAuthority)
         {
             Mod mod = new()
             {
                 Id = modId,
                 OwnerActorId = ownerActorId ?? "",
+                OwnerHasHostAuthority = ownerHasHostAuthority,
                 Source = luaCode,
                 Caps = capabilities,
                 LoadedAtUtc = DateTime.UtcNow
@@ -998,6 +1185,7 @@ namespace CoreAI.Ai.LuaCs
                 // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
                 // round-trip the Luau the user wrote.
                 string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
+                BindActorAttribution(modId, ownerActorId, ownerHasHostAuthority);
                 rbxLoadCandidate = _rbxApi?.BeginModLoadCandidate(modId);
 
                 IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
@@ -1099,6 +1287,7 @@ namespace CoreAI.Ai.LuaCs
                 lock (_subscriptionGate)
                 {
                     DeactivateSubscriptionsLocked(mod);
+                    PublishSubscriptionSnapshotLocked();
                 }
             }
 
@@ -1143,6 +1332,7 @@ namespace CoreAI.Ai.LuaCs
 
             LuaCapabilities caps;
             string ownerActorId;
+            bool ownerHasHostAuthority;
             Mod existing;
             lock (_gate)
             {
@@ -1153,9 +1343,11 @@ namespace CoreAI.Ai.LuaCs
 
                 caps = existing.Caps;
                 ownerActorId = existing.OwnerActorId;
+                ownerHasHostAuthority = existing.OwnerHasHostAuthority;
             }
 
-            Mod replacement = BuildMod(modId, luaCode, caps, ownerActorId);
+            Mod replacement = BuildMod(
+                modId, luaCode, caps, ownerActorId, ownerHasHostAuthority);
 
             // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
             // are gone by the time the replacement is live — the old formula must never be invoked
@@ -1182,6 +1374,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     DeactivateSubscriptionsLocked(existing);
                     ActivateSubscriptionsLocked(replacement);
+                    PublishSubscriptionSnapshotLocked();
                 }
             }
 
@@ -1334,8 +1527,10 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Advances timers and dispatches queued events. Call once per frame from the host (main
-        /// thread); every handler call is individually instruction/time guarded.
+        /// Runs the timer phase before the event phase. Each phase visits mods in stable load order;
+        /// timers use registration order, queued events use FIFO order, and handlers use registration
+        /// order. Both phases share one global invocation budget. Call once per frame from the host
+        /// (main thread); every handler call is individually instruction/time guarded.
         /// </summary>
         internal void Tick(double deltaSeconds)
         {
@@ -1366,20 +1561,33 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            // WHY: Rotation shares one timer/event invocation budget fairly; work not reached stays pending.
             int count = _tickScratch.Count;
-            int start = count > 0 ? (_dispatchRotation % count + count) % count : 0;
-            _dispatchRotation++;
-
             int completedThisTick = 0;
             int eventsDeliveredThisTick = 0;
-            for (int n = 0; n < count; n++)
+            for (int i = 0; i < count; i++)
             {
-                Mod mod = _tickScratch[(start + n) % count];
+                Mod mod = _tickScratch[i];
 
                 try
                 {
                     completedThisTick += TickTimers(mod, deltaSeconds, completedThisTick);
+                }
+                catch (Exception ex)
+                {
+                    // WHY: A single mod's dispatch failure must never abort the other mods' frame tick.
+                    mod.ErrorCount++;
+                    _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' scheduled dispatch failed: {ex}");
+                    AppendLog(mod.Id, LuaLogLevel.RuntimeError,
+                        $"scheduled dispatch failed: {SingleLineErrorMessage(ex)}");
+                }
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                Mod mod = _tickScratch[i];
+
+                try
+                {
                     int eventsDelivered = DispatchPendingEvents(mod, completedThisTick);
                     completedThisTick += eventsDelivered;
                     eventsDeliveredThisTick += eventsDelivered;
@@ -1448,6 +1656,7 @@ namespace CoreAI.Ai.LuaCs
             lock (_subscriptionGate)
             {
                 DeactivateSubscriptionsLocked(mod);
+                PublishSubscriptionSnapshotLocked();
             }
 
             _log?.Warn(
@@ -1579,7 +1788,7 @@ namespace CoreAI.Ai.LuaCs
                         ? handlers.ToArray()
                         : Array.Empty<object>();
 
-                    // WHY: Dequeue only when this whole handler batch fits; rotation guarantees later progress.
+                    // WHY: Dequeue only when the whole handler batch fits so one event is never partially delivered.
                     if (handlerSnapshot.Length > limit - dispatched)
                     {
                         return dispatched;
@@ -1835,6 +2044,54 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        private void EnsureEventSubscriptionCapacity(Mod mod, string eventName)
+        {
+            string actorId = NormalizeQuotaActorId(mod.OwnerActorId);
+            int existingTotal = 0;
+            int existingForActor = 0;
+            lock (_subscriptionGate)
+            {
+                foreach (List<Mod> subscribers in _subscriptions.Values)
+                {
+                    foreach (Mod subscriber in subscribers)
+                    {
+                        if (string.Equals(subscriber.Id, mod.Id, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        existingTotal++;
+                        if (string.Equals(
+                                NormalizeQuotaActorId(subscriber.OwnerActorId), actorId,
+                                StringComparison.Ordinal))
+                        {
+                            existingForActor++;
+                        }
+                    }
+                }
+            }
+
+            int candidateCount;
+            lock (mod.EventGate)
+            {
+                candidateCount = mod.Handlers.Count;
+            }
+
+            if (existingTotal + candidateCount >= EmergencyMaxEventSubscriptions)
+            {
+                throw new InvalidOperationException(
+                    $"hooks_on: actor '{actorId}' cannot subscribe to event '{eventName}': "
+                    + $"emergency event subscriptions ceiling reached ({EmergencyMaxEventSubscriptions}).");
+            }
+
+            if (existingForActor + candidateCount >= MaxEventSubscriptionsPerActor)
+            {
+                throw new InvalidOperationException(
+                    $"hooks_on: actor '{actorId}' cannot subscribe to event '{eventName}': "
+                    + $"event subscriptions quota reached (limit {MaxEventSubscriptionsPerActor}).");
+            }
+        }
+
         private void RegisterModApis(IScriptFunctionRegistry registry, Mod mod)
         {
             registry.Register("mod_id", new Func<string>(() => mod.Id));
@@ -1869,7 +2126,23 @@ namespace CoreAI.Ai.LuaCs
                     return ScriptCallResult.Return(true);
                 }
 
-                bool firstSubscription = false;
+                bool firstSubscription;
+                lock (mod.EventGate)
+                {
+                    if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
+                    {
+                        throw new InvalidOperationException(
+                            $"hooks_on: handler limit reached ({DefaultMaxHandlersPerMod}).");
+                    }
+
+                    firstSubscription = !mod.Handlers.ContainsKey(name);
+                }
+
+                if (firstSubscription)
+                {
+                    EnsureEventSubscriptionCapacity(mod, name);
+                }
+
                 lock (mod.EventGate)
                 {
                     if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
@@ -1883,6 +2156,10 @@ namespace CoreAI.Ai.LuaCs
                         list = new List<object>();
                         mod.Handlers[name] = list;
                         firstSubscription = true;
+                    }
+                    else
+                    {
+                        firstSubscription = false;
                     }
 
                     list.Add(fn);
@@ -2142,13 +2419,10 @@ namespace CoreAI.Ai.LuaCs
 
         private void RouteEvent(Mod sender, string evt, string payload)
         {
-            Mod[] subscriberSnapshot;
-            lock (_subscriptionGate)
-            {
-                subscriberSnapshot = _subscriptions.TryGetValue(evt, out List<Mod> subscribers)
-                    ? subscribers.ToArray()
-                    : Array.Empty<Mod>();
-            }
+            Dictionary<string, Mod[]> subscriptions = Volatile.Read(ref _subscriptionSnapshot);
+            Mod[] subscriberSnapshot = subscriptions.TryGetValue(evt, out Mod[] subscribers)
+                ? subscribers
+                : Array.Empty<Mod>();
 
             int touched = 0;
             for (int i = 0; i < subscriberSnapshot.Length; i++)
@@ -2194,7 +2468,20 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 AddSubscriptionLocked(mod, evt);
+                PublishSubscriptionSnapshotLocked();
             }
+        }
+
+        private void PublishSubscriptionSnapshotLocked()
+        {
+            Dictionary<string, Mod[]> snapshot =
+                new Dictionary<string, Mod[]>(_subscriptions.Count, StringComparer.Ordinal);
+            foreach (KeyValuePair<string, List<Mod>> subscription in _subscriptions)
+            {
+                snapshot.Add(subscription.Key, subscription.Value.ToArray());
+            }
+
+            Volatile.Write(ref _subscriptionSnapshot, snapshot);
         }
 
         private void ActivateSubscriptionsLocked(Mod mod)
@@ -2325,7 +2612,9 @@ namespace CoreAI.Ai.LuaCs
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
-                    LoadModInternal(modId, source, ownerActorId, effectiveCaps, false);
+                    LoadModInternal(
+                        modId, source, ownerActorId, effectiveCaps, false,
+                        ownerActorId.Length == 0);
                     loaded++;
                 }
                 catch (Exception ex)
@@ -2402,7 +2691,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
         {
-            return ImportModInternal(bundleJson, "", hostGrant, allowFull);
+            return ImportModInternal(bundleJson, "", hostGrant, allowFull, true);
         }
 
         /// <inheritdoc />
@@ -2414,11 +2703,12 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentException("Owner actor id is required.", nameof(ownerActorId));
             }
 
-            return ImportModInternal(bundleJson, ownerActorId.Trim(), hostGrant, allowFull);
+            return ImportModInternal(
+                bundleJson, ownerActorId.Trim(), hostGrant, allowFull, false);
         }
 
         private bool ImportModInternal(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
-            bool allowFull)
+            bool allowFull, bool ownerHasHostAuthority)
         {
             if (string.IsNullOrWhiteSpace(bundleJson))
             {
@@ -2469,7 +2759,9 @@ namespace CoreAI.Ai.LuaCs
                     // restart's allowFull=true rehydrate would re-grant Full to a mod imported WITHOUT it.
                     // The store must never hold more than the host granted here; re-import under
                     // allowFull=true to raise it later.
-                    LoadModInternal(modId, bundle.Source, ownerActorId, effectiveCaps, false);
+                    LoadModInternal(
+                        modId, bundle.Source, ownerActorId, effectiveCaps, false,
+                        ownerHasHostAuthority);
                     PersistMod(modId, bundle.Source, effectiveCaps, ownerActorId);
                 }
 

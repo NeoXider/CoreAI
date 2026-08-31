@@ -58,10 +58,32 @@ namespace CoreAI.Mods.Rbx.Instances
         public InstanceIdAllocator Allocator { get; }
 
         /// <summary>Persisted world ACL schema; null means legacy compatibility mode.</summary>
-        public int? WorldAclVersion { get; }
+        public int? WorldAclVersion { get; private set; }
 
         /// <summary>Whether actor-level strict authorization is active for this world.</summary>
         public bool IsWorldAclEnabled => WorldAclVersion.HasValue;
+
+        /// <summary>
+        /// Selects the ACL schema for a world created by composition. Null preserves legacy
+        /// compatibility; a non-null value enables that schema.
+        /// </summary>
+        public void ConfigureWorldAclVersion(int? worldAclVersion)
+        {
+            if (worldAclVersion.HasValue
+                && worldAclVersion.Value != CurrentWorldAclVersion)
+            {
+                throw new ArgumentOutOfRangeException(nameof(worldAclVersion), worldAclVersion,
+                    "Unsupported world ACL version.");
+            }
+
+            if (WorldAclVersion.HasValue && WorldAclVersion != worldAclVersion)
+            {
+                throw new InvalidOperationException(
+                    "A world ACL version cannot be changed after it has been enabled.");
+            }
+
+            WorldAclVersion = worldAclVersion;
+        }
 
         /// <summary>Stable world identity used to reject cross-world actor contexts when specified.</summary>
         public string WorldId { get; }
@@ -303,6 +325,27 @@ namespace CoreAI.Mods.Rbx.Instances
 
             ownerActorId = null;
             return false;
+        }
+
+        /// <summary>Removes provenance attribution without issuing or changing actor authority.</summary>
+        public void ClearActorAttribution(string ownerModId, string originTag)
+        {
+            if (!string.IsNullOrWhiteSpace(ownerModId))
+            {
+                _actorByOwnerModId.Remove(ownerModId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(originTag))
+            {
+                if (!OriginTag.IsValid(originTag))
+                {
+                    throw RbxError.BadArgument(
+                        "origin tag '" + originTag + "' is not a valid ledger tag",
+                        "use OriginTag.FromMod/FromConsole/FromAi");
+                }
+
+                _actorByOriginTag.Remove(originTag);
+            }
         }
 
         /// <summary>Reattributes a completed clone or trusted import atomically at the record layer.</summary>

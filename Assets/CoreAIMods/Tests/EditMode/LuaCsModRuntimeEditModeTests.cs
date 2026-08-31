@@ -148,10 +148,37 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LuaCs_ProductionDefaultCapacity_Remains32ForExistingHosts()
+        public void LuaCs_StructuralQuotaDefaults_AreVisibleOnOptionsAndRuntime()
         {
             LuaCsModStackOptions options = new();
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(options);
+
+            Assert.AreEqual(LuaCsModRuntime.DefaultMaxMods, options.MaxMods);
+            Assert.AreEqual(options.MaxMods, stack.Runtime.MaxMods);
+            Assert.AreEqual(
+                options.MaxSchedulerThreadsPerActor,
+                stack.Runtime.MaxSchedulerThreadsPerActor);
+            Assert.AreEqual(
+                LuaCsModRuntime.DefaultMaxRegisteredInstancesPerActor,
+                options.MaxRegisteredInstancesPerActor);
+            Assert.AreEqual(
+                options.MaxRegisteredInstancesPerActor,
+                stack.Runtime.MaxRegisteredInstancesPerActor);
+            Assert.AreEqual(
+                LuaCsModRuntime.DefaultMaxEventSubscriptionsPerActor,
+                options.MaxEventSubscriptionsPerActor);
+            Assert.AreEqual(
+                options.MaxEventSubscriptionsPerActor,
+                stack.Runtime.MaxEventSubscriptionsPerActor);
+        }
+
+        [Test]
+        public void LuaCs_ProductionDefaultCapacity_IsPerActorAtNAndNPlusOne()
+        {
+            LuaCsModStackOptions options = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(options);
+            ActorContext actor = new LocalActorIdentityProvider("production-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
 
             Assert.AreEqual(32, LuaCsModRuntime.DefaultMaxMods);
             Assert.AreEqual(LuaCsModRuntime.DefaultMaxMods, options.MaxMods);
@@ -159,22 +186,24 @@ namespace CoreAI.Tests.EditMode
 
             for (int i = 0; i < LuaCsModRuntime.DefaultMaxMods; i++)
             {
-                ActorContext actor = new LocalActorIdentityProvider($"production-actor-{i}")
-                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 stack.Runtime.LoadMod(actor, $"production-mod-{i}", "return true", persistToStore: false);
             }
 
-            ActorContext refusedActor = new LocalActorIdentityProvider("production-actor-over-limit")
-                .GetActorContext(BuiltInAgentRoleIds.Programmer);
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
                 stack.Runtime.LoadMod(
-                    refusedActor,
+                    actor,
                     "production-mod-over-limit",
                     "return true",
                     persistToStore: false));
 
-            StringAssert.Contains(refusedActor.ActorId, exception.Message);
+            StringAssert.Contains("loaded mods quota", exception.Message);
+            StringAssert.Contains(actor.ActorId, exception.Message);
             StringAssert.Contains(LuaCsModRuntime.DefaultMaxMods.ToString(), exception.Message);
+
+            ActorContext secondActor = new LocalActorIdentityProvider("production-actor-2")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                secondActor, "production-mod-second-actor", "return true", persistToStore: false));
         }
 
         [Test]
@@ -186,26 +215,29 @@ namespace CoreAI.Tests.EditMode
             {
                 MaxMods = LuaCsModRuntime.BenchmarkMaxMods
             });
+            ActorContext actor = new LocalActorIdentityProvider("benchmark-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
 
             for (int i = 0; i < LuaCsModRuntime.BenchmarkMaxMods; i++)
             {
-                ActorContext actor = new LocalActorIdentityProvider($"benchmark-actor-{i}")
-                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 stack.Runtime.LoadMod(actor, $"benchmark-mod-{i}", "return true", persistToStore: false);
             }
 
-            ActorContext refusedActor = new LocalActorIdentityProvider("benchmark-actor-over-limit")
-                .GetActorContext(BuiltInAgentRoleIds.Programmer);
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
                 stack.Runtime.LoadMod(
-                    refusedActor,
+                    actor,
                     "benchmark-mod-over-limit",
                     "return true",
                     persistToStore: false));
 
-            StringAssert.Contains("configured mod limit", exception.Message);
-            StringAssert.Contains(refusedActor.ActorId, exception.Message);
+            StringAssert.Contains("loaded mods quota", exception.Message);
+            StringAssert.Contains(actor.ActorId, exception.Message);
             StringAssert.Contains(LuaCsModRuntime.BenchmarkMaxMods.ToString(), exception.Message);
+
+            ActorContext secondActor = new LocalActorIdentityProvider("benchmark-actor-2")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                secondActor, "benchmark-mod-second-actor", "return true", persistToStore: false));
         }
 
         [Test]
@@ -235,6 +267,103 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("emergency mod ceiling", exception.Message);
             StringAssert.Contains(refusedActor.ActorId, exception.Message);
             StringAssert.Contains(LuaCsModRuntime.EmergencyMaxMods.ToString(), exception.Message);
+        }
+
+        [Test]
+        public void LuaCs_SchedulerThreadQuota_IsPerActorAtNAndNPlusOne()
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = new LuaCsRbxApiBindings(),
+                MaxSchedulerThreadsPerActor = 2
+            });
+            ActorContext actor = new LocalActorIdentityProvider("thread-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                actor, "thread-a-1", "task.wait(1000)", persistToStore: false));
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                actor, "thread-a-2", "task.wait(1000)", persistToStore: false));
+
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                actor, "thread-a-3", "task.wait(1000)", persistToStore: false));
+            StringAssert.Contains(actor.ActorId, exception.Message);
+            StringAssert.Contains("live scheduler threads quota", exception.Message);
+            StringAssert.Contains("2", exception.Message);
+
+            ActorContext secondActor = new LocalActorIdentityProvider("thread-actor-2")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                secondActor, "thread-b-1", "task.wait(1000)", persistToStore: false));
+        }
+
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_IsPerActorAtNAndNPlusOne()
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                RbxApi = new LuaCsRbxApiBindings(),
+                MaxRegisteredInstancesPerActor = 2
+            });
+            ActorContext actor = new LocalActorIdentityProvider("instance-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                actor,
+                "instance-a-1",
+                "Instance.new('Folder')\nInstance.new('Folder')",
+                persistToStore: false));
+
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                actor,
+                "instance-a-2",
+                "Instance.new('Folder')",
+                persistToStore: false));
+            StringAssert.Contains(actor.ActorId, exception.Message);
+            StringAssert.Contains("registered instances quota", exception.Message);
+            StringAssert.Contains("2", exception.Message);
+
+            ActorContext secondActor = new LocalActorIdentityProvider("instance-actor-2")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                secondActor,
+                "instance-b-1",
+                "Instance.new('Folder')",
+                persistToStore: false));
+        }
+
+        [Test]
+        public void LuaCs_EventSubscriptionQuota_IsPerActorAtNAndNPlusOne()
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                MaxEventSubscriptionsPerActor = 2
+            });
+            ActorContext actor = new LocalActorIdentityProvider("subscription-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                actor,
+                "subscription-a-1",
+                "hooks_on('one', function() end)\nhooks_on('two', function() end)",
+                persistToStore: false));
+
+            Exception exception = Assert.Catch(() => stack.Runtime.LoadMod(
+                actor,
+                "subscription-a-2",
+                "hooks_on('three', function() end)",
+                persistToStore: false));
+            StringAssert.Contains(actor.ActorId, exception.Message);
+            StringAssert.Contains("event subscriptions quota", exception.Message);
+            StringAssert.Contains("2", exception.Message);
+
+            ActorContext secondActor = new LocalActorIdentityProvider("subscription-actor-2")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                secondActor,
+                "subscription-b-1",
+                "hooks_on('one', function() end)",
+                persistToStore: false));
         }
 
         [Test]
@@ -402,56 +531,65 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LuaCs_EmitEvent_DoesNotAcquireTheProcessWideRuntimeGate()
+        public void LuaCs_EmitEvent_DoesNotWaitForAnyProcessWideRuntimeLock()
         {
             LuaCsModStack stack = BuildStack();
             stack.Runtime.LoadMod("subscriber", "hooks_on('target', function() end)");
-            FieldInfo gateField = typeof(LuaCsModRuntime).GetField(
-                "_gate", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(gateField);
-            object processWideGate = gateField.GetValue(stack.Runtime);
-            ManualResetEventSlim started = new(false);
-            ManualResetEventSlim completed = new(false);
-            Exception emitError = null;
-            Thread emitThread = new(() =>
-            {
-                started.Set();
-                try
-                {
-                    stack.Runtime.EmitEvent("target", "");
-                }
-                catch (Exception ex)
-                {
-                    emitError = ex;
-                }
-                finally
-                {
-                    completed.Set();
-                }
-            });
-            emitThread.IsBackground = true;
+            FieldInfo[] gateFields = typeof(LuaCsModRuntime)
+                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Where(field => field.FieldType == typeof(object))
+                .ToArray();
+            Assert.Greater(gateFields.Length, 0);
 
-            bool startedInTime;
-            bool completedWhileGateHeld;
-            lock (processWideGate)
+            foreach (FieldInfo gateField in gateFields)
             {
-                emitThread.Start();
-                startedInTime = started.Wait(1000);
-                completedWhileGateHeld = completed.Wait(1000);
+                object processWideGate = gateField.GetValue(stack.Runtime);
+                Assert.IsNotNull(processWideGate);
+                ManualResetEventSlim started = new(false);
+                ManualResetEventSlim completed = new(false);
+                Exception emitError = null;
+                Thread emitThread = new(() =>
+                {
+                    started.Set();
+                    try
+                    {
+                        stack.Runtime.EmitEvent("target", "");
+                    }
+                    catch (Exception ex)
+                    {
+                        emitError = ex;
+                    }
+                    finally
+                    {
+                        completed.Set();
+                    }
+                });
+                emitThread.IsBackground = true;
+
+                bool startedInTime;
+                bool completedWhileGateHeld;
+                lock (processWideGate)
+                {
+                    emitThread.Start();
+                    startedInTime = started.Wait(1000);
+                    completedWhileGateHeld = completed.Wait(1000);
+                }
+
+                bool stoppedInTime = emitThread.Join(5000);
+                started.Dispose();
+                completed.Dispose();
+
+                Assert.IsTrue(startedInTime,
+                    $"The emit worker must start while runtime lock '{gateField.Name}' is held.");
+                Assert.IsTrue(completedWhileGateHeld,
+                    $"EmitEvent must complete while runtime lock '{gateField.Name}' is held elsewhere.");
+                Assert.IsTrue(stoppedInTime, "The emit worker must stop after the structural assertion.");
+                Assert.IsNull(emitError);
             }
-
-            emitThread.Join(5000);
-            started.Dispose();
-            completed.Dispose();
-
-            Assert.IsTrue(startedInTime, "The emit worker must start during the structural assertion.");
-            Assert.IsTrue(completedWhileGateHeld,
-                "EmitEvent must complete while the process-wide runtime gate is held elsewhere.");
-            Assert.IsNull(emitError);
         }
 
         [Test]
-        public void LuaCs_SubscriptionDeliveryOrder_IsStableAcrossRepeatedRuntimeInstances()
+        public void LuaCs_SubscriptionDeliveryOrder_RemainsLoadOrderAfterEmptyTick()
         {
             string[] expected = { "zeta", "alpha", "mu" };
             for (int run = 0; run < 5; run++)
@@ -476,44 +614,69 @@ namespace CoreAI.Tests.EditMode
                 stack.Runtime.Tick(0);
 
                 CollectionAssert.AreEqual(expected, delivered, $"Delivery order changed on run {run}.");
+
+                delivered.Clear();
+                stack.Runtime.Tick(0);
+                stack.Runtime.EmitEvent("ordered", "");
+                stack.Runtime.Tick(0);
+
+                CollectionAssert.AreEqual(expected, delivered,
+                    $"Delivery order changed after an empty tick on run {run}.");
             }
         }
 
         [Test]
-        public void LuaCs_ActorTimer_IsChargedAgainstTheSharedEventBudget()
+        public void LuaCs_ActorTimerEvent_ReachesEarlierSubscriberInTheSameTick()
         {
             MemoryStore store = new();
             LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("subscriber-a", @"
+                hooks_on('timer-work', function(_, payload)
+                    store_set('received', payload)
+                end)", persistToStore: false);
             ActorContext actor = new LocalActorIdentityProvider("timer-owner")
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            stack.Runtime.LoadMod(actor, "timer-owner-mod", @"
+            stack.Runtime.LoadMod(actor, "timer-b", @"
                 hooks_every(0, function()
-                    store_set('timers', tostring((tonumber(store_get('timers')) or 0) + 1))
+                    events_emit('timer-work', 'same-frame')
                 end)", persistToStore: false);
 
-            string eventSource = string.Concat(Enumerable.Repeat(@"
-                hooks_on('work', function()
-                    store_set('events', tostring((tonumber(store_get('events')) or 0) + 1))
-                end)", LuaCsModRuntime.DefaultMaxHandlersPerMod));
-            for (int i = 0; i < 4; i++)
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("same-frame", store.Get("subscriber-a", "received"),
+                "The timer phase must run before event dispatch, regardless of mod load order.");
+        }
+
+        [Test]
+        public void LuaCs_TimersAndEvents_ShareOneGlobalInvocationBudget()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            string timerSource = string.Concat(Enumerable.Repeat(
+                "hooks_every(1, function() end)\n",
+                LuaCsModRuntime.DefaultMaxTimersPerMod));
+            int timerModCount = LuaCsModRuntime.DefaultMaxEventsDispatchedPerTickGlobal /
+                LuaCsModRuntime.DefaultMaxTimersPerMod;
+            Assert.AreEqual(
+                LuaCsModRuntime.DefaultMaxEventsDispatchedPerTickGlobal,
+                timerModCount * LuaCsModRuntime.DefaultMaxTimersPerMod);
+            for (int i = 0; i < timerModCount; i++)
             {
-                stack.Runtime.LoadMod($"events-{i}", eventSource);
+                stack.Runtime.LoadMod($"timer-{i}", timerSource, persistToStore: false);
             }
 
+            stack.Runtime.LoadMod("event-subscriber",
+                "hooks_on('work', function() store_set('event', 'delivered') end)",
+                persistToStore: false);
             stack.Runtime.EmitEvent("work", "");
-            stack.Runtime.Tick(0);
+            stack.Runtime.Tick(1);
 
-            Assert.AreEqual("1", store.Get("timer-owner-mod", "timers"));
-            Assert.AreEqual("64", store.Get("events-0", "events"));
-            Assert.AreEqual("64", store.Get("events-1", "events"));
-            Assert.AreEqual("64", store.Get("events-2", "events"));
-            Assert.AreEqual("", store.Get("events-3", "events"),
-                "The actor timer must consume one shared-budget slot, leaving the final 64-handler event queued.");
+            Assert.AreEqual("", store.Get("event-subscriber", "event"),
+                "Exactly 256 due timers must exhaust the shared budget and leave the event queued.");
 
             stack.Runtime.Tick(0);
 
-            Assert.AreEqual("2", store.Get("timer-owner-mod", "timers"));
-            Assert.AreEqual("64", store.Get("events-3", "events"));
+            Assert.AreEqual("delivered", store.Get("event-subscriber", "event"));
         }
 
         [Test]

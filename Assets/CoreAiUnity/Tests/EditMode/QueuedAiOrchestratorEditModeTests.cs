@@ -105,6 +105,101 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class ScriptedAdmissionOrchestrator : IAiOrchestrationService
+        {
+            private readonly object _lock = new();
+            private readonly List<string> _started = new();
+            private readonly List<TaskCompletionSource<string>> _gates = new();
+            private int _cancelledCount;
+            private int _completedCount;
+
+            public int StartedCount
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _started.Count;
+                    }
+                }
+            }
+
+            public int CancelledCount
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _cancelledCount;
+                    }
+                }
+            }
+
+            public int CompletedCount
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _completedCount;
+                    }
+                }
+            }
+
+            public async Task<string> RunTaskAsync(
+                AiTaskRequest task,
+                CancellationToken cancellationToken = default)
+            {
+                TaskCompletionSource<string> gate =
+                    new(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_lock)
+                {
+                    _started.Add(task?.Hint ?? "");
+                    _gates.Add(gate);
+                }
+
+                using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+                {
+                    lock (_lock)
+                    {
+                        _cancelledCount++;
+                    }
+
+                    gate.TrySetCanceled(cancellationToken);
+                });
+                return await gate.Task;
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+
+            public string[] StartedSnapshot()
+            {
+                lock (_lock)
+                {
+                    return _started.ToArray();
+                }
+            }
+
+            public void CompleteNext()
+            {
+                TaskCompletionSource<string> gate;
+                lock (_lock)
+                {
+                    if (_completedCount >= _gates.Count)
+                    {
+                        throw new InvalidOperationException("No started scripted request is waiting for completion.");
+                    }
+
+                    gate = _gates[_completedCount];
+                    _completedCount++;
+                }
+
+                gate.TrySetResult("ok");
+            }
+        }
+
         private sealed class MutableScopeProvider : IAgentMemoryScopeProvider
         {
             public string UserId { get; set; } = "";
@@ -461,6 +556,145 @@ namespace CoreAI.Tests.EditMode
 
             inner.Gates[0].TrySetResult("local-complete");
             await task;
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task ProductionAdmission_TwentyActorsFortyRequests_UsesBoundedFairRounds()
+        {
+            const int actorCount = 20;
+            const int requestsPerActor = 2;
+            const int blockerCount = 2;
+            ScriptedAdmissionOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(
+                inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 2, MaxPending = 64 });
+            List<Task> tasks = new();
+
+            for (int blockerIndex = 0; blockerIndex < blockerCount; blockerIndex++)
+            {
+                string actorId = "blocker-" + blockerIndex;
+                ActorContext actorContext = CreateActorContext(actorId, actorId + "-session");
+                tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = "Teacher",
+                    Hint = actorId,
+                    ActorContext = actorContext,
+                    CancellationScope = actorContext.SessionId
+                }));
+            }
+
+            await WaitUntilAsync(() => inner.StartedCount == blockerCount,
+                "Both scripted blockers must occupy the configured provider slots.");
+
+            for (int actorIndex = 0; actorIndex < actorCount; actorIndex++)
+            {
+                string actorId = "actor-" + actorIndex.ToString("D2");
+                for (int requestIndex = 0; requestIndex < requestsPerActor; requestIndex++)
+                {
+                    string sessionId = actorId + "-session-" + requestIndex;
+                    ActorContext actorContext = CreateActorContext(actorId, sessionId);
+                    tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+                    {
+                        RoleId = "Teacher",
+                        Hint = actorId,
+                        ActorContext = actorContext,
+                        CancellationScope = "Teacher"
+                    }));
+                }
+            }
+
+            await CompleteAllScriptedAsync(inner, blockerCount + actorCount * requestsPerActor);
+            await Task.WhenAll(tasks);
+
+            Assert.AreEqual(0, inner.CancelledCount,
+                "Actor-aware admission must not cancel another actor sharing the same role.");
+            Assert.AreEqual(65L, queue.MaximumActorBypasses,
+                "The configured starvation bound must remain visible and measurable.");
+
+            string[] started = inner.StartedSnapshot();
+            Dictionary<string, int> lastStartByActor = new(StringComparer.Ordinal);
+            for (int subjectIndex = 0; subjectIndex < actorCount * requestsPerActor; subjectIndex++)
+            {
+                string actorId = started[blockerCount + subjectIndex];
+                if (lastStartByActor.TryGetValue(actorId, out int lastStart))
+                {
+                    Assert.LessOrEqual(subjectIndex - lastStart - 1, actorCount - 1,
+                        "A waiting actor exceeded the measurable per-round bypass bound.");
+                }
+                else
+                {
+                    Assert.LessOrEqual(subjectIndex, actorCount - 1,
+                        "An actor's first request was starved beyond one fair round.");
+                }
+
+                lastStartByActor[actorId] = subjectIndex;
+            }
+
+            for (int round = 0; round < requestsPerActor; round++)
+            {
+                HashSet<string> actorsInRound = new(StringComparer.Ordinal);
+                int roundStart = blockerCount + round * actorCount;
+                for (int offset = 0; offset < actorCount; offset++)
+                {
+                    Assert.IsTrue(actorsInRound.Add(started[roundStart + offset]),
+                        "An actor was served twice before every waiting actor received its turn.");
+                }
+
+                Assert.AreEqual(actorCount, actorsInRound.Count);
+            }
+
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task ProductionAdmission_LargeBacklog_DoesNotDelayAnotherActorsFirstRequest()
+        {
+            const int backlogCount = 8;
+            ScriptedAdmissionOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(
+                inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 1, MaxPending = 16 });
+            ActorContext busyActor = CreateActorContext("busy-actor", "busy-session");
+            ActorContext secondActor = CreateActorContext("second-actor", "second-session");
+            List<Task> tasks = new()
+            {
+                queue.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = "Teacher",
+                    Hint = "busy-active",
+                    ActorContext = busyActor
+                })
+            };
+
+            await WaitUntilAsync(() => inner.StartedCount == 1,
+                "The busy actor must occupy the provider slot before its backlog is offered.");
+
+            for (int requestIndex = 0; requestIndex < backlogCount; requestIndex++)
+            {
+                tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = "Teacher",
+                    Hint = "busy-backlog-" + requestIndex,
+                    ActorContext = busyActor
+                }));
+            }
+
+            tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "second-first",
+                ActorContext = secondActor
+            }));
+
+            inner.CompleteNext();
+            await WaitUntilAsync(() => inner.StartedCount == 2,
+                "A pending request must start after the active scripted request completes.");
+            Assert.AreEqual("second-first", inner.StartedSnapshot()[1],
+                "A newly waiting actor must be admitted before the already-served actor's backlog.");
+
+            await CompleteAllScriptedAsync(inner, backlogCount + 2);
+            await Task.WhenAll(tasks);
             queue.Dispose();
         }
 
@@ -1127,6 +1361,30 @@ namespace CoreAI.Tests.EditMode
         // F-10: bounded pending queue (MaxPending) and full Dispose contract
         // ──────────────────────────────────────────────────────────
 
+        private static ActorContext CreateActorContext(string actorId, string sessionId)
+        {
+            return new LocalActorIdentityProvider(
+                    actorId,
+                    sessionId,
+                    "world",
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty)
+                .GetActorContext("Teacher");
+        }
+
+        private static async Task CompleteAllScriptedAsync(
+            ScriptedAdmissionOrchestrator inner,
+            int expectedCount)
+        {
+            while (inner.CompletedCount < expectedCount)
+            {
+                await WaitUntilAsync(
+                    () => inner.StartedCount > inner.CompletedCount,
+                    "The fair queue did not start the next scripted request.");
+                inner.CompleteNext();
+            }
+        }
+
         private static async Task WaitUntilAsync(
             Func<bool> condition,
             string message,
@@ -1183,11 +1441,14 @@ namespace CoreAI.Tests.EditMode
             Task p2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "p2" });
 
             // A third pending request must be rejected immediately instead of growing the queue further.
+            ActorContext overflowActor = CreateActorContext("overflow-actor", "overflow-session");
             Task overflow = queue.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = "Teacher",
                 SourceTag = "Chat",
-                Hint = "overflow"
+                Hint = "overflow",
+                ActorContext = overflowActor,
+                CancellationScope = overflowActor.SessionId
             });
 
             AiOrchestrationQueueFullException caught = null;
@@ -1202,7 +1463,10 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(caught,
                 "Enqueuing beyond MaxPending must fail fast with AiOrchestrationQueueFullException.");
+            Assert.AreEqual("overflow-actor", caught.ActorId);
             Assert.AreEqual(2, caught.MaxPending);
+            Assert.That(caught.Message, Does.Contain("overflow-actor"));
+            Assert.That(caught.Message, Does.Contain("MaxPending=2"));
             AssertSingleUnstartedTurn(inner, "Teacher", "overflow");
 
             // Cleanup: release blocker and both accepted pending tasks so nothing is left running.
@@ -1228,14 +1492,17 @@ namespace CoreAI.Tests.EditMode
             // Fills the single pending slot.
             Task p1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "p1" });
 
+            ActorContext overflowActor = CreateActorContext("stream-overflow-actor", "stream-overflow-session");
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in queue.RunStreamingAsync(
                                new AiTaskRequest
                                {
-                                   RoleId = "Teacher",
-                                   SourceTag = "Chat",
-                                   Hint = "overflow-stream"
-                               }))
+                                    RoleId = "Teacher",
+                                    SourceTag = "Chat",
+                                    Hint = "overflow-stream",
+                                    ActorContext = overflowActor,
+                                    CancellationScope = overflowActor.SessionId
+                                }))
             {
                 chunks.Add(chunk);
             }
@@ -1244,6 +1511,7 @@ namespace CoreAI.Tests.EditMode
                 "A streaming request rejected by admission control gets exactly one terminal chunk.");
             Assert.IsTrue(chunks[0].IsDone);
             Assert.That(chunks[0].Error, Does.Contain("MaxPending"));
+            Assert.That(chunks[0].Error, Does.Contain("stream-overflow-actor"));
             Assert.AreEqual(LlmErrorCode.BackendUnavailable, chunks[0].ErrorCode);
             AssertSingleUnstartedTurn(inner, "Teacher", "overflow-stream");
 

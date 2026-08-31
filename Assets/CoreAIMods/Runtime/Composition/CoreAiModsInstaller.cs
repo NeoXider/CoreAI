@@ -6,7 +6,9 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using Newtonsoft.Json;
 using UnityEngine;
 using VContainer;
 
@@ -49,13 +51,18 @@ namespace CoreAI.Composition
         /// (e.g. demo scenes) never rehydrate each other's mods. Ignored when the host registers its
         /// own <see cref="ILuaModStore"/>/<see cref="ILuaModSourceStore"/>.
         /// </param>
+        /// <param name="worldAclVersion">
+        /// ACL schema assigned to a newly composed Rbx world. Pass null only when opening a legacy
+        /// world whose persisted metadata has no ACL version.
+        /// </param>
         public static void RegisterCoreAiMods(
             this IContainerBuilder builder,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
             bool enableFullLuaAccess = false,
             bool enableFullLuaPrivateAccess = false,
             IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null,
-            string modStoreId = null)
+            string modStoreId = null,
+            int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -110,6 +117,7 @@ namespace CoreAI.Composition
                 {
                     rbxHost.SetLog(rbxLog);
                     rbxHost.Initialize();
+                    rbxHost.Registry.ConfigureWorldAclVersion(worldAclVersion);
                     rbxLog.Info(
                         $"[CoreAiMods] RbxWorldHost resolved — registry has {rbxHost.Registry.Count} instances, " +
                         $"binder bound count={rbxHost.Binder.BoundCount}.",
@@ -124,6 +132,8 @@ namespace CoreAI.Composition
                 }
                 else
                 {
+                    InstanceRegistry registry = new(worldAclVersion: worldAclVersion);
+                    RbxDataModel game = DataModelBootstrap.CreateGame(registry);
                     rbxLog.Error(
                         "[CoreAiMods] RbxWorldHost NOT resolved — mods run headless. " +
                         "Instance.new / workspace mutations produce no GameObjects. " +
@@ -132,6 +142,8 @@ namespace CoreAI.Composition
                         "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.",
                         Logging.LogTag.World);
                     rbxApi = new LuaCsRbxApiBindings(
+                        registry: registry,
+                        game: game,
                         observability: observability,
                         log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
@@ -222,7 +234,12 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton);
 
             builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)
-                .AsSelf().As<ILuaModRuntime>();
+                .AsSelf();
+            builder.Register(c => new ActorAttributedLuaModRuntime(
+                    c.Resolve<LuaCsModStack>().Runtime,
+                    c.Resolve<LuaCsModStack>().GameplayBindings.RbxApi.Registry),
+                Lifetime.Singleton)
+                .As<ILuaModRuntime>();
             builder.Register(c => c.Resolve<LuaCsModStack>().ToolExecutor, Lifetime.Singleton)
                 .As<LuaTool.ILuaExecutor>();
             builder.Register(c => c.Resolve<LuaCsModStack>().GameplayBindings.LogicSlots, Lifetime.Singleton)
@@ -283,14 +300,17 @@ namespace CoreAI.Composition
                                 Logging.Log.Instance.Warn($"[CoreAI] Bundled mod seeding failed: {ex.Message}");
                             }
 
-                            runtime.RehydrateFromStore(scriptCapabilities,
-                                (scriptCapabilities & LuaCapabilities.Full) != 0);
-
                             IActorIdentityProvider hostIdentityProvider =
                                 container.ResolveOrDefault<IActorIdentityProvider>() ??
                                 fallbackHostIdentityProvider;
                             ActorContext hostActor = hostIdentityProvider.GetActorContext(
                                 BuiltInAgentRoleIds.Programmer);
+                            BindPersistedActorAttribution(
+                                container.ResolveOrDefault<ILuaModSourceStore>(),
+                                stackRbxApi?.Registry,
+                                hostActor);
+                            runtime.RehydrateFromStore(scriptCapabilities,
+                                (scriptCapabilities & LuaCapabilities.Full) != 0);
 
                             // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
                             // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
@@ -386,6 +406,370 @@ namespace CoreAI.Composition
                     // Lua tools are an additive convenience, not a requirement.
                 }
             });
+        }
+
+        private static void BindPersistedActorAttribution(
+            ILuaModSourceStore sourceStore,
+            InstanceRegistry registry,
+            ActorContext compositionActor)
+        {
+            if (sourceStore == null || registry == null)
+            {
+                return;
+            }
+
+            System.Collections.Generic.IReadOnlyList<LuaModManifest> manifests;
+            try
+            {
+                manifests = sourceStore.List()
+                    ?? System.Array.Empty<LuaModManifest>();
+            }
+            catch (System.Exception)
+            {
+                return;
+            }
+
+            foreach (LuaModManifest manifest in manifests)
+            {
+                string modId = manifest?.Id?.Trim() ?? "";
+                string ownerActorId = manifest?.OwnerActorId?.Trim() ?? "";
+                if (modId.Length == 0 || ownerActorId.Length == 0)
+                {
+                    continue;
+                }
+
+                string originTag = OriginTag.FromMod(modId);
+                if (compositionActor.IsTrusted
+                    && compositionActor.Grants.IsUnrestricted
+                    && string.Equals(ownerActorId, compositionActor.ActorId,
+                        System.StringComparison.Ordinal))
+                {
+                    registry.ClearActorAttribution(modId, originTag);
+                    continue;
+                }
+
+                registry.BindActorAttribution(modId, originTag, ownerActorId);
+            }
+        }
+
+        private sealed class ActorAttributedLuaModRuntime : ILuaModRuntime
+        {
+            private readonly ILuaModRuntime _inner;
+            private readonly InstanceRegistry _registry;
+
+            public ActorAttributedLuaModRuntime(ILuaModRuntime inner, InstanceRegistry registry)
+            {
+                _inner = inner ?? throw new System.ArgumentNullException(nameof(inner));
+                _registry = registry ?? throw new System.ArgumentNullException(nameof(registry));
+            }
+
+            public System.Collections.Generic.IReadOnlyList<LuaModInfo> ListMods(ActorContext caller)
+            {
+                return _inner.ListMods(caller);
+            }
+
+            public bool TryGetModSource(ActorContext caller, string id, out string source)
+            {
+                return _inner.TryGetModSource(caller, id, out source);
+            }
+
+            public void LoadMod(ActorContext caller, string id, string luaCode,
+                LuaCapabilities capabilities = LuaCapabilities.All,
+                bool persistToStore = true)
+            {
+                string modId = NormalizeModId(id);
+                ActorAttributionSnapshot snapshot = Capture(modId);
+                PrepareNewOwner(caller, modId);
+                try
+                {
+                    _inner.LoadMod(caller, id, luaCode, capabilities, persistToStore);
+                }
+                catch
+                {
+                    Restore(modId, snapshot);
+                    throw;
+                }
+            }
+
+            public string GetModOwnerActorId(ActorContext caller, string id)
+            {
+                return _inner.GetModOwnerActorId(caller, id);
+            }
+
+            public void ReloadMod(ActorContext caller, string id, string luaCode)
+            {
+                string modId = NormalizeModId(id);
+                PrepareExistingOwner(caller, modId);
+                _inner.ReloadMod(caller, id, luaCode);
+            }
+
+            public bool UnloadMod(ActorContext caller, string id)
+            {
+                return _inner.UnloadMod(caller, id);
+            }
+
+            public string ExportMod(ActorContext caller, string id)
+            {
+                return _inner.ExportMod(caller, id);
+            }
+
+            public bool ImportMod(ActorContext caller, string bundleJson,
+                LuaCapabilities hostGrant, bool allowFull = false)
+            {
+                string modId = ReadBundleModId(bundleJson);
+                ActorAttributionSnapshot snapshot = Capture(modId);
+                PrepareNewOwner(caller, modId);
+                try
+                {
+                    bool imported = _inner.ImportMod(caller, bundleJson, hostGrant, allowFull);
+                    if (!imported)
+                    {
+                        Restore(modId, snapshot);
+                    }
+
+                    return imported;
+                }
+                catch
+                {
+                    Restore(modId, snapshot);
+                    throw;
+                }
+            }
+
+            public bool ForgetMod(ActorContext caller, string id)
+            {
+                bool forgotten = _inner.ForgetMod(caller, id);
+                if (forgotten)
+                {
+                    string modId = NormalizeModId(id);
+                    if (modId.Length > 0)
+                    {
+                        _registry.ClearActorAttribution(modId, OriginTag.FromMod(modId));
+                    }
+                }
+
+                return forgotten;
+            }
+
+            public System.Collections.Generic.IReadOnlyList<LuaScriptRevision> ListModVersions(
+                ActorContext caller, string id)
+            {
+                return _inner.ListModVersions(caller, id);
+            }
+
+            public bool TryRevertMod(ActorContext caller, string id, int revisionIndex,
+                out string restoredSource)
+            {
+                string modId = NormalizeModId(id);
+                PrepareExistingOwner(caller, modId);
+                return _inner.TryRevertMod(caller, id, revisionIndex, out restoredSource);
+            }
+
+            public System.Collections.Generic.IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(
+                ActorContext caller, string modId = null)
+            {
+                return _inner.GetRecentHandlerErrors(caller, modId);
+            }
+
+            public void Tick(ActorContext caller, double deltaSeconds)
+            {
+                _inner.Tick(caller, deltaSeconds);
+            }
+
+            public void EmitEvent(ActorContext caller, string name, string payload = "")
+            {
+                _inner.EmitEvent(caller, name, payload);
+            }
+
+            public bool IsLoaded(ActorContext caller, string id)
+            {
+                return _inner.IsLoaded(caller, id);
+            }
+
+            public bool GetModReportLoggingEnabled(ActorContext caller, string id)
+            {
+                return _inner.GetModReportLoggingEnabled(caller, id);
+            }
+
+            public bool SetModReportLoggingEnabled(ActorContext caller, string id, bool enabled)
+            {
+                return _inner.SetModReportLoggingEnabled(caller, id, enabled);
+            }
+
+            public void AddModHandlerErroredListener(ActorContext caller,
+                System.Action<string, string, int> listener)
+            {
+                _inner.AddModHandlerErroredListener(caller, listener);
+            }
+
+            public void RemoveModHandlerErroredListener(ActorContext caller,
+                System.Action<string, string, int> listener)
+            {
+                _inner.RemoveModHandlerErroredListener(caller, listener);
+            }
+
+            public void AddModSourceLoadedListener(ActorContext caller,
+                System.Action<string, string, LuaCapabilities> listener)
+            {
+                _inner.AddModSourceLoadedListener(caller, listener);
+            }
+
+            public void RemoveModSourceLoadedListener(ActorContext caller,
+                System.Action<string, string, LuaCapabilities> listener)
+            {
+                _inner.RemoveModSourceLoadedListener(caller, listener);
+            }
+
+            public void AddModSourceUnloadedListener(ActorContext caller,
+                System.Action<string, string, LuaCapabilities> listener)
+            {
+                _inner.AddModSourceUnloadedListener(caller, listener);
+            }
+
+            public void RemoveModSourceUnloadedListener(ActorContext caller,
+                System.Action<string, string, LuaCapabilities> listener)
+            {
+                _inner.RemoveModSourceUnloadedListener(caller, listener);
+            }
+
+            public void AddModEventEmittedListener(ActorContext caller,
+                System.Action<string, string, string> listener)
+            {
+                _inner.AddModEventEmittedListener(caller, listener);
+            }
+
+            public void RemoveModEventEmittedListener(ActorContext caller,
+                System.Action<string, string, string> listener)
+            {
+                _inner.RemoveModEventEmittedListener(caller, listener);
+            }
+
+            public void AddModReportEmittedListener(ActorContext caller,
+                System.Action<string, string> listener)
+            {
+                _inner.AddModReportEmittedListener(caller, listener);
+            }
+
+            public void RemoveModReportEmittedListener(ActorContext caller,
+                System.Action<string, string> listener)
+            {
+                _inner.RemoveModReportEmittedListener(caller, listener);
+            }
+
+            private void PrepareNewOwner(ActorContext caller, string modId)
+            {
+                DemandTrusted(caller);
+                if (modId.Length == 0)
+                {
+                    return;
+                }
+
+                string originTag = OriginTag.FromMod(modId);
+                if (caller.Grants.IsUnrestricted)
+                {
+                    _registry.ClearActorAttribution(modId, originTag);
+                    return;
+                }
+
+                _registry.BindActorAttribution(modId, originTag, caller.ActorId);
+            }
+
+            private void PrepareExistingOwner(ActorContext caller, string modId)
+            {
+                DemandTrusted(caller);
+                if (modId.Length == 0)
+                {
+                    return;
+                }
+
+                string ownerActorId = _inner.GetModOwnerActorId(caller, modId)?.Trim() ?? "";
+                string originTag = OriginTag.FromMod(modId);
+                if (ownerActorId.Length == 0
+                    || (caller.Grants.IsUnrestricted
+                        && string.Equals(ownerActorId, caller.ActorId,
+                            System.StringComparison.Ordinal)))
+                {
+                    _registry.ClearActorAttribution(modId, originTag);
+                    return;
+                }
+
+                _registry.BindActorAttribution(modId, originTag, ownerActorId);
+            }
+
+            private ActorAttributionSnapshot Capture(string modId)
+            {
+                if (modId.Length == 0)
+                {
+                    return new ActorAttributionSnapshot(false, null);
+                }
+
+                bool found = _registry.TryGetActorAttribution(
+                    modId, OriginTag.FromMod(modId), out string actorId);
+                return new ActorAttributionSnapshot(found, actorId);
+            }
+
+            private void Restore(string modId, ActorAttributionSnapshot snapshot)
+            {
+                if (modId.Length == 0)
+                {
+                    return;
+                }
+
+                string originTag = OriginTag.FromMod(modId);
+                if (snapshot.Found)
+                {
+                    _registry.BindActorAttribution(modId, originTag, snapshot.ActorId);
+                    return;
+                }
+
+                _registry.ClearActorAttribution(modId, originTag);
+            }
+
+            private static string NormalizeModId(string id)
+            {
+                return id?.Trim() ?? "";
+            }
+
+            private static string ReadBundleModId(string bundleJson)
+            {
+                try
+                {
+                    ActorAttributionBundle bundle =
+                        JsonConvert.DeserializeObject<ActorAttributionBundle>(bundleJson);
+                    return bundle?.Manifest?.Id?.Trim() ?? "";
+                }
+                catch (JsonException)
+                {
+                    return "";
+                }
+            }
+
+            private static void DemandTrusted(ActorContext caller)
+            {
+                if (!caller.IsTrusted)
+                {
+                    throw new System.InvalidOperationException(
+                        "Actor context was not issued by an identity provider.");
+                }
+            }
+
+            private readonly struct ActorAttributionSnapshot
+            {
+                public ActorAttributionSnapshot(bool found, string actorId)
+                {
+                    Found = found;
+                    ActorId = actorId;
+                }
+
+                public bool Found { get; }
+
+                public string ActorId { get; }
+            }
+
+            private sealed class ActorAttributionBundle
+            {
+                public LuaModManifest Manifest = new();
+            }
         }
     }
 }

@@ -11,7 +11,7 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Adds priority queueing, concurrency limits, and cancellation scopes around an orchestrator.
+    /// Adds per-actor fair queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiActorContextResolver,
         IScopedAiTaskCancellation, IDisposable
@@ -29,6 +29,7 @@ namespace CoreAI.Ai
         private readonly object _lock = new();
         private readonly List<WorkItem> _pending = new();
         private readonly List<StreamWorkItem> _streamPending = new();
+        private readonly Dictionary<string, ActorQueueState> _actorQueues = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ScopeEntry> _scopeTokens = new(StringComparer.Ordinal);
 
         // WHY: F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
@@ -43,6 +44,7 @@ namespace CoreAI.Ai
             Comparer<StreamWorkItem>.Create(CompareStreamWorkItems);
 
         private int _inFlight;
+        private long _fairDispatchOrdinal;
         private long _nextSequence;
         private bool _disposed;
 
@@ -62,6 +64,17 @@ namespace CoreAI.Ai
             int maxPending = options?.MaxPending ?? 64;
             _maxPending = maxPending < 1 ? 1 : maxPending;
         }
+
+        /// <summary>The configured maximum number of concurrent provider calls.</summary>
+        public int MaxConcurrent => _maxConcurrent;
+
+        /// <summary>The configured maximum number of pending requests.</summary>
+        public int MaxPending => _maxPending;
+
+        /// <summary>
+        /// Maximum number of other actor admissions that can occur while an admitted actor remains pending.
+        /// </summary>
+        public long MaximumActorBypasses => (long)_maxPending + _maxConcurrent - 1L;
 
         /// <inheritdoc />
         public ActorContext ResolveActorContext(AiTaskRequest task)
@@ -95,6 +108,7 @@ namespace CoreAI.Ai
                 Priority = effectiveTask.Priority,
                 Sequence = NextSequence(),
                 ActorContext = actorContext,
+                ActorId = ResolveAdmissionActorId(actorContext),
                 MemoryScope = actorContext.HasValue
                     ? actorContext.Value.MemoryScope
                     : CaptureMemoryScope(effectiveTask.RoleId)
@@ -142,6 +156,7 @@ namespace CoreAI.Ai
                 Priority = effectiveTask.Priority,
                 Sequence = NextSequence(),
                 ActorContext = actorContext,
+                ActorId = ResolveAdmissionActorId(actorContext),
                 MemoryScope = actorContext.HasValue
                     ? actorContext.Value.MemoryScope
                     : CaptureMemoryScope(effectiveTask.RoleId)
@@ -216,29 +231,31 @@ namespace CoreAI.Ai
             {
                 while (_inFlight < _maxConcurrent)
                 {
-                    bool hasTask = _pending.Count > 0;
-                    bool hasStream = _streamPending.Count > 0;
-                    if (hasTask && (!hasStream || ComesBefore(_pending[0], _streamPending[0])))
+                    string actorId = SelectNextActorIdLocked();
+                    if (actorId == null)
                     {
-                        WorkItem w = _pending[0];
-                        _pending.RemoveAt(0);
-                        _inFlight++;
+                        break;
+                    }
+
+                    int taskIndex = FindNextTaskIndexLocked(actorId);
+                    int streamIndex = FindNextStreamIndexLocked(actorId);
+                    bool hasTask = taskIndex >= 0;
+                    bool hasStream = streamIndex >= 0;
+                    if (hasTask && (!hasStream || ComesBefore(_pending[taskIndex], _streamPending[streamIndex])))
+                    {
+                        WorkItem w = _pending[taskIndex];
+                        _pending.RemoveAt(taskIndex);
+                        MarkActorDispatchedLocked(actorId);
                         readyTasks ??= new List<WorkItem>();
                         readyTasks.Add(w);
                         continue;
                     }
 
-                    if (hasStream)
-                    {
-                        StreamWorkItem sw = _streamPending[0];
-                        _streamPending.RemoveAt(0);
-                        _inFlight++;
-                        readyStreams ??= new List<StreamWorkItem>();
-                        readyStreams.Add(sw);
-                        continue;
-                    }
-
-                    break;
+                    StreamWorkItem sw = _streamPending[streamIndex];
+                    _streamPending.RemoveAt(streamIndex);
+                    MarkActorDispatchedLocked(actorId);
+                    readyStreams ??= new List<StreamWorkItem>();
+                    readyStreams.Add(sw);
                 }
             }
 
@@ -257,6 +274,90 @@ namespace CoreAI.Ai
                     _ = RunOneStreamingAsync(sw);
                 }
             }
+        }
+
+        private string SelectNextActorIdLocked()
+        {
+            ActorQueueState selected = null;
+            foreach (ActorQueueState candidate in _actorQueues.Values)
+            {
+                if (candidate.PendingCount == 0 || !ComesBefore(candidate, selected))
+                {
+                    continue;
+                }
+
+                selected = candidate;
+            }
+
+            return selected?.ActorId;
+        }
+
+        private static bool ComesBefore(ActorQueueState candidate, ActorQueueState selected)
+        {
+            if (selected == null)
+            {
+                return true;
+            }
+
+            if (candidate.LastDispatchOrdinal != selected.LastDispatchOrdinal)
+            {
+                return candidate.LastDispatchOrdinal < selected.LastDispatchOrdinal;
+            }
+
+            if (candidate.HasBeenDispatched != selected.HasBeenDispatched)
+            {
+                return !candidate.HasBeenDispatched;
+            }
+
+            return candidate.ActivationSequence < selected.ActivationSequence;
+        }
+
+        private int FindNextTaskIndexLocked(string actorId)
+        {
+            for (int index = 0; index < _pending.Count; index++)
+            {
+                if (string.Equals(_pending[index].ActorId, actorId, StringComparison.Ordinal))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private int FindNextStreamIndexLocked(string actorId)
+        {
+            for (int index = 0; index < _streamPending.Count; index++)
+            {
+                if (string.Equals(_streamPending[index].ActorId, actorId, StringComparison.Ordinal))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private void MarkActorDispatchedLocked(string actorId)
+        {
+            ActorQueueState state = _actorQueues[actorId];
+            state.PendingCount--;
+            state.InFlightCount++;
+            state.HasBeenDispatched = true;
+            state.LastDispatchOrdinal = ++_fairDispatchOrdinal;
+            _inFlight++;
+        }
+
+        private void ReleaseActorDispatchLocked(string actorId)
+        {
+            _inFlight--;
+            if (!_actorQueues.TryGetValue(actorId, out ActorQueueState state))
+            {
+                return;
+            }
+
+            state.InFlightCount--;
+            RemoveIdleActorLocked(state);
         }
 
         private async Task RunOneAsync(WorkItem w)
@@ -312,7 +413,7 @@ namespace CoreAI.Ai
 
                 lock (_lock)
                 {
-                    _inFlight--;
+                    ReleaseActorDispatchLocked(w.ActorId);
                 }
 
                 Pump();
@@ -373,7 +474,7 @@ namespace CoreAI.Ai
 
                 lock (_lock)
                 {
-                    _inFlight--;
+                    ReleaseActorDispatchLocked(w.ActorId);
                 }
 
                 Pump();
@@ -391,6 +492,7 @@ namespace CoreAI.Ai
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
             public ActorContext? ActorContext;
+            public string ActorId;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
         }
@@ -406,6 +508,7 @@ namespace CoreAI.Ai
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
             public ActorContext? ActorContext;
+            public string ActorId;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
 
@@ -413,6 +516,16 @@ namespace CoreAI.Ai
             // enumerating (including an early break that does not cancel its own token). The producer
             // links its inner-stream token to this so it stops draining instead of running off-screen.
             public CancellationTokenSource ConsumerCancellation;
+        }
+
+        private sealed class ActorQueueState
+        {
+            public string ActorId;
+            public long ActivationSequence;
+            public long LastDispatchOrdinal;
+            public bool HasBeenDispatched;
+            public int PendingCount;
+            public int InFlightCount;
         }
 
         private sealed class ScopeEntry
@@ -470,9 +583,12 @@ namespace CoreAI.Ai
             {
                 if (pair.Value.ActorContext.HasValue)
                 {
+                    string actorScopeKey = ResolveActorCancellationScopeKey(
+                        pair.Value.ActorContext.Value.SessionId,
+                        pair.Value.RoleId);
                     if (string.Equals(
                             pair.Key,
-                            pair.Value.ActorContext.Value.SessionId,
+                            actorScopeKey,
                             StringComparison.Ordinal))
                     {
                         currentScopeKeys.Add(pair.Key);
@@ -517,6 +633,16 @@ namespace CoreAI.Ai
                     keySet.Contains(w.ScopeKey));
                 _streamPending.RemoveAll(w =>
                     keySet.Contains(w.ScopeKey));
+
+                foreach (WorkItem removed in removedPending)
+                {
+                    RemovePendingActorLocked(removed.ActorId);
+                }
+
+                foreach (StreamWorkItem removed in removedStreamPending)
+                {
+                    RemovePendingActorLocked(removed.ActorId);
+                }
 
                 foreach (string scopeKey in keySet)
                 {
@@ -578,6 +704,41 @@ namespace CoreAI.Ai
             list.Insert(index, item);
         }
 
+        private void AddPendingActorLocked(string actorId, long activationSequence)
+        {
+            if (!_actorQueues.TryGetValue(actorId, out ActorQueueState state))
+            {
+                state = new ActorQueueState
+                {
+                    ActorId = actorId,
+                    ActivationSequence = activationSequence,
+                    LastDispatchOrdinal = _fairDispatchOrdinal
+                };
+                _actorQueues.Add(actorId, state);
+            }
+
+            state.PendingCount++;
+        }
+
+        private void RemovePendingActorLocked(string actorId)
+        {
+            if (!_actorQueues.TryGetValue(actorId, out ActorQueueState state))
+            {
+                return;
+            }
+
+            state.PendingCount--;
+            RemoveIdleActorLocked(state);
+        }
+
+        private void RemoveIdleActorLocked(ActorQueueState state)
+        {
+            if (state.PendingCount == 0 && state.InFlightCount == 0)
+            {
+                _actorQueues.Remove(state.ActorId);
+            }
+        }
+
         private void Enqueue(WorkItem work)
         {
             if (work.OuterCt.IsCancellationRequested)
@@ -600,15 +761,25 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                // WHY: F-10: bounded admission instead of an unbounded queue - reject fast rather than
-                // growing _pending/_streamPending without limit under sustained offline/slow-LLM load.
-                if (_pending.Count + _streamPending.Count >= _maxPending)
+                List<WorkItem> replaceablePending = null;
+                List<StreamWorkItem> replaceableStreamPending = null;
+                if (!string.IsNullOrEmpty(scopeKey))
+                {
+                    replaceablePending = _pending.FindAll(w =>
+                        string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                    replaceableStreamPending = _streamPending.FindAll(w =>
+                        string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                }
+
+                int replaceableCount = (replaceablePending?.Count ?? 0) +
+                                       (replaceableStreamPending?.Count ?? 0);
+                int projectedPending = _pending.Count + _streamPending.Count - replaceableCount;
+                if (projectedPending >= _maxPending)
                 {
                     rejected = true;
                 }
                 else
                 {
-                    InsertSorted(_pending, work, WorkItemComparer);
                     if (!string.IsNullOrEmpty(scopeKey))
                     {
                         work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
@@ -618,23 +789,31 @@ namespace CoreAI.Ai
                             activeToCancel = previous.Cancellation;
                         }
 
+                        removedPending = replaceablePending;
+                        removedStreamPending = replaceableStreamPending;
+                        _pending.RemoveAll(w =>
+                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                        _streamPending.RemoveAll(w =>
+                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+
+                        foreach (WorkItem removed in removedPending)
+                        {
+                            RemovePendingActorLocked(removed.ActorId);
+                        }
+
+                        foreach (StreamWorkItem removed in removedStreamPending)
+                        {
+                            RemovePendingActorLocked(removed.ActorId);
+                        }
+
                         _scopeTokens[scopeKey] = CreateScopeEntry(
                             work.Task,
                             work.ActorContext,
                             work.ScopeCancellation);
-
-                        removedPending = _pending.FindAll(w =>
-                            !ReferenceEquals(w, work) &&
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-                        removedStreamPending = _streamPending.FindAll(w =>
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-
-                        _pending.RemoveAll(w =>
-                            !ReferenceEquals(w, work) &&
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-                        _streamPending.RemoveAll(w =>
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
                     }
+
+                    InsertSorted(_pending, work, WorkItemComparer);
+                    AddPendingActorLocked(work.ActorId, work.Sequence);
                 }
             }
 
@@ -642,7 +821,7 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "task queue full");
-                work.Tcs.TrySetException(new AiOrchestrationQueueFullException(_maxPending));
+                work.Tcs.TrySetException(new AiOrchestrationQueueFullException(work.ActorId, _maxPending));
                 return;
             }
 
@@ -676,13 +855,25 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                if (_pending.Count + _streamPending.Count >= _maxPending)
+                List<WorkItem> replaceablePending = null;
+                List<StreamWorkItem> replaceableStreamPending = null;
+                if (!string.IsNullOrEmpty(scopeKey))
+                {
+                    replaceablePending = _pending.FindAll(w =>
+                        string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                    replaceableStreamPending = _streamPending.FindAll(w =>
+                        string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                }
+
+                int replaceableCount = (replaceablePending?.Count ?? 0) +
+                                       (replaceableStreamPending?.Count ?? 0);
+                int projectedPending = _pending.Count + _streamPending.Count - replaceableCount;
+                if (projectedPending >= _maxPending)
                 {
                     rejected = true;
                 }
                 else
                 {
-                    InsertSorted(_streamPending, work, StreamWorkItemComparer);
                     if (!string.IsNullOrEmpty(scopeKey))
                     {
                         work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
@@ -692,23 +883,31 @@ namespace CoreAI.Ai
                             activeToCancel = previous.Cancellation;
                         }
 
+                        removedPending = replaceablePending;
+                        removedStreamPending = replaceableStreamPending;
+                        _pending.RemoveAll(w =>
+                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+                        _streamPending.RemoveAll(w =>
+                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
+
+                        foreach (WorkItem removed in removedPending)
+                        {
+                            RemovePendingActorLocked(removed.ActorId);
+                        }
+
+                        foreach (StreamWorkItem removed in removedStreamPending)
+                        {
+                            RemovePendingActorLocked(removed.ActorId);
+                        }
+
                         _scopeTokens[scopeKey] = CreateScopeEntry(
                             work.Task,
                             work.ActorContext,
                             work.ScopeCancellation);
-
-                        removedPending = _pending.FindAll(w =>
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-                        removedStreamPending = _streamPending.FindAll(w =>
-                            !ReferenceEquals(w, work) &&
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-
-                        _pending.RemoveAll(w =>
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
-                        _streamPending.RemoveAll(w =>
-                            !ReferenceEquals(w, work) &&
-                            string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
                     }
+
+                    InsertSorted(_streamPending, work, StreamWorkItemComparer);
+                    AddPendingActorLocked(work.ActorId, work.Sequence);
                 }
             }
 
@@ -716,10 +915,12 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "stream queue full");
+                AiOrchestrationQueueFullException rejection =
+                    new(work.ActorId, _maxPending);
                 work.Queue.Write(new LlmStreamChunk
                 {
                     IsDone = true,
-                    Error = $"AI orchestration queue is full (MaxPending={_maxPending}).",
+                    Error = rejection.Message,
                     ErrorCode = LlmErrorCode.BackendUnavailable
                 });
                 work.Queue.Complete();
@@ -744,8 +945,15 @@ namespace CoreAI.Ai
             }
 
             return actorContext.HasValue
-                ? actorContext.Value.SessionId
+                ? ResolveActorCancellationScopeKey(actorContext.Value.SessionId, task.RoleId)
                 : ResolveLegacyCancellationScopeKey(task.CancellationScope, task.RoleId, memoryScope);
+        }
+
+        private static string ResolveActorCancellationScopeKey(string sessionId, string roleId)
+        {
+            string normalizedSessionId = sessionId?.Trim() ?? "";
+            string normalizedRoleId = NormalizeRoleId(roleId);
+            return normalizedSessionId.Length + ":" + normalizedSessionId + normalizedRoleId;
         }
 
         private static string ResolveLegacyCancellationScopeKey(
@@ -796,6 +1004,13 @@ namespace CoreAI.Ai
             return trusted;
         }
 
+        private static string ResolveAdmissionActorId(ActorContext? actorContext)
+        {
+            return actorContext.HasValue
+                ? actorContext.Value.ActorId
+                : LocalActorIdentityProvider.DefaultActorId;
+        }
+
         private static ScopeEntry CreateScopeEntry(
             AiTaskRequest task,
             ActorContext? actorContext,
@@ -823,6 +1038,10 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 removed = _pending.Remove(work);
+                if (removed)
+                {
+                    RemovePendingActorLocked(work.ActorId);
+                }
             }
 
             if (removed)
@@ -839,6 +1058,10 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 removed = _streamPending.Remove(work);
+                if (removed)
+                {
+                    RemovePendingActorLocked(work.ActorId);
+                }
             }
 
             if (removed)
@@ -1080,6 +1303,7 @@ namespace CoreAI.Ai
 
                 drainedStreamPending = new List<StreamWorkItem>(_streamPending);
                 _streamPending.Clear();
+                _actorQueues.Clear();
             }
 
             // WHY: Pending work never got a chance to run: resolve it now instead of leaving it forever

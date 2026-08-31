@@ -597,7 +597,16 @@ namespace CoreAI.Ai.LuaCs
                             "pass an Instance parent, got " + Describe(parentValue) + " at argument 2");
                     }
 
-                    instance.Parent = parent.Instance;
+                    try
+                    {
+                        context.RequireReparent(instance, parent.Instance);
+                        instance.Parent = parent.Instance;
+                    }
+                    catch
+                    {
+                        instance.Destroy();
+                        throw;
+                    }
                 }
 
                 return context.WrapInstance(instance);

@@ -541,8 +541,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            RunActorLua(bindings, host, "host", "service:Destroy()", ("service", lighting));
-            Assert.IsTrue(lighting.IsDestroyed);
+            Exception hostDestroyError = Assert.Catch(() => RunActorLua(
+                bindings, host, "host", "service:Destroy()", ("service", lighting)));
+            StringAssert.Contains("including for unrestricted actors", FullText(hostDestroyError));
+            Assert.IsFalse(lighting.IsDestroyed);
         }
 
         [Test]
@@ -569,6 +571,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsNotNull(cloneChild);
             Assert.AreEqual("clone-caller", Record(registry, clone).OwnerActorId);
             Assert.AreEqual("clone-caller", Record(registry, cloneChild).OwnerActorId);
+            Assert.AreEqual("clone-mod", Record(registry, clone).OwnerModId);
+            Assert.AreEqual("clone-mod", Record(registry, cloneChild).OwnerModId);
+            Assert.AreEqual(OriginTag.FromMod("clone-mod"), Record(registry, clone).OriginTag);
+            Assert.AreEqual(OriginTag.FromMod("clone-mod"), Record(registry, cloneChild).OriginTag);
             Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, clone).AccessScope);
             Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, cloneChild).AccessScope);
         }
@@ -595,6 +601,41 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("reparent destination", FullText(destinationError));
             StringAssert.Contains("Owned by actor 'reparent-b'", FullText(destinationError));
             Assert.IsNull(childA.Parent);
+
+            childA.Parent = parentB;
+            Exception sourceContainerError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "reparent-mod-a", "child.Parent = workspace",
+                ("child", childA), ("workspace", workspace)));
+            StringAssert.Contains("reparent source container", FullText(sourceContainerError));
+            StringAssert.Contains("Owned by actor 'reparent-b'", FullText(sourceContainerError));
+            Assert.AreSame(parentB, childA.Parent);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_InstanceNewParentChecksForeignContainerBeforeMutation()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            LuaCsModStack stack = BuildStack(bindings);
+            ActorContext actorA = Actor("instance-new-parent-a");
+            ActorContext actorB = Actor("instance-new-parent-b");
+            RbxInstance workspace = bindings.Game.FindFirstChildOfClass("Workspace");
+            RbxInstance containerA = CreateActorInstance(
+                registry, actorA, "instance-new-container-a", "Folder");
+            containerA.Name = "ForeignContainer";
+            containerA.Parent = workspace;
+            registry.BindActorAttribution(
+                "instance-new-mod-b", OriginTag.FromMod("instance-new-mod-b"), actorB.ActorId);
+
+            Exception error = Assert.Catch(() => stack.Runtime.LoadMod(
+                actorB,
+                "instance-new-mod-b",
+                "Instance.new('Folder', workspace:FindFirstChild('ForeignContainer'))",
+                persistToStore: false));
+
+            StringAssert.Contains("reparent destination", FullText(error));
+            StringAssert.Contains("Owned by actor 'instance-new-parent-a'", FullText(error));
+            Assert.AreEqual(0, containerA.GetChildren().Count);
+            Assert.AreEqual(0, registry.GetOwnedBy("instance-new-mod-b").Count);
         }
 
         [Test]
@@ -627,6 +668,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreSame(containerA, childB.Parent);
             Assert.IsFalse(childA.IsDestroyed);
             Assert.IsFalse(childB.IsDestroyed);
+
+            RbxInstance containerB = CreateActorInstance(
+                registry, actorB, "destroy-mod-b", "Folder");
+            RbxInstance callerOwnedChild = CreateActorInstance(
+                registry, actorA, "destroy-mod-a", "Folder");
+            callerOwnedChild.Parent = containerB;
+            Exception containerError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "destroy-mod-a", "container:ClearAllChildren()",
+                ("container", containerB)));
+            StringAssert.Contains("clear descendants container", FullText(containerError));
+            StringAssert.Contains("Owned by actor 'destroy-b'", FullText(containerError));
+            Assert.AreSame(containerB, callerOwnedChild.Parent);
+            Assert.IsFalse(callerOwnedChild.IsDestroyed);
         }
 
         [Test]

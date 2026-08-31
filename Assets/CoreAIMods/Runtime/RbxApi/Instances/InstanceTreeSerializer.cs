@@ -20,7 +20,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 throw RbxError.BadArgument("cannot capture a nil root", "pass a live instance");
             }
 
-            InstanceTreeSnapshot snapshot = new();
+            InstanceTreeSnapshot snapshot = new()
+            {
+                WorldAclVersion = root.Registry?.WorldAclVersion
+            };
             CaptureNode(root, 0UL, snapshot.Instances);
             return snapshot;
         }
@@ -39,7 +42,9 @@ namespace CoreAI.Mods.Rbx.Instances
                 Name = instance.Name,
                 Archivable = instance.Archivable,
                 OwnerModId = record?.OwnerModId,
-                OriginTag = record?.OriginTag
+                OriginTag = record?.OriginTag,
+                OwnerActorId = record?.OwnerActorId,
+                AccessScope = record?.AccessScope
             };
 
             foreach (string tag in instance.GetTags())
@@ -115,11 +120,13 @@ namespace CoreAI.Mods.Rbx.Instances
                     "capture a subtree with InstanceTreeSerializer.Capture first");
             }
 
+            registry.ConfigureWorldAclVersion(snapshot.WorldAclVersion);
             Dictionary<ulong, RbxInstance> restored = new();
             foreach (InstanceSnapshot node in snapshot.Instances)
             {
                 RbxInstance instance = registry.RestoreInstance(node.ClassName,
-                    new InstanceId(node.Id), node.OwnerModId, node.OriginTag);
+                    new InstanceId(node.Id), node.OwnerModId, node.OriginTag,
+                    node.OwnerActorId, node.AccessScope);
                 instance.Name = node.Name;
                 instance.Archivable = node.Archivable;
                 foreach (AttributeSnapshot attribute in node.Attributes)

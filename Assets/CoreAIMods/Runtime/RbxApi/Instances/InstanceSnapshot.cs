@@ -49,6 +49,8 @@ namespace CoreAI.Mods.Rbx.Instances
         public bool Archivable;
         public string OwnerModId;
         public string OriginTag;
+        public string OwnerActorId;
+        public InstanceAccessScope? AccessScope;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -57,6 +59,7 @@ namespace CoreAI.Mods.Rbx.Instances
     [Serializable]
     public sealed class InstanceTreeSnapshot
     {
+        public int? WorldAclVersion;
         public List<InstanceSnapshot> Instances = new();
     }
 }

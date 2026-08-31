@@ -157,6 +157,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
 
                 RbxInstance part = host.Registry.WorldRoot.FindFirstChild("LeakPart");
                 Assert.IsNotNull(part, "the mod's Instance.new('Part') must exist while the mod is loaded");
+                Assert.IsTrue(host.Registry.TryGetRecord(part.Id, out InstanceRecord record));
+                Assert.IsNull(record.OwnerActorId,
+                    "the default local actor is the unrestricted host, not an owned-world actor");
+                Assert.AreEqual(InstanceAccessScope.SharedWritable, record.AccessScope);
                 InstanceId partId = part.Id;
                 Assert.IsTrue(host.Binder.TryGetBoundObject(partId, out _),
                     "the part must be materialized as a GameObject while the mod is loaded");
@@ -180,10 +184,163 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             }
         }
 
+        [Test]
+        public void UnloadSourceMod_DoesNotDestroyCloneOwnedByCloningMod()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            host.Initialize();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            builder.RegisterInstance(host);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                ActorContext sourceActor = Actor("clone-source-actor");
+                ActorContext cloningActor = Actor("clone-owner-actor");
+                runtime.LoadMod(sourceActor, "clone-source-mod", @"
+                    local source = Instance.new('Folder')
+                    source.Name = 'CloneSource'
+                    local child = Instance.new('Part')
+                    child.Parent = source
+                    source.Parent = workspace", persistToStore: false);
+                runtime.LoadMod(cloningActor, "clone-owner-mod", @"
+                    local clone = workspace:FindFirstChild('CloneSource'):Clone()
+                    clone.Name = 'SurvivingClone'
+                    clone.Parent = workspace", persistToStore: false);
+
+                RbxInstance clone = host.Registry.WorldRoot.FindFirstChild("SurvivingClone");
+                Assert.IsNotNull(clone);
+                Assert.IsTrue(host.Registry.TryGetRecord(clone.Id, out InstanceRecord cloneRecord));
+                Assert.AreEqual("clone-owner-mod", cloneRecord.OwnerModId);
+                Assert.AreEqual(OriginTag.FromMod("clone-owner-mod"), cloneRecord.OriginTag);
+                Assert.AreEqual(cloningActor.ActorId, cloneRecord.OwnerActorId);
+
+                Assert.IsTrue(runtime.UnloadMod(sourceActor, "clone-source-mod"));
+
+                Assert.IsNull(host.Registry.WorldRoot.FindFirstChild("CloneSource"));
+                Assert.AreSame(clone, host.Registry.WorldRoot.FindFirstChild("SurvivingClone"));
+                Assert.IsFalse(clone.IsDestroyed);
+                Assert.IsNotNull(clone.FindFirstChildOfClass("Part"));
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(hostGo);
+            }
+        }
+
+        [Test]
+        public void ProductionRuntime_NewWorldAttributesOwnerAndEnforcesAclScopes()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            host.Initialize();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            builder.RegisterInstance(host);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                ActorContext actorA = Actor("production-actor-a");
+                ActorContext actorB = Actor("production-actor-b");
+                runtime.LoadMod(actorA, "production-owner-a", @"
+                    local folder = Instance.new('Folder')
+                    folder.Name = 'ProductionOwnedByA'
+                    folder.Parent = workspace", persistToStore: false);
+
+                RbxInstance owned = host.Registry.WorldRoot.FindFirstChild("ProductionOwnedByA");
+                Assert.IsNotNull(owned);
+                Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, host.Registry.WorldAclVersion);
+                Assert.IsTrue(host.Registry.TryGetRecord(owned.Id, out InstanceRecord ownedRecord));
+                Assert.AreEqual(actorA.ActorId, ownedRecord.OwnerActorId);
+                Assert.AreEqual(InstanceAccessScope.Owned, ownedRecord.AccessScope);
+
+                RbxInstance camera = host.Registry.WorldRoot.FindFirstChildOfClass("Camera");
+                Assert.IsTrue(host.Registry.TryGetRecord(camera.Id, out InstanceRecord cameraRecord));
+                Assert.AreEqual(InstanceAccessScope.HostProtected, cameraRecord.AccessScope);
+                System.Exception writeError = Assert.Catch(() => runtime.LoadMod(
+                    actorB,
+                    "production-writer-b",
+                    "workspace:FindFirstChild('ProductionOwnedByA').Name = 'Stolen'",
+                    persistToStore: false));
+                StringAssert.Contains("Owned by actor 'production-actor-a'", writeError.ToString());
+                Assert.AreEqual("ProductionOwnedByA", owned.Name);
+
+                Assert.DoesNotThrow(() => runtime.LoadMod(
+                    actorB,
+                    "production-camera-b",
+                    "workspace.CurrentCamera.CFrame = CFrame.new(1, 2, 3)",
+                    persistToStore: false));
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(hostGo);
+            }
+        }
+
+        [Test]
+        public void ProductionRuntime_LegacyWorldKeepsCrossActorMutationCompatibility()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            host.Initialize();
+
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry, worldAclVersion: null);
+            builder.RegisterInstance(host);
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                ActorContext actorA = Actor("legacy-production-a");
+                ActorContext actorB = Actor("legacy-production-b");
+                runtime.LoadMod(actorA, "legacy-production-owner", @"
+                    local folder = Instance.new('Folder')
+                    folder.Name = 'LegacyProductionOwned'
+                    folder.Parent = workspace", persistToStore: false);
+
+                Assert.IsNull(host.Registry.WorldAclVersion);
+                Assert.DoesNotThrow(() => runtime.LoadMod(
+                    actorB,
+                    "legacy-production-destroyer",
+                    "workspace:FindFirstChild('LegacyProductionOwned'):Destroy()",
+                    persistToStore: false));
+                Assert.IsNull(host.Registry.WorldRoot.FindFirstChild("LegacyProductionOwned"));
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(hostGo);
+            }
+        }
+
         /// <summary>Minimal registrations the LuaCsModStack factory resolves (mirrors the proven
         /// bootstrap in LuaModsLlmToolEditModeTests): required IGameLogger + IAiGameCommandSink, plus
         /// the ResolveOrDefault conveniences and the world-command executors the installer expects.</summary>
-        private void RegisterMinimalModStack(ContainerBuilder builder, CoreAiPrefabRegistryAsset registry)
+        private static ActorContext Actor(string actorId)
+        {
+            return new LocalActorIdentityProvider(actorId)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        private void RegisterMinimalModStack(ContainerBuilder builder,
+            CoreAiPrefabRegistryAsset registry,
+            int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion)
         {
             builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
             // WHY: an explicit recorder, not the ambient Log.Instance — the factory's diagnostics are then
@@ -197,7 +354,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
 
             builder.RegisterWorldCommands(registry);
-            builder.RegisterCoreAiMods();
+            builder.RegisterCoreAiMods(worldAclVersion: worldAclVersion);
         }
 
         private sealed class NoopSink : IAiGameCommandSink

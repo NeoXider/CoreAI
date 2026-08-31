@@ -44,6 +44,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             DataModelBootstrap.AttachWorldRoot(target, restoredGame);
             InstanceTreeSnapshot second = InstanceTreeSerializer.Capture(restoredGame);
 
+            Assert.AreEqual(first.WorldAclVersion, second.WorldAclVersion);
             Assert.AreEqual(first.Instances.Count, second.Instances.Count);
             for (int i = 0; i < first.Instances.Count; i++)
             {
@@ -56,6 +57,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                 Assert.AreEqual(a.Archivable, b.Archivable);
                 Assert.AreEqual(a.OwnerModId, b.OwnerModId);
                 Assert.AreEqual(a.OriginTag, b.OriginTag);
+                Assert.AreEqual(a.OwnerActorId, b.OwnerActorId);
+                Assert.AreEqual(a.AccessScope, b.AccessScope);
                 CollectionAssert.AreEqual(a.Tags, b.Tags);
                 Assert.AreEqual(a.Attributes.Count, b.Attributes.Count);
                 for (int j = 0; j < a.Attributes.Count; j++)
@@ -67,6 +70,61 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                     Assert.AreEqual(a.Attributes[j].BoolValue, b.Attributes[j].BoolValue);
                 }
             }
+        }
+
+        [Test]
+        public void Restore_PreservesWorldAclOwnerAndExplicitScopeOverride()
+        {
+            InstanceRegistry source = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            RbxDataModel game = DataModelBootstrap.CreateGame(source);
+            RbxInstance owned = source.Create(
+                "Folder", "mod-a", OriginTag.FromMod("mod-a"),
+                ownerActorId: "actor-a");
+            owned.Name = "Owned";
+            owned.Parent = source.WorldRoot;
+            RbxInstance protectedOverride = source.Create(
+                "Folder", "mod-a", OriginTag.FromMod("mod-a"),
+                ownerActorId: "actor-a", accessScope: InstanceAccessScope.HostProtected);
+            protectedOverride.Name = "ProtectedOverride";
+            protectedOverride.Parent = source.WorldRoot;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(game);
+            InstanceRegistry target = new();
+            RbxDataModel restoredGame = (RbxDataModel)InstanceTreeSerializer.Restore(snapshot, target);
+            DataModelBootstrap.AttachWorldRoot(target, restoredGame);
+
+            Assert.AreEqual(InstanceRegistry.CurrentWorldAclVersion, target.WorldAclVersion);
+            RbxInstance restoredOwned = target.WorldRoot.FindFirstChild("Owned");
+            Assert.IsTrue(target.TryGetRecord(restoredOwned.Id, out InstanceRecord ownedRecord));
+            Assert.AreEqual("actor-a", ownedRecord.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, ownedRecord.AccessScope);
+            RbxInstance restoredProtected = target.WorldRoot.FindFirstChild("ProtectedOverride");
+            Assert.IsTrue(target.TryGetRecord(
+                restoredProtected.Id, out InstanceRecord protectedRecord));
+            Assert.AreEqual("actor-a", protectedRecord.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.HostProtected, protectedRecord.AccessScope);
+        }
+
+        [Test]
+        public void Restore_LegacySnapshotWithoutAclFieldsRemainsLegacy()
+        {
+            InstanceTreeSnapshot snapshot = new();
+            snapshot.Instances.Add(new InstanceSnapshot
+            {
+                Id = 1UL,
+                ClassName = "Folder",
+                Name = "Legacy",
+                Archivable = true
+            });
+
+            InstanceRegistry target = new();
+            RbxInstance restored = InstanceTreeSerializer.Restore(snapshot, target);
+
+            Assert.IsNull(target.WorldAclVersion);
+            Assert.IsTrue(target.TryGetRecord(restored.Id, out InstanceRecord record));
+            Assert.IsNull(record.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.SharedWritable, record.AccessScope);
         }
 
         [Test]

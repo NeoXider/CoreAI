@@ -181,8 +181,15 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
+            RbxInstance sourceContainer = target.Parent;
             WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
                 WorldAclDecision.ReparentSelf, "reparent source");
+            if (sourceContainer != null && !ReferenceEquals(sourceContainer, destination))
+            {
+                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, sourceContainer,
+                    WorldAclDecision.AcceptChild, "reparent source container");
+            }
+
             if (destination != null)
             {
                 WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, destination,
@@ -202,9 +209,12 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        public void RequireDestroyForest(IReadOnlyList<RbxInstance> roots, string operation)
+        public void RequireDestroyForest(RbxInstance container,
+            IReadOnlyList<RbxInstance> roots, string operation)
         {
             RequireWorldEdit(operation);
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, container,
+                WorldAclDecision.AcceptChild, operation + " container");
             for (int rootIndex = 0; rootIndex < roots.Count; rootIndex++)
             {
                 RbxInstance root = roots[rootIndex];
@@ -238,8 +248,22 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
+            // WHY: host authority means the right to WRITE host-protected properties, not the right
+            // to destroy or reparent world-lifetime singletons — conflating the two let host Lua
+            // delete Lighting once the ACL was enabled, which is weaker than the pre-ACL guards.
             if (actorContext.Grants.IsUnrestricted)
             {
+                if (target != null
+                    && registry.TryGetRecord(target.Id, out InstanceRecord hostRecord)
+                    && hostRecord.AccessScope == InstanceAccessScope.HostProtected
+                    && (decision == WorldAclDecision.Destroy
+                        || decision == WorldAclDecision.ReparentSelf))
+                {
+                    Deny(actorContext, target, operation,
+                        "world-lifetime singletons are HostProtected against destroy and reparent, "
+                        + "including for unrestricted actors");
+                }
+
                 return;
             }
 
@@ -579,7 +603,7 @@ namespace CoreAI.Ai.LuaCs
                     return LuaValue.Nil;
                 }
 
-                RbxInstance copy = self.Clone();
+                RbxInstance copy = self.Clone(context.OwnerModId, context.OriginTag);
                 if (copy == null)
                 {
                     return LuaValue.Nil;
@@ -622,7 +646,7 @@ namespace CoreAI.Ai.LuaCs
                     }
                 }
 
-                context.RequireDestroyForest(destroyRoots, "clear descendants");
+                context.RequireDestroyForest(self, destroyRoots, "clear descendants");
                 for (int index = 0; index < destroyRoots.Count; index++)
                 {
                     destroyRoots[index].Destroy();

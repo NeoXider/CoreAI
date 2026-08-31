@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
@@ -25,12 +26,31 @@ namespace CoreAI.Ai
     {
         /// <summary>Creates the exception carrying the configured pending-queue capacity that was hit.</summary>
         public AiOrchestrationQueueFullException(int maxPending)
-            : base($"AI orchestration queue is full (MaxPending={maxPending}); request rejected.")
+            : this(LocalActorIdentityProvider.DefaultActorId, maxPending)
         {
+        }
+
+        /// <summary>Creates an actor-specific rejection for the configured pending-queue capacity.</summary>
+        public AiOrchestrationQueueFullException(string actorId, int maxPending)
+            : base(
+                $"AI orchestration request for actor '{NormalizeActorId(actorId)}' rejected: " +
+                $"pending capacity is exhausted (MaxPending={maxPending}).")
+        {
+            ActorId = NormalizeActorId(actorId);
             MaxPending = maxPending;
         }
 
+        /// <summary>The actor whose request was rejected.</summary>
+        public string ActorId { get; }
+
         /// <summary>The configured pending-queue capacity that was exceeded.</summary>
         public int MaxPending { get; }
+
+        private static string NormalizeActorId(string actorId)
+        {
+            return string.IsNullOrWhiteSpace(actorId)
+                ? LocalActorIdentityProvider.DefaultActorId
+                : actorId.Trim();
+        }
     }
 }

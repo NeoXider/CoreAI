@@ -118,11 +118,20 @@ namespace CoreAI.Ai.LuaCs
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
 
         /// <summary>
-        /// Persistent mod capacity. Defaults to the existing production limit; benchmark hosts may set
+        /// Per-actor persistent mod capacity. Defaults to the existing production limit; benchmark hosts may set
         /// <see cref="LuaCsModRuntime.BenchmarkMaxMods"/>. The runtime always retains its independent
         /// <see cref="LuaCsModRuntime.EmergencyMaxMods"/> ceiling.
         /// </summary>
         public int MaxMods = LuaCsModRuntime.DefaultMaxMods;
+
+        /// <summary>Per-actor live scheduler-thread capacity.</summary>
+        public int MaxSchedulerThreadsPerActor = ModScheduler.DefaultMaxThreadsPerActor;
+
+        /// <summary>Per-actor capacity for live instances registered by runtime scripts.</summary>
+        public int MaxRegisteredInstancesPerActor = LuaCsModRuntime.DefaultMaxRegisteredInstancesPerActor;
+
+        /// <summary>Per-actor capacity for distinct named-event subscriptions.</summary>
+        public int MaxEventSubscriptionsPerActor = LuaCsModRuntime.DefaultMaxEventSubscriptionsPerActor;
 
         /// <summary>
         /// Consecutive-error streak (reset by any success) at which a persistent mod is quarantined —
@@ -258,7 +267,10 @@ namespace CoreAI.Ai.LuaCs
                 options.LogService,
                 options.RbxApi,
                 options.MaxMods,
-                options.Observability);
+                options.Observability,
+                options.MaxSchedulerThreadsPerActor,
+                options.MaxRegisteredInstancesPerActor,
+                options.MaxEventSubscriptionsPerActor);
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,
