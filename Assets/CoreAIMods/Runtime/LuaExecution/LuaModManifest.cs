@@ -52,6 +52,9 @@ namespace CoreAI.Ai
         /// <summary>Optional author/attribution.</summary>
         public string Author = "";
 
+        /// <summary>Durable actor identity that owns this mod; empty denotes host/system ownership.</summary>
+        public string OwnerActorId = "";
+
         /// <summary>
         /// The granted <see cref="LuaCapabilities"/> flag set as a string (round-trips via
         /// <c>Enum.Parse</c>). Treated as a request only; never trusted to escalate on load.

@@ -21,6 +21,13 @@ namespace CoreAI.Ai
         void LoadMod(string id, string luaCode, LuaCapabilities capabilities = LuaCapabilities.All,
             bool persistToStore = true);
 
+        /// <summary>Loads a mod owned by the supplied durable actor identity.</summary>
+        void LoadModForActor(string id, string luaCode, string ownerActorId,
+            LuaCapabilities capabilities = LuaCapabilities.All, bool persistToStore = true);
+
+        /// <summary>Returns the durable owner id, empty for host/system, or null when the mod is unknown.</summary>
+        string GetModOwnerActorId(string id);
+
         /// <summary>Replaces a loaded mod's code, keeping its granted capabilities.</summary>
         void ReloadMod(string id, string luaCode);
 
@@ -32,6 +39,10 @@ namespace CoreAI.Ai
 
         /// <summary>Installs a mod from a bundle, capped by the host grant. Full is stripped unless allowed.</summary>
         bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false);
+
+        /// <summary>Installs a caller-owned mod from a bundle, capped by the host grant.</summary>
+        bool ImportModForActor(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
+            bool allowFull = false);
 
         /// <summary>Unloads a mod and deletes its persisted source/state. False if unknown.</summary>
         bool ForgetMod(string id);

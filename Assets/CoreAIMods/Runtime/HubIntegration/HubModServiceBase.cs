@@ -397,6 +397,7 @@ namespace CoreAI.Ai.Hub
                     manifest.SeededVersion = existing.SeededVersion;
                     manifest.SeededHash = existing.SeededHash;
                     manifest.Entry = string.IsNullOrEmpty(existing.Entry) ? manifest.Entry : existing.Entry;
+                    manifest.OwnerActorId = existing.OwnerActorId ?? "";
                 }
             }
             catch

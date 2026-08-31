@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
+[assembly: InternalsVisibleTo("CoreAI.Mods.Tests")]
+
 namespace CoreAI.Mods.Rbx.Instances.Scheduling
 {
     /// <summary>Roblox frame phases exposed by the engine-free scheduler pipeline.</summary>
@@ -73,6 +75,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public ThreadScheduleState State { get; set; }
 
             public object[] DeferredArguments { get; set; }
+
+            public CompletionWaitEntry CompletionWait { get; set; }
         }
 
         private abstract class TimedEntry
@@ -133,6 +137,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public RbxSchedulerCompletion Completion { get; }
 
             public long Sequence { get; }
+
+            public bool IsSignaled { get; set; }
         }
 
         private sealed class MinHeap<T>
@@ -268,7 +274,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly Queue<ThreadRecord> _deferredQueue = new();
         private readonly List<ThreadRecord> _drainBuffer = new();
         private readonly List<TimedEntry> _delayedBatchBuffer = new();
-        private readonly List<CompletionWaitEntry> _completionWaits = new();
+        private readonly object _completionGate = new();
+        private readonly Dictionary<RbxSchedulerCompletion, CompletionWaitEntry>
+            _completionRegistrations = new();
+        private readonly SortedDictionary<long, CompletionWaitEntry> _readyCompletions = new();
         private readonly List<CompletionWaitEntry> _completionBuffer = new();
         private readonly MinHeap<WaitEntry> _waitHeap;
         private readonly MinHeap<DelayEntry> _delayHeap;
@@ -309,6 +318,19 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>Current injected scaled scheduler time.</summary>
         public double CurrentTime => _timeSource.CurrentTime;
+
+        internal long CompletionPromotionTouchCount { get; private set; }
+
+        internal int CompletionWaitCount
+        {
+            get
+            {
+                lock (_completionGate)
+                {
+                    return _completionRegistrations.Count;
+                }
+            }
+        }
 
         /// <summary>Raised at each observable phase boundary in canonical pipeline order.</summary>
         public event Action<SchedulerPhase, double> PhaseReached;
@@ -364,7 +386,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _waitHeap.Add(entry);
         }
 
-        /// <summary>Resumes an existing caller at the next deferred drain after completion.</summary>
+        /// <summary>
+        /// Resumes an existing caller at the next deferred drain after completion. Ready callers are
+        /// promoted in registration order, independent of host callback arrival order. The host must
+        /// call <see cref="SignalCompletion"/> after registering and completing the token.
+        /// </summary>
         public void ScheduleWaitUntil(IRbxScriptThread caller, RbxSchedulerCompletion completion)
         {
             if (completion == null)
@@ -375,8 +401,58 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             ThreadRecord record = GetSchedulableRecord(caller, "ScheduleWaitUntil", true);
-            record.State = ThreadScheduleState.WaitingForCompletion;
-            _completionWaits.Add(new CompletionWaitEntry(record, completion, NextSequence()));
+            lock (_completionGate)
+            {
+                if (_completionRegistrations.ContainsKey(completion))
+                {
+                    throw RbxError.BadArgument(
+                        "ScheduleWaitUntil requires a distinct completion token",
+                        "create one RbxSchedulerCompletion for each scheduler wait");
+                }
+
+                CompletionWaitEntry entry = new(record, completion, NextSequence());
+                record.State = ThreadScheduleState.WaitingForCompletion;
+                record.CompletionWait = entry;
+                _completionRegistrations.Add(completion, entry);
+            }
+        }
+
+        /// <summary>
+        /// Publishes a terminal completion to the scheduler. Host callbacks may call this off the
+        /// main thread after completing the token; late teardown signals are discarded.
+        /// </summary>
+        public void SignalCompletion(RbxSchedulerCompletion completion)
+        {
+            if (completion == null)
+            {
+                throw RbxError.BadArgument(
+                    "SignalCompletion requires a completion token",
+                    "signal the token passed to ScheduleWaitUntil");
+            }
+
+            lock (_completionGate)
+            {
+                if (!_completionRegistrations.TryGetValue(completion,
+                        out CompletionWaitEntry entry))
+                {
+                    return;
+                }
+
+                if (!completion.IsCompleted)
+                {
+                    throw RbxError.BadArgument(
+                        "SignalCompletion requires a terminal completion token",
+                        "complete, fail, or cancel the token before signalling it");
+                }
+
+                if (entry.IsSignaled)
+                {
+                    return;
+                }
+
+                entry.IsSignaled = true;
+                _readyCompletions.Add(entry.Sequence, entry);
+            }
         }
 
         /// <summary>Cancels one live scheduler-owned thread and removes all pending work.</summary>
@@ -581,28 +657,25 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private void PromoteCompletedWaits()
         {
             _completionBuffer.Clear();
-            for (int index = _completionWaits.Count - 1; index >= 0; index--)
+            lock (_completionGate)
             {
-                CompletionWaitEntry entry = _completionWaits[index];
-                if (!entry.Completion.IsCompleted)
+                foreach (KeyValuePair<long, CompletionWaitEntry> pair in _readyCompletions)
                 {
-                    continue;
+                    _completionBuffer.Add(pair.Value);
                 }
 
-                _completionWaits.RemoveAt(index);
-                _completionBuffer.Add(entry);
+                _readyCompletions.Clear();
             }
 
-            _completionBuffer.Reverse();
             int nextIndex = 0;
             try
             {
                 for (; nextIndex < _completionBuffer.Count; nextIndex++)
                 {
+                    CompletionPromotionTouchCount++;
                     CompletionWaitEntry entry = _completionBuffer[nextIndex];
                     ThreadRecord record = entry.Record;
-                    if (record.State != ThreadScheduleState.WaitingForCompletion
-                        || !_records.ContainsKey(record.Thread))
+                    if (!TryConsumeCompletionEntry(entry))
                     {
                         continue;
                     }
@@ -638,18 +711,47 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         private void RestoreCompletionBatch(int startIndex)
         {
-            for (int index = startIndex; index < _completionBuffer.Count; index++)
+            lock (_completionGate)
             {
-                CompletionWaitEntry entry = _completionBuffer[index];
-                if (entry.Record.State == ThreadScheduleState.WaitingForCompletion
-                    && _records.ContainsKey(entry.Record.Thread))
+                for (int index = startIndex; index < _completionBuffer.Count; index++)
                 {
-                    _completionWaits.Add(entry);
+                    CompletionWaitEntry entry = _completionBuffer[index];
+                    if (entry.Record.State == ThreadScheduleState.WaitingForCompletion
+                        && _records.ContainsKey(entry.Record.Thread)
+                        && ReferenceEquals(entry.Record.CompletionWait, entry)
+                        && _completionRegistrations.TryGetValue(entry.Completion,
+                            out CompletionWaitEntry registered)
+                        && ReferenceEquals(registered, entry))
+                    {
+                        _readyCompletions[entry.Sequence] = entry;
+                    }
                 }
             }
+        }
 
-            _completionWaits.Sort((CompletionWaitEntry left, CompletionWaitEntry right) =>
-                left.Sequence.CompareTo(right.Sequence));
+        private bool TryConsumeCompletionEntry(CompletionWaitEntry entry)
+        {
+            ThreadRecord record = entry.Record;
+            lock (_completionGate)
+            {
+                if (!_completionRegistrations.TryGetValue(entry.Completion,
+                        out CompletionWaitEntry registered)
+                    || !ReferenceEquals(registered, entry))
+                {
+                    return false;
+                }
+
+                if (record.State != ThreadScheduleState.WaitingForCompletion
+                    || !_records.ContainsKey(record.Thread)
+                    || !ReferenceEquals(record.CompletionWait, entry))
+                {
+                    RemoveCompletionRegistration(entry);
+                    return false;
+                }
+
+                RemoveCompletionRegistration(entry);
+                return true;
+            }
         }
 
         private void ResumeDelayedThreads()
@@ -848,11 +950,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         {
             _waitHeap.RemoveWhere(entry => ReferenceEquals(entry.Record, record));
             _delayHeap.RemoveWhere(entry => ReferenceEquals(entry.Record, record));
-            for (int index = _completionWaits.Count - 1; index >= 0; index--)
+            lock (_completionGate)
             {
-                if (ReferenceEquals(_completionWaits[index].Record, record))
+                CompletionWaitEntry completionWait = record.CompletionWait;
+                if (completionWait != null)
                 {
-                    _completionWaits.RemoveAt(index);
+                    RemoveCompletionRegistration(completionWait);
                 }
             }
 
@@ -867,6 +970,22 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             record.DeferredArguments = null;
+        }
+
+        private void RemoveCompletionRegistration(CompletionWaitEntry entry)
+        {
+            if (_completionRegistrations.TryGetValue(entry.Completion,
+                    out CompletionWaitEntry registered)
+                && ReferenceEquals(registered, entry))
+            {
+                _completionRegistrations.Remove(entry.Completion);
+            }
+
+            _readyCompletions.Remove(entry.Sequence);
+            if (ReferenceEquals(entry.Record.CompletionWait, entry))
+            {
+                entry.Record.CompletionWait = null;
+            }
         }
 
         private ThreadRecord CreateRecord(string ownerModId, object callable)

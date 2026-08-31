@@ -1,6 +1,7 @@
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
@@ -326,11 +327,20 @@ namespace CoreAI.Composition
                     ICoreAISettings settings = container.Resolve<ICoreAISettings>();
                     Logging.ILog log = container.Resolve<Logging.ILog>();
                     LuaGenerationRateLimiter limiter = container.Resolve<LuaGenerationRateLimiter>();
+                    IActorIdentityProvider actorIdentityProvider =
+                        container.ResolveOrDefault<IActorIdentityProvider>() ?? LocalActorIdentityProvider.Default;
 
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaModsLlmTool(container.Resolve<ILuaModRuntime>(), settings, log, scriptCapabilities));
+                        new LuaModsLlmTool(
+                            container.Resolve<ILuaModRuntime>(),
+                            settings,
+                            log,
+                            scriptCapabilities,
+                            allowModManagement: true,
+                            actorIdentityProvider: actorIdentityProvider,
+                            roleId: BuiltInAgentRoleIds.Programmer));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
 

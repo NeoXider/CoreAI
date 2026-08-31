@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Authority;
 using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
@@ -31,11 +34,16 @@ namespace CoreAI.Ai
         /// <summary>Cap on the source text returned by <c>get_source</c>.</summary>
         public const int MaxSourceLengthReturned = 16_000;
 
+        private static readonly ConditionalWeakTable<ILuaModRuntime, object> AuthorizationGates = new();
+
         private readonly ILuaModRuntime _runtime;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
         private readonly LuaCapabilities _grantedCapabilities;
         private readonly bool _allowModManagement;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
+        private readonly object _authorizationGate;
+        private readonly string _roleId;
 
         /// <param name="runtime">Mod runtime to manage.</param>
         /// <param name="settings">Settings driving tool-call logging.</param>
@@ -44,7 +52,7 @@ namespace CoreAI.Ai
         /// Capability tier applied to every mod loaded through this tool. The model cannot widen it.
         /// </param>
         /// <param name="allowModManagement">
-        /// When false the tool is read-only: only <c>list</c> and <c>get_source</c> are accepted.
+        /// When false the tool is read-only and all mutating actions are refused.
         /// </param>
         public LuaModsLlmTool(
             ILuaModRuntime runtime,
@@ -52,12 +60,42 @@ namespace CoreAI.Ai
             ILog logger,
             LuaCapabilities grantedCapabilities = LuaCapabilities.All,
             bool allowModManagement = true)
+            : this(
+                runtime,
+                settings,
+                logger,
+                grantedCapabilities,
+                allowModManagement,
+                LocalActorIdentityProvider.Default,
+                BuiltInAgentRoleIds.Programmer)
+        {
+        }
+
+        /// <summary>Creates an actor-aware mod tool that resolves identity at every call boundary.</summary>
+        /// <param name="runtime">Mod runtime to manage.</param>
+        /// <param name="settings">Settings driving tool-call logging.</param>
+        /// <param name="logger">Logger.</param>
+        /// <param name="grantedCapabilities">Capability tier applied to loaded mods.</param>
+        /// <param name="allowModManagement">Whether mutating actions are enabled.</param>
+        /// <param name="actorIdentityProvider">Trusted actor resolver used at each tool-call boundary.</param>
+        /// <param name="roleId">Role through which this tool is invoked.</param>
+        public LuaModsLlmTool(
+            ILuaModRuntime runtime,
+            ICoreAISettings settings,
+            ILog logger,
+            LuaCapabilities grantedCapabilities,
+            bool allowModManagement,
+            IActorIdentityProvider actorIdentityProvider,
+            string roleId)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _grantedCapabilities = grantedCapabilities;
             _allowModManagement = allowModManagement;
+            _actorIdentityProvider = actorIdentityProvider ?? LocalActorIdentityProvider.Default;
+            _authorizationGate = AuthorizationGates.GetValue(_runtime, CreateAuthorizationGate);
+            _roleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Programmer : roleId.Trim();
         }
 
         /// <inheritdoc />
@@ -150,22 +188,31 @@ namespace CoreAI.Ai
             string result;
             try
             {
-                result = normalized switch
+                ActorContext actor = _actorIdentityProvider.GetActorContext(_roleId);
+                if (!actor.IsTrusted)
                 {
-                    "list" => ListMods(),
-                    "get_source" => GetSource(mod_id),
-                    "load" => Mutate(() => Load(mod_id, code)),
-                    "reload" => Mutate(() => Reload(mod_id, code)),
-                    "unload" => Mutate(() => Unload(mod_id)),
-                    "export" => Export(mod_id),
-                    "import" => Mutate(() => Import(bundle ?? code)),
-                    "forget" => Mutate(() => Forget(mod_id)),
-                    "versions" => Versions(mod_id),
-                    "revert" => Mutate(() => Revert(mod_id, revision)),
-                    "diagnostics" => Diagnostics(mod_id),
-                    _ => Fail(
-                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
-                };
+                    throw new InvalidOperationException("Actor identity provider returned an untrusted context.");
+                }
+
+                lock (_authorizationGate)
+                {
+                    result = normalized switch
+                    {
+                        "list" => ListMods(),
+                        "get_source" => ReadOwned(actor, normalized, mod_id, () => GetSource(mod_id)),
+                        "load" => Mutate(() => Load(mod_id, code, actor)),
+                        "reload" => MutateOwned(actor, normalized, mod_id, () => Reload(mod_id, code)),
+                        "unload" => MutateOwned(actor, normalized, mod_id, () => Unload(mod_id)),
+                        "export" => ReadOwned(actor, normalized, mod_id, () => Export(mod_id)),
+                        "import" => Mutate(() => Import(bundle ?? code, actor)),
+                        "forget" => MutateOwned(actor, normalized, mod_id, () => Forget(mod_id)),
+                        "versions" => ReadOwned(actor, normalized, mod_id, () => Versions(mod_id)),
+                        "revert" => MutateOwned(actor, normalized, mod_id, () => Revert(mod_id, revision)),
+                        "diagnostics" => Diagnostics(mod_id, actor),
+                        _ => Fail(
+                            $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
+                    };
+                }
             }
             catch (Exception ex)
             {
@@ -181,6 +228,11 @@ namespace CoreAI.Ai
             return Task.FromResult(result);
         }
 
+        private static object CreateAuthorizationGate(ILuaModRuntime runtime)
+        {
+            return new object();
+        }
+
         private string Mutate(Func<string> action)
         {
             if (!_allowModManagement)
@@ -190,6 +242,38 @@ namespace CoreAI.Ai
             }
 
             return action();
+        }
+
+        private string MutateOwned(ActorContext actor, string actionName, string modId, Func<string> action)
+        {
+            return Mutate(() => ReadOwned(actor, actionName, modId, action));
+        }
+
+        private string ReadOwned(ActorContext actor, string actionName, string modId, Func<string> action)
+        {
+            string denial = OwnershipDenial(actor, actionName, modId);
+            return denial ?? action();
+        }
+
+        private string OwnershipDenial(ActorContext actor, string actionName, string modId)
+        {
+            if (actor.Grants.IsUnrestricted || string.IsNullOrWhiteSpace(modId))
+            {
+                return null;
+            }
+
+            string normalizedModId = modId.Trim();
+            string ownerActorId = _runtime.GetModOwnerActorId(normalizedModId);
+            if (ownerActorId == null || string.Equals(ownerActorId, actor.ActorId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            string reason = ownerActorId.Length == 0
+                ? "it is owned by the host/system"
+                : $"it is owned by actor '{ownerActorId}'";
+            return Fail(
+                $"{actionName}: actor '{actor.ActorId}' is not authorized to access mod '{normalizedModId}' because {reason}.");
         }
 
         private string ListMods()
@@ -244,14 +328,20 @@ namespace CoreAI.Ai
             return Ok($"Source of mod '{modId.Trim()}'.", source);
         }
 
-        private string Load(string modId, string code)
+        private string Load(string modId, string code, ActorContext actor)
         {
             if (string.IsNullOrWhiteSpace(modId) || string.IsNullOrWhiteSpace(code))
             {
                 return Fail("load: mod_id and code are required.");
             }
 
-            _runtime.LoadMod(modId, code, _grantedCapabilities);
+            string denial = OwnershipDenial(actor, "load", modId);
+            if (denial != null)
+            {
+                return denial;
+            }
+
+            _runtime.LoadModForActor(modId, code, actor.ActorId, _grantedCapabilities);
             return Ok($"Mod '{modId.Trim()}' loaded (capabilities={_grantedCapabilities}).");
         }
 
@@ -294,14 +384,31 @@ namespace CoreAI.Ai
             return Ok($"Bundle for mod '{modId.Trim()}'. Pass it to import on another player.", bundle);
         }
 
-        private string Import(string bundle)
+        private string Import(string bundle, ActorContext actor)
         {
             if (string.IsNullOrWhiteSpace(bundle))
             {
                 return Fail("import: bundle (or code) with the shareable mod JSON is required.");
             }
 
-            return _runtime.ImportMod(bundle, _grantedCapabilities, false)
+            string modId;
+            try
+            {
+                JObject parsed = JObject.Parse(bundle);
+                modId = parsed["manifest"]?["id"]?.Value<string>();
+            }
+            catch (JsonException)
+            {
+                return Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
+            }
+
+            string denial = OwnershipDenial(actor, "import", modId);
+            if (denial != null)
+            {
+                return denial;
+            }
+
+            return _runtime.ImportModForActor(bundle, actor.ActorId, _grantedCapabilities, false)
                 ? Ok($"Mod imported and loaded (capabilities masked to {_grantedCapabilities}).")
                 : Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
         }
@@ -388,17 +495,33 @@ namespace CoreAI.Ai
                 : Fail($"revert: mod '{modId.Trim()}' has no revision {revision} (see versions).");
         }
 
-        private string Diagnostics(string modId)
+        private string Diagnostics(string modId, ActorContext actor)
         {
+            string denial = OwnershipDenial(actor, "diagnostics", modId);
+            if (denial != null)
+            {
+                return denial;
+            }
+
             IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(modId);
-            int total = errors.Count;
+            List<LuaModHandlerError> visible = new(errors.Count);
+            foreach (LuaModHandlerError error in errors)
+            {
+                if (actor.Grants.IsUnrestricted ||
+                    string.Equals(error.OwnerActorId, actor.ActorId, StringComparison.Ordinal))
+                {
+                    visible.Add(error);
+                }
+            }
+
+            int total = visible.Count;
             List<object> items = new(Math.Min(total, MaxDiagnosticsReturned));
 
             // WHY: Return the newest entries (GetRecentHandlerErrors is oldest-first).
             int start = total > MaxDiagnosticsReturned ? total - MaxDiagnosticsReturned : 0;
             for (int i = start; i < total; i++)
             {
-                LuaModHandlerError err = errors[i];
+                LuaModHandlerError err = visible[i];
                 items.Add(new
                 {
                     mod_id = err.ModId,

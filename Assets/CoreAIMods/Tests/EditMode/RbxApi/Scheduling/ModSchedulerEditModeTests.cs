@@ -663,6 +663,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(1, caller.ResumeCount);
 
             completion.Complete("value", 7d);
+            scheduler.SignalCompletion(completion);
             scheduler.PhaseReached += (SchedulerPhase phase, double delta) =>
             {
                 if (phase == SchedulerPhase.PreSimulation)
@@ -695,20 +696,141 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             faulted.Fail(new RbxError(RbxErrorCode.BudgetExceeded,
                 "mod-a failed while promoting completion",
                 "yield before exhausting the scheduler slice"));
+            scheduler.SignalCompletion(faulted);
             succeeded.Complete("value");
+            scheduler.SignalCompletion(succeeded);
 
             RbxError thrown = Assert.Throws<RbxError>(() => scheduler.Advance(0.016d));
 
             Assert.AreEqual(RbxErrorCode.BudgetExceeded, thrown.Code);
             Assert.AreEqual(1, faulting.KillCount);
             Assert.AreEqual(1, sibling.ResumeCount);
+            Assert.AreEqual(1, scheduler.CompletionWaitCount);
 
             scheduler.Advance(0.016d);
 
             Assert.AreEqual(2, sibling.ResumeCount);
             Assert.AreEqual("value", sibling.ResumeArguments[1][0]);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
             Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.032d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        [Test]
+        public void F2_CompletionPromotionTouchesOnlySignaledEntries()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            const int waitCount = 200;
+            const int completedCount = 20;
+            List<FakeScriptThread> threads = new();
+            List<RbxSchedulerCompletion> completions = new();
+            for (int index = 0; index < waitCount; index++)
+            {
+                FakeScriptThread thread = (FakeScriptThread)scheduler.Spawn("mod-a",
+                    new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                RbxSchedulerCompletion completion = new();
+                scheduler.ScheduleWaitUntil(thread, completion);
+                threads.Add(thread);
+                completions.Add(completion);
+            }
+
+            for (int index = 0; index < completedCount; index++)
+            {
+                completions[index].Complete(index);
+                scheduler.SignalCompletion(completions[index]);
+            }
+
+            scheduler.Advance(0.016d);
+
+            Assert.AreEqual(completedCount, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(waitCount - completedCount, scheduler.CompletionWaitCount);
+            for (int index = 0; index < waitCount; index++)
+            {
+                int expectedResumeCount = index < completedCount ? 2 : 1;
+                Assert.AreEqual(expectedResumeCount, threads[index].ResumeCount);
+            }
+
+            Assert.AreEqual(waitCount, factory.Created.Count);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        [Test]
+        public void F2_CompletionPromotionUsesRegistrationOrder()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            List<string> order = new();
+            FakeScriptThread first = CreateCompletionCaller(scheduler, "first", order);
+            FakeScriptThread second = CreateCompletionCaller(scheduler, "second", order);
+            FakeScriptThread third = CreateCompletionCaller(scheduler, "third", order);
+            RbxSchedulerCompletion firstCompletion = new();
+            RbxSchedulerCompletion secondCompletion = new();
+            RbxSchedulerCompletion thirdCompletion = new();
+            scheduler.ScheduleWaitUntil(first, firstCompletion);
+            scheduler.ScheduleWaitUntil(second, secondCompletion);
+            scheduler.ScheduleWaitUntil(third, thirdCompletion);
+
+            thirdCompletion.Complete();
+            scheduler.SignalCompletion(thirdCompletion);
+            firstCompletion.Complete();
+            scheduler.SignalCompletion(firstCompletion);
+            secondCompletion.Complete();
+            scheduler.SignalCompletion(secondCompletion);
+
+            scheduler.Advance(0.016d);
+
+            CollectionAssert.AreEqual(new[] { "first", "second", "third" }, order);
+            Assert.AreEqual(3, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
+            Assert.AreEqual(3, factory.Created.Count);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        [Test]
+        public void F2_LateCompletionSignalsAfterCancelAndUnloadAreDiscarded()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            FakeScriptThread canceled = (FakeScriptThread)scheduler.Spawn("mod-cancel",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            FakeScriptThread unloaded = (FakeScriptThread)scheduler.Spawn("mod-unload",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            RbxSchedulerCompletion canceledCompletion = new();
+            RbxSchedulerCompletion unloadedCompletion = new();
+            scheduler.ScheduleWaitUntil(canceled, canceledCompletion);
+            scheduler.ScheduleWaitUntil(unloaded, unloadedCompletion);
+
+            scheduler.Cancel(canceled);
+            Assert.AreEqual(1, scheduler.KillOwnedBy("mod-unload"));
+            canceledCompletion.Complete();
+            scheduler.SignalCompletion(canceledCompletion);
+            unloadedCompletion.Complete();
+            scheduler.SignalCompletion(unloadedCompletion);
+
+            scheduler.Advance(0.016d);
+
+            Assert.AreEqual(1, canceled.ResumeCount);
+            Assert.AreEqual(1, unloaded.ResumeCount);
+            Assert.IsTrue(canceled.IsDead);
+            Assert.IsTrue(unloaded.IsDead);
+            Assert.AreEqual(0, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
+            Assert.AreEqual(2, factory.Created.Count);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        private static FakeScriptThread CreateCompletionCaller(ModScheduler scheduler, string name,
+            List<string> order)
+        {
+            return (FakeScriptThread)scheduler.Spawn("mod-a",
+                new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+                {
+                    if (thread.ResumeCount == 2)
+                    {
+                        order.Add(name);
+                    }
+                }, false), Array.Empty<object>());
         }
 
         private static ModScheduler CreateScheduler(out FakeTimeSource timeSource,

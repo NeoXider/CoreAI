@@ -13,6 +13,9 @@ namespace CoreAI.Ai
         public bool LogReports;
         public DateTime LoadedAtUtc;
 
+        /// <summary>Durable actor identity that owns this mod; empty denotes host/system ownership.</summary>
+        public string OwnerActorId = "";
+
         /// <summary>
         /// True when the mod hit its consecutive-error threshold and was quarantined: it stays loaded
         /// and addressable (list/get_source/diagnostics/reload all work) but its handlers, timers, and
@@ -33,6 +36,9 @@ namespace CoreAI.Ai
     {
         public string ModId = "";
         public string Error = "";
+
+        /// <summary>Durable owner captured when the error occurred; empty denotes host/system.</summary>
+        public string OwnerActorId = "";
 
         /// <summary>The mod's consecutive-failure streak when this error fired (resets after any success).</summary>
         public int ConsecutiveCount;

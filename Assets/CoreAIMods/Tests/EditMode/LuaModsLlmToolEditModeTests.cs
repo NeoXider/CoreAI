@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
@@ -50,16 +51,32 @@ namespace CoreAI.Tests.EditMode
         private LuaModsLlmTool CreateTool(
             LuaCsModRuntime runtime,
             LuaCapabilities granted = LuaCapabilities.All,
-            bool allowManagement = true)
+            bool allowManagement = true,
+            IActorIdentityProvider actorIdentityProvider = null)
         {
-            return new LuaModsLlmTool(runtime, _settings, NullLog.Instance, granted, allowManagement);
+            return new LuaModsLlmTool(
+                runtime,
+                _settings,
+                NullLog.Instance,
+                granted,
+                allowManagement,
+                actorIdentityProvider ?? LocalActorIdentityProvider.Default,
+                BuiltInAgentRoleIds.Programmer);
         }
 
         private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null,
-            string code = null)
+            string code = null, int revision = -1)
         {
-            string json = await tool.ExecuteAsync(action, modId, code);
+            string json = await tool.ExecuteAsync(action, modId, code, revision: revision);
             return JObject.Parse(json);
+        }
+
+        private static void AssertOwnershipDenied(JObject result, string callerActorId, string ownerActorId)
+        {
+            Assert.IsFalse(result.Value<bool>("success"), result.ToString());
+            string message = result.Value<string>("message");
+            StringAssert.Contains($"actor '{callerActorId}'", message);
+            StringAssert.Contains($"owned by actor '{ownerActorId}'", message);
         }
 
         [Test]
@@ -130,6 +147,99 @@ namespace CoreAI.Tests.EditMode
             JObject unload = await ExecuteAsync(tool, "unload", "m1");
             Assert.IsTrue(unload.Value<bool>("success"));
             Assert.IsFalse(runtime.IsLoaded("m1"));
+        }
+
+        [Test]
+        public async Task Actor_CanManageItsOwnMod()
+        {
+            LuaCsModRuntime runtime = new(versionStore: new MemoryLuaScriptVersionStore());
+            IActorIdentityProvider actorA = new LocalActorIdentityProvider(
+                "actor-a", "session-a", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            LuaModsLlmTool tool = CreateTool(runtime, actorIdentityProvider: actorA);
+
+            Assert.IsTrue((await ExecuteAsync(tool, "load", "owned", "local value = 1")).Value<bool>("success"));
+            Assert.AreEqual("actor-a", runtime.GetModOwnerActorId("owned"));
+            Assert.IsTrue((await ExecuteAsync(tool, "reload", "owned", "local value = 2")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "revert", "owned", revision: 0)).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "unload", "owned")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "load", "owned", "local value = 3")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(tool, "forget", "owned")).Value<bool>("success"));
+        }
+
+        [Test]
+        public async Task CrossActorMutations_AreRefusedWithCallerAndOwnerReason()
+        {
+            LuaCsModRuntime runtime = new(versionStore: new MemoryLuaScriptVersionStore());
+            IActorIdentityProvider actorA = new LocalActorIdentityProvider(
+                "actor-a", "session-a", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            IActorIdentityProvider actorB = new LocalActorIdentityProvider(
+                "actor-b", "session-b", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            LuaModsLlmTool toolA = CreateTool(runtime, actorIdentityProvider: actorA);
+            LuaModsLlmTool toolB = CreateTool(runtime, actorIdentityProvider: actorB);
+
+            Assert.IsTrue((await ExecuteAsync(toolB, "load", "foreign", "local value = 1")).Value<bool>("success"));
+            AssertOwnershipDenied(
+                await ExecuteAsync(toolA, "load", "foreign", "local value = 2"), "actor-a", "actor-b");
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "unload", "foreign"), "actor-a", "actor-b");
+            AssertOwnershipDenied(
+                await ExecuteAsync(toolA, "reload", "foreign", "local value = 2"), "actor-a", "actor-b");
+            AssertOwnershipDenied(
+                await ExecuteAsync(toolA, "revert", "foreign", revision: 0), "actor-a", "actor-b");
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "forget", "foreign"), "actor-a", "actor-b");
+            Assert.IsTrue(runtime.IsLoaded("foreign"));
+        }
+
+        [Test]
+        public async Task CrossActorMetadataRemainsReadable_ButSensitiveReadsAreRefused()
+        {
+            LuaCsModRuntime runtime = new(
+                versionStore: new MemoryLuaScriptVersionStore(),
+                maxErrorsBeforeQuarantine: 2);
+            IActorIdentityProvider actorA = new LocalActorIdentityProvider(
+                "actor-a", "session-a", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            IActorIdentityProvider actorB = new LocalActorIdentityProvider(
+                "actor-b", "session-b", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            LuaModsLlmTool toolA = CreateTool(runtime, actorIdentityProvider: actorA);
+            LuaModsLlmTool toolB = CreateTool(runtime, actorIdentityProvider: actorB);
+
+            Assert.IsTrue((await ExecuteAsync(
+                toolB,
+                "load",
+                "foreign",
+                "hooks_on('boom', function() error('private failure') end)")).Value<bool>("success"));
+            runtime.EmitEvent("boom", "");
+            runtime.Tick(0);
+
+            JObject list = await ExecuteAsync(toolA, "list");
+            Assert.IsTrue(list.Value<bool>("success"));
+            Assert.AreEqual("foreign", list["data"]?[0]?["id"]?.Value<string>());
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "get_source", "foreign"), "actor-a", "actor-b");
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "versions", "foreign"), "actor-a", "actor-b");
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "diagnostics", "foreign"), "actor-a", "actor-b");
+            AssertOwnershipDenied(await ExecuteAsync(toolA, "export", "foreign"), "actor-a", "actor-b");
+        }
+
+        [Test]
+        public async Task DefaultLocalAndHostPaths_RetainFullAccess()
+        {
+            LuaCsModRuntime runtime = new(versionStore: new MemoryLuaScriptVersionStore());
+            IActorIdentityProvider actorB = new LocalActorIdentityProvider(
+                "actor-b", "session-b", "world", ActorGrantSet.None, AgentMemoryScope.Empty);
+            LuaModsLlmTool toolB = CreateTool(runtime, actorIdentityProvider: actorB);
+            LuaModsLlmTool host = CreateTool(runtime);
+
+            Assert.IsTrue((await ExecuteAsync(toolB, "load", "foreign", "local value = 1")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "get_source", "foreign")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "versions", "foreign")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "diagnostics", "foreign")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "export", "foreign")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "reload", "foreign", "local value = 2")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "revert", "foreign", revision: 0)).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "unload", "foreign")).Value<bool>("success"));
+            Assert.IsTrue((await ExecuteAsync(host, "forget", "foreign")).Value<bool>("success"));
+
+            Assert.IsTrue((await ExecuteAsync(host, "load", "local-owned", "local value = 3")).Value<bool>("success"));
+            Assert.AreEqual(LocalActorIdentityProvider.DefaultActorId, runtime.GetModOwnerActorId("local-owned"));
         }
 
         [Test]

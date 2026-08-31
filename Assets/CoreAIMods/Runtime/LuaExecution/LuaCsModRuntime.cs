@@ -144,6 +144,7 @@ namespace CoreAI.Ai.LuaCs
         private sealed class Mod
         {
             public string Id = "";
+            public string OwnerActorId = "";
             public IScriptState State;
             public string Source = "";
             public LuaCapabilities Caps;
@@ -388,6 +389,7 @@ namespace CoreAI.Ai.LuaCs
                         ErrorCount = mod.ErrorCount,
                         LogReports = mod.LogReports,
                         LoadedAtUtc = mod.LoadedAtUtc,
+                        OwnerActorId = mod.OwnerActorId,
                         Quarantined = mod.Quarantined
                     });
                 }
@@ -448,6 +450,26 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <inheritdoc />
+        public string GetModOwnerActorId(string id)
+        {
+            string modId = Normalize(id);
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    return mod.OwnerActorId;
+                }
+            }
+
+            if (_sourceStore.TryLoad(modId, out _, out LuaModManifest manifest))
+            {
+                return manifest?.OwnerActorId?.Trim() ?? "";
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// Loads a mod: creates a sandboxed Lua-CSharp state with the (optional) gameplay bindings plus
         /// mod-core APIs and runs the chunk (which registers its hooks). Throws on invalid input,
@@ -464,6 +486,32 @@ namespace CoreAI.Ai.LuaCs
             string luaCode,
             LuaCapabilities capabilities = LuaCapabilities.All,
             bool persistToStore = true)
+        {
+            LoadModInternal(id, luaCode, "", capabilities, persistToStore);
+        }
+
+        /// <inheritdoc />
+        public void LoadModForActor(
+            string id,
+            string luaCode,
+            string ownerActorId,
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            bool persistToStore = true)
+        {
+            if (string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                throw new ArgumentException("Owner actor id is required.", nameof(ownerActorId));
+            }
+
+            LoadModInternal(id, luaCode, ownerActorId.Trim(), capabilities, persistToStore);
+        }
+
+        private void LoadModInternal(
+            string id,
+            string luaCode,
+            string ownerActorId,
+            LuaCapabilities capabilities,
+            bool persistToStore)
         {
             string modId = Normalize(id);
             if (modId.Length == 0)
@@ -489,7 +537,7 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            Mod mod = BuildMod(modId, luaCode, capabilities);
+            Mod mod = BuildMod(modId, luaCode, capabilities, ownerActorId);
 
             lock (_gate)
             {
@@ -510,7 +558,7 @@ namespace CoreAI.Ai.LuaCs
             RecordRevision(modId, luaCode);
             if (persistToStore)
             {
-                PersistMod(modId, luaCode, capabilities);
+                PersistMod(modId, luaCode, capabilities, ownerActorId);
             }
 
             RaiseModSourceLoaded(modId, luaCode, capabilities);
@@ -521,11 +569,12 @@ namespace CoreAI.Ai.LuaCs
         /// runs the chunk (hook registration happens there). Errors propagate to the caller and the mod
         /// is never added, so a failed build leaves no handlers behind.
         /// </summary>
-        private Mod BuildMod(string modId, string luaCode, LuaCapabilities capabilities)
+        private Mod BuildMod(string modId, string luaCode, LuaCapabilities capabilities, string ownerActorId)
         {
             Mod mod = new()
             {
                 Id = modId,
+                OwnerActorId = ownerActorId ?? "",
                 Source = luaCode,
                 Caps = capabilities,
                 LoadedAtUtc = DateTime.UtcNow
@@ -678,6 +727,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             LuaCapabilities caps;
+            string ownerActorId;
             lock (_gate)
             {
                 if (!_mods.TryGetValue(modId, out Mod existing))
@@ -686,9 +736,10 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 caps = existing.Caps;
+                ownerActorId = existing.OwnerActorId;
             }
 
-            Mod replacement = BuildMod(modId, luaCode, caps);
+            Mod replacement = BuildMod(modId, luaCode, caps, ownerActorId);
 
             // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
             // are gone by the time the replacement is live — the old formula must never be invoked
@@ -703,7 +754,7 @@ namespace CoreAI.Ai.LuaCs
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}).");
             RecordRevision(modId, luaCode);
-            PersistMod(modId, luaCode, caps);
+            PersistMod(modId, luaCode, caps, ownerActorId);
             RaiseModSourceLoaded(modId, luaCode, caps);
         }
 
@@ -1727,12 +1778,13 @@ namespace CoreAI.Ai.LuaCs
 
                     string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
                     LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+                    string ownerActorId = stored?.OwnerActorId?.Trim() ?? manifest.OwnerActorId?.Trim() ?? "";
 
                     // WHY: Load with the masked runtime tier but do NOT re-persist: the stored manifest already
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
-                    LoadMod(modId, source, effectiveCaps, false);
+                    LoadModInternal(modId, source, ownerActorId, effectiveCaps, false);
                     loaded++;
                 }
                 catch (Exception ex)
@@ -1763,7 +1815,7 @@ namespace CoreAI.Ai.LuaCs
                 if (_mods.TryGetValue(modId, out Mod mod))
                 {
                     source = mod.Source;
-                    manifest = BuildManifest(modId, mod.Source ?? "", mod.Caps, true);
+                    manifest = BuildManifest(modId, mod.Source ?? "", mod.Caps, true, null, mod.OwnerActorId);
                 }
             }
 
@@ -1808,6 +1860,24 @@ namespace CoreAI.Ai.LuaCs
         /// id or source, or a load failure.
         /// </summary>
         public bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            return ImportModInternal(bundleJson, "", hostGrant, allowFull);
+        }
+
+        /// <inheritdoc />
+        public bool ImportModForActor(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
+            bool allowFull = false)
+        {
+            if (string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                throw new ArgumentException("Owner actor id is required.", nameof(ownerActorId));
+            }
+
+            return ImportModInternal(bundleJson, ownerActorId.Trim(), hostGrant, allowFull);
+        }
+
+        private bool ImportModInternal(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
+            bool allowFull)
         {
             if (string.IsNullOrWhiteSpace(bundleJson))
             {
@@ -1858,8 +1928,8 @@ namespace CoreAI.Ai.LuaCs
                     // restart's allowFull=true rehydrate would re-grant Full to a mod imported WITHOUT it.
                     // The store must never hold more than the host granted here; re-import under
                     // allowFull=true to raise it later.
-                    LoadMod(modId, bundle.Source, effectiveCaps, false);
-                    PersistMod(modId, bundle.Source, effectiveCaps);
+                    LoadModInternal(modId, bundle.Source, ownerActorId, effectiveCaps, false);
+                    PersistMod(modId, bundle.Source, effectiveCaps, ownerActorId);
                 }
 
                 return true;
@@ -1882,7 +1952,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>
-        private void PersistMod(string modId, string source, LuaCapabilities caps)
+        private void PersistMod(string modId, string source, LuaCapabilities caps, string ownerActorId)
         {
             if (!_autoPersistMods)
             {
@@ -1904,7 +1974,10 @@ namespace CoreAI.Ai.LuaCs
                     existing = null;
                 }
 
-                _sourceStore.Save(modId, source, BuildManifest(modId, source ?? "", caps, true, existing));
+                _sourceStore.Save(
+                    modId,
+                    source,
+                    BuildManifest(modId, source ?? "", caps, true, existing, ownerActorId));
             }
             catch (Exception ex)
             {
@@ -1921,7 +1994,7 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="LuaModManifest.SeededHash"/>) is carried over from <paramref name="existing"/> when present.
         /// </summary>
         private LuaModManifest BuildManifest(string id, string source, LuaCapabilities caps, bool active,
-            LuaModManifest existing = null)
+            LuaModManifest existing = null, string ownerActorId = null)
         {
             LuaModHeader header = LuaModHeader.Parse(source ?? "", id);
             string version = string.IsNullOrWhiteSpace(header.Version) ? CurrentVersionString(id) : header.Version;
@@ -1933,6 +2006,7 @@ namespace CoreAI.Ai.LuaCs
                 Category = header.Category ?? "",
                 Tags = header.Tags ?? "",
                 Author = header.Author ?? "",
+                OwnerActorId = ownerActorId ?? existing?.OwnerActorId ?? "",
                 Capabilities = caps.ToString(),
                 Active = active,
                 Version = version,
@@ -2020,6 +2094,11 @@ namespace CoreAI.Ai.LuaCs
 
             lock (_gate)
             {
+                if (_mods.TryGetValue(Normalize(modId), out Mod mod))
+                {
+                    entry.OwnerActorId = mod.OwnerActorId;
+                }
+
                 if (_recentHandlerErrors.Count >= MaxRetainedHandlerErrors)
                 {
                     _recentHandlerErrors.Dequeue();
