@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
 using Newtonsoft.Json.Linq;
@@ -111,7 +112,14 @@ namespace CoreAI.Tests.EditMode
             LuaCapabilities granted = LuaCapabilities.All,
             bool allowManagement = true)
         {
-            return new LuaModsLlmTool(runtime, _settings, NullLog.Instance, granted, allowManagement);
+            return new LuaModsLlmTool(
+                runtime,
+                _settings,
+                NullLog.Instance,
+                granted,
+                allowManagement,
+                ActorIdentityComposition.CreateLocalHost(),
+                BuiltInAgentRoleIds.Programmer);
         }
 
         private static async Task<JObject> ExecuteAsync(LuaModsLlmTool tool, string action, string modId = null,

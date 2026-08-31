@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using CoreAI;
 using CoreAI.Audit;
+using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Features.Audit;
 using CoreAI.Messaging;
 using NUnit.Framework;
+using VContainer;
 
 namespace CoreAI.Tests.EditMode.Audit
 {
@@ -15,11 +18,18 @@ namespace CoreAI.Tests.EditMode.Audit
         public void FailedToolCall_RecordsResolvedActorAndDenialReason()
         {
             RecordingAuditLog auditLog = new();
-            using (ToolCallAuditInterceptor interceptor = new(auditLog))
-            {
-                interceptor.SetActorIdentityResolver(
-                    (string traceId, string roleId) => traceId == "trace-a" ? "player-42" : "");
+            ContainerBuilder builder = new ContainerBuilder();
+            builder.RegisterAuditLog();
+            builder.RegisterInstance<IActorIdentityProvider>(new LocalActorIdentityProvider(
+                "player-42",
+                "session-42",
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty));
+            builder.RegisterInstance<IAuditLog>(auditLog);
 
+            using (IObjectResolver container = builder.Build())
+            {
                 CoreAi.NotifyToolCallFailed(new LlmToolCallFailed(
                     "trace-a",
                     "builder",

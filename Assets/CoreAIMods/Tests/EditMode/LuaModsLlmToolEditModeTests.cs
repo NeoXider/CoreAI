@@ -60,7 +60,7 @@ namespace CoreAI.Tests.EditMode
                 NullLog.Instance,
                 granted,
                 allowManagement,
-                actorIdentityProvider ?? LocalActorIdentityProvider.Default,
+                actorIdentityProvider ?? ActorIdentityComposition.CreateLocalHost(),
                 BuiltInAgentRoleIds.Programmer);
         }
 
@@ -212,7 +212,10 @@ namespace CoreAI.Tests.EditMode
 
             JObject list = await ExecuteAsync(toolA, "list");
             Assert.IsTrue(list.Value<bool>("success"));
-            Assert.AreEqual("foreign", list["data"]?[0]?["id"]?.Value<string>());
+            JArray metadata = list["data"] as JArray;
+            Assert.IsNotNull(metadata);
+            Assert.AreEqual(1, metadata.Count, "Cross-actor mod metadata must remain discoverable.");
+            Assert.AreEqual("foreign", metadata[0]?["id"]?.Value<string>());
             AssertOwnershipDenied(await ExecuteAsync(toolA, "get_source", "foreign"), "actor-a", "actor-b");
             AssertOwnershipDenied(await ExecuteAsync(toolA, "versions", "foreign"), "actor-a", "actor-b");
             AssertOwnershipDenied(await ExecuteAsync(toolA, "diagnostics", "foreign"), "actor-a", "actor-b");
@@ -422,7 +425,9 @@ namespace CoreAI.Tests.EditMode
                     "local id = unity_find('FullManageModsProbe')\nif id == 0 then error('Full unity_find missing') end");
                 Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 
-                IReadOnlyList<LuaModInfo> loaded = container.Resolve<ILuaModRuntime>().ListMods();
+                ActorContext actorContext = ActorIdentityComposition.CreateLocalHost().GetActorContext(
+                    BuiltInAgentRoleIds.Programmer);
+                IReadOnlyList<LuaModInfo> loaded = container.Resolve<ILuaModRuntime>().ListMods(actorContext);
                 Assert.AreEqual(LuaCapabilities.All | LuaCapabilities.Full, loaded[0].Capabilities);
             }
             finally

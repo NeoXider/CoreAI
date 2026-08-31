@@ -376,7 +376,8 @@ namespace CoreAI.Tests.PlayMode
                 memPolicy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("command-router-test"));
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
             AiGameCommandRouter router = new(bus, new NoOpGameLogger(), new NullWorldExecutor());

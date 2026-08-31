@@ -104,6 +104,9 @@ namespace CoreAI.Authority
 
     /// <summary>
     /// Immutable identity and authority context for one actor connection.
+    /// The issuance API prevents accidental or careless authority creation by CoreAI runtime code and
+    /// embedders. It is not a security boundary against a hostile assembly running with full trust in
+    /// the same process, because such an assembly can use reflection to invoke private members.
     /// </summary>
     public readonly struct ActorContext
     {
@@ -163,7 +166,7 @@ namespace CoreAI.Authority
             return new ActorContext(ActorId, SessionId, RoleId, WorldId, narrowed, MemoryScope);
         }
 
-        internal static ActorContext Issue(
+        internal static ActorContext IssueRestricted(
             string actorId,
             string sessionId,
             string roleId,
@@ -171,7 +174,36 @@ namespace CoreAI.Authority
             ActorGrantSet grants,
             AgentMemoryScope memoryScope)
         {
+            if (grants == null)
+            {
+                throw new ArgumentNullException(nameof(grants));
+            }
+
+            if (grants.IsUnrestricted)
+            {
+                throw new InvalidOperationException(
+                    "Unrestricted actor contexts require a host composition capability.");
+            }
+
             return new ActorContext(actorId, sessionId, roleId, worldId, grants, memoryScope);
+        }
+
+        internal static ActorContext IssueForComposition(
+            object issuanceCapability,
+            string actorId,
+            string sessionId,
+            string roleId,
+            string worldId,
+            AgentMemoryScope memoryScope)
+        {
+            ActorIdentityComposition.AssertIssuanceCapability(issuanceCapability);
+            return new ActorContext(
+                actorId,
+                sessionId,
+                roleId,
+                worldId,
+                ActorGrantSet.Unrestricted,
+                memoryScope);
         }
 
         internal void AssertTrusted()

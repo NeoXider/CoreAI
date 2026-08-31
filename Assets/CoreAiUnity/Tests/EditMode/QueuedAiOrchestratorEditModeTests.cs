@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -151,6 +152,14 @@ namespace CoreAI.Tests.EditMode
                 return _memory.GetChatHistory(roleId);
             }
 
+            public ChatMessage[] GetHistory(ActorContext actorContext, string roleId)
+            {
+                using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                {
+                    return _memory.GetChatHistory(roleId);
+                }
+            }
+
             void IUnstartedAiTurnRecorder.RecordUnstartedUserTurn(AiTaskRequest task)
             {
                 _memory.AppendChatMessage(task.RoleId, "user", "unstarted:" + task.Hint, false);
@@ -293,50 +302,165 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CancellationScope_SameRoleAcrossStudents_DoesNotCrossCancel()
+        public async Task ProductionAdmission_SameRoleActors_IsolateMemoryAndCancellation()
         {
-            RecordingOrchestrator inner = new();
-            MutableScopeProvider scopeProvider = new();
+            AgentMemoryScope sharedLegacyScope = new("school", "shared-user", "shared-session", "");
+            ActorContext studentAContext = new LocalActorIdentityProvider(
+                    "student-a",
+                    "connection-a",
+                    "world",
+                    ActorGrantSet.None,
+                    sharedLegacyScope)
+                .GetActorContext("Teacher");
+            ActorContext studentBContext = new LocalActorIdentityProvider(
+                    "student-b",
+                    "connection-b",
+                    "world",
+                    ActorGrantSet.None,
+                    sharedLegacyScope)
+                .GetActorContext("Teacher");
+            DefaultAgentMemoryScopeProvider scopeProvider = new();
+            ScopedPersistenceOrchestrator inner = new(scopeProvider);
             QueuedAiOrchestrator queue = new(
                 inner,
                 new AiOrchestrationQueueOptions { MaxConcurrent = 2 },
                 scopeProvider);
 
-            scopeProvider.UserId = "student-a";
             Task<string> studentA = queue.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = "Teacher",
                 Hint = "student-a",
-                CancellationScope = "Teacher"
+                ActorContext = studentAContext,
+                CancellationScope = studentAContext.SessionId
             });
             await WaitUntilAsync(() => inner.Gates.Count == 1,
-                "Student A turn must start before switching the mutable learner scope.");
+                "Student A turn must enter the production queue path.");
 
-            scopeProvider.UserId = "student-b";
             Task<string> studentB = queue.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = "Teacher",
                 Hint = "student-b",
-                CancellationScope = "Teacher"
+                ActorContext = studentBContext,
+                CancellationScope = studentBContext.SessionId
             });
             await WaitUntilAsync(() => inner.Gates.Count == 2,
-                "Student B turn must start without cancelling student A.");
+                "Student B turn must start without cancelling student A's session.");
 
             Assert.AreEqual(2, inner.Gates.Count);
             Assert.IsFalse(studentA.IsCanceled,
-                "The same role in another learner scope must not cancel an active turn.");
+                "The same role from another actor must not cancel an active turn.");
+            CollectionAssert.AreEqual(
+                new[] { "started:student-a" },
+                Array.ConvertAll(
+                    inner.GetHistory(studentAContext, "Teacher"),
+                    message => message.Content));
+            CollectionAssert.AreEqual(
+                new[] { "started:student-b" },
+                Array.ConvertAll(
+                    inner.GetHistory(studentBContext, "Teacher"),
+                    message => message.Content));
 
-            ((IScopedAiTaskCancellation)queue).CancelTasks("Teacher", "Teacher");
+            ((IScopedAiTaskCancellation)queue).CancelTasks(studentBContext.SessionId, "Teacher");
             Task cancelled = await Task.WhenAny(studentB, Task.Delay(2000));
             Assert.AreSame(studentB, cancelled,
                 "Scoped cancellation must reach the active inner turn promptly.");
             Assert.IsTrue(studentB.IsCanceled,
-                "Explicit scoped cancellation must stop only the current learner's Teacher turn.");
+                "Session cancellation must stop only student B's Teacher turn.");
             Assert.IsFalse(studentA.IsCompleted,
                 "Cancelling student B must leave student A's concurrent Teacher turn running.");
 
             inner.Gates[0].TrySetResult("student-a-complete");
             Assert.AreEqual("student-a-complete", await studentA);
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task ProductionAdmission_ReconnectResumesActorMemoryAcrossSessions()
+        {
+            ActorContext firstConnection = new LocalActorIdentityProvider(
+                    "durable-student",
+                    "connection-1",
+                    "world",
+                    ActorGrantSet.None,
+                    new AgentMemoryScope("school", "legacy-user-1", "legacy-session-1", "topic-1"))
+                .GetActorContext("Teacher");
+            ActorContext secondConnection = new LocalActorIdentityProvider(
+                    "durable-student",
+                    "connection-2",
+                    "world",
+                    ActorGrantSet.None,
+                    new AgentMemoryScope("other-school", "legacy-user-2", "legacy-session-2", "topic-2"))
+                .GetActorContext("Teacher");
+            DefaultAgentMemoryScopeProvider scopeProvider = new();
+            ScopedPersistenceOrchestrator inner = new(scopeProvider);
+            QueuedAiOrchestrator queue = new(
+                inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 1 },
+                scopeProvider);
+
+            Task<string> first = queue.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "first-connection",
+                ActorContext = firstConnection,
+                CancellationScope = firstConnection.SessionId
+            });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "First connection must start.");
+            inner.Gates[0].TrySetResult("first-complete");
+            await first;
+
+            Task<string> second = queue.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "second-connection",
+                ActorContext = secondConnection,
+                CancellationScope = secondConnection.SessionId
+            });
+            await WaitUntilAsync(() => inner.Gates.Count == 2, "Reconnected actor must start.");
+
+            string[] expected = { "started:first-connection", "started:second-connection" };
+            CollectionAssert.AreEqual(
+                expected,
+                Array.ConvertAll(
+                    inner.GetHistory(firstConnection, "Teacher"),
+                    message => message.Content));
+            CollectionAssert.AreEqual(
+                expected,
+                Array.ConvertAll(
+                    inner.GetHistory(secondConnection, "Teacher"),
+                    message => message.Content));
+
+            inner.Gates[1].TrySetResult("second-complete");
+            await second;
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task ProductionAdmission_DefaultLocalActorPreservesRoleMemory()
+        {
+            ActorContext localActor = ActorIdentityComposition.CreateLocalHost().GetActorContext("Teacher");
+            DefaultAgentMemoryScopeProvider scopeProvider = new();
+            ScopedPersistenceOrchestrator inner = new(scopeProvider);
+            QueuedAiOrchestrator queue = new(
+                inner,
+                new AiOrchestrationQueueOptions { MaxConcurrent = 1 },
+                scopeProvider);
+
+            Task<string> task = queue.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "local",
+                ActorContext = localActor,
+                CancellationScope = localActor.SessionId
+            });
+            await WaitUntilAsync(() => inner.Gates.Count == 1, "Local actor turn must start.");
+
+            CollectionAssert.AreEqual(
+                new[] { "started:local" },
+                Array.ConvertAll(inner.GetHistory("Teacher"), message => message.Content));
+
+            inner.Gates[0].TrySetResult("local-complete");
+            await task;
             queue.Dispose();
         }
 

@@ -202,6 +202,7 @@ namespace CoreAI.Tests.PlayMode
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
                     settings,
+                    actorIdentityProvider: new LocalActorIdentityProvider("backend-switch-live-test"),
                     traceSink: traceSink);
 
                 string[] tailMarkers = { "synthetic-learner-a", "synthetic-learner-b", "synthetic-learner-c" };

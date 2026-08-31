@@ -46,7 +46,7 @@ namespace CoreAI.Core.Tests.EditMode
         [Test]
         public void DefaultLocalActor_PreservesLegacyRoleOnlyMemoryBehavior()
         {
-            LocalActorIdentityProvider provider = LocalActorIdentityProvider.Default;
+            LocalActorIdentityProvider provider = ActorIdentityComposition.CreateLocalHost();
             ActorContext first = provider.GetActorContext("Merchant");
             ActorContext second = provider.GetActorContext("Merchant");
 
@@ -57,6 +57,48 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreEqual("", first.WorldId);
             Assert.IsTrue(first.Grants.IsUnrestricted);
             Assert.AreEqual("Merchant", AgentMemoryScopeKey.Resolve(first.MemoryScope, first.RoleId));
+        }
+
+        [Test]
+        public void RuntimeLocalProvider_CannotIssueUnrestrictedContext()
+        {
+            ActorContext context = new LocalActorIdentityProvider("runtime-actor")
+                .GetActorContext("runtime-role");
+
+            Assert.IsTrue(context.IsTrusted);
+            Assert.IsFalse(context.Grants.IsUnrestricted);
+            Assert.IsNull(typeof(LocalActorIdentityProvider).GetProperty(
+                "Default",
+                BindingFlags.Public | BindingFlags.Static));
+            Assert.Throws<InvalidOperationException>(() => new LocalActorIdentityProvider(
+                "runtime-actor",
+                "runtime-session",
+                "",
+                ActorGrantSet.Unrestricted,
+                AgentMemoryScope.Empty));
+        }
+
+        [Test]
+        public void PublicProviderSubclass_CannotEscalate()
+        {
+            ActorContext context = new PublicProviderSubclass().GetActorContext("runtime-role");
+
+            Assert.IsTrue(context.IsTrusted);
+            Assert.IsFalse(context.Grants.IsUnrestricted);
+            Assert.IsNull(typeof(ActorIdentityProviderBase).GetMethod(
+                "IssueActorContext",
+                BindingFlags.NonPublic | BindingFlags.Static));
+        }
+
+        [Test]
+        public void InvalidCompositionCapability_CannotIssueUnrestrictedContext()
+        {
+            Assert.Throws<InvalidOperationException>(() => LocalActorIdentityProvider.CreateForComposition(
+                new object(),
+                "forged-actor",
+                "forged-session",
+                "",
+                AgentMemoryScope.Empty));
         }
 
         [Test]
@@ -79,6 +121,14 @@ namespace CoreAI.Core.Tests.EditMode
 
             Assert.AreEqual(firstConnection.ActorId, secondConnection.ActorId);
             Assert.AreNotEqual(firstConnection.SessionId, secondConnection.SessionId);
+        }
+
+        private sealed class PublicProviderSubclass : ActorIdentityProviderBase
+        {
+            public override ActorContext GetActorContext(string roleId)
+            {
+                return new LocalActorIdentityProvider("subclass-actor").GetActorContext(roleId);
+            }
         }
     }
 }

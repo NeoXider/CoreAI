@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using NUnit.Framework;
 using System.Collections;
@@ -715,6 +716,7 @@ namespace CoreAI.Tests.EditMode
         {
             GameObject go = new("CoreAiChatPanel_BusyApi_Test");
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+            panel.SetActorIdentityProvider(new LocalActorIdentityProvider("busy-panel-test"));
             // WHY: plain EditMode [Test] methods do not drive MonoBehaviour lifecycle callbacks. These
             // unit tests exercise turn mechanics directly; lifecycle ordering is covered separately by
             // CoreAiChatPanelLifecyclePlayModeTests in the FastNoLlm PlayMode assembly.

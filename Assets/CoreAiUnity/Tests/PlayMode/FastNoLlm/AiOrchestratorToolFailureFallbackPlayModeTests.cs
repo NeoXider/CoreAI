@@ -34,7 +34,8 @@ namespace CoreAI.Tests.PlayMode
                     memoryPolicy,
                     new CompositeRoleStructuredResponsePolicy(),
                     null,
-                    settings);
+                    settings,
+                    new LocalActorIdentityProvider("tool-failure-test"));
 
                 string text = "";
                 List<string> errors = new();

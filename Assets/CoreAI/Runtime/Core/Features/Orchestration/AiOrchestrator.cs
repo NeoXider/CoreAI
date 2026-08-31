@@ -43,6 +43,7 @@ namespace CoreAI.Ai
         private readonly IContextBudgetPolicy _contextBudgetPolicy;
         private readonly ITokenEstimator _tokenEstimator;
         private readonly IConversationCompactionCoordinator _compactionCoordinator;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
 
         /// <summary>Constructs orchestrator dependencies (usual registration path: DI container).</summary>
         public AiOrchestrator(
@@ -56,6 +57,7 @@ namespace CoreAI.Ai
             IRoleStructuredResponsePolicy structuredPolicy,
             IAiOrchestrationMetrics metrics,
             ICoreAISettings settings,
+            IActorIdentityProvider actorIdentityProvider,
             IConversationContextManager contextManager = null,
             IAgentTurnTraceSink traceSink = null,
             IContextBudgetPolicy contextBudgetPolicy = null,
@@ -78,6 +80,8 @@ namespace CoreAI.Ai
             _contextBudgetPolicy = contextBudgetPolicy ?? new DefaultContextBudgetPolicy();
             _tokenEstimator = tokenEstimator ?? new HeuristicTokenEstimator();
             _compactionCoordinator = compactionCoordinator ?? new DefaultConversationCompactionCoordinator();
+            _actorIdentityProvider = actorIdentityProvider ??
+                                     throw new ArgumentNullException(nameof(actorIdentityProvider));
         }
 
         /// <summary>
@@ -89,6 +93,8 @@ namespace CoreAI.Ai
             CancellationToken cancellationToken)
         {
             string roleId = ResolveRoleId(task);
+            ActorContext actorContext = task.ActorContext ?? _actorIdentityProvider.GetActorContext(roleId);
+            actorContext.AssertTrusted();
             string traceId = string.IsNullOrWhiteSpace(task.TraceId)
                 ? Guid.NewGuid().ToString("N")
                 : task.TraceId.Trim();
@@ -230,6 +236,7 @@ namespace CoreAI.Ai
 
             return new RequestBundle
             {
+                ActorId = actorContext.ActorId,
                 RoleId = roleId,
                 TraceId = traceId,
                 Snapshot = snap,
@@ -319,7 +326,7 @@ namespace CoreAI.Ai
                     finally
                     {
                         sw.Stop();
-                        _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
+                        _metrics.RecordLlmCompletion(bundle.ActorId, roleId, traceId, result != null && result.Ok,
                             sw.Elapsed.TotalMilliseconds);
                     }
 
@@ -411,7 +418,7 @@ namespace CoreAI.Ai
             if (_structuredPolicy.ShouldValidate(roleId) &&
                 !_structuredPolicy.TryValidate(roleId, content, out string failReason))
             {
-                _metrics.RecordStructuredRetry(roleId, traceId, failReason ?? "");
+                _metrics.RecordStructuredRetry(bundle.ActorId, roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
                 Stopwatch sw = Stopwatch.StartNew();
@@ -419,7 +426,7 @@ namespace CoreAI.Ai
                     BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
                     cancellationToken);
                 sw.Stop();
-                _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok,
+                _metrics.RecordLlmCompletion(bundle.ActorId, roleId, traceId, second != null && second.Ok,
                     sw.Elapsed.TotalMilliseconds);
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
@@ -585,7 +592,8 @@ namespace CoreAI.Ai
                         maxContextOverflowRetries);
                     if (canRetryInitOverflow)
                     {
-                        _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId, false, 0d);
+                        _metrics.RecordLlmCompletion(
+                            bundle.ActorId, bundle.RoleId, bundle.TraceId, false, 0d);
                         contextOverflowPasses++;
                         contextPass = contextOverflowPasses;
                         continue;
@@ -789,7 +797,7 @@ namespace CoreAI.Ai
                     // synthesized from the executed calls right after this block.
                     bool producedContent = !string.IsNullOrWhiteSpace(accumulated.ToString()) ||
                                            (executedToolCalls != null && executedToolCalls.Count > 0);
-                    _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
+                    _metrics.RecordLlmCompletion(bundle.ActorId, bundle.RoleId, bundle.TraceId,
                         string.IsNullOrEmpty(terminalError) && producedContent,
                         sw.Elapsed.TotalMilliseconds);
                 }
@@ -836,7 +844,8 @@ namespace CoreAI.Ai
                     if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
                         !_structuredPolicy.TryValidate(bundle.RoleId, content, out string failReason))
                     {
-                        _metrics.RecordStructuredRetry(bundle.RoleId, bundle.TraceId, failReason ?? "");
+                        _metrics.RecordStructuredRetry(
+                            bundle.ActorId, bundle.RoleId, bundle.TraceId, failReason ?? "");
                         yield return new LlmStreamChunk
                         {
                             IsDone = true,
@@ -1084,6 +1093,7 @@ namespace CoreAI.Ai
 
         private sealed class RequestBundle
         {
+            public string ActorId;
             public string RoleId;
             public string TraceId;
             public GameSessionSnapshot Snapshot;
@@ -1458,7 +1468,7 @@ namespace CoreAI.Ai
                 LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             });
-            _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
+            _metrics.RecordCommandPublished(bundle.ActorId, bundle.RoleId, bundle.TraceId);
             RecordTokenObservation(bundle, result);
             RecordTrace(bundle, result, content, null);
             return content;

@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Logging;
 using CoreAI.Mcp.Protocol;
 using Newtonsoft.Json.Linq;
@@ -21,15 +22,28 @@ namespace CoreAI.Mcp.Tools
         /// <param name="settings">Settings driving tool-call logging.</param>
         /// <param name="logger">Logger.</param>
         /// <param name="grantedCapabilities">Capability tier applied to mods loaded through this tool.</param>
+        /// <param name="actorIdentityProvider">Explicit identity assigned to MCP mod calls by the host.</param>
         public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
-            LuaCapabilities grantedCapabilities)
+            LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider)
         {
             if (runtime == null)
             {
                 throw new ArgumentNullException(nameof(runtime));
             }
 
-            _inner = new LuaModsLlmTool(runtime, settings, logger, grantedCapabilities);
+            if (actorIdentityProvider == null)
+            {
+                throw new ArgumentNullException(nameof(actorIdentityProvider));
+            }
+
+            _inner = new LuaModsLlmTool(
+                runtime,
+                settings,
+                logger,
+                grantedCapabilities,
+                allowModManagement: true,
+                actorIdentityProvider: actorIdentityProvider,
+                roleId: BuiltInAgentRoleIds.Programmer);
         }
 
         /// <inheritdoc />

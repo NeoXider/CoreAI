@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using UnityEngine;
 using VContainer;
@@ -32,6 +33,7 @@ namespace CoreAI.Demos
         private CoreAILifetimeScope coreAiScope;
 
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private string _status = "Waiting for CoreAI scope.";
         private string _selfTestSummary = "Self-test not run yet.";
         private readonly List<string> _selfTestLines = new();
@@ -54,7 +56,7 @@ namespace CoreAI.Demos
         public bool IsReady => _mods != null;
 
         /// <summary>True while the Tetris mod is loaded and playing.</summary>
-        public bool IsTetrisRunning => _mods != null && _mods.IsLoaded(TetrisId);
+        public bool IsTetrisRunning => _mods != null && _mods.IsLoaded(_actorContext, TetrisId);
 
         private IEnumerator Start()
         {
@@ -75,14 +77,16 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
-            _mods.ModReportEmitted += OnModReport;
-            bool tetrisAlreadyRunning = _mods.IsLoaded(TetrisId);
+            _mods.AddModReportEmittedListener(_actorContext, OnModReport);
+            bool tetrisAlreadyRunning = _mods.IsLoaded(_actorContext, TetrisId);
             if (tetrisAlreadyRunning)
             {
                 // The mod store rehydrated the game from a previous session — that IS the restart
                 // test. Just re-enable report logging (it is not persisted).
-                _mods.SetModReportLoggingEnabled(TetrisId, true);
+                _mods.SetModReportLoggingEnabled(_actorContext, TetrisId, true);
             }
 
             _status = tetrisAlreadyRunning
@@ -95,7 +99,7 @@ namespace CoreAI.Demos
         {
             if (_mods != null)
             {
-                _mods.ModReportEmitted -= OnModReport;
+                _mods.RemoveModReportEmittedListener(_actorContext, OnModReport);
             }
         }
 
@@ -106,8 +110,8 @@ namespace CoreAI.Demos
                 // Unload outside the report callback: the callback fires from inside the runtime's
                 // Tick dispatch and unloading mid-dispatch is legal but needlessly re-entrant.
                 _pendingSelfTestUnload = false;
-                _mods.UnloadMod(SelfTestAId);
-                _mods.UnloadMod(SelfTestBId);
+                _mods.UnloadMod(_actorContext, SelfTestAId);
+                _mods.UnloadMod(_actorContext, SelfTestBId);
             }
         }
 
@@ -125,14 +129,14 @@ namespace CoreAI.Demos
             {
                 // ForgetMod also purges stale persisted copies from older builds; a persisted A
                 // would autoload before B on restart and fail its load-time mods_get.
-                _mods.ForgetMod(SelfTestAId);
-                _mods.ForgetMod(SelfTestBId);
+                _mods.ForgetMod(_actorContext, SelfTestAId);
+                _mods.ForgetMod(_actorContext, SelfTestBId);
 
                 // B first so it is already listening when A emits ping from its load chunk.
-                _mods.LoadMod(SelfTestBId, SelfTestBSource, LuaCapabilities.All, false);
-                _mods.LoadMod(SelfTestAId, SelfTestASource, LuaCapabilities.All, false);
-                _mods.SetModReportLoggingEnabled(SelfTestAId, true);
-                _mods.SetModReportLoggingEnabled(SelfTestBId, true);
+                _mods.LoadMod(_actorContext, SelfTestBId, SelfTestBSource, LuaCapabilities.All, false);
+                _mods.LoadMod(_actorContext, SelfTestAId, SelfTestASource, LuaCapabilities.All, false);
+                _mods.SetModReportLoggingEnabled(_actorContext, SelfTestAId, true);
+                _mods.SetModReportLoggingEnabled(_actorContext, SelfTestBId, true);
                 _status = "Self-test mods loaded; verdict arrives in ~2 s.";
             }
             catch (System.Exception ex)
@@ -153,16 +157,16 @@ namespace CoreAI.Demos
 
             try
             {
-                if (_mods.IsLoaded(TetrisId))
+                if (_mods.IsLoaded(_actorContext, TetrisId))
                 {
-                    _mods.ReloadMod(TetrisId, TetrisSource);
+                    _mods.ReloadMod(_actorContext, TetrisId, TetrisSource);
                 }
                 else
                 {
-                    _mods.LoadMod(TetrisId, TetrisSource, LuaCapabilities.All, true);
+                    _mods.LoadMod(_actorContext, TetrisId, TetrisSource, LuaCapabilities.All, true);
                 }
 
-                _mods.SetModReportLoggingEnabled(TetrisId, true);
+                _mods.SetModReportLoggingEnabled(_actorContext, TetrisId, true);
                 _status = "Tetris mod loaded. It plays itself; watch the board.";
             }
             catch (System.Exception ex)
@@ -175,7 +179,7 @@ namespace CoreAI.Demos
         /// <summary>Unloads the Tetris mod (marks it inactive for the persistence host).</summary>
         public void StopTetris()
         {
-            if (_mods != null && _mods.UnloadMod(TetrisId))
+            if (_mods != null && _mods.UnloadMod(_actorContext, TetrisId))
             {
                 _status = "Tetris mod unloaded.";
             }
@@ -185,7 +189,7 @@ namespace CoreAI.Demos
         public void DumpStatus()
         {
             Debug.Log($"[LuaPlatformExample] STATUS status={_status} | selftest={_selfTestSummary} | " +
-                      $"tetris={(_mods != null && _mods.IsLoaded(TetrisId) ? "running" : "stopped")} {_tetrisHud}");
+                      $"tetris={(_mods != null && _mods.IsLoaded(_actorContext, TetrisId) ? "running" : "stopped")} {_tetrisHud}");
         }
 
         /// <summary>WebGL SendMessage alias for <see cref="DumpStatus"/>.</summary>
@@ -197,7 +201,7 @@ namespace CoreAI.Demos
         /// <summary>Nudges the falling piece: payload "-1" left, "1" right (named-event demo).</summary>
         public void TetrisMove(string delta)
         {
-            _mods?.EmitEvent("tetris_move", delta ?? "0");
+            _mods?.EmitEvent(_actorContext, "tetris_move", delta ?? "0");
         }
 
         /// <summary>WebGL SendMessage alias for <see cref="TetrisMove"/>.</summary>

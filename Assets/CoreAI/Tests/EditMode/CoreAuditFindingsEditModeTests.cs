@@ -146,6 +146,32 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.IsTrue(metrics.Completions[0]);
         }
 
+        [Test]
+        public async Task Orchestrator_CompletionMetrics_CarryAdmittedActorIdentity()
+        {
+            RecordingMetrics metrics = new();
+            LocalActorIdentityProvider admittedIdentity = new(
+                "player-42",
+                "session-42",
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+            AiOrchestrator sut = BuildOrchestrator(
+                new TextStreamingClient("hello"),
+                new RecordingTraceSink(),
+                metrics,
+                new LocalActorIdentityProvider("fallback-actor"));
+
+            await sut.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.SmartChat,
+                Hint = "hi",
+                ActorContext = admittedIdentity.GetActorContext(BuiltInAgentRoleIds.SmartChat)
+            });
+
+            CollectionAssert.AreEqual(new[] { "player-42" }, metrics.ActorIds);
+        }
+
         // --- Finding 4: a transient read failure must not wipe role memory ---
 
         [Test]
@@ -545,7 +571,8 @@ namespace CoreAI.Core.Tests.EditMode
         private static AiOrchestrator BuildOrchestrator(
             ILlmClient llm,
             IAgentTurnTraceSink traceSink,
-            IAiOrchestrationMetrics metrics)
+            IAiOrchestrationMetrics metrics,
+            IActorIdentityProvider actorIdentityProvider = null)
         {
             AiPromptComposer composer = new(
                 new StubSystemPrompts(),
@@ -563,7 +590,9 @@ namespace CoreAI.Core.Tests.EditMode
                 null,
                 metrics,
                 new CoreAISettingsOptions(),
-                traceSink: traceSink);
+                traceSink: traceSink,
+                actorIdentityProvider: actorIdentityProvider ??
+                                       new LocalActorIdentityProvider("core-audit-test"));
         }
 
         private sealed class StubSystemPrompts : IAgentSystemPromptProvider
@@ -603,18 +632,26 @@ namespace CoreAI.Core.Tests.EditMode
 
         private sealed class RecordingMetrics : IAiOrchestrationMetrics
         {
+            public List<string> ActorIds { get; } = new();
+
             public List<bool> Completions { get; } = new();
 
-            public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
+            public void RecordLlmCompletion(
+                string actorId,
+                string roleId,
+                string traceId,
+                bool ok,
+                double wallMs)
             {
+                ActorIds.Add(actorId);
                 Completions.Add(ok);
             }
 
-            public void RecordStructuredRetry(string roleId, string traceId, string reason)
+            public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
             {
             }
 
-            public void RecordCommandPublished(string roleId, string traceId)
+            public void RecordCommandPublished(string actorId, string roleId, string traceId)
             {
             }
         }

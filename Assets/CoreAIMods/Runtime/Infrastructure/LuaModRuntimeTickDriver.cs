@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using UnityEngine;
 
@@ -15,13 +16,14 @@ namespace CoreAI.Infrastructure.Lua
     public sealed class LuaModRuntimeTickDriver : MonoBehaviour
     {
         private ILuaModRuntime _runtime;
+        private ActorContext _actorContext;
         private System.Action<float> _preSimulation;
         private System.Action<float> _heartbeat;
         private System.Action<float> _preRender;
         private ModScheduler _scheduler;
 
         /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
-        public void Initialize(ILuaModRuntime runtime, ModScheduler scheduler = null,
+        public void Initialize(ILuaModRuntime runtime, ActorContext actorContext, ModScheduler scheduler = null,
             System.Action<float> preSimulation = null,
             System.Action<float> heartbeat = null,
             System.Action<float> preRender = null)
@@ -32,6 +34,7 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             _runtime = runtime;
+            _actorContext = actorContext;
             _scheduler = scheduler;
             _preSimulation = preSimulation;
             _heartbeat = heartbeat;
@@ -69,7 +72,7 @@ namespace CoreAI.Infrastructure.Lua
                 _preRender?.Invoke(deltaSeconds);
             }
 
-            _runtime?.Tick(deltaSeconds);
+            _runtime?.Tick(_actorContext, deltaSeconds);
         }
 
         private void OnSchedulerPhaseReached(SchedulerPhase phase, double deltaSeconds)

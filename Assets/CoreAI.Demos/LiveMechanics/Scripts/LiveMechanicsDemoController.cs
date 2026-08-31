@@ -3,6 +3,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -42,6 +43,7 @@ namespace CoreAI.Demos
 
         private LuaCsLogicSlots _slots;
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private ILuaScriptVersionStore _versions;
         private LuaTool.ILuaExecutor _luaExecutor;
         private readonly List<string> _battleLog = new();
@@ -68,6 +70,8 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _versions = luaContainer.Resolve<ILuaScriptVersionStore>();
@@ -227,7 +231,7 @@ namespace CoreAI.Demos
 
             GUILayout.Space(4);
             GUILayout.Label("<b>Mods</b>", RichLabel());
-            IReadOnlyList<LuaModInfo> mods = _mods.ListMods();
+            IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
             if (mods.Count == 0)
             {
                 GUILayout.Label("No mods loaded.");

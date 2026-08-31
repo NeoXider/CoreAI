@@ -169,7 +169,8 @@ namespace CoreAI.Core.Tests.EditMode
         {
             AiOrchestrator sut = new(
                 new SoloAuthorityHost(), null, null, null, null, null, null, null, null,
-                new CoreAISettingsOptions());
+                new CoreAISettingsOptions(),
+                new LocalActorIdentityProvider("orchestration-resilience-test"));
 
             string result = await sut.RunTaskAsync(null);
             Assert.IsNull(result);

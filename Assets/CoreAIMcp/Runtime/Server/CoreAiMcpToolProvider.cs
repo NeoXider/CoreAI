@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
 using CoreAI.Mcp.Tools;
@@ -22,6 +23,7 @@ namespace CoreAI.Mcp.Server
         /// <param name="settings">Settings for the manage_mods logging path. Required for manage_mods.</param>
         /// <param name="logger">Logger for the manage_mods path. Required for manage_mods.</param>
         /// <param name="modCapabilities">Capability tier applied to mods loaded via manage_mods.</param>
+        /// <param name="modActorIdentityProvider">Explicit host identity for manage_mods. Null omits the tool.</param>
         /// <param name="logService">Lua log service (get_mod_logs). Optional.</param>
         /// <param name="worldTool">Constructed world tool (world_command). Optional - absent when no executor resolved.</param>
         /// <param name="skills">Programmer-role skills (read_skill). Optional - absent when empty/null.</param>
@@ -32,6 +34,7 @@ namespace CoreAI.Mcp.Server
             ICoreAISettings settings,
             ILog logger,
             LuaCapabilities modCapabilities,
+            IActorIdentityProvider modActorIdentityProvider,
             ILuaLogService logService,
             WorldLlmTool worldTool,
             IReadOnlyList<SkillSet> skills,
@@ -44,9 +47,14 @@ namespace CoreAI.Mcp.Server
                 tools.Add(new ExecuteLuaMcpTool(luaExecutor));
             }
 
-            if (modRuntime != null && settings != null && logger != null)
+            if (modRuntime != null && settings != null && logger != null && modActorIdentityProvider != null)
             {
-                tools.Add(new ManageModsMcpTool(modRuntime, settings, logger, modCapabilities));
+                tools.Add(new ManageModsMcpTool(
+                    modRuntime,
+                    settings,
+                    logger,
+                    modCapabilities,
+                    modActorIdentityProvider));
             }
 
             if (logService != null)

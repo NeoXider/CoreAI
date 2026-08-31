@@ -148,3 +148,7 @@ coreai-*.xml
 
 # Local build + test artifacts (batchmode results, logs, compile checks)
 artifacts/
+
+# vmbench build output
+tools/vmbench/obj/
+tools/vmbench/bin/

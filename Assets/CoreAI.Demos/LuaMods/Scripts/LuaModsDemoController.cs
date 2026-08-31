@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -36,6 +37,7 @@ namespace CoreAI.Demos
         private TextAsset damageTunerMod;
 
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private LuaCsLogicSlots _slots;
         private string _status = "";
         private string _lastModEvent = "-";
@@ -58,10 +60,12 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             _slots.DeclareSlot(DamageSlot);
-            _mods.ModEventEmitted += OnModEvent;
+            _mods.AddModEventEmittedListener(_actorContext, OnModEvent);
             _status = LuaCsModRuntime.IsSupported
                 ? "Ready. Load a mod to start."
                 : "Lua sandbox is not supported on this platform.";
@@ -74,9 +78,9 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods.ModEventEmitted -= OnModEvent;
-            _mods.UnloadMod(WaveDirectorModId);
-            _mods.UnloadMod(DamageTunerModId);
+            _mods.RemoveModEventEmittedListener(_actorContext, OnModEvent);
+            _mods.UnloadMod(_actorContext, WaveDirectorModId);
+            _mods.UnloadMod(_actorContext, DamageTunerModId);
             _slots?.Reset(DamageSlot);
         }
 
@@ -112,10 +116,11 @@ namespace CoreAI.Demos
         {
             GUILayout.Label("<b>1. Wave director mod (Read | WorldEdit)</b>", RichLabel());
             GUILayout.BeginHorizontal();
-            bool loaded = _mods.IsLoaded(WaveDirectorModId);
+            bool loaded = _mods.IsLoaded(_actorContext, WaveDirectorModId);
             if (!loaded && GUILayout.Button("Load mod"))
             {
                 Try(() => _mods.LoadMod(
+                    _actorContext,
                     WaveDirectorModId,
                     waveDirectorMod.text,
                     LuaCapabilities.Read | LuaCapabilities.WorldEdit));
@@ -124,12 +129,12 @@ namespace CoreAI.Demos
             if (loaded && GUILayout.Button("Emit 'wave_started'"))
             {
                 _waveButtonPresses++;
-                Try(() => _mods.EmitEvent("wave_started", _waveButtonPresses.ToString()));
+                Try(() => _mods.EmitEvent(_actorContext, "wave_started", _waveButtonPresses.ToString()));
             }
 
             if (loaded && GUILayout.Button("Unload"))
             {
-                Try(() => _mods.UnloadMod(WaveDirectorModId));
+                Try(() => _mods.UnloadMod(_actorContext, WaveDirectorModId));
             }
 
             GUILayout.EndHorizontal();
@@ -152,10 +157,11 @@ namespace CoreAI.Demos
             GUILayout.Label($"damage(atk={atk}, def={def}) = <b>{dmg:0.#}</b>  ({source})", RichLabel());
 
             GUILayout.BeginHorizontal();
-            bool loaded = _mods.IsLoaded(DamageTunerModId);
+            bool loaded = _mods.IsLoaded(_actorContext, DamageTunerModId);
             if (!loaded && GUILayout.Button("Load override mod"))
             {
                 Try(() => _mods.LoadMod(
+                    _actorContext,
                     DamageTunerModId,
                     damageTunerMod.text,
                     LuaCapabilities.Read | LuaCapabilities.LogicOverride));
@@ -165,7 +171,7 @@ namespace CoreAI.Demos
             {
                 Try(() =>
                 {
-                    _mods.UnloadMod(DamageTunerModId);
+                    _mods.UnloadMod(_actorContext, DamageTunerModId);
                     _slots.Reset(DamageSlot);
                 });
             }
@@ -178,7 +184,7 @@ namespace CoreAI.Demos
             GUILayout.Label("<b>3. Runtime state</b>", RichLabel());
             GUILayout.Label($"Last mod event: {_lastModEvent}");
 
-            IReadOnlyList<LuaModInfo> mods = _mods.ListMods();
+            IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
             if (mods.Count == 0)
             {
                 GUILayout.Label("No mods loaded.");

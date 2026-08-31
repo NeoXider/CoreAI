@@ -8,7 +8,6 @@ using CoreAI.Authority;
 using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
@@ -45,32 +44,6 @@ namespace CoreAI.Ai
         private readonly object _authorizationGate;
         private readonly string _roleId;
 
-        /// <param name="runtime">Mod runtime to manage.</param>
-        /// <param name="settings">Settings driving tool-call logging.</param>
-        /// <param name="logger">Logger.</param>
-        /// <param name="grantedCapabilities">
-        /// Capability tier applied to every mod loaded through this tool. The model cannot widen it.
-        /// </param>
-        /// <param name="allowModManagement">
-        /// When false the tool is read-only and all mutating actions are refused.
-        /// </param>
-        public LuaModsLlmTool(
-            ILuaModRuntime runtime,
-            ICoreAISettings settings,
-            ILog logger,
-            LuaCapabilities grantedCapabilities = LuaCapabilities.All,
-            bool allowModManagement = true)
-            : this(
-                runtime,
-                settings,
-                logger,
-                grantedCapabilities,
-                allowModManagement,
-                LocalActorIdentityProvider.Default,
-                BuiltInAgentRoleIds.Programmer)
-        {
-        }
-
         /// <summary>Creates an actor-aware mod tool that resolves identity at every call boundary.</summary>
         /// <param name="runtime">Mod runtime to manage.</param>
         /// <param name="settings">Settings driving tool-call logging.</param>
@@ -93,7 +66,8 @@ namespace CoreAI.Ai
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _grantedCapabilities = grantedCapabilities;
             _allowModManagement = allowModManagement;
-            _actorIdentityProvider = actorIdentityProvider ?? LocalActorIdentityProvider.Default;
+            _actorIdentityProvider = actorIdentityProvider ??
+                                     throw new ArgumentNullException(nameof(actorIdentityProvider));
             _authorizationGate = AuthorizationGates.GetValue(_runtime, CreateAuthorizationGate);
             _roleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Programmer : roleId.Trim();
         }
@@ -198,16 +172,16 @@ namespace CoreAI.Ai
                 {
                     result = normalized switch
                     {
-                        "list" => ListMods(),
-                        "get_source" => ReadOwned(actor, normalized, mod_id, () => GetSource(mod_id)),
+                        "list" => ListMods(actor),
+                        "get_source" => GetSource(actor, mod_id),
                         "load" => Mutate(() => Load(mod_id, code, actor)),
-                        "reload" => MutateOwned(actor, normalized, mod_id, () => Reload(mod_id, code)),
-                        "unload" => MutateOwned(actor, normalized, mod_id, () => Unload(mod_id)),
-                        "export" => ReadOwned(actor, normalized, mod_id, () => Export(mod_id)),
+                        "reload" => Mutate(() => Reload(actor, mod_id, code)),
+                        "unload" => Mutate(() => Unload(actor, mod_id)),
+                        "export" => Export(actor, mod_id),
                         "import" => Mutate(() => Import(bundle ?? code, actor)),
-                        "forget" => MutateOwned(actor, normalized, mod_id, () => Forget(mod_id)),
-                        "versions" => ReadOwned(actor, normalized, mod_id, () => Versions(mod_id)),
-                        "revert" => MutateOwned(actor, normalized, mod_id, () => Revert(mod_id, revision)),
+                        "forget" => Mutate(() => Forget(actor, mod_id)),
+                        "versions" => Versions(actor, mod_id),
+                        "revert" => Mutate(() => Revert(actor, mod_id, revision)),
                         "diagnostics" => Diagnostics(mod_id, actor),
                         _ => Fail(
                             $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
@@ -244,41 +218,9 @@ namespace CoreAI.Ai
             return action();
         }
 
-        private string MutateOwned(ActorContext actor, string actionName, string modId, Func<string> action)
+        private string ListMods(ActorContext actor)
         {
-            return Mutate(() => ReadOwned(actor, actionName, modId, action));
-        }
-
-        private string ReadOwned(ActorContext actor, string actionName, string modId, Func<string> action)
-        {
-            string denial = OwnershipDenial(actor, actionName, modId);
-            return denial ?? action();
-        }
-
-        private string OwnershipDenial(ActorContext actor, string actionName, string modId)
-        {
-            if (actor.Grants.IsUnrestricted || string.IsNullOrWhiteSpace(modId))
-            {
-                return null;
-            }
-
-            string normalizedModId = modId.Trim();
-            string ownerActorId = _runtime.GetModOwnerActorId(normalizedModId);
-            if (ownerActorId == null || string.Equals(ownerActorId, actor.ActorId, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            string reason = ownerActorId.Length == 0
-                ? "it is owned by the host/system"
-                : $"it is owned by actor '{ownerActorId}'";
-            return Fail(
-                $"{actionName}: actor '{actor.ActorId}' is not authorized to access mod '{normalizedModId}' because {reason}.");
-        }
-
-        private string ListMods()
-        {
-            IReadOnlyList<LuaModInfo> mods = _runtime.ListMods();
+            IReadOnlyList<LuaModInfo> mods = _runtime.ListMods(actor);
             List<object> items = new(mods.Count);
             int quarantined = 0;
             foreach (LuaModInfo mod in mods)
@@ -308,14 +250,14 @@ namespace CoreAI.Ai
             return Ok(message, items);
         }
 
-        private string GetSource(string modId)
+        private string GetSource(ActorContext actor, string modId)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("get_source: mod_id is required.");
             }
 
-            if (!_runtime.TryGetModSource(modId, out string source))
+            if (!_runtime.TryGetModSource(actor, modId, out string source))
             {
                 return Fail($"get_source: mod '{modId.Trim()}' is not loaded.");
             }
@@ -335,47 +277,41 @@ namespace CoreAI.Ai
                 return Fail("load: mod_id and code are required.");
             }
 
-            string denial = OwnershipDenial(actor, "load", modId);
-            if (denial != null)
-            {
-                return denial;
-            }
-
-            _runtime.LoadModForActor(modId, code, actor.ActorId, _grantedCapabilities);
+            _runtime.LoadMod(actor, modId, code, _grantedCapabilities);
             return Ok($"Mod '{modId.Trim()}' loaded (capabilities={_grantedCapabilities}).");
         }
 
-        private string Reload(string modId, string code)
+        private string Reload(ActorContext actor, string modId, string code)
         {
             if (string.IsNullOrWhiteSpace(modId) || string.IsNullOrWhiteSpace(code))
             {
                 return Fail("reload: mod_id and code are required.");
             }
 
-            _runtime.ReloadMod(modId, code);
+            _runtime.ReloadMod(actor, modId, code);
             return Ok($"Mod '{modId.Trim()}' reloaded.");
         }
 
-        private string Unload(string modId)
+        private string Unload(ActorContext actor, string modId)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("unload: mod_id is required.");
             }
 
-            return _runtime.UnloadMod(modId)
+            return _runtime.UnloadMod(actor, modId)
                 ? Ok($"Mod '{modId.Trim()}' unloaded.")
                 : Fail($"unload: mod '{modId.Trim()}' is not loaded.");
         }
 
-        private string Export(string modId)
+        private string Export(ActorContext actor, string modId)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("export: mod_id is required.");
             }
 
-            string bundle = _runtime.ExportMod(modId);
+            string bundle = _runtime.ExportMod(actor, modId);
             if (bundle == null)
             {
                 return Fail($"export: mod '{modId.Trim()}' is not loaded or stored.");
@@ -391,36 +327,19 @@ namespace CoreAI.Ai
                 return Fail("import: bundle (or code) with the shareable mod JSON is required.");
             }
 
-            string modId;
-            try
-            {
-                JObject parsed = JObject.Parse(bundle);
-                modId = parsed["manifest"]?["id"]?.Value<string>();
-            }
-            catch (JsonException)
-            {
-                return Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
-            }
-
-            string denial = OwnershipDenial(actor, "import", modId);
-            if (denial != null)
-            {
-                return denial;
-            }
-
-            return _runtime.ImportModForActor(bundle, actor.ActorId, _grantedCapabilities, false)
+            return _runtime.ImportMod(actor, bundle, _grantedCapabilities, false)
                 ? Ok($"Mod imported and loaded (capabilities masked to {_grantedCapabilities}).")
                 : Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
         }
 
-        private string Forget(string modId)
+        private string Forget(ActorContext actor, string modId)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("forget: mod_id is required.");
             }
 
-            return _runtime.ForgetMod(modId)
+            return _runtime.ForgetMod(actor, modId)
                 ? Ok($"Mod '{modId.Trim()}' forgotten (unloaded and deleted from storage).")
                 : Fail($"forget: mod '{modId.Trim()}' is not loaded or stored.");
         }
@@ -431,14 +350,14 @@ namespace CoreAI.Ai
         /// <summary>Cap on the number of recent runtime errors returned by <c>diagnostics</c>.</summary>
         private const int MaxDiagnosticsReturned = 20;
 
-        private string Versions(string modId)
+        private string Versions(ActorContext actor, string modId)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("versions: mod_id is required.");
             }
 
-            IReadOnlyList<LuaScriptRevision> history = _runtime.ListModVersions(modId);
+            IReadOnlyList<LuaScriptRevision> history = _runtime.ListModVersions(actor, modId);
             if (history.Count == 0)
             {
                 return Fail(
@@ -466,7 +385,7 @@ namespace CoreAI.Ai
                 items);
         }
 
-        private string Revert(string modId, int revision)
+        private string Revert(ActorContext actor, string modId, int revision)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
@@ -482,7 +401,7 @@ namespace CoreAI.Ai
             string restored;
             try
             {
-                reverted = _runtime.TryRevertMod(modId, revision, out restored);
+                reverted = _runtime.TryRevertMod(actor, modId, revision, out restored);
             }
             catch (Exception ex)
             {
@@ -497,31 +416,15 @@ namespace CoreAI.Ai
 
         private string Diagnostics(string modId, ActorContext actor)
         {
-            string denial = OwnershipDenial(actor, "diagnostics", modId);
-            if (denial != null)
-            {
-                return denial;
-            }
-
-            IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(modId);
-            List<LuaModHandlerError> visible = new(errors.Count);
-            foreach (LuaModHandlerError error in errors)
-            {
-                if (actor.Grants.IsUnrestricted ||
-                    string.Equals(error.OwnerActorId, actor.ActorId, StringComparison.Ordinal))
-                {
-                    visible.Add(error);
-                }
-            }
-
-            int total = visible.Count;
+            IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(actor, modId);
+            int total = errors.Count;
             List<object> items = new(Math.Min(total, MaxDiagnosticsReturned));
 
             // WHY: Return the newest entries (GetRecentHandlerErrors is oldest-first).
             int start = total > MaxDiagnosticsReturned ? total - MaxDiagnosticsReturned : 0;
             for (int i = start; i < total; i++)
             {
-                LuaModHandlerError err = visible[i];
+                LuaModHandlerError err = errors[i];
                 items.Add(new
                 {
                     mod_id = err.ModId,

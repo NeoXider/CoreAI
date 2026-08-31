@@ -188,7 +188,8 @@ namespace CoreAI.Tests.PlayMode
                 memoryPolicy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                settings);
+                settings,
+                new LocalActorIdentityProvider("reasoning-isolation-test"));
             CoreAiChatService chatService = new(
                 orchestrator,
                 memoryPolicy,

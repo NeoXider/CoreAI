@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using NUnit.Framework;
 using UnityEngine;
@@ -173,6 +174,7 @@ namespace CoreAI.Tests.EditMode
         {
             GameObject go = new("CoreAiChatPanel_ToolRoundBubble_Test");
             CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+            panel.SetActorIdentityProvider(new LocalActorIdentityProvider("tool-round-panel-test"));
             // WHY: Plain EditMode tests do not invoke MonoBehaviour lifecycle callbacks, so model the
             // enabled panel precondition explicitly instead of weakening the production lifecycle guard.
             SetField(panel, "_lifecycleActive", true);

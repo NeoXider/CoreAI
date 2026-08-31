@@ -4,17 +4,17 @@ namespace CoreAI.Ai
     public sealed class NullAiOrchestrationMetrics : IAiOrchestrationMetrics
     {
         /// <inheritdoc />
-        public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
+        public void RecordLlmCompletion(string actorId, string roleId, string traceId, bool ok, double wallMs)
         {
         }
 
         /// <inheritdoc />
-        public void RecordStructuredRetry(string roleId, string traceId, string reason)
+        public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
         {
         }
 
         /// <inheritdoc />
-        public void RecordCommandPublished(string roleId, string traceId)
+        public void RecordCommandPublished(string actorId, string roleId, string traceId)
         {
         }
     }

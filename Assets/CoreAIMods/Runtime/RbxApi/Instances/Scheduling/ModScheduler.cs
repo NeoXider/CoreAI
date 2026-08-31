@@ -179,8 +179,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return root;
             }
 
-            public void RemoveWhere(Predicate<T> predicate)
+            public int RemoveWhere(Predicate<T> predicate)
             {
+                int touchedCount = _items.Count;
                 int writeIndex = 0;
                 for (int readIndex = 0; readIndex < _items.Count; readIndex++)
                 {
@@ -194,7 +195,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
                 if (writeIndex == _items.Count)
                 {
-                    return;
+                    return touchedCount;
                 }
 
                 _items.RemoveRange(writeIndex, _items.Count - writeIndex);
@@ -202,6 +203,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 {
                     SiftDown(index);
                 }
+
+                return touchedCount;
             }
 
             private void SiftUp(int index)
@@ -286,6 +289,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private long _sequence;
         private bool _advancing;
         private bool _delayedBatchStarted;
+        private bool _promotingCompletions;
         private PipelineStage? _currentStage;
 
         public ModScheduler(IRbxScriptThreadFactory threadFactory, IRbxTimeSource timeSource)
@@ -320,6 +324,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         public double CurrentTime => _timeSource.CurrentTime;
 
         internal long CompletionPromotionTouchCount { get; private set; }
+
+        internal Action CompletionSnapshotCaptured { get; set; }
 
         internal int CompletionWaitCount
         {
@@ -387,9 +393,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         }
 
         /// <summary>
-        /// Resumes an existing caller at the next deferred drain after completion. Ready callers are
-        /// promoted in registration order, independent of host callback arrival order. The host must
-        /// call <see cref="SignalCompletion"/> after registering and completing the token.
+        /// Resumes an existing caller at the next deferred drain after completion. Callers captured in
+        /// one ready snapshot are promoted in registration order. Across snapshots, order follows
+        /// signal readiness. The host must call <see cref="SignalCompletion"/> after registering and
+        /// completing the token.
         /// </summary>
         public void ScheduleWaitUntil(IRbxScriptThread caller, RbxSchedulerCompletion completion)
         {
@@ -667,10 +674,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _readyCompletions.Clear();
             }
 
-            int nextIndex = 0;
+            int nextIndex = -1;
             try
             {
-                for (; nextIndex < _completionBuffer.Count; nextIndex++)
+                Action snapshotHandler = CompletionSnapshotCaptured;
+                snapshotHandler?.Invoke();
+                _promotingCompletions = true;
+                for (nextIndex = 0; nextIndex < _completionBuffer.Count; nextIndex++)
                 {
                     CompletionPromotionTouchCount++;
                     CompletionWaitEntry entry = _completionBuffer[nextIndex];
@@ -688,10 +698,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                             _deferredQueue.Enqueue(record);
                             break;
                         case RbxSchedulerCompletionStatus.Faulted:
-                            HandleFault(record, entry.Completion.Error);
+                            FinalizeFault(record, entry.Completion.Error);
                             break;
                         case RbxSchedulerCompletionStatus.Canceled:
-                            KillRecord(record);
+                            FinalizeKill(record);
                             break;
                         default:
                             throw new ArgumentOutOfRangeException();
@@ -700,11 +710,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
             catch
             {
-                RestoreCompletionBatch(nextIndex + 1);
+                RestoreCompletionBatch(nextIndex < 0 ? 0 : nextIndex + 1);
                 throw;
             }
             finally
             {
+                _promotingCompletions = false;
                 _completionBuffer.Clear();
             }
         }
@@ -918,11 +929,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private void HandleFault(ThreadRecord record, RbxError error)
         {
             RemoveQueuedWork(record);
+            FinalizeFault(record, error);
+        }
+
+        private void FinalizeFault(ThreadRecord record, RbxError error)
+        {
             if (!record.Thread.IsDead && record.Thread.Status != RbxScriptThreadStatus.Dead)
             {
                 record.Thread.Kill();
             }
 
+            record.DeferredArguments = null;
             record.State = ThreadScheduleState.Canceled;
             _records.Remove(record.Thread);
             Action<string, RbxError> handler = ThreadFaulted;
@@ -937,19 +954,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private void KillRecord(ThreadRecord record)
         {
             RemoveQueuedWork(record);
+            FinalizeKill(record);
+        }
+
+        private void FinalizeKill(ThreadRecord record)
+        {
             if (!record.Thread.IsDead && record.Thread.Status != RbxScriptThreadStatus.Dead)
             {
                 record.Thread.Kill();
             }
 
+            record.DeferredArguments = null;
             record.State = ThreadScheduleState.Canceled;
             _records.Remove(record.Thread);
         }
 
         private void RemoveQueuedWork(ThreadRecord record)
         {
-            _waitHeap.RemoveWhere(entry => ReferenceEquals(entry.Record, record));
-            _delayHeap.RemoveWhere(entry => ReferenceEquals(entry.Record, record));
+            int touchedCount = _waitHeap.RemoveWhere(
+                entry => ReferenceEquals(entry.Record, record));
+            touchedCount += _delayHeap.RemoveWhere(
+                entry => ReferenceEquals(entry.Record, record));
             lock (_completionGate)
             {
                 CompletionWaitEntry completionWait = record.CompletionWait;
@@ -960,6 +985,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             int deferredCount = _deferredQueue.Count;
+            touchedCount += deferredCount;
             for (int index = 0; index < deferredCount; index++)
             {
                 ThreadRecord candidate = _deferredQueue.Dequeue();
@@ -970,6 +996,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             record.DeferredArguments = null;
+            if (_promotingCompletions)
+            {
+                CompletionPromotionTouchCount += touchedCount;
+            }
         }
 
         private void RemoveCompletionRegistration(CompletionWaitEntry entry)

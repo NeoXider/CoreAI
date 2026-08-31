@@ -1,6 +1,7 @@
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
@@ -149,7 +150,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             try
             {
                 ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
-                runtime.LoadMod("leaker",
+                ActorContext actorContext = ActorIdentityComposition.CreateLocalHost().GetActorContext(
+                    BuiltInAgentRoleIds.Programmer);
+                runtime.LoadMod(actorContext, "leaker",
                     "local p = Instance.new('Part') p.Name = 'LeakPart' p.Parent = workspace");
 
                 RbxInstance part = host.Registry.WorldRoot.FindFirstChild("LeakPart");
@@ -162,7 +165,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
 
                 // WHY: Unload routes through TeardownModEffects(Unload) -> ModTearingDown -> the installer's
                 // ownership sweep, so the mod's instances (and their GameObjects) must be destroyed — no leak.
-                Assert.IsTrue(runtime.UnloadMod("leaker"));
+                Assert.IsTrue(runtime.UnloadMod(actorContext, "leaker"));
 
                 Assert.IsFalse(host.Binder.TryGetBoundObject(partId, out _),
                     "unloading the mod must release the backing GameObject of the instance it owned");

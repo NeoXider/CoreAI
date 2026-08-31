@@ -141,7 +141,8 @@ namespace CoreAI.Tests.EditMode
                 policy,
                 null,
                 null,
-                settings);
+                settings,
+                new LocalActorIdentityProvider("tool-contract-test"));
         }
 
         private static void AssertNoGuidOrTimestamp(string value)

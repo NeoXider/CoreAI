@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai.Logging;
+using CoreAI.Authority;
 using CoreAI.Logging;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -202,13 +203,13 @@ namespace CoreAI.Ai.LuaCs
         /// Raised when a mod calls <c>events_emit(name, payload)</c>: (modId, eventName, payload).
         /// The Unity layer bridges this to MessagePipe/game systems.
         /// </summary>
-        public event Action<string, string, string> ModEventEmitted;
+        internal event Action<string, string, string> ModEventEmitted;
 
         /// <summary>Raised after a mod source is successfully loaded or reloaded: (modId, source, caps).</summary>
-        public event Action<string, string, LuaCapabilities> ModSourceLoaded;
+        internal event Action<string, string, LuaCapabilities> ModSourceLoaded;
 
         /// <summary>Raised after a mod is unloaded via <see cref="UnloadMod"/>/<see cref="ForgetMod"/>: (modId, source, caps). Repeated errors never unload — see <see cref="ModQuarantined"/>.</summary>
-        public event Action<string, string, LuaCapabilities> ModSourceUnloaded;
+        internal event Action<string, string, LuaCapabilities> ModSourceUnloaded;
 
         /// <summary>
         /// Raised when a mod hits <see cref="MaxErrorsBeforeQuarantine"/> consecutive errors and is
@@ -216,7 +217,7 @@ namespace CoreAI.Ai.LuaCs
         /// until it is reloaded; hosts drive their repair loop from this instead of an unload.
         /// Subscribers are isolated: a throwing subscriber never skips the rest.
         /// </summary>
-        public event Action<string, int> ModQuarantined;
+        internal event Action<string, int> ModQuarantined;
 
         /// <summary>
         /// Raised whenever a mod instance's runtime side effects are being torn down — on
@@ -225,7 +226,7 @@ namespace CoreAI.Ai.LuaCs
         /// runtime itself; future subsystems (instance registries, signals) subscribe here to release
         /// the mod's effects at the same point. Subscribers are isolated.
         /// </summary>
-        public event Action<string, LuaModTeardownReason> ModTearingDown;
+        internal event Action<string, LuaModTeardownReason> ModTearingDown;
 
         /// <summary>
         /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>:
@@ -233,14 +234,14 @@ namespace CoreAI.Ai.LuaCs
         /// resets to zero after any successful call, so a host can debounce an auto-repair loop on the
         /// streak length.
         /// </summary>
-        public event Action<string, string, int> ModHandlerErrored;
+        internal event Action<string, string, int> ModHandlerErrored;
 
         /// <summary>
         /// Raised when a loaded mod calls <c>report(message)</c> (or <c>print</c>) and report logging
         /// is enabled for that mod: (modId, message). Reports are muted by default so timer mods cannot
         /// flood logs.
         /// </summary>
-        public event Action<string, string> ModReportEmitted;
+        internal event Action<string, string> ModReportEmitted;
 
         /// <summary>
         /// True when the Lua-CSharp sandbox is available on this platform. Lua-CSharp is a managed,
@@ -372,8 +373,368 @@ namespace CoreAI.Ai.LuaCs
             return VersionKeyPrefix + modId;
         }
 
+        /// <inheritdoc />
+        public IReadOnlyList<LuaModInfo> ListMods(ActorContext caller)
+        {
+            RequireTrusted(caller);
+            return ListMods();
+        }
+
+        /// <inheritdoc />
+        public bool TryGetModSource(ActorContext caller, string id, out string source)
+        {
+            DemandModAccess(caller, "get_source", id);
+            return TryGetModSource(id, out source);
+        }
+
+        /// <inheritdoc />
+        public void LoadMod(
+            ActorContext caller,
+            string id,
+            string luaCode,
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            bool persistToStore = true)
+        {
+            DemandModAccess(caller, "load", id);
+            LoadModForActor(id, luaCode, caller.ActorId, capabilities, persistToStore);
+        }
+
+        /// <inheritdoc />
+        public string GetModOwnerActorId(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "get_owner", id);
+            return GetModOwnerActorId(id);
+        }
+
+        /// <inheritdoc />
+        public void ReloadMod(ActorContext caller, string id, string luaCode)
+        {
+            DemandModAccess(caller, "reload", id);
+            ReloadMod(id, luaCode);
+        }
+
+        /// <inheritdoc />
+        public bool UnloadMod(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "unload", id);
+            return UnloadMod(id);
+        }
+
+        /// <inheritdoc />
+        public string ExportMod(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "export", id);
+            return ExportMod(id);
+        }
+
+        /// <inheritdoc />
+        public bool ImportMod(
+            ActorContext caller,
+            string bundleJson,
+            LuaCapabilities hostGrant,
+            bool allowFull = false)
+        {
+            RequireTrusted(caller);
+            string modId = TryReadBundleModId(bundleJson);
+            if (modId == null)
+            {
+                return false;
+            }
+
+            DemandModAccess(caller, "import", modId);
+            return ImportModForActor(bundleJson, caller.ActorId, hostGrant, allowFull);
+        }
+
+        /// <inheritdoc />
+        public bool ForgetMod(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "forget", id);
+            return ForgetMod(id);
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<LuaScriptRevision> ListModVersions(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "versions", id);
+            return ListModVersions(id);
+        }
+
+        /// <inheritdoc />
+        public bool TryRevertMod(
+            ActorContext caller,
+            string id,
+            int revisionIndex,
+            out string restoredSource)
+        {
+            DemandModAccess(caller, "revert", id);
+            return TryRevertMod(id, revisionIndex, out restoredSource);
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(
+            ActorContext caller,
+            string modId = null)
+        {
+            RequireTrusted(caller);
+            if (!string.IsNullOrWhiteSpace(modId))
+            {
+                DemandModAccess(caller, "diagnostics", modId);
+            }
+
+            IReadOnlyList<LuaModHandlerError> errors = GetRecentHandlerErrors(modId);
+            if (caller.Grants.IsUnrestricted)
+            {
+                return errors;
+            }
+
+            List<LuaModHandlerError> visible = new();
+            foreach (LuaModHandlerError error in errors)
+            {
+                if (string.Equals(error.OwnerActorId, caller.ActorId, StringComparison.Ordinal))
+                {
+                    visible.Add(error);
+                }
+            }
+
+            return visible;
+        }
+
+        /// <inheritdoc />
+        public void Tick(ActorContext caller, double deltaSeconds)
+        {
+            DemandHostAdmin(caller, "tick");
+            Tick(deltaSeconds);
+        }
+
+        /// <inheritdoc />
+        public void EmitEvent(ActorContext caller, string name, string payload = "")
+        {
+            DemandHostAdmin(caller, "emit_event");
+            EmitEvent(name, payload);
+        }
+
+        /// <inheritdoc />
+        public bool IsLoaded(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "is_loaded", id);
+            return IsLoaded(id);
+        }
+
+        /// <inheritdoc />
+        public bool GetModReportLoggingEnabled(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "get_report_logging", id);
+            return GetModReportLoggingEnabled(id);
+        }
+
+        /// <inheritdoc />
+        public bool SetModReportLoggingEnabled(ActorContext caller, string id, bool enabled)
+        {
+            DemandModAccess(caller, "set_report_logging", id);
+            return SetModReportLoggingEnabled(id, enabled);
+        }
+
+        /// <summary>Rehydrates stored mods for an unrestricted host caller.</summary>
+        public int RehydrateFromStore(
+            ActorContext caller,
+            LuaCapabilities hostGrant,
+            bool allowFull = false)
+        {
+            DemandHostAdmin(caller, "rehydrate");
+            return RehydrateFromStore(hostGrant, allowFull);
+        }
+
+        /// <summary>Returns recent reports visible to the caller.</summary>
+        public IReadOnlyList<LuaModReport> GetRecentReports(ActorContext caller, string modId = null)
+        {
+            RequireTrusted(caller);
+            if (!string.IsNullOrWhiteSpace(modId))
+            {
+                DemandModAccess(caller, "get_reports", modId);
+            }
+
+            IReadOnlyList<LuaModReport> reports = GetRecentReports(modId);
+            if (caller.Grants.IsUnrestricted)
+            {
+                return reports;
+            }
+
+            List<LuaModReport> visible = new();
+            foreach (LuaModReport report in reports)
+            {
+                string ownerActorId = GetModOwnerActorId(report.ModId);
+                if (string.Equals(ownerActorId, caller.ActorId, StringComparison.Ordinal))
+                {
+                    visible.Add(report);
+                }
+            }
+
+            return visible;
+        }
+
+        /// <summary>Clears recent handler errors visible to an unrestricted host caller.</summary>
+        public int ClearRecentHandlerErrors(ActorContext caller, string modId = null)
+        {
+            DemandHostAdmin(caller, "clear_handler_errors");
+            return ClearRecentHandlerErrors(modId);
+        }
+
+        /// <summary>Clears recent reports visible to an unrestricted host caller.</summary>
+        public int ClearRecentReports(ActorContext caller, string modId = null)
+        {
+            DemandHostAdmin(caller, "clear_reports");
+            return ClearRecentReports(modId);
+        }
+
+        /// <inheritdoc />
+        public void AddModHandlerErroredListener(ActorContext caller, Action<string, string, int> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_handler_errors");
+            ModHandlerErrored += listener;
+        }
+
+        /// <inheritdoc />
+        public void RemoveModHandlerErroredListener(ActorContext caller, Action<string, string, int> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_handler_errors");
+            ModHandlerErrored -= listener;
+        }
+
+        /// <inheritdoc />
+        public void AddModSourceLoadedListener(
+            ActorContext caller,
+            Action<string, string, LuaCapabilities> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_source_loads");
+            ModSourceLoaded += listener;
+        }
+
+        /// <inheritdoc />
+        public void RemoveModSourceLoadedListener(
+            ActorContext caller,
+            Action<string, string, LuaCapabilities> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_source_loads");
+            ModSourceLoaded -= listener;
+        }
+
+        /// <inheritdoc />
+        public void AddModSourceUnloadedListener(
+            ActorContext caller,
+            Action<string, string, LuaCapabilities> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_source_unloads");
+            ModSourceUnloaded += listener;
+        }
+
+        /// <inheritdoc />
+        public void RemoveModSourceUnloadedListener(
+            ActorContext caller,
+            Action<string, string, LuaCapabilities> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_source_unloads");
+            ModSourceUnloaded -= listener;
+        }
+
+        /// <inheritdoc />
+        public void AddModEventEmittedListener(ActorContext caller, Action<string, string, string> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_mod_events");
+            ModEventEmitted += listener;
+        }
+
+        /// <inheritdoc />
+        public void RemoveModEventEmittedListener(ActorContext caller, Action<string, string, string> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_mod_events");
+            ModEventEmitted -= listener;
+        }
+
+        /// <inheritdoc />
+        public void AddModReportEmittedListener(ActorContext caller, Action<string, string> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_mod_reports");
+            ModReportEmitted += listener;
+        }
+
+        /// <inheritdoc />
+        public void RemoveModReportEmittedListener(ActorContext caller, Action<string, string> listener)
+        {
+            DemandHostAdminListener(caller, listener, "observe_mod_reports");
+            ModReportEmitted -= listener;
+        }
+
+        private static void RequireTrusted(ActorContext caller)
+        {
+            if (!caller.IsTrusted)
+            {
+                throw new InvalidOperationException(
+                    "Actor context was not issued by an identity provider.");
+            }
+        }
+
+        private static void DemandHostAdmin(ActorContext caller, string operation)
+        {
+            RequireTrusted(caller);
+            if (!caller.Grants.IsUnrestricted)
+            {
+                throw new UnauthorizedAccessException(
+                    $"{operation}: actor '{caller.ActorId}' requires unrestricted host authority.");
+            }
+        }
+
+        private static void DemandHostAdminListener(ActorContext caller, Delegate listener, string operation)
+        {
+            DemandHostAdmin(caller, operation);
+            if (listener == null)
+            {
+                throw new ArgumentNullException(nameof(listener));
+            }
+        }
+
+        private void DemandModAccess(ActorContext caller, string operation, string id)
+        {
+            RequireTrusted(caller);
+            if (caller.Grants.IsUnrestricted)
+            {
+                return;
+            }
+
+            string modId = Normalize(id);
+            string ownerActorId = GetModOwnerActorId(modId);
+            if (ownerActorId == null || string.Equals(ownerActorId, caller.ActorId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string reason = ownerActorId.Length == 0
+                ? "it is owned by the host/system"
+                : $"it is owned by actor '{ownerActorId}'";
+            throw new UnauthorizedAccessException(
+                $"{operation}: actor '{caller.ActorId}' is not authorized to access mod '{modId}' because {reason}.");
+        }
+
+        private static string TryReadBundleModId(string bundleJson)
+        {
+            if (string.IsNullOrWhiteSpace(bundleJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                LuaModBundle bundle = JsonConvert.DeserializeObject<LuaModBundle>(bundleJson);
+                string modId = Normalize(bundle?.Manifest?.Id);
+                return modId.Length == 0 ? null : modId;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
         /// <summary>Snapshot of all loaded mods.</summary>
-        public IReadOnlyList<LuaModInfo> ListMods()
+        internal IReadOnlyList<LuaModInfo> ListMods()
         {
             List<LuaModInfo> result = new();
             lock (_gate)
@@ -402,7 +763,7 @@ namespace CoreAI.Ai.LuaCs
         /// Returns the Lua source of a loaded mod (the exact chunk passed to
         /// <see cref="LoadMod"/>/<see cref="ReloadMod"/>). False when no mod with this id is loaded.
         /// </summary>
-        public bool TryGetModSource(string id, out string source)
+        internal bool TryGetModSource(string id, out string source)
         {
             lock (_gate)
             {
@@ -418,7 +779,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Returns whether <c>report()</c> output is logged for a loaded mod.</summary>
-        public bool GetModReportLoggingEnabled(string id)
+        internal bool GetModReportLoggingEnabled(string id)
         {
             lock (_gate)
             {
@@ -427,7 +788,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Enables or disables <c>report()</c> output for a loaded mod.</summary>
-        public bool SetModReportLoggingEnabled(string id, bool enabled)
+        internal bool SetModReportLoggingEnabled(string id, bool enabled)
         {
             lock (_gate)
             {
@@ -442,7 +803,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>True when a mod with this id is currently loaded.</summary>
-        public bool IsLoaded(string id)
+        internal bool IsLoaded(string id)
         {
             lock (_gate)
             {
@@ -451,7 +812,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
-        public string GetModOwnerActorId(string id)
+        internal string GetModOwnerActorId(string id)
         {
             string modId = Normalize(id);
             lock (_gate)
@@ -481,7 +842,7 @@ namespace CoreAI.Ai.LuaCs
         /// and import pass false so loading a mod with masked runtime capabilities never overwrites the
         /// declared capabilities already recorded in the store.
         /// </param>
-        public void LoadMod(
+        internal void LoadMod(
             string id,
             string luaCode,
             LuaCapabilities capabilities = LuaCapabilities.All,
@@ -491,7 +852,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
-        public void LoadModForActor(
+        internal void LoadModForActor(
             string id,
             string luaCode,
             string ownerActorId,
@@ -670,7 +1031,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Unloads a mod and drops its handlers/timers/queued events.</summary>
-        public bool UnloadMod(string id)
+        internal bool UnloadMod(string id)
         {
             string modId = Normalize(id);
             string source;
@@ -718,7 +1079,7 @@ namespace CoreAI.Ai.LuaCs
         /// and the replacement starts with a zero error streak and no quarantine, so reloading is THE
         /// way to bring a quarantined mod back to life.
         /// </summary>
-        public void ReloadMod(string id, string luaCode)
+        internal void ReloadMod(string id, string luaCode)
         {
             string modId = Normalize(id);
             if (string.IsNullOrWhiteSpace(luaCode))
@@ -782,7 +1143,7 @@ namespace CoreAI.Ai.LuaCs
         /// Returns the recorded revision history for a mod (revision 0 = original), newest last, or an empty
         /// list when the mod has no tracked history (no version store, or never loaded through one).
         /// </summary>
-        public IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
+        internal IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
         {
             string modId = Normalize(id);
             try
@@ -811,7 +1172,7 @@ namespace CoreAI.Ai.LuaCs
         /// revision. Throws if the restored source fails to reload (the live mod stays untouched, exactly like
         /// <see cref="ReloadMod"/>).
         /// </summary>
-        public bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
+        internal bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
         {
             restoredSource = null;
             string modId = Normalize(id);
@@ -889,7 +1250,7 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
-        public void EmitEvent(string name, string payload = "")
+        internal void EmitEvent(string name, string payload = "")
         {
             string evt = Normalize(name);
             if (evt.Length == 0)
@@ -910,7 +1271,7 @@ namespace CoreAI.Ai.LuaCs
         /// Advances timers and dispatches queued events. Call once per frame from the host (main
         /// thread); every handler call is individually instruction/time guarded.
         /// </summary>
-        public void Tick(double deltaSeconds)
+        internal void Tick(double deltaSeconds)
         {
             if (deltaSeconds < 0d || double.IsNaN(deltaSeconds))
             {
@@ -1714,7 +2075,7 @@ namespace CoreAI.Ai.LuaCs
         /// Unloads the mod (if loaded) <em>and</em> deletes its persisted package, so it does not
         /// rehydrate on a future start. Returns true when either an unload or a delete occurred.
         /// </summary>
-        public bool ForgetMod(string id)
+        internal bool ForgetMod(string id)
         {
             string modId = Normalize(id);
             bool wasLoaded = UnloadMod(modId);
@@ -1740,7 +2101,7 @@ namespace CoreAI.Ai.LuaCs
         /// reflection. Loads run in independent try/catch blocks so one bad package does not abort the
         /// rest. Returns the count successfully loaded.
         /// </summary>
-        public int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
+        internal int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
         {
             IReadOnlyList<LuaModManifest> manifests;
             try
@@ -1804,7 +2165,7 @@ namespace CoreAI.Ai.LuaCs
         /// Returns a shareable JSON bundle <c>{ "manifest": {...}, "source": "..." }</c> for a loaded or
         /// stored mod, or null when neither holds the id.
         /// </summary>
-        public string ExportMod(string id)
+        internal string ExportMod(string id)
         {
             string modId = Normalize(id);
             string source = null;
@@ -1859,13 +2220,13 @@ namespace CoreAI.Ai.LuaCs
         /// mod can never auto-acquire full reflection. Returns false on malformed input, a missing/blank
         /// id or source, or a load failure.
         /// </summary>
-        public bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
+        internal bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
         {
             return ImportModInternal(bundleJson, "", hostGrant, allowFull);
         }
 
         /// <inheritdoc />
-        public bool ImportModForActor(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
+        internal bool ImportModForActor(string bundleJson, string ownerActorId, LuaCapabilities hostGrant,
             bool allowFull = false)
         {
             if (string.IsNullOrWhiteSpace(ownerActorId))
@@ -2149,7 +2510,7 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="MaxRetainedHandlerErrors"/>. Pass <paramref name="modId"/> to filter to a single
         /// mod.
         /// </summary>
-        public IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(string modId = null)
+        internal IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(string modId = null)
         {
             string filter = modId == null ? null : Normalize(modId);
             List<LuaModHandlerError> result = new();
@@ -2172,7 +2533,7 @@ namespace CoreAI.Ai.LuaCs
         /// Clears the recent Tick-time handler-error buffer (optionally only entries for one mod).
         /// Returns the number of entries removed.
         /// </summary>
-        public int ClearRecentHandlerErrors(string modId = null)
+        internal int ClearRecentHandlerErrors(string modId = null)
         {
             string filter = modId == null ? null : Normalize(modId);
             lock (_gate)
@@ -2236,7 +2597,7 @@ namespace CoreAI.Ai.LuaCs
         /// at <see cref="MaxRetainedReports"/>, independent of each mod's <c>LogReports</c> flag. Pass
         /// <paramref name="modId"/> to filter to a single mod.
         /// </summary>
-        public IReadOnlyList<LuaModReport> GetRecentReports(string modId = null)
+        internal IReadOnlyList<LuaModReport> GetRecentReports(string modId = null)
         {
             string filter = modId == null ? null : Normalize(modId);
             List<LuaModReport> result = new();
@@ -2259,7 +2620,7 @@ namespace CoreAI.Ai.LuaCs
         /// Clears the recent reports buffer (optionally only entries for one mod). Returns the number of
         /// entries removed.
         /// </summary>
-        public int ClearRecentReports(string modId = null)
+        internal int ClearRecentReports(string modId = null)
         {
             string filter = modId == null ? null : Normalize(modId);
             lock (_gate)

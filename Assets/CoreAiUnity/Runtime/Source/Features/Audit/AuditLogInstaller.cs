@@ -1,4 +1,5 @@
 using CoreAI.Audit;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
 using VContainer;
 
@@ -16,7 +17,11 @@ namespace CoreAI.Features.Audit
             builder.RegisterBuildCallback(resolver =>
             {
                 resolver.Resolve<LlmAuditInterceptor>();
-                resolver.Resolve<ToolCallAuditInterceptor>();
+                ToolCallAuditInterceptor toolCallInterceptor = resolver.Resolve<ToolCallAuditInterceptor>();
+                IActorIdentityProvider actorIdentityProvider = resolver.Resolve<IActorIdentityProvider>();
+                toolCallInterceptor.SetActorIdentityResolver(
+                    (string traceId, string roleId) =>
+                        actorIdentityProvider.GetActorContext(roleId).ActorId);
             });
         }
     }

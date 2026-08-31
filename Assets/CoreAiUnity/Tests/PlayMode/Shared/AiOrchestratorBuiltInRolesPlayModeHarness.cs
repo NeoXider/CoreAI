@@ -49,7 +49,8 @@ namespace CoreAI.Tests.PlayMode
                 new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("built-in-role-test"));
 
             List<string> failedRoles = new();
 

@@ -1,6 +1,7 @@
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Hub;
 using CoreAI.Hub.UI;
@@ -77,11 +78,13 @@ namespace CoreAI.Ai.Hub
             }
 
             LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
+            IActorIdentityProvider actorIdentityProvider = container.Resolve<IActorIdentityProvider>();
+            ActorContext actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             ILuaModSourceStore sourceStore = container.ResolveOrDefault<ILuaModSourceStore>();
             LuaCapabilities grant = allowFullTier
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            HubModsPages.Register(registry, runtime, sourceStore, grant, allowFullTier);
+            HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier);
 
             if (window.Registry == null)
             {

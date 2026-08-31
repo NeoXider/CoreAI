@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using NUnit.Framework;
 using UnityEngine;
@@ -42,6 +43,7 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 PanelForTesting panel = go.AddComponent<PanelForTesting>();
+                panel.SetActorIdentityProvider(new LocalActorIdentityProvider("build-request-test"));
                 AiTaskRequest req = panel.InvokeBuildAiTaskRequest(" hello ", "Merchant");
 
                 Assert.AreEqual("Merchant", req.RoleId);
@@ -63,6 +65,7 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 PanelWithAllowedTools panel = go.AddComponent<PanelWithAllowedTools>();
+                panel.SetActorIdentityProvider(new LocalActorIdentityProvider("allowed-tools-test"));
                 AiTaskRequest req = panel.InvokeBuildAiTaskRequest("go", "BlueprintBot");
 
                 Assert.AreEqual("BlueprintBot", req.RoleId);

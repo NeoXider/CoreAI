@@ -200,7 +200,14 @@ namespace CoreAI.Tests.PlayMode
                 new LuaLlmTool(setup.Stack.ToolExecutor, setup.Settings, Log.Instance,
                     new LuaGenerationRateLimiter()));
             policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                new LuaModsLlmTool(setup.Stack.Runtime, setup.Settings, Log.Instance, scriptCapabilities));
+                new LuaModsLlmTool(
+                    setup.Stack.Runtime,
+                    setup.Settings,
+                    Log.Instance,
+                    scriptCapabilities,
+                    true,
+                    new LocalActorIdentityProvider("programmer-live-test"),
+                    BuiltInAgentRoleIds.Programmer));
             policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                 BuiltInLuaModdingSkillText.SkillName,
                 BuiltInLuaModdingSkillText.SkillDescription,

@@ -293,6 +293,7 @@ namespace CoreAI.Tests.EditMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-smart-test"),
                 ctxMgr,
                 null,
                 new FixedHistoryBudgetPolicy(25));
@@ -321,6 +322,7 @@ namespace CoreAI.Tests.EditMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-programmer-test"),
                 ctxMgr2,
                 null,
                 new FixedHistoryBudgetPolicy(25));
@@ -355,6 +357,7 @@ namespace CoreAI.Tests.EditMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-global-test"),
                 globalCtxMgr,
                 null,
                 new FixedHistoryBudgetPolicy(25));
@@ -385,6 +388,7 @@ namespace CoreAI.Tests.EditMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-override-test"),
                 overrideCtxMgr,
                 null,
                 new FixedHistoryBudgetPolicy(25));

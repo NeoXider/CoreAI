@@ -118,7 +118,8 @@ namespace CoreAI.Tests.EditMode
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null),
                 null, policy ?? new AgentMemoryPolicy(),
-                null, null, new TestSettings());
+                null, null, new TestSettings(),
+                new LocalActorIdentityProvider("forced-tool-test"));
         }
 
         [Test]

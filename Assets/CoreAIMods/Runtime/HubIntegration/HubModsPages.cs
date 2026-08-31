@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Hub;
 using CoreAI.Hub.UI;
 
@@ -30,6 +31,7 @@ namespace CoreAI.Ai.Hub
         /// <summary>Registers the Mods page backed by the Lua-CSharp <see cref="LuaCsModRuntime"/>.</summary>
         /// <param name="registry">Target registry. Required.</param>
         /// <param name="runtime">Live mod runtime (also driven by the manage_mods LLM tool). Required.</param>
+        /// <param name="actorContext">Trusted host actor performing Hub mod operations.</param>
         /// <param name="sourceStore">Package store persisting mod source + manifest (may be null).</param>
         /// <param name="grant">Capability ceiling applied to every mod loaded from the UI.</param>
         /// <param name="allowFull">When true, <see cref="LuaCapabilities.Full"/> may be granted from the header.</param>
@@ -37,6 +39,7 @@ namespace CoreAI.Ai.Hub
         public static void Register(
             HubPageRegistry registry,
             LuaCsModRuntime runtime,
+            ActorContext actorContext,
             ILuaModSourceStore sourceStore = null,
             LuaCapabilities grant = LuaCapabilities.All,
             bool allowFull = false,
@@ -47,7 +50,10 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(runtime));
             }
 
-            Register(registry, new LuaCsModRuntimeHubService(runtime, sourceStore, grant, allowFull), order);
+            Register(
+                registry,
+                new LuaCsModRuntimeHubService(runtime, actorContext, sourceStore, grant, allowFull),
+                order);
         }
 
         /// <summary>Registers the Mods page backed by a pre-built <see cref="IHubModService"/>.</summary>

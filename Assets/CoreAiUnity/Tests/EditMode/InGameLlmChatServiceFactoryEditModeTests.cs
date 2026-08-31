@@ -4,7 +4,9 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Presentation.PlayerChat;
 using NUnit.Framework;
+using UnityEngine;
 using VContainer;
 
 namespace CoreAI.Tests.EditMode
@@ -69,18 +71,56 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ReleaseActor_DepartedActorInstanceIsNotRetained()
+        public void InGameChatPanel_ReconnectOldDeparture_DoesNotEvictLiveActorAndFinalDepartureFreesCapacity()
         {
             StubLlmClient llm = new StubLlmClient();
             ActorKeyedInGameLlmChatServiceFactory factory = CreateFactory(llm, 10, 1);
-            ActorContext actorAContext = CreateActor("actor-a");
-            IInGameLlmChatService departed = factory.Resolve(actorAContext);
+            LocalActorIdentityProvider oldIdentity = CreateIdentity("actor-a", "session-old");
+            LocalActorIdentityProvider newIdentity = CreateIdentity("actor-a", "session-new");
+            ActorContext oldActor = oldIdentity.GetActorContext(BuiltInAgentRoleIds.SmartChat);
+            ActorContext actorB = CreateIdentity("actor-b", "session-b")
+                .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+            using IObjectResolver oldResolver = CreatePanelResolver(factory, oldIdentity);
+            using IObjectResolver newResolver = CreatePanelResolver(factory, newIdentity);
+            GameObject oldPanelObject = new GameObject("old-session-chat-panel");
+            GameObject newPanelObject = new GameObject("new-session-chat-panel");
 
-            Assert.Throws<InvalidOperationException>(() => factory.Resolve(CreateActor("actor-b")));
-            Assert.IsTrue(factory.ReleaseActor(actorAContext));
+            try
+            {
+                InGameChatPanel oldPanel = oldPanelObject.AddComponent<InGameChatPanel>();
+                InGameChatPanel newPanel = newPanelObject.AddComponent<InGameChatPanel>();
+                oldPanel.ResolveCurrentActorChat(oldResolver);
+                newPanel.ResolveCurrentActorChat(newResolver);
 
-            IInGameLlmChatService replacement = factory.Resolve(actorAContext);
-            Assert.AreNotSame(departed, replacement);
+                Assert.AreSame(factory.Resolve(oldActor), oldPanel.BoundChatService);
+                Assert.AreSame(oldPanel.BoundChatService, newPanel.BoundChatService);
+
+                oldPanel.ReleaseCurrentActorChat();
+                UnityEngine.Object.DestroyImmediate(oldPanelObject);
+                oldPanelObject = null;
+
+                Assert.Throws<InvalidOperationException>(() => factory.Resolve(actorB));
+
+                newPanel.ReleaseCurrentActorChat();
+                UnityEngine.Object.DestroyImmediate(newPanelObject);
+                newPanelObject = null;
+
+                Assert.IsNotNull(factory.Resolve(actorB));
+            }
+            finally
+            {
+                if (oldPanelObject != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(oldPanelObject);
+                }
+
+                if (newPanelObject != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(newPanelObject);
+                }
+
+                factory.Dispose();
+            }
         }
 
         [Test]
@@ -100,6 +140,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(defaultService);
             Assert.AreSame(defaultService, factory.Resolve(defaultActor));
             Assert.AreSame(defaultService, container.Resolve<IInGameLlmChatService>());
+            Assert.AreEqual(LocalActorIdentityProvider.DefaultActorId, defaultActor.ActorId);
+            Assert.IsTrue(defaultActor.Grants.IsUnrestricted);
         }
 
         private static ActorKeyedInGameLlmChatServiceFactory CreateFactory(
@@ -117,6 +159,26 @@ namespace CoreAI.Tests.EditMode
         {
             LocalActorIdentityProvider provider = new LocalActorIdentityProvider(actorId);
             return provider.GetActorContext(BuiltInAgentRoleIds.SmartChat);
+        }
+
+        private static LocalActorIdentityProvider CreateIdentity(string actorId, string sessionId)
+        {
+            return new LocalActorIdentityProvider(
+                actorId,
+                sessionId,
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+        }
+
+        private static IObjectResolver CreatePanelResolver(
+            IInGameLlmChatServiceFactory factory,
+            IActorIdentityProvider identityProvider)
+        {
+            ContainerBuilder builder = new ContainerBuilder();
+            builder.RegisterInstance(factory);
+            builder.RegisterInstance(identityProvider);
+            return builder.Build();
         }
 
         private sealed class StubLlmClient : ILlmClient

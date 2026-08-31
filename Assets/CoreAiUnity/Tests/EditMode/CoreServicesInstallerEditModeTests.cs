@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Logging;
@@ -36,9 +38,12 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 IAiGameCommandSink sink = container.Resolve<IAiGameCommandSink>();
+                ActorContext actor = container.Resolve<IActorIdentityProvider>()
+                    .GetActorContext(BuiltInAgentRoleIds.Creator);
 
                 Assert.That(sink, Is.Not.Null);
                 Assert.That(sink, Is.InstanceOf<MessagePipeAiCommandSink>());
+                Assert.IsTrue(actor.Grants.IsUnrestricted);
             }
             finally
             {

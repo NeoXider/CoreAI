@@ -3,6 +3,7 @@ using UnityEngine;
 #if COREAI_LUA
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -61,6 +62,7 @@ namespace CoreAI.Demos
         private readonly List<string> _log = new();
 
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private UnitForgeLuaBindings _bindings;
         private string _status = "Starting...";
         private Vector2 _scroll;
@@ -82,9 +84,11 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
-            _mods.ModEventEmitted += OnModEvent;
-            _mods.ModSourceLoaded += OnModLoaded;
+            _mods.AddModEventEmittedListener(_actorContext, OnModEvent);
+            _mods.AddModSourceLoadedListener(_actorContext, OnModLoaded);
 
             // The forge API (forge_define / forge_spawn / ...) is authored as a Lua-CSharp gameplay binding
             // set. The runtime seam now exists: LuaCsModStackOptions.AdditionalGameplayBindings feeds a
@@ -104,8 +108,8 @@ namespace CoreAI.Demos
         {
             if (_mods != null)
             {
-                _mods.ModEventEmitted -= OnModEvent;
-                _mods.ModSourceLoaded -= OnModLoaded;
+                _mods.RemoveModEventEmittedListener(_actorContext, OnModEvent);
+                _mods.RemoveModSourceLoadedListener(_actorContext, OnModLoaded);
             }
 
             if (_bindings != null)
@@ -189,7 +193,7 @@ namespace CoreAI.Demos
                 MaxHp = archetype.Hp
             });
 
-            _mods?.EmitEvent("unit_spawned", $"{archetype.Name}:{archetype.Team}");
+            _mods?.EmitEvent(_actorContext, "unit_spawned", $"{archetype.Name}:{archetype.Team}");
             return visual.GetInstanceID();
         }
 
@@ -312,11 +316,11 @@ namespace CoreAI.Demos
             }
 
             _units.Remove(unit);
-            _mods?.EmitEvent("unit_died", $"{unit.Archetype.Name}:{team}");
+            _mods?.EmitEvent(_actorContext, "unit_died", $"{unit.Archetype.Name}:{team}");
 
             if (Count(team) == 0)
             {
-                _mods?.EmitEvent("team_wiped", team);
+                _mods?.EmitEvent(_actorContext, "team_wiped", team);
                 Log($"Team '{team}' was wiped out.");
             }
         }
@@ -373,7 +377,7 @@ namespace CoreAI.Demos
             GUILayout.Label("<b>Loaded mods</b>", RichLabel());
             if (_mods != null)
             {
-                IReadOnlyList<LuaModInfo> mods = _mods.ListMods();
+                IReadOnlyList<LuaModInfo> mods = _mods.ListMods(_actorContext);
                 if (mods.Count == 0)
                 {
                     GUILayout.Label("No mods loaded.");

@@ -121,13 +121,13 @@ namespace CoreAI.Ai
             return SecondsSinceLastSuccess > thresholdSeconds;
         }
 
-        /// <inheritdoc />
+        /// <summary>Records an LLM completion without an actor dimension.</summary>
         public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
         {
             RecordLlmCompletion("", roleId, traceId, ok, wallMs);
         }
 
-        /// <summary>Records an LLM completion against distinct actor and role dimensions.</summary>
+        /// <inheritdoc />
         public void RecordLlmCompletion(string actorId, string roleId, string traceId, bool ok, double wallMs)
         {
             lock (_lock)
@@ -150,13 +150,13 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <inheritdoc />
+        /// <summary>Records a structured retry without an actor dimension.</summary>
         public void RecordStructuredRetry(string roleId, string traceId, string reason)
         {
             RecordStructuredRetry("", roleId, traceId, reason);
         }
 
-        /// <summary>Records a structured retry against distinct actor and role dimensions.</summary>
+        /// <inheritdoc />
         public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
         {
             lock (_lock)
@@ -168,13 +168,13 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <inheritdoc />
+        /// <summary>Records a published command without an actor dimension.</summary>
         public void RecordCommandPublished(string roleId, string traceId)
         {
             RecordCommandPublished("", roleId, traceId);
         }
 
-        /// <summary>Records a published command against distinct actor and role dimensions.</summary>
+        /// <inheritdoc />
         public void RecordCommandPublished(string actorId, string roleId, string traceId)
         {
             lock (_lock)

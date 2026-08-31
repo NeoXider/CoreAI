@@ -1,9 +1,11 @@
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using VContainer;
 
 namespace CoreAI.Presentation.PlayerChat
 {
@@ -29,6 +31,9 @@ namespace CoreAI.Presentation.PlayerChat
         private Button clearHistoryButton;
 
         private IInGameLlmChatService _chat;
+        private ActorContext _chatActor;
+        private IInGameLlmChatServiceFactory _chatFactory;
+        private bool _hasChatActor;
         private CoreAILifetimeScope _scope;
 
         private void Awake()
@@ -66,9 +71,53 @@ namespace CoreAI.Presentation.PlayerChat
         {
             if (_scope != null)
             {
-                _chat = (IInGameLlmChatService)_scope.Container.Resolve(typeof(IInGameLlmChatService));
+                ResolveCurrentActorChat(_scope.Container);
             }
         }
+
+        private void OnDestroy()
+        {
+            ReleaseCurrentActorChat();
+        }
+
+        /// <summary>Releases this panel's actor session from the retained chat factory.</summary>
+        internal void ReleaseCurrentActorChat()
+        {
+            if (!_hasChatActor || _chatFactory == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _chatFactory.ReleaseActor(_chatActor);
+            }
+            catch (System.ObjectDisposedException)
+            {
+            }
+
+            _chat = null;
+            _chatFactory = null;
+            _hasChatActor = false;
+        }
+
+        /// <summary>Resolves the chat service for the actor currently admitted by the host.</summary>
+        internal void ResolveCurrentActorChat(IObjectResolver resolver)
+        {
+            ReleaseCurrentActorChat();
+            IActorIdentityProvider identityProvider = resolver.Resolve<IActorIdentityProvider>();
+            ActorContext actor = identityProvider.GetActorContext(BuiltInAgentRoleIds.SmartChat);
+            IInGameLlmChatServiceFactory factory = resolver.Resolve<IInGameLlmChatServiceFactory>();
+            IInGameLlmChatService chat = factory.Resolve(actor);
+
+            _chatActor = actor;
+            _chatFactory = factory;
+            _chat = chat;
+            _hasChatActor = true;
+        }
+
+        /// <summary>Currently bound actor-owned service.</summary>
+        internal IInGameLlmChatService BoundChatService => _chat;
 
         private async void OnSendClicked()
         {

@@ -1,4 +1,5 @@
 ﻿using CoreAI.Audit;
+using CoreAI.Authority;
 using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
@@ -20,6 +21,11 @@ namespace CoreAI.Composition
         /// <summary>Registers CoreAI domain services with the dependency injection container.</summary>
         public static void RegisterCore(this IContainerBuilder builder)
         {
+            if (!builder.Exists(typeof(IActorIdentityProvider), true))
+            {
+                builder.RegisterInstance<IActorIdentityProvider>(ActorIdentityComposition.CreateLocalHost());
+            }
+
             builder.Register<UnityGameLogSink>(Lifetime.Singleton).AsSelf().As<IGameLogSink>();
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 

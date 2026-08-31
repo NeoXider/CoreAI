@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
@@ -59,6 +60,16 @@ namespace CoreAI.Mcp.Server
         [SerializeField]
         private string authToken = "";
 
+        [Tooltip("Expose manage_mods to MCP as an unrestricted host administrator. Off by default. " +
+                 "Enable only when every client holding the bearer token is trusted with every mod.")]
+        [SerializeField]
+        private bool enableHostAdminModManagement;
+
+        [Tooltip("Required durable actor id used for MCP manage_mods calls when host-admin mod management " +
+                 "is enabled. The tool is omitted when this is blank.")]
+        [SerializeField]
+        private string hostAdminActorId = "";
+
         [Tooltip("Seconds a tools/call may wait for the Unity main thread before it fails with a clear " +
                  "error. Guards against a paused game or a disabled component hanging the client forever. " +
                  "0 disables the timeout.")]
@@ -74,6 +85,7 @@ namespace CoreAI.Mcp.Server
         private McpHttpServer _server;
         private McpSessionStore _sessions;
         private string _activeAuthToken;
+        private IActorIdentityProvider _hostAdminActorIdentityProvider;
 
         private static CoreAiMcpServer _active;
 
@@ -100,6 +112,57 @@ namespace CoreAI.Mcp.Server
         {
             get => mainThreadTimeoutSeconds;
             set => mainThreadTimeoutSeconds = value;
+        }
+
+        /// <summary>Whether MCP explicitly receives unrestricted host-admin mod authority.</summary>
+        public bool HostAdminModManagementEnabled => enableHostAdminModManagement;
+
+        /// <summary>The explicit durable actor id assigned to MCP host-admin mod calls.</summary>
+        public string HostAdminActorId => hostAdminActorId?.Trim() ?? "";
+
+        /// <summary>Explicitly enables unrestricted MCP mod management for the supplied host actor.</summary>
+        public void ConfigureHostAdminModManagement(string actorId)
+        {
+            if (string.IsNullOrWhiteSpace(actorId))
+            {
+                throw new ArgumentException("Host-admin actor id is required.", nameof(actorId));
+            }
+
+            if (IsRunning)
+            {
+                throw new InvalidOperationException(
+                    "Stop the MCP server before changing host-admin mod authority.");
+            }
+
+            hostAdminActorId = actorId.Trim();
+            enableHostAdminModManagement = true;
+        }
+
+        /// <summary>Enables MCP mod management with an unrestricted actor received from host composition.</summary>
+        public void ConfigureHostAdminModManagement(IActorIdentityProvider actorIdentityProvider)
+        {
+            if (actorIdentityProvider == null)
+            {
+                throw new ArgumentNullException(nameof(actorIdentityProvider));
+            }
+
+            if (IsRunning)
+            {
+                throw new InvalidOperationException(
+                    "Stop the MCP server before changing host-admin mod authority.");
+            }
+
+            ActorContext actor = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            if (!actor.IsTrusted || !actor.Grants.IsUnrestricted)
+            {
+                throw new ArgumentException(
+                    "MCP host-admin mod management requires an unrestricted actor from host composition.",
+                    nameof(actorIdentityProvider));
+            }
+
+            _hostAdminActorIdentityProvider = actorIdentityProvider;
+            hostAdminActorId = actor.ActorId;
+            enableHostAdminModManagement = true;
         }
 
         /// <summary>The bearer token of the server started via the static API, or null.</summary>
@@ -343,6 +406,8 @@ namespace CoreAI.Mcp.Server
             resolver.TryResolve(out ILog logger);
             resolver.TryResolve(out ILuaLogService logService);
 
+            IActorIdentityProvider modActorIdentityProvider = BuildMcpModIdentityProvider(resolver, modRuntime);
+
             WorldLlmTool worldTool = BuildWorldTool(resolver, settings);
             IReadOnlyList<SkillSet> skills = ResolveSkills(resolver);
             // WHY: register screenshot unconditionally. Probing for a camera at START-UP made the tool
@@ -356,10 +421,69 @@ namespace CoreAI.Mcp.Server
                 settings,
                 logger,
                 LuaCapabilities.All,
+                modActorIdentityProvider,
                 logService,
                 worldTool,
                 skills,
                 screenshot);
+        }
+
+        private IActorIdentityProvider BuildMcpModIdentityProvider(
+            IObjectResolver resolver,
+            ILuaModRuntime modRuntime)
+        {
+            if (modRuntime == null)
+            {
+                return null;
+            }
+
+            if (!enableHostAdminModManagement)
+            {
+                Log.Instance.Warn(
+                    "[CoreAI MCP] manage_mods omitted: MCP has no authenticated actor identity. " +
+                    "Explicitly enable Host Admin Mod Management and set Host Admin Actor Id only for " +
+                    "clients trusted with every mod.");
+                return null;
+            }
+
+            string actorId = HostAdminActorId;
+            if (actorId.Length == 0)
+            {
+                Log.Instance.Warn(
+                    "[CoreAI MCP] manage_mods omitted: Host Admin Mod Management is enabled but Host " +
+                    "Admin Actor Id is blank.");
+                return null;
+            }
+
+            IActorIdentityProvider actorIdentityProvider = _hostAdminActorIdentityProvider ??
+                                                           resolver.ResolveOrDefault<IActorIdentityProvider>();
+            if (actorIdentityProvider == null)
+            {
+                Log.Instance.Warn(
+                    "[CoreAI MCP] manage_mods omitted: host composition did not provide an actor identity.");
+                return null;
+            }
+
+            ActorContext actor = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            if (!actor.IsTrusted || !actor.Grants.IsUnrestricted)
+            {
+                Log.Instance.Warn(
+                    "[CoreAI MCP] manage_mods omitted: the composed actor is not unrestricted.");
+                return null;
+            }
+
+            if (!string.Equals(actor.ActorId, actorId, StringComparison.Ordinal))
+            {
+                Log.Instance.Warn(
+                    $"[CoreAI MCP] manage_mods omitted: configured Host Admin Actor Id '{actorId}' does not " +
+                    $"match composed actor '{actor.ActorId}'.");
+                return null;
+            }
+
+            Log.Instance.Warn(
+                $"[CoreAI MCP] manage_mods enabled with unrestricted host-admin identity '{actorId}'. " +
+                "Every client holding the MCP bearer token receives this authority.");
+            return actorIdentityProvider;
         }
 
         private static WorldLlmTool BuildWorldTool(IObjectResolver resolver, ICoreAISettings settings)

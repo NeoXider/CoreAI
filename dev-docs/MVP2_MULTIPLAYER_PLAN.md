@@ -40,7 +40,7 @@ lockstep rule (`CONTRIBUTING.md:79`).
 | Events broadcast to every mod | `EmitEvent` iterates `_mods.Values` under `lock (_gate)` (`:841-855`) | O(n²) fan-out plus one serialization point |
 | Timers bypass the global budget | `LuaCsModRuntime.cs:891` (`// WHY:` says so) | deliberate; stops working at scale |
 | No per-state memory accounting | `IScriptState` has no memory surface; the 256 MB guard is process-wide, per-call, first-growth | cumulative per-actor byte limits are not implementable today |
-| **Every Lua resume installs a per-instruction hook** | `LuaCsCoroutineHandle.cs:164`; measured raw VM throughput 1.27–2.51 M ops/s (`dev-docs/LUA_VM_BENCHMARK_PLAN.md:373`) | **one 10 000-op resume alone costs ≈4–8 ms** — frame budgets cannot be invented, they must be derived from op counts |
+| **Every Lua resume installs a per-instruction hook** | `LuaCsCoroutineHandle.cs:164`. RAW (unguarded) throughput is 1.27–2.51 M ops/s (`dev-docs/LUA_VM_BENCHMARK_PLAN.md:373`); the GUARDED rate at the production batch of 4 was measured separately at **148–158 k instructions/s** — see the manifest §8 | at the guarded rate one 10 000-instruction resume costs **≈67 ms**, so a 4 ms frame holds ~589 instructions. Frame budgets must be derived from the guarded rate, never from the raw one |
 | Actors cancel each other | `CoreAiChatPanel.cs:2670` uses the ROLE id as `CancellationScope` | same-role actors supersede one another |
 | Completion polling per-frame linear | `ModScheduler.PromoteCompletedWaits` | 7 passes/frame; quadratic via `RemoveAt` |
 | Metrics and audit keyed by role | `InMemoryAiOrchestrationMetrics`, `ToolCallAuditInterceptor` | 200 misbehaving agents are one row |

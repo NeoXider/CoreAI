@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 #if COREAI_LUA
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Presentation;
 using VContainer;
@@ -50,6 +51,7 @@ namespace CoreAI.Demos
         private const int EditWindowId = 0x10D_0003;
 
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private ILuaScriptVersionStore _versions;
         private CoreAiLuaModAutoRepair _autoRepair;
         private string _status = "Waiting for CoreAI scope.";
@@ -148,11 +150,13 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _versions = luaContainer.Resolve<ILuaScriptVersionStore>();
             _autoRepair = FindFirstObjectByType<CoreAiLuaModAutoRepair>();
-            _mods.ModSourceLoaded += OnModSourceLoaded;
-            _mods.ModSourceUnloaded += OnModSourceUnloaded;
+            _mods.AddModSourceLoadedListener(_actorContext, OnModSourceLoaded);
+            _mods.AddModSourceUnloadedListener(_actorContext, OnModSourceUnloaded);
 
             AutoloadSavedMods();
             RecomputeModLists();
@@ -168,8 +172,8 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods.ModSourceLoaded -= OnModSourceLoaded;
-            _mods.ModSourceUnloaded -= OnModSourceUnloaded;
+            _mods.RemoveModSourceLoadedListener(_actorContext, OnModSourceLoaded);
+            _mods.RemoveModSourceUnloadedListener(_actorContext, OnModSourceUnloaded);
         }
 
         private void AutoloadSavedMods()
@@ -213,9 +217,9 @@ namespace CoreAI.Demos
 
                     try
                     {
-                        if (_mods.IsLoaded(modId))
+                        if (_mods.IsLoaded(_actorContext, modId))
                         {
-                            _mods.ReloadMod(modId, record.CurrentLua);
+                            _mods.ReloadMod(_actorContext, modId, record.CurrentLua);
                         }
                         else
                         {
@@ -224,7 +228,7 @@ namespace CoreAI.Demos
                             LuaCapabilities autoloadCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
                                 ? LuaCapabilities.All | LuaCapabilities.Full
                                 : LuaCapabilities.All;
-                            _mods.LoadMod(modId, record.CurrentLua, autoloadCaps);
+                            _mods.LoadMod(_actorContext, modId, record.CurrentLua, autoloadCaps);
                         }
 
                         _autoloadedCount++;
@@ -379,7 +383,7 @@ namespace CoreAI.Demos
             }
 
             GUILayout.FlexibleSpace();
-            GUILayout.Label(_mods != null && _mods.IsLoaded(_editModId ?? "")
+            GUILayout.Label(_mods != null && _mods.IsLoaded(_actorContext, _editModId ?? "")
                 ? "Save reloads the running mod and persists the new source."
                 : "Save updates the saved source (mod stays inactive).", _richLabel);
             GUILayout.EndHorizontal();
@@ -401,11 +405,11 @@ namespace CoreAI.Demos
 
             try
             {
-                if (_mods.IsLoaded(_editModId))
+                if (_mods.IsLoaded(_actorContext, _editModId))
                 {
                     // Reload persists the new source and re-registers hooks; a compile/runtime error
                     // throws here, keeps the old mod running, and leaves the editor open to fix it.
-                    _mods.ReloadMod(_editModId, _editBuffer);
+                    _mods.ReloadMod(_actorContext, _editModId, _editBuffer);
                 }
                 else
                 {
@@ -499,11 +503,11 @@ namespace CoreAI.Demos
                 GUILayout.Label("[ACTIVE]", _activeBadge, GUILayout.Width(64));
                 GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
                 GUILayout.FlexibleSpace();
-                bool logReports = _mods.GetModReportLoggingEnabled(info.Id);
+                bool logReports = _mods.GetModReportLoggingEnabled(_actorContext, info.Id);
                 bool nextLogReports = GUILayout.Toggle(logReports, "Logs", GUILayout.Width(58));
                 if (nextLogReports != logReports)
                 {
-                    _mods.SetModReportLoggingEnabled(info.Id, nextLogReports);
+                    _mods.SetModReportLoggingEnabled(_actorContext, info.Id, nextLogReports);
                     _status = $"Mod '{info.Id}' logs {(nextLogReports ? "enabled" : "disabled")}.";
                 }
 
@@ -514,7 +518,7 @@ namespace CoreAI.Demos
 
                 if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
                 {
-                    _mods.UnloadMod(info.Id);
+                    _mods.UnloadMod(_actorContext, info.Id);
                     RecomputeModLists();
                 }
 
@@ -581,12 +585,12 @@ namespace CoreAI.Demos
                 return;
             }
 
-            IReadOnlyList<LuaModInfo> active = _mods.ListMods();
+            IReadOnlyList<LuaModInfo> active = _mods.ListMods(_actorContext);
             List<LuaModInfo> activeMods = new(active.Count);
             List<ModDescriptor> activeDescriptors = new(active.Count);
             foreach (LuaModInfo info in active)
             {
-                _mods.TryGetModSource(info.Id, out string source);
+                _mods.TryGetModSource(_actorContext, info.Id, out string source);
                 activeMods.Add(info);
                 activeDescriptors.Add(new ModDescriptor(info.Id, source));
             }
@@ -612,7 +616,8 @@ namespace CoreAI.Demos
                 }
 
                 string modId = key.Substring(modKeyPrefix.Length);
-                if (string.IsNullOrWhiteSpace(modId) || IsTransientModId(modId) || _mods.IsLoaded(modId) ||
+                if (string.IsNullOrWhiteSpace(modId) || IsTransientModId(modId) ||
+                    _mods.IsLoaded(_actorContext, modId) ||
                     !_versions.TryGetSnapshot(key, out LuaScriptVersionRecord record) ||
                     string.IsNullOrWhiteSpace(record.CurrentLua) ||
                     ShouldAutoload(modId))
@@ -630,9 +635,9 @@ namespace CoreAI.Demos
         {
             try
             {
-                if (_mods.IsLoaded(descriptor.Id))
+                if (_mods.IsLoaded(_actorContext, descriptor.Id))
                 {
-                    _mods.ReloadMod(descriptor.Id, descriptor.Source);
+                    _mods.ReloadMod(_actorContext, descriptor.Id, descriptor.Source);
                 }
                 else
                 {
@@ -642,7 +647,7 @@ namespace CoreAI.Demos
                     LuaCapabilities activateCaps = coreAiScope != null && coreAiScope.FullLuaAccessEnabled
                         ? LuaCapabilities.All | LuaCapabilities.Full
                         : LuaCapabilities.All;
-                    _mods.LoadMod(descriptor.Id, descriptor.Source, activateCaps);
+                    _mods.LoadMod(_actorContext, descriptor.Id, descriptor.Source, activateCaps);
                 }
 
                 _status = $"Activated mod '{descriptor.Id}'.";

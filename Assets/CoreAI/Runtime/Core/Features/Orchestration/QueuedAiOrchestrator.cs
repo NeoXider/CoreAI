@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Authority;
 using CoreAI.Logging;
 
 
@@ -69,6 +70,7 @@ namespace CoreAI.Ai
 
             TaskCompletionSource<string> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
             AiTaskRequest effectiveTask = task ?? new AiTaskRequest();
+            ActorContext? actorContext = CaptureActorContext(effectiveTask);
             WorkItem work = new()
             {
                 Task = effectiveTask,
@@ -76,7 +78,10 @@ namespace CoreAI.Ai
                 Tcs = tcs,
                 Priority = effectiveTask.Priority,
                 Sequence = NextSequence(),
-                MemoryScope = CaptureMemoryScope(effectiveTask.RoleId)
+                ActorContext = actorContext,
+                MemoryScope = actorContext.HasValue
+                    ? actorContext.Value.MemoryScope
+                    : CaptureMemoryScope(effectiveTask.RoleId)
             };
 
             if (cancellationToken.IsCancellationRequested)
@@ -110,6 +115,7 @@ namespace CoreAI.Ai
             AsyncChunkQueue queue = new();
             CancellationTokenSource consumerCancellation = new();
             AiTaskRequest effectiveTask = task ?? new AiTaskRequest();
+            ActorContext? actorContext = CaptureActorContext(effectiveTask);
 
             StreamWorkItem work = new()
             {
@@ -119,7 +125,10 @@ namespace CoreAI.Ai
                 ConsumerCancellation = consumerCancellation,
                 Priority = effectiveTask.Priority,
                 Sequence = NextSequence(),
-                MemoryScope = CaptureMemoryScope(effectiveTask.RoleId)
+                ActorContext = actorContext,
+                MemoryScope = actorContext.HasValue
+                    ? actorContext.Value.MemoryScope
+                    : CaptureMemoryScope(effectiveTask.RoleId)
             };
 
             if (cancellationToken.IsCancellationRequested)
@@ -243,7 +252,9 @@ namespace CoreAI.Ai
             CancellationTokenSource linkedCts = null;
             try
             {
-                using (AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
+                using (w.ActorContext.HasValue
+                           ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
+                           : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
                 {
                     CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
                     // WHY: Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
@@ -299,7 +310,9 @@ namespace CoreAI.Ai
             CancellationTokenSource linkedCts = null;
             try
             {
-                using (AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
+                using (w.ActorContext.HasValue
+                           ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
+                           : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
                 {
                     CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
                     // WHY: Always link the lifetime signal (Dispose() teardown) and, when present, the
@@ -361,6 +374,7 @@ namespace CoreAI.Ai
             public CancellationTokenRegistration PendingCancellation;
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
+            public ActorContext? ActorContext;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
         }
@@ -375,6 +389,7 @@ namespace CoreAI.Ai
             public CancellationTokenRegistration PendingCancellation;
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
+            public ActorContext? ActorContext;
             public AgentMemoryScope MemoryScope;
             public int UnstartedPersistenceAttempted;
 
@@ -388,6 +403,7 @@ namespace CoreAI.Ai
         {
             public string CancellationScope;
             public string RoleId;
+            public ActorContext? ActorContext;
             public CancellationTokenSource Cancellation;
         }
 
@@ -399,31 +415,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            string logicalScope = cancellationScope.Trim();
-            List<KeyValuePair<string, ScopeEntry>> candidates = new();
-            lock (_lock)
-            {
-                foreach (KeyValuePair<string, ScopeEntry> pair in _scopeTokens)
-                {
-                    if (string.Equals(pair.Value.CancellationScope, logicalScope, StringComparison.Ordinal))
-                    {
-                        candidates.Add(pair);
-                    }
-                }
-            }
-
-            List<string> currentScopeKeys = new();
-            foreach (KeyValuePair<string, ScopeEntry> pair in candidates)
-            {
-                AgentMemoryScope currentScope = CaptureMemoryScope(pair.Value.RoleId);
-                string currentKey = ResolveCancellationScopeKey(logicalScope, pair.Value.RoleId, currentScope);
-                if (string.Equals(pair.Key, currentKey, StringComparison.Ordinal))
-                {
-                    currentScopeKeys.Add(pair.Key);
-                }
-            }
-
-            CancelScopeKeys(currentScopeKeys);
+            CancelScopeKeys(ResolveCurrentScopeKeys(cancellationScope.Trim(), null));
         }
 
         /// <inheritdoc />
@@ -434,9 +426,57 @@ namespace CoreAI.Ai
                 return;
             }
 
-            AgentMemoryScope memoryScope = CaptureMemoryScope(roleId);
-            string scopeKey = ResolveCancellationScopeKey(cancellationScope, roleId, memoryScope);
-            CancelScopeKeys(new[] { scopeKey });
+            CancelScopeKeys(ResolveCurrentScopeKeys(
+                cancellationScope.Trim(),
+                NormalizeRoleId(roleId)));
+        }
+
+        private List<string> ResolveCurrentScopeKeys(string cancellationScope, string roleId)
+        {
+            List<KeyValuePair<string, ScopeEntry>> candidates = new();
+            lock (_lock)
+            {
+                foreach (KeyValuePair<string, ScopeEntry> pair in _scopeTokens)
+                {
+                    if (string.Equals(
+                            pair.Value.CancellationScope,
+                            cancellationScope,
+                            StringComparison.Ordinal) &&
+                        (roleId == null || string.Equals(pair.Value.RoleId, roleId, StringComparison.Ordinal)))
+                    {
+                        candidates.Add(pair);
+                    }
+                }
+            }
+
+            List<string> currentScopeKeys = new();
+            foreach (KeyValuePair<string, ScopeEntry> pair in candidates)
+            {
+                if (pair.Value.ActorContext.HasValue)
+                {
+                    if (string.Equals(
+                            pair.Key,
+                            pair.Value.ActorContext.Value.SessionId,
+                            StringComparison.Ordinal))
+                    {
+                        currentScopeKeys.Add(pair.Key);
+                    }
+
+                    continue;
+                }
+
+                AgentMemoryScope currentScope = CaptureMemoryScope(pair.Value.RoleId);
+                string currentKey = ResolveLegacyCancellationScopeKey(
+                    cancellationScope,
+                    pair.Value.RoleId,
+                    currentScope);
+                if (string.Equals(pair.Key, currentKey, StringComparison.Ordinal))
+                {
+                    currentScopeKeys.Add(pair.Key);
+                }
+            }
+
+            return currentScopeKeys;
         }
 
         private void CancelScopeKeys(IReadOnlyCollection<string> scopeKeys)
@@ -532,7 +572,10 @@ namespace CoreAI.Ai
                 return;
             }
 
-            string scopeKey = ResolveCancellationScopeKey(work.Task, work.MemoryScope);
+            string scopeKey = ResolveCancellationScopeKey(
+                work.Task,
+                work.ActorContext,
+                work.MemoryScope);
             work.ScopeKey = scopeKey;
             CancellationTokenSource activeToCancel = null;
             List<WorkItem> removedPending = null;
@@ -559,7 +602,10 @@ namespace CoreAI.Ai
                             activeToCancel = previous.Cancellation;
                         }
 
-                        _scopeTokens[scopeKey] = CreateScopeEntry(work.Task, work.ScopeCancellation);
+                        _scopeTokens[scopeKey] = CreateScopeEntry(
+                            work.Task,
+                            work.ActorContext,
+                            work.ScopeCancellation);
 
                         removedPending = _pending.FindAll(w =>
                             !ReferenceEquals(w, work) &&
@@ -602,7 +648,10 @@ namespace CoreAI.Ai
                 return;
             }
 
-            string scopeKey = ResolveCancellationScopeKey(work.Task, work.MemoryScope);
+            string scopeKey = ResolveCancellationScopeKey(
+                work.Task,
+                work.ActorContext,
+                work.MemoryScope);
             work.ScopeKey = scopeKey;
             CancellationTokenSource activeToCancel = null;
             List<WorkItem> removedPending = null;
@@ -627,7 +676,10 @@ namespace CoreAI.Ai
                             activeToCancel = previous.Cancellation;
                         }
 
-                        _scopeTokens[scopeKey] = CreateScopeEntry(work.Task, work.ScopeCancellation);
+                        _scopeTokens[scopeKey] = CreateScopeEntry(
+                            work.Task,
+                            work.ActorContext,
+                            work.ScopeCancellation);
 
                         removedPending = _pending.FindAll(w =>
                             string.Equals(w.ScopeKey, scopeKey, StringComparison.Ordinal));
@@ -665,14 +717,22 @@ namespace CoreAI.Ai
             Pump();
         }
 
-        private static string ResolveCancellationScopeKey(AiTaskRequest task, AgentMemoryScope memoryScope)
+        private static string ResolveCancellationScopeKey(
+            AiTaskRequest task,
+            ActorContext? actorContext,
+            AgentMemoryScope memoryScope)
         {
-            return task == null
-                ? null
-                : ResolveCancellationScopeKey(task.CancellationScope, task.RoleId, memoryScope);
+            if (task == null || string.IsNullOrWhiteSpace(task.CancellationScope))
+            {
+                return null;
+            }
+
+            return actorContext.HasValue
+                ? actorContext.Value.SessionId
+                : ResolveLegacyCancellationScopeKey(task.CancellationScope, task.RoleId, memoryScope);
         }
 
-        private static string ResolveCancellationScopeKey(
+        private static string ResolveLegacyCancellationScopeKey(
             string cancellationScope,
             string roleId,
             AgentMemoryScope memoryScope)
@@ -701,12 +761,31 @@ namespace CoreAI.Ai
             return _scopeProvider.GetScope(normalizedRole);
         }
 
-        private static ScopeEntry CreateScopeEntry(AiTaskRequest task, CancellationTokenSource cancellation)
+        private static ActorContext? CaptureActorContext(AiTaskRequest task)
+        {
+            ActorContext? actorContext = task?.ActorContext;
+            if (!actorContext.HasValue)
+            {
+                return null;
+            }
+
+            ActorContext trusted = actorContext.Value;
+            trusted.AssertTrusted();
+            return trusted;
+        }
+
+        private static ScopeEntry CreateScopeEntry(
+            AiTaskRequest task,
+            ActorContext? actorContext,
+            CancellationTokenSource cancellation)
         {
             return new ScopeEntry
             {
-                CancellationScope = task.CancellationScope.Trim(),
+                CancellationScope = actorContext.HasValue
+                    ? actorContext.Value.SessionId
+                    : task.CancellationScope.Trim(),
                 RoleId = NormalizeRoleId(task.RoleId),
+                ActorContext = actorContext,
                 Cancellation = cancellation
             };
         }
@@ -784,7 +863,9 @@ namespace CoreAI.Ai
                 return;
             }
 
-            using (AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
+            using (work.ActorContext.HasValue
+                       ? AgentMemoryScopeExecutionContext.Push(work.ActorContext.Value)
+                       : AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
             {
                 RecordUnstartedTurn(work.Task, outcome);
             }
@@ -797,7 +878,9 @@ namespace CoreAI.Ai
                 return;
             }
 
-            using (AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
+            using (work.ActorContext.HasValue
+                       ? AgentMemoryScopeExecutionContext.Push(work.ActorContext.Value)
+                       : AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
             {
                 RecordUnstartedTurn(work.Task, outcome);
             }

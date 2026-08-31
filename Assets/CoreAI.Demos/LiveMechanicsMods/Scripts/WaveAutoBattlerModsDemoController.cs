@@ -3,6 +3,7 @@ using UnityEngine;
 #if COREAI_LUA
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using VContainer;
 #endif
@@ -76,6 +77,7 @@ namespace CoreAI.Demos
         private readonly List<EnemyState> _enemies = new();
         private readonly List<string> _log = new();
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private LuaCsLogicSlots _slots;
         private GameObject _heroVisual;
         private IReadOnlyList<LuaModInfo> _cachedMods = System.Array.Empty<LuaModInfo>();
@@ -173,14 +175,16 @@ namespace CoreAI.Demos
 
             IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
 
+            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
             _slots = luaContainer.Resolve<LuaCsLogicSlots>();
             DeclareSlots();
             EnsureAnchorsAndVisuals();
             _heroHp = _heroMaxHp;
-            _mods.ModEventEmitted += OnModEvent;
-            _mods.ModSourceLoaded += OnModsChanged;
-            _mods.ModSourceUnloaded += OnModsChanged;
+            _mods.AddModEventEmittedListener(_actorContext, OnModEvent);
+            _mods.AddModSourceLoadedListener(_actorContext, OnModsChanged);
+            _mods.AddModSourceUnloadedListener(_actorContext, OnModsChanged);
             RefreshCachedMods();
             _status = "Ask chat to create or edit mods. Prompt buttons insert ready requests.";
             Log("Battle started. Lua mods can alter wave scaling, damage, regen and rewards.");
@@ -191,9 +195,9 @@ namespace CoreAI.Demos
         {
             if (_mods != null)
             {
-                _mods.ModEventEmitted -= OnModEvent;
-                _mods.ModSourceLoaded -= OnModsChanged;
-                _mods.ModSourceUnloaded -= OnModsChanged;
+                _mods.RemoveModEventEmittedListener(_actorContext, OnModEvent);
+                _mods.RemoveModSourceLoadedListener(_actorContext, OnModsChanged);
+                _mods.RemoveModSourceUnloadedListener(_actorContext, OnModsChanged);
             }
         }
 
@@ -204,7 +208,7 @@ namespace CoreAI.Demos
 
         private void RefreshCachedMods()
         {
-            _cachedMods = _mods.ListMods();
+            _cachedMods = _mods.ListMods(_actorContext);
         }
 
         private void DeclareSlots()
@@ -254,7 +258,7 @@ namespace CoreAI.Demos
             }
 
             float dt = Time.deltaTime;
-            _mods.EmitEvent("battle_tick", $"{_wave}:{_heroLevel}:{_enemies.Count}");
+            _mods.EmitEvent(_actorContext, "battle_tick", $"{_wave}:{_heroLevel}:{_enemies.Count}");
             RegenerateHero(dt);
             RunHeroAttack(dt);
             RunEnemyAttack(dt);
@@ -327,7 +331,7 @@ namespace CoreAI.Demos
                 return;
             }
 
-            _mods.EmitEvent("hero_died", _wave.ToString());
+            _mods.EmitEvent(_actorContext, "hero_died", _wave.ToString());
             _heroHp = _heroMaxHp;
             _gold = Mathf.Max(0, _gold - 5);
             Log("Hero was knocked out. He recovers, loses 5 gold, and retries the wave.");
@@ -351,7 +355,7 @@ namespace CoreAI.Demos
             }
 
             _xp += 7f + _wave;
-            _mods.EmitEvent("enemy_defeated", $"{_wave}:{_enemies.Count}");
+            _mods.EmitEvent(_actorContext, "enemy_defeated", $"{_wave}:{_enemies.Count}");
             Log($"Enemy defeated. Remaining: {_enemies.Count}.");
             TryLevelUp();
 
@@ -374,7 +378,7 @@ namespace CoreAI.Demos
             _heroMaxHp += 12f;
             _heroAttack += 3.5f;
             _heroHp = _heroMaxHp;
-            _mods.EmitEvent("hero_level_up", _heroLevel.ToString());
+            _mods.EmitEvent(_actorContext, "hero_level_up", _heroLevel.ToString());
             Log($"Hero leveled up to {_heroLevel}! Stats increased.");
         }
 
@@ -385,7 +389,7 @@ namespace CoreAI.Demos
                 : 12d + _wave * 3d));
             reward = Mathf.Max(0, reward);
             _gold += reward;
-            _mods.EmitEvent("wave_cleared", $"{_wave}:{reward}:{_heroLevel}");
+            _mods.EmitEvent(_actorContext, "wave_cleared", $"{_wave}:{reward}:{_heroLevel}");
             Log($"Wave {_wave} cleared. +{reward} gold.");
             StartNextWave();
         }
@@ -430,7 +434,7 @@ namespace CoreAI.Demos
             }
 
             UpdateEnemyLayout();
-            _mods.EmitEvent("wave_started", $"{wave}:{count}:{hp:0.#}:{damage:0.#}");
+            _mods.EmitEvent(_actorContext, "wave_started", $"{wave}:{count}:{hp:0.#}:{damage:0.#}");
             Log($"Wave {wave} started: {count} enemies, HP {hp:0.#}, damage {damage:0.#}.");
         }
 

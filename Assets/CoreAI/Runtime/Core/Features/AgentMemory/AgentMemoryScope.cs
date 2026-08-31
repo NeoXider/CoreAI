@@ -2,6 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
@@ -44,14 +45,28 @@ namespace CoreAI.Ai
     internal static class AgentMemoryScopeKey
     {
         internal const string ScopedKeyPrefix = "scope-v1-";
+        internal const string ActorKeyPrefix = "actor-v1-";
 
         internal static string Resolve(IAgentMemoryScopeProvider scopeProvider, string roleId)
         {
             roleId = NormalizeRoleId(roleId);
-            AgentMemoryScope scope = AgentMemoryScopeExecutionContext.TryGet(out AgentMemoryScope captured)
-                ? captured
-                : (scopeProvider ?? new DefaultAgentMemoryScopeProvider()).GetScope(roleId);
+            if (AgentMemoryScopeExecutionContext.TryGet(
+                    out AgentMemoryScope captured,
+                    out string actorId))
+            {
+                return string.IsNullOrEmpty(actorId)
+                    ? Resolve(captured, roleId)
+                    : ResolveActorId(actorId, roleId);
+            }
+
+            AgentMemoryScope scope = (scopeProvider ?? new DefaultAgentMemoryScopeProvider()).GetScope(roleId);
             return Resolve(scope, roleId);
+        }
+
+        internal static string Resolve(ActorContext actorContext, string roleId)
+        {
+            actorContext.AssertTrusted();
+            return ResolveActorId(actorContext.ActorId, NormalizeRoleId(roleId));
         }
 
         internal static string Resolve(AgentMemoryScope scope, string roleId)
@@ -76,6 +91,19 @@ namespace CoreAI.Ai
             AppendCanonicalPart(canonical, scope.TopicId);
             AppendCanonicalPart(canonical, roleId);
             return ScopedKeyPrefix + Sha256Hex(canonical.ToString());
+        }
+
+        private static string ResolveActorId(string actorId, string roleId)
+        {
+            if (string.Equals(actorId, LocalActorIdentityProvider.DefaultActorId, StringComparison.Ordinal))
+            {
+                return roleId;
+            }
+
+            StringBuilder canonical = new(64);
+            AppendCanonicalPart(canonical, actorId);
+            AppendCanonicalPart(canonical, roleId);
+            return ActorKeyPrefix + Sha256Hex(canonical.ToString());
         }
 
         private static string NormalizeRoleId(string roleId)
@@ -123,32 +151,45 @@ namespace CoreAI.Ai
         internal static IDisposable Push(AgentMemoryScope scope)
         {
             Frame previous = Current.Value;
-            Frame frame = new(scope);
+            Frame frame = new(scope, "");
             Current.Value = frame;
             return new Lease(frame, previous);
         }
 
-        internal static bool TryGet(out AgentMemoryScope scope)
+        internal static IDisposable Push(ActorContext actorContext)
+        {
+            actorContext.AssertTrusted();
+            Frame previous = Current.Value;
+            Frame frame = new(actorContext.MemoryScope, actorContext.ActorId);
+            Current.Value = frame;
+            return new Lease(frame, previous);
+        }
+
+        internal static bool TryGet(out AgentMemoryScope scope, out string actorId)
         {
             Frame frame = Current.Value;
             if (frame == null)
             {
                 scope = AgentMemoryScope.Empty;
+                actorId = "";
                 return false;
             }
 
             scope = frame.Scope;
+            actorId = frame.ActorId;
             return true;
         }
 
         private sealed class Frame
         {
-            internal Frame(AgentMemoryScope scope)
+            internal Frame(AgentMemoryScope scope, string actorId)
             {
                 Scope = scope;
+                ActorId = actorId ?? "";
             }
 
             internal AgentMemoryScope Scope { get; }
+            internal string ActorId { get; }
         }
 
         private sealed class Lease : IDisposable

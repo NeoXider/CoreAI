@@ -6,6 +6,7 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -117,12 +118,23 @@ namespace CoreAI.Tests.EditMode
 
         private static string ExportFullTierBundle()
         {
+            ActorContext actorContext = CreateHostActor();
             FakeSourceStore exportStore = new();
             LuaCsModRuntime exporter = new(sourceStore: exportStore);
-            exporter.LoadMod("shared", "local x = 1", LuaCapabilities.Read | LuaCapabilities.Full);
-            string bundle = exporter.ExportMod("shared");
+            exporter.LoadMod(
+                actorContext,
+                "shared",
+                "local x = 1",
+                LuaCapabilities.Read | LuaCapabilities.Full);
+            string bundle = exporter.ExportMod(actorContext, "shared");
             Assert.IsNotNull(bundle, "ExportMod must return a bundle whose header requests Full.");
             return bundle;
+        }
+
+        private static ActorContext CreateHostActor()
+        {
+            LocalActorIdentityProvider provider = ActorIdentityComposition.CreateLocalHost("hub-test");
+            return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
         }
 
         [Test]
@@ -130,15 +142,21 @@ namespace CoreAI.Tests.EditMode
         {
             string bundle = ExportFullTierBundle();
 
+            ActorContext actorContext = CreateHostActor();
             FakeSourceStore store = new();
             LuaCsModRuntime runtime = new(sourceStore: store);
             // Host grant includes Full, but allowFull is false — the default Mods tab wiring.
             IHubModService service = new LuaCsModRuntimeHubService(
-                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, false);
+                runtime, actorContext, store, LuaCapabilities.All | LuaCapabilities.Full, false);
+            bool modsChanged = false;
+            service.ModsChanged += () => modsChanged = true;
 
             Assert.IsTrue(service.ImportMod(bundle), "Import of a valid bundle must succeed.");
-            Assert.IsTrue(runtime.IsLoaded("shared"));
-            Assert.AreEqual(LuaCapabilities.None, runtime.ListMods()[0].Capabilities & LuaCapabilities.Full,
+            Assert.IsTrue(modsChanged, "The authorized runtime listener must preserve Hub live refresh.");
+            Assert.IsTrue(runtime.IsLoaded(actorContext, "shared"));
+            Assert.AreEqual(
+                LuaCapabilities.None,
+                runtime.ListMods(actorContext)[0].Capabilities & LuaCapabilities.Full,
                 "An imported mod must not self-escalate to Full when the host has not opted in.");
         }
 
@@ -147,14 +165,17 @@ namespace CoreAI.Tests.EditMode
         {
             string bundle = ExportFullTierBundle();
 
+            ActorContext actorContext = CreateHostActor();
             FakeSourceStore store = new();
             LuaCsModRuntime runtime = new(sourceStore: store);
             // Explicit host opt-in (allowFullTier=true) — trusted/first-party/singleplayer content only.
             IHubModService service = new LuaCsModRuntimeHubService(
-                runtime, store, LuaCapabilities.All | LuaCapabilities.Full, true);
+                runtime, actorContext, store, LuaCapabilities.All | LuaCapabilities.Full, true);
 
             Assert.IsTrue(service.ImportMod(bundle));
-            Assert.AreEqual(LuaCapabilities.Full, runtime.ListMods()[0].Capabilities & LuaCapabilities.Full,
+            Assert.AreEqual(
+                LuaCapabilities.Full,
+                runtime.ListMods(actorContext)[0].Capabilities & LuaCapabilities.Full,
                 "Full must survive import only when the host explicitly opted in and grants Full.");
         }
 #endif

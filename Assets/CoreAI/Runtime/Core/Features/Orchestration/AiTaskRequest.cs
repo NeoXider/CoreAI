@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
@@ -73,10 +74,12 @@ namespace CoreAI.Ai
         public string SourceTag { get; set; } = "";
 
         /// <summary>
-        /// Logical latest-wins cancellation scope. <see cref="QueuedAiOrchestrator"/> combines a
-        /// non-empty value with the current <see cref="AgentMemoryScope"/> for <see cref="RoleId"/>,
-        /// so identical role/scope strings in different learner identities do not cross-cancel.
+        /// Trusted actor snapshot captured by the production admission caller. When present,
+        /// <see cref="QueuedAiOrchestrator"/> uses its durable and connection identities directly.
         /// </summary>
+        public ActorContext? ActorContext { get; set; }
+
+        /// <summary>Logical latest-wins cancellation scope for legacy callers.</summary>
         public string CancellationScope { get; set; } = "";
 
         /// <summary>

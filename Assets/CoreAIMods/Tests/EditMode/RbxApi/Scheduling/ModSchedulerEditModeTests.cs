@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
@@ -756,6 +757,53 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
+        public void F2_FaultedCompletionPromotionDoesNotScanPendingSchedulerWork()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            PopulatePendingSchedulerWork(scheduler, 200);
+            FakeScriptThread faulting = (FakeScriptThread)scheduler.Spawn("mod-fault",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            RbxSchedulerCompletion completion = new();
+            scheduler.ScheduleWaitUntil(faulting, completion);
+            completion.Fail(new RbxError(RbxErrorCode.BudgetExceeded,
+                "completion failed during complexity regression",
+                "keep failure promotion proportional to ready completions"));
+            scheduler.SignalCompletion(completion);
+
+            RbxError thrown = Assert.Throws<RbxError>(() => scheduler.Advance(0.016d));
+
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, thrown.Code);
+            Assert.AreEqual(1, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
+            Assert.AreEqual(1, faulting.KillCount);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+            Assert.AreEqual(201, factory.Created.Count);
+        }
+
+        [Test]
+        public void F2_CanceledCompletionPromotionDoesNotScanPendingSchedulerWork()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            PopulatePendingSchedulerWork(scheduler, 200);
+            FakeScriptThread canceled = (FakeScriptThread)scheduler.Spawn("mod-cancel",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            RbxSchedulerCompletion completion = new();
+            scheduler.ScheduleWaitUntil(canceled, completion);
+            completion.Cancel();
+            scheduler.SignalCompletion(completion);
+
+            scheduler.Advance(0.016d);
+
+            Assert.AreEqual(1, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
+            Assert.AreEqual(1, canceled.KillCount);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+            Assert.AreEqual(201, factory.Created.Count);
+        }
+
+        [Test]
         public void F2_CompletionPromotionUsesRegistrationOrder()
         {
             ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
@@ -784,6 +832,74 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(3, scheduler.CompletionPromotionTouchCount);
             Assert.AreEqual(0, scheduler.CompletionWaitCount);
             Assert.AreEqual(3, factory.Created.Count);
+            Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
+        }
+
+        [Test]
+        public void F2_CrossSnapshotCompletionOrderFollowsSignalReadiness()
+        {
+            ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,
+                out FakeThreadFactory factory);
+            List<string> order = new();
+            FakeScriptThread earlier = CreateCompletionCaller(scheduler, "earlier", order);
+            FakeScriptThread later = CreateCompletionCaller(scheduler, "later", order);
+            RbxSchedulerCompletion earlierCompletion = new();
+            RbxSchedulerCompletion laterCompletion = new();
+            scheduler.ScheduleWaitUntil(earlier, earlierCompletion);
+            scheduler.ScheduleWaitUntil(later, laterCompletion);
+            laterCompletion.Complete();
+            scheduler.SignalCompletion(laterCompletion);
+
+            using (Barrier snapshotBarrier = new(2))
+            {
+                Exception signalError = null;
+                Thread signalThread = new(() =>
+                {
+                    try
+                    {
+                        if (!snapshotBarrier.SignalAndWait(TimeSpan.FromSeconds(5d)))
+                        {
+                            throw new TimeoutException("completion snapshot barrier timed out");
+                        }
+
+                        earlierCompletion.Complete();
+                        scheduler.SignalCompletion(earlierCompletion);
+                        if (!snapshotBarrier.SignalAndWait(TimeSpan.FromSeconds(5d)))
+                        {
+                            throw new TimeoutException("completion signal barrier timed out");
+                        }
+                    }
+                    catch (Exception error)
+                    {
+                        signalError = error;
+                    }
+                });
+                scheduler.CompletionSnapshotCaptured = () =>
+                {
+                    scheduler.CompletionSnapshotCaptured = null;
+                    Assert.IsTrue(snapshotBarrier.SignalAndWait(TimeSpan.FromSeconds(5d)));
+                    Assert.IsTrue(snapshotBarrier.SignalAndWait(TimeSpan.FromSeconds(5d)));
+                };
+                signalThread.Start();
+                bool joined = false;
+                try
+                {
+                    scheduler.Advance(0.016d);
+                }
+                finally
+                {
+                    joined = signalThread.Join(TimeSpan.FromSeconds(5d));
+                    scheduler.CompletionSnapshotCaptured = null;
+                }
+
+                Assert.IsTrue(joined);
+                Assert.IsNull(signalError);
+            }
+
+            CollectionAssert.AreEqual(new[] { "later", "earlier" }, order);
+            Assert.AreEqual(2, scheduler.CompletionPromotionTouchCount);
+            Assert.AreEqual(0, scheduler.CompletionWaitCount);
+            Assert.AreEqual(2, factory.Created.Count);
             Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
         }
 
@@ -831,6 +947,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                         order.Add(name);
                     }
                 }, false), Array.Empty<object>());
+        }
+
+        private static void PopulatePendingSchedulerWork(ModScheduler scheduler, int count)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                switch (index % 3)
+                {
+                    case 0:
+                        scheduler.Defer("mod-pending", new FakeThreadPlan(), Array.Empty<object>());
+                        break;
+                    case 1:
+                        scheduler.Delay("mod-pending", 1000d, new FakeThreadPlan(),
+                            Array.Empty<object>());
+                        break;
+                    case 2:
+                        FakeScriptThread waiting = (FakeScriptThread)scheduler.Spawn("mod-pending",
+                            new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                        scheduler.ScheduleWait(waiting, 1000d);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
         }
 
         private static ModScheduler CreateScheduler(out FakeTimeSource timeSource,

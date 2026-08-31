@@ -12,7 +12,7 @@ namespace CoreAI.Ai
         /// <summary>Returns the chat service owned by the supplied actor.</summary>
         IInGameLlmChatService Resolve(ActorContext actorContext);
 
-        /// <summary>Releases the retained service when an actor departs.</summary>
+        /// <summary>Releases one actor session and evicts the service after its final session departs.</summary>
         bool ReleaseActor(ActorContext actorContext);
     }
 
@@ -24,8 +24,8 @@ namespace CoreAI.Ai
         /// <summary>Default maximum number of retained actor services.</summary>
         public const int DefaultMaxActorInstances = 256;
 
-        private readonly Dictionary<string, IInGameLlmChatService> _services =
-            new Dictionary<string, IInGameLlmChatService>(StringComparer.Ordinal);
+        private readonly Dictionary<string, ActorServiceEntry> _services =
+            new Dictionary<string, ActorServiceEntry>(StringComparer.Ordinal);
         private readonly Func<IInGameLlmChatService> _serviceFactory;
         private readonly object _sync = new object();
         private readonly int _maxActorInstances;
@@ -50,13 +50,15 @@ namespace CoreAI.Ai
         {
             actorContext.AssertTrusted();
             string actorId = actorContext.ActorId;
+            string sessionId = actorContext.SessionId;
 
             lock (_sync)
             {
                 ThrowIfDisposed();
-                if (_services.TryGetValue(actorId, out IInGameLlmChatService existing))
+                if (_services.TryGetValue(actorId, out ActorServiceEntry existing))
                 {
-                    return existing;
+                    existing.SessionIds.Add(sessionId);
+                    return existing.Service;
                 }
 
                 if (_services.Count >= _maxActorInstances)
@@ -71,7 +73,7 @@ namespace CoreAI.Ai
                     throw new InvalidOperationException("The in-game chat service factory returned null.");
                 }
 
-                _services.Add(actorId, created);
+                _services.Add(actorId, new ActorServiceEntry(created, sessionId));
                 return created;
             }
         }
@@ -80,16 +82,23 @@ namespace CoreAI.Ai
         public bool ReleaseActor(ActorContext actorContext)
         {
             actorContext.AssertTrusted();
-            IInGameLlmChatService released;
+            IInGameLlmChatService released = null;
             lock (_sync)
             {
                 ThrowIfDisposed();
-                if (!_services.TryGetValue(actorContext.ActorId, out released))
+                if (!_services.TryGetValue(actorContext.ActorId, out ActorServiceEntry entry) ||
+                    !entry.SessionIds.Remove(actorContext.SessionId))
                 {
                     return false;
                 }
 
+                if (entry.SessionIds.Count > 0)
+                {
+                    return true;
+                }
+
                 _services.Remove(actorContext.ActorId);
+                released = entry.Service;
             }
 
             DisposeService(released);
@@ -108,7 +117,12 @@ namespace CoreAI.Ai
                 }
 
                 _disposed = true;
-                released = new List<IInGameLlmChatService>(_services.Values);
+                released = new List<IInGameLlmChatService>(_services.Count);
+                foreach (KeyValuePair<string, ActorServiceEntry> pair in _services)
+                {
+                    released.Add(pair.Value.Service);
+                }
+
                 _services.Clear();
             }
 
@@ -132,6 +146,19 @@ namespace CoreAI.Ai
             {
                 throw new ObjectDisposedException(nameof(ActorKeyedInGameLlmChatServiceFactory));
             }
+        }
+
+        private sealed class ActorServiceEntry
+        {
+            public ActorServiceEntry(IInGameLlmChatService service, string sessionId)
+            {
+                Service = service;
+                SessionIds = new HashSet<string>(StringComparer.Ordinal) { sessionId };
+            }
+
+            public IInGameLlmChatService Service { get; }
+
+            public HashSet<string> SessionIds { get; }
         }
     }
 }

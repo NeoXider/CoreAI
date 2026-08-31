@@ -78,7 +78,8 @@ namespace CoreAI.Tests.PlayMode
                 new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store1, policy1, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("chat-history-first-test"));
 
             Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                 { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
@@ -115,7 +116,8 @@ namespace CoreAI.Tests.PlayMode
                 new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store2, policy2, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("chat-history-second-test"));
 
             Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                 { RoleId = chatAgent.RoleId, Hint = "What was my secret word?" });

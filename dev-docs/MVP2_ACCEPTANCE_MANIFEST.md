@@ -41,6 +41,14 @@ Thresholds apply to this machine. Other hardware is reported, never gated.
 | Backend concurrency | frozen; recorded in the result |
 | Deterministic backend | a scripted stub for queue/latency separation, **plus** one real provider-backed run |
 
+## 3b. Production-path rule (added after the phase-1 QA)
+
+A guarantee counts as delivered only when a test drives it **through the production path**. QA found
+that all 18 phase-1 tests passed while the shipped code never routed through the new components — the
+types existed and behaved, and production ignored them. So for every gate below, the test must reach
+the component the way the running system does, not by constructing it directly. See
+`MVP2_PHASE1_CORRECTION.md`.
+
 ## 4. Counters that must be non-zero
 
 A run reporting zero for any of these **fails**, regardless of its timings:

@@ -22,6 +22,9 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class AiOrchestratorHistoryEditModeTests
     {
+        private static IActorIdentityProvider TestActorIdentityProvider =>
+            new LocalActorIdentityProvider("orchestrator-history-test");
+
         private sealed class TestAuthority : IAuthorityHost
         {
             public bool CanRunAiTasks { get; set; } = true;
@@ -179,7 +182,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -218,7 +221,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -240,7 +243,8 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings);
+                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings,
+                TestActorIdentityProvider);
 
             string result = await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -263,7 +267,8 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings);
+                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings,
+                TestActorIdentityProvider);
 
             string text = "";
             List<string> errors = new();
@@ -868,7 +873,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -910,7 +915,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "current" });
 
@@ -1113,7 +1118,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 authority, llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -1152,7 +1157,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 authority, llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(new AiTaskRequest
@@ -1328,7 +1333,7 @@ namespace CoreAI.Tests.EditMode
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings, contextManager);
+                memory, policy, null, null, settings, TestActorIdentityProvider, contextManager);
         }
 
         private static int CountOccurrences(string value, string needle)
@@ -1490,7 +1495,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             // Act
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "Hi" });
@@ -1535,7 +1540,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings, TestActorIdentityProvider);
 
             // Act
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -1576,7 +1581,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -1718,7 +1723,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
@@ -1766,7 +1771,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "retry test" });
@@ -1824,7 +1829,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -1875,7 +1880,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
@@ -1918,7 +1923,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new InMemoryConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "prune" });
@@ -1946,7 +1951,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             HeuristicTokenEstimator estimator = new();
@@ -2023,7 +2028,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings, recorder);
+                memory, policy, null, null, settings, TestActorIdentityProvider, recorder);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "hi" });
 
@@ -2069,7 +2074,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(summaryStore));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "retry" });
@@ -2105,7 +2110,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -2119,7 +2124,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, null, null, settings);
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "slide?" });
         }
@@ -2146,7 +2151,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
@@ -2170,7 +2175,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                store, policy, null, null, settings);
+                store, policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "memory?" });
             return store;
@@ -2199,7 +2204,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -2232,7 +2237,8 @@ namespace CoreAI.Tests.EditMode
                 new IAiPromptContextProvider[] { new StaticContextProvider() });
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, settings);
+                composer, new TestMemoryStore(), policy, null, null, settings,
+                TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2262,7 +2268,8 @@ namespace CoreAI.Tests.EditMode
             AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, settings);
+                composer, new TestMemoryStore(), policy, null, null, settings,
+                TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2294,7 +2301,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, null, null, settings);
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2329,7 +2336,8 @@ namespace CoreAI.Tests.EditMode
             AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
             AiOrchestrator orchestratorSync = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, settings);
+                composer, new TestMemoryStore(), policy, null, null, settings,
+                TestActorIdentityProvider);
             await orchestratorSync.RunTaskAsync(task);
 
             int syncToolCount = llm.LastRequest.Tools.Count;
@@ -2340,7 +2348,8 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llmStream = new();
             AiOrchestrator orchestratorStream = new(
                 new TestAuthority(), llmStream, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, settings);
+                composer, new TestMemoryStore(), policy, null, null, settings,
+                TestActorIdentityProvider);
 
             await foreach (LlmStreamChunk _ in orchestratorStream.RunStreamingAsync(task, default))
             {
@@ -2369,7 +2378,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, null, null, settings);
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2413,7 +2422,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, null, null, settings);
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2564,7 +2573,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()),
                 contextBudgetPolicy: budgetPolicy);
 
@@ -2596,7 +2605,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()),
                 contextBudgetPolicy: budgetPolicy);
 
@@ -2626,7 +2635,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()),
                 contextBudgetPolicy: budgetPolicy);
 
@@ -2649,7 +2658,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings,
+                memory, policy, null, null, settings, TestActorIdentityProvider,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()),
                 contextBudgetPolicy: budgetPolicy);
 
@@ -2671,7 +2680,7 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                new TestMemoryStore(), policy, null, null, settings);
+                new TestMemoryStore(), policy, null, null, settings, TestActorIdentityProvider);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -2707,7 +2716,7 @@ namespace CoreAI.Tests.EditMode
                 AiOrchestrator orchestrator = new(
                     new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                     new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                    store1, policy, null, null, settings);
+                    store1, policy, null, null, settings, TestActorIdentityProvider);
 
                 await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = roleId, Hint = "persist hint" });
 

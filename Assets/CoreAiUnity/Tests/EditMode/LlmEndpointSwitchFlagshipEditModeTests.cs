@@ -217,7 +217,8 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), routing, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
-                memory, policy, null, null, settings);
+                memory, policy, null, null, settings,
+                new LocalActorIdentityProvider("endpoint-switch-test"));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {

@@ -17,46 +17,49 @@ namespace CoreAI.Infrastructure.Ai
         }
 
         /// <inheritdoc />
-        public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
+        public void RecordLlmCompletion(string actorId, string roleId, string traceId, bool ok, double wallMs)
         {
             if (_settings == null || !_settings.ShouldLog(GameLogFeature.Metrics, GameLogLevel.Info))
             {
                 return;
             }
 
+            string a = string.IsNullOrWhiteSpace(actorId) ? "-" : actorId.Trim();
             string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
             string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
-                $"[ai-metrics] llm role={r} traceId={t} ok={ok} wallMs={wallMs:F0}");
+                $"[ai-metrics] llm actor={a} role={r} traceId={t} ok={ok} wallMs={wallMs:F0}");
         }
 
         /// <inheritdoc />
-        public void RecordStructuredRetry(string roleId, string traceId, string reason)
+        public void RecordStructuredRetry(string actorId, string roleId, string traceId, string reason)
         {
             if (_settings == null || !_settings.ShouldLog(GameLogFeature.Metrics, GameLogLevel.Info))
             {
                 return;
             }
 
+            string a = string.IsNullOrWhiteSpace(actorId) ? "-" : actorId.Trim();
             string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
             string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
             string msg = string.IsNullOrWhiteSpace(reason) ? "-" : reason.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
-                $"[ai-metrics] structured_retry role={r} traceId={t} reason={msg}");
+                $"[ai-metrics] structured_retry actor={a} role={r} traceId={t} reason={msg}");
         }
 
         /// <inheritdoc />
-        public void RecordCommandPublished(string roleId, string traceId)
+        public void RecordCommandPublished(string actorId, string roleId, string traceId)
         {
             if (_settings == null || !_settings.ShouldLog(GameLogFeature.Metrics, GameLogLevel.Info))
             {
                 return;
             }
 
+            string a = string.IsNullOrWhiteSpace(actorId) ? "-" : actorId.Trim();
             string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
             string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
-                $"[ai-metrics] publish role={r} traceId={t}");
+                $"[ai-metrics] publish actor={a} role={r} traceId={t}");
         }
     }
 }

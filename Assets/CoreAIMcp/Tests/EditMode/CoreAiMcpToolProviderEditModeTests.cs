@@ -45,6 +45,7 @@ namespace CoreAI.Mcp.Tests
                 LuaCapabilities.All,
                 null,
                 null,
+                null,
                 skills,
                 screenshot);
         }

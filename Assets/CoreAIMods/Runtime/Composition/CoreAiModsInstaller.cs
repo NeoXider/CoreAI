@@ -59,6 +59,7 @@ namespace CoreAI.Composition
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
+            IActorIdentityProvider fallbackHostIdentityProvider = ActorIdentityComposition.CreateLocalHost();
 
             // One-off execute_lua calls run untrusted, ad-hoc snippets rather than an installed mod, so
             // Full-tier reflection is stripped from them by default even when persistent mods are granted
@@ -277,10 +278,17 @@ namespace CoreAI.Composition
                             runtime.RehydrateFromStore(scriptCapabilities,
                                 (scriptCapabilities & LuaCapabilities.Full) != 0);
 
+                            IActorIdentityProvider hostIdentityProvider =
+                                container.ResolveOrDefault<IActorIdentityProvider>() ??
+                                fallbackHostIdentityProvider;
+                            ActorContext hostActor = hostIdentityProvider.GetActorContext(
+                                BuiltInAgentRoleIds.Programmer);
+
                             // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
                             // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
                             tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
                                 runtime,
+                                hostActor,
                                 stackRbxApi?.Scheduler,
                                 stackRbxApi != null
                                     ? stackRbxApi.PumpPreSimulation
@@ -328,7 +336,7 @@ namespace CoreAI.Composition
                     Logging.ILog log = container.Resolve<Logging.ILog>();
                     LuaGenerationRateLimiter limiter = container.Resolve<LuaGenerationRateLimiter>();
                     IActorIdentityProvider actorIdentityProvider =
-                        container.ResolveOrDefault<IActorIdentityProvider>() ?? LocalActorIdentityProvider.Default;
+                        container.ResolveOrDefault<IActorIdentityProvider>() ?? fallbackHostIdentityProvider;
 
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));

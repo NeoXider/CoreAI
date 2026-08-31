@@ -84,7 +84,8 @@ namespace CoreAI.Tests.EditMode
                 auth, llm, sink ?? new CapturingSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null),
                 null, new AgentMemoryPolicy(),
-                null, null, new TestSettings());
+                null, null, new TestSettings(),
+                new LocalActorIdentityProvider("orchestrator-refactor-test"));
         }
 
         private sealed class TestTelemetry : ISessionTelemetryProvider

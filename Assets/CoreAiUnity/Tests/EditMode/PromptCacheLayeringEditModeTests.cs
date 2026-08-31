@@ -299,7 +299,8 @@ namespace CoreAI.Tests.EditMode
                 policy,
                 null,
                 null,
-                settings);
+                settings,
+                new LocalActorIdentityProvider("prompt-cache-test"));
         }
 
         private sealed class StubTool : ILlmTool

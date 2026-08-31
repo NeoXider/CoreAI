@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
+using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
@@ -227,6 +229,7 @@ namespace CoreAI.Chat
         private bool _typingToolProgressHintActive;
 
         protected CoreAiChatService _chatService;
+        private IActorIdentityProvider _actorIdentityProvider;
 
         public virtual CoreAiChatService ChatService
         {
@@ -240,6 +243,13 @@ namespace CoreAI.Chat
                     TryRegisterToolCallChatDisplay();
                 }
             }
+        }
+
+        /// <summary>Receives the actor identity provider owned by host composition.</summary>
+        internal void SetActorIdentityProvider(IActorIdentityProvider actorIdentityProvider)
+        {
+            _actorIdentityProvider = actorIdentityProvider ??
+                                     throw new ArgumentNullException(nameof(actorIdentityProvider));
         }
 
         private CancellationTokenSource _cts;
@@ -1687,6 +1697,22 @@ namespace CoreAI.Chat
 
         protected virtual void InitService()
         {
+            CoreAILifetimeScope lifetimeScope =
+                UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
+            if (lifetimeScope?.Container != null)
+            {
+                try
+                {
+                    SetActorIdentityProvider(
+                        (IActorIdentityProvider)lifetimeScope.Container.Resolve(typeof(IActorIdentityProvider)));
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] Resolve IActorIdentityProvider: {ex.Message}");
+                }
+            }
+
             _chatService = CoreAiChatService.TryCreateFromScene();
             if (_chatService == null)
             {
@@ -2661,13 +2687,21 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual AiTaskRequest BuildAiTaskRequest(string userText, string roleId)
         {
+            if (_actorIdentityProvider == null)
+            {
+                throw new InvalidOperationException(
+                    "CoreAiChatPanel requires an actor identity provider from host composition.");
+            }
+
+            ActorContext actorContext = _actorIdentityProvider.GetActorContext(roleId);
             return new AiTaskRequest
             {
                 RoleId = roleId,
                 RoutingProfileId = ResolveSelectedProfileId(),
                 Hint = userText,
                 SourceTag = "Chat",
-                CancellationScope = roleId
+                ActorContext = actorContext,
+                CancellationScope = actorContext.SessionId
             };
         }
 

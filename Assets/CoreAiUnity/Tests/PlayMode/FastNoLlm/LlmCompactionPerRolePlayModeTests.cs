@@ -245,7 +245,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                settings);
+                settings,
+                new LocalActorIdentityProvider("compaction-history-test"));
 
             Task task = orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -286,6 +287,7 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-smart-playmode-test"),
                 ConversationContextManagerFactories.Create(
                     true,
                     new InMemoryConversationSummaryStore(),
@@ -327,6 +329,7 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
                 settings,
+                new LocalActorIdentityProvider("compaction-programmer-playmode-test"),
                 ConversationContextManagerFactories.Create(
                     true,
                     new InMemoryConversationSummaryStore(),

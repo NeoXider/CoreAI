@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using UnityEngine;
 using VContainer;
@@ -53,6 +54,7 @@ namespace CoreAI.Presentation
         private string sourceTag = "lua_mod_auto_repair";
 
         private ILuaModRuntime _mods;
+        private ActorContext _actorContext;
         private IAiOrchestrationService _orchestrator;
         private LuaModAutoRepairPolicy _policy;
         private bool _ready;
@@ -105,6 +107,17 @@ namespace CoreAI.Presentation
                 yield break;
             }
 
+            IActorIdentityProvider actorIdentityProvider =
+                lifetimeScope.Container.ResolveOrDefault<IActorIdentityProvider>();
+            if (actorIdentityProvider == null)
+            {
+                SetStatus("Lua mod auto-repair disabled: IActorIdentityProvider not registered.");
+                enabled = false;
+                yield break;
+            }
+
+            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+
             if (!lifetimeScope.Container.TryResolve<IAiOrchestrationService>(out _orchestrator) ||
                 _orchestrator == null)
             {
@@ -114,8 +127,8 @@ namespace CoreAI.Presentation
             }
 
             _policy = new LuaModAutoRepairPolicy(minConsecutiveErrors, maxAttemptsPerMod, cooldownSeconds);
-            _mods.ModHandlerErrored += OnModHandlerErrored;
-            _mods.ModSourceLoaded += OnModSourceLoaded;
+            _mods.AddModHandlerErroredListener(_actorContext, OnModHandlerErrored);
+            _mods.AddModSourceLoadedListener(_actorContext, OnModSourceLoaded);
             _ready = true;
             SetStatus(autoRepairEnabled
                 ? "Lua mod auto-repair armed."
@@ -129,8 +142,8 @@ namespace CoreAI.Presentation
                 return;
             }
 
-            _mods.ModHandlerErrored -= OnModHandlerErrored;
-            _mods.ModSourceLoaded -= OnModSourceLoaded;
+            _mods.RemoveModHandlerErroredListener(_actorContext, OnModHandlerErrored);
+            _mods.RemoveModSourceLoadedListener(_actorContext, OnModSourceLoaded);
         }
 
         // Runs on the main thread inside LuaModRuntime.Tick. Keep it cheap and never reload synchronously.
@@ -150,7 +163,7 @@ namespace CoreAI.Presentation
                         $"Auto-repair gave up on '{modId}' after {maxAttemptsPerMod} attempt(s). Last error: {error}");
                     return;
                 case LuaModAutoRepairDecision.Repair:
-                    if (!_mods.TryGetModSource(modId, out string source))
+                    if (!_mods.TryGetModSource(_actorContext, modId, out string source))
                     {
                         source = "";
                     }

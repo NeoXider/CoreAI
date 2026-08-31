@@ -4,6 +4,7 @@ using System.Collections;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using CoreAI.Composition;
 using CoreAI.Hub;
@@ -122,11 +123,19 @@ namespace CoreAI.Demos
 
                 IObjectResolver container = modsScope.Container;
                 LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
+                IActorIdentityProvider actorIdentityProvider = container.Resolve<IActorIdentityProvider>();
+                ActorContext actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
                 ILuaModSourceStore sourceStore = TryResolve<ILuaModSourceStore>(container);
 
                 // WHY: last-writer-wins registration into the window's live registry; PageRegistered
                 // rebuilds the tab bar so the Mods tab lights up after the scopes are ready.
-                HubModsPages.Register(Registry, runtime, sourceStore, LuaCapabilities.All, false);
+                HubModsPages.Register(
+                    Registry,
+                    runtime,
+                    actorContext,
+                    sourceStore,
+                    LuaCapabilities.All,
+                    false);
             }
             catch (Exception ex)
             {
