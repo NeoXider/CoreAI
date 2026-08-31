@@ -186,6 +186,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.PressKey(KeySpace);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual("Enum.KeyCode.Space", store.Get("m", "kc"));
             Assert.AreEqual("Enum.UserInputType.Keyboard", store.Get("m", "type"));
@@ -209,10 +210,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.PressKey(KeyE);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("", store.Get("m", "kc"));
 
             source.ReleaseKey(KeyE);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("Enum.KeyCode.E", store.Get("m", "kc"));
             Assert.AreEqual("Enum.UserInputState.End", store.Get("m", "state"));
         }
@@ -235,6 +238,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.SetMouseButton(0, true);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual("Enum.UserInputType.MouseButton1", store.Get("m", "type"));
             Assert.AreEqual("10, 20, 0", store.Get("m", "pos"));
@@ -259,8 +263,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             // WHY: the first pump records the baseline location; only the second observes motion.
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             source.SetMouseLocation(105f, 56f);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual("Enum.UserInputType.MouseMovement", store.Get("m", "type"));
             Assert.AreEqual("105, 56, 0", store.Get("m", "pos"));
@@ -283,6 +289,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.PressKey(ButtonA);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual("Enum.KeyCode.ButtonA", store.Get("m", "kc"));
             Assert.AreEqual("Enum.UserInputType.Gamepad1", store.Get("m", "type"));
@@ -309,10 +316,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.PressKey(KeyA);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("1", store.Get("m", "count"));
 
             source.PressKey(KeyE);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("1", store.Get("m", "count"));
         }
 
@@ -395,7 +404,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             source.PressKey(KeyA);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
             roblox.PumpInput();
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual(1, beganCount);
         }
@@ -455,6 +466,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             source.PressKey(KeyA);
             source.PressKey(KeySpace);
             Assert.DoesNotThrow(() => roblox.PumpInput());
+            Assert.DoesNotThrow(() => roblox.Scheduler.Advance(0d));
             Assert.AreEqual(2, handled, "both key-down events dispatched without a pump fault");
         }
     }

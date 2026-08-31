@@ -393,7 +393,7 @@ Sources:
 - Ship **Deferred** as CoreAI's default (Roblox's recommended/template default), with the queue
   flushed at every script-resumption point of the frame loop; keep an Immediate switch only if
   mod-compat requires it.
-- Implement: per-signal FIFO invocation queue; args captured at fire time; re-entrancy counter
+- Implement: deferred invocation queue; args captured at fire time; re-entrancy counter
   with cap 10; `Disconnect` = drop pending, `Destroy` = run pending then disconnect (R5.7).
 - `Once` must disconnect *before* invoking (R5.1) — this is load-bearing for re-entrancy safety.
 - For CoreAI's bindable-style custom events, adopt the table-copy + string-key + no-metatable

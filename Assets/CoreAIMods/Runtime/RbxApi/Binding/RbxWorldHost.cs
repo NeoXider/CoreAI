@@ -107,6 +107,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void OnDestroy()
         {
+            Binder?.BeginHostTeardown();
+
             // WHY: the mod stack outlives this component — LuaCsRbxApiBindings captures the registry
             // once at install time, so clearing our own property hides nothing from running scripts.
             // Marking it detached is what turns the next Instance.new into a named WORLD_DETACHED

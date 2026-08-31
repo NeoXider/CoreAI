@@ -44,6 +44,13 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
 - Creating or mutating instances needs the WorldEdit capability (persistent mods have it by
   default). Read-only scripts still get `game`/`workspace`/datatypes and can READ input
   (UserInputService) and the camera, but not `Instance` or any mutation.
+- Every `RbxScriptSignal` uses DEFERRED dispatch. Firing queues handlers instead of running
+  them at the fire site; they run at the next script-resumption point, and the queue flushes
+  at every script-resumption point of the frame loop. `:Connect()`, `:Once()`, and `:Wait()`
+  work, and a connected handler may call `task.wait()`. Invocation order for multiple
+  connections to one signal is NOT guaranteed; never depend on connection order.
+- `task.wait/spawn/defer/delay/cancel` work. `task.synchronize/desynchronize` are no-ops that
+  log once per mod.
 
 ## 2. Datatypes (immutable value types; assigning a field errors)
 
@@ -93,9 +100,21 @@ buttons live at 1000+).
   `local cd = Instance.new(""ClickDetector""); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
   MouseClick fires (no args) when the user clicks THAT part with the mouse and it is within
   `cd.MaxActivationDistance` studs (default 32). Only the part under the cursor fires.
-- `game:GetService(""Name"")` — valid services: Workspace, Lighting, ReplicatedStorage,
-  ServerStorage, ServerScriptService, StarterPlayer, UserInputService, RunService. Unknown name -> ""X is not
-  a valid Service name"". Also `game:FindService(name)`. `workspace` is
+- `game:GetService(""Name"")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
+  `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
+  `UserInputService`, and `RunService` services.
+- The catalog's 13 registrations/rungs are: `RunService` (MVP2; fallback), `HttpService`
+  (MVP2), `Players` (MVP8), `TweenService` (MVP8), `CollectionService` (MVP8), `Debris`
+  (MVP8), `DataStoreService` (MVP9), `UserInputService` (MVP10; fallback),
+  `ContextActionService` (MVP10), `SoundService` (MVP15), `AIService`
+  (`a future MVP (reserved)`), `PathfindingService` (`no planned MVP (not planned)`), and
+  `MarketplaceService` (`no planned MVP (not planned)`). The standard runtime replaces the
+  two fallbacks with its live implementations.
+- `GetService` for a registered but unimplemented service resolves a placeholder. The first
+  member read, write, or method lookup raises NOT_IMPLEMENTED and names that service's rung.
+  Top-of-file acquisition therefore does not abort setup; do not add defensive workarounds
+  solely to avoid that obsolete failure. An unknown name still raises UNKNOWN_SERVICE with
+  ""X is not a valid Service name"". Also `game:FindService(name)`. `workspace` is
   `game:GetService(""Workspace"")`.
 - Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
   needs WorldEdit.
@@ -130,7 +149,7 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, 
   `input` is an InputObject with `.KeyCode` (Enum.KeyCode), `.UserInputType` (Enum.UserInputType),
   `.UserInputState` (Enum.UserInputState), `.Position` (Vector3), `.Delta` (Vector3).
   `:Connect(fn)` and `:Once(fn)` return an RBXScriptConnection with `.Connected` and
-  `:Disconnect()`; `:Wait()` is a loud MVP2 stub.
+  `:Disconnect()`; `:Wait()` yields until the next fire and returns its arguments.
 - Polls: `IsKeyDown(Enum.KeyCode)` -> bool; `GetKeysPressed()` -> array of InputObject;
   `GetMouseLocation()` -> Vector2 (top-left origin).
 - `MouseBehavior` (read+write, Enum.MouseBehavior: Default/LockCenter/LockCurrentPosition) is
@@ -188,13 +207,8 @@ the current world, so report it instead of retrying the spawn.
 
 ## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
-- `task.wait/spawn/defer/delay/cancel` — use `RunService.Heartbeat:Connect(function(dt) ... end)`
-  for a per-frame loop (accumulate `dt` for periodic work).
-  `task.synchronize/desynchronize` are silent no-ops.
-- Instance-tree signals (`inst.ChildAdded:Connect`, `:Once`, `:Wait`) and `WaitForChild(name)`
-  when the child is absent, `Model:PivotTo/GetPivot`, `Instance.fromExisting` (use `Clone`).
-  NOTE: UserInputService's own events (InputBegan/InputEnded/InputChanged) DO fire — this
-  exclusion is only about instance-tree signals.
+- `WaitForChild(name)` when the child is absent, `Model:PivotTo/GetPivot`,
+  `Instance.fromExisting` (use `Clone`).
 - Part `Material`, `Orientation`, `Rotation` properties (Shape DOES work now — see section 5).
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
@@ -277,6 +291,7 @@ local part = Instance.new(""Part""); part.Parent = workspace
 part:Destroy()
 local ok2, err2 = pcall(function() return part.Position end)
 if not ok2 then print(err2) end  -- ""INSTANCE_DESTROYED: ... | fix: ...""
-```";
+```
+";
     }
 }

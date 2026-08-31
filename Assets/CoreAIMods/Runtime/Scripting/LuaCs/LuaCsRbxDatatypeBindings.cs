@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using Lua;
@@ -79,12 +78,15 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Wraps a dispatch-enabled signal carrying the acting mod context so <c>Connect</c>/<c>Once</c>
-        /// can record the returned connection for teardown (RunService/UserInputService reads use this;
-        /// the MVP2-stub signals stay context-free since connecting them throws before a connection exists).
+        /// Wraps a signal with the acting mod context used for scheduling and teardown ownership.
         /// </summary>
         public static LuaValue Wrap(RbxScriptSignal value, LuaCsRbxModContext owner)
         {
+            if (owner != null)
+            {
+                value.BindScheduler(owner.Bindings.Scheduler);
+            }
+
             return new LuaValue(new LuaCsRbxValueBox(value, SignalMeta, owner));
         }
 
@@ -933,27 +935,11 @@ namespace CoreAI.Ai.LuaCs
                 "pass Enum.RotationOrder.XYZ (or another order) at argument " + (index + 1));
         }
 
-        // ---- Signals (dispatch-enabled input signals; MVP2 stubs elsewhere) ------------------
-
-        /// <summary>Budget for one synchronous signal-handler call (mirrors the logic-slot
-        /// guard: a broken handler must never stall the frame).</summary>
-        private static readonly CoreAI.Sandbox.LuaCs.LuaCsExecutionGuard SignalHandlerGuard =
-            new(200, 200_000, Sandbox.LuaCs.LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
-
-        // The three signal members capture nothing but a compile-time constant and take their
-        // receiver from their own call context, so one instance each is reused for every member
-        // read instead of building a fresh LuaFunction + closure per `sig:Connect(...)`.
         private static readonly LuaValue SignalConnectFn =
             new(Fn("RBXScriptSignal.Connect", inner => ConnectSignal(inner, false)));
 
         private static readonly LuaValue SignalOnceFn =
             new(Fn("RBXScriptSignal.Once", inner => ConnectSignal(inner, true)));
-
-        private static readonly LuaValue SignalWaitFn = new(Fn("RBXScriptSignal.Wait", inner =>
-        {
-            ReadSignal(inner, 0).Wait();
-            return LuaValue.Nil;
-        }));
 
         private static readonly LuaValue ConnectionDisconnectFn =
             new(Fn("RBXScriptConnection.Disconnect", inner =>
@@ -971,12 +957,9 @@ namespace CoreAI.Ai.LuaCs
                 string key = ReadString(ctx, 1, "RBXScriptSignal member access");
                 switch (key)
                 {
-                    // WHY: on non-dispatch signals the C# methods are themselves the MVP2 loud
-                    // stubs — calling them surfaces "signals land in MVP2 (scheduler)" with the
-                    // exact phase; dispatch-enabled signals (UserInputService) connect for real.
                     case "Connect": return SignalConnectFn;
                     case "Once": return SignalOnceFn;
-                    case "Wait": return SignalWaitFn;
+                    case "Wait": return ReadSignalWaitBridge(ctx);
                     default:
                         throw NotAMember(key, "RBXScriptSignal");
                 }
@@ -992,22 +975,6 @@ namespace CoreAI.Ai.LuaCs
         {
             RbxScriptSignal signal = ReadSignal(ctx, 0);
             string member = once ? "Once" : "Connect";
-            if (!signal.SupportsDispatch)
-            {
-                // WHY: the engine-free signal raises the MVP2 stub itself, keeping the phase text
-                // in one place.
-                if (once)
-                {
-                    signal.Once(Arg(ctx, 1));
-                }
-                else
-                {
-                    signal.Connect(Arg(ctx, 1));
-                }
-
-                return LuaValue.Nil;
-            }
-
             LuaValue handlerValue = Arg(ctx, 1);
             if (handlerValue.Type != LuaValueType.Function)
             {
@@ -1022,72 +989,83 @@ namespace CoreAI.Ai.LuaCs
                 signalOwner = signalBox.SignalOwner;
             }
 
-            LuaState handlerState = signalOwner == null
-                ? ctx.State
-                : signalOwner.Bindings.ResolveSchedulerOwnerState(ctx.State);
+            if (signalOwner == null)
+            {
+                throw new RbxError(
+                    RbxErrorCode.ContextViolation,
+                    signal.SignalName + ":" + member + " requires an owning mod context",
+                    "read the signal from an Instance proxy owned by the running mod");
+            }
+
+            LuaState handlerState = signalOwner.Bindings.ResolveSchedulerOwnerState(ctx.State);
+            object callable = signalOwner.Bindings.CaptureSignalCallable(
+                handlerState, handlerValue);
             Action<object[]> wrapper = BuildSignalHandler(
-                handlerState, handlerValue.Read<LuaFunction>(), signal.SignalName);
+                signalOwner, callable);
             RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
 
             // WHY: attribute the connection to the mod that opened it so composition teardown can
             // Disconnect it on unload/reload/quarantine — otherwise the handler keeps firing against the
             // torn-down mod (INSTANCE_DESTROYED). A context-free wrap or a mod-less one-off records nothing.
-            if (signalOwner != null)
-            {
-                signalOwner.TrackConnection(connection);
-            }
+            signalOwner.TrackConnection(connection);
 
             return Wrap(connection);
         }
 
-        /// <summary>
-        /// Wraps a Lua handler into the engine-free <c>Action&lt;object[]&gt;</c> the signal
-        /// stores: marshals fired args, runs the call under the signal budget, and contains
-        /// failures so one broken handler never breaks the input pump or its sibling connections.
-        /// </summary>
-        // TODO: MVP2 — the scheduler replaces this direct call with deferred dispatch and
-        // attributes handler errors to the owning mod's quarantine streak.
-        private static Action<object[]> BuildSignalHandler(LuaState state, LuaFunction handler,
-            string signalName)
+        private static Action<object[]> BuildSignalHandler(
+            LuaCsRbxModContext context, object callable)
         {
             return args =>
             {
-                try
+                object[] luaArgs = new object[args.Length];
+                for (int index = 0; index < args.Length; index++)
                 {
-                    LuaValue[] luaArgs = new LuaValue[args.Length];
-                    for (int i = 0; i < args.Length; i++)
-                    {
-                        luaArgs[i] = MarshalSignalArg(args[i]);
-                    }
+                    luaArgs[index] = MarshalSignalArg(context, args[index]);
+                }
 
-                    SignalHandlerGuard.Execute(state, handler, CancellationToken.None, luaArgs);
-                }
-                catch (Exception ex)
-                {
-                    CoreAI.Logging.Log.Instance.Error(
-                        "[RbxApi] " + signalName + " handler failed: " + ex.Message);
-                }
+                context.Bindings.SpawnSignalHandler(context, callable, luaArgs);
             };
         }
 
-        /// <summary>Marshals one fired signal argument to Lua (the input events carry
-        /// InputObject + bool today; the datatype set covers the near-term signal corpus).</summary>
-        private static LuaValue MarshalSignalArg(object arg)
+        internal static LuaValue MarshalSignalArg(LuaCsRbxModContext context, object arg)
         {
             switch (arg)
             {
                 case null: return LuaValue.Nil;
+                case LuaValue value: return value;
                 case bool b: return b;
                 case double d: return d;
                 case float f: return f;
                 case int i: return i;
                 case string s: return s;
+                case RbxInstance instance: return context.WrapInstance(instance);
                 case RbxInputObject input: return Wrap(input);
                 case RbxEnumItem item: return Wrap(item);
                 case RbxVector3 v3: return Wrap(v3);
                 case RbxVector2 v2: return Wrap(v2);
                 default: return LuaValue.Nil;
             }
+        }
+
+        private static LuaValue ReadSignalWaitBridge(LuaFunctionExecutionContext ctx)
+        {
+            LuaValue taskValue = ctx.State.Environment["task"];
+            if (taskValue.Type != LuaValueType.Table)
+            {
+                throw RbxError.BadArgument(
+                    "RBXScriptSignal.Wait requires the task scheduler bridge",
+                    "run signal:Wait() from a loaded mod scheduler thread");
+            }
+
+            LuaValue bridge = taskValue.Read<LuaTable>()["_signalWaitBridge"];
+            if (bridge.Type != LuaValueType.Function)
+            {
+                throw RbxError.BadArgument(
+                    "RBXScriptSignal.Wait bridge is unavailable",
+                    "run signal:Wait() after the mod scheduler initializes");
+            }
+
+            return bridge;
         }
 
         private static RbxScriptSignal ReadSignal(LuaFunctionExecutionContext ctx, int index)

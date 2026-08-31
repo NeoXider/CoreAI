@@ -61,6 +61,7 @@ namespace CoreAI.Mods.Rbx.Binding
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
         private ILog _log;
+        private bool _hostTeardownStarted;
 
         // WHY: the binder is constructed by RbxWorldHost, not by the container, so the host hands it
         // the composition-scoped logger (see SetLog); the process-wide CoreAI logger backs direct
@@ -119,6 +120,14 @@ namespace CoreAI.Mods.Rbx.Binding
             }
         }
 
+        /// <summary>Stops new materialization and transform re-parenting once the owning host has
+        /// entered Unity destruction. Registry destruction may continue to release binding records
+        /// and backing objects without moving them into the dying hierarchy.</summary>
+        public void BeginHostTeardown()
+        {
+            _hostTeardownStarted = true;
+        }
+
         /// <summary>Count of live backing GameObjects (materialized or parked-deactivated).</summary>
         public int BoundCount => _bindings.Count;
 
@@ -167,6 +176,11 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnEnteredWorld(InstanceRecord record)
         {
+            if (_hostTeardownStarted)
+            {
+                return;
+            }
+
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry))
             {
                 if (entry.OwnsGameObject)
@@ -213,6 +227,11 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnLeftWorld(InstanceRecord record)
         {
+            if (_hostTeardownStarted)
+            {
+                return;
+            }
+
             // WHY: the DataModel host GameObject never leaves its own tree; guard so nothing
             // deactivates or re-parents the host.
             if (!_bindings.TryGetValue(record.Id, out BindingEntry entry) || !entry.OwnsGameObject)
@@ -246,6 +265,11 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public void OnReparented(InstanceRecord record)
         {
+            if (_hostTeardownStarted)
+            {
+                return;
+            }
+
             if (_bindings.TryGetValue(record.Id, out BindingEntry entry) && entry.OwnsGameObject)
             {
                 // WHY: worldPositionStays — CFrames are world-space, so a hierarchy move
@@ -318,6 +342,15 @@ namespace CoreAI.Mods.Rbx.Binding
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Shape = shape;
             Store(id, properties, PartAspect.Full);
+        }
+
+        // TODO: MVP2 — resolve through IRbxMaterialProvider once the URP catalog lands; until then
+        // the state round-trips through PartProperties and every part keeps the default material.
+        public void SetMaterial(InstanceId id, in RbxMaterialId material)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.Material = material;
+            Store(id, properties, PartAspect.Appearance);
         }
 
         public void SetPartProperties(InstanceId id, in PartProperties properties)

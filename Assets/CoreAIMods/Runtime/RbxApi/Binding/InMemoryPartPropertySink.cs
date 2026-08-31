@@ -73,6 +73,13 @@ namespace CoreAI.Mods.Rbx.Binding
             _properties[id] = properties;
         }
 
+        public void SetMaterial(InstanceId id, in RbxMaterialId material)
+        {
+            PartProperties properties = GetPartPropertiesOrDefault(id);
+            properties.Material = material;
+            _properties[id] = properties;
+        }
+
         public void SetPartProperties(InstanceId id, in PartProperties properties)
         {
             _properties[id] = properties;

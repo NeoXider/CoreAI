@@ -9,6 +9,7 @@ using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -143,21 +144,46 @@ namespace CoreAI.Tests.EditMode
                     worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
                 RbxApi = new LuaCsRbxApiBindings(registry: registry, inputSource: Input);
                 Logger = new CapturingGameLogger();
+                Store = new MemoryStore();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
                     Logger = Logger,
-                    ModStore = new MemoryStore(),
+                    ModStore = Store,
                     Capabilities = LuaCapabilities.All,
                     OneOffCapabilities = LuaCapabilities.All,
                     RbxApi = RbxApi,
                     RegisterWorldEditBuildBindings = false
                 });
+                RbxApi.Scheduler.PhaseReached += PumpSchedulerPhase;
             }
 
             public InMemoryInputSource Input { get; }
             public LuaCsRbxApiBindings RbxApi { get; }
             public CapturingGameLogger Logger { get; }
+            public MemoryStore Store { get; }
             public LuaCsModStack Stack { get; }
+
+            public void AdvanceFrame(float deltaSeconds)
+            {
+                RbxApi.Scheduler.Advance(deltaSeconds);
+            }
+
+            private void PumpSchedulerPhase(SchedulerPhase phase, double deltaSeconds)
+            {
+                float frameDelta = (float)deltaSeconds;
+                switch (phase)
+                {
+                    case SchedulerPhase.PreSimulation:
+                        RbxApi.PumpPreSimulation(frameDelta);
+                        return;
+                    case SchedulerPhase.Heartbeat:
+                        RbxApi.PumpHeartbeat(frameDelta);
+                        return;
+                    case SchedulerPhase.PreRender:
+                        RbxApi.PumpPreRender(frameDelta);
+                        return;
+                }
+            }
         }
 
         private static BundledMod FindBundledMod(IReadOnlyList<BundledMod> mods, string id)
@@ -243,9 +269,9 @@ namespace CoreAI.Tests.EditMode
             }
 
             harness.Input.PressKey(key);
-            harness.RbxApi.PumpFrame(0f);
+            harness.AdvanceFrame(0f);
             harness.Input.ReleaseKey(key);
-            harness.RbxApi.PumpFrame(0f);
+            harness.AdvanceFrame(0f);
         }
 
         private static List<RbxVector3> ActiveCellPositions(RuntimeHarness harness, RbxInstance root)
@@ -315,7 +341,27 @@ namespace CoreAI.Tests.EditMode
         public void RealSample_LoadsAndRunsWithoutLoudStub(string modId, string resourceName)
         {
             RuntimeHarness harness = LoadSample(modId, resourceName);
-            Assert.DoesNotThrow(() => harness.RbxApi.PumpFrame(1f / 60f));
+            Assert.DoesNotThrow(() => harness.AdvanceFrame(1f / 60f));
+            AssertRuntimeHealthy(harness, modId);
+        }
+
+        [Test]
+        public void FrameHarness_HeartbeatHandlerRunsExactlyOncePerFrame()
+        {
+            const string modId = "heartbeat_exactly_once";
+            RuntimeHarness harness = LoadSource(modId, @"
+                local RunService = game:GetService('RunService')
+                RunService.Heartbeat:Connect(function()
+                    local count = tonumber(store_get('heartbeat_count')) or 0
+                    store_set('heartbeat_count', tostring(count + 1))
+                end)");
+
+            harness.AdvanceFrame(0.25f);
+            Assert.AreEqual("1", harness.Store.Get(modId, "heartbeat_count"),
+                "One logical frame must invoke a Heartbeat handler exactly once.");
+            harness.AdvanceFrame(0.25f);
+            Assert.AreEqual("2", harness.Store.Get(modId, "heartbeat_count"),
+                "Each additional logical frame must add exactly one Heartbeat invocation.");
             AssertRuntimeHealthy(harness, modId);
         }
 
@@ -331,11 +377,11 @@ namespace CoreAI.Tests.EditMode
             RbxInstance root = RequiredChild(Workspace(harness), "LaneRacer");
             RbxInstance car = RequiredChild(root, "RacerCar");
 
-            harness.RbxApi.PumpFrame(0.8f);
+            harness.AdvanceFrame(0.8f);
             RbxInstance block = RequiredChild(root, "Block");
             RbxVector3 blockBefore = PartProperties(harness, block).Position;
             harness.Input.PressKey(KeyD);
-            harness.RbxApi.PumpFrame(0.1f);
+            harness.AdvanceFrame(0.1f);
             RbxVector3 blockAfter = PartProperties(harness, block).Position;
             RbxVector3 carAfter = PartProperties(harness, car).Position;
 
@@ -358,10 +404,10 @@ namespace CoreAI.Tests.EditMode
             RbxInstance root = RequiredChild(Workspace(harness), "LaneRacer");
             RbxInstance car = RequiredChild(root, "RacerCar");
 
-            harness.RbxApi.PumpFrame(0.8f);
+            harness.AdvanceFrame(0.8f);
             RbxInstance block = RequiredChild(root, "Block");
             AlignLaneWithBlock(harness, block);
-            harness.RbxApi.PumpFrame(3.5f);
+            harness.AdvanceFrame(3.5f);
 
             Assert.IsFalse(PartProperties(harness, car).Anchored,
                 "A block swept from distance 60 to -10 must crash instead of tunnelling through the car band.");
@@ -379,10 +425,10 @@ namespace CoreAI.Tests.EditMode
             RuntimeHarness harness = LoadSource(modId, source);
             RbxInstance root = RequiredChild(Workspace(harness), "Tetris3D");
 
-            harness.RbxApi.PumpFrame(0.0625f);
+            harness.AdvanceFrame(0.0625f);
             List<RbxVector3> before = ActiveCellPositions(harness, root);
             harness.Input.PressKey(KeyD);
-            harness.RbxApi.PumpFrame(0.0625f);
+            harness.AdvanceFrame(0.0625f);
             List<RbxVector3> after = ActiveCellPositions(harness, root);
 
             for (int i = 0; i < before.Count; i++)
@@ -405,11 +451,11 @@ namespace CoreAI.Tests.EditMode
             RbxInstance root = RequiredChild(Workspace(harness), "LaneRacer");
             RbxInstance car = RequiredChild(root, "RacerCar");
 
-            harness.RbxApi.PumpFrame(0.8f);
+            harness.AdvanceFrame(0.8f);
             RbxInstance block = RequiredChild(root, "Block");
             AlignLaneWithBlock(harness, block);
-            harness.RbxApi.PumpFrame(2.9f);
-            harness.RbxApi.PumpFrame(1f / 60f);
+            harness.AdvanceFrame(2.9f);
+            harness.AdvanceFrame(1f / 60f);
 
             Assert.IsTrue(PartProperties(harness, car).Anchored,
                 "A normal frame ending outside the car band must not report a collision.");
@@ -423,11 +469,11 @@ namespace CoreAI.Tests.EditMode
             RuntimeHarness harness = LoadSample(modId, "sample_tetris3d");
             RbxInstance root = RequiredChild(Workspace(harness), "Tetris3D");
 
-            harness.RbxApi.PumpFrame(0.4f);
+            harness.AdvanceFrame(0.4f);
             float before = ActiveCellAverageY(harness, root);
-            harness.RbxApi.PumpFrame(0.3f);
+            harness.AdvanceFrame(0.3f);
             float afterFirstStep = ActiveCellAverageY(harness, root);
-            harness.RbxApi.PumpFrame(0.5f);
+            harness.AdvanceFrame(0.5f);
             float afterSecondStep = ActiveCellAverageY(harness, root);
 
             Assert.AreEqual(before - 1f, afterFirstStep, 0.0001f);
@@ -443,13 +489,13 @@ namespace CoreAI.Tests.EditMode
             RuntimeHarness harness = LoadSample(modId, "sample_tetris3d");
             RbxInstance root = RequiredChild(Workspace(harness), "Tetris3D");
 
-            harness.RbxApi.PumpFrame(0.0625f);
+            harness.AdvanceFrame(0.0625f);
             float before = ActiveCellAverageY(harness, root);
-            Assert.DoesNotThrow(() => harness.RbxApi.PumpFrame(100f));
+            Assert.DoesNotThrow(() => harness.AdvanceFrame(100f));
             float afterLongFrame = ActiveCellAverageY(harness, root);
-            harness.RbxApi.PumpFrame(0f);
+            harness.AdvanceFrame(0f);
             float afterZeroFrame = ActiveCellAverageY(harness, root);
-            harness.RbxApi.PumpFrame(0.138f);
+            harness.AdvanceFrame(0.138f);
             float afterPreservedSurplus = ActiveCellAverageY(harness, root);
 
             Assert.AreEqual(before - 8f, afterLongFrame, 0.0001f,
@@ -468,15 +514,15 @@ namespace CoreAI.Tests.EditMode
             RuntimeHarness harness = LoadSample(modId, "sample_tetris3d");
             RbxInstance root = RequiredChild(Workspace(harness), "Tetris3D");
 
-            harness.RbxApi.PumpFrame(0.59f);
+            harness.AdvanceFrame(0.59f);
             float bankedNormal = ActiveCellAverageY(harness, root);
             harness.Input.PressKey(KeyS);
-            harness.RbxApi.PumpFrame(0.0005f);
+            harness.AdvanceFrame(0.0005f);
             float switchedToSoft = ActiveCellAverageY(harness, root);
             harness.Input.ReleaseKey(KeyS);
-            harness.RbxApi.PumpFrame(0f);
+            harness.AdvanceFrame(0f);
             float switchedBackToNormal = ActiveCellAverageY(harness, root);
-            harness.RbxApi.PumpFrame(0.0045f);
+            harness.AdvanceFrame(0.0045f);
             float completedPhase = ActiveCellAverageY(harness, root);
 
             Assert.AreEqual(bankedNormal, switchedToSoft, 0.0001f,

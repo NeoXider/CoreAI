@@ -31,6 +31,7 @@ namespace CoreAI.Ai
         private readonly List<StreamWorkItem> _streamPending = new();
         private readonly Dictionary<string, ActorQueueState> _actorQueues = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ScopeEntry> _scopeTokens = new(StringComparer.Ordinal);
+        private List<(long ClaimOrdinal, string ActorId)> _admissionClaimsForTests;
 
         // WHY: F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
         // caller/scope token was never cancelled. Never disposed (only Cancel()'d): work already
@@ -75,6 +76,35 @@ namespace CoreAI.Ai
         /// Maximum number of other actor admissions that can occur while an admitted actor remains pending.
         /// </summary>
         public long MaximumActorBypasses => (long)_maxPending + _maxConcurrent - 1L;
+
+        /// <summary>Enables authoritative claim-order capture for friend test assemblies.</summary>
+        internal void EnableAdmissionClaimTrackingForTests()
+        {
+            lock (_lock)
+            {
+                if (_fairDispatchOrdinal != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Admission claim tracking must be enabled before the first claim.");
+                }
+
+                _admissionClaimsForTests ??= new List<(long ClaimOrdinal, string ActorId)>();
+            }
+        }
+
+        /// <summary>Returns a read-only-by-copy snapshot of claims recorded under the admission lock.</summary>
+        internal (long ClaimOrdinal, string ActorId)[] GetAdmissionClaimSnapshotForTests()
+        {
+            lock (_lock)
+            {
+                if (_admissionClaimsForTests == null)
+                {
+                    throw new InvalidOperationException("Admission claim tracking is not enabled.");
+                }
+
+                return _admissionClaimsForTests.ToArray();
+            }
+        }
 
         /// <inheritdoc />
         public ActorContext ResolveActorContext(AiTaskRequest task)
@@ -344,7 +374,9 @@ namespace CoreAI.Ai
             state.PendingCount--;
             state.InFlightCount++;
             state.HasBeenDispatched = true;
-            state.LastDispatchOrdinal = ++_fairDispatchOrdinal;
+            long claimOrdinal = ++_fairDispatchOrdinal;
+            state.LastDispatchOrdinal = claimOrdinal;
+            _admissionClaimsForTests?.Add((claimOrdinal, actorId));
             _inFlight++;
         }
 

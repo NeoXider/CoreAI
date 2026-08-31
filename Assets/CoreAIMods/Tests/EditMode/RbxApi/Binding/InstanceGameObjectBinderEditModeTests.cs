@@ -202,6 +202,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
+        public void BeginHostTeardown_BlocksLateMaterializationAndHierarchyParking()
+        {
+            RbxInstance boundPart = CreatePartInWorld();
+            GameObject boundPartGo = BoundObject(boundPart);
+            Transform originalParent = boundPartGo.transform.parent;
+            RbxInstance latePart = _registry.Create("Part");
+
+            _binder.BeginHostTeardown();
+            boundPart.Parent = null;
+            latePart.Parent = _registry.WorldRoot;
+
+            Assert.AreEqual(originalParent, boundPartGo.transform.parent,
+                "host teardown must not re-parent existing backing objects");
+            Assert.IsTrue(boundPartGo.activeSelf,
+                "host teardown must not park existing objects while their host is being destroyed");
+            Assert.IsFalse(_binder.TryGetBoundObject(latePart.Id, out _),
+                "instances entering the world during host teardown must not materialize");
+
+            boundPart.Destroy();
+        }
+
+        [Test]
         public void ReparentWithinWorld_MovesTheTransform()
         {
             RbxInstance model = _registry.Create("Model");

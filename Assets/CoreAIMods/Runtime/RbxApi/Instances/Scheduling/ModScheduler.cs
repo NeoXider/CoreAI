@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("CoreAI.Mods.Tests")]
+[assembly: InternalsVisibleTo("CoreAI.Mods")]
 
 namespace CoreAI.Mods.Rbx.Instances.Scheduling
 {
@@ -13,6 +14,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         PreSimulation,
         PostSimulation,
         Heartbeat,
+        InputProcessing,
         PreRender
     }
 
@@ -25,6 +27,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
     {
         public const int DefaultMaxThreadsPerActor = 256;
         public const int EmergencyMaxThreads = 4096;
+        public const int MaxSignalGenerations = 10;
 
         private enum PipelineStage
         {
@@ -33,7 +36,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             PreSimulation,
             PostSimulation,
             ResumeDelayed,
+            DrainSignals,
             Heartbeat,
+            InputProcessing,
             PreRender
         }
 
@@ -45,6 +50,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             Waiting,
             Delayed,
             WaitingForCompletion,
+            WaitingForSignal,
             Canceled
         }
 
@@ -80,6 +86,31 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public object[] DeferredArguments { get; set; }
 
             public CompletionWaitEntry CompletionWait { get; set; }
+
+            public RbxInstance ReadableTombstone { get; set; }
+        }
+
+        private sealed class SignalInvocation
+        {
+            public SignalInvocation(RbxScriptConnection connection, object[] arguments,
+                RbxInstance readableTombstone, int generation, string[] chain)
+            {
+                Connection = connection;
+                Arguments = arguments;
+                ReadableTombstone = readableTombstone;
+                Generation = generation;
+                Chain = chain;
+            }
+
+            public RbxScriptConnection Connection { get; }
+
+            public object[] Arguments { get; }
+
+            public RbxInstance ReadableTombstone { get; }
+
+            public int Generation { get; }
+
+            public string[] Chain { get; }
         }
 
         private abstract class TimedEntry
@@ -259,18 +290,28 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private static readonly PipelineStage[] Pipeline =
         {
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.PreAnimation,
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.PreSimulation,
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.PostSimulation,
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.ResumeDelayed,
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.Heartbeat,
             PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
+            PipelineStage.InputProcessing,
+            PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals,
             PipelineStage.PreRender,
-            PipelineStage.DrainDeferred
+            PipelineStage.DrainDeferred,
+            PipelineStage.DrainSignals
         };
 
         private readonly IRbxScriptThreadFactory _threadFactory;
@@ -279,6 +320,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             new(ThreadReferenceComparer.Instance);
         private readonly Queue<ThreadRecord> _deferredQueue = new();
         private readonly List<ThreadRecord> _drainBuffer = new();
+        private readonly Queue<SignalInvocation> _signalQueue = new();
+        private readonly List<SignalInvocation> _signalDrainBuffer = new();
         private readonly List<TimedEntry> _delayedBatchBuffer = new();
         private readonly object _completionGate = new();
         private readonly Dictionary<RbxSchedulerCompletion, CompletionWaitEntry>
@@ -294,6 +337,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private bool _advancing;
         private bool _delayedBatchStarted;
         private bool _promotingCompletions;
+        private bool _drainingSignals;
+        private int _currentSignalGeneration;
+        private string[] _currentSignalChain;
+        private string[] _signalCascadeChain;
+        private RbxInstance _currentSignalTombstone;
         private PipelineStage? _currentStage;
 
         /// <summary>Configured per-actor live-thread quota.</summary>
@@ -369,6 +417,15 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return record.Thread;
         }
 
+        /// <summary>Creates a scheduler-owned signal callback with its destruction tombstone scope.</summary>
+        internal IRbxScriptThread SpawnSignal(string ownerModId, object callable, object[] args)
+        {
+            ThreadRecord record = CreateRecord(ownerModId, callable);
+            record.ReadableTombstone = _currentSignalTombstone;
+            ResumeThread(record, CopyArguments(args));
+            return record.Thread;
+        }
+
         /// <summary>Creates a thread for the next deferred resumption point.</summary>
         public IRbxScriptThread Defer(string ownerModId, object callable, object[] args)
         {
@@ -404,6 +461,50 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             WaitEntry entry = new(record, scheduledAt, scheduledAt + duration,
                 GetEarliestTimerFrame(), NextSequence());
             _waitHeap.Add(entry);
+        }
+
+        /// <summary>Marks a running scheduler thread as yielded until its signal's first delivery.</summary>
+        internal void ScheduleSignalWait(IRbxScriptThread caller)
+        {
+            ThreadRecord record = GetSchedulableRecord(caller, "signal:Wait", true);
+            record.State = ThreadScheduleState.WaitingForSignal;
+        }
+
+        /// <summary>Resumes one signal waiter with the arguments captured at fire time.</summary>
+        internal void ResumeSignalWait(IRbxScriptThread caller, object[] arguments)
+        {
+            if (caller == null || !_records.TryGetValue(caller, out ThreadRecord record)
+                || record.State != ThreadScheduleState.WaitingForSignal)
+            {
+                return;
+            }
+
+            record.ReadableTombstone = _currentSignalTombstone;
+            ResumeThread(record, CopyArguments(arguments));
+        }
+
+        /// <summary>Queues one connection invocation for the deferred signal drain.</summary>
+        internal void EnqueueSignalInvocation(RbxScriptConnection connection, object[] arguments,
+            RbxInstance readableTombstone)
+        {
+            if (connection == null || !ReferenceEquals(connection.Scheduler, this))
+            {
+                throw RbxError.BadArgument(
+                    "signal invocation belongs to another scheduler",
+                    "queue each RBXScriptConnection through its owning ModScheduler");
+            }
+
+            int generation = _drainingSignals ? _currentSignalGeneration + 1 : 1;
+            string[] chain = BuildSignalChain(connection.SignalName);
+            if (generation > MaxSignalGenerations)
+            {
+                _signalCascadeChain ??= chain;
+                connection.DropQueuedInvocation();
+                return;
+            }
+
+            _signalQueue.Enqueue(new SignalInvocation(
+                connection, CopyArguments(arguments), readableTombstone, generation, chain));
         }
 
         /// <summary>
@@ -596,8 +697,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 case PipelineStage.ResumeDelayed:
                     ResumeDelayedThreads();
                     return;
+                case PipelineStage.DrainSignals:
+                    DrainSignals();
+                    return;
                 case PipelineStage.Heartbeat:
                     ReachPhase(SchedulerPhase.Heartbeat, deltaSeconds);
+                    return;
+                case PipelineStage.InputProcessing:
+                    ReachPhase(SchedulerPhase.InputProcessing, deltaSeconds);
                     return;
                 case PipelineStage.PreRender:
                     ReachPhase(SchedulerPhase.PreRender, deltaSeconds);
@@ -673,6 +780,71 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             {
                 _deferredQueue.Enqueue(newlyDeferred[index]);
             }
+        }
+
+        private void DrainSignals()
+        {
+            if (_signalQueue.Count == 0)
+            {
+                return;
+            }
+
+            _drainingSignals = true;
+            _signalCascadeChain = null;
+            try
+            {
+                while (_signalQueue.Count > 0)
+                {
+                    int generation = _signalQueue.Peek().Generation;
+                    _currentSignalGeneration = generation;
+                    _signalDrainBuffer.Clear();
+                    while (_signalQueue.Count > 0
+                           && _signalQueue.Peek().Generation == generation)
+                    {
+                        _signalDrainBuffer.Add(_signalQueue.Dequeue());
+                    }
+
+                    for (int index = 0; index < _signalDrainBuffer.Count; index++)
+                    {
+                        SignalInvocation invocation = _signalDrainBuffer[index];
+                        _currentSignalChain = invocation.Chain;
+                        _currentSignalTombstone = invocation.ReadableTombstone;
+                        invocation.Connection.InvokePending(invocation.Arguments);
+                    }
+
+                    if (_signalCascadeChain != null)
+                    {
+                        _signalQueue.Clear();
+                        throw new RbxError(
+                            RbxErrorCode.SignalCascade,
+                            "signal cascade exceeded " + MaxSignalGenerations
+                            + " generations: " + string.Join(" -> ", _signalCascadeChain),
+                            "break the signal cycle or defer the next mutation to a later frame");
+                    }
+                }
+            }
+            finally
+            {
+                _signalDrainBuffer.Clear();
+                _currentSignalGeneration = 0;
+                _currentSignalChain = null;
+                _currentSignalTombstone = null;
+                _signalCascadeChain = null;
+                _drainingSignals = false;
+            }
+        }
+
+        private string[] BuildSignalChain(string signalName)
+        {
+            if (!_drainingSignals || _currentSignalChain == null)
+            {
+                return new[] { signalName };
+            }
+
+            string[] chain = new string[_currentSignalChain.Length + 1];
+            Array.Copy(_currentSignalChain, chain, _currentSignalChain.Length);
+            chain[chain.Length - 1] = signalName;
+            return chain;
         }
 
         private void PromoteCompletedWaits()
@@ -918,7 +1090,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             record.State = ThreadScheduleState.Running;
-            RbxScriptThreadResumeResult result = record.Thread.Resume(arguments ?? EmptyArguments);
+            RbxInstance previousTombstone =
+                RbxScriptSignal.EnterTombstoneScope(record.ReadableTombstone);
+            RbxScriptThreadResumeResult result;
+            try
+            {
+                result = record.Thread.Resume(arguments ?? EmptyArguments);
+            }
+            finally
+            {
+                RbxScriptSignal.ExitTombstoneScope(previousTombstone);
+            }
+
             if (!result.Succeeded)
             {
                 RbxError error = result.Error ?? RbxError.BadArgument(

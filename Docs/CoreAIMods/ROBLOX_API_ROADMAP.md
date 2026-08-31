@@ -279,7 +279,6 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-5 | `task.synchronize/desynchronize` switch Parallel Luau contexts | no-op + once-per-mod log note | Parallel-annotated scripts are otherwise runnable; throwing would fail working code |
 | DEV-6 | global gravity | per-body gravity forces, host `Physics.gravity` untouched | mods coexist with the host game's physics |
 | DEV-7 | destroyed instances stay readable (`Parent` nil + locked, R5.8/R6.2) | member access on a destroyed instance raises `INSTANCE_DESTROYED` — **except** inside destruction-queued handlers (`Destroying`/`AncestryChanged`), which read a **tombstone** (`Name`, `ClassName`, `Parent == nil`; connections gone) | loud errors drive AI self-repair; the tombstone keeps R5.8's observable post-destruction state |
-| DEV-8 | handler invocation order per signal is undocumented (R5.11) | CoreAI **guarantees connect-order** dispatch per handler | stability helps AI-authored code; an undocumented order invites flaky repairs |
 | DEV-9 | legacy `wait`/`spawn`/`delay` have a ~29 ms floor + load-dependent throttling (R4.9) | preserve the **0.029 s minimum delay**, but omit load-dependent throttling | the real floor preserves timing compatibility; deterministic scheduling avoids machine-load-dependent behavior |
 | DEV-10 | `GetAsync`/`UpdateAsync` return a `DataStoreKeyInfo` second value (S1.4/S1.7 — S1.4 is `GetAsync`'s `(value, DataStoreKeyInfo)` tuple; S1.7 is `UpdateAsync`'s transform contract) | second return is `nil` in MVP9 — documented reduced fidelity | version/metadata model not emulated locally; loud stubs cover the explicit version APIs |
 | DEV-11 | `GetAsync` results are cached for 4 s (S1.5) | cache **not emulated** — every `GetAsync` reads the store | the local store is fast; emulating the cache would only add staleness surprises |
@@ -487,10 +486,10 @@ Ordering changes vs. the seed roadmap, with justification:
 
 ### MVP2 — Scheduler, signals, clocks, services framework (detail: §5.2)
 
-- **Current state (partial)**: `ModScheduler`, `task.*` plus the legacy aliases, and the
-  class-aware loud-stub catalog have landed. Deferred signal dispatch, clocks, `ServiceCatalog`,
-  JSON/`HttpService`, loopback remotes, absent-child `WaitForChild` yield, the Tier-A corpus, and
-  the materials catalog remain.
+- **Current state (partial)**: `ModScheduler`, `task.*` plus the legacy aliases, general deferred
+  signal dispatch, yieldable signal handlers, and `ServiceCatalog` with member-access loud stubs
+  have landed. Clocks, JSON/`HttpService`, loopback remotes, absent-child `WaitForChild` yield, the
+  Tier-A corpus, and the materials catalog remain.
 - **Goal**: time and events — `task.*`, `RunService`, the clock surface,
   `RBXScriptSignal`/connections, `game:GetService` with the loud-stub catalog, the materials
   catalog, the shared JSON contract, and loopback remotes. Conformance targets:
@@ -1074,7 +1073,7 @@ public abstract class RbxInstance
     public bool HasTag(string tag);
     public IReadOnlyList<string> GetTags();
 
-    // Signals: properties exist in MVP1, Connect works from MVP2 (loud stub before).
+    // Signals: all use the general deferred Connect/Once/Wait path.
     public RbxScriptSignal ChildAdded { get; }
     public RbxScriptSignal ChildRemoved { get; }
     public RbxScriptSignal DescendantAdded { get; }
@@ -1095,21 +1094,21 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | Class | Lua members shipped by the current release | Planned loud stubs (has rung) | Backlog loud errors (no rung) | Unsupported loud errors (deliberate) |
 |---|---|---|---|---|
 | `Instance` (static) | `Instance.new(className)`; deprecated second `parent` arg accepted with a once-per-mod log | — | `Instance.fromExisting` | — |
-| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; immediate-child `WaitForChild` | absent-child `WaitForChild` → MVP2; generic Instance-tree signals → MVP2 | — | — |
+| `Instance` (members) | §5.1.2 navigation/lifecycle/attributes/tags; immediate-child `WaitForChild`; general Instance-tree signals | absent-child `WaitForChild` → MVP2 | — | — |
 | `Folder` | pure container | — | — | — |
 | `PVInstance` descendants | ancestry/API shape only | `PivotTo`, `GetPivot` → **MVP2 (Model pivot)** | — | — |
 | `Model` | pure container | `PrimaryPart`, `WorldPivot` → **MVP2 (Model pivot)** | — | — |
 | `BasePart`/`Part` | `Position`, `Size`, `CFrame`, `Orientation`, `Rotation`, `Color`, `Transparency`, `Anchored`, `CanCollide`, `Shape` | `Material` → **MVP2 (materials catalog)** ([research](../../dev-docs/MATERIALS_RESEARCH.md)) | `Velocity`, `AssemblyLinearVelocity`, `AssemblyAngularVelocity`, `Massless`, `CanQuery`, `CanTouch`, `CollisionGroup`, `CustomPhysicalProperties`, six legacy surface properties | — |
 | `Workspace` | child navigation; `CurrentCamera`; `SignalBehavior` reads `Enum.SignalBehavior.Deferred` (D4) | inherited `PivotTo`/`GetPivot` → **MVP2 (Model pivot)**; `Raycast`/`Gravity` → MVP8; `GetServerTimeNow` → MVP2 | — | `Terrain`; setting `SignalBehavior` (Deferred-only, D4) |
 | `Camera` | `CFrame`, `CameraType`, `CameraSubject` | — | — | — |
-| `DataModel` (`game`) | class-scoped `GetService`/`FindService`; existing services resolve; unknown names raise `UNKNOWN_SERVICE` | planned service names name their phase; class-scoped `BindToClose` → MVP5 | — | — |
+| `DataModel` (`game`) | class-scoped `GetService`/`FindService`; `GetService` resolves tree-backed services and registered placeholders; placeholder member access raises `NOT_IMPLEMENTED` with its rung; `FindService` returns nil for a registered placeholder not yet resolved; unknown names raise `UNKNOWN_SERVICE` | class-scoped `BindToClose` → MVP5 | — | — |
 | containers | `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer` tree nodes | — | — | — |
 | `Lighting` | structural service/tree node | — | `ClockTime`, `Ambient`, `GeographicLatitude` | — |
-| `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation` | signal `Wait` → MVP2 | — | — |
-| `RunService` | `Heartbeat`, `Stepped`, `RenderStepped` | signal `Wait`; `IsServer`, `IsClient`, `IsRunning`, `IsStudio`, `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
-| `ClickDetector` | `MouseClick`, `MouseHoverEnter`, `MouseHoverLeave`, `MaxActivationDistance` | signal `Wait` → MVP2 | — | — |
+| `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`; signal `Wait` | — | — | — |
+| `RunService` | `Heartbeat`, `Stepped`, `RenderStepped`; signal `Wait` | `IsServer`, `IsClient`, `IsRunning`, `IsStudio`, `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
+| `ClickDetector` | `MouseClick`, `MouseHoverEnter`, `MouseHoverLeave`, `MaxActivationDistance`; signal `Wait` | — | — | — |
 | `InputObject` | read-only `KeyCode`, `UserInputType`, `UserInputState`, `Position`, `Delta` | — | — | — |
-| `RBXScriptSignal` | `Connect`/`Once` on RunService, UserInputService, and ClickDetector signals | `Connect`/`Once` on generic Instance-tree signals; `Wait` on every signal → MVP2 | — | — |
+| `RBXScriptSignal` | deferred `Connect`/`Once`/`Wait` on every shipped signal; handlers may yield with `task.wait` | — | — | — |
 | `RBXScriptConnection` | read-only `Connected`; `Disconnect()` | — | — | — |
 
 The concurrently wired end state is now verified: `GetService`/`FindService` are scoped to
@@ -1232,9 +1231,8 @@ records its C# marker; scheduled stubs normally use `// TODO: MVP<n> — ...`.
 | backlog | BasePart velocity, mass, collision-query, physical-properties, and legacy-surface members listed in §5.1.3 | known member; no rung assigned | `ClassCatalog` |
 | backlog | `Lighting.ClockTime/Ambient/GeographicLatitude` | known member; no rung assigned | `ClassCatalog` |
 | unsupported | `Workspace.Terrain` | deliberate non-goal; use Parts | `ClassCatalog` |
-| planned | generic Instance-tree signal `Connect/Once/Wait`; `Wait` on dispatch-enabled signals | MVP2 scheduler/deferred signals | `RbxScriptSignal` |
 | planned | absent-child `WaitForChild` | MVP2 scheduler yield | Lua binding |
-| planned | `game:GetService(plannedName)`; `game:BindToClose` | per-service phase; MVP5 | DataModel binding |
+| planned | `game:BindToClose` | MVP5 | DataModel binding |
 | backlog | `Instance.fromExisting` | not scheduled; use `Clone()` | Lua binding |
 
 The concurrent end state moves `Workspace.SignalBehavior` out of the catalog's planned row: reads
@@ -1454,7 +1452,9 @@ Notes:
 - Signals: `:Connect(fn) → RBXScriptConnection`, `:Once(fn)`, `:Wait() → ...`,
   `connection.Connected`, `connection:Disconnect()` — dispatch per R5.x. All MVP1 Instance
   signals now live (`ChildAdded`, `Destroying`, `GetPropertyChangedSignal`,
-  `GetAttributeChangedSignal`, …).
+  `GetAttributeChangedSignal`, …). Every signal uses the same deferred path: firing only queues
+  handlers, which run at the next script-resumption point. Signal handlers are scheduler-owned
+  and may call `task.wait()`. Handler order across multiple connections is not guaranteed (R5.11).
 - **Shared JSON contract**: `RobloxJson` — one table↔JSON mapping (empty-table→`{}` vs `[]`
   rule, `null` handling, number formatting, string escapes — per the M-doc serialization
   appendix and S-rules) with `HttpService:JSONEncode(value) → string` and
@@ -1462,16 +1462,17 @@ Notes:
   the remote payload path (below, and Mirror in MVP11) reuse this exact component — one
   serialization semantics everywhere. The rest of `HttpService` (`GetAsync`, `RequestAsync`)
   stays loud-stubbed as not-planned (no open internet egress — Non-goals).
-- `game:GetService(name)`: implemented services in MVP2 — `RunService`, `Workspace`,
-  `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `HttpService` (JSON members
-  only). Registered stubs (return stub object; error on member access): `Players` (→MVP8),
-  `TweenService` (→MVP8), `Debris` (→MVP8), `DataStoreService` (→MVP9), `UserInputService`
-  (→MVP10), `ContextActionService` (→MVP10), `SoundService` (→MVP15), `CollectionService`
-  (→MVP8, tags already work on Instance), `AIService` (phase "reserved — future MVP", hint
-  "CoreAI agent/chat access from Lua is planned; not yet scriptable" — §2 AI-call
-  reservations), `PathfindingService`, `MarketplaceService` (both:
-  phase "not planned", honest hint). Unknown name: `UNKNOWN_SERVICE` — message text matches
-  Roblox: `X is not a valid Service name`.
+- `game:GetService(name)`: tree-backed services in the standard runtime are `Workspace`,
+  `Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
+  `UserInputService`, and `RunService`. Registered placeholder names also resolve, but return a
+  placeholder whose first member access raises `NOT_IMPLEMENTED` with its catalog rung:
+  `HttpService` (MVP2); `Players`, `TweenService`, `CollectionService`, and `Debris` (MVP8);
+  `DataStoreService` (MVP9); `ContextActionService` (MVP10); `SoundService` (MVP15);
+  `AIService` (`a future MVP (reserved)`); and `PathfindingService`/`MarketplaceService`
+  (`no planned MVP (not planned)`). `ServiceCatalog` also retains fallback registrations for
+  `RunService` (MVP2) and `UserInputService` (MVP10), which the normal game tree replaces with
+  the live implementations. Unknown names still raise `UNKNOWN_SERVICE` at resolution with the
+  Roblox-shaped message `X is not a valid Service name`.
 - Remotes (loopback via `NullNetworkBridge`): `Instance.new("RemoteEvent")` under
   `ReplicatedStorage`; `:FireServer(...)`, `:FireClient(player, ...)`, `:FireAllClients(...)`,
   `OnServerEvent(player, ...)`, `OnClientEvent(...)` [^5]; `UnreliableRemoteEvent` same
@@ -1567,7 +1568,7 @@ even raw VM tracebacks resolve to the owning mod. Until then errors surface with
 
 | Risk | Mitigation |
 |---|---|
-| Deferred queue reorders where corpus scripts assumed immediate | corpus gate catches it; per-drain generation cap (R5.6) keeps cascades diagnosable; the skill states ordering guarantees (FIFO per signal; connect-order per handler is a **CoreAI guarantee**, DEV-8 — Roblox leaves order undocumented, R5.11) |
+| Deferred queue reorders where corpus scripts assumed immediate | corpus gate catches it; per-drain generation cap (R5.6) keeps cascades diagnosable; author docs warn that multi-connection handler order is not guaranteed (R5.11) |
 | Scheduler heap churn / GC in Heartbeat | binary heap keyed by resume-time, pooled nodes; zero-alloc drain measured in MVP2 tests, budget ≤ 1 KB/frame steady-state |
 | `signal:Wait()` leaks threads if the signal never fires | threads owned by mod → reaped on unload; `Wait` counts against the mod's live-thread cap (default 256, `THREAD_CAP` error beyond) |
 | Loopback remotes hide serialization cost | payloads always round-trip `RobloxJson` bytes (§5.2.5), perf measured in MVP17 |
@@ -1769,7 +1770,7 @@ Tests that pin a recorded DEV decision use the `DEV<n>_` prefix in the same way 
 - Full Roblox fidelity: R15/R6 rigs, `MarketplaceService`, avatar/catalog systems, real
   DataStore cloud semantics (versioning, ordered stores), Parallel Luau actors, Terrain,
   `HttpService` open internet access (CoreAI's own AI backend is the only network egress;
-  `HttpService` ships JSON members only).
+  when its planned MVP2 surface lands, `HttpService` will expose JSON members only).
 - Copying any Roblox code, assets, or documentation text — API *shape* compatibility only;
   corpus scripts are written from scratch.
 - A Studio-like 3D editing UI. CoreAI's editor is conversation + Hub + (optionally) Unity.

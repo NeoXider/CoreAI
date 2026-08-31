@@ -351,10 +351,9 @@ namespace CoreAI.Ai.LuaCs
     /// Lua member dispatch for <see cref="RbxInstance"/> proxies (roadmap §5.1.3): properties,
     /// navigation, lifecycle, attributes, tags, child-by-name sugar, ServiceProvider members on
     /// the DataModel, BasePart spatial/appearance properties over the part-property sink, and loud
-    /// stubs for the surface that lands in later slices (signals/WaitForChild yield → MVP2).
+    /// stubs for surface that lands in later slices (including absent-child WaitForChild yield).
     /// Destroyed instances follow DEV-7 at the Lua boundary: every member access raises
-    /// INSTANCE_DESTROYED (the tombstone exception applies only inside destruction-queued handlers,
-    /// which arrive with the MVP2 signal system).
+    /// INSTANCE_DESTROYED except for Name/ClassName/Parent inside destruction-queued handlers.
     /// </summary>
     internal static class LuaCsRbxInstanceBindings
     {
@@ -382,6 +381,7 @@ namespace CoreAI.Ai.LuaCs
                 RbxInstance self = Self(ctx, context);
                 string key = ReadString(ctx, 1, "Instance member access");
                 ThrowIfDestroyedForLua(self, key);
+                ThrowIfStubServiceForLua(self, key);
 
                 switch (key)
                 {
@@ -389,17 +389,17 @@ namespace CoreAI.Ai.LuaCs
                     case "ClassName": return self.ClassName;
                     case "Parent": return context.WrapInstance(self.Parent);
                     case "Archivable": return self.Archivable;
-                    case "ChildAdded": return LuaCsRbxDatatypeBindings.Wrap(self.ChildAdded);
-                    case "ChildRemoved": return LuaCsRbxDatatypeBindings.Wrap(self.ChildRemoved);
+                    case "ChildAdded": return LuaCsRbxDatatypeBindings.Wrap(self.ChildAdded, context);
+                    case "ChildRemoved": return LuaCsRbxDatatypeBindings.Wrap(self.ChildRemoved, context);
                     case "DescendantAdded":
-                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantAdded);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantAdded, context);
                     case "DescendantRemoving":
-                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantRemoving);
-                    case "Destroying": return LuaCsRbxDatatypeBindings.Wrap(self.Destroying);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.DescendantRemoving, context);
+                    case "Destroying": return LuaCsRbxDatatypeBindings.Wrap(self.Destroying, context);
                     case "AncestryChanged":
-                        return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged, context);
                     case "AttributeChanged":
-                        return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged);
+                        return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged, context);
                 }
 
                 if (methods.TryGetValue(key, out RbxMethodBinding method)
@@ -454,13 +454,14 @@ namespace CoreAI.Ai.LuaCs
                 throw RbxError.BadArgument(
                     key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
                     "use FindFirstChild(\"" + key + "\") for children that may not exist yet");
-            });
+            }, context);
 
             meta[Metamethods.NewIndex] = Fn("Instance.__newindex", ctx =>
             {
                 RbxInstance self = Self(ctx, context);
                 string key = ReadString(ctx, 1, "Instance member assignment");
                 LuaValue value = Arg(ctx, 2);
+                ThrowIfStubServiceForLua(self, key);
 
                 switch (key)
                 {
@@ -527,14 +528,15 @@ namespace CoreAI.Ai.LuaCs
                     key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
                     "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
                     "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
-            });
+            }, context);
 
             meta[Metamethods.Eq] = Fn("Instance.__eq", ctx =>
                 TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy a)
                 && TryGetInstance(Arg(ctx, 1), out LuaCsRbxInstanceProxy b)
-                && ReferenceEquals(a.Instance, b.Instance));
+                && ReferenceEquals(a.Instance, b.Instance), context);
 
-            meta[Metamethods.ToString] = Fn("Instance.__tostring", ctx => Self(ctx, context).Name);
+            meta[Metamethods.ToString] = Fn(
+                "Instance.__tostring", ctx => Self(ctx, context).Name, context);
             return Lock(meta);
         }
 
@@ -550,7 +552,7 @@ namespace CoreAI.Ai.LuaCs
                         RbxInstance self = Self(ctx, context);
                         ThrowIfDestroyedForLua(self, name);
                         return body(ctx, self);
-                    }));
+                    }, context));
                 methods[name] = new RbxMethodBinding(value, declaringClassName);
             }
 
@@ -700,9 +702,9 @@ namespace CoreAI.Ai.LuaCs
                 return new LuaValue(table);
             });
             Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
-                self.GetAttributeChangedSignal(ReadString(ctx, 1, "GetAttributeChangedSignal"))));
+                self.GetAttributeChangedSignal(ReadString(ctx, 1, "GetAttributeChangedSignal")), context));
             Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
-                self.GetPropertyChangedSignal(ReadString(ctx, 1, "GetPropertyChangedSignal"))));
+                self.GetPropertyChangedSignal(ReadString(ctx, 1, "GetPropertyChangedSignal")), context));
 
             // ---- ServiceProvider (DataModel) ----
             Method("GetService", (ctx, self) => context.WrapInstance(
@@ -740,7 +742,7 @@ namespace CoreAI.Ai.LuaCs
                 "call instance methods with a colon, e.g. workspace:FindFirstChild(\"Part\")");
         }
 
-        /// <summary>DEV-7 at the Lua boundary: destroyed instances read as errors, not tombstones.</summary>
+        /// <summary>Enforces DEV-7, including the destruction-handler tombstone exception.</summary>
         // WHY: services (UserInputService/Lighting/Workspace/…) and the canonical Camera are
         // world-lifetime singletons; the lifecycle bindings refuse to Clone/Destroy them so one mod
         // cannot brick a shared service for every other mod.
@@ -751,9 +753,21 @@ namespace CoreAI.Ai.LuaCs
 
         private static void ThrowIfDestroyedForLua(RbxInstance instance, string memberName)
         {
-            if (instance.IsDestroyed)
+            bool tombstoneMember = memberName == "Name"
+                                   || memberName == "ClassName"
+                                   || memberName == "Parent";
+            if (instance.IsDestroyed
+                && !(tombstoneMember && RbxScriptSignal.CanReadTombstone(instance)))
             {
                 throw RbxError.InstanceDestroyed(memberName, instance.Name, instance.Id);
+            }
+        }
+
+        private static void ThrowIfStubServiceForLua(RbxInstance instance, string memberName)
+        {
+            if (instance is RbxStubService stubService)
+            {
+                throw stubService.MemberAccessError(memberName);
             }
         }
 
@@ -953,6 +967,9 @@ namespace CoreAI.Ai.LuaCs
                 case "Shape":
                     value = WrapPartType(context, properties.Shape);
                     return true;
+                case "Material":
+                    value = WrapMaterial(context, properties.Material);
+                    return true;
                 case "Position":
                     value = LuaCsRbxDatatypeBindings.Wrap(properties.Position);
                     return true;
@@ -1011,6 +1028,11 @@ namespace CoreAI.Ai.LuaCs
                 case "Shape":
                     context.RequireWorldEditForWrite(self, "Shape");
                     sink.SetShape(id, ReadPartShapeValue(value));
+                    return true;
+                case "Material":
+                    context.RequireWorldEditForWrite(self, "Material");
+                    RbxMaterialId material = ReadMaterialValue(value);
+                    sink.SetMaterial(id, in material);
                     return true;
                 case "Position":
                     context.RequireWorldEditForWrite(self, "Position");
@@ -1090,6 +1112,30 @@ namespace CoreAI.Ai.LuaCs
                 "Part.Shape assignment expects an Enum.PartType item",
                 "pass Enum.PartType.Block/Ball/Cylinder/Wedge/CornerWedge, got "
                 + Describe(value));
+        }
+
+        /// <summary>Part.Material as its interned Enum.Material item.</summary>
+        private static LuaValue WrapMaterial(LuaCsRbxModContext context, in RbxMaterialId material)
+        {
+            if (context.Bindings.Enums.TryGet("Material", out RbxEnum materialType)
+                && materialType.TryGetItemByValue(material.Value, out RbxEnumItem item))
+            {
+                return LuaCsRbxDatatypeBindings.Wrap(item);
+            }
+
+            return LuaValue.Nil;
+        }
+
+        private static RbxMaterialId ReadMaterialValue(LuaValue value)
+        {
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "Material")
+            {
+                return new RbxMaterialId(item.Name, item.Value);
+            }
+
+            throw RbxError.BadArgument(
+                "Part.Material assignment expects an Enum.Material item",
+                "pass an item like Enum.Material.Plastic/Neon/Wood, got " + Describe(value));
         }
 
         // ---- UserInputService (input signals + poll surface over IInputSource) ---------------

@@ -54,6 +54,77 @@ The mod-core + inter-mod API above is always present. Tiers gate the **game** bi
   stripped on network clients. Opt-in ("Enable Full Lua Access"); NOT part of `All`.
 A binding absent from your tier simply doesn't exist in the sandbox (calling it errors).
 
+## Roblox-style signals and scheduling
+
+Every `RbxScriptSignal` uses deferred dispatch. Firing an event queues its connected handlers;
+it never runs them at the mutation or engine callback that fired the event. CoreAI drains that
+queue at every script-resumption point in its frame loop, so a handler runs at the next resumption
+point. This matches Roblox's recommended `Deferred` behavior and the default for new Roblox
+templates.
+
+Signal handlers are scheduler-owned threads and may yield with `task.wait()`:
+
+```lua
+local handled = false
+
+workspace.ChildAdded:Connect(function(child)
+    handled = true
+    task.wait(0.25)
+    print("resumed for", child.Name)
+end)
+
+local folder = Instance.new("Folder")
+folder.Parent = workspace
+-- handled is still false here; the handler has not reached a resumption point yet.
+```
+
+Do not depend on the relative invocation order of multiple connections to the same signal. That
+order is not part of the CoreAI or Roblox authoring contract.
+
+## Roblox services and deferred placeholders
+
+In the standard runtime, `game:GetService()` resolves these tree-backed services: `Workspace`,
+`Lighting`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
+`UserInputService`, and `RunService`. A tree-backed service can still have service-specific members
+that have not landed; resolution alone does not promise that every Roblox member exists.
+
+A known catalog service without an implementation also resolves successfully. It returns a
+placeholder, and the first member read, write, or method lookup raises `NOT_IMPLEMENTED` with the
+delivery rung recorded by `ServiceCatalog`:
+
+| Service | Catalog delivery rung |
+|---|---|
+| `HttpService` | MVP2 |
+| `Players` | MVP8 |
+| `TweenService` | MVP8 |
+| `CollectionService` | MVP8 |
+| `Debris` | MVP8 |
+| `DataStoreService` | MVP9 |
+| `ContextActionService` | MVP10 |
+| `SoundService` | MVP15 |
+| `AIService` | a future MVP (reserved) |
+| `PathfindingService` | no planned MVP (not planned) |
+| `MarketplaceService` | no planned MVP (not planned) |
+
+The catalog also retains fallback registrations for `RunService` (MVP2) and `UserInputService`
+(MVP10). The standard runtime replaces those fallbacks with their live tree-backed implementations
+before returning them.
+
+This delayed failure is intentional. Roblox scripts commonly acquire services at the top of a file
+but use them only in a later code path. Failing during `GetService()` would prevent the file from
+loading and stop unrelated supported code from running. For example:
+
+```lua
+local TweenService = game:GetService("TweenService") -- resolves
+
+print("unrelated setup still runs")
+
+-- The first member lookup fails loudly and names MVP8.
+TweenService:Create(...)
+```
+
+An unknown, unregistered name still fails immediately at `GetService()` with `UNKNOWN_SERVICE`.
+
 ## Coroutines (work across frames, WebGL-safe)
 `coroutine.create/resume/yield/status` are available. A coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this

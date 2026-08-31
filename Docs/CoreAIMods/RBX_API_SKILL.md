@@ -36,16 +36,18 @@ The Rbx Lua bindings themselves live in `Assets/CoreAIMods/Runtime/Scripting/Lua
 (namespaces `CoreAI.Mods.Rbx.*`, assemblies `CoreAI.RbxApi.*`) and are enabled through
 `LuaCsModStackOptions.RobloxApi`, which the same installer wires by default.
 
-## What is NOT implemented yet
+## Current shipped scheduler, signal, and service behavior
 
-The skill documents only the surface that actually runs today. The following raise a loud
-`NOT_IMPLEMENTED` error and are intentionally excluded from the reference: the `task` scheduler
-(`task.wait`/`spawn`/`defer`/`delay`/`cancel`), signal connections
-(`instance.ChildAdded:Connect`/`:Once`/`:Wait`), yielding `WaitForChild`, `Model:PivotTo`/
-`GetPivot`, `Instance.fromExisting`, the BasePart `Shape`/`Material`/`Orientation`/`Rotation`
-properties, and every enum outside `Material`/`PartType`/`NormalId`/`Axis`/`RotationOrder`.
-Luau-only syntax (`+=`, `continue`, backtick string interpolation, type annotations) is also not
-accepted — scripts must be plain Lua 5.2.
+The `task` scheduler and general `RbxScriptSignal` connections now run in the shipped runtime.
+Every signal is deferred: firing queues handlers, and handlers run at the next script-resumption
+point rather than at the fire site. A handler may call `task.wait()` and resume later on its owning
+scheduler thread. Multiple connections to one signal have no documented invocation order; scripts
+must not depend on connection order.
+
+`game:GetService()` also resolves registered placeholder services without failing the file's setup code.
+The first member access on an unimplemented service raises `NOT_IMPLEMENTED` and names its delivery
+rung. See the exact current service table and author-facing examples in
+[`mod-authoring.md`](mod-authoring.md#roblox-services-and-deferred-placeholders).
 
 For the full picture of what has landed and what is planned, see
 [`ROBLOX_API_ROADMAP.md`](ROBLOX_API_ROADMAP.md).

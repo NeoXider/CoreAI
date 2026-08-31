@@ -290,10 +290,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                 "defer-Delayed",
                 "Heartbeat",
                 "defer-Heartbeat",
+                "InputProcessing",
+                "defer-InputProcessing",
                 "PreRender",
                 "defer-PreRender"
             }, order);
-            Assert.AreEqual(7, factory.Created.Count);
+            Assert.AreEqual(8, factory.Created.Count);
             Assert.AreEqual(0.016d, timeSource.CurrentTime, 0.000001d);
         }
 
@@ -391,15 +393,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual(1L, resumedFrames["PostSimulation"]);
             Assert.IsFalse(resumedFrames.ContainsKey("Delayed"));
             Assert.IsFalse(resumedFrames.ContainsKey("Heartbeat"));
+            Assert.IsFalse(resumedFrames.ContainsKey("InputProcessing"));
             Assert.IsFalse(resumedFrames.ContainsKey("PreRender"));
 
             scheduler.Advance(0.016d);
 
             Assert.AreEqual(2L, resumedFrames["Delayed"]);
             Assert.AreEqual(2L, resumedFrames["Heartbeat"]);
+            Assert.AreEqual(2L, resumedFrames["InputProcessing"]);
             Assert.AreEqual(2L, resumedFrames["PreRender"]);
-            Assert.AreEqual(6, resumedFrames.Count);
-            Assert.AreEqual(7, factory.Created.Count);
+            Assert.AreEqual(7, resumedFrames.Count);
+            Assert.AreEqual(8, factory.Created.Count);
             Assert.AreEqual(0.032d, timeSource.CurrentTime, 0.000001d);
         }
 
@@ -447,6 +451,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                         break;
                     case SchedulerPhase.Heartbeat:
                         scheduler.ScheduleWait(heartbeat, 0d);
+                        break;
+                    case SchedulerPhase.InputProcessing:
                         break;
                     case SchedulerPhase.PreRender:
                         scheduler.ScheduleWait(preRender, 0d);
@@ -510,6 +516,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                 "PostSimulation",
                 "Delayed",
                 "Heartbeat",
+                "InputProcessing",
                 "PreRender"
             }, order);
             Assert.AreEqual(1, factory.Created.Count);
@@ -537,10 +544,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
                 SchedulerPhase.PreSimulation,
                 SchedulerPhase.PostSimulation,
                 SchedulerPhase.Heartbeat,
+                SchedulerPhase.InputProcessing,
                 SchedulerPhase.PreRender
             }, phases);
             CollectionAssert.AreEqual(
-                new[] { 0.033d, 0.033d, 0.033d, 0.033d, 0.033d }, deltas);
+                new[] { 0.033d, 0.033d, 0.033d, 0.033d, 0.033d, 0.033d }, deltas);
             Assert.AreEqual(0, factory.Created.Count);
             Assert.AreEqual(0.033d, timeSource.CurrentTime, 0.000001d);
         }

@@ -46,8 +46,12 @@ namespace CoreAI.Ai.LuaCs
             local scheduleTaskWait = task.wait
             local scheduleLegacyWait = wait
             local resumeValue = task._resumeValue
+            local scheduleSignalWait = task._scheduleSignalWait
+            local signalResumeValues = task._signalResumeValues
             local realtime = task._realtime
             task._resumeValue = nil
+            task._scheduleSignalWait = nil
+            task._signalResumeValues = nil
             task._realtime = nil
             task.wait = function(duration)
                 scheduleTaskWait(duration)
@@ -58,6 +62,12 @@ namespace CoreAI.Ai.LuaCs
                 scheduleLegacyWait(duration)
                 coroutine.yield()
                 return resumeValue(), realtime()
+            end
+            task._signalWaitBridge = function(signal)
+                scheduleSignalWait(signal)
+                coroutine.yield()
+                local values = signalResumeValues()
+                return table.unpack(values, 1, values.n)
             end";
 
         private readonly IScriptEngine _scriptEngine;

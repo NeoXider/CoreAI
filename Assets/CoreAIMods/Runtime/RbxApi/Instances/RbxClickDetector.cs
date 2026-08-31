@@ -5,9 +5,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// clicks that part with the mouse (the host picks the part under the cursor each frame and fires
     /// the hit part's detector — see the pick pump in the bindings layer). MouseHoverEnter/
     /// MouseHoverLeave exist for parity; the pick pump leaves them unfired in this slice.
-    /// State is driven by the host: <see cref="MouseClick"/> is a dispatch-enabled signal fired by
-    /// C# (mirroring <see cref="RbxRunService"/>'s Heartbeat), so a mod does
-    /// <c>cd.MouseClick:Connect(function() ... end)</c> and runs that handler on the click frame.
+    /// State is driven by the host: <see cref="MouseClick"/> is fired by C# and uses the same
+    /// deferred scheduler dispatch as every other signal.
     /// </summary>
     public sealed class RbxClickDetector : RbxInstance
     {
@@ -22,17 +21,17 @@ namespace CoreAI.Mods.Rbx.Instances
         // TODO: pass the clicking player once a Players service lands.
         /// <summary>Fires (no args) when the owning part is clicked within MaxActivationDistance.</summary>
         public RbxScriptSignal MouseClick { get; } =
-            new("ClickDetector.MouseClick", true);
+            new("ClickDetector.MouseClick");
 
         /// <summary>Fires when the cursor enters the owning part's hover range. Parity hook; the
         /// MVP pick pump does not fire it yet.</summary>
         public RbxScriptSignal MouseHoverEnter { get; } =
-            new("ClickDetector.MouseHoverEnter", true);
+            new("ClickDetector.MouseHoverEnter");
 
         /// <summary>Fires when the cursor leaves the owning part's hover range. Parity hook; the
         /// MVP pick pump does not fire it yet.</summary>
         public RbxScriptSignal MouseHoverLeave { get; } =
-            new("ClickDetector.MouseHoverLeave", true);
+            new("ClickDetector.MouseHoverLeave");
 
         /// <summary>Roblox ClickDetector.MaxActivationDistance (studs, default 32): a click farther
         /// than this from the camera does not fire MouseClick.</summary>

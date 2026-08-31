@@ -97,11 +97,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         {
             RbxInstance part = _host.Registry.Create("Part");
             part.Parent = _host.Registry.WorldRoot;
+            RbxInstance camera = _host.Registry.WorldRoot.FindFirstChildOfClass("Camera");
+            Assert.IsNotNull(camera, "the canonical Camera must exist before teardown");
+            Assert.IsTrue(_host.Binder.TryGetBoundObject(camera.Id, out GameObject cameraGo),
+                "the canonical Camera must already be materialized before teardown");
 
             Object.DestroyImmediate(_hostGo);
             _hostGo = null;
 
             Assert.IsTrue(part.IsDestroyed, "host teardown must destroy world instances");
+            Assert.IsTrue(camera.IsDestroyed, "host teardown must destroy the canonical Camera instance");
+            Assert.IsTrue(cameraGo == null,
+                "Unity must destroy the existing Camera backing object with the host");
         }
     }
 }

@@ -377,13 +377,35 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_GetService_PlannedService_RaisesPhaseNamingStub()
+        public void Lua_GetService_PlannedService_DefersPhaseNamingStubUntilMemberAccess()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            // WHY: RunService is implemented now; HttpService is still an MVP2-gated planned service.
-            Exception ex = LoadFails(stack, "m", "game:GetService('HttpService')");
+            // WHY: top-of-file GetService calls must not block unrelated script initialization;
+            // the loud failure belongs to the line that first uses the missing service surface.
+            stack.Runtime.LoadMod("resolve-only", @"
+                local TweenService = game:GetService('TweenService')
+                assert(TweenService ~= nil)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("resolve-only"));
+
+            Exception ex = LoadFails(stack, "member-access", @"
+                local TweenService = game:GetService('TweenService')
+                TweenService:Create()");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("MVP2", FullText(ex));
+            StringAssert.Contains("TweenService:Create", FullText(ex));
+            StringAssert.Contains("MVP8", FullText(ex));
+        }
+
+        [Test]
+        public void Lua_PlannedStub_ProductionPathCarriesModIdAndSourceLine()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            Exception ex = LoadFails(stack, "stub-context", @"
+                local missing = 'NeverThere'
+                workspace:WaitForChild(missing)");
+            string fullText = FullText(ex);
+            StringAssert.Contains("[mod:stub-context script:main.lua line:3]", fullText);
+            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
+            StringAssert.Contains("MVP2", fullText);
         }
 
         [Test]
@@ -997,16 +1019,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_BasePartMaterial_LoudStubNamesMvp2Catalog()
+        public void Lua_BasePartMaterial_SetAndReadBackEnumMaterialThroughProductionPath()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m", @"
+            stack.Runtime.LoadMod("m", @"
                 local p = Instance.new('Part')
-                p.Material = Enum.Material.Wood");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("BasePart.Material", FullText(ex));
-            StringAssert.Contains("MVP2 (materials catalog)", FullText(ex));
-            StringAssert.Contains("Color / Transparency", FullText(ex));
+                p.Material = Enum.Material.Wood
+                assert(p.Material == Enum.Material.Wood)
+                assert(p.Material.Name == 'Wood')
+                assert(p.Material.Value == 512)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
         [TestCase(
@@ -1220,13 +1242,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_SignalConnect_LoudStubNamesMvp2()
+        public void Lua_SignalConnect_UsesGeneralDeferredSurface()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m",
-                "workspace.ChildAdded:Connect(function() end)");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("MVP2", FullText(ex));
+            stack.Runtime.LoadMod("m", "workspace.ChildAdded:Connect(function() end)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
         [Test]

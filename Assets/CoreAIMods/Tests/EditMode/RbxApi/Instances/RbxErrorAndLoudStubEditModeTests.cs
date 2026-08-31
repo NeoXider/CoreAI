@@ -55,15 +55,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
-        public void SignalConnect_IsALoudStubNamingMvp2()
+        public void SignalConnect_NoLongerUsesMvp2Stub()
         {
             InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");
 
             RbxError connect = Assert.Throws<RbxError>(() => part.ChildAdded.Connect(null));
-            Assert.AreEqual(RbxErrorCode.NotImplemented, connect.Code);
-            StringAssert.Contains("MVP2", connect.RawMessage);
-            StringAssert.Contains("ChildAdded", connect.RawMessage);
+            Assert.AreEqual(RbxErrorCode.BadArgument, connect.Code);
+            StringAssert.DoesNotContain("NOT_IMPLEMENTED", connect.Message);
 
             Assert.Throws<RbxError>(() => part.Destroying.Once(null));
             Assert.Throws<RbxError>(() => part.AttributeChanged.Wait());
@@ -72,7 +71,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
-        public void SignalProperties_ExistAsInertHookPoints()
+        public void SignalProperties_ExistAsCachedLiveHookPoints()
         {
             InstanceRegistry registry = new();
             RbxInstance part = registry.Create("Part");

@@ -152,6 +152,22 @@ namespace CoreAI.Ai.LuaCs
                 _runService.Parent = _game;
             }
 
+            if (_userInputService != null)
+            {
+                _userInputService.InputBegan.BindScheduler(_scheduler);
+                _userInputService.InputEnded.BindScheduler(_scheduler);
+                _userInputService.InputChanged.BindScheduler(_scheduler);
+            }
+
+            if (_runService != null)
+            {
+                _runService.Heartbeat.BindScheduler(_scheduler);
+                _runService.Stepped.BindScheduler(_scheduler);
+                _runService.RenderStepped.BindScheduler(_scheduler);
+            }
+
+            _scheduler.PhaseReached += PumpSchedulerPhase;
+
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
             if (_enums.TryGet("CameraType", out RbxEnum cameraType)
                 && cameraType.TryGetItem("Custom", out RbxEnumItem custom))
@@ -287,11 +303,23 @@ namespace CoreAI.Ai.LuaCs
             return _schedulerThreadFactory.ResolveOwnerState(fallbackState);
         }
 
+        internal object CaptureSignalCallable(LuaState ownerState, LuaValue callable)
+        {
+            return _schedulerThreadFactory.CaptureCallable(ownerState, callable);
+        }
+
+        internal void SpawnSignalHandler(LuaCsRbxModContext context,
+            object callable, object[] arguments)
+        {
+            string ownerModId = RequireTaskOwner(context);
+            TrackScheduledThread(context, _scheduler.SpawnSignal(
+                ownerModId, callable, arguments));
+        }
+
         /// <summary>
         /// Per-frame input pump: polls the input source, diffs, and fires
-        /// InputBegan/InputEnded/InputChanged after the Heartbeat signal.
+        /// InputBegan/InputEnded/InputChanged at the scheduler's input-processing boundary.
         /// </summary>
-        // TODO: MVP2 — the general signal scheduler replaces this pump.
         public void PumpInput()
         {
             _userInputService?.Step();
@@ -300,7 +328,6 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Fires legacy Stepped at the scheduler's PreSimulation boundary.
         /// </summary>
-        // TODO: MVP2 — the general signal scheduler replaces this pump.
         public void PumpPreSimulation(float dt)
         {
             if (_runService == null || _runService.IsDestroyed)
@@ -315,7 +342,7 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        /// <summary>Fires legacy Heartbeat, then polls input at the scheduler Heartbeat boundary.</summary>
+        /// <summary>Fires legacy Heartbeat at the scheduler Heartbeat boundary.</summary>
         public void PumpHeartbeat(float dt)
         {
             if (_runService != null && !_runService.IsDestroyed
@@ -324,7 +351,6 @@ namespace CoreAI.Ai.LuaCs
                 _runService.Heartbeat.Fire(dt);
             }
 
-            PumpInput();
         }
 
         /// <summary>Fires legacy RenderStepped and completes click picking at PreRender.</summary>
@@ -344,7 +370,16 @@ namespace CoreAI.Ai.LuaCs
         {
             PumpPreSimulation(dt);
             PumpHeartbeat(dt);
+            PumpInput();
             PumpPreRender(dt);
+        }
+
+        private void PumpSchedulerPhase(SchedulerPhase phase, double deltaSeconds)
+        {
+            if (phase == SchedulerPhase.InputProcessing)
+            {
+                PumpInput();
+            }
         }
 
         /// <summary>
@@ -610,10 +645,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 return context.WrapInstance(instance);
-            });
+            }, context);
             // TODO: backlog — Instance.fromExisting (not scheduled; Clone covers the corpus).
             t["fromExisting"] = Fn("Instance.fromExisting", _ => throw RbxError.NotImplemented(
-                "Instance.fromExisting", "no planned MVP (backlog)", "use instance:Clone() instead"));
+                "Instance.fromExisting", "no planned MVP (backlog)", "use instance:Clone() instead"),
+                context);
             return new LuaValue(t);
         }
 
@@ -625,6 +661,10 @@ namespace CoreAI.Ai.LuaCs
                 context, ctx, "task.wait", 0d, false));
             t["_resumeValue"] = Fn("task._resumeValue", ctx =>
                 ReadWaitResumeValue(context, ctx));
+            t["_scheduleSignalWait"] = Fn("task._scheduleSignalWait", ctx =>
+                ScheduleSignalWait(context, ctx));
+            t["_signalResumeValues"] = Fn("task._signalResumeValues", ctx =>
+                ReadSignalResumeValues(context, ctx));
             t["_realtime"] = Fn("task._realtime", _ =>
                 LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble));
             t["spawn"] = Fn("task.spawn", ctx => WrapTaskThread(
@@ -783,6 +823,84 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 return LuaCsValueMarshaller.Unbox(elapsed);
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaValue ScheduleSignalWait(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                if (!TryUnbox(Arg(ctx, 0), out RbxScriptSignal signal))
+                {
+                    throw RbxError.BadArgument(
+                        "signal:Wait expects an RBXScriptSignal as self",
+                        "call signal methods with a colon, e.g. part.ChildAdded:Wait()");
+                }
+
+                IRbxScriptThread caller = _schedulerThreadFactory.CurrentThread;
+                if (!(caller is LuaCsRbxScriptThread luaThread)
+                    || !string.Equals(luaThread.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        "signal:Wait caller is not owned by mod " + ownerModId,
+                        "wait only from a live scheduler thread owned by the current mod");
+                }
+
+                signal.BindScheduler(_scheduler);
+                _scheduler.ScheduleSignalWait(caller);
+                RbxScriptConnection connection = signal.Wait(arguments =>
+                {
+                    LuaTable values = new();
+                    for (int index = 0; index < arguments.Length; index++)
+                    {
+                        values[index + 1] = LuaCsRbxDatatypeBindings.MarshalSignalArg(
+                            context, arguments[index]);
+                    }
+
+                    values["n"] = arguments.Length;
+                    _scheduler.ResumeSignalWait(caller,
+                        new object[] { new LuaValue(values) });
+                });
+                context.TrackConnection(connection);
+                return LuaValue.Nil;
+            }
+            catch (Exception ex)
+            {
+                throw ToLuaError(ctx.State, ex);
+            }
+        }
+
+        private LuaValue ReadSignalResumeValues(LuaCsRbxModContext context,
+            LuaFunctionExecutionContext ctx)
+        {
+            try
+            {
+                string ownerModId = RequireTaskOwner(context);
+                if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
+                    || !string.Equals(caller.OwnerModId, ownerModId,
+                        StringComparison.Ordinal))
+                {
+                    throw RbxError.BadArgument(
+                        "signal:Wait resumed outside its owning scheduler thread",
+                        "resume signal waiters through the deferred signal drain");
+                }
+
+                object values = caller.ReadCurrentResumeArgument(0);
+                if (values == null)
+                {
+                    throw RbxError.BadArgument(
+                        "signal:Wait resumed without fire arguments",
+                        "resume signal waiters through the deferred signal drain");
+                }
+
+                return LuaCsValueMarshaller.Unbox(values);
             }
             catch (Exception ex)
             {

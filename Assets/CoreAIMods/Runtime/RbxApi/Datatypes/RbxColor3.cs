@@ -17,10 +17,16 @@ namespace CoreAI.Mods.Rbx.Datatypes
             B = b;
         }
 
-        /// <summary>Color3.fromRGB(0..255) — integer channels scaled to 0..1.</summary>
+        /// <summary>Color3.fromRGB(0..255) — channels rounded to 8-bit integers, then scaled to 0..1.</summary>
         public static RbxColor3 FromRGB(float r = 0f, float g = 0f, float b = 0f)
         {
-            return new RbxColor3(r / 255f, g / 255f, b / 255f);
+            // WHY: The offline Roblox mirror accepts 0..255 numbers but does not specify fractional
+            // behavior. CoreAI locks nearest-integer, midpoint-away-from-zero rounding until a
+            // documented Roblox fractional golden is available.
+            return new RbxColor3(
+                MathF.Round(r, MidpointRounding.AwayFromZero) / 255f,
+                MathF.Round(g, MidpointRounding.AwayFromZero) / 255f,
+                MathF.Round(b, MidpointRounding.AwayFromZero) / 255f);
         }
 
         /// <summary>Color3.fromHSV(hue, saturation, value) — all in 0..1.</summary>

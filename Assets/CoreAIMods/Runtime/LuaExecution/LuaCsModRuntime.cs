@@ -409,6 +409,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 _rbxApi.Scheduler.ConfigureActorQuota(
                     MaxSchedulerThreadsPerActor, ResolveSchedulerActorId);
+                _rbxApi.Scheduler.ThreadFaulted += OnSchedulerThreadFaulted;
                 _rbxApi.Registry.Registered += OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
             }
@@ -1732,6 +1733,35 @@ namespace CoreAI.Ai.LuaCs
             }
 
             string message = $"logic slot '{slot}' override failed and was reset to vanilla: {error}";
+            RecordHandlerError(modId, message, streak);
+            RaiseModHandlerErrored(modId, message, streak);
+        }
+
+        private void OnSchedulerThreadFaulted(string ownerModId, RbxError error)
+        {
+            string modId = Normalize(ownerModId);
+            if (modId.Length == 0)
+            {
+                return;
+            }
+
+            int streak;
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    mod.ErrorCount++;
+                    streak = mod.ErrorCount;
+                }
+                else
+                {
+                    streak = 1;
+                }
+            }
+
+            string message = error != null
+                ? SingleLineErrorMessage(error)
+                : "scheduler thread failed without a structured error";
             RecordHandlerError(modId, message, streak);
             RaiseModHandlerErrored(modId, message, streak);
         }

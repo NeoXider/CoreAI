@@ -42,15 +42,15 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when a key/button/touch begins.</summary>
         public RbxScriptSignal InputBegan { get; } =
-            new("UserInputService.InputBegan", true);
+            new("UserInputService.InputBegan");
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when a key/button/touch ends.</summary>
         public RbxScriptSignal InputEnded { get; } =
-            new("UserInputService.InputEnded", true);
+            new("UserInputService.InputEnded");
 
         /// <summary>Fires (InputObject, gameProcessedEvent) when an input changes (mouse movement).</summary>
         public RbxScriptSignal InputChanged { get; } =
-            new("UserInputService.InputChanged", true);
+            new("UserInputService.InputChanged");
 
         /// <summary>Device state seam; headless in-memory by default, the composition attaches the
         /// engine-backed source once (like the camera rig).</summary>
@@ -121,9 +121,8 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// Per-frame poll→diff→fire pump: newly held keys/buttons fire InputBegan, released ones
         /// fire InputEnded, mouse movement fires InputChanged with the position delta. The host
-        /// calls this once per frame before mod dispatch so handlers see this frame's events.
+        /// calls this once per frame; handlers run at the scheduler's deferred signal drain.
         /// </summary>
-        // TODO: MVP2 — the general signal scheduler replaces this pump with deferred dispatch.
         public void Step()
         {
             if (IsDestroyed)

@@ -200,6 +200,114 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>Releases every provider call in a wave from one shared completion signal.</summary>
+        private sealed class ConcurrentWaveAdmissionOrchestrator : IAiOrchestrationService
+        {
+            private readonly object _lock = new();
+            private readonly List<string> _started = new();
+            private TaskCompletionSource<string> _waveGate =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private int _completedCount;
+            private int _currentWaveCount;
+            private int _inFlight;
+            private int _maxInFlight;
+
+            public int StartedCount
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _started.Count;
+                    }
+                }
+            }
+
+            public int CompletedCount
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _completedCount;
+                    }
+                }
+            }
+
+            public int MaxInFlight
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _maxInFlight;
+                    }
+                }
+            }
+
+            public async Task<string> RunTaskAsync(
+                AiTaskRequest task,
+                CancellationToken cancellationToken = default)
+            {
+                TaskCompletionSource<string> waveGate;
+                lock (_lock)
+                {
+                    _started.Add(task?.Hint ?? "");
+                    _currentWaveCount++;
+                    _inFlight++;
+                    _maxInFlight = Math.Max(_maxInFlight, _inFlight);
+                    waveGate = _waveGate;
+                }
+
+                try
+                {
+                    return await waveGate.Task;
+                }
+                finally
+                {
+                    lock (_lock)
+                    {
+                        _completedCount++;
+                        _inFlight--;
+                    }
+                }
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
+
+            public int ReleaseStartedWave()
+            {
+                TaskCompletionSource<string> waveGate;
+                int waveCount;
+                lock (_lock)
+                {
+                    if (_currentWaveCount == 0)
+                    {
+                        throw new InvalidOperationException("No concurrent admission wave is waiting.");
+                    }
+
+                    waveGate = _waveGate;
+                    waveCount = _currentWaveCount;
+                    _currentWaveCount = 0;
+                    _waveGate = new TaskCompletionSource<string>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+
+                waveGate.TrySetResult("ok");
+                return waveCount;
+            }
+
+            public string[] StartedSnapshot()
+            {
+                lock (_lock)
+                {
+                    return _started.ToArray();
+                }
+            }
+        }
+
         private sealed class MutableScopeProvider : IAgentMemoryScopeProvider
         {
             public string UserId { get; set; } = "";
@@ -614,6 +722,7 @@ namespace CoreAI.Tests.EditMode
 
             string[] started = inner.StartedSnapshot();
             Dictionary<string, int> lastStartByActor = new(StringComparer.Ordinal);
+            // WHY: Least-last-dispatch order serves each of the other 20 - 1 actors once before this actor.
             for (int subjectIndex = 0; subjectIndex < actorCount * requestsPerActor; subjectIndex++)
             {
                 string actorId = started[blockerCount + subjectIndex];
@@ -642,6 +751,163 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 Assert.AreEqual(actorCount, actorsInRound.Count);
+            }
+
+            queue.Dispose();
+        }
+
+        [Test]
+        public async Task ProductionAdmission_ConcurrentTurnover_ClaimsRemainCompleteAndFair()
+        {
+            const int actorCount = 100;
+            const int requestsPerActor = 2;
+            const int maxConcurrent = 16;
+            const int blockerCount = maxConcurrent;
+            const int actorRequestCount = actorCount * requestsPerActor;
+            const int expectedTotal = blockerCount + actorRequestCount;
+            ConcurrentWaveAdmissionOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(
+                inner,
+                new AiOrchestrationQueueOptions
+                {
+                    MaxConcurrent = maxConcurrent,
+                    MaxPending = actorRequestCount
+                });
+            queue.EnableAdmissionClaimTrackingForTests();
+            List<Task> tasks = new();
+            HashSet<string> expectedRequestIds = new(StringComparer.Ordinal);
+            HashSet<string> expectedActorIds = new(StringComparer.Ordinal);
+
+            for (int blockerIndex = 0; blockerIndex < blockerCount; blockerIndex++)
+            {
+                string requestId = "blocker-" + blockerIndex.ToString("D2");
+                ActorContext actorContext = CreateActorContext(requestId, requestId + "-session");
+                expectedRequestIds.Add(requestId);
+                tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = "Teacher",
+                    Hint = requestId,
+                    ActorContext = actorContext,
+                    CancellationScope = actorContext.SessionId
+                }));
+            }
+
+            await WaitUntilAsync(
+                () => inner.StartedCount == blockerCount,
+                "All blockers must occupy provider slots before the actor backlog is offered.");
+
+            for (int actorIndex = 0; actorIndex < actorCount; actorIndex++)
+            {
+                string actorId = "actor-" + actorIndex.ToString("D3");
+                expectedActorIds.Add(actorId);
+                for (int requestIndex = 0; requestIndex < requestsPerActor; requestIndex++)
+                {
+                    string requestId = actorId + "-request-" + requestIndex.ToString("D2");
+                    ActorContext actorContext = CreateActorContext(actorId, requestId + "-session");
+                    expectedRequestIds.Add(requestId);
+                    tasks.Add(queue.RunTaskAsync(new AiTaskRequest
+                    {
+                        RoleId = "Teacher",
+                        Hint = requestId,
+                        ActorContext = actorContext,
+                        CancellationScope = actorContext.SessionId
+                    }));
+                }
+            }
+
+            int fullWaveCount = 0;
+            while (inner.CompletedCount < expectedTotal)
+            {
+                int startedBeforeWave = inner.StartedCount;
+                int waveSize = inner.ReleaseStartedWave();
+                Assert.LessOrEqual(waveSize, maxConcurrent,
+                    "A completion wave exceeded the configured provider concurrency.");
+                if (waveSize == maxConcurrent)
+                {
+                    fullWaveCount++;
+                }
+
+                int expectedStarted = Math.Min(expectedTotal, startedBeforeWave + waveSize);
+                await WaitUntilAsync(
+                    () => inner.CompletedCount >= startedBeforeWave &&
+                          inner.StartedCount >= expectedStarted,
+                    "Concurrent completion did not refill every available provider slot.");
+                Assert.AreEqual(startedBeforeWave, inner.CompletedCount,
+                    "A replacement wave completed before its shared gate was released.");
+                Assert.AreEqual(expectedStarted, inner.StartedCount,
+                    "Concurrent admission started an unexpected number of requests.");
+            }
+
+            await Task.WhenAll(tasks);
+            Assert.GreaterOrEqual(fullWaveCount, 2,
+                "The scenario must release multiple full provider waves concurrently.");
+            Assert.AreEqual(maxConcurrent, inner.MaxInFlight,
+                "The measured scenario must occupy every configured provider slot.");
+
+            string[] started = inner.StartedSnapshot();
+            Assert.AreEqual(expectedTotal, started.Length,
+                "Concurrent admission lost or duplicated a provider start.");
+            HashSet<string> seenRequestIds = new(StringComparer.Ordinal);
+            foreach (string requestId in started)
+            {
+                Assert.IsTrue(expectedRequestIds.Contains(requestId),
+                    "Concurrent admission started an unknown request.");
+                Assert.IsTrue(seenRequestIds.Add(requestId),
+                    "Concurrent admission started one request more than once.");
+            }
+
+            CollectionAssert.AreEquivalent(expectedRequestIds, seenRequestIds,
+                "Concurrent admission did not start every queued request exactly once.");
+
+            (long ClaimOrdinal, string ActorId)[] claims =
+                queue.GetAdmissionClaimSnapshotForTests();
+            Assert.AreEqual(expectedTotal, claims.Length,
+                "The authoritative admission trace must contain exactly one claim per request.");
+            for (int claimIndex = 0; claimIndex < claims.Length; claimIndex++)
+            {
+                Assert.AreEqual(claimIndex + 1L, claims[claimIndex].ClaimOrdinal,
+                    "Admission claim ordinals must be gap-free and strictly monotonic.");
+            }
+
+            Dictionary<string, int> lastClaimByActor = new(StringComparer.Ordinal);
+            for (int subjectIndex = 0; subjectIndex < actorRequestCount; subjectIndex++)
+            {
+                string actorId = claims[blockerCount + subjectIndex].ActorId;
+                Assert.IsTrue(expectedActorIds.Contains(actorId),
+                    "The actor claim trace contained an unexpected actor.");
+                if (lastClaimByActor.TryGetValue(actorId, out int lastClaim))
+                {
+                    int bypasses = subjectIndex - lastClaim - 1;
+                    Assert.LessOrEqual((long)bypasses, queue.MaximumActorBypasses,
+                        "An actor exceeded the configured production bypass bound.");
+                    Assert.LessOrEqual(bypasses, actorCount - 1,
+                        "An actor exceeded one fair round in authoritative claim order.");
+                }
+                else
+                {
+                    Assert.LessOrEqual((long)subjectIndex, queue.MaximumActorBypasses,
+                        "An actor's first claim exceeded the configured production bypass bound.");
+                    Assert.LessOrEqual(subjectIndex, actorCount - 1,
+                        "An actor's first claim was delayed beyond one fair round.");
+                }
+
+                lastClaimByActor[actorId] = subjectIndex;
+            }
+
+            Assert.AreEqual(actorCount, lastClaimByActor.Count,
+                "Every actor must appear in the authoritative claim trace.");
+            for (int round = 0; round < requestsPerActor; round++)
+            {
+                HashSet<string> actorsInRound = new(StringComparer.Ordinal);
+                int roundStart = blockerCount + round * actorCount;
+                for (int offset = 0; offset < actorCount; offset++)
+                {
+                    Assert.IsTrue(actorsInRound.Add(claims[roundStart + offset].ActorId),
+                        "An actor was claimed twice before all waiting actors received a claim.");
+                }
+
+                CollectionAssert.AreEquivalent(expectedActorIds, actorsInRound,
+                    "Each claim round must contain every waiting actor exactly once.");
             }
 
             queue.Dispose();
@@ -1381,7 +1647,15 @@ namespace CoreAI.Tests.EditMode
                 await WaitUntilAsync(
                     () => inner.StartedCount > inner.CompletedCount,
                     "The fair queue did not start the next scripted request.");
+                int startedBeforeCompletion = inner.StartedCount;
                 inner.CompleteNext();
+                if (startedBeforeCompletion < expectedCount)
+                {
+                    // WHY: Claims are locked but starts are not; one replacement at a time preserves admission order.
+                    await WaitUntilAsync(
+                        () => inner.StartedCount > startedBeforeCompletion,
+                        "The fair queue did not replace the completed scripted request.");
+                }
             }
         }
 

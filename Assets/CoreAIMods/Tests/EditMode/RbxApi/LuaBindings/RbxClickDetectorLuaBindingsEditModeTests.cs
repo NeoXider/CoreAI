@@ -198,9 +198,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // WHY: drive the same fire path the pick pump uses when the part is clicked; the handler
             // must run once per fire.
             detector.MouseClick.Fire();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("1", store.Get("m", "clicks"), "MouseClick handler runs when the signal fires");
 
             detector.MouseClick.Fire();
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("2", store.Get("m", "clicks"), "each MouseClick fire invokes the handler once");
         }
 

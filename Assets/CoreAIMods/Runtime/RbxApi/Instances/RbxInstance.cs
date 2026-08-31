@@ -9,9 +9,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// through <see cref="InstanceRegistry"/>, which owns identity (§3.3).
     /// Destroyed-instance policy (DEV-7, registry-level interpretation): tombstone reads
     /// (Name, ClassName, Parent, IsDestroyed) stay available at the C# Domain level; every
-    /// mutation and navigation raises INSTANCE_DESTROYED. The stricter Lua-context rule
-    /// (tombstone only inside destruction-queued handlers) is enforced by the marshalling
-    /// layer when it lands.
+    /// mutation and navigation raises INSTANCE_DESTROYED. The Lua boundary permits those reads
+    /// only while a destruction-queued handler owns the scheduler tombstone scope.
     /// </summary>
     public class RbxInstance
     {
@@ -24,6 +23,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private bool _archivable = true;
         private RbxInstance _parent;
         private bool _destroyed;
+        private bool _destroying;
 
         protected internal RbxInstance(ClassDescriptor descriptor)
         {
@@ -58,9 +58,16 @@ namespace CoreAI.Mods.Rbx.Instances
             set
             {
                 ThrowIfDestroyed("Name");
-                _name = value ?? throw RbxError.BadArgument("Name cannot be nil",
+                string nextName = value ?? throw RbxError.BadArgument("Name cannot be nil",
                     "pass a string, e.g. instance.Name = \"SpawnPad\"");
+                if (string.Equals(_name, nextName, System.StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _name = nextName;
                 Registry?.OnNameChanged(this);
+                FireSignal("GetPropertyChangedSignal(Name)");
             }
         }
 
@@ -75,7 +82,13 @@ namespace CoreAI.Mods.Rbx.Instances
             set
             {
                 ThrowIfDestroyed("Archivable");
+                if (_archivable == value)
+                {
+                    return;
+                }
+
                 _archivable = value;
+                FireSignal("GetPropertyChangedSignal(Archivable)");
             }
         }
 
@@ -118,16 +131,48 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             bool wasInScene = Registry != null && Registry.IsInScene(this);
-
             RbxInstance oldParent = _parent;
+            List<RbxInstance> movedSubtree = SnapshotSubtree();
+            List<RbxInstance> oldAncestors = SnapshotAncestors(oldParent);
+            List<RbxInstance> newAncestors = SnapshotAncestors(newParent);
+            for (int ancestorIndex = 0; ancestorIndex < oldAncestors.Count; ancestorIndex++)
+            {
+                RbxInstance ancestor = oldAncestors[ancestorIndex];
+                for (int movedIndex = 0; movedIndex < movedSubtree.Count; movedIndex++)
+                {
+                    ancestor.FireSignal("DescendantRemoving", movedSubtree[movedIndex]);
+                }
+            }
+
             oldParent?._children.Remove(this);
             _parent = newParent;
             newParent?._children.Add(this);
 
             Registry?.OnParentChanged(this, wasInScene);
+            oldParent?.FireSignal("ChildRemoved", this);
+            newParent?.FireSignal("ChildAdded", this);
+            FireSignal("GetPropertyChangedSignal(Parent)");
+            for (int movedIndex = 0; movedIndex < movedSubtree.Count; movedIndex++)
+            {
+                RbxInstance moved = movedSubtree[movedIndex];
+                if (_destroying)
+                {
+                    moved.FireSignalForDestruction("AncestryChanged", moved, moved._parent);
+                }
+                else
+                {
+                    moved.FireSignal("AncestryChanged", moved, moved._parent);
+                }
+            }
 
-            // TODO: MVP2 — fire ChildAdded/ChildRemoved/AncestryChanged/DescendantAdded on the
-            // deferred signal queue; the hook points exist (signal properties) but stay inert.
+            for (int ancestorIndex = 0; ancestorIndex < newAncestors.Count; ancestorIndex++)
+            {
+                RbxInstance ancestor = newAncestors[ancestorIndex];
+                for (int movedIndex = 0; movedIndex < movedSubtree.Count; movedIndex++)
+                {
+                    ancestor.FireSignal("DescendantAdded", movedSubtree[movedIndex]);
+                }
+            }
         }
 
         // ---- Navigation (R6.10) -------------------------------------------------------------
@@ -380,7 +425,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Atomic destroy per R6.2/D6 at registry level: (1) detach — Parent set to nil,
-        /// (2) Parent locked, (3) connections would disconnect here (inert until MVP2),
+        /// (2) Parent locked, (3) signals disconnect while preserving pending invocations,
         /// (4) children destroy recursively, (5) tags cleared and the registry record
         /// unregistered, (6) the backing binder releases the backing object. Idempotent.
         /// </summary>
@@ -391,17 +436,15 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            _destroying = true;
+            FireSignalForDestruction("Destroying");
             SetParent(null);
             _destroyed = true;
-
-            // TODO: MVP2 — enqueue Destroying/AncestryChanged on the deferred queue and
-            // disconnect all connections (R5.7/R5.12); signals are inert in MVP1.
+            DisconnectSignals();
 
             RbxInstance[] childrenCopy = _children.ToArray();
-            _children.Clear();
             foreach (RbxInstance child in childrenCopy)
             {
-                child._parent = null;
                 child.Destroy();
             }
 
@@ -434,16 +477,29 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             ThrowIfDestroyed("SetAttribute");
             AttributeContract.ValidateName(attribute);
+            bool hadValue = _attributes.TryGetValue(attribute, out object previousValue);
             if (value == null)
             {
+                if (!hadValue)
+                {
+                    return;
+                }
+
                 _attributes.Remove(attribute);
             }
             else
             {
-                _attributes[attribute] = AttributeContract.NormalizeValue(value);
+                object normalized = AttributeContract.NormalizeValue(value);
+                if (hadValue && Equals(previousValue, normalized))
+                {
+                    return;
+                }
+
+                _attributes[attribute] = normalized;
             }
 
-            // TODO: MVP2 — fire AttributeChanged / GetAttributeChangedSignal on the deferred queue.
+            FireSignal("AttributeChanged", attribute);
+            FireSignal("GetAttributeChangedSignal(" + attribute + ")");
         }
 
         public IReadOnlyDictionary<string, object> GetAttributes()
@@ -478,8 +534,6 @@ namespace CoreAI.Mods.Rbx.Instances
             return Registry.Tags.GetTags(Id);
         }
 
-        // ---- Signal hook points (inert until MVP2, roadmap §5.1.6) --------------------------
-
         public RbxScriptSignal ChildAdded => GetSignal("ChildAdded");
         public RbxScriptSignal ChildRemoved => GetSignal("ChildRemoved");
         public RbxScriptSignal DescendantAdded => GetSignal("DescendantAdded");
@@ -499,6 +553,66 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             ThrowIfDestroyed("GetPropertyChangedSignal");
             return GetSignal("GetPropertyChangedSignal(" + property + ")");
+        }
+
+        private List<RbxInstance> SnapshotSubtree()
+        {
+            List<RbxInstance> result = new();
+            AddSubtree(this, result);
+            return result;
+        }
+
+        private static void AddSubtree(RbxInstance instance, List<RbxInstance> result)
+        {
+            result.Add(instance);
+            for (int index = 0; index < instance._children.Count; index++)
+            {
+                AddSubtree(instance._children[index], result);
+            }
+        }
+
+        private static List<RbxInstance> SnapshotAncestors(RbxInstance start)
+        {
+            List<RbxInstance> result = new();
+            RbxInstance current = start;
+            while (current != null)
+            {
+                result.Add(current);
+                current = current._parent;
+            }
+
+            return result;
+        }
+
+        private void FireSignal(string signalName, params object[] arguments)
+        {
+            if (_signals != null
+                && _signals.TryGetValue(signalName, out RbxScriptSignal signal))
+            {
+                signal.Fire(arguments);
+            }
+        }
+
+        private void FireSignalForDestruction(string signalName, params object[] arguments)
+        {
+            if (_signals != null
+                && _signals.TryGetValue(signalName, out RbxScriptSignal signal))
+            {
+                signal.FireForDestruction(this, arguments);
+            }
+        }
+
+        private void DisconnectSignals()
+        {
+            if (_signals == null)
+            {
+                return;
+            }
+
+            foreach (RbxScriptSignal signal in _signals.Values)
+            {
+                signal.DisconnectAll();
+            }
         }
 
         private RbxScriptSignal GetSignal(string signalName)

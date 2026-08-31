@@ -31,6 +31,9 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Sets Part.Shape (Enum.PartType); the binder swaps the backing primitive.</summary>
         void SetShape(InstanceId id, RbxPartShape shape);
 
+        /// <summary>Sets Part.Material (Enum.Material) through the render-side provider.</summary>
+        void SetMaterial(InstanceId id, in RbxMaterialId material);
+
         /// <summary>Full-state push (bulk restore / Instance.new initialization).</summary>
         void SetPartProperties(InstanceId id, in PartProperties properties);
 

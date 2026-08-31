@@ -180,8 +180,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
                 inputSource.SetMouseButton(0, true);
                 driver.PumpFrame(0.1f);
-
                 Assert.AreEqual("SDHIR", store.Get("m", "order"));
+                driver.PumpFrame(0.1f);
+
+                Assert.AreEqual("SDHIRSHR", store.Get("m", "order"));
             }
             finally
             {
@@ -296,6 +298,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                         end)
                     end)");
                 driver.PumpFrame(0.1f);
+                driver.PumpFrame(0.1f);
                 stack.Runtime.ReloadMod("m", @"
                     task.delay(1, function()
                         store_set('replacement_fired', 'yes')
@@ -328,8 +331,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 end)");
 
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("3", store.Get("m", "n"), "connected Heartbeat handler runs once per frame");
             Assert.IsTrue(roblox.RunService.Heartbeat.HasConnections,
                 "the mod's Heartbeat connection is live while loaded");
@@ -340,7 +346,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "unloading the mod disconnects its Heartbeat connection");
 
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual("3", store.Get("m", "n"),
                 "Heartbeat must not fire after the mod is unloaded");
@@ -365,7 +373,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             stack.Runtime.LoadMod("m", bump);
 
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("2", store.Get("m", "n"), "gen-1 handler fires once per frame while loaded");
 
             // WHY: reload with a chunk that ALSO connects Heartbeat (generation 2). The reload teardown
@@ -376,7 +386,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "the reloaded chunk's Heartbeat connection survives the reload teardown");
 
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
 
             // WHY: n grows by exactly one per frame after reload — the reloaded connection STILL fires
             // (would stay at 2 if the fix disconnected the new chunk's own connection), and the old
@@ -389,6 +401,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "unloading after a reload disconnects the surviving connection too");
 
             roblox.PumpFrame(0.1f);
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("4", store.Get("m", "n"), "no Heartbeat fires after the final unload");
         }
     }

@@ -122,12 +122,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             // WHY: drive the same path the host uses each frame (PumpFrame → RunService.Step(dt)).
             roblox.PumpFrame(0.25f);
+            roblox.Scheduler.Advance(0d);
             Assert.AreEqual("1", store.Get("m", "n"));
             Assert.AreEqual("true", store.Get("m", "dt_is_number"), "Heartbeat handler must receive a numeric dt");
             Assert.AreEqual("0.25", store.Get("m", "dt"));
 
             roblox.PumpFrame(0.25f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.25f);
+            roblox.Scheduler.Advance(0d);
 
             // WHY: one fire per frame — three pumps deliver exactly three Heartbeat invocations.
             Assert.AreEqual("3", store.Get("m", "n"));
@@ -161,7 +164,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             }));
 
             roblox.PumpFrame(0.5f);
+            roblox.Scheduler.Advance(0d);
             roblox.PumpFrame(0.5f);
+            roblox.Scheduler.Advance(0d);
 
             Assert.AreEqual(2, count, "Heartbeat fires once per pump");
             Assert.AreEqual(0.5f, lastDelta, "Heartbeat carries the frame delta");

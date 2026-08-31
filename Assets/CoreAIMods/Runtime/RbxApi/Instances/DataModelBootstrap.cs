@@ -26,6 +26,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "ServerStorage");
             CreateService(registry, game, "ServerScriptService");
             CreateService(registry, game, "StarterPlayer");
+            CreateService(registry, game, "Players");
             CreateService(registry, game, "UserInputService");
             CreateService(registry, game, "RunService");
             return game;
@@ -57,6 +58,11 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("RunService") == null)
             {
                 CreateService(registry, game, "RunService");
+            }
+
+            if (game.FindFirstChildOfClass("Players") == null)
+            {
+                CreateService(registry, game, "Players");
             }
         }
 

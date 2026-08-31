@@ -1,31 +1,46 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
-    /// <summary>
-    /// One RBXScriptConnection: the handle Connect returns, carrying Roblox's Connected flag and
-    /// Disconnect(). Disconnecting is idempotent and safe while the owning signal is firing.
-    /// </summary>
+    /// <summary>One deferred RBXScriptConnection owned by a ModScheduler.</summary>
     public sealed class RbxScriptConnection
     {
-        private readonly RbxScriptSignal _signal;
+        private enum DisconnectKind
+        {
+            None,
+            Explicit,
+            Destroy,
+            Once
+        }
 
-        internal RbxScriptConnection(RbxScriptSignal signal, Action<object[]> handler, bool once)
+        private readonly RbxScriptSignal _signal;
+        private DisconnectKind _disconnectKind;
+        private bool _onceQueued;
+        private int _pendingCount;
+
+        internal RbxScriptConnection(RbxScriptSignal signal, ModScheduler scheduler,
+            Action<object[]> handler, bool once)
         {
             _signal = signal;
+            Scheduler = scheduler;
             Handler = handler;
             Once = once;
         }
+
+        internal ModScheduler Scheduler { get; }
 
         internal Action<object[]> Handler { get; }
 
         internal bool Once { get; }
 
-        /// <summary>Roblox RBXScriptConnection.Connected.</summary>
-        public bool Connected { get; internal set; } = true;
+        internal string SignalName => _signal.SignalName;
 
-        /// <summary>Roblox RBXScriptConnection:Disconnect().</summary>
+        /// <summary>Roblox RBXScriptConnection.Connected.</summary>
+        public bool Connected => _disconnectKind == DisconnectKind.None;
+
+        /// <summary>Disconnects explicitly and drops every pending invocation per R5.7.</summary>
         public void Disconnect()
         {
             if (!Connected)
@@ -33,53 +48,96 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            Connected = false;
+            DisconnectCore(DisconnectKind.Explicit);
+        }
+
+        internal bool TryQueueInvocation()
+        {
+            if (!Connected || Once && _onceQueued)
+            {
+                return false;
+            }
+
+            _pendingCount++;
+            if (Once)
+            {
+                _onceQueued = true;
+            }
+
+            return true;
+        }
+
+        internal void InvokePending(object[] arguments)
+        {
+            try
+            {
+                if (_disconnectKind == DisconnectKind.Explicit)
+                {
+                    return;
+                }
+
+                if (Once && Connected)
+                {
+                    DisconnectCore(DisconnectKind.Once);
+                }
+
+                Handler(arguments);
+            }
+            finally
+            {
+                _pendingCount = Math.Max(0, _pendingCount - 1);
+            }
+        }
+
+        internal void DisconnectFromDestroy()
+        {
+            if (Connected)
+            {
+                DisconnectCore(DisconnectKind.Destroy);
+            }
+        }
+
+        internal void DropQueuedInvocation()
+        {
+            _pendingCount = Math.Max(0, _pendingCount - 1);
+            if (Once && Connected && _pendingCount == 0)
+            {
+                _onceQueued = false;
+            }
+        }
+
+        private void DisconnectCore(DisconnectKind kind)
+        {
+            _disconnectKind = kind;
             _signal.Remove(this);
         }
     }
 
     /// <summary>
-    /// Roblox signal (ChildAdded, Destroying, UserInputService.InputBegan, ...). Two modes:
-    /// the default MVP1 shape keeps every entry point a loud stub (dispatch, connections, and
-    /// yielding belong to the MVP2 scheduler/signal system — roadmap §5.1.6), while a signal
-    /// constructed with <c>supportsDispatch: true</c> stores connections and fires them
-    /// synchronously via <see cref="Fire"/>. The dispatch-enabled path exists so the MVP1 input
-    /// slice (UserInputService.InputBegan/InputEnded/InputChanged) can deliver events this frame.
-    /// WHY: exposing the final surface shape now lets the registry/tree code compile against it
-    /// without building the deferred-dispatch machinery out of order.
+    /// Deferred-only RBXScriptSignal. Fire snapshots live connections and queues their invocations
+    /// on the owning ModScheduler; callbacks never run inside the mutation that fired the signal.
     /// </summary>
     public sealed class RbxScriptSignal
     {
+        private static RbxInstance _readableTombstone;
+
         private readonly string _signalName;
-        private readonly List<RbxScriptConnection> _connections;
+        private readonly List<RbxScriptConnection> _connections = new();
+        private ModScheduler _scheduler;
 
-        // WHY: dispatch happens every frame for the input signals, so the fire snapshot is reused
-        // rather than allocated per event; a re-entrancy flag falls back to a fresh buffer for the
-        // (rare) nested fire so the shared one is never clobbered.
-        private readonly List<RbxScriptConnection> _fireBuffer;
-        private bool _firing;
-
-        public RbxScriptSignal(string signalName, bool supportsDispatch = false)
+        public RbxScriptSignal(string signalName)
         {
-            _signalName = signalName;
-            SupportsDispatch = supportsDispatch;
-            _connections = supportsDispatch ? new List<RbxScriptConnection>() : null;
-            _fireBuffer = supportsDispatch ? new List<RbxScriptConnection>() : null;
+            _signalName = string.IsNullOrWhiteSpace(signalName)
+                ? throw new ArgumentException("Signal name is required.", nameof(signalName))
+                : signalName;
         }
 
-        /// <summary>Signal name used in stub errors, e.g. "Instance.ChildAdded".</summary>
+        /// <summary>Signal name used in diagnostics, e.g. "Instance.ChildAdded".</summary>
         public string SignalName => _signalName;
 
-        /// <summary>True for the MVP1 input signals that dispatch now; false for the signals whose
-        /// dispatch lands with the MVP2 scheduler.</summary>
-        public bool SupportsDispatch { get; }
+        /// <summary>True when at least one live handler or waiter is connected.</summary>
+        public bool HasConnections => _connections.Count > 0;
 
-        /// <summary>True when a live handler is connected. Callers gate per-frame event-object
-        /// construction on this so a mouse-move frame with no InputChanged listener allocates nothing.</summary>
-        public bool HasConnections => SupportsDispatch && _connections.Count > 0;
-
-        // TODO: MVP2 — general RbxScriptSignal dispatch replaces the SupportsDispatch split; every
-        // signal then connects/fires through the scheduler with deferred-dispatch semantics.
         public RbxScriptConnection Connect(object handler)
         {
             return ConnectCore(handler, false, "Connect");
@@ -90,108 +148,128 @@ namespace CoreAI.Mods.Rbx.Instances
             return ConnectCore(handler, true, "Once");
         }
 
-        // TODO: MVP2 — RbxScriptSignal:Wait() needs the scheduler's coroutine yield even for
-        // dispatch-enabled signals.
+        /// <summary>
+        /// The Lua binding supplies the current scheduler thread and performs the actual yield.
+        /// Direct C# calls cannot infer a yielding caller and therefore fail loudly.
+        /// </summary>
         public object Wait()
         {
-            throw Stub("Wait");
+            throw RbxError.BadArgument(
+                _signalName + ":Wait requires a scheduler-owned Lua thread",
+                "call signal:Wait() from a running mod thread");
         }
 
-        /// <summary>
-        /// Fires every live connection synchronously in connection order. Handlers are opaque
-        /// <c>Action&lt;object[]&gt;</c> wrappers built by the scripting adapter (which owns
-        /// guarding/marshalling/error attribution), so a throwing wrapper is the adapter's bug —
-        /// this layer stays engine-free and does not swallow.
-        /// </summary>
+        /// <summary>Queues one deferred invocation for every connection live at fire time.</summary>
         public void Fire(params object[] args)
         {
-            if (!SupportsDispatch || _connections.Count == 0)
+            FireCore(null, args);
+        }
+
+        internal void FireForDestruction(RbxInstance readableTombstone, params object[] args)
+        {
+            FireCore(readableTombstone, args);
+        }
+
+        internal void BindScheduler(ModScheduler scheduler)
+        {
+            if (scheduler == null)
+            {
+                throw RbxError.BadArgument(
+                    _signalName + " requires a ModScheduler",
+                    "bind the signal through the active Lua mod context");
+            }
+
+            if (_scheduler != null && !ReferenceEquals(_scheduler, scheduler)
+                && _connections.Count > 0)
+            {
+                throw RbxError.BadArgument(
+                    _signalName + " is already bound to another ModScheduler",
+                    "use one scheduler per shared Rbx world");
+            }
+
+            _scheduler = scheduler;
+        }
+
+        internal RbxScriptConnection Wait(Action<object[]> resume)
+        {
+            return ConnectCore(resume, true, "Wait");
+        }
+
+        internal void DisconnectAll()
+        {
+            if (_connections.Count == 0)
             {
                 return;
             }
 
-            Dispatch(args);
+            RbxScriptConnection[] snapshot = _connections.ToArray();
+            for (int index = 0; index < snapshot.Length; index++)
+            {
+                snapshot[index].DisconnectFromDestroy();
+            }
         }
 
-        // WHY: iterate a snapshot so a handler may Connect/Disconnect on the same signal while firing;
-        // the snapshot reuses a shared buffer in the common (non-nested) case and a nested fire takes a
-        // private copy. Handlers are opaque wrappers owned by the scripting adapter, so a throwing
-        // wrapper is the adapter's bug — this layer stays engine-free and does not swallow.
-        private void Dispatch(object[] args)
+        internal static bool CanReadTombstone(RbxInstance instance)
         {
-            bool usingShared = !_firing;
-            List<RbxScriptConnection> buffer;
-            if (usingShared)
-            {
-                _firing = true;
-                buffer = _fireBuffer;
-                buffer.Clear();
-                buffer.AddRange(_connections);
-            }
-            else
-            {
-                buffer = new List<RbxScriptConnection>(_connections);
-            }
+            return ReferenceEquals(_readableTombstone, instance);
+        }
 
-            try
-            {
-                for (int i = 0; i < buffer.Count; i++)
-                {
-                    RbxScriptConnection connection = buffer[i];
-                    if (!connection.Connected)
-                    {
-                        continue;
-                    }
+        internal static RbxInstance EnterTombstoneScope(RbxInstance instance)
+        {
+            RbxInstance previous = _readableTombstone;
+            _readableTombstone = instance;
+            return previous;
+        }
 
-                    // WHY: Roblox Once disconnects BEFORE the handler runs, so a re-fire from
-                    // inside the handler can never invoke it twice.
-                    if (connection.Once)
-                    {
-                        connection.Disconnect();
-                    }
-
-                    connection.Handler(args);
-                }
-            }
-            finally
-            {
-                if (usingShared)
-                {
-                    buffer.Clear();
-                    _firing = false;
-                }
-            }
+        internal static void ExitTombstoneScope(RbxInstance previous)
+        {
+            _readableTombstone = previous;
         }
 
         internal void Remove(RbxScriptConnection connection)
         {
-            _connections?.Remove(connection);
+            _connections.Remove(connection);
+        }
+
+        private void FireCore(RbxInstance readableTombstone, object[] args)
+        {
+            if (_connections.Count == 0)
+            {
+                return;
+            }
+
+            object[] arguments = args ?? Array.Empty<object>();
+            RbxScriptConnection[] snapshot = _connections.ToArray();
+            for (int index = 0; index < snapshot.Length; index++)
+            {
+                RbxScriptConnection connection = snapshot[index];
+                if (connection.TryQueueInvocation())
+                {
+                    connection.Scheduler.EnqueueSignalInvocation(
+                        connection, arguments, readableTombstone);
+                }
+            }
         }
 
         private RbxScriptConnection ConnectCore(object handler, bool once, string member)
         {
-            if (!SupportsDispatch)
-            {
-                throw Stub(member);
-            }
-
             if (!(handler is Action<object[]> action))
             {
                 throw RbxError.BadArgument(
                     _signalName + ":" + member + " received a non-invokable handler",
-                    "the scripting adapter must wrap the script function into an Action<object[]> " +
-                    "before connecting");
+                    "the scripting adapter must wrap the script function before connecting");
             }
 
-            RbxScriptConnection connection = new(this, action, once);
+            if (_scheduler == null)
+            {
+                throw RbxError.BadArgument(
+                    _signalName + ":" + member + " has no scheduler",
+                    "read and connect the signal through an active Lua mod context");
+            }
+
+            RbxScriptConnection connection = new(this, _scheduler, action, once);
             _connections.Add(connection);
             return connection;
-        }
-
-        private RbxError Stub(string member)
-        {
-            return RbxError.NotImplemented(_signalName + ":" + member, "MVP2",
-                "signals land in MVP2 (scheduler); poll with FindFirstChild/GetAttribute until then");
         }
     }
 }

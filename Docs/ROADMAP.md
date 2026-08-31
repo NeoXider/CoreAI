@@ -87,11 +87,12 @@ policy, the Luau→Lua 5.2 downlevel preprocessor (standalone, 93 EditMode tests
 service, and editor Lua/Luau syntax highlighting. **MVP1 landed in 6.3.0 with the §5.1.8
 acceptance gate green**, including the pulled-forward Roblox-1:1 `UserInputService` slice,
 `workspace.CurrentCamera`, and `Part.Shape`. Sample needs also pulled forward `RbxScriptSignal`
-dispatch for RunService, UserInputService, and ClickDetector plus `ModConnectionRegistry`;
-general deferred dispatch remains MVP2.
+dispatch for RunService, UserInputService, and ClickDetector plus `ModConnectionRegistry`. The
+unified deferred signal path, yieldable signal handlers, and deferred-placeholder `ServiceCatalog`
+contract have now landed within the MVP2 work.
 
-**Next milestones.** Start MVP2 (task scheduler, signals, clocks, `game:GetService` catalog,
-materials catalog, shared JSON contract, loopback remotes), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
+**Next milestones.** Continue MVP2 (clocks, materials catalog, shared JSON contract, loopback
+remotes), then the ladder through MVP17 (world files, RBXL, mod UX, skill-as-docs, gameplay services,
 DataStore, input, Mirror, replication, dedicated server, GUI, audio/FX, in-game console,
 performance/WebGL).
 

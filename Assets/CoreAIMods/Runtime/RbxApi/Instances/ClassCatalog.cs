@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Instances.Networking;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -338,6 +339,15 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             ClassCatalog catalog = new();
             catalog.Register(new ClassDescriptor("Instance", null, true, false, false));
+            catalog.Register(new ClassDescriptor("BaseRemoteEvent", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("RemoteEvent", "BaseRemoteEvent", false, true, false,
+                descriptor => new RbxRemoteEvent(descriptor)));
+            catalog.Register(new ClassDescriptor("UnreliableRemoteEvent", "BaseRemoteEvent",
+                false, true, false, descriptor => new RbxUnreliableRemoteEvent(descriptor)));
+            catalog.Register(new ClassDescriptor("RemoteFunction", "Instance", false, true, false,
+                descriptor => new RbxRemoteFunction(descriptor)));
+            catalog.Register(new ClassDescriptor("Player", "Instance", false, false, false,
+                descriptor => new RbxPlayer(descriptor)));
             catalog.Register(new ClassDescriptor("PVInstance", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("Folder", "Instance", false, true, false));
             catalog.Register(new ClassDescriptor("Model", "PVInstance", false, true, false));
@@ -360,6 +370,8 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("ServerStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerScriptService", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("StarterPlayer", "Instance", false, false, true));
+            catalog.Register(new ClassDescriptor("Players", "Instance", false, false, true,
+                descriptor => new RbxPlayers(descriptor)));
             // WHY: pulled forward from MVP10 for MVP1 mini-game controls (TODO.md pending note);
             // behavior class carries the input signals + poll surface over the IInputSource seam.
             catalog.Register(new ClassDescriptor("UserInputService", "Instance", false, false, true,
@@ -413,9 +425,6 @@ namespace CoreAI.Mods.Rbx.Instances
             string surfaceWorkaround =
                 "use Material, Color, and geometry; legacy surface joints are not currently scheduled";
             catalog.RegisterKnownUnimplementedMembers("BasePart",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "Material", "MVP2 (materials catalog)",
-                    "use Color / Transparency for appearance until then"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "Velocity", physicsWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(

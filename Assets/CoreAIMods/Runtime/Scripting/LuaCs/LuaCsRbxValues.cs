@@ -28,9 +28,8 @@ namespace CoreAI.Ai.LuaCs
         public LuaTable Metatable { get; set; }
 
         /// <summary>
-        /// For a dispatch-enabled <see cref="RbxScriptSignal"/> box, the mod context whose
-        /// <c>Connect</c>/<c>Once</c> connections are tracked for teardown; null for context-free
-        /// wraps and one-off execution (no connection ownership to record).
+        /// For an <see cref="RbxScriptSignal"/> box, the mod context that owns scheduler callbacks
+        /// and connection teardown; null only for context-free non-connectable wraps.
         /// </summary>
         public LuaCsRbxModContext SignalOwner { get; }
 
@@ -69,8 +68,11 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal static class LuaCsRbxLua
     {
+        private const string ModMainScript = "main.lua";
+
         /// <summary>Builds a host function whose body may throw Roblox-layer errors.</summary>
-        public static LuaFunction Fn(string name, Func<LuaFunctionExecutionContext, LuaValue> body)
+        public static LuaFunction Fn(string name, Func<LuaFunctionExecutionContext, LuaValue> body,
+            LuaCsRbxModContext context = null)
         {
             return new LuaFunction(name, (ctx, _) =>
             {
@@ -80,7 +82,7 @@ namespace CoreAI.Ai.LuaCs
                 }
                 catch (Exception ex)
                 {
-                    throw ToLuaError(ctx.State, ex);
+                    throw ToLuaError(ctx.State, WithProductionContext(ctx.State, ex, context));
                 }
             });
         }
@@ -115,6 +117,22 @@ namespace CoreAI.Ai.LuaCs
 
             string message = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
             return new LuaRuntimeException(state, new InvalidOperationException(message, ex));
+        }
+
+        private static Exception WithProductionContext(LuaState state, Exception ex,
+            LuaCsRbxModContext context)
+        {
+            if (!(ex is RbxError error) || error.ModId != null
+                || string.IsNullOrWhiteSpace(context?.OwnerModId))
+            {
+                return ex;
+            }
+
+            // WHY: Persistent mods currently have one author source and Lua-CSharp names the VM chunk
+            // generically. The live traceback still carries the post-downlevel author line, so expose
+            // that line under the virtual author-relative main.lua path until multi-file chunks land.
+            int line = state.GetTraceback().LastLine;
+            return error.WithContext(context.OwnerModId, ModMainScript, line);
         }
 
         // ---- Wrap / unwrap ------------------------------------------------------------------

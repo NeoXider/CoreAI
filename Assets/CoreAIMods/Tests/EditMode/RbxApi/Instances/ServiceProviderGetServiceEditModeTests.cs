@@ -3,9 +3,9 @@ using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
-    /// <summary>ServiceProvider semantics on the DataModel: registered container services
-    /// resolve; planned services are loud NOT_IMPLEMENTED stubs naming their phase; unknown
-    /// names raise UNKNOWN_SERVICE with the exact Roblox text (roadmap §5.2.4).</summary>
+    /// <summary>ServiceProvider semantics on the DataModel: registered services resolve,
+    /// planned services resolve as deferred loud stubs, and unknown names raise UNKNOWN_SERVICE
+    /// with the exact Roblox text (roadmap §5.2.4).</summary>
     [TestFixture]
     public sealed class ServiceProviderGetServiceEditModeTests
     {
@@ -27,6 +27,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual("ServerStorage", _game.GetService("ServerStorage").ClassName);
             Assert.AreEqual("ServerScriptService", _game.GetService("ServerScriptService").ClassName);
             Assert.AreEqual("StarterPlayer", _game.GetService("StarterPlayer").ClassName);
+        }
+
+        [Test]
+        public void GetService_ResolvesAServiceRegisteredInTheCatalog()
+        {
+            ClassCatalog classCatalog = ClassCatalog.CreateMvp1();
+            classCatalog.Register(new ClassDescriptor(
+                "TestService", "Instance", false, false, true));
+            InstanceRegistry registry = new(classCatalog);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            RbxInstance service = registry.Create("TestService");
+
+            game.Services.Register("TestService", service);
+
+            Assert.AreSame(service, game.GetService("TestService"));
+        }
+
+        [Test]
+        public void GetService_ResolvesServicesPulledForwardFromLaterRungs()
+        {
+            Assert.IsInstanceOf<RbxRunService>(_game.GetService("RunService"));
+            Assert.IsInstanceOf<RbxUserInputService>(_game.GetService("UserInputService"));
         }
 
         [Test]
@@ -54,26 +76,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
-        public void GetService_PlannedService_RaisesLoudStubNamingThePhase()
+        public void GetService_PlannedService_ReturnsCachedStubWithoutThrowing()
         {
-            // WHY: RunService is now implemented (Heartbeat/Stepped/RenderStepped); HttpService is the
-            // remaining MVP2-gated planned service that still raises the loud phase-naming stub.
-            RbxError httpService = Assert.Throws<RbxError>(() => _game.GetService("HttpService"));
-            Assert.AreEqual(RbxErrorCode.NotImplemented, httpService.Code);
-            StringAssert.Contains("MVP2", httpService.RawMessage);
-
-            RbxError tween = Assert.Throws<RbxError>(() => _game.GetService("TweenService"));
-            StringAssert.Contains("MVP8", tween.RawMessage);
-
-            RbxError dataStore = Assert.Throws<RbxError>(() => _game.GetService("DataStoreService"));
-            StringAssert.Contains("MVP9", dataStore.RawMessage);
+            RbxInstance service = null;
+            Assert.DoesNotThrow(() => service = _game.GetService("TweenService"));
+            RbxStubService stub = service as RbxStubService;
+            Assert.IsNotNull(stub);
+            Assert.AreEqual("MVP8", stub.PlannedMvp);
+            Assert.AreSame(stub, _game.GetService("TweenService"));
         }
 
         [Test]
         public void FindService_ReturnsNullForValidAbsentServicesAndThrowsForUnknown()
         {
             Assert.AreSame(_registry.WorldRoot, _game.FindService("Workspace"));
-            Assert.IsNull(_game.FindService("Players"));
+            Assert.IsNull(_game.FindService("Debris"));
+
+            // WHY: Players is no longer absent — the loopback networking rung pulled its minimum
+            // surface forward so RemoteEvent.OnServerEvent can hand Lua a real Player, as Roblox does.
+            Assert.IsNotNull(_game.FindService("Players"));
 
             RbxError error = Assert.Throws<RbxError>(() => _game.FindService("Bogus"));
             Assert.AreEqual(RbxErrorCode.UnknownService, error.Code);

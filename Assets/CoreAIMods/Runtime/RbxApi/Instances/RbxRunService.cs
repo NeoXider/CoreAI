@@ -4,7 +4,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Roblox RunService: the per-frame game loop signals Stepped/Heartbeat/RenderStepped. State
     /// is driven by the host composition, which calls <see cref="Step"/> once per frame with the
     /// frame delta (mirroring how <see cref="RbxUserInputService.Step"/> is pumped); each signal
-    /// fires synchronously so <c>Heartbeat:Connect(function(dt) ... end)</c> runs that frame.
+    /// queues its handlers for the scheduler's deferred signal drain.
     /// </summary>
     public sealed class RbxRunService : RbxInstance
     {
@@ -21,15 +21,15 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Fires (deltaTime) each frame after physics, before rendering — the idiomatic
         /// per-frame game-loop hook.</summary>
         public RbxScriptSignal Heartbeat { get; } =
-            new("RunService.Heartbeat", true);
+            new("RunService.Heartbeat");
 
         /// <summary>Fires (accumulatedTime, deltaTime) each frame before physics.</summary>
         public RbxScriptSignal Stepped { get; } =
-            new("RunService.Stepped", true);
+            new("RunService.Stepped");
 
         /// <summary>Fires (deltaTime) each frame before the screen renders.</summary>
         public RbxScriptSignal RenderStepped { get; } =
-            new("RunService.RenderStepped", true);
+            new("RunService.RenderStepped");
 
         /// <summary>
         /// Per-frame pump: fires Stepped, then Heartbeat, then RenderStepped with the frame delta.
@@ -37,7 +37,6 @@ namespace CoreAI.Mods.Rbx.Instances
         /// advance every frame. Each signal is gated on <see cref="RbxScriptSignal.HasConnections"/>
         /// so an unlistened signal boxes nothing.
         /// </summary>
-        // TODO: MVP2 — the general signal scheduler replaces this pump with deferred dispatch.
         public void Step(float deltaSeconds)
         {
             if (IsDestroyed)

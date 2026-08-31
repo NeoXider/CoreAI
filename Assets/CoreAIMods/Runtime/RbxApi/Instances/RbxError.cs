@@ -26,10 +26,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
     /// <summary>
     /// Structured error for the Roblox API layer following the roadmap §5.2.7 format:
-    /// <c>[mod:id script:path line:n] CODE: message | fix: suggestion</c>. Mod context is optional
-    /// at the Domain level and is NOT attached today: <see cref="WithContext"/> is the ready seam,
-    /// but wiring the mod/script/line prefix is deferred to the MVP5 VM chunk-name work, so errors
-    /// currently surface with no prefix.
+    /// <c>[mod:id script:path line:n] CODE: message | fix: suggestion</c>. Domain errors are born
+    /// context-free; the production Lua host-function boundary attaches the durable mod id and live
+    /// source line through <see cref="WithContext"/> before converting them to VM errors.
     /// </summary>
     public sealed class RbxError : Exception
     {

@@ -46,6 +46,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
         }
 
         [Test]
+        public void Color3_FromRGB_FractionalChannelsUseLockedCoreAiRounding()
+        {
+            // WHY: The offline Roblox mirror does not document fractional rounding, so this is a
+            // CoreAI compatibility decision rather than a documented Roblox golden.
+            RbxColor3 c = RbxColor3.FromRGB(1.49f, 1.5f, 2.5f);
+            Assert.AreEqual(1f / 255f, c.R, Epsilon);
+            Assert.AreEqual(2f / 255f, c.G, Epsilon);
+            Assert.AreEqual(3f / 255f, c.B, Epsilon);
+        }
+
+        [Test]
         public void Color3_FromHSV_PrimaryGoldens()
         {
             Assert.AreEqual(new RbxColor3(1f, 0f, 0f), RbxColor3.FromHSV(0f, 1f, 1f));
