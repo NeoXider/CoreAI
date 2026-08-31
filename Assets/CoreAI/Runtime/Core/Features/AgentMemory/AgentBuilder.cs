@@ -788,8 +788,14 @@ namespace CoreAI.Ai
                         : additionalPrompt.TrimEnd() + "\n\n" + catalog.Trim();
                 }
 
+                // WHY: the provider reads the SAME role's tools, so a top-level tool the model wrapped
+                // in call_skill_tool by analogy with the skill's own tools still runs instead of coming
+                // back as a "not found" the learner never sees.
+                string roleForDirectTools = RoleId;
                 policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(catalogSkills));
-                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(catalogSkills));
+                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(
+                    catalogSkills,
+                    () => policy.GetToolsForRole(roleForDirectTools)));
             }
 
             if (!string.IsNullOrWhiteSpace(additionalPrompt))

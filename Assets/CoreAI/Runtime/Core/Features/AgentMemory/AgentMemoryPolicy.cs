@@ -40,7 +40,7 @@ namespace CoreAI.Ai
                                                    string.Equals(tool.Name, "call_skill_tool",
                                                        StringComparison.OrdinalIgnoreCase)));
                     replacement.Add(ReadSkillLlmTool.Create(catalog));
-                    replacement.Add(CallSkillToolLlmTool.Create(catalog));
+                    replacement.Add(CallSkillToolLlmTool.Create(catalog, DirectToolsProviderFor(roleId)));
                 }
 
                 if (replacement.Count == 0)
@@ -112,8 +112,24 @@ namespace CoreAI.Ai
             if (createdCatalog)
             {
                 AddToolForRole(roleId, ReadSkillLlmTool.Create(catalog));
-                AddToolForRole(roleId, CallSkillToolLlmTool.Create(catalog));
+                AddToolForRole(roleId, CallSkillToolLlmTool.Create(catalog, DirectToolsProviderFor(roleId)));
             }
+        }
+
+        /// <summary>
+        /// Callback that reports the role's own top-level tools to <c>call_skill_tool</c>.
+        /// </summary>
+        /// <remarks>
+        /// A callback rather than a list because the meta-tool is registered while the role's tools are
+        /// still being assembled — a snapshot taken here would miss every tool added afterwards. It is
+        /// only consulted when a name misses the skill catalog, so the lock is never taken on the
+        /// normal path (and never while this one is already held: the call happens during a tool
+        /// invocation, long after registration).
+        /// </remarks>
+        private Func<IReadOnlyList<ILlmTool>> DirectToolsProviderFor(string roleId)
+        {
+            string capturedRoleId = roleId;
+            return () => GetToolsForRole(capturedRoleId);
         }
 
         /// <summary>

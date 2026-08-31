@@ -387,6 +387,104 @@ namespace CoreAI.Tests.EditMode
             Assert.That(json, Does.Contain("Player"));
         }
 
+        [Test]
+        public async Task CallSkillTool_Execute_TopLevelToolName_InvokesItInstead()
+        {
+            // A skill teaches the model to reach ITS tools through call_skill_tool, and the model
+            // generalises to the agent's top-level tools. Refusing that call costs a real action: the
+            // refusal is an ordinary tool result, so the model apologises in prose and the user sees
+            // nothing happen. Downstream this read as "the model rarely spawns a quiz".
+            bool called = false;
+            DelegateLlmTool topLevel = new("spawn_quiz", "Shows a quiz card",
+                new Func<string, object>(question =>
+                {
+                    called = true;
+                    return new { shown = question };
+                }));
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(
+                new List<SkillSet> { MakeCraftingSkill() },
+                () => new List<ILlmTool> { topLevel });
+
+            string json = await InvokeCallSkillToolAsync(proxy, "spawn_quiz", "{\"question\":\"2+2?\"}");
+
+            Assert.IsTrue(called, "A wrapped top-level tool must run, not come back as 'not found'.");
+            Assert.That(json, Does.Contain("2+2?"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_UnknownTool_StillFailsWhenNoTopLevelMatch()
+        {
+            DelegateLlmTool topLevel = new("spawn_quiz", "Shows a quiz card", new Action(() => { }));
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(
+                new List<SkillSet> { MakeCraftingSkill() },
+                () => new List<ILlmTool> { topLevel });
+
+            string json = await InvokeCallSkillToolAsync(proxy, "no_such_tool", "{}");
+
+            Assert.IsFalse(JObject.Parse(json).Value<bool>("success"),
+                "The fallback must widen the lookup, not accept any name.");
+            Assert.That(json, Does.Contain("not found"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_TopLevelTool_SurvivesRestrictToWhenAllowed()
+        {
+            // Pairs with the test below, and neither is enough alone: a RestrictTo that silently
+            // dropped the provider would leave the "blocked" test green for the WRONG reason — the
+            // tool would be unreachable rather than forbidden. Only the allowed direction can tell
+            // "the allowlist said no" apart from "the fallback was lost in the copy".
+            bool called = false;
+            DelegateLlmTool topLevel = new("spawn_quiz", "Shows a quiz card",
+                new Action(() => called = true));
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(
+                new List<SkillSet> { MakeCraftingSkill() },
+                () => new List<ILlmTool> { topLevel });
+            ILlmTool restricted = ((ISkillSetMetaLlmTool)proxy).RestrictTo(new[] { "craft_item", "spawn_quiz" });
+
+            string json = await InvokeCallSkillToolAsync(restricted, "spawn_quiz", "{}");
+
+            Assert.IsTrue(called, "RestrictTo must carry the top-level fallback into the restricted copy.");
+            Assert.IsTrue(JObject.Parse(json).Value<bool>("success"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_TopLevelTool_StaysBlockedByTheSessionAllowlist()
+        {
+            // Wrapping a name must not become a way around the per-turn allowlist: what the turn may
+            // not call directly it may not call through the wrapper either.
+            bool called = false;
+            DelegateLlmTool topLevel = new("spawn_quiz", "Shows a quiz card",
+                new Action(() => called = true));
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(
+                new List<SkillSet> { MakeCraftingSkill() },
+                () => new List<ILlmTool> { topLevel });
+            ILlmTool restricted = ((ISkillSetMetaLlmTool)proxy).RestrictTo(new[] { "craft_item" });
+
+            string json = await InvokeCallSkillToolAsync(restricted, "spawn_quiz", "{}");
+
+            Assert.IsFalse(called, "A tool outside the allowlist must not run through the wrapper.");
+            Assert.That(json, Does.Contain("not found"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_OwnName_DoesNotRecurse()
+        {
+            // The provider reports the role's whole tool list, and that list contains this proxy.
+            ILlmTool proxy = null;
+            proxy = CallSkillToolLlmTool.Create(
+                new List<SkillSet> { MakeCraftingSkill() },
+                () => new List<ILlmTool> { proxy });
+
+            string json = await InvokeCallSkillToolAsync(proxy, "call_skill_tool", "{}");
+
+            Assert.IsFalse(JObject.Parse(json).Value<bool>("success"),
+                "Dispatching the wrapper into itself would recurse until the stack gives out.");
+        }
+
         // ══════════════════════════════════════════════════════════════════════
         //  AgentBuilder integration
         // ══════════════════════════════════════════════════════════════════════
