@@ -15,7 +15,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Regression coverage for the shipped Lane Racer and Tetris Lua resources, including their
+    /// Regression coverage for the shipped Clicker, Lane Racer, and Tetris Lua resources, including their
     /// delivery headers and frame-driven collision and gravity behavior under the real Lua runtime.
     /// </summary>
     [TestFixture]
@@ -139,7 +139,9 @@ namespace CoreAI.Tests.EditMode
             public RuntimeHarness()
             {
                 Input = new InMemoryInputSource();
-                RbxApi = new LuaCsRbxApiBindings(inputSource: Input);
+                InstanceRegistry registry = new(
+                    worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+                RbxApi = new LuaCsRbxApiBindings(registry: registry, inputSource: Input);
                 Logger = new CapturingGameLogger();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
@@ -302,10 +304,12 @@ namespace CoreAI.Tests.EditMode
         public void RealResources_LoadAndHeadersParseWithFixDeliveryVersions()
         {
             IReadOnlyList<BundledMod> mods = new ResourcesBundledModSource().Load();
+            AssertHeader(FindBundledMod(mods, "sample_clicker"), "sample_clicker", "1.5.0");
             AssertHeader(FindBundledMod(mods, "sample_lane_racer"), "sample_lane_racer", "2.3.0");
             AssertHeader(FindBundledMod(mods, "sample_tetris3d"), "sample_tetris3d", "3.3.0");
         }
 
+        [TestCase("sample_clicker", "sample_clicker")]
         [TestCase("sample_lane_racer", "sample_lane_racer")]
         [TestCase("sample_tetris3d", "sample_tetris3d")]
         public void RealSample_LoadsAndRunsWithoutLoudStub(string modId, string resourceName)

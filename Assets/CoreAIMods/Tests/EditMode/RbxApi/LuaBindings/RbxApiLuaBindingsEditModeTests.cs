@@ -3,11 +3,16 @@ using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Sandbox.LuaCs;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
+using CoreAI.Scripting;
+using CoreAI.Scripting.LuaCs;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -119,6 +124,53 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         private static string FullText(Exception ex)
         {
             return ex.ToString();
+        }
+
+        private static ActorContext Actor(string actorId)
+        {
+            return new LocalActorIdentityProvider(actorId)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        private static LuaCsRbxApiBindings StrictWorld(out InstanceRegistry instanceRegistry)
+        {
+            instanceRegistry = new InstanceRegistry(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            return new LuaCsRbxApiBindings(registry: instanceRegistry);
+        }
+
+        private static RbxInstance CreateActorInstance(InstanceRegistry registry,
+            ActorContext actorContext, string modId, string className)
+        {
+            string originTag = OriginTag.FromMod(modId);
+            registry.BindActorAttribution(modId, originTag, actorContext.ActorId);
+            return registry.CreateScripted(className, modId, originTag);
+        }
+
+        private static InstanceRecord Record(InstanceRegistry registry, RbxInstance instance)
+        {
+            Assert.IsTrue(registry.TryGetRecord(instance.Id, out InstanceRecord record));
+            return record;
+        }
+
+        private static void RunActorLua(LuaCsRbxApiBindings bindings, ActorContext actorContext,
+            string modId, string source,
+            params (string Name, RbxInstance Instance)[] instanceGlobals)
+        {
+            LuaCsRbxModContext context = new(
+                bindings, LuaCapabilities.All, modId, OriginTag.FromMod(modId), actorContext);
+            LuaCsScriptEngine engine = new();
+            LuaCsApiRegistry registry = (LuaCsApiRegistry)engine.CreateFunctionRegistry();
+            registry.RegisterValue("CFrame", LuaCsRbxDatatypeBindings.BuildCFrameGlobal);
+            for (int index = 0; index < instanceGlobals.Length; index++)
+            {
+                (string Name, RbxInstance Instance) global = instanceGlobals[index];
+                registry.RegisterValue(global.Name, () => context.WrapInstance(global.Instance));
+            }
+
+            IScriptState state = engine.CreateState();
+            registry.ApplyTo(state);
+            engine.RunChunk(state, source);
         }
 
         // ---- Datatypes ----------------------------------------------------------------------
@@ -388,6 +440,208 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsTrue(roblox.Registry.TryGetRecord(owned.Id, out InstanceRecord record));
             Assert.AreEqual("mymod", record.OwnerModId);
             Assert.AreEqual(OriginTag.FromMod("mymod"), record.OriginTag);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_OwnerCanMutate_ButCrossActorWritesAndDestroyAreDenied()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            ActorContext actorA = Actor("actor-a");
+            ActorContext actorB = Actor("actor-b");
+            RbxInstance ownedA = CreateActorInstance(registry, actorA, "mod-a", "Folder");
+            RbxInstance ownedB = CreateActorInstance(registry, actorB, "mod-b", "Folder");
+            RbxInstance shared = registry.Create("Folder");
+
+            Assert.AreEqual("actor-a", Record(registry, ownedA).OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, ownedA).AccessScope);
+            Assert.AreEqual(InstanceAccessScope.SharedWritable, Record(registry, shared).AccessScope);
+
+            RunActorLua(bindings, actorA, "mod-a", "own.Name = 'OwnedByA'",
+                ("own", ownedA));
+            Assert.AreEqual("OwnedByA", ownedA.Name);
+
+            Exception writeError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "mod-a", "foreign.Name = 'stolen'", ("foreign", ownedB)));
+            StringAssert.Contains("actor 'actor-a'", FullText(writeError));
+            StringAssert.Contains("Owned by actor 'actor-b'", FullText(writeError));
+            Assert.AreEqual("Folder", ownedB.Name);
+
+            Exception destroyError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "mod-a", "foreign:Destroy()", ("foreign", ownedB)));
+            StringAssert.Contains("actor 'actor-a'", FullText(destroyError));
+            StringAssert.Contains("Owned by actor 'actor-b'", FullText(destroyError));
+            Assert.IsFalse(ownedB.IsDestroyed);
+
+            RunActorLua(bindings, actorA, "mod-a", "shared.Name = 'Writable'", ("shared", shared));
+            Exception sharedDestroyError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "mod-a", "shared:Destroy()", ("shared", shared)));
+            StringAssert.Contains("SharedWritable destruction", FullText(sharedDestroyError));
+            Assert.IsFalse(shared.IsDestroyed);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_ProductionRuntimeInstanceNewAndMutationUseActorAcl()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            LuaCsModStack stack = BuildStack(bindings);
+            ActorContext actorA = Actor("runtime-actor-a");
+            ActorContext actorB = Actor("runtime-actor-b");
+            registry.BindActorAttribution(
+                "runtime-owner-b", OriginTag.FromMod("runtime-owner-b"), actorB.ActorId);
+
+            stack.Runtime.LoadMod(actorB, "runtime-owner-b", @"
+                local owned = Instance.new('Folder')
+                owned.Name = 'RuntimeOwnedByB'
+                owned.Parent = workspace", persistToStore: false);
+
+            RbxInstance ownedB = bindings.Registry.WorldRoot.FindFirstChild("RuntimeOwnedByB");
+            Assert.IsNotNull(ownedB);
+            Assert.AreEqual(actorB.ActorId, Record(registry, ownedB).OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, ownedB).AccessScope);
+
+            registry.BindActorAttribution(
+                "runtime-write-a", OriginTag.FromMod("runtime-write-a"), actorA.ActorId);
+            Exception writeError = Assert.Catch(() => stack.Runtime.LoadMod(
+                actorA,
+                "runtime-write-a",
+                "workspace:FindFirstChild('RuntimeOwnedByB').Name = 'stolen'",
+                persistToStore: false));
+            StringAssert.Contains("Owned by actor 'runtime-actor-b'", FullText(writeError));
+
+            registry.BindActorAttribution(
+                "runtime-destroy-a", OriginTag.FromMod("runtime-destroy-a"), actorA.ActorId);
+            Exception destroyError = Assert.Catch(() => stack.Runtime.LoadMod(
+                actorA,
+                "runtime-destroy-a",
+                "workspace:FindFirstChild('RuntimeOwnedByB'):Destroy()",
+                persistToStore: false));
+            StringAssert.Contains("actor 'runtime-actor-a'", FullText(destroyError));
+            Assert.IsFalse(ownedB.IsDestroyed);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_HostProtectedCameraIsWritable_ButSingletonLifecycleIsHostOnly()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            ActorContext actor = Actor("camera-mod-owner");
+            RbxInstance workspace = bindings.Game.FindFirstChildOfClass("Workspace");
+            RbxInstance camera = workspace.FindFirstChildOfClass("Camera");
+            RbxInstance lighting = bindings.Game.FindFirstChildOfClass("Lighting");
+
+            Assert.AreEqual(InstanceAccessScope.HostProtected, Record(registry, camera).AccessScope);
+            Assert.AreEqual(InstanceAccessScope.HostProtected, Record(registry, lighting).AccessScope);
+            RunActorLua(bindings, actor, "camera-mod",
+                "camera.CFrame = CFrame.new(3, 4, 5)", ("camera", camera));
+            Assert.AreEqual(3f, bindings.CameraRig.GetCFrame().Position.X, 0.0001f);
+
+            Exception actorDestroyError = Assert.Catch(() => RunActorLua(
+                bindings, actor, "camera-mod", "service:Destroy()", ("service", lighting)));
+            StringAssert.Contains("HostProtected", FullText(actorDestroyError));
+            Assert.IsFalse(lighting.IsDestroyed);
+
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            RunActorLua(bindings, host, "host", "service:Destroy()", ("service", lighting));
+            Assert.IsTrue(lighting.IsDestroyed);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_CloneSubtreeBelongsToCloningActor()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            ActorContext actorA = Actor("clone-source-owner");
+            ActorContext actorB = Actor("clone-caller");
+            RbxInstance workspace = bindings.Game.FindFirstChildOfClass("Workspace");
+            RbxInstance source = CreateActorInstance(registry, actorA, "source-mod", "Folder");
+            RbxInstance sourceChild = CreateActorInstance(registry, actorA, "source-mod", "Part");
+            sourceChild.Parent = source;
+            source.Parent = workspace;
+
+            RunActorLua(bindings, actorB, "clone-mod", @"
+                local copy = source:Clone()
+                copy.Name = 'CloneByB'
+                copy.Parent = workspace",
+                ("source", source), ("workspace", workspace));
+
+            RbxInstance clone = workspace.FindFirstChild("CloneByB");
+            Assert.IsNotNull(clone);
+            RbxInstance cloneChild = clone.FindFirstChildOfClass("Part");
+            Assert.IsNotNull(cloneChild);
+            Assert.AreEqual("clone-caller", Record(registry, clone).OwnerActorId);
+            Assert.AreEqual("clone-caller", Record(registry, cloneChild).OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, clone).AccessScope);
+            Assert.AreEqual(InstanceAccessScope.Owned, Record(registry, cloneChild).AccessScope);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_ReparentChecksMovedObjectAndDestinationBeforeMutation()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            ActorContext actorA = Actor("reparent-a");
+            ActorContext actorB = Actor("reparent-b");
+            RbxInstance workspace = bindings.Game.FindFirstChildOfClass("Workspace");
+            RbxInstance childA = CreateActorInstance(registry, actorA, "reparent-mod-a", "Folder");
+            RbxInstance parentB = CreateActorInstance(registry, actorB, "reparent-mod-b", "Folder");
+
+            Exception sourceError = Assert.Catch(() => RunActorLua(
+                bindings, actorB, "reparent-mod-b", "child.Parent = workspace",
+                ("child", childA), ("workspace", workspace)));
+            StringAssert.Contains("reparent source", FullText(sourceError));
+            Assert.IsNull(childA.Parent);
+
+            Exception destinationError = Assert.Catch(() => RunActorLua(
+                bindings, actorA, "reparent-mod-a", "child.Parent = destination",
+                ("child", childA), ("destination", parentB)));
+            StringAssert.Contains("reparent destination", FullText(destinationError));
+            StringAssert.Contains("Owned by actor 'reparent-b'", FullText(destinationError));
+            Assert.IsNull(childA.Parent);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_RecursiveDestroyAndClearPreflightEveryDescendantAtomically()
+        {
+            LuaCsRbxApiBindings bindings = StrictWorld(out InstanceRegistry registry);
+            ActorContext actorA = Actor("destroy-a");
+            ActorContext actorB = Actor("destroy-b");
+            RbxInstance rootA = CreateActorInstance(registry, actorA, "destroy-mod-a", "Folder");
+            RbxInstance descendantB = CreateActorInstance(registry, actorB, "destroy-mod-b", "Folder");
+            descendantB.Parent = rootA;
+
+            Assert.Catch(() => RunActorLua(
+                bindings, actorA, "destroy-mod-a", "root:Destroy()", ("root", rootA)));
+            Assert.IsFalse(rootA.IsDestroyed);
+            Assert.IsFalse(descendantB.IsDestroyed);
+            Assert.AreSame(rootA, descendantB.Parent);
+
+            RbxInstance containerA = CreateActorInstance(
+                registry, actorA, "destroy-mod-a", "Folder");
+            RbxInstance childA = CreateActorInstance(registry, actorA, "destroy-mod-a", "Folder");
+            RbxInstance childB = CreateActorInstance(registry, actorB, "destroy-mod-b", "Folder");
+            childA.Parent = containerA;
+            childB.Parent = containerA;
+
+            Assert.Catch(() => RunActorLua(
+                bindings, actorA, "destroy-mod-a", "container:ClearAllChildren()",
+                ("container", containerA)));
+            Assert.AreSame(containerA, childA.Parent);
+            Assert.AreSame(containerA, childB.Parent);
+            Assert.IsFalse(childA.IsDestroyed);
+            Assert.IsFalse(childB.IsDestroyed);
+        }
+
+        [Test]
+        public void Lua_WorldAcl_LegacyWorldKeepsExistingCrossActorDestroyBehavior()
+        {
+            InstanceRegistry registry = new();
+            LuaCsRbxApiBindings bindings = new(registry: registry);
+            ActorContext actorA = Actor("legacy-a");
+            ActorContext actorB = Actor("legacy-b");
+            RbxInstance ownedB = CreateActorInstance(registry, actorB, "legacy-mod-b", "Folder");
+
+            Assert.IsNull(registry.WorldAclVersion);
+            RunActorLua(bindings, actorA, "legacy-mod-a",
+                "target.Name = 'LegacyWritable'; target:Destroy()", ("target", ownedB));
+            Assert.IsTrue(ownedB.IsDestroyed);
         }
 
         [Test]

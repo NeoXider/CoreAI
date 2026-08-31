@@ -1,5 +1,13 @@
 namespace CoreAI.Mods.Rbx.Instances
 {
+    /// <summary>Actor-level mutation and lifecycle policy for one world instance.</summary>
+    public enum InstanceAccessScope
+    {
+        Owned,
+        SharedWritable,
+        HostProtected
+    }
+
     /// <summary>
     /// The single reconciliation point for the three identity spaces (roadmap §3.3):
     /// Roblox InstanceId, future Mirror netId, and the CoreAI world-command name. Exactly one
@@ -26,15 +34,24 @@ namespace CoreAI.Mods.Rbx.Instances
         /// "ai:&lt;modId&gt;" | null (host). See <see cref="OriginTag"/>.</summary>
         public string OriginTag { get; }
 
+        /// <summary>Durable actor owner; null identifies the host.</summary>
+        public string OwnerActorId { get; internal set; }
+
+        /// <summary>Actor-level access policy, independent of teardown ownership and provenance.</summary>
+        public InstanceAccessScope AccessScope { get; internal set; }
+
         /// <summary>True while the backing binder holds a materialized backing object (D5).</summary>
         public bool IsMaterialized { get; internal set; }
 
-        internal InstanceRecord(InstanceId id, RbxInstance instance, string ownerModId, string originTag)
+        internal InstanceRecord(InstanceId id, RbxInstance instance, string ownerModId, string originTag,
+            string ownerActorId, InstanceAccessScope accessScope)
         {
             Id = id;
             Instance = instance;
             OwnerModId = ownerModId;
             OriginTag = originTag;
+            OwnerActorId = ownerActorId;
+            AccessScope = accessScope;
         }
     }
 }

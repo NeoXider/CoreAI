@@ -83,8 +83,8 @@ namespace CoreAI.Ai.LuaCs
         public const int DefaultMaxEventsDispatchedPerTick = 64;
 
         /// <summary>
-        /// Upper bound on handler invocations dispatched across <em>all</em> mods in a single
-        /// <see cref="Tick"/>. Chosen as 4x the per-mod cap: comfortably above the per-mod cap so a
+        /// Upper bound on event-handler and timer invocations dispatched across <em>all</em> mods in a
+        /// single <see cref="Tick"/>. Chosen as 4x the per-mod event cap: comfortably above that cap so a
         /// single busy mod is never throttled below its own budget, while still bounding a worst-case
         /// burst across many mods to a few hundred calls per frame. Mods not reached once it is
         /// exhausted keep their queued events for later ticks (no events are dropped).
@@ -147,6 +147,7 @@ namespace CoreAI.Ai.LuaCs
 
         private sealed class Mod
         {
+            public readonly object EventGate = new();
             public string Id = "";
             public string OwnerActorId = "";
             public IScriptState State;
@@ -156,10 +157,13 @@ namespace CoreAI.Ai.LuaCs
             public readonly Dictionary<string, List<object>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
             public readonly Queue<KeyValuePair<string, string>> Pending = new();
+            public readonly HashSet<string> RegisteredEvents = new(StringComparer.Ordinal);
             public readonly Dictionary<string, object> Exports = new(StringComparer.Ordinal);
             public int HandlerCount;
             public int ErrorCount;
             public DateTime LoadedAtUtc;
+            public long LoadOrder;
+            public volatile bool AcceptsEvents;
 
             /// <summary>
             /// True once the mod hit the consecutive-error threshold: it stays loaded and addressable
@@ -170,7 +174,10 @@ namespace CoreAI.Ai.LuaCs
         }
 
         private readonly object _gate = new();
+        private readonly object _subscriptionGate = new();
         private readonly Dictionary<string, Mod> _mods = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<Mod>> _subscriptions = new(StringComparer.Ordinal);
+        private readonly List<Mod> _modsInLoadOrder = new();
         private readonly IScriptEngine _engine;
         private readonly IValueMarshaller _marshaller;
         private readonly IScriptExecutionGuard _handlerGuard;
@@ -197,6 +204,8 @@ namespace CoreAI.Ai.LuaCs
         /// starving forever.
         /// </summary>
         private int _dispatchRotation;
+        private long _nextLoadOrder;
+        private long _subscriptionEntriesTouched;
 
         // WHY: Reentrancy depth of mods_call on the current thread (ticks run on the main thread; a
         // second thread would only ever see its own chain).
@@ -758,7 +767,7 @@ namespace CoreAI.Ai.LuaCs
             List<LuaModInfo> result = new();
             lock (_gate)
             {
-                foreach (Mod mod in _mods.Values)
+                foreach (Mod mod in _modsInLoadOrder)
                 {
                     result.Add(new LuaModInfo
                     {
@@ -940,7 +949,13 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 EnsureModCapacity(modId, ownerActorId);
+                mod.LoadOrder = ++_nextLoadOrder;
                 _mods[modId] = mod;
+                _modsInLoadOrder.Add(mod);
+                lock (_subscriptionGate)
+                {
+                    ActivateSubscriptionsLocked(mod);
+                }
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
@@ -1069,9 +1084,10 @@ namespace CoreAI.Ai.LuaCs
             string modId = Normalize(id);
             string source;
             LuaCapabilities caps;
+            Mod mod;
             lock (_gate)
             {
-                if (!_mods.TryGetValue(modId, out Mod mod))
+                if (!_mods.TryGetValue(modId, out mod))
                 {
                     return false;
                 }
@@ -1079,6 +1095,11 @@ namespace CoreAI.Ai.LuaCs
                 source = mod.Source;
                 caps = mod.Caps;
                 _mods.Remove(modId);
+                _modsInLoadOrder.Remove(mod);
+                lock (_subscriptionGate)
+                {
+                    DeactivateSubscriptionsLocked(mod);
+                }
             }
 
             TeardownModEffects(modId, LuaModTeardownReason.Unload);
@@ -1122,9 +1143,10 @@ namespace CoreAI.Ai.LuaCs
 
             LuaCapabilities caps;
             string ownerActorId;
+            Mod existing;
             lock (_gate)
             {
-                if (!_mods.TryGetValue(modId, out Mod existing))
+                if (!_mods.TryGetValue(modId, out existing))
                 {
                     throw new InvalidOperationException($"Mod '{modId}' is not loaded.");
                 }
@@ -1143,7 +1165,24 @@ namespace CoreAI.Ai.LuaCs
 
             lock (_gate)
             {
+                if (!_mods.TryGetValue(modId, out Mod live) || !ReferenceEquals(live, existing))
+                {
+                    throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
+                }
+
+                replacement.LoadOrder = existing.LoadOrder;
                 _mods[modId] = replacement;
+                int orderIndex = _modsInLoadOrder.IndexOf(existing);
+                if (orderIndex >= 0)
+                {
+                    _modsInLoadOrder[orderIndex] = replacement;
+                }
+
+                lock (_subscriptionGate)
+                {
+                    DeactivateSubscriptionsLocked(existing);
+                    ActivateSubscriptionsLocked(replacement);
+                }
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}).");
@@ -1282,7 +1321,7 @@ namespace CoreAI.Ai.LuaCs
             return null;
         }
 
-        /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
+        /// <summary>Queues a game event for subscribed mods on the next <see cref="Tick"/>.</summary>
         internal void EmitEvent(string name, string payload = "")
         {
             string evt = Normalize(name);
@@ -1291,13 +1330,7 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            lock (_gate)
-            {
-                foreach (Mod mod in _mods.Values)
-                {
-                    EnqueueLocked(mod, evt, payload ?? "");
-                }
-            }
+            RouteEvent(null, evt, payload ?? "");
         }
 
         /// <summary>
@@ -1319,7 +1352,7 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 _tickScratch.Clear();
-                foreach (Mod mod in _mods.Values)
+                foreach (Mod mod in _modsInLoadOrder)
                 {
                     if (!mod.Quarantined)
                     {
@@ -1333,58 +1366,52 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
-            // WHY: Timers always run (bounded to one fire per timer per tick); they are not charged against
-            // the global event budget, so they run for every mod in iteration order.
-            for (int i = 0; i < _tickScratch.Count; i++)
-            {
-                TickTimers(_tickScratch[i], deltaSeconds);
-            }
-
-            // WHY: Only event dispatch is charged against the global budget. The start index rotates
-            // round-robin every tick so the budget is shared fairly across all mods over successive
-            // ticks; mods not reached keep their queued events for later ticks (no drops).
+            // WHY: Rotation shares one timer/event invocation budget fairly; work not reached stays pending.
             int count = _tickScratch.Count;
             int start = count > 0 ? (_dispatchRotation % count + count) % count : 0;
             _dispatchRotation++;
 
-            int dispatchedThisTick = 0;
+            int completedThisTick = 0;
+            int eventsDeliveredThisTick = 0;
             for (int n = 0; n < count; n++)
             {
                 Mod mod = _tickScratch[(start + n) % count];
 
-                if (dispatchedThisTick < DefaultMaxEventsDispatchedPerTickGlobal)
+                try
                 {
-                    try
-                    {
-                        dispatchedThisTick += DispatchPendingEvents(mod, dispatchedThisTick);
-                    }
-                    catch (Exception ex)
-                    {
-                        // WHY: Defence in depth: a single mod's dispatch failure must never abort the whole
-                        // per-frame tick for the other mods.
-                        mod.ErrorCount++;
-                        _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' event dispatch failed: {ex}");
-                        AppendLog(mod.Id, LuaLogLevel.RuntimeError,
-                            $"event dispatch failed: {SingleLineErrorMessage(ex)}");
-                    }
+                    completedThisTick += TickTimers(mod, deltaSeconds, completedThisTick);
+                    int eventsDelivered = DispatchPendingEvents(mod, completedThisTick);
+                    completedThisTick += eventsDelivered;
+                    eventsDeliveredThisTick += eventsDelivered;
+                }
+                catch (Exception ex)
+                {
+                    // WHY: A single mod's dispatch failure must never abort the other mods' frame tick.
+                    mod.ErrorCount++;
+                    _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' scheduled dispatch failed: {ex}");
+                    AppendLog(mod.Id, LuaLogLevel.RuntimeError,
+                        $"scheduled dispatch failed: {SingleLineErrorMessage(ex)}");
                 }
 
                 QuarantineIfExhausted(mod);
             }
 
-            if (_observability != null && dispatchedThisTick > 0)
+            if (_observability != null && completedThisTick > 0)
             {
-                try
+                if (eventsDeliveredThisTick > 0)
                 {
-                    _observability.RecordEventsDelivered(dispatchedThisTick);
-                }
-                catch
-                {
+                    try
+                    {
+                        _observability.RecordEventsDelivered(eventsDeliveredThisTick);
+                    }
+                    catch
+                    {
+                    }
                 }
 
                 try
                 {
-                    _observability.RecordCompletedOperations(dispatchedThisTick);
+                    _observability.RecordCompletedOperations(completedThisTick);
                 }
                 catch
                 {
@@ -1416,6 +1443,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 mod.Quarantined = true;
+            }
+
+            lock (_subscriptionGate)
+            {
+                DeactivateSubscriptionsLocked(mod);
             }
 
             _log?.Warn(
@@ -1495,13 +1527,15 @@ namespace CoreAI.Ai.LuaCs
             RaiseModHandlerErrored(modId, message, streak);
         }
 
-        private void TickTimers(Mod mod, double dt)
+        private int TickTimers(Mod mod, double dt, int alreadyCompletedThisTick)
         {
+            int remaining = DefaultMaxEventsDispatchedPerTickGlobal - alreadyCompletedThisTick;
+            int dispatched = 0;
             for (int i = 0; i < mod.Timers.Count; i++)
             {
                 TimerEntry timer = mod.Timers[i];
                 timer.DueIn -= dt;
-                if (timer.DueIn > 0d)
+                if (timer.DueIn > 0d || dispatched >= remaining)
                 {
                     continue;
                 }
@@ -1509,7 +1543,10 @@ namespace CoreAI.Ai.LuaCs
                 // WHY: One invocation per tick maximum — a long hitch must not burst-fire a timer.
                 timer.DueIn = timer.IntervalSeconds;
                 InvokeGuarded(mod, timer.Fn);
+                dispatched++;
             }
+
+            return dispatched;
         }
 
         /// <summary>
@@ -1526,7 +1563,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 KeyValuePair<string, string> evt;
                 object[] handlerSnapshot;
-                lock (_gate)
+                lock (mod.EventGate)
                 {
                     if (mod.Pending.Count == 0)
                     {
@@ -1535,18 +1572,15 @@ namespace CoreAI.Ai.LuaCs
 
                     evt = mod.Pending.Peek();
 
-                    // WHY: Snapshot the handler list under the gate: a dispatched handler may call hooks_on()
+                    // WHY: Snapshot the handler list under the per-mod gate: a dispatched handler may call hooks_on()
                     // for the same event, mutating mod.Handlers; enumerating the live list would then
                     // throw out of the (unguarded) tick.
                     handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<object> handlers)
                         ? handlers.ToArray()
                         : Array.Empty<object>();
 
-                    // WHY: No-drop contract: only dequeue when the remaining budget can run every handler of
-                    // this event. Exception: an event whose own handler count exceeds the whole budget
-                    // would starve forever, so when nothing has run yet for this mod we dispatch it in
-                    // full (bounded by the per-mod handler cap) to guarantee progress.
-                    if (handlerSnapshot.Length > limit - dispatched && dispatched > 0)
+                    // WHY: Dequeue only when this whole handler batch fits; rotation guarantees later progress.
+                    if (handlerSnapshot.Length > limit - dispatched)
                     {
                         return dispatched;
                     }
@@ -1835,20 +1869,31 @@ namespace CoreAI.Ai.LuaCs
                     return ScriptCallResult.Return(true);
                 }
 
-                if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
+                bool firstSubscription = false;
+                lock (mod.EventGate)
                 {
-                    throw new InvalidOperationException(
-                        $"hooks_on: handler limit reached ({DefaultMaxHandlersPerMod}).");
+                    if (mod.HandlerCount >= DefaultMaxHandlersPerMod)
+                    {
+                        throw new InvalidOperationException(
+                            $"hooks_on: handler limit reached ({DefaultMaxHandlersPerMod}).");
+                    }
+
+                    if (!mod.Handlers.TryGetValue(name, out List<object> list))
+                    {
+                        list = new List<object>();
+                        mod.Handlers[name] = list;
+                        firstSubscription = true;
+                    }
+
+                    list.Add(fn);
+                    mod.HandlerCount++;
                 }
 
-                if (!mod.Handlers.TryGetValue(name, out List<object> list))
+                if (firstSubscription)
                 {
-                    list = new List<object>();
-                    mod.Handlers[name] = list;
+                    RegisterSubscription(mod, name);
                 }
 
-                list.Add(fn);
-                mod.HandlerCount++;
                 return ScriptCallResult.Return(true);
             });
 
@@ -2091,36 +2136,119 @@ namespace CoreAI.Ai.LuaCs
 
         private void EmitFromMod(Mod sender, string evt, string payload)
         {
-            // WHY: Deliver to every other mod's queue (no self-delivery: trivial infinite loops).
-            lock (_gate)
-            {
-                foreach (Mod mod in _mods.Values)
-                {
-                    if (!ReferenceEquals(mod, sender))
-                    {
-                        EnqueueLocked(mod, evt, payload);
-                    }
-                }
-            }
-
+            RouteEvent(sender, evt, payload);
             RaiseModEventEmitted(sender.Id, evt, payload);
         }
 
-        private void EnqueueLocked(Mod mod, string evt, string payload)
+        private void RouteEvent(Mod sender, string evt, string payload)
         {
-            // WHY: Quarantine suspends the whole dispatch surface; queueing into a mod that will never
-            // dispatch again (a reload swaps in a fresh instance with a fresh queue) is pure waste.
-            if (mod.Quarantined)
+            Mod[] subscriberSnapshot;
+            lock (_subscriptionGate)
+            {
+                subscriberSnapshot = _subscriptions.TryGetValue(evt, out List<Mod> subscribers)
+                    ? subscribers.ToArray()
+                    : Array.Empty<Mod>();
+            }
+
+            int touched = 0;
+            for (int i = 0; i < subscriberSnapshot.Length; i++)
+            {
+                Mod subscriber = subscriberSnapshot[i];
+                if (ReferenceEquals(subscriber, sender))
+                {
+                    continue;
+                }
+
+                touched++;
+                Enqueue(subscriber, evt, payload);
+            }
+
+            Interlocked.Add(ref _subscriptionEntriesTouched, touched);
+        }
+
+        private void Enqueue(Mod mod, string evt, string payload)
+        {
+            lock (mod.EventGate)
+            {
+                if (!mod.AcceptsEvents)
+                {
+                    return;
+                }
+
+                if (mod.Pending.Count >= DefaultMaxQueuedEventsPerMod)
+                {
+                    mod.Pending.Dequeue();
+                }
+
+                mod.Pending.Enqueue(new KeyValuePair<string, string>(evt, payload));
+            }
+        }
+
+        private void RegisterSubscription(Mod mod, string evt)
+        {
+            lock (_subscriptionGate)
+            {
+                if (!mod.AcceptsEvents)
+                {
+                    return;
+                }
+
+                AddSubscriptionLocked(mod, evt);
+            }
+        }
+
+        private void ActivateSubscriptionsLocked(Mod mod)
+        {
+            mod.AcceptsEvents = true;
+            lock (mod.EventGate)
+            {
+                foreach (string evt in mod.Handlers.Keys)
+                {
+                    AddSubscriptionLocked(mod, evt);
+                }
+            }
+        }
+
+        private void AddSubscriptionLocked(Mod mod, string evt)
+        {
+            if (!mod.RegisteredEvents.Add(evt))
             {
                 return;
             }
 
-            if (mod.Pending.Count >= DefaultMaxQueuedEventsPerMod)
+            if (!_subscriptions.TryGetValue(evt, out List<Mod> subscribers))
             {
-                mod.Pending.Dequeue();
+                subscribers = new List<Mod>();
+                _subscriptions[evt] = subscribers;
             }
 
-            mod.Pending.Enqueue(new KeyValuePair<string, string>(evt, payload));
+            int insertIndex = subscribers.Count;
+            while (insertIndex > 0 && subscribers[insertIndex - 1].LoadOrder > mod.LoadOrder)
+            {
+                insertIndex--;
+            }
+
+            subscribers.Insert(insertIndex, mod);
+        }
+
+        private void DeactivateSubscriptionsLocked(Mod mod)
+        {
+            mod.AcceptsEvents = false;
+            foreach (string evt in mod.RegisteredEvents)
+            {
+                if (!_subscriptions.TryGetValue(evt, out List<Mod> subscribers))
+                {
+                    continue;
+                }
+
+                subscribers.Remove(mod);
+                if (subscribers.Count == 0)
+                {
+                    _subscriptions.Remove(evt);
+                }
+            }
+
+            mod.RegisteredEvents.Clear();
         }
 
         /// <summary>

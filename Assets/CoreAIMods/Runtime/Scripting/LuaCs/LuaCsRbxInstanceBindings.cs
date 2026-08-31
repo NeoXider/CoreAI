@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
@@ -22,11 +24,30 @@ namespace CoreAI.Ai.LuaCs
 
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag)
+            : this(bindings, capabilities, ownerModId, originTag,
+                ResolveActorContext(bindings, ownerModId, originTag))
         {
+        }
+
+        public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
+            string ownerModId, string originTag, ActorContext actorContext)
+        {
+            if (!actorContext.IsTrusted)
+            {
+                throw new InvalidOperationException(
+                    "Actor context was not issued by an identity provider.");
+            }
+
             Bindings = bindings;
             Capabilities = capabilities;
             OwnerModId = ownerModId;
             OriginTag = originTag;
+            ActorContext = actorContext;
+            if (!IsHost)
+            {
+                bindings.Registry.BindActorAttribution(ownerModId, originTag, actorContext.ActorId);
+            }
+
             // WHY: stamp this load's connection generation BEFORE the mod chunk runs, so every Connect
             // the chunk makes is tracked under it. On reload a fresh context bumps the generation first
             // (BuildMod runs before the reload teardown), letting teardown disconnect only the previous
@@ -35,9 +56,37 @@ namespace CoreAI.Ai.LuaCs
             _instanceMeta = LuaCsRbxInstanceBindings.BuildInstanceMeta(this);
         }
 
+        private static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
+            string ownerModId, string originTag)
+        {
+            if (bindings.Registry.TryGetActorAttribution(
+                    ownerModId, originTag, out string ownerActorId))
+            {
+                LocalActorIdentityProvider provider = new(
+                    ownerActorId,
+                    Guid.NewGuid().ToString("N"),
+                    bindings.Registry.WorldId,
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty);
+                return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            }
+
+            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
         public LuaCsRbxApiBindings Bindings { get; }
 
         public LuaCapabilities Capabilities { get; }
+
+        /// <summary>Issued actor identity used for object-level authorization.</summary>
+        public ActorContext ActorContext { get; }
+
+        /// <summary>Whether the caller is the composition-issued host.</summary>
+        public bool IsHost => ActorContext.Grants.IsUnrestricted;
+
+        /// <summary>Record owner attribution for objects created by this caller.</summary>
+        public string OwnerActorId => IsHost ? null : ActorContext.ActorId;
 
         /// <summary>Teardown owner recorded on created instances; null for one-off consoles.</summary>
         public string OwnerModId { get; }
@@ -106,14 +155,171 @@ namespace CoreAI.Ai.LuaCs
         /// description string is built only when the check FAILS. Part property writes run per frame,
         /// and the eagerly-concatenated description was an allocation on every successful write.
         /// </summary>
-        public void RequireWorldEditForWrite(string className, string member)
+        public void RequireWorldEditForWrite(RbxInstance target, string member)
         {
-            if (CanWorldEdit)
+            if (!CanWorldEdit)
+            {
+                RequireWorldEdit("setting " + target.ClassName + "." + member);
+            }
+
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
+                WorldAclDecision.WriteProperty, "write property");
+        }
+
+        public void RequireMetadataMutation(RbxInstance target, string operation)
+        {
+            RequireWorldEdit(operation);
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
+                WorldAclDecision.MutateMetadata, operation);
+        }
+
+        public void RequireReparent(RbxInstance target, RbxInstance destination)
+        {
+            RequireWorldEdit("setting Instance.Parent");
+            if (target.IsDestroyed)
             {
                 return;
             }
 
-            RequireWorldEdit("setting " + className + "." + member);
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
+                WorldAclDecision.ReparentSelf, "reparent source");
+            if (destination != null)
+            {
+                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, destination,
+                    WorldAclDecision.AcceptChild, "reparent destination");
+            }
+        }
+
+        public void RequireDestroyTree(RbxInstance target, string operation)
+        {
+            RequireWorldEdit(operation);
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
+                WorldAclDecision.Destroy, operation);
+            foreach (RbxInstance descendant in target.GetDescendants())
+            {
+                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
+                    WorldAclDecision.Destroy, operation);
+            }
+        }
+
+        public void RequireDestroyForest(IReadOnlyList<RbxInstance> roots, string operation)
+        {
+            RequireWorldEdit(operation);
+            for (int rootIndex = 0; rootIndex < roots.Count; rootIndex++)
+            {
+                RbxInstance root = roots[rootIndex];
+                WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, root,
+                    WorldAclDecision.Destroy, operation);
+                foreach (RbxInstance descendant in root.GetDescendants())
+                {
+                    WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
+                        WorldAclDecision.Destroy, operation);
+                }
+            }
+        }
+    }
+
+    internal enum WorldAclDecision
+    {
+        WriteProperty,
+        MutateMetadata,
+        ReparentSelf,
+        AcceptChild,
+        Destroy
+    }
+
+    internal static class WorldAclAuthorizer
+    {
+        public static void Demand(InstanceRegistry registry, ActorContext actorContext,
+            RbxInstance target, WorldAclDecision decision, string operation)
+        {
+            if (!registry.IsWorldAclEnabled)
+            {
+                return;
+            }
+
+            if (actorContext.Grants.IsUnrestricted)
+            {
+                return;
+            }
+
+            if (registry.WorldId.Length > 0
+                && !string.Equals(registry.WorldId, actorContext.WorldId, StringComparison.Ordinal))
+            {
+                Deny(actorContext, target, operation,
+                    "the actor belongs to world '" + actorContext.WorldId
+                    + "', not world '" + registry.WorldId + "'");
+            }
+
+            if (!registry.TryGetRecord(target.Id, out InstanceRecord record))
+            {
+                Deny(actorContext, target, operation,
+                    "the target has no live access-control record");
+                return;
+            }
+
+            if (record.AccessScope == InstanceAccessScope.Owned)
+            {
+                if (record.OwnerActorId != null
+                    && string.Equals(record.OwnerActorId, actorContext.ActorId,
+                        StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                Deny(actorContext, target, operation,
+                    record.OwnerActorId == null
+                        ? "the target is Owned by the host"
+                        : "the target is Owned by actor '" + record.OwnerActorId + "'");
+            }
+
+            if (record.AccessScope == InstanceAccessScope.SharedWritable)
+            {
+                if (decision != WorldAclDecision.Destroy)
+                {
+                    return;
+                }
+
+                if (record.OwnerActorId != null
+                    && string.Equals(record.OwnerActorId, actorContext.ActorId,
+                        StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                Deny(actorContext, target, operation,
+                    "SharedWritable destruction is limited to its owner or the host");
+            }
+
+            if (record.AccessScope == InstanceAccessScope.HostProtected)
+            {
+                if (decision == WorldAclDecision.WriteProperty)
+                {
+                    return;
+                }
+
+                if (decision == WorldAclDecision.AcceptChild
+                    && target.ClassName == "Workspace")
+                {
+                    return;
+                }
+
+                Deny(actorContext, target, operation,
+                    "the target is HostProtected for this operation");
+            }
+
+            Deny(actorContext, target, operation,
+                "the target has an unsupported access scope");
+        }
+
+        private static void Deny(ActorContext actorContext, RbxInstance target,
+            string operation, string reason)
+        {
+            throw RbxError.BadArgument(
+                "actor '" + actorContext.ActorId + "' cannot " + operation + " on "
+                + target.ClassName + " '" + target.GetFullName() + "': " + reason,
+                "use an object owned by actor '" + actorContext.ActorId
+                + "' or ask the owner/host to perform the operation");
         }
     }
 
@@ -236,14 +442,16 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case "Name":
                         ThrowIfDestroyedForLua(self, key);
-                        context.RequireWorldEdit("setting Instance.Name");
+                        context.RequireWorldEditForWrite(self, "Name");
                         self.Name = ReadString(ctx, 2, "Instance.Name assignment");
                         return LuaValue.Nil;
                     case "Parent":
                         // WHY: no destroyed pre-check here — the Domain setter raises the exact
                         // D6 PARENT_LOCKED message for destroyed instances.
-                        context.RequireWorldEdit("setting Instance.Parent");
-                        if (IsProtectedSingleton(self))
+                        RbxInstance destination = ReadOptionalInstance(
+                            value, "Instance.Parent assignment");
+                        if (!context.Bindings.Registry.IsWorldAclEnabled
+                            && IsProtectedSingleton(self))
                         {
                             // WHY: a service's Parent is locked in Roblox — reparenting (or nil-ing)
                             // it would detach it so game:GetService stops resolving it for the world.
@@ -252,11 +460,12 @@ namespace CoreAI.Ai.LuaCs
                                 "services and workspace.CurrentCamera are fixed for the world's lifetime");
                         }
 
-                        self.Parent = ReadOptionalInstance(value, "Instance.Parent assignment");
+                        context.RequireReparent(self, destination);
+                        self.Parent = destination;
                         return LuaValue.Nil;
                     case "Archivable":
                         ThrowIfDestroyedForLua(self, key);
-                        context.RequireWorldEdit("setting Instance.Archivable");
+                        context.RequireWorldEditForWrite(self, "Archivable");
                         self.Archivable = value.ToBoolean();
                         return LuaValue.Nil;
                 }
@@ -267,7 +476,7 @@ namespace CoreAI.Ai.LuaCs
                     return LuaValue.Nil;
                 }
 
-                if (TryWriteUserInput(self, key, value))
+                if (TryWriteUserInput(context, self, key, value))
                 {
                     return LuaValue.Nil;
                 }
@@ -286,7 +495,7 @@ namespace CoreAI.Ai.LuaCs
                     context, self, key, RbxKnownUnimplementedMemberAccess.Write);
                 if (knownMemberError != null)
                 {
-                    context.RequireWorldEditForWrite(self.ClassName, key);
+                    context.RequireWorldEditForWrite(self, key);
                     throw knownMemberError;
                 }
 
@@ -371,13 +580,21 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 RbxInstance copy = self.Clone();
+                if (copy == null)
+                {
+                    return LuaValue.Nil;
+                }
+
+                context.Bindings.Registry.SetAccessControl(copy, context.OwnerActorId,
+                    InstanceAccessScope.Owned, true);
                 CopyPartSinkState(context.PartSink, self, copy);
                 return context.WrapInstance(copy);
             });
             Method("Destroy", (_, self) =>
             {
-                context.RequireWorldEdit("Instance:Destroy");
-                if (IsProtectedSingleton(self))
+                context.RequireDestroyTree(self, "destroy");
+                if (!context.Bindings.Registry.IsWorldAclEnabled
+                    && IsProtectedSingleton(self))
                 {
                     // WHY: a shared service is cached once at composition and never re-resolved, so
                     // destroying it would brick input/lighting/etc for every mod; Roblox locks these
@@ -393,16 +610,22 @@ namespace CoreAI.Ai.LuaCs
             });
             Method("ClearAllChildren", (_, self) =>
             {
-                context.RequireWorldEdit("Instance:ClearAllChildren");
                 // WHY: game:ClearAllChildren() must not wipe the world's services (Roblox locks
                 // them). GetChildren returns a snapshot, so destroying non-protected children while
                 // iterating is safe; protected singletons (services/Camera) are left intact.
+                List<RbxInstance> destroyRoots = new();
                 foreach (RbxInstance child in self.GetChildren())
                 {
                     if (!IsProtectedSingleton(child))
                     {
-                        child.Destroy();
+                        destroyRoots.Add(child);
                     }
+                }
+
+                context.RequireDestroyForest(destroyRoots, "clear descendants");
+                for (int index = 0; index < destroyRoots.Count; index++)
+                {
+                    destroyRoots[index].Destroy();
                 }
 
                 return LuaValue.Nil;
@@ -413,7 +636,7 @@ namespace CoreAI.Ai.LuaCs
                 self.GetAttribute(ReadString(ctx, 1, "GetAttribute"))));
             Method("SetAttribute", (ctx, self) =>
             {
-                context.RequireWorldEdit("Instance:SetAttribute");
+                context.RequireMetadataMutation(self, "set attribute");
                 self.SetAttribute(
                     ReadString(ctx, 1, "SetAttribute"), AttributeFromLua(Arg(ctx, 2)));
                 return LuaValue.Nil;
@@ -430,13 +653,13 @@ namespace CoreAI.Ai.LuaCs
             });
             Method("AddTag", (ctx, self) =>
             {
-                context.RequireWorldEdit("Instance:AddTag");
+                context.RequireMetadataMutation(self, "add tag");
                 self.AddTag(ReadString(ctx, 1, "AddTag"));
                 return LuaValue.Nil;
             });
             Method("RemoveTag", (ctx, self) =>
             {
-                context.RequireWorldEdit("Instance:RemoveTag");
+                context.RequireMetadataMutation(self, "remove tag");
                 self.RemoveTag(ReadString(ctx, 1, "RemoveTag"));
                 return LuaValue.Nil;
             });
@@ -762,23 +985,23 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "Shape":
-                    context.RequireWorldEditForWrite(self.ClassName, "Shape");
+                    context.RequireWorldEditForWrite(self, "Shape");
                     sink.SetShape(id, ReadPartShapeValue(value));
                     return true;
                 case "Position":
-                    context.RequireWorldEditForWrite(self.ClassName, "Position");
+                    context.RequireWorldEditForWrite(self, "Position");
                     sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
                     return true;
                 case "Size":
-                    context.RequireWorldEditForWrite(self.ClassName, "Size");
+                    context.RequireWorldEditForWrite(self, "Size");
                     sink.SetSize(id, ReadVector3Value(value, "Part.Size assignment"));
                     return true;
                 case "CFrame":
-                    context.RequireWorldEditForWrite(self.ClassName, "CFrame");
+                    context.RequireWorldEditForWrite(self, "CFrame");
                     sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
                     return true;
                 case "Orientation":
-                    context.RequireWorldEditForWrite(self.ClassName, "Orientation");
+                    context.RequireWorldEditForWrite(self, "Orientation");
                     RbxVector3 orientation = ReadVector3Value(value, "Part.Orientation assignment");
                     PartProperties orientationProperties = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame orientationCFrame = RbxCFrame.FromOrientation(
@@ -789,7 +1012,7 @@ namespace CoreAI.Ai.LuaCs
                         RbxCFrame.FromPosition(orientationProperties.Position) * orientationCFrame);
                     return true;
                 case "Rotation":
-                    context.RequireWorldEditForWrite(self.ClassName, "Rotation");
+                    context.RequireWorldEditForWrite(self, "Rotation");
                     RbxVector3 rotation = ReadVector3Value(value, "Part.Rotation assignment");
                     PartProperties rotationProperties = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame rotationCFrame = RbxCFrame.FromEulerAnglesXYZ(
@@ -800,19 +1023,19 @@ namespace CoreAI.Ai.LuaCs
                         RbxCFrame.FromPosition(rotationProperties.Position) * rotationCFrame);
                     return true;
                 case "Color":
-                    context.RequireWorldEditForWrite(self.ClassName, "Color");
+                    context.RequireWorldEditForWrite(self, "Color");
                     sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
                     return true;
                 case "Transparency":
-                    context.RequireWorldEditForWrite(self.ClassName, "Transparency");
+                    context.RequireWorldEditForWrite(self, "Transparency");
                     sink.SetTransparency(id, ReadNumberValue(value, "Part.Transparency assignment"));
                     return true;
                 case "Anchored":
-                    context.RequireWorldEditForWrite(self.ClassName, "Anchored");
+                    context.RequireWorldEditForWrite(self, "Anchored");
                     sink.SetAnchored(id, value.ToBoolean());
                     return true;
                 case "CanCollide":
-                    context.RequireWorldEditForWrite(self.ClassName, "CanCollide");
+                    context.RequireWorldEditForWrite(self, "CanCollide");
                     sink.SetCanCollide(id, value.ToBoolean());
                     return true;
                 default:
@@ -928,17 +1151,18 @@ namespace CoreAI.Ai.LuaCs
             });
         }
 
-        /// <summary>UserInputService.MouseBehavior assignment. Roblox lets any script set it, so
-        /// no capability gate; MVP1 keeps it state-only.
+        /// <summary>UserInputService.MouseBehavior assignment guarded as a shared world property.
         /// TODO: apply LockCenter/LockCurrentPosition to the host cursor with the pointer-lock
         /// slice.</summary>
-        private static bool TryWriteUserInput(RbxInstance self, string key, LuaValue value)
+        private static bool TryWriteUserInput(LuaCsRbxModContext context, RbxInstance self,
+            string key, LuaValue value)
         {
             if (!(self is RbxUserInputService service) || key != "MouseBehavior")
             {
                 return false;
             }
 
+            context.RequireWorldEditForWrite(self, "MouseBehavior");
             if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "MouseBehavior")
             {
                 service.MouseBehavior = item;
@@ -1040,7 +1264,7 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
-            context.RequireWorldEdit("setting ClickDetector.MaxActivationDistance");
+            context.RequireWorldEditForWrite(self, "MaxActivationDistance");
             detector.MaxActivationDistance = ReadNumberValue(value, "ClickDetector.MaxActivationDistance");
             return true;
         }
@@ -1093,16 +1317,16 @@ namespace CoreAI.Ai.LuaCs
             switch (key)
             {
                 case "CFrame":
-                    context.RequireWorldEdit("setting Camera.CFrame");
+                    context.RequireWorldEditForWrite(self, "CFrame");
                     context.Bindings.CameraRig.SetCFrame(
                         ReadCFrameValue(value, "Camera.CFrame assignment"));
                     return true;
                 case "CameraType":
-                    context.RequireWorldEdit("setting Camera.CameraType");
+                    context.RequireWorldEditForWrite(self, "CameraType");
                     context.Bindings.CameraTypeItem = ReadCameraTypeValue(value);
                     return true;
                 case "CameraSubject":
-                    context.RequireWorldEdit("setting Camera.CameraSubject");
+                    context.RequireWorldEditForWrite(self, "CameraSubject");
                     context.Bindings.SetCameraSubject(
                         ReadOptionalInstance(value, "Camera.CameraSubject assignment"));
                     return true;

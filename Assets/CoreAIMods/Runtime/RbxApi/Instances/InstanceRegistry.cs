@@ -15,21 +15,33 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public sealed class InstanceRegistry
     {
+        public const int CurrentWorldAclVersion = 1;
+
         private readonly Dictionary<InstanceId, InstanceRecord> _byId = new();
         private readonly Dictionary<uint, InstanceRecord> _byNetId = new();
         private readonly Dictionary<string, InstanceRecord> _byWorldName = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _actorByOwnerModId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _actorByOriginTag = new(StringComparer.Ordinal);
         private readonly IInstanceBackingBinder _binder;
 
         private RbxInstance _worldRoot;
         private RbxInstance _sceneRoot;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
-            InstanceIdAllocator allocator = null)
+            InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "")
         {
+            if (worldAclVersion.HasValue && worldAclVersion.Value != CurrentWorldAclVersion)
+            {
+                throw new ArgumentOutOfRangeException(nameof(worldAclVersion), worldAclVersion,
+                    "Unsupported world ACL version.");
+            }
+
             Catalog = catalog ?? ClassCatalog.CreateMvp1();
             Allocator = allocator ?? new InstanceIdAllocator();
             Tags = new InstanceTagStore();
             _binder = binder ?? NullInstanceBackingBinder.Instance;
+            WorldAclVersion = worldAclVersion;
+            WorldId = worldId?.Trim() ?? "";
         }
 
         /// <summary>
@@ -44,6 +56,15 @@ namespace CoreAI.Mods.Rbx.Instances
         public ClassCatalog Catalog { get; }
 
         public InstanceIdAllocator Allocator { get; }
+
+        /// <summary>Persisted world ACL schema; null means legacy compatibility mode.</summary>
+        public int? WorldAclVersion { get; }
+
+        /// <summary>Whether actor-level strict authorization is active for this world.</summary>
+        public bool IsWorldAclEnabled => WorldAclVersion.HasValue;
+
+        /// <summary>Stable world identity used to reject cross-world actor contexts when specified.</summary>
+        public string WorldId { get; }
 
         /// <summary>CollectionService substrate; instances delegate their tag members here.</summary>
         public InstanceTagStore Tags { get; }
@@ -83,16 +104,19 @@ namespace CoreAI.Mods.Rbx.Instances
         /// the creatable flag.
         /// </summary>
         public RbxInstance Create(string className, string ownerModId = null, string originTag = null,
-            InstanceIdAuthority authority = InstanceIdAuthority.Server)
+            InstanceIdAuthority authority = InstanceIdAuthority.Server, string ownerActorId = null,
+            InstanceAccessScope? accessScope = null)
         {
             ClassDescriptor descriptor = ResolveConcrete(className);
-            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag);
+            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
+                ownerActorId, accessScope);
         }
 
         /// <summary>Roblox Instance.new semantics: unknown/abstract/non-creatable class names
         /// raise BAD_ARGUMENT with the Roblox message shape.</summary>
         public RbxInstance CreateScripted(string className, string ownerModId = null,
-            string originTag = null, InstanceIdAuthority authority = InstanceIdAuthority.Server)
+            string originTag = null, InstanceIdAuthority authority = InstanceIdAuthority.Server,
+            string ownerActorId = null, InstanceAccessScope? accessScope = null)
         {
             // WHY: reported here rather than at the later Parent assignment. Parenting into the dead
             // world throws PARENT_LOCKED about Workspace, which reads as a script mistake; the real
@@ -111,7 +135,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     "pass a creatable class name like \"Part\", \"Folder\", or \"Model\"");
             }
 
-            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag);
+            return RegisterNew(Instantiate(descriptor), Allocator.Next(authority), ownerModId, originTag,
+                ownerActorId, accessScope);
         }
 
         /// <summary>
@@ -119,7 +144,8 @@ namespace CoreAI.Mods.Rbx.Instances
         /// roadmap §2 world file) and advances the allocator past it.
         /// </summary>
         public RbxInstance RestoreInstance(string className, InstanceId id, string ownerModId = null,
-            string originTag = null)
+            string originTag = null, string ownerActorId = null,
+            InstanceAccessScope? accessScope = null)
         {
             if (!id.IsValid)
             {
@@ -135,7 +161,8 @@ namespace CoreAI.Mods.Rbx.Instances
 
             ClassDescriptor descriptor = ResolveConcrete(className);
             Allocator.EnsureNotBelow(id);
-            return RegisterNew(Instantiate(descriptor), id, ownerModId, originTag);
+            return RegisterNew(Instantiate(descriptor), id, ownerModId, originTag, ownerActorId,
+                accessScope);
         }
 
         private ClassDescriptor ResolveConcrete(string className)
@@ -164,7 +191,7 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         private RbxInstance RegisterNew(RbxInstance instance, InstanceId id, string ownerModId,
-            string originTag)
+            string originTag, string ownerActorId, InstanceAccessScope? accessScope)
         {
             if (!OriginTag.IsValid(originTag))
             {
@@ -174,10 +201,147 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             instance.Attach(this, id);
-            InstanceRecord record = new(id, instance, ownerModId, originTag);
+            string resolvedOwnerActorId = ResolveOwnerActorId(ownerModId, originTag, ownerActorId);
+            InstanceAccessScope resolvedAccessScope = accessScope
+                ?? DefaultAccessScope(instance, resolvedOwnerActorId);
+            InstanceRecord record = new(id, instance, ownerModId, originTag, resolvedOwnerActorId,
+                resolvedAccessScope);
             _byId.Add(id, record);
             Registered?.Invoke(record);
             return instance;
+        }
+
+        private string ResolveOwnerActorId(string ownerModId, string originTag, string ownerActorId)
+        {
+            if (!string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                return ownerActorId.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(ownerModId)
+                && _actorByOwnerModId.TryGetValue(ownerModId, out string modActorId))
+            {
+                return modActorId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(originTag)
+                && _actorByOriginTag.TryGetValue(originTag, out string originActorId))
+            {
+                return originActorId;
+            }
+
+            return null;
+        }
+
+        private static InstanceAccessScope DefaultAccessScope(RbxInstance instance,
+            string ownerActorId)
+        {
+            if (instance.IsService || instance.ClassName == "DataModel"
+                                   || instance.ClassName == "Camera")
+            {
+                return InstanceAccessScope.HostProtected;
+            }
+
+            return ownerActorId != null
+                ? InstanceAccessScope.Owned
+                : InstanceAccessScope.SharedWritable;
+        }
+
+        /// <summary>
+        /// Binds provenance keys to a restricted actor so the existing Instance.new call path can
+        /// attribute records without treating a mod id or console tag as authority.
+        /// </summary>
+        public void BindActorAttribution(string ownerModId, string originTag, string ownerActorId)
+        {
+            if (string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                throw new ArgumentException("Owner actor id is required.", nameof(ownerActorId));
+            }
+
+            string actorId = ownerActorId.Trim();
+            bool bound = false;
+            if (!string.IsNullOrWhiteSpace(ownerModId))
+            {
+                _actorByOwnerModId[ownerModId] = actorId;
+                bound = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(originTag))
+            {
+                if (!OriginTag.IsValid(originTag))
+                {
+                    throw RbxError.BadArgument(
+                        "origin tag '" + originTag + "' is not a valid ledger tag",
+                        "use OriginTag.FromMod/FromConsole/FromAi");
+                }
+
+                _actorByOriginTag[originTag] = actorId;
+                bound = true;
+            }
+
+            if (!bound)
+            {
+                throw new ArgumentException(
+                    "An owner mod id or origin tag is required for actor attribution.");
+            }
+        }
+
+        /// <summary>Resolves actor attribution without granting or issuing actor authority.</summary>
+        public bool TryGetActorAttribution(string ownerModId, string originTag, out string ownerActorId)
+        {
+            if (!string.IsNullOrWhiteSpace(ownerModId)
+                && _actorByOwnerModId.TryGetValue(ownerModId, out ownerActorId))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(originTag)
+                && _actorByOriginTag.TryGetValue(originTag, out ownerActorId))
+            {
+                return true;
+            }
+
+            ownerActorId = null;
+            return false;
+        }
+
+        /// <summary>Reattributes a completed clone or trusted import atomically at the record layer.</summary>
+        public void SetAccessControl(RbxInstance root, string ownerActorId,
+            InstanceAccessScope accessScope, bool recursive)
+        {
+            if (root == null)
+            {
+                throw new ArgumentNullException(nameof(root));
+            }
+
+            if (!ReferenceEquals(root.Registry, this) || root.IsDestroyed)
+            {
+                throw RbxError.BadArgument(
+                    "access control can only be set on a live instance in this registry",
+                    "pass a live instance owned by this world");
+            }
+
+            string normalizedActorId = string.IsNullOrWhiteSpace(ownerActorId)
+                ? null
+                : ownerActorId.Trim();
+            SetRecordAccessControl(root, normalizedActorId, accessScope);
+            if (!recursive)
+            {
+                return;
+            }
+
+            foreach (RbxInstance descendant in root.GetDescendants())
+            {
+                SetRecordAccessControl(descendant, normalizedActorId, accessScope);
+            }
+        }
+
+        private void SetRecordAccessControl(RbxInstance instance, string ownerActorId,
+            InstanceAccessScope accessScope)
+        {
+            InstanceRecord record = RequireRecord(instance.Id);
+            record.OwnerActorId = ownerActorId;
+            record.AccessScope = accessScope;
         }
 
         // ---- Lookup (§3.3: any key resolves to the same record) -----------------------------

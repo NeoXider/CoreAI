@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
@@ -374,6 +375,145 @@ namespace CoreAI.Tests.EditMode
             stack.Runtime.EmitEvent("hit", "42");
             stack.Runtime.Tick(0);
             Assert.AreEqual("42", store.Get("m", "last"), "EmitEvent + Tick dispatches the hooks_on handler.");
+        }
+
+        [Test]
+        public void LuaCs_EmitEvent_RoutesOnlyToSubscribers_AndTouchesOnlySubscriberEntries()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("subscriber",
+                "hooks_on('target', function() store_set('ran', 'yes') end)");
+            stack.Runtime.LoadMod("non-subscriber",
+                "hooks_on('other', function() store_set('ran', 'yes') end)");
+
+            FieldInfo touchedField = typeof(LuaCsModRuntime).GetField(
+                "_subscriptionEntriesTouched", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(touchedField);
+            long touchedBefore = (long)touchedField.GetValue(stack.Runtime);
+            stack.Runtime.EmitEvent("target", "");
+            long touched = (long)touchedField.GetValue(stack.Runtime) - touchedBefore;
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("yes", store.Get("subscriber", "ran"));
+            Assert.AreEqual("", store.Get("non-subscriber", "ran"));
+            Assert.AreEqual(1L, touched,
+                "Routing must touch exactly the subscribed mod entry, not every loaded mod.");
+        }
+
+        [Test]
+        public void LuaCs_EmitEvent_DoesNotAcquireTheProcessWideRuntimeGate()
+        {
+            LuaCsModStack stack = BuildStack();
+            stack.Runtime.LoadMod("subscriber", "hooks_on('target', function() end)");
+            FieldInfo gateField = typeof(LuaCsModRuntime).GetField(
+                "_gate", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(gateField);
+            object processWideGate = gateField.GetValue(stack.Runtime);
+            ManualResetEventSlim started = new(false);
+            ManualResetEventSlim completed = new(false);
+            Exception emitError = null;
+            Thread emitThread = new(() =>
+            {
+                started.Set();
+                try
+                {
+                    stack.Runtime.EmitEvent("target", "");
+                }
+                catch (Exception ex)
+                {
+                    emitError = ex;
+                }
+                finally
+                {
+                    completed.Set();
+                }
+            });
+            emitThread.IsBackground = true;
+
+            bool startedInTime;
+            bool completedWhileGateHeld;
+            lock (processWideGate)
+            {
+                emitThread.Start();
+                startedInTime = started.Wait(1000);
+                completedWhileGateHeld = completed.Wait(1000);
+            }
+
+            emitThread.Join(5000);
+            started.Dispose();
+            completed.Dispose();
+
+            Assert.IsTrue(startedInTime, "The emit worker must start during the structural assertion.");
+            Assert.IsTrue(completedWhileGateHeld,
+                "EmitEvent must complete while the process-wide runtime gate is held elsewhere.");
+            Assert.IsNull(emitError);
+        }
+
+        [Test]
+        public void LuaCs_SubscriptionDeliveryOrder_IsStableAcrossRepeatedRuntimeInstances()
+        {
+            string[] expected = { "zeta", "alpha", "mu" };
+            for (int run = 0; run < 5; run++)
+            {
+                List<string> delivered = new();
+                LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Capabilities = LuaCapabilities.All,
+                    OneOffCapabilities = LuaCapabilities.All,
+                    AdditionalGameplayBindings = (registry, caps) =>
+                        registry.Register("record_order", new Action<string>(value => delivered.Add(value)))
+                });
+
+                for (int i = 0; i < expected.Length; i++)
+                {
+                    string id = expected[i];
+                    stack.Runtime.LoadMod(id,
+                        $"hooks_on('ordered', function() record_order('{id}') end)");
+                }
+
+                stack.Runtime.EmitEvent("ordered", "");
+                stack.Runtime.Tick(0);
+
+                CollectionAssert.AreEqual(expected, delivered, $"Delivery order changed on run {run}.");
+            }
+        }
+
+        [Test]
+        public void LuaCs_ActorTimer_IsChargedAgainstTheSharedEventBudget()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            ActorContext actor = new LocalActorIdentityProvider("timer-owner")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            stack.Runtime.LoadMod(actor, "timer-owner-mod", @"
+                hooks_every(0, function()
+                    store_set('timers', tostring((tonumber(store_get('timers')) or 0) + 1))
+                end)", persistToStore: false);
+
+            string eventSource = string.Concat(Enumerable.Repeat(@"
+                hooks_on('work', function()
+                    store_set('events', tostring((tonumber(store_get('events')) or 0) + 1))
+                end)", LuaCsModRuntime.DefaultMaxHandlersPerMod));
+            for (int i = 0; i < 4; i++)
+            {
+                stack.Runtime.LoadMod($"events-{i}", eventSource);
+            }
+
+            stack.Runtime.EmitEvent("work", "");
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("1", store.Get("timer-owner-mod", "timers"));
+            Assert.AreEqual("64", store.Get("events-0", "events"));
+            Assert.AreEqual("64", store.Get("events-1", "events"));
+            Assert.AreEqual("64", store.Get("events-2", "events"));
+            Assert.AreEqual("", store.Get("events-3", "events"),
+                "The actor timer must consume one shared-budget slot, leaving the final 64-handler event queued.");
+
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("2", store.Get("timer-owner-mod", "timers"));
+            Assert.AreEqual("64", store.Get("events-3", "events"));
         }
 
         [Test]

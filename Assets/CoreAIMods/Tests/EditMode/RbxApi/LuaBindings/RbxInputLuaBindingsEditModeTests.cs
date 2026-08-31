@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai;
@@ -91,14 +92,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             }
         }
 
-        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)
+        private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store,
+            LuaCapabilities capabilities = LuaCapabilities.All)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
                 ModStore = store,
-                Capabilities = LuaCapabilities.All,
-                OneOffCapabilities = LuaCapabilities.All,
+                Capabilities = capabilities,
+                OneOffCapabilities = capabilities,
                 RbxApi = roblox
             });
         }
@@ -327,6 +329,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 assert(uis.MouseBehavior == Enum.MouseBehavior.Default)
                 uis.MouseBehavior = Enum.MouseBehavior.LockCenter
                 assert(uis.MouseBehavior == Enum.MouseBehavior.LockCenter)");
+        }
+
+        [Test]
+        public void Lua_UserInputService_MouseBehavior_RequiresWorldEdit()
+        {
+            LuaCsRbxApiBindings roblox = new(inputSource: new InMemoryInputSource());
+            LuaCapabilities readOnly = LuaCapabilities.Read | LuaCapabilities.Gameplay;
+            LuaCsModStack stack = BuildStack(roblox, new MemoryStore(), readOnly);
+
+            Exception error = Assert.Catch(() => stack.Runtime.LoadMod("reader", @"
+                local uis = game:GetService('UserInputService')
+                uis.MouseBehavior = Enum.MouseBehavior.LockCenter"));
+
+            StringAssert.Contains("WorldEdit", error.ToString());
+            Assert.AreEqual("Default", roblox.UserInputService.MouseBehavior.Name);
         }
 
         [Test]
