@@ -233,6 +233,18 @@ objects. So the rule is: host singletons stay writable, but not destroyable or r
 endpoints; a clone is attributed to the *cloning* actor, not the source's owner; recursive destroy and
 `ClearAllChildren` authorize per descendant; reads and exports are authorized separately from writes.
 
-**Migration.** Existing content has no `OwnerActorId`, so it loads as host-owned `SharedWritable` —
-preserving today's behaviour exactly. Tightening is opt-in per world, which is why this can ship
-without breaking the acceptance gates or the samples.
+**Migration — corrected after the 124-citation call-site audit.** The v6 sentence "existing content
+loads as host-owned `SharedWritable`, preserving today's behaviour exactly" was **wrong**: under the
+scope table a non-host actor may mutate but may NOT destroy host-owned `SharedWritable`, so legacy
+worlds would silently lose destruction they have always had.
+
+The correct mechanism is an **ACL version on the world**. Legacy worlds (missing the field) enter
+compatibility mode and keep today's destroy behaviour untouched; only worlds explicitly ACL-enabled
+use the strict table. Never silently weaken all `SharedWritable` objects to obtain compatibility.
+
+**Attribution rules** (from the same audit): new actor objects and clone subtrees are caller-`Owned`;
+host singletons are `HostProtected`; host-created ordinary content is `SharedWritable`. Reparenting is
+authorized against BOTH endpoints; recursive destruction is preflighted atomically; reads stay
+cross-owner under a separate grant while source, revisions, diagnostics and bundle export require
+owner/host. Raw reflection, scene transform and low-level bindings stay host-only until native
+`GameObject` metadata shares the ACL — production already withholds the low-level bindings.

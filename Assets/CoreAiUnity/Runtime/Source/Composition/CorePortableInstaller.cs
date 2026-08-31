@@ -116,7 +116,23 @@ namespace CoreAI.Composition
                         c.Resolve<AiOrchestrationQueueOptions>(),
                         c.Resolve<IAgentMemoryScopeProvider>()),
                 Lifetime.Singleton);
-            builder.Register<InGameLlmChatService>(Lifetime.Singleton).As<IInGameLlmChatService>();
+            if (!builder.Exists(typeof(IActorIdentityProvider), true))
+            {
+                builder.RegisterInstance<IActorIdentityProvider>(LocalActorIdentityProvider.Default);
+            }
+
+            builder.Register<IInGameLlmChatServiceFactory>(c =>
+                    new ActorKeyedInGameLlmChatServiceFactory(
+                        () => new InGameLlmChatService(
+                            c.Resolve<ILlmClient>(),
+                            c.Resolve<IAgentSystemPromptProvider>())),
+                Lifetime.Singleton);
+            builder.Register<IInGameLlmChatService>(c =>
+            {
+                ActorContext defaultActor = c.Resolve<IActorIdentityProvider>()
+                    .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+                return c.Resolve<IInGameLlmChatServiceFactory>().Resolve(defaultActor);
+            }, Lifetime.Singleton);
         }
     }
 }
