@@ -125,3 +125,34 @@ the plan's earlier assumption, which was wrong by roughly 6750x.
 3. Measurement caveat, stated by the harness author: the Mono CLI used was Unity's bundled x86
    runtime. The gate must be confirmed in the real 64-bit Standalone Mono player before any threshold
    is frozen.
+
+
+## 9. The 4 ms gate is arithmetically impossible at batch 4 — measured 2026-08-31
+
+The staircase benchmark could not be built honestly, and that refusal is itself the finding.
+
+**Why no number was produced.** The production path exposes no counters: `LuaCsExecutionGuard._steps`
+is private and the scheduler's script thread has no resume telemetry, and its factory cannot be
+decorated through production composition. Reading them by reflection would bypass the very path §3b
+requires the measurement to travel, so a reflected number would be worthless. **An observability seam
+is prerequisite work, not an optimisation.**
+
+**What the arithmetic already settles.** At the measured guarded rate (§8), a 4 ms frame contains
+**589 guarded instructions in total**. Split across 20 simultaneous resumes that is **fewer than 30
+instructions per actor**, before any scheduler, timer or event overhead. No realistic Lua body fits.
+So the 4 ms p95 at 20 actors is not a demanding target — it is an impossible one at the current guard
+batch, and any implementation that appeared to pass it would be measuring something else.
+
+**Therefore the guard batch decision is forced by measurement, not preference.** Batch 256 was measured
+at 35.1x, which turns 589 instructions per 4 ms frame into roughly 20 600 — about 1 000 per actor at 20
+actors, which is workable. The counter-argument for batch 4 is allocation-bomb latency, and the VM-fork
+research established that this protection is a process-wide first-growth backstop a determined actor
+evades regardless. So batch 4 buys little and costs 35x.
+
+**Not changed yet, deliberately.** The measurement used Unity's bundled x86 Mono CLI. Widening the
+production batch on that basis would repeat the invented-number mistake this document exists to
+prevent. Sequence: build the observability seam, re-measure on the 64-bit Standalone player, then set
+the batch and the frame gate together from that data.
+
+**Reference machine for the run above:** Windows 11 Pro build 26200, AMD engineering sample, 16 logical
+processors, 39.3 GiB RAM, RTX 3050 Laptop, Unity 6000.3.14f1, Performance power plan.

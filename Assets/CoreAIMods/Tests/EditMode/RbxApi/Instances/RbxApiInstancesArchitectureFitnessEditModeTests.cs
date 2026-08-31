@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -43,6 +45,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.IsEmpty(offenders,
                 "CoreAI.RbxApi.Instances is an engine-free Domain assembly; move engine code " +
                 "into the Unity adapter (world-binding task) instead:\n" + string.Join("\n", offenders));
+        }
+
+        [Test]
+        public void ObservabilityPort_LivesInEngineFreeDomainAssembly()
+        {
+            Assert.AreSame(typeof(IRbxScriptThread).Assembly,
+                typeof(IRbxRuntimeObservabilitySink).Assembly);
+            Assert.AreSame(typeof(IRbxScriptThread).Assembly,
+                typeof(NullRbxRuntimeObservabilitySink).Assembly);
+        }
+
+        [Test]
+        public void NoOpObservabilitySink_IsDisabledAndAllocationFree()
+        {
+            IRbxRuntimeObservabilitySink sink = NullRbxRuntimeObservabilitySink.Instance;
+            Assert.IsFalse(sink.IsEnabled);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int index = 0; index < 256; index++)
+            {
+                sink.RecordGuardedInstructionSteps(1);
+                sink.RecordThreadResumes(1);
+                sink.RecordEventsDelivered(1);
+                sink.RecordCompletedOperations(1);
+            }
+
+            long after = GC.GetAllocatedBytesForCurrentThread();
+            Assert.AreEqual(before, after);
         }
 
         // WHY: ARCHITECTURE_RULES §1 lets a Domain assembly reference sibling engine-free Domain

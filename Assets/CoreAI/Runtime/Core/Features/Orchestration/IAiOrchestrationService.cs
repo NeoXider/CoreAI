@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
@@ -46,6 +47,15 @@ namespace CoreAI.Ai
         /// by each admitted item; the logical cancellation scope is not required to equal that role id.
         /// </remarks>
         void CancelTasks(string cancellationScope);
+    }
+
+    /// <summary>
+    /// Resolves and captures the trusted actor before queue admission chooses durable and cancellation scopes.
+    /// </summary>
+    public interface IAiActorContextResolver
+    {
+        /// <summary>Resolves the actor for <paramref name="task"/> and stores it on the request.</summary>
+        ActorContext ResolveActorContext(AiTaskRequest task);
     }
 
     /// <summary>

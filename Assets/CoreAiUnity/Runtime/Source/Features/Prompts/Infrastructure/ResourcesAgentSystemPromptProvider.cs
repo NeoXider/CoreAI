@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using UnityEngine;
 
@@ -8,12 +10,22 @@ namespace CoreAI.Infrastructure.Prompts
     /// </summary>
     public sealed class ResourcesAgentSystemPromptProvider : IAgentSystemPromptProvider
     {
-        private readonly string _resourcePathPrefix;
+        private readonly Dictionary<string, string> _prompts;
 
         /// <param name="resourcePathPrefix">The resource path prefix value.</param>
         public ResourcesAgentSystemPromptProvider(string resourcePathPrefix)
         {
-            _resourcePathPrefix = resourcePathPrefix?.Trim().TrimEnd('/') ?? "AgentPrompts/System";
+            string resourcePathPrefixValue =
+                resourcePathPrefix?.Trim().TrimEnd('/') ?? "AgentPrompts/System";
+            _prompts = new Dictionary<string, string>(StringComparer.Ordinal);
+            TextAsset[] assets = Resources.LoadAll<TextAsset>(resourcePathPrefixValue);
+            foreach (TextAsset asset in assets)
+            {
+                if (asset != null && !string.IsNullOrWhiteSpace(asset.text))
+                {
+                    _prompts[asset.name] = asset.text;
+                }
+            }
         }
 
         /// <inheritdoc />
@@ -25,15 +37,7 @@ namespace CoreAI.Infrastructure.Prompts
                 return false;
             }
 
-            string path = $"{_resourcePathPrefix}/{roleId.Trim()}";
-            TextAsset ta = Resources.Load<TextAsset>(path);
-            if (ta == null || string.IsNullOrWhiteSpace(ta.text))
-            {
-                return false;
-            }
-
-            systemPrompt = ta.text;
-            return true;
+            return _prompts.TryGetValue(roleId.Trim(), out systemPrompt);
         }
     }
 }

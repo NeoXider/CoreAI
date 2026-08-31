@@ -5,6 +5,7 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
 using NUnit.Framework;
@@ -143,6 +144,96 @@ namespace CoreAI.Tests.EditMode
             }
 
             return LuaCsModRuntimeFactory.Create(options);
+        }
+
+        [Test]
+        public void LuaCs_ProductionDefaultCapacity_Remains32ForExistingHosts()
+        {
+            LuaCsModStackOptions options = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(options);
+
+            Assert.AreEqual(32, LuaCsModRuntime.DefaultMaxMods);
+            Assert.AreEqual(LuaCsModRuntime.DefaultMaxMods, options.MaxMods);
+            Assert.AreEqual(LuaCsModRuntime.DefaultMaxMods, stack.Runtime.MaxMods);
+
+            for (int i = 0; i < LuaCsModRuntime.DefaultMaxMods; i++)
+            {
+                ActorContext actor = new LocalActorIdentityProvider($"production-actor-{i}")
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                stack.Runtime.LoadMod(actor, $"production-mod-{i}", "return true", persistToStore: false);
+            }
+
+            ActorContext refusedActor = new LocalActorIdentityProvider("production-actor-over-limit")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                stack.Runtime.LoadMod(
+                    refusedActor,
+                    "production-mod-over-limit",
+                    "return true",
+                    persistToStore: false));
+
+            StringAssert.Contains(refusedActor.ActorId, exception.Message);
+            StringAssert.Contains(LuaCsModRuntime.DefaultMaxMods.ToString(), exception.Message);
+        }
+
+        [Test]
+        public void LuaCs_BenchmarkCapacity_AcceptsLimitAndRejectsNextActorLoudly()
+        {
+            Assert.Less(LuaCsModRuntime.BenchmarkMaxMods, LuaCsModRuntime.EmergencyMaxMods);
+
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                MaxMods = LuaCsModRuntime.BenchmarkMaxMods
+            });
+
+            for (int i = 0; i < LuaCsModRuntime.BenchmarkMaxMods; i++)
+            {
+                ActorContext actor = new LocalActorIdentityProvider($"benchmark-actor-{i}")
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                stack.Runtime.LoadMod(actor, $"benchmark-mod-{i}", "return true", persistToStore: false);
+            }
+
+            ActorContext refusedActor = new LocalActorIdentityProvider("benchmark-actor-over-limit")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                stack.Runtime.LoadMod(
+                    refusedActor,
+                    "benchmark-mod-over-limit",
+                    "return true",
+                    persistToStore: false));
+
+            StringAssert.Contains("configured mod limit", exception.Message);
+            StringAssert.Contains(refusedActor.ActorId, exception.Message);
+            StringAssert.Contains(LuaCsModRuntime.BenchmarkMaxMods.ToString(), exception.Message);
+        }
+
+        [Test]
+        public void LuaCs_EmergencyCeiling_RejectsEvenWhenConfiguredLimitIsHigher()
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                MaxMods = LuaCsModRuntime.EmergencyMaxMods + 1
+            });
+
+            for (int i = 0; i < LuaCsModRuntime.EmergencyMaxMods; i++)
+            {
+                ActorContext actor = new LocalActorIdentityProvider($"emergency-actor-{i}")
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                stack.Runtime.LoadMod(actor, $"emergency-mod-{i}", "return true", persistToStore: false);
+            }
+
+            ActorContext refusedActor = new LocalActorIdentityProvider("emergency-actor-over-limit")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                stack.Runtime.LoadMod(
+                    refusedActor,
+                    "emergency-mod-over-limit",
+                    "return true",
+                    persistToStore: false));
+
+            StringAssert.Contains("emergency mod ceiling", exception.Message);
+            StringAssert.Contains(refusedActor.ActorId, exception.Message);
+            StringAssert.Contains(LuaCsModRuntime.EmergencyMaxMods.ToString(), exception.Message);
         }
 
         [Test]

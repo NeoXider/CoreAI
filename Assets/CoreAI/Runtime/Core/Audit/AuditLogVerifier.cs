@@ -258,7 +258,8 @@ namespace CoreAI.Audit
                 (string)obj["prevHash"] ?? "",
                 (string)obj["hash"] ?? "",
                 (string)obj["SourceTag"] ?? "",
-                ts);
+                ts,
+                (string)obj["Role"] ?? "");
         }
     }
 }

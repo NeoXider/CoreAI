@@ -118,7 +118,8 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
             if (!builder.Exists(typeof(IActorIdentityProvider), true))
             {
-                builder.RegisterInstance<IActorIdentityProvider>(ActorIdentityComposition.CreateLocalHost());
+                builder.RegisterInstance<IActorIdentityProvider>(
+                    CoreServicesInstaller.DefaultLocalHostIdentityProvider);
             }
 
             builder.Register<IInGameLlmChatServiceFactory>(c =>

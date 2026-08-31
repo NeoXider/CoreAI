@@ -1,4 +1,5 @@
 using System.Threading;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
@@ -13,10 +14,15 @@ namespace CoreAI.Scripting.LuaCs
     public sealed class LuaCsScriptEngine : IScriptEngine
     {
         private readonly LuaCsSecureEnvironment _environment;
+        private readonly IRbxRuntimeObservabilitySink _observability;
 
-        public LuaCsScriptEngine(LuaCsSecureEnvironment environment = null)
+        public LuaCsScriptEngine(LuaCsSecureEnvironment environment = null,
+            IRbxRuntimeObservabilitySink observability = null)
         {
             _environment = environment ?? new LuaCsSecureEnvironment();
+            _observability = observability != null && observability.IsEnabled
+                ? observability
+                : null;
         }
 
         /// <summary>The wrapped secure environment (adapter-internal).</summary>
@@ -48,7 +54,7 @@ namespace CoreAI.Scripting.LuaCs
         /// <inheritdoc />
         public IScriptExecutionGuard CreateGuard(IExecutionBudget budget = null)
         {
-            return new LuaCsScriptExecutionGuard(budget);
+            return new LuaCsScriptExecutionGuard(budget, _observability);
         }
 
         /// <inheritdoc />
@@ -78,10 +84,18 @@ namespace CoreAI.Scripting.LuaCs
             CancellationToken cancellationToken = default)
         {
             LuaState lua = LuaCsScriptState.Unwrap(state);
+            LuaCsExecutionGuard luaGuard = (guard as LuaCsScriptExecutionGuard)?.Inner;
+            if (luaGuard == null && _observability != null)
+            {
+                luaGuard = new LuaCsExecutionGuard(
+                    maxSteps: LuaCsSecureEnvironment.OneShotHardLimitSteps,
+                    observability: _observability);
+            }
+
             LuaValue[] results = _environment.RunChunk(
                 lua,
                 source,
-                (guard as LuaCsScriptExecutionGuard)?.Inner,
+                luaGuard,
                 cancellationToken);
 
             object[] boxed = new object[results.Length];

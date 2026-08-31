@@ -36,7 +36,10 @@ namespace CoreAI.Authority
         private readonly string _sessionId;
         private readonly string _worldId;
 
-        /// <summary>Starts an unprivileged default local actor with a new connection session.</summary>
+        /// <summary>
+        /// Starts an unprivileged synthetic actor using the reserved local id. Host composition uses
+        /// its capability-guarded default instead.
+        /// </summary>
         public LocalActorIdentityProvider()
             : this(DefaultActorId)
         {
@@ -129,34 +132,19 @@ namespace CoreAI.Authority
     /// </summary>
     internal static class ActorIdentityComposition
     {
+        private const string CompositionAssemblyName = "CoreAI.Source";
+        private const string CompositionEntryPointTypeName = "CoreAI.Composition.CoreServicesInstaller";
         private static readonly object IssuanceCapability = new();
 
-        internal static LocalActorIdentityProvider CreateLocalHost()
+        internal static LocalActorIdentityProvider CreateLocalHost(object compositionEntryPoint)
         {
-            return CreateLocalHost(LocalActorIdentityProvider.DefaultActorId);
-        }
-
-        internal static LocalActorIdentityProvider CreateLocalHost(string actorId)
-        {
-            return CreateLocalHost(
-                actorId,
+            AssertCompositionEntryPoint(compositionEntryPoint);
+            return LocalActorIdentityProvider.CreateForComposition(
+                IssuanceCapability,
+                LocalActorIdentityProvider.DefaultActorId,
                 Guid.NewGuid().ToString("N"),
                 "",
                 AgentMemoryScope.Empty);
-        }
-
-        internal static LocalActorIdentityProvider CreateLocalHost(
-            string actorId,
-            string sessionId,
-            string worldId,
-            AgentMemoryScope memoryScope)
-        {
-            return LocalActorIdentityProvider.CreateForComposition(
-                IssuanceCapability,
-                actorId,
-                sessionId,
-                worldId,
-                memoryScope);
         }
 
         internal static void AssertIssuanceCapability(object issuanceCapability)
@@ -165,6 +153,21 @@ namespace CoreAI.Authority
             {
                 throw new InvalidOperationException(
                     "Unrestricted actor contexts may only be issued by host composition.");
+            }
+        }
+
+        private static void AssertCompositionEntryPoint(object compositionEntryPoint)
+        {
+            Type proofType = compositionEntryPoint?.GetType();
+            Type declaringType = proofType?.DeclaringType;
+            if (proofType == null ||
+                !proofType.IsNestedPrivate ||
+                declaringType == null ||
+                !string.Equals(declaringType.FullName, CompositionEntryPointTypeName, StringComparison.Ordinal) ||
+                !string.Equals(proofType.Assembly.GetName().Name, CompositionAssemblyName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Unrestricted actor providers may only be created by the CoreAI composition entry point.");
             }
         }
     }

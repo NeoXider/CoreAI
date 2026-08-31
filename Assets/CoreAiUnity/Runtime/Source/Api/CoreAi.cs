@@ -116,7 +116,8 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            return await svc.SendMessageAsync(userMessage, roleId, cancellationToken);
+            AiTaskRequest task = svc.CreateTaskRequest(userMessage, roleId);
+            return await svc.SendMessageAsync(task, cancellationToken);
         }
 
         /// <summary>
@@ -370,7 +371,8 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            return svc.SendMessageStreamingAsync(task, cancellationToken);
+            IAiOrchestrationService orchestrator = RequireOrchestrator();
+            return svc.SendMessageStreamingAsync(ResolveActorBeforeAdmission(orchestrator, task), cancellationToken);
         }
 
         /// <summary>
@@ -406,7 +408,7 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             IAiOrchestrationService svc = RequireOrchestrator();
-            return svc.RunTaskAsync(task, cancellationToken)!;
+            return svc.RunTaskAsync(ResolveActorBeforeAdmission(svc, task), cancellationToken)!;
         }
 
         /// <summary>
@@ -418,7 +420,7 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             IAiOrchestrationService svc = RequireOrchestrator();
-            return svc.RunStreamingAsync(task, cancellationToken);
+            return svc.RunStreamingAsync(ResolveActorBeforeAdmission(svc, task), cancellationToken);
         }
 
         /// <summary>
@@ -765,6 +767,26 @@ namespace CoreAI
 
                 return _chatService;
             }
+        }
+
+        private static AiTaskRequest ResolveActorBeforeAdmission(
+            IAiOrchestrationService orchestrator,
+            AiTaskRequest task)
+        {
+            if (task == null)
+            {
+                throw new ArgumentNullException(nameof(task));
+            }
+
+            IAiActorContextResolver actorContextResolver = orchestrator as IAiActorContextResolver;
+            if (actorContextResolver == null)
+            {
+                throw new InvalidOperationException(
+                    "CoreAi: the orchestration service does not support actor-aware admission.");
+            }
+
+            actorContextResolver.ResolveActorContext(task);
+            return task;
         }
 
         private static IAiOrchestrationService RequireOrchestrator()

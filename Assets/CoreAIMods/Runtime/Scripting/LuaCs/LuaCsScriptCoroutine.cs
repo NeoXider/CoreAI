@@ -19,6 +19,9 @@ namespace CoreAI.Scripting.LuaCs
             _handle = handle ?? throw new ArgumentNullException(nameof(handle));
         }
 
+        /// <summary>Guarded instruction steps consumed across completed resumes.</summary>
+        internal long ConsumedSteps => _handle.ConsumedSteps;
+
         /// <summary>The wrapped concrete handle (adapter-internal; frame runners use it directly).</summary>
         internal LuaCsCoroutineHandle Handle => _handle;
 

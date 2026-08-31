@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
 using Newtonsoft.Json.Linq;
@@ -118,7 +119,7 @@ namespace CoreAI.Tests.EditMode
                 NullLog.Instance,
                 granted,
                 allowManagement,
-                ActorIdentityComposition.CreateLocalHost(),
+                CoreServicesInstaller.DefaultLocalHostIdentityProvider,
                 BuiltInAgentRoleIds.Programmer);
         }
 

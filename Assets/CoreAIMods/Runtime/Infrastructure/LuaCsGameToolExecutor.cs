@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -66,17 +67,32 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public static bool IsSupported => true;
 
+        /// <summary>
+        /// Creates the executor without an observability sink.
+        /// </summary>
+        // WHY: an OPTIONAL sink parameter would force every calling assembly to reference the
+        // engine-free scheduling assembly just to name the type it never passes, so the sink-free
+        // overload keeps that dependency off consumers such as the demos.
         public LuaCsGameToolExecutor(
             LuaCsSecureEnvironment sandbox,
             ILuaCsGameRuntimeBindings bindings,
             ILuaExecutionObserver observer)
+            : this(sandbox, bindings, observer, null)
+        {
+        }
+
+        public LuaCsGameToolExecutor(
+            LuaCsSecureEnvironment sandbox,
+            ILuaCsGameRuntimeBindings bindings,
+            ILuaExecutionObserver observer,
+            IRbxRuntimeObservabilitySink observability)
         {
             if (sandbox == null)
             {
                 throw new ArgumentNullException(nameof(sandbox));
             }
 
-            _engine = new LuaCsScriptEngine(sandbox);
+            _engine = new LuaCsScriptEngine(sandbox, observability);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
         }

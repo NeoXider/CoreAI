@@ -61,15 +61,22 @@ namespace CoreAI.Ai.LuaCs
             end";
 
         private readonly IScriptEngine _scriptEngine;
+        private readonly IRbxRuntimeObservabilitySink _observability;
         private LuaCsRbxScriptThread _currentThread;
 
-        public LuaCsRbxScriptThreadFactory(IScriptEngine scriptEngine = null)
+        public LuaCsRbxScriptThreadFactory(IScriptEngine scriptEngine = null,
+            IRbxRuntimeObservabilitySink observability = null)
         {
-            _scriptEngine = scriptEngine ?? new LuaCsScriptEngine();
+            _observability = observability != null && observability.IsEnabled
+                ? observability
+                : null;
+            _scriptEngine = scriptEngine ?? new LuaCsScriptEngine(observability: _observability);
         }
 
         /// <summary>The scheduler-owned thread currently executing a Lua host callback.</summary>
         public IRbxScriptThread CurrentThread => _currentThread;
+
+        internal bool IsObservabilityEnabled => _observability != null;
 
         /// <inheritdoc />
         public IRbxScriptThread Create(string ownerModId, object callable)
@@ -166,6 +173,35 @@ namespace CoreAI.Ai.LuaCs
                 ? fallbackState
                 : LuaCsScriptState.Unwrap(_currentThread.OwnerState);
         }
+
+        internal void RecordThreadResume(long guardedInstructionSteps)
+        {
+            if (_observability == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _observability.RecordThreadResumes(1);
+            }
+            catch
+            {
+            }
+
+            if (guardedInstructionSteps <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                _observability.RecordGuardedInstructionSteps(guardedInstructionSteps);
+            }
+            catch
+            {
+            }
+        }
     }
 
     /// <summary>Lua-CSharp scheduler thread adapter over one <see cref="IScriptCoroutine"/>.</summary>
@@ -230,6 +266,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             bool isInitialResume = _coroutine == null;
+            bool observe = _factory.IsObservabilityEnabled;
+            long consumedStepsBefore = observe ? ReadConsumedSteps() : 0;
             LuaCsRbxScriptThread previous = _factory.Enter(this);
             _resumeArguments = args == null || args.Length == 0
                 ? Array.Empty<object>()
@@ -268,7 +306,18 @@ namespace CoreAI.Ai.LuaCs
             {
                 _resumeArguments = Array.Empty<object>();
                 _factory.Exit(this, previous);
+                if (observe)
+                {
+                    _factory.RecordThreadResume(ReadConsumedSteps() - consumedStepsBefore);
+                }
             }
+        }
+
+        private long ReadConsumedSteps()
+        {
+            return _coroutine is LuaCsScriptCoroutine luaCoroutine
+                ? luaCoroutine.ConsumedSteps
+                : 0;
         }
 
         internal object ReadCurrentResumeArgument(int index)

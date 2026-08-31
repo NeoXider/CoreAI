@@ -138,7 +138,8 @@ namespace CoreAI.Infrastructure.Llm
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
                 _currentRoleId,
                 request.TraceId,
-                EnsureIdempotencyKey(request));
+                EnsureIdempotencyKey(request),
+                request.ActorId);
             List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
 
             if (_settings.LogMeaiToolCallingSteps)
@@ -151,7 +152,7 @@ namespace CoreAI.Infrastructure.Llm
             SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
                 request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
-                request.MaxToolCallRoundtrips);
+                request.MaxToolCallRoundtrips, request.ActorId);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
@@ -432,7 +433,8 @@ namespace CoreAI.Infrastructure.Llm
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
                 _currentRoleId,
                 request.TraceId,
-                EnsureIdempotencyKey(request));
+                EnsureIdempotencyKey(request),
+                request.ActorId);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
@@ -471,7 +473,8 @@ namespace CoreAI.Infrastructure.Llm
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
                 _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
-                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
+                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
+                request.ActorId);
             string? pendingFailedToolRetryInstruction = null;
             int emptyResponsesAfterToolFailure = 0;
             int emptyResponsesAfterToolSuccess = 0;

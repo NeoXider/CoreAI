@@ -90,11 +90,17 @@ namespace CoreAI.Ai.LuaCs
         public LuaCsRbxApiBindings(InstanceRegistry registry = null, RbxDataModel game = null,
             RbxEnumRegistry enums = null, Action<string> log = null, IPartPropertySink partSink = null,
             IRbxCameraRig cameraRig = null, IInputSource inputSource = null,
-            ModConnectionRegistry connections = null, IClickPickSource pickSource = null)
+            ModConnectionRegistry connections = null, IClickPickSource pickSource = null,
+            IRbxRuntimeObservabilitySink observability = null)
         {
             _registry = registry ?? new InstanceRegistry();
             _connections = connections ?? new ModConnectionRegistry();
-            _schedulerThreadFactory = new LuaCsRbxScriptThreadFactory();
+            IRbxRuntimeObservabilitySink resolvedObservability =
+                observability != null && observability.IsEnabled
+                ? observability
+                : null;
+            _schedulerThreadFactory = new LuaCsRbxScriptThreadFactory(
+                observability: resolvedObservability);
             _scheduler = new ModScheduler(
                 _schedulerThreadFactory, new RbxAccumulatingTimeSource());
             // WHY: no camera/physics behind the headless default, so clicks resolve to nothing until

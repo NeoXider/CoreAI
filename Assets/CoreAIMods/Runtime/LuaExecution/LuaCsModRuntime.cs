@@ -4,6 +4,7 @@ using System.Threading;
 using CoreAI.Ai.Logging;
 using CoreAI.Authority;
 using CoreAI.Logging;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -74,6 +75,8 @@ namespace CoreAI.Ai.LuaCs
         public const int DefaultHandlerTimeoutMs = 10_000;
         public const long DefaultHandlerMaxSteps = 50_000_000;
         public const int DefaultMaxMods = 32;
+        public const int BenchmarkMaxMods = 200;
+        public const int EmergencyMaxMods = 256;
         public const int DefaultMaxHandlersPerMod = 64;
         public const int DefaultMaxTimersPerMod = 16;
         public const int DefaultMaxQueuedEventsPerMod = 256;
@@ -181,6 +184,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly ILog _log;
         private readonly ILuaLogService _logService;
         private readonly LuaCsRbxApiBindings _rbxApi;
+        private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly IExecutionBudget _scriptExecutionBudget;
         private readonly List<Mod> _tickScratch = new();
 
@@ -249,6 +253,9 @@ namespace CoreAI.Ai.LuaCs
         /// supported — including IL2CPP/WebGL.
         /// </summary>
         public static bool IsSupported => true;
+
+        /// <summary>Host-configured mod capacity, independently bounded by <see cref="EmergencyMaxMods"/>.</summary>
+        public int MaxMods { get; }
 
         /// <summary>
         /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined.
@@ -322,6 +329,12 @@ namespace CoreAI.Ai.LuaCs
         /// read them back via the <c>get_mod_logs</c> tool. Null keeps the previous behavior (console
         /// log + events + bounded recent buffers only).
         /// </param>
+        /// <param name="maxMods">
+        /// Host-configured mod capacity. Defaults to <see cref="DefaultMaxMods"/>; benchmark hosts may
+        /// use <see cref="BenchmarkMaxMods"/>. Values above <see cref="EmergencyMaxMods"/> never bypass
+        /// the independent emergency ceiling.
+        /// </param>
+        /// <param name="observability">Optional production counter sink.</param>
         public LuaCsModRuntime(
             Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
@@ -337,17 +350,23 @@ namespace CoreAI.Ai.LuaCs
             int maxErrorsBeforeQuarantine = DefaultMaxErrorsBeforeQuarantine,
             LuaCsLogicSlots logicSlots = null,
             ILuaLogService logService = null,
-            LuaCsRbxApiBindings rbxApi = null)
+            LuaCsRbxApiBindings rbxApi = null,
+            int maxMods = DefaultMaxMods,
+            IRbxRuntimeObservabilitySink observability = null)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
             _log = log;
             _logService = logService;
             _rbxApi = rbxApi;
+            _observability = observability != null && observability.IsEnabled
+                ? observability
+                : null;
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
             _transactionScope = transactionScope;
+            MaxMods = Math.Max(1, maxMods);
             MaxErrorsBeforeQuarantine = Math.Max(1, maxErrorsBeforeQuarantine);
             _logicSlots = logicSlots;
             if (_logicSlots != null)
@@ -867,6 +886,22 @@ namespace CoreAI.Ai.LuaCs
             LoadModInternal(id, luaCode, ownerActorId.Trim(), capabilities, persistToStore);
         }
 
+        private void EnsureModCapacity(string modId, string ownerActorId)
+        {
+            string actorId = ownerActorId.Length == 0 ? "host/system" : ownerActorId;
+            if (_mods.Count >= EmergencyMaxMods)
+            {
+                throw new InvalidOperationException(
+                    $"load: actor '{actorId}' cannot load mod '{modId}': emergency mod ceiling reached ({EmergencyMaxMods}).");
+            }
+
+            if (_mods.Count >= MaxMods)
+            {
+                throw new InvalidOperationException(
+                    $"load: actor '{actorId}' cannot load mod '{modId}': configured mod limit reached ({MaxMods}).");
+            }
+        }
+
         private void LoadModInternal(
             string id,
             string luaCode,
@@ -892,10 +927,7 @@ namespace CoreAI.Ai.LuaCs
                     throw new InvalidOperationException($"Mod '{modId}' is already loaded. Use ReloadMod.");
                 }
 
-                if (_mods.Count >= DefaultMaxMods)
-                {
-                    throw new InvalidOperationException($"Mod limit reached ({DefaultMaxMods}).");
-                }
+                EnsureModCapacity(modId, ownerActorId);
             }
 
             Mod mod = BuildMod(modId, luaCode, capabilities, ownerActorId);
@@ -907,6 +939,7 @@ namespace CoreAI.Ai.LuaCs
                     throw new InvalidOperationException($"Mod '{modId}' was loaded concurrently.");
                 }
 
+                EnsureModCapacity(modId, ownerActorId);
                 _mods[modId] = mod;
             }
 
@@ -1337,6 +1370,25 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 QuarantineIfExhausted(mod);
+            }
+
+            if (_observability != null && dispatchedThisTick > 0)
+            {
+                try
+                {
+                    _observability.RecordEventsDelivered(dispatchedThisTick);
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    _observability.RecordCompletedOperations(dispatchedThisTick);
+                }
+                catch
+                {
+                }
             }
         }
 

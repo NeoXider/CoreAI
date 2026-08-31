@@ -37,20 +37,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void BuildAiTaskRequest_Default_MapsHintRoleAndChatSourceTag()
+        public void BuildAiTaskRequest_ZeroConfiguration_UsesCompositionDefaultAndMapsRequest()
         {
             GameObject go = new("ChatPanel_BuildRequest_Default");
             try
             {
                 PanelForTesting panel = go.AddComponent<PanelForTesting>();
-                panel.SetActorIdentityProvider(new LocalActorIdentityProvider("build-request-test"));
                 AiTaskRequest req = panel.InvokeBuildAiTaskRequest(" hello ", "Merchant");
+                AiTaskRequest nextReq = panel.InvokeBuildAiTaskRequest("again", "BlueprintBot");
 
                 Assert.AreEqual("Merchant", req.RoleId);
                 Assert.AreEqual(" hello ", req.Hint);
                 Assert.AreEqual("Chat", req.SourceTag);
                 Assert.AreEqual(LlmToolChoiceMode.Auto, req.ForcedToolMode);
                 Assert.IsNull(req.AllowedToolNames);
+                Assert.IsTrue(req.ActorContext.HasValue);
+                Assert.IsTrue(nextReq.ActorContext.HasValue);
+                ActorContext actor = req.ActorContext.Value;
+                ActorContext nextActor = nextReq.ActorContext.Value;
+                Assert.AreEqual(LocalActorIdentityProvider.DefaultActorId, actor.ActorId);
+                Assert.IsTrue(actor.Grants.IsUnrestricted);
+                Assert.AreEqual(actor.SessionId, req.CancellationScope);
+                Assert.AreEqual(actor.SessionId, nextActor.SessionId);
             }
             finally
             {

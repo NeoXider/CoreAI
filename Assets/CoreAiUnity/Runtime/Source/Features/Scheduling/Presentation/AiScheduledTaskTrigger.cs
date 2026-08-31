@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
@@ -111,13 +112,27 @@ namespace CoreAI.Presentation
                 return;
             }
 
+            if (!scope.Container.TryResolve<IActorIdentityProvider>(out IActorIdentityProvider actorIdentityProvider))
+            {
+                log.LogWarning(
+                    GameLogFeature.Composition,
+                    "AiScheduledTaskTrigger: IActorIdentityProvider is not registered.");
+                return;
+            }
+
+            string roleId = string.IsNullOrWhiteSpace(agentRoleId)
+                ? BuiltInAgentRoleIds.Creator
+                : agentRoleId.Trim();
+            ActorContext actorContext = actorIdentityProvider.GetActorContext(roleId);
+
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
-                RoleId = string.IsNullOrWhiteSpace(agentRoleId) ? BuiltInAgentRoleIds.Creator : agentRoleId.Trim(),
+                RoleId = roleId,
                 Hint = taskHint ?? "",
                 Priority = priority,
                 SourceTag = string.IsNullOrWhiteSpace(sourceTag) ? "scheduled_timer" : sourceTag.Trim(),
-                CancellationScope = cancellationScope ?? ""
+                ActorContext = actorContext,
+                CancellationScope = string.IsNullOrWhiteSpace(cancellationScope) ? "" : actorContext.SessionId
             });
         }
 

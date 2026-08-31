@@ -102,5 +102,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
 
             Assert.AreEqual(3, received);
         }
+
     }
 }

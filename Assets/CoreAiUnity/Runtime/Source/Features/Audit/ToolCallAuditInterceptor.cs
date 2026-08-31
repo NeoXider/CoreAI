@@ -8,7 +8,6 @@ namespace CoreAI.Features.Audit
     public sealed class ToolCallAuditInterceptor : IDisposable
     {
         private readonly IAuditLog _auditLog;
-        private Func<string, string, string> _actorIdentityResolver;
         private bool _disposed;
 
         public ToolCallAuditInterceptor(IAuditLog auditLog)
@@ -16,12 +15,6 @@ namespace CoreAI.Features.Audit
             _auditLog = auditLog;
             CoreAi.OnToolCallCompleted += OnCompleted;
             CoreAi.OnToolCallFailed += OnFailed;
-        }
-
-        /// <summary>Sets the trusted runtime identity lookup shaped as trace id and role id to actor id.</summary>
-        public void SetActorIdentityResolver(Func<string, string, string> actorIdentityResolver)
-        {
-            _actorIdentityResolver = actorIdentityResolver ?? throw new ArgumentNullException(nameof(actorIdentityResolver));
         }
 
         private void OnCompleted(LlmToolCallCompleted evt)
@@ -34,7 +27,7 @@ namespace CoreAI.Features.Audit
             _auditLog.Record(AuditEntry.ForToolCall(
                 0,
                 evt.TraceId,
-                ResolveActorId(evt.TraceId, evt.RoleId),
+                evt.ActorId,
                 AuditContext.GetModel(evt.TraceId),
                 AuditContext.GetPromptHash(evt.TraceId),
                 evt.ToolName,
@@ -42,7 +35,8 @@ namespace CoreAI.Features.Audit
                 "allowed",
                 "ok",
                 evt.ResultJson,
-                evt.DurationMs));
+                evt.DurationMs,
+                evt.RoleId));
         }
 
         private void OnFailed(LlmToolCallFailed evt)
@@ -55,7 +49,7 @@ namespace CoreAI.Features.Audit
             _auditLog.Record(AuditEntry.ForToolCall(
                 0,
                 evt.TraceId,
-                ResolveActorId(evt.TraceId, evt.RoleId),
+                evt.ActorId,
                 AuditContext.GetModel(evt.TraceId),
                 AuditContext.GetPromptHash(evt.TraceId),
                 evt.ToolName,
@@ -63,13 +57,8 @@ namespace CoreAI.Features.Audit
                 "denied",
                 "error",
                 evt.Error,
-                evt.DurationMs));
-        }
-
-        private string ResolveActorId(string traceId, string roleId)
-        {
-            Func<string, string, string> resolver = _actorIdentityResolver;
-            return resolver != null ? resolver(traceId ?? "", roleId ?? "") ?? "" : "";
+                evt.DurationMs,
+                evt.RoleId));
         }
 
         public void Dispose()

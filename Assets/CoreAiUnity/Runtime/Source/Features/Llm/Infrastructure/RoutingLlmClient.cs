@@ -304,7 +304,8 @@ namespace CoreAI.Infrastructure.Llm
                 request.AgentRoleId,
                 request.RoutingProfileId,
                 capturedMode,
-                streaming));
+                streaming,
+                request.ActorId));
             return inner;
         }
 
@@ -339,7 +340,8 @@ namespace CoreAI.Infrastructure.Llm
                 streaming,
                 success,
                 error,
-                errorCode));
+                errorCode,
+                request?.ActorId));
         }
 
         private void PublishUsage(

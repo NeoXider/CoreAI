@@ -1,5 +1,55 @@
 namespace CoreAI.Mods.Rbx.Instances.Scheduling
 {
+    /// <summary>
+    /// Engine-free production observability port for aggregated Lua runtime work. Implementations
+    /// must be nonblocking and must not throw into the observed runtime path.
+    /// </summary>
+    public interface IRbxRuntimeObservabilitySink
+    {
+        /// <summary>True when the runtime should collect and publish boundary counters.</summary>
+        bool IsEnabled { get; }
+
+        /// <summary>Records guarded Lua instruction steps accumulated by completed guards.</summary>
+        void RecordGuardedInstructionSteps(long count);
+
+        /// <summary>Records script-thread resumes completed by the Lua adapter.</summary>
+        void RecordThreadResumes(long count);
+
+        /// <summary>Records signal events delivered to live subscribers.</summary>
+        void RecordEventsDelivered(long count);
+
+        /// <summary>Records completed Lua handler operations drained by the runtime.</summary>
+        void RecordCompletedOperations(long count);
+    }
+
+    /// <summary>Allocation-free disabled default for hosts that do not collect runtime counters.</summary>
+    public sealed class NullRbxRuntimeObservabilitySink : IRbxRuntimeObservabilitySink
+    {
+        public static readonly NullRbxRuntimeObservabilitySink Instance = new();
+
+        private NullRbxRuntimeObservabilitySink()
+        {
+        }
+
+        public bool IsEnabled => false;
+
+        public void RecordGuardedInstructionSteps(long count)
+        {
+        }
+
+        public void RecordThreadResumes(long count)
+        {
+        }
+
+        public void RecordEventsDelivered(long count)
+        {
+        }
+
+        public void RecordCompletedOperations(long count)
+        {
+        }
+    }
+
     /// <summary>Engine-neutral lifecycle states exposed by a scheduler-owned script thread.</summary>
     public enum RbxScriptThreadStatus
     {

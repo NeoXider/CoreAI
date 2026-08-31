@@ -1697,21 +1697,7 @@ namespace CoreAI.Chat
 
         protected virtual void InitService()
         {
-            CoreAILifetimeScope lifetimeScope =
-                UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
-            if (lifetimeScope?.Container != null)
-            {
-                try
-                {
-                    SetActorIdentityProvider(
-                        (IActorIdentityProvider)lifetimeScope.Container.Resolve(typeof(IActorIdentityProvider)));
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning(GameLogFeature.Core,
-                        $"[CoreAiChatPanel] Resolve IActorIdentityProvider: {ex.Message}");
-                }
-            }
+            TryResolveActorIdentityProviderFromScene();
 
             _chatService = CoreAiChatService.TryCreateFromScene();
             if (_chatService == null)
@@ -1722,6 +1708,40 @@ namespace CoreAI.Chat
             }
 
             EnsureCameraToolForActiveRole();
+        }
+
+        private bool TryResolveActorIdentityProviderFromScene()
+        {
+            CoreAILifetimeScope lifetimeScope =
+                UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
+            if (lifetimeScope?.Container == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                SetActorIdentityProvider(
+                    (IActorIdentityProvider)lifetimeScope.Container.Resolve(typeof(IActorIdentityProvider)));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Resolve IActorIdentityProvider: {ex.Message}");
+                return false;
+            }
+        }
+
+        private IActorIdentityProvider ResolveActorIdentityProvider()
+        {
+            if (_actorIdentityProvider == null)
+            {
+                TryResolveActorIdentityProviderFromScene();
+            }
+
+            _actorIdentityProvider ??= CoreServicesInstaller.DefaultLocalHostIdentityProvider;
+            return _actorIdentityProvider;
         }
 
         /// <summary>
@@ -2687,13 +2707,8 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual AiTaskRequest BuildAiTaskRequest(string userText, string roleId)
         {
-            if (_actorIdentityProvider == null)
-            {
-                throw new InvalidOperationException(
-                    "CoreAiChatPanel requires an actor identity provider from host composition.");
-            }
-
-            ActorContext actorContext = _actorIdentityProvider.GetActorContext(roleId);
+            IActorIdentityProvider actorIdentityProvider = ResolveActorIdentityProvider();
+            ActorContext actorContext = actorIdentityProvider.GetActorContext(roleId);
             return new AiTaskRequest
             {
                 RoleId = roleId,

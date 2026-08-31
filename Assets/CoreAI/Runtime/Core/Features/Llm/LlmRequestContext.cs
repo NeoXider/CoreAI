@@ -5,7 +5,8 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Per-request ambient context bridging the orchestrator/<see cref="LlmCompletionRequest"/>
-    /// layer to HTTP transports. Carries the role id, end-to-end trace id, and idempotency key
+    /// layer to HTTP transports and trace-aware runtime services. Carries actor and role identity,
+    /// end-to-end trace id, and idempotency key
     /// so backends can attribute requests and safely deduplicate retries without the client
     /// re-issuing logical work.
     /// </summary>
@@ -47,13 +48,14 @@ namespace CoreAI.Ai
         public static LlmRequestContextFrame Current => _current.Value;
 
         /// <summary>Pushes a new frame; the returned <see cref="IDisposable"/> restores the prior frame.</summary>
-        public static Scope Begin(string agentRoleId, string traceId, string idempotencyKey)
+        public static Scope Begin(string agentRoleId, string traceId, string idempotencyKey, string actorId = "")
         {
             LlmRequestContextFrame previous = _current.Value;
             _current.Value = new LlmRequestContextFrame(
                 agentRoleId ?? "",
                 string.IsNullOrEmpty(traceId) ? Guid.NewGuid().ToString("N") : traceId,
-                string.IsNullOrEmpty(idempotencyKey) ? Guid.NewGuid().ToString("N") : idempotencyKey);
+                string.IsNullOrEmpty(idempotencyKey) ? Guid.NewGuid().ToString("N") : idempotencyKey,
+                actorId ?? "");
             return new Scope(previous);
         }
 
@@ -75,11 +77,14 @@ namespace CoreAI.Ai
         }
     }
 
-    /// <summary>One LLM-request frame: role, trace, idempotency key.</summary>
+    /// <summary>One LLM-request frame: actor, role, trace, idempotency key.</summary>
     public sealed class LlmRequestContextFrame
     {
         /// <summary>Agent role id (e.g. <c>SmartChat</c>, <c>Teacher</c>).</summary>
         public string AgentRoleId { get; }
+
+        /// <summary>Stable actor id admitted for this request.</summary>
+        public string ActorId { get; }
 
         /// <summary>End-to-end trace id; matches <see cref="LlmCompletionRequest.TraceId"/>.</summary>
         public string TraceId { get; }
@@ -88,11 +93,16 @@ namespace CoreAI.Ai
         public string IdempotencyKey { get; }
 
         /// <summary>Constructs a frame.</summary>
-        public LlmRequestContextFrame(string agentRoleId, string traceId, string idempotencyKey)
+        public LlmRequestContextFrame(
+            string agentRoleId,
+            string traceId,
+            string idempotencyKey,
+            string actorId = "")
         {
             AgentRoleId = agentRoleId ?? "";
             TraceId = traceId ?? "";
             IdempotencyKey = idempotencyKey ?? "";
+            ActorId = actorId ?? "";
         }
     }
 }

@@ -1,11 +1,18 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
+using CoreAI.Composition;
+using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Logging;
 using NUnit.Framework;
 using CoreAI;
+using UnityEngine;
+using VContainer;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -124,6 +131,93 @@ namespace CoreAI.Tests.EditMode
             Assert.AreSame(resolverOrchestrator, resolved);
         }
 
+        [Test]
+        public async Task OrchestrateAsync_ProductionComposition_UsesActorDurableKeyAndSessionCancellation()
+        {
+            const string RoleId = "ActorWiringRegression";
+            LocalActorIdentityProvider actorIdentityProvider = new(
+                "facade-actor",
+                "facade-session",
+                "",
+                ActorGrantSet.None,
+                AgentMemoryScope.Empty);
+            RecordingMemoryStore backingStore = new();
+            FixedMemoryScopeProvider legacyScopeProvider = new();
+            ScopedAgentMemoryStoreDecorator memoryStore = new(backingStore, legacyScopeProvider);
+            BlockingFirstLlmClient llmClient = new();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureOffline();
+
+            ContainerBuilder builder = new();
+            builder.RegisterInstance<IActorIdentityProvider>(actorIdentityProvider);
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+            builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
+            builder.RegisterAgentPrompts(null);
+            builder.RegisterInstance<ILlmClient>(llmClient);
+            builder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
+            builder.RegisterInstance(new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            builder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
+            builder.RegisterInstance<IAgentMemoryScopeProvider>(legacyScopeProvider);
+            builder.RegisterInstance<IAgentMemoryStore>(memoryStore);
+            builder.RegisterCorePortable(
+                suppressDefaultConversationSummaryStore: false,
+                suppressDefaultAgentMemoryStore: true);
+
+            try
+            {
+                using IObjectResolver container = builder.Build();
+                IAiOrchestrationService orchestrator = container.Resolve<IAiOrchestrationService>();
+                CoreAi.SetResolver(() => orchestrator);
+
+                AiTaskRequest firstRequest = new()
+                {
+                    RoleId = RoleId,
+                    Hint = "first",
+                    CancellationScope = "legacy-first"
+                };
+                Task<string> first = CoreAi.OrchestrateAsync(firstRequest);
+
+                Task firstStarted = llmClient.FirstCallStarted.Task;
+                Task startWinner = await Task.WhenAny(firstStarted, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.AreSame(firstStarted, startWinner, "The first production request did not reach the LLM.");
+                await firstStarted;
+
+                AiTaskRequest secondRequest = new()
+                {
+                    RoleId = RoleId,
+                    Hint = "second",
+                    CancellationScope = "legacy-second"
+                };
+                Task<string> second = CoreAi.OrchestrateAsync(secondRequest);
+                Task secondWinner = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(5)));
+
+                Assert.AreSame(second, secondWinner,
+                    "Different legacy scopes must still be latest-wins within the actor SessionId.");
+                Assert.AreEqual("ok", await second);
+                // WHY: TaskCanceledException derives from OperationCanceledException, and
+                // ThrowsAsync matches the exact type — CatchAsync accepts either.
+                Assert.CatchAsync<OperationCanceledException>(async () =>
+                {
+                    await first;
+                });
+
+                ActorContext expectedActor = actorIdentityProvider.GetActorContext(RoleId);
+                string expectedDurableKey = AgentMemoryScopeKey.Resolve(expectedActor, RoleId);
+                Assert.IsTrue(backingStore.HasSeen(expectedDurableKey),
+                    "The scoped production memory store must receive the ActorId-derived durable key.");
+                Assert.AreEqual(expectedActor.ActorId, firstRequest.ActorContext?.ActorId);
+                Assert.AreEqual(expectedActor.SessionId, firstRequest.ActorContext?.SessionId);
+                Assert.AreEqual(expectedActor.ActorId, secondRequest.ActorContext?.ActorId);
+                Assert.AreEqual(expectedActor.SessionId, secondRequest.ActorContext?.SessionId);
+            }
+            finally
+            {
+                CoreAi.Invalidate();
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
         private sealed class TestStubOrchestrator : IAiOrchestrationService
         {
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
@@ -142,6 +236,88 @@ namespace CoreAI.Tests.EditMode
 
             public void CancelTasks(string cancellationScope)
             {
+            }
+        }
+
+        private sealed class BlockingFirstLlmClient : ILlmClient
+        {
+            private int _callCount;
+
+            public TaskCompletionSource<bool> FirstCallStarted { get; } =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                int call = Interlocked.Increment(ref _callCount);
+                if (call == 1)
+                {
+                    FirstCallStarted.TrySetResult(true);
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+
+                return new LlmCompletionResult { Ok = true, Content = "ok" };
+            }
+        }
+
+        private sealed class RecordingMemoryStore : IAgentMemoryStore
+        {
+            private readonly ConcurrentDictionary<string, byte> _seenKeys = new(StringComparer.Ordinal);
+
+            public bool HasSeen(string roleId)
+            {
+                return _seenKeys.ContainsKey(roleId);
+            }
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                Record(roleId);
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                Record(roleId);
+            }
+
+            public void Clear(string roleId)
+            {
+                Record(roleId);
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+                Record(roleId);
+            }
+
+            public void AppendChatMessage(
+                string roleId,
+                string role,
+                string content,
+                bool persistToDisk = true)
+            {
+                Record(roleId);
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                Record(roleId);
+                return Array.Empty<ChatMessage>();
+            }
+
+            private void Record(string roleId)
+            {
+                _seenKeys.TryAdd(roleId ?? "", 0);
+            }
+        }
+
+        private sealed class FixedMemoryScopeProvider : IAgentMemoryScopeProvider
+        {
+            public AgentMemoryScope GetScope(string roleId)
+            {
+                return new AgentMemoryScope("legacy-tenant", "legacy-user", "legacy-session", "");
             }
         }
     }

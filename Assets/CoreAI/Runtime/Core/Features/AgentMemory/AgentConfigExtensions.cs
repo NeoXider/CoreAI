@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Authority;
 using CoreAI.Logging;
 
 namespace CoreAI.Ai
@@ -52,14 +53,23 @@ namespace CoreAI.Ai
                     "Orchestrator is null. Make sure CoreAILifetimeScope is initialized or pass orchestrator explicitly.");
             }
 
+            IActorIdentityProvider actorIdentityProvider = CoreAIAgent.ActorIdentityProvider;
+            if (actorIdentityProvider == null)
+            {
+                throw new InvalidOperationException(
+                    "Actor identity provider is null. Initialize CoreAI before asking an agent.");
+            }
+
+            ActorContext actorContext = actorIdentityProvider.GetActorContext(config.RoleId);
+
             return orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = config.RoleId,
                 RoutingProfileId = config.LlmProfileId ?? "",
                 Hint = message,
                 Priority = priority,
-                CancellationScope =
-                    config.RoleId // Automatically cancels previous in-flight call for same role, if still generating.
+                ActorContext = actorContext,
+                CancellationScope = actorContext.SessionId
             }, cancellationToken);
         }
 

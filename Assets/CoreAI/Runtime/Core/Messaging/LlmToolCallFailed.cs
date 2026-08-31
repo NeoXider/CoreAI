@@ -34,6 +34,9 @@ namespace CoreAI.Messaging
         /// <summary>Correlation id propagated from the LLM request.</summary>
         public string TraceId => Info.TraceId;
 
+        /// <summary>Stable actor id admitted for this trace.</summary>
+        public string ActorId => Info.ActorId;
+
         /// <summary>Agent role that requested the tool.</summary>
         public string RoleId => Info.RoleId;
 

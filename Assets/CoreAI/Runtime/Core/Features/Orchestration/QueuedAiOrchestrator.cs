@@ -13,9 +13,11 @@ namespace CoreAI.Ai
     /// <summary>
     /// Adds priority queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
-    public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IScopedAiTaskCancellation, IDisposable
+    public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiActorContextResolver,
+        IScopedAiTaskCancellation, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
+        private readonly IAiActorContextResolver _actorContextResolver;
         private readonly IUnstartedAiTurnRecorder _unstartedTurnRecorder;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
         private readonly int _maxConcurrent;
@@ -52,12 +54,26 @@ namespace CoreAI.Ai
             IAgentMemoryScopeProvider scopeProvider = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            _actorContextResolver = inner as IAiActorContextResolver;
             _unstartedTurnRecorder = inner as IUnstartedAiTurnRecorder;
             _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
             int max = options?.MaxConcurrent ?? 2;
             _maxConcurrent = max < 1 ? 1 : max;
             int maxPending = options?.MaxPending ?? 64;
             _maxPending = maxPending < 1 ? 1 : maxPending;
+        }
+
+        /// <inheritdoc />
+        public ActorContext ResolveActorContext(AiTaskRequest task)
+        {
+            ActorContext? actorContext = CaptureActorContext(task);
+            if (!actorContext.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "Queued AI orchestration requires an actor-aware inner service or an explicit actor context.");
+            }
+
+            return actorContext.Value;
         }
 
         /// <inheritdoc />
@@ -761,9 +777,14 @@ namespace CoreAI.Ai
             return _scopeProvider.GetScope(normalizedRole);
         }
 
-        private static ActorContext? CaptureActorContext(AiTaskRequest task)
+        private ActorContext? CaptureActorContext(AiTaskRequest task)
         {
             ActorContext? actorContext = task?.ActorContext;
+            if (!actorContext.HasValue && task != null && _actorContextResolver != null)
+            {
+                actorContext = _actorContextResolver.ResolveActorContext(task);
+            }
+
             if (!actorContext.HasValue)
             {
                 return null;
@@ -771,6 +792,7 @@ namespace CoreAI.Ai
 
             ActorContext trusted = actorContext.Value;
             trusted.AssertTrusted();
+            task.ActorContext = trusted;
             return trusted;
         }
 

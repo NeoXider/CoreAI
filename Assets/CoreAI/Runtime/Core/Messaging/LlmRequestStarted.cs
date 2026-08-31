@@ -15,19 +15,26 @@ namespace CoreAI.Messaging
             string roleId,
             string routingProfileId,
             LlmExecutionMode executionMode,
-            bool streaming)
+            bool streaming,
+            string actorId = "")
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
             RoutingProfileId = routingProfileId ?? "";
             ExecutionMode = executionMode;
             Streaming = streaming;
+            ActorId = actorId ?? "";
         }
 
         /// <summary>
         /// Correlation id propagated from the LLM request.
         /// </summary>
         public string TraceId { get; }
+
+        /// <summary>
+        /// Stable actor id admitted for this trace.
+        /// </summary>
+        public string ActorId { get; }
 
         /// <summary>
         /// Agent role used for routing.

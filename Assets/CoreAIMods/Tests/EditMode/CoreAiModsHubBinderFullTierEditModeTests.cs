@@ -7,6 +7,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -133,8 +134,8 @@ namespace CoreAI.Tests.EditMode
 
         private static ActorContext CreateHostActor()
         {
-            LocalActorIdentityProvider provider = ActorIdentityComposition.CreateLocalHost("hub-test");
-            return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
         }
 
         [Test]

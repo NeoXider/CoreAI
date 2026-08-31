@@ -18,7 +18,7 @@ namespace CoreAI.Ai
     /// Orchestration pipeline: prompts, memory, <see cref="ILlmClient"/> invocation,
     /// optional structured-output retry via <see cref="IRoleStructuredResponsePolicy"/>, command publication.
     /// </summary>
-    public sealed class AiOrchestrator : IAiOrchestrationService, IUnstartedAiTurnRecorder
+    public sealed class AiOrchestrator : IAiOrchestrationService, IAiActorContextResolver, IUnstartedAiTurnRecorder
     {
         /// <summary>
         /// Legacy sentinel for "no history cap". The orchestrator no longer uses it: even with
@@ -84,6 +84,21 @@ namespace CoreAI.Ai
                                      throw new ArgumentNullException(nameof(actorIdentityProvider));
         }
 
+        /// <inheritdoc />
+        public ActorContext ResolveActorContext(AiTaskRequest task)
+        {
+            if (task == null)
+            {
+                throw new ArgumentNullException(nameof(task));
+            }
+
+            string roleId = ResolveRoleId(task);
+            ActorContext actorContext = task.ActorContext ?? _actorIdentityProvider.GetActorContext(roleId);
+            actorContext.AssertTrusted();
+            task.ActorContext = actorContext;
+            return actorContext;
+        }
+
         /// <summary>
         /// Builds the request bundle shared by <see cref="RunTaskAsync"/> and <see cref="RunStreamingAsync"/>.
         /// </summary>
@@ -93,7 +108,7 @@ namespace CoreAI.Ai
             CancellationToken cancellationToken)
         {
             string roleId = ResolveRoleId(task);
-            ActorContext actorContext = task.ActorContext ?? _actorIdentityProvider.GetActorContext(roleId);
+            ActorContext actorContext = task.ActorContext.Value;
             actorContext.AssertTrusted();
             string traceId = string.IsNullOrWhiteSpace(task.TraceId)
                 ? Guid.NewGuid().ToString("N")
@@ -261,6 +276,8 @@ namespace CoreAI.Ai
             {
                 return null;
             }
+
+            ResolveActorContext(task);
 
             if (!_authority.CanRunAiTasks)
             {
@@ -489,6 +506,8 @@ namespace CoreAI.Ai
                 yield return new LlmStreamChunk { IsDone = true, Error = "task is null" };
                 yield break;
             }
+
+            ResolveActorContext(task);
 
             StreamingTurnState turn = new();
             try
@@ -1460,6 +1479,7 @@ namespace CoreAI.Ai
             {
                 CommandTypeId = Envelope,
                 JsonPayload = content,
+                SourceActorId = bundle.ActorId,
                 SourceRoleId = bundle.RoleId,
                 SourceTaskHint = task.Hint ?? "",
                 SourceTag = task.SourceTag ?? "",
@@ -2000,6 +2020,7 @@ namespace CoreAI.Ai
         {
             return new LlmCompletionRequest
             {
+                ActorId = bundle.ActorId,
                 AgentRoleId = bundle.RoleId,
                 RoutingProfileId = task.RoutingProfileId ?? "",
                 SystemPrompt = bundle.SystemPrompt,

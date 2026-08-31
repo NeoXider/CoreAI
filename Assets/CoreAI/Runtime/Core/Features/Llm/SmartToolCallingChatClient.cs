@@ -25,6 +25,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
+        private readonly string _actorId;
         private readonly string _roleId;
         private readonly string _traceId;
         private readonly IToolCallEventPublisher _eventPublisher;
@@ -40,13 +41,15 @@ namespace CoreAI.Infrastructure.Llm
             bool allowDuplicateToolCalls, IReadOnlyList<ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3,
             string traceId = "",
             IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null,
-            int? maxRoundtripsOverride = null)
+            int? maxRoundtripsOverride = null,
+            string actorId = "")
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _originalTools = tools ?? new List<ILlmTool>();
+            _actorId = actorId ?? "";
             _roleId = roleId ?? "Unknown";
             _traceId = traceId ?? "";
             _maxConsecutiveErrors = maxConsecutiveErrors;
@@ -100,7 +103,7 @@ namespace CoreAI.Infrastructure.Llm
             // Fresh policy per top-level request so duplicates reset between independent calls
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
-                _eventPublisher, _notifier);
+                _eventPublisher, _notifier, _actorId);
             LastRoundtripUsage = null;
 
             try

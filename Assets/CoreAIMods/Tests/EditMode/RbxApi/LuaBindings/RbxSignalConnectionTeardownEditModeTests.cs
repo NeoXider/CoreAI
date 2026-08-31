@@ -3,6 +3,7 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
@@ -141,8 +142,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         {
             GameObject driverObject = new("LuaModRuntimeTickDriver");
             LuaModRuntimeTickDriver driver = driverObject.AddComponent<LuaModRuntimeTickDriver>();
-            ActorContext actorContext = ActorIdentityComposition.CreateLocalHost().GetActorContext(
-                BuiltInAgentRoleIds.Programmer);
+            ActorContext actorContext = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
             driver.Initialize(stack.Runtime, actorContext, roblox.Scheduler,
                 roblox.PumpPreSimulation, roblox.PumpHeartbeat, roblox.PumpPreRender);
             return driver;

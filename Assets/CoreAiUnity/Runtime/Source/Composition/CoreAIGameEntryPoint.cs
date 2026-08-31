@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Logging;
 using VContainer.Unity;
 
@@ -30,17 +31,24 @@ namespace CoreAI.Composition
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _policy;
         private readonly IAgentMemoryStore _memoryStore;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
         private bool _started;
         private bool _isOwner;
 
         /// <summary>Initializes a new instance of CoreAIGameEntryPoint.</summary>
-        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
-            IAgentMemoryStore memoryStore)
+        public CoreAIGameEntryPoint(
+            ILog logger,
+            IAiOrchestrationService orchestrator,
+            AgentMemoryPolicy policy,
+            IAgentMemoryStore memoryStore,
+            IActorIdentityProvider actorIdentityProvider = null)
         {
             _logger = logger;
             _orchestrator = orchestrator;
             _policy = policy;
             _memoryStore = memoryStore;
+            _actorIdentityProvider = actorIdentityProvider ??
+                                     CoreServicesInstaller.DefaultLocalHostIdentityProvider;
         }
 
         /// <summary>Starts the entry point and registers CoreAI services for runtime use.</summary>
@@ -85,7 +93,7 @@ namespace CoreAI.Composition
 
         private void InitializeAsOwner()
         {
-            CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
+            CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore, _actorIdentityProvider);
 
             _logger.Info(
                 "VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.",

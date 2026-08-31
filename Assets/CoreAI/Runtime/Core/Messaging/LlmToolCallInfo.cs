@@ -6,10 +6,17 @@ namespace CoreAI.Messaging
     public readonly struct LlmToolCallInfo
     {
         /// <summary>Creates immutable tool-call metadata.</summary>
-        public LlmToolCallInfo(string traceId, string roleId, string callId, string toolName, string argumentsJson)
+        public LlmToolCallInfo(
+            string traceId,
+            string roleId,
+            string callId,
+            string toolName,
+            string argumentsJson,
+            string actorId = "")
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
+            ActorId = actorId ?? "";
             CallId = callId ?? "";
             ToolName = toolName ?? "";
             ArgumentsJson = argumentsJson ?? "";
@@ -17,6 +24,9 @@ namespace CoreAI.Messaging
 
         /// <summary>Correlation id propagated from the LLM request.</summary>
         public string TraceId { get; }
+
+        /// <summary>Stable actor id admitted for this trace.</summary>
+        public string ActorId { get; }
 
         /// <summary>Agent role that requested the tool.</summary>
         public string RoleId { get; }

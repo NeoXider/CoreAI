@@ -117,6 +117,9 @@ namespace CoreAI.Ai
     /// <summary>Input for one <see cref="ILlmClient.CompleteAsync"/> call: role, prompts, tracing.</summary>
     public sealed class LlmCompletionRequest
     {
+        /// <summary>Stable actor id admitted for this request.</summary>
+        public string ActorId { get; set; } = "";
+
         /// <summary>Role id for backend routing and system prompt selection.</summary>
         public string AgentRoleId { get; set; } = "";
 

@@ -13,6 +13,9 @@ namespace CoreAI.Messaging
         /// <summary>Command payload serialized as JSON.</summary>
         public string JsonPayload { get; set; } = "";
 
+        /// <summary>Stable actor id of the agent that produced the command.</summary>
+        public string SourceActorId { get; set; } = "";
+
         /// <summary>Role id of the agent that produced the command.</summary>
         public string SourceRoleId { get; set; } = "";
 

@@ -24,6 +24,7 @@
         private static volatile IAiOrchestrationService _orchestrator;
         private static volatile AgentMemoryPolicy _policy;
         private static volatile IAgentMemoryStore _memoryStore;
+        private static volatile CoreAI.Authority.IActorIdentityProvider _actorIdentityProvider;
 
         /// <summary>
         /// Orchestration service currently registered for the global CoreAI agent facade.
@@ -53,14 +54,27 @@
         }
 
         /// <summary>
+        /// Actor identity provider currently registered for global request admission.
+        /// </summary>
+        public static CoreAI.Authority.IActorIdentityProvider ActorIdentityProvider
+        {
+            get => _actorIdentityProvider;
+            private set => _actorIdentityProvider = value;
+        }
+
+        /// <summary>
         /// Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade.
         /// </summary>
-        public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
-            IAgentMemoryStore memoryStore)
+        public static void Initialize(
+            IAiOrchestrationService orchestrator,
+            AgentMemoryPolicy policy,
+            IAgentMemoryStore memoryStore,
+            CoreAI.Authority.IActorIdentityProvider actorIdentityProvider = null)
         {
             Orchestrator = orchestrator;
             Policy = policy;
             MemoryStore = memoryStore;
+            ActorIdentityProvider = actorIdentityProvider ?? new CoreAI.Authority.LocalActorIdentityProvider();
         }
 
         /// <summary>
@@ -77,6 +91,7 @@
             Orchestrator = null;
             Policy = null;
             MemoryStore = null;
+            ActorIdentityProvider = null;
         }
     }
 }

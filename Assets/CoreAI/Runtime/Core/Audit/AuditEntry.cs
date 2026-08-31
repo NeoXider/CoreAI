@@ -42,13 +42,15 @@ namespace CoreAI.Audit
             string prevHash = "",
             string hash = "",
             string sourceTag = "",
-            DateTime ts = default)
+            DateTime ts = default,
+            string role = "")
         {
             Seq = seq;
             Ts = ts == default ? DateTime.UtcNow : ts;
             Kind = kind;
             TraceId = traceId ?? "";
             Actor = actor ?? "";
+            Role = role ?? "";
             Model = model ?? "";
             PromptHash = promptHash ?? "";
             ToolName = toolName ?? "";
@@ -70,6 +72,7 @@ namespace CoreAI.Audit
 
         public string TraceId { get; }
         public string Actor { get; }
+        public string Role { get; }
         public string Model { get; }
         public string PromptHash { get; }
 
@@ -122,7 +125,8 @@ namespace CoreAI.Audit
                 PrevHash,
                 hash,
                 SourceTag,
-                Ts);
+                Ts,
+                Role);
         }
 
         public static AuditEntry ForToolCall(
@@ -136,7 +140,8 @@ namespace CoreAI.Audit
             string policyDecision,
             string result,
             string resultDetail,
-            double durationMs)
+            double durationMs,
+            string role = "")
         {
             return new AuditEntry(
                 seq,
@@ -150,7 +155,8 @@ namespace CoreAI.Audit
                 policyDecision,
                 result,
                 resultDetail,
-                durationMs);
+                durationMs,
+                role: role);
         }
 
         public static AuditEntry ForWorldMutation(
@@ -162,7 +168,8 @@ namespace CoreAI.Audit
             string sourceTag,
             bool success,
             string worldDiff = "",
-            string rollbackHandle = "")
+            string rollbackHandle = "",
+            string role = "")
         {
             return new AuditEntry(
                 seq,
@@ -175,7 +182,8 @@ namespace CoreAI.Audit
                 result: success ? "ok" : "error",
                 worldDiff: worldDiff,
                 rollbackHandle: rollbackHandle,
-                sourceTag: sourceTag);
+                sourceTag: sourceTag,
+                role: role);
         }
 
         public static AuditEntry ForLlmRequest(
@@ -185,7 +193,8 @@ namespace CoreAI.Audit
             string model,
             string promptHash,
             string routingProfileId,
-            bool streaming)
+            bool streaming,
+            string role = "")
         {
             return new AuditEntry(
                 seq,
@@ -196,7 +205,8 @@ namespace CoreAI.Audit
                 promptHash,
                 args: $"{{\"routingProfile\":\"{routingProfileId}\",\"streaming\":{streaming}}}",
                 policyDecision: "started",
-                result: "pending");
+                result: "pending",
+                role: role);
         }
 
         public static AuditEntry ForLlmResponse(
@@ -206,7 +216,8 @@ namespace CoreAI.Audit
             string model,
             string promptHash,
             bool success,
-            string error)
+            string error,
+            string role = "")
         {
             return new AuditEntry(
                 seq,
@@ -217,7 +228,8 @@ namespace CoreAI.Audit
                 promptHash,
                 policyDecision: success ? "completed" : "failed",
                 result: success ? "ok" : "error",
-                resultDetail: error);
+                resultDetail: error,
+                role: role);
         }
 
         /// <summary>

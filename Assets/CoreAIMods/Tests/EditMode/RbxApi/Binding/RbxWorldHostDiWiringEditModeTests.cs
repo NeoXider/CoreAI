@@ -150,8 +150,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             try
             {
                 ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
-                ActorContext actorContext = ActorIdentityComposition.CreateLocalHost().GetActorContext(
-                    BuiltInAgentRoleIds.Programmer);
+                ActorContext actorContext = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 runtime.LoadMod(actorContext, "leaker",
                     "local p = Instance.new('Part') p.Name = 'LeakPart' p.Parent = workspace");
 

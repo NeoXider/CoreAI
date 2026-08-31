@@ -1,5 +1,6 @@
 using System.Collections;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using NUnit.Framework;
 using UnityEngine;
@@ -39,7 +40,7 @@ namespace CoreAI.Tests.PlayMode
 
         [UnityTest]
         [Timeout(60000)]
-        public IEnumerator BuildAiTaskRequest_Default_InPlayMode_MapsHintRoleAndChatSourceTag()
+        public IEnumerator BuildAiTaskRequest_ZeroConfiguration_InPlayMode_UsesCompositionDefaultAndMapsRequest()
         {
             GameObject go = new("ChatPanel_PlayMode_BuildRequest_Default");
             go.SetActive(false);
@@ -47,16 +48,24 @@ namespace CoreAI.Tests.PlayMode
             PanelForTesting panel = go.AddComponent<PanelForTesting>();
             yield return null;
 
-            // Keep the GameObject inactive: OnEnable() requires UITK UIDocument/visual tree bindings;
-            // BuildAiTaskRequest does not depend on UI (same pattern as CoreAiChatPanelStopPlayModeTests).
+            // WHY: keeping the object inactive avoids UI bindings; request construction has no UI dependency.
 
             AiTaskRequest req = panel.InvokeBuildAiTaskRequest(" hello ", "Merchant");
+            AiTaskRequest nextReq = panel.InvokeBuildAiTaskRequest("again", "BlueprintBot");
 
             Assert.AreEqual("Merchant", req.RoleId);
             Assert.AreEqual(" hello ", req.Hint);
             Assert.AreEqual("Chat", req.SourceTag);
             Assert.AreEqual(LlmToolChoiceMode.Auto, req.ForcedToolMode);
             Assert.IsNull(req.AllowedToolNames);
+            Assert.IsTrue(req.ActorContext.HasValue);
+            Assert.IsTrue(nextReq.ActorContext.HasValue);
+            ActorContext actor = req.ActorContext.Value;
+            ActorContext nextActor = nextReq.ActorContext.Value;
+            Assert.AreEqual(LocalActorIdentityProvider.DefaultActorId, actor.ActorId);
+            Assert.IsTrue(actor.Grants.IsUnrestricted);
+            Assert.AreEqual(actor.SessionId, req.CancellationScope);
+            Assert.AreEqual(actor.SessionId, nextActor.SessionId);
 
             Object.DestroyImmediate(go);
         }

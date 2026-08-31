@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -96,6 +97,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Observer notified by the one-off <c>execute_lua</c> executor (null =&gt; no-op).</summary>
         public ILuaExecutionObserver ExecutionObserver;
 
+        /// <summary>Optional production sink for aggregated Lua runtime counters.</summary>
+        public IRbxRuntimeObservabilitySink Observability;
+
         // ---- Capability ceilings & guard budgets ------------------------------------------------
 
         /// <summary>
@@ -112,6 +116,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Instruction budget per persistent handler/timer call.</summary>
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
+
+        /// <summary>
+        /// Persistent mod capacity. Defaults to the existing production limit; benchmark hosts may set
+        /// <see cref="LuaCsModRuntime.BenchmarkMaxMods"/>. The runtime always retains its independent
+        /// <see cref="LuaCsModRuntime.EmergencyMaxMods"/> ceiling.
+        /// </summary>
+        public int MaxMods = LuaCsModRuntime.DefaultMaxMods;
 
         /// <summary>
         /// Consecutive-error streak (reset by any success) at which a persistent mod is quarantined —
@@ -204,7 +215,7 @@ namespace CoreAI.Ai.LuaCs
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
             // state directly and a future engine swap happens here alone.
-            LuaCsScriptEngine engine = new();
+            LuaCsScriptEngine engine = new(observability: options.Observability);
 
             // WHY: Register the built-in surface first, then any host/per-scene additions, through the SAME
             // seam, so an injected demo API (forge_define/...) reaches every loaded mod alongside the core APIs.
@@ -245,13 +256,16 @@ namespace CoreAI.Ai.LuaCs
                 // attributed into the mod's diagnostics channel.
                 bindings.LogicSlots,
                 options.LogService,
-                options.RbxApi);
+                options.RbxApi,
+                options.MaxMods,
+                options.Observability);
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,
                 new CapabilityScopedGameRuntimeBindings(
                     bindings, options.OneOffCapabilities, options.AdditionalGameplayBindings),
-                options.ExecutionObserver ?? new NullLuaExecutionObserver());
+                options.ExecutionObserver ?? new NullLuaExecutionObserver(),
+                options.Observability);
 
             return new LuaCsModStack(runtime, executor, bindings);
         }

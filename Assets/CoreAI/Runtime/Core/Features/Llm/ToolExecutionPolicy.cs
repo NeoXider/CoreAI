@@ -48,6 +48,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
+        private readonly string _actorId;
         private readonly string _roleId;
         private readonly string _traceId;
         private readonly int _maxConsecutiveErrors;
@@ -83,12 +84,14 @@ namespace CoreAI.Infrastructure.Llm
             int maxConsecutiveErrors = 3,
             string traceId = "",
             IToolCallEventPublisher eventPublisher = null,
-            IToolExecutionNotifier notifier = null)
+            IToolExecutionNotifier notifier = null,
+            string actorId = "")
         {
             _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _originalTools = originalTools ?? new List<ILlmTool>();
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
+            _actorId = actorId ?? "";
             _roleId = roleId ?? "Unknown";
             _traceId = traceId ?? "";
             _maxConsecutiveErrors = Math.Max(1, maxConsecutiveErrors);
@@ -910,7 +913,8 @@ namespace CoreAI.Infrastructure.Llm
                 _roleId,
                 fc?.CallId ?? "",
                 fc?.Name ?? "",
-                SafeArgumentsJson(fc));
+                SafeArgumentsJson(fc),
+                _actorId);
         }
 
         private string SafeArgumentsJson(MEAI.FunctionCallContent fc)

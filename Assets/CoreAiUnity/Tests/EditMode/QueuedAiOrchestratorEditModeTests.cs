@@ -438,7 +438,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ProductionAdmission_DefaultLocalActorPreservesRoleMemory()
         {
-            ActorContext localActor = ActorIdentityComposition.CreateLocalHost().GetActorContext("Teacher");
+            ActorContext localActor = new LocalActorIdentityProvider().GetActorContext("Teacher");
             DefaultAgentMemoryScopeProvider scopeProvider = new();
             ScopedPersistenceOrchestrator inner = new(scopeProvider);
             QueuedAiOrchestrator queue = new(

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
@@ -27,6 +28,7 @@ namespace CoreAI.Chat
         private readonly IGameLogger _logger;
         private readonly ILlmClient _llmClient;
         private readonly Vision.IAgentCameraService _cameraService;
+        private readonly IActorIdentityProvider _actorIdentityProvider;
 
         public CoreAiChatService(
             IAiOrchestrationService orchestrator,
@@ -35,7 +37,8 @@ namespace CoreAI.Chat
             IAgentMemoryStore memoryStore = null,
             IGameLogger logger = null,
             ILlmClient llmClient = null,
-            Vision.IAgentCameraService cameraService = null)
+            Vision.IAgentCameraService cameraService = null,
+            IActorIdentityProvider actorIdentityProvider = null)
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _memoryPolicy = memoryPolicy;
@@ -44,6 +47,8 @@ namespace CoreAI.Chat
             _logger = logger;
             _llmClient = llmClient;
             _cameraService = cameraService;
+            _actorIdentityProvider = actorIdentityProvider ??
+                                     CoreServicesInstaller.DefaultLocalHostIdentityProvider;
         }
 
         /// <summary>
@@ -62,6 +67,8 @@ namespace CoreAI.Chat
             {
                 IAiOrchestrationService orchestrator =
                     (IAiOrchestrationService)scope.Container.Resolve(typeof(IAiOrchestrationService));
+                IActorIdentityProvider actorIdentityProvider =
+                    (IActorIdentityProvider)scope.Container.Resolve(typeof(IActorIdentityProvider));
                 AgentMemoryPolicy policy = null;
                 ICoreAISettings settings = null;
                 IAgentMemoryStore memStore = null;
@@ -135,7 +142,8 @@ namespace CoreAI.Chat
                 }
 
                 return new CoreAiChatService(
-                    orchestrator, policy, settings, memStore, logger, llmClient, cameraService);
+                    orchestrator, policy, settings, memStore, logger, llmClient, cameraService,
+                    actorIdentityProvider);
             }
             catch (Exception ex)
             {
@@ -153,12 +161,7 @@ namespace CoreAI.Chat
             string roleId,
             CancellationToken ct = default)
         {
-            AiTaskRequest request = new()
-            {
-                RoleId = roleId,
-                Hint = userText,
-                SourceTag = "Chat"
-            };
+            AiTaskRequest request = CreateTaskRequest(userText, roleId);
 
             return SendMessageAsync(request, ct);
         }
@@ -283,14 +286,22 @@ namespace CoreAI.Chat
             string roleId,
             CancellationToken ct = default)
         {
-            AiTaskRequest request = new()
+            AiTaskRequest request = CreateTaskRequest(userText, roleId);
+
+            return SendMessageStreamingAsync(request, ct);
+        }
+
+        internal AiTaskRequest CreateTaskRequest(string userText, string roleId)
+        {
+            ActorContext actorContext = _actorIdentityProvider.GetActorContext(roleId);
+            return new AiTaskRequest
             {
                 RoleId = roleId,
                 Hint = userText,
-                SourceTag = "Chat"
+                SourceTag = "Chat",
+                ActorContext = actorContext,
+                CancellationScope = actorContext.SessionId
             };
-
-            return SendMessageStreamingAsync(request, ct);
         }
 
         /// <summary>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using Lua;
 using Lua.Runtime;
 
@@ -104,6 +105,7 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
         private readonly long _maxAllocatedBytes;
+        private readonly IRbxRuntimeObservabilitySink _observability;
 
         /// <param name="timeoutMs">Maximum wall-clock time allowed for one guarded call.</param>
         /// <param name="maxSteps">Maximum Lua-CSharp instruction steps allowed for one guarded call.</param>
@@ -117,11 +119,15 @@ namespace CoreAI.Sandbox.LuaCs
         public LuaCsExecutionGuard(
             int timeoutMs = 10_000,
             long maxSteps = 50_000_000,
-            long maxAllocatedBytes = DefaultMaxAllocatedBytesBudget)
+            long maxAllocatedBytes = DefaultMaxAllocatedBytesBudget,
+            IRbxRuntimeObservabilitySink observability = null)
         {
             _timeoutMs = timeoutMs;
             _maxSteps = maxSteps;
             _maxAllocatedBytes = maxAllocatedBytes;
+            _observability = observability != null && observability.IsEnabled
+                ? observability
+                : null;
         }
 
         /// <summary>Runs a loaded Lua-CSharp chunk synchronously under the guard.</summary>
@@ -207,7 +213,7 @@ namespace CoreAI.Sandbox.LuaCs
             return hook;
         }
 
-        private static void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook)
+        private void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook)
         {
             installed.Pop();
             try
@@ -226,6 +232,17 @@ namespace CoreAI.Sandbox.LuaCs
             catch
             {
                 /* ignore */
+            }
+
+            if (_observability != null && hook.Steps > 0)
+            {
+                try
+                {
+                    _observability.RecordGuardedInstructionSteps(hook.Steps);
+                }
+                catch
+                {
+                }
             }
 
             ReturnHook(hook);
@@ -261,6 +278,9 @@ namespace CoreAI.Sandbox.LuaCs
             private int _timeoutMs;
             private long _maxAllocatedBytes;
             private long _allocBaseline;
+
+            /// <summary>Instruction steps accumulated by the current guarded execution.</summary>
+            public long Steps => _steps;
 
             public GuardHook()
             {

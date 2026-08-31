@@ -11,6 +11,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -60,7 +61,7 @@ namespace CoreAI.Tests.EditMode
                 NullLog.Instance,
                 granted,
                 allowManagement,
-                actorIdentityProvider ?? ActorIdentityComposition.CreateLocalHost(),
+                actorIdentityProvider ?? CoreServicesInstaller.DefaultLocalHostIdentityProvider,
                 BuiltInAgentRoleIds.Programmer);
         }
 
@@ -246,6 +247,43 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void UnconfiguredComposition_DefaultLocalActorHasHostRuntimeAuthority()
+        {
+            ContainerBuilder builder = new();
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+
+            using IObjectResolver container = builder.Build();
+            ActorContext host = container.Resolve<IActorIdentityProvider>()
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext ordinary = new LocalActorIdentityProvider("ordinary-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            LuaCsModRuntime runtime = new();
+            string observedModId = null;
+            System.Action<string, string, LuaCapabilities> listener =
+                (string id, string source, LuaCapabilities capabilities) => observedModId = id;
+
+            Assert.AreEqual(LocalActorIdentityProvider.DefaultActorId, host.ActorId);
+            Assert.IsTrue(host.Grants.IsUnrestricted);
+            Assert.IsFalse(ordinary.Grants.IsUnrestricted);
+            runtime.AddModSourceLoadedListener(host, listener);
+            try
+            {
+                runtime.LoadMod(ordinary, "ordinary-owned", "local value = 1", persistToStore: false);
+                runtime.Tick(host, 0d);
+                IReadOnlyList<LuaModHandlerError> diagnostics =
+                    runtime.GetRecentHandlerErrors(host, "ordinary-owned");
+
+                Assert.AreEqual("ordinary-owned", observedModId);
+                Assert.IsNotNull(diagnostics);
+            }
+            finally
+            {
+                runtime.RemoveModSourceLoadedListener(host, listener);
+            }
+        }
+
+        [Test]
         public async Task Load_UsesHostGrantedCapabilities_NotModelControlled()
         {
             LuaCsModRuntime runtime = new();
@@ -299,6 +337,93 @@ namespace CoreAI.Tests.EditMode
         {
             public void Publish(ApplyAiGameCommand command)
             {
+            }
+        }
+
+        private sealed class RuntimeObservability : IRbxRuntimeObservabilitySink
+        {
+            private long _guardedInstructionSteps;
+            private long _threadResumes;
+            private long _eventsDelivered;
+            private long _completedOperations;
+
+            public bool IsEnabled => true;
+
+            public long GuardedInstructionSteps => Interlocked.Read(ref _guardedInstructionSteps);
+
+            public long ThreadResumes => Interlocked.Read(ref _threadResumes);
+
+            public long EventsDelivered => Interlocked.Read(ref _eventsDelivered);
+
+            public long CompletedOperations => Interlocked.Read(ref _completedOperations);
+
+            public void RecordGuardedInstructionSteps(long count)
+            {
+                Interlocked.Add(ref _guardedInstructionSteps, count);
+            }
+
+            public void RecordThreadResumes(long count)
+            {
+                Interlocked.Add(ref _threadResumes, count);
+            }
+
+            public void RecordEventsDelivered(long count)
+            {
+                Interlocked.Add(ref _eventsDelivered, count);
+            }
+
+            public void RecordCompletedOperations(long count)
+            {
+                Interlocked.Add(ref _completedOperations, count);
+            }
+        }
+
+        [Test]
+        public void RegisterCoreAiMods_ObservabilitySink_ReceivesProductionPathWork()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            try
+            {
+                RuntimeObservability observability = new();
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
+                builder.RegisterInstance<ILog>(_log);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+                builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+                builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+                builder.RegisterInstance<ICoreAISettings>(_settings);
+                builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+                builder.RegisterInstance<IRbxRuntimeObservabilitySink>(observability);
+
+                builder.RegisterWorldCommands(registry);
+                builder.RegisterCoreAiMods();
+
+                using IObjectResolver container = builder.Build();
+                LuaCsModStack stack = container.Resolve<LuaCsModStack>();
+                LuaCsRbxApiBindings rbxApi = stack.GameplayBindings.RbxApi;
+                stack.Runtime.LoadMod("observability-probe", @"
+                    hooks_on('measure', function()
+                        local total = 0
+                        for index = 1, 32 do total = total + index end
+                    end)
+                    task.defer(function()
+                        local total = 0
+                        for index = 1, 32 do total = total + index end
+                    end)", persistToStore: false);
+
+                stack.Runtime.EmitEvent("measure", "");
+                stack.Runtime.Tick(0d);
+                rbxApi.Scheduler.Advance(0d);
+
+                Assert.Greater(observability.GuardedInstructionSteps, 0);
+                Assert.Greater(observability.ThreadResumes, 0);
+                Assert.Greater(observability.EventsDelivered, 0);
+                Assert.Greater(observability.CompletedOperations, 0);
+            }
+            finally
+            {
+                Object.DestroyImmediate(registry);
             }
         }
 
@@ -425,8 +550,8 @@ namespace CoreAI.Tests.EditMode
                     "local id = unity_find('FullManageModsProbe')\nif id == 0 then error('Full unity_find missing') end");
                 Assert.IsTrue(load.Value<bool>("success"), load.ToString());
 
-                ActorContext actorContext = ActorIdentityComposition.CreateLocalHost().GetActorContext(
-                    BuiltInAgentRoleIds.Programmer);
+                ActorContext actorContext = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 IReadOnlyList<LuaModInfo> loaded = container.Resolve<ILuaModRuntime>().ListMods(actorContext);
                 Assert.AreEqual(LuaCapabilities.All | LuaCapabilities.Full, loaded[0].Capabilities);
             }

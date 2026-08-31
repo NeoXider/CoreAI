@@ -18,12 +18,22 @@ namespace CoreAI.Composition
     /// </summary>
     public static class CoreServicesInstaller
     {
+        private sealed class ActorIdentityCompositionEntryPoint
+        {
+        }
+
+        /// <summary>
+        /// Composition-issued host identity used by every unconfigured single-player path.
+        /// </summary>
+        internal static IActorIdentityProvider DefaultLocalHostIdentityProvider { get; } =
+            ActorIdentityComposition.CreateLocalHost(new ActorIdentityCompositionEntryPoint());
+
         /// <summary>Registers CoreAI domain services with the dependency injection container.</summary>
         public static void RegisterCore(this IContainerBuilder builder)
         {
             if (!builder.Exists(typeof(IActorIdentityProvider), true))
             {
-                builder.RegisterInstance<IActorIdentityProvider>(ActorIdentityComposition.CreateLocalHost());
+                builder.RegisterInstance<IActorIdentityProvider>(DefaultLocalHostIdentityProvider);
             }
 
             builder.Register<UnityGameLogSink>(Lifetime.Singleton).AsSelf().As<IGameLogSink>();

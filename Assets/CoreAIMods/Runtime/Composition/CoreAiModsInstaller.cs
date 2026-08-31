@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using UnityEngine;
 using VContainer;
 
@@ -59,7 +60,8 @@ namespace CoreAI.Composition
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            IActorIdentityProvider fallbackHostIdentityProvider = ActorIdentityComposition.CreateLocalHost();
+            IActorIdentityProvider fallbackHostIdentityProvider =
+                CoreServicesInstaller.DefaultLocalHostIdentityProvider;
 
             // One-off execute_lua calls run untrusted, ad-hoc snippets rather than an installed mod, so
             // Full-tier reflection is stripped from them by default even when persistent mods are granted
@@ -100,6 +102,9 @@ namespace CoreAI.Composition
                 // minimal containers (tests, headless tools) that never registered one, so the Rbx
                 // wiring diagnostics below survive either way.
                 Logging.ILog rbxLog = c.ResolveOrDefault<Logging.ILog>() ?? Logging.Log.Instance;
+                IRbxRuntimeObservabilitySink observability =
+                    c.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
+                    ?? NullRbxRuntimeObservabilitySink.Instance;
                 LuaCsRbxApiBindings rbxApi;
                 if (rbxHost != null)
                 {
@@ -113,6 +118,7 @@ namespace CoreAI.Composition
                         rbxHost.Registry, rbxHost.Game, partSink: rbxHost.Binder,
                         cameraRig: rbxHost.CameraRig, inputSource: rbxHost.InputSource,
                         pickSource: rbxHost.PickSource,
+                        observability: observability,
                         log: msg => rbxLog.Warn(
                             "[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
@@ -126,6 +132,7 @@ namespace CoreAI.Composition
                         "(3) link.xml preserves CoreAI.RbxApi.Binding assembly.",
                         Logging.LogTag.World);
                     rbxApi = new LuaCsRbxApiBindings(
+                        observability: observability,
                         log: msg => rbxLog.Warn("[CoreAI.RbxApi] " + msg, Logging.LogTag.World));
                 }
 
@@ -144,6 +151,7 @@ namespace CoreAI.Composition
                     Log = c.ResolveOrDefault<Logging.ILog>(),
                     LogService = c.ResolveOrDefault<ILuaLogService>(),
                     ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
+                    Observability = observability,
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
                     // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve

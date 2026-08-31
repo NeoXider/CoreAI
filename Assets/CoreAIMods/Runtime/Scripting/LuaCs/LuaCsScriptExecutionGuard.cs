@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
@@ -20,11 +21,13 @@ namespace CoreAI.Scripting.LuaCs
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         }
 
-        public LuaCsScriptExecutionGuard(IExecutionBudget budget)
+        public LuaCsScriptExecutionGuard(IExecutionBudget budget,
+            IRbxRuntimeObservabilitySink observability = null)
             : this(new LuaCsExecutionGuard(
                 budget?.TimeoutMs ?? ExecutionBudget.DefaultTimeoutMs,
                 budget?.MaxSteps ?? ExecutionBudget.DefaultMaxSteps,
-                budget?.MaxAllocatedBytes ?? ExecutionBudget.DefaultMaxAllocatedBytes))
+                budget?.MaxAllocatedBytes ?? ExecutionBudget.DefaultMaxAllocatedBytes,
+                observability))
         {
         }
 

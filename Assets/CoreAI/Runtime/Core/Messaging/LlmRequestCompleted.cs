@@ -18,7 +18,8 @@ namespace CoreAI.Messaging
             bool streaming,
             bool success,
             string error,
-            LlmErrorCode errorCode = LlmErrorCode.None)
+            LlmErrorCode errorCode = LlmErrorCode.None,
+            string actorId = "")
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
@@ -28,12 +29,18 @@ namespace CoreAI.Messaging
             Success = success;
             Error = error ?? "";
             ErrorCode = errorCode;
+            ActorId = actorId ?? "";
         }
 
         /// <summary>
         /// Correlation id propagated from the LLM request.
         /// </summary>
         public string TraceId { get; }
+
+        /// <summary>
+        /// Stable actor id admitted for this trace.
+        /// </summary>
+        public string ActorId { get; }
 
         /// <summary>
         /// Agent role used for routing.
