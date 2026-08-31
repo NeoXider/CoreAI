@@ -74,6 +74,27 @@ namespace CoreAI.Ai
             return BuildDescriptors(skill == null ? null : new[] { skill });
         }
 
+        /// <summary>
+        /// Describes bare tools that belong to no skill, so they can be invoked by the same
+        /// name-to-binding machinery. <see cref="SkillToolDescriptor.Skill"/> is null for them —
+        /// the only consumer of that field is a diagnostic message, which reads it defensively.
+        /// </summary>
+        public static IReadOnlyList<SkillToolDescriptor> BuildToolDescriptors(IEnumerable<ILlmTool> tools)
+        {
+            List<SkillToolDescriptor> descriptors = new();
+            if (tools == null)
+            {
+                return descriptors;
+            }
+
+            foreach (ILlmTool tool in tools)
+            {
+                AddDescriptors(null, tool, descriptors);
+            }
+
+            return descriptors;
+        }
+
         public static string[] BuildToolNames(IEnumerable<ILlmTool> tools)
         {
             if (tools == null)

@@ -19,12 +19,35 @@ namespace CoreAI.Ai
         /// </summary>
         public static ILlmTool Create(IReadOnlyList<SkillSet> skills)
         {
-            return Create(skills, null);
+            return Create(skills, null, null);
         }
 
-        internal static ILlmTool Create(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
+        /// <summary>
+        /// Creates the <c>call_skill_tool</c> tool that also accepts the agent's OWN top-level tool
+        /// names, resolved through <paramref name="directToolsProvider"/> at call time.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a skill's instructions teach the model to reach its tools through this wrapper, and the
+        /// model generalises — it wraps top-level tools by analogy. Refusing that call is pedantry with
+        /// a real cost: the refusal is an ordinary tool RESULT, not an error, so the model reads
+        /// "not found", apologises in prose and moves on. Downstream this looked like "the model rarely
+        /// spawns a quiz" — the model asked for it every time and we declined. The wrapper knows what
+        /// was meant, so it does it. The provider is a callback, not a list, because tools are still
+        /// being registered while this tool is built.
+        /// </remarks>
+        public static ILlmTool Create(
+            IReadOnlyList<SkillSet> skills,
+            Func<IReadOnlyList<ILlmTool>> directToolsProvider)
         {
-            return new CallSkillToolProxy(skills, allowedToolNames);
+            return Create(skills, null, directToolsProvider);
+        }
+
+        internal static ILlmTool Create(
+            IReadOnlyList<SkillSet> skills,
+            IReadOnlyCollection<string> allowedToolNames,
+            Func<IReadOnlyList<ILlmTool>> directToolsProvider)
+        {
+            return new CallSkillToolProxy(skills, allowedToolNames, directToolsProvider);
         }
 
         private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
@@ -33,15 +56,21 @@ namespace CoreAI.Ai
 
             private readonly IReadOnlyCollection<string> _allowedToolNames;
 
+            private readonly Func<IReadOnlyList<ILlmTool>> _directToolsProvider;
+
             // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the tool map is
             // rebuilt per call so a tool exposed by a just-authored skill is immediately invocable.
             private readonly bool _isLive;
             private readonly Dictionary<string, SkillToolDescriptor> _toolsByName;
 
-            public CallSkillToolProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
+            public CallSkillToolProxy(
+                IReadOnlyList<SkillSet> skills,
+                IReadOnlyCollection<string> allowedToolNames,
+                Func<IReadOnlyList<ILlmTool>> directToolsProvider)
             {
                 _skills = skills ?? throw new ArgumentNullException(nameof(skills));
                 _allowedToolNames = allowedToolNames;
+                _directToolsProvider = directToolsProvider;
                 _isLive = skills is MutableSkillCatalog;
                 _toolsByName = _isLive ? null : BuildToolMap(_skills, allowedToolNames);
             }
@@ -73,7 +102,51 @@ namespace CoreAI.Ai
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
             {
-                return new CallSkillToolProxy(_skills, allowedToolNames);
+                return new CallSkillToolProxy(_skills, allowedToolNames, _directToolsProvider);
+            }
+
+            /// <summary>
+            /// Finds a top-level tool of the same agent by name, or null when there is none.
+            /// </summary>
+            /// <remarks>
+            /// Runs only after the skill map missed, so building the bindings here costs nothing on the
+            /// normal path. Meta-tools are skipped: dispatching the wrapper into itself would recurse.
+            /// The session allowlist still applies — a tool the turn is not allowed to call must not
+            /// become callable just because the name arrived wrapped.
+            /// </remarks>
+            private SkillToolDescriptor ResolveDirectTool(string toolName)
+            {
+                IReadOnlyList<ILlmTool> tools = _directToolsProvider?.Invoke();
+                if (tools == null || tools.Count == 0 || string.IsNullOrWhiteSpace(toolName))
+                {
+                    return null;
+                }
+
+                List<ILlmTool> candidates = new();
+                foreach (ILlmTool tool in tools)
+                {
+                    if (tool != null && !(tool is ISkillSetMetaLlmTool))
+                    {
+                        candidates.Add(tool);
+                    }
+                }
+
+                foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildToolDescriptors(candidates))
+                {
+                    if (descriptor == null || !descriptor.CanInvoke)
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(descriptor.Name, toolName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    return IsAllowed(descriptor.Name, _allowedToolNames) ? descriptor : null;
+                }
+
+                return null;
             }
 
             public AIFunction CreateAIFunction()
@@ -95,7 +168,7 @@ namespace CoreAI.Ai
                 CancellationToken cancellationToken = default)
             {
                 return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(),
-                    cancellationToken);
+                    ResolveDirectTool, cancellationToken);
             }
         }
 
@@ -137,10 +210,12 @@ namespace CoreAI.Ai
         }
 
         private static async Task<string> ExecuteAsync(string toolName, string argumentsJson,
-            Dictionary<string, SkillToolDescriptor> toolsByName, CancellationToken cancellationToken)
+            Dictionary<string, SkillToolDescriptor> toolsByName,
+            Func<string, SkillToolDescriptor> resolveDirectTool, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(toolName))
             {
+                Log.Instance.Warn("[call_skill_tool] Called without tool_name; nothing was invoked.", LogTag.Llm);
                 return SkillSetToolResolver.SerializeFailure(
                     "tool_name is required.",
                     toolsByName.Keys);
@@ -150,9 +225,24 @@ namespace CoreAI.Ai
 
             if (!toolsByName.TryGetValue(trimmed, out SkillToolDescriptor descriptor))
             {
-                return SkillSetToolResolver.SerializeFailure(
-                    $"Tool '{trimmed}' not found.",
-                    toolsByName.Keys);
+                descriptor = resolveDirectTool?.Invoke(trimmed);
+                if (descriptor == null)
+                {
+                    // WHY: this refusal reaches the model as an ordinary tool RESULT, so nothing throws
+                    // and nothing surfaces — the user sees only that the action never happened. Without
+                    // this line a wrong tool name is invisible and can only be argued about by guesswork.
+                    Log.Instance.Warn(
+                        $"[call_skill_tool] Tool '{trimmed}' not found and not invoked. " +
+                        $"Available: {string.Join(", ", toolsByName.Keys)}.",
+                        LogTag.Llm);
+                    return SkillSetToolResolver.SerializeFailure(
+                        $"Tool '{trimmed}' not found.",
+                        toolsByName.Keys);
+                }
+
+                Log.Instance.Info(
+                    $"[call_skill_tool] '{trimmed}' is a top-level tool, not a skill tool; invoked it anyway.",
+                    LogTag.Llm);
             }
 
             if (!descriptor.CanInvoke)
