@@ -272,7 +272,8 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store, policy, new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("compatibility-tool-test"));
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
             return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };

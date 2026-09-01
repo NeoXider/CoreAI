@@ -122,7 +122,8 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                     policy,
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    new LocalActorIdentityProvider("merchant-behavior-test"));
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step1_GreetAndList",
                     "You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. " +

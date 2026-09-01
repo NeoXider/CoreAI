@@ -80,6 +80,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 {
                     StringAssert.Contains("Metal063_1K-JPG_Metalness",
                         texturedMaterial.GetTexture("_MetallicMap").name);
+                    Assert.IsTrue(texturedMaterial.IsKeywordEnabled("_RBX_METALLIC_MAP"));
                 }
             }
         }
@@ -128,6 +129,49 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     Assert.That(verticalTileCount * brickCoursesPerTextureHeight,
                         Is.EqualTo(6f).Within(0.0001f));
                 }
+            }
+        }
+
+        [Test]
+        public void LuaDiamondPlate_ThreeStudFaceKeepsReadableTreadCount()
+        {
+            const float diamondCellsPerPatternUnit = 1.35f;
+            const float diamondHalfWidthInCell = 0.28f;
+            string commonPath = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
+            string commonSource = File.ReadAllText(commonPath);
+            using (Mvp1AcceptanceWorld world = new())
+            {
+                world.Stack.Runtime.LoadMod("diamond-scale", @"
+                    local part = Instance.new('Part', workspace)
+                    part.Name = 'ScaledDiamondPlate'
+                    part.Size = Vector3.new(3, 3, 3)
+                    part.Material = Enum.Material.DiamondPlate");
+
+                RbxInstance part = world.Workspace.FindFirstChild("ScaledDiamondPlate");
+                Renderer renderer = world.BoundObject(part).GetComponent<Renderer>();
+                Material material = renderer.sharedMaterial;
+                float patternScale = material.GetFloat("_PatternScale");
+                float cellSpacingMeters = 1f / (patternScale * diamondCellsPerPatternUnit);
+                float treadWidthMeters = 2f * diamondHalfWidthInCell /
+                                         (patternScale * diamondCellsPerPatternUnit);
+                float faceWidthMeters = renderer.transform.localToWorldMatrix
+                    .MultiplyVector(Vector3.right).magnitude;
+                float cellsPerEdge = faceWidthMeters / cellSpacingMeters;
+                float estimatedTreadCountOnFace = cellsPerEdge * cellsPerEdge;
+
+                Assert.AreEqual("CoreAI/Rbx/Procedural Surface", material.shader.name);
+                StringAssert.Contains("float2 plateCell = frac(uv * 1.35)", commonSource);
+                StringAssert.Contains(
+                    "RbxFilteredInsideMask(diamondDistance, 0.28, 0.06, distanceFootprint)",
+                    commonSource);
+                Assert.That(faceWidthMeters, Is.EqualTo(0.84f).Within(0.0001f));
+                Assert.That(patternScale, Is.EqualTo(5f).Within(0.0001f));
+                Assert.That(cellSpacingMeters, Is.EqualTo(0.1481f).Within(0.0001f));
+                Assert.That(treadWidthMeters, Is.EqualTo(0.083f).Within(0.0001f));
+                Assert.That(cellsPerEdge, Is.EqualTo(5.67f).Within(0.0001f));
+                Assert.That(estimatedTreadCountOnFace, Is.InRange(20f, 40f),
+                    "A three-stud face must show readable diamonds instead of filtered tread haze.");
             }
         }
 

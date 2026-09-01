@@ -349,11 +349,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LuaCs_RegisteredInstanceQuota_IsPerActorAtNAndNPlusOne()
         {
+            const int quota = 2;
             LuaCsRbxApiBindings rbxApi = new();
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 RbxApi = rbxApi,
-                MaxRegisteredInstancesPerActor = 2
+                MaxRegisteredInstancesPerActor = quota
             });
             ActorContext actor = new LocalActorIdentityProvider("instance-actor")
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
@@ -373,15 +374,20 @@ namespace CoreAI.Tests.EditMode
                 persistToStore: false));
             StringAssert.Contains(actor.ActorId, exception.Message);
             StringAssert.Contains("registered instances quota", exception.Message);
-            StringAssert.Contains("2", exception.Message);
+            StringAssert.Contains(quota.ToString(), exception.Message);
 
-            ActorContext secondActor = new LocalActorIdentityProvider("instance-actor-2")
-                .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
-                secondActor,
-                "instance-b-1",
-                "Instance.new('Folder')",
-                persistToStore: false));
+            for (int actorNumber = 2; actorNumber <= quota + 1; actorNumber++)
+            {
+                ActorContext independentActor = new LocalActorIdentityProvider(
+                        "instance-actor-" + actorNumber)
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                Assert.DoesNotThrow(() => stack.Runtime.LoadMod(
+                    independentActor,
+                    "instance-independent-" + actorNumber,
+                    "Instance.new('Folder')",
+                    persistToStore: false),
+                    "actor N+1 must retain its own quota even after N runtime Players exist");
+            }
         }
 
         [Test]

@@ -28,7 +28,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         }
     }
 
-    /// <summary>Minimum Players service pulled forward for Roblox-compatible remotes.</summary>
+    /// <summary>Minimum Players service of real client identities for Roblox-compatible remotes.</summary>
     public sealed class RbxPlayers : RbxInstance
     {
         private readonly Dictionary<string, RbxPlayer> _byActor =
@@ -61,14 +61,29 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 return existing;
             }
 
-            // WHY: without this, every mod written against remotes today would need rewriting at MVP8.
-            RbxPlayer player = (RbxPlayer)registry.Create("Player");
-            player.Initialize(actor, _nextUserId++);
-            player.Parent = this;
-            _byActor.Add(actor, player);
-            _players.Add(player);
-            PlayerAdded.Fire(player);
-            return player;
+            // WHY: Player identities are runtime-created authorization infrastructure, not authored
+            // world content, while actor ownership prevents a foreign client from rewriting identity.
+            RbxPlayer player = (RbxPlayer)registry.Create(
+                "Player",
+                ownerActorId: actor,
+                accessScope: InstanceAccessScope.Owned,
+                isRuntimeInfrastructure: true);
+            try
+            {
+                player.Initialize(actor, _nextUserId++);
+                player.Parent = this;
+                _byActor.Add(actor, player);
+                _players.Add(player);
+                PlayerAdded.Fire(player);
+                return player;
+            }
+            catch
+            {
+                _byActor.Remove(actor);
+                _players.Remove(player);
+                player.Destroy();
+                throw;
+            }
         }
 
         public RbxPlayer GetLocalPlayer(string actorId)

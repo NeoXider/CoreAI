@@ -50,10 +50,29 @@ of either side of a 45-degree boundary, and three are evaluated only near triple
 Three-dimensional noise modes and the visible fallback do not select a projection axis. ForceField keeps
 its intentionally world-animated coordinates but uses the same narrow geometric-normal transition.
 
-All procedural noise has a fixed instruction count and the shaders target shader model 3.0. Fragment
-derivatives used by the opaque surface pass are available on the WebGL 2 target. There are no compute
-passes, geometry/tessellation stages, texture dependencies, dynamic loops, or thread/blocking paths,
-keeping the catalog compatible with the URP WebGL 2 shipping path.
+Concrete, Sand, Fabric, SmoothPlastic, Brick, Cobblestone, WoodPlanks, DiamondPlate, and Metal split
+macro/structural response from a decorrelated micro-roughness band. High or worn structure is slightly
+smoother; pores, fibres, joints, tread edges, and scratches are rougher. Micro albedo modulation stays
+weaker than the roughness modulation. Metal and DiamondPlate are fully metallic, so their neutral base
+colour becomes the coloured specular response in URP's metallic workflow; filtered directional grooves
+provide a brushed highlight without an extra texture or anisotropic shader variant.
+
+Pattern coordinates are calibrated in world metres, with structural detail display-scaled when its real
+size would filter into noise. DiamondPlate repeats every `1 / (5 * 1.35)`, or about 14.8 cm, and each
+visible diamond is about 8.3 cm across. A default 3-stud/0.84 m face therefore shows about 32 treads,
+inside the 20-40 readability target. Procedural Brick uses about 14 cm courses, matching roughly six
+courses on that face; plank rows are about 15 cm, and Cobblestone shows about 24 stones. Grass's densest
+blade grid is about 10.6 cm with centimetre-wide silhouettes, while Fabric uses a 2.5 cm display weave
+with about 34 periods across. Sand ripples remain about 10.5 cm. These are stable defaults rather than
+patterns auto-fitted to each part; the separate CC0 texture-backed catalog retains its own tested physical
+tiling. Neon, Glass, and Ice also consume their provider scale instead of ignoring that preset contract.
+
+Cell edges, periodic waves, tread masks, blades, cracks, and pebbles widen from their projected `fwidth`.
+Value-noise and analytical-simplex FBM attenuate unresolved octaves toward their mean and skip their
+kernel sample once fully filtered. Micro-normal strength fades under minification while smoothness falls
+toward the unresolved normal variance. The shaders target shader model 3.0 and keep bounded branch-only
+work with no dynamic loops. Fragment derivatives are available on the WebGL 2 target; there are no
+compute passes, geometry/tessellation stages, per-part materials, threads, or blocking paths.
 
 ## Visible fallback
 
@@ -81,6 +100,13 @@ silently leaving the previous material in place.
 name/value-mismatched ids must resolve to the visible fallback, and every catalog entry must load the
 expected shader family. It also requires all 22 entries to own distinct intrinsic colors and verifies
 that the 18 opaque entries map one-to-one onto modes 0 through 17.
+
+The production-path scale gates derive feature sizes from each shared material's `_PatternScale` and the
+matching shader kernel. A three-stud DiamondPlate face must contain 20-40 tread cells in total; companion
+gates keep brick courses, plank rows, cobblestones, fabric weave, and the densest grass blade layer in
+readable count ranges. The hybrid texture tests separately retain the six-Brick-course gate.
+Source-contract tests also require the filtered roughness bands, octave pruning, dielectric clamp, and
+near-one metallic response.
 
 The no-per-part-allocation gate warms the cache and lookup path, then resolves the same part material
 4,096 times. It requires every result to be reference-identical, checks that the provider's native

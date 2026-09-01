@@ -262,7 +262,7 @@ namespace CoreAI.Tests.PlayMode
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
                     settings,
-                    null, null, null);
+                    new LocalActorIdentityProvider("skill-real-tool-calling-test"), null, null);
 
                 // ── Run: model should read_skill("Crafting") → use crafting tools ──
 

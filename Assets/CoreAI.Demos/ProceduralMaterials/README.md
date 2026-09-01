@@ -17,8 +17,8 @@ The generated folder contains only text-serialized Unity assets: a rounded-cube 
 materials, a procedural sky, and two Volume profiles.
 
 The project contains no `.hdr`, `.exr`, or cubemap environment asset. The builder therefore uses a
-neutral HDR-capable URP procedural sky, a realtime reflection probe, broad light/dark reflection cards,
-and a large soft grazing key. It does not invent or download an HDRI.
+neutral HDR-capable URP procedural sky, a realtime reflection probe that includes the rig's non-static
+light/dark reflection cards, and a large soft grazing key. It does not invent or download an HDRI.
 
 ## What the rig shows
 

@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
@@ -828,6 +830,46 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("faulting", errors[0].ModId);
             StringAssert.Contains("signal-boom", errors[0].Error);
             Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("healthy"));
+        }
+
+        [Test]
+        public void Lua_SignalAdmissionQuota_FirstActorSaturated_DoesNotDropLaterActor()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                MaxSchedulerThreadsPerActor = 1
+            });
+            ActorContext saturatedActor = new LocalActorIdentityProvider("signal-saturated-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext healthyActor = new LocalActorIdentityProvider("signal-healthy-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            stack.Runtime.LoadMod(saturatedActor, "signal-saturated", @"
+                workspace.ChildAdded:Connect(function()
+                    store_set('unexpected', 'ran')
+                end)
+                task.wait(1000)", persistToStore: false);
+            stack.Runtime.LoadMod(healthyActor, "signal-healthy", @"
+                workspace.ChildAdded:Connect(function()
+                    store_set('delivered', 'yes')
+                end)", persistToStore: false);
+            stack.Runtime.LoadMod("signal-trigger", "Instance.new('Folder', workspace)");
+
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0d));
+            Assert.AreEqual("", store.Get("signal-saturated", "unexpected"));
+            Assert.AreEqual("yes", store.Get("signal-healthy", "delivered"));
+            IReadOnlyList<LuaModHandlerError> errors =
+                stack.Runtime.GetRecentHandlerErrors("signal-saturated");
+            Assert.AreEqual(1, errors.Count);
+            StringAssert.Contains("THREAD_CAP", errors[0].Error);
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("signal-healthy"));
         }
 
         [Test]

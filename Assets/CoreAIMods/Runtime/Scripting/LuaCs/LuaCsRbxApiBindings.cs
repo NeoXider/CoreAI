@@ -603,8 +603,26 @@ namespace CoreAI.Ai.LuaCs
 
         private RbxPlayer EnsureNetworkActor(string actorId)
         {
-            _networkBridge.RegisterActor(actorId);
-            return _players.EnsureActor(_registry, actorId);
+            bool hadPlayer = _players.TryGetByActorId(actorId, out RbxPlayer player);
+            if (!hadPlayer)
+            {
+                player = _players.EnsureActor(_registry, actorId);
+            }
+
+            try
+            {
+                _networkBridge.RegisterActor(actorId);
+                return player;
+            }
+            catch
+            {
+                if (!hadPlayer)
+                {
+                    _players.RemoveActor(actorId);
+                }
+
+                throw;
+            }
         }
 
         private void DeliverNetworkEvent(RbxNetworkEventMessage message)
@@ -1036,7 +1054,10 @@ namespace CoreAI.Ai.LuaCs
                     this, capabilities, ownerModId, originTag,
                     actorContext.Value, mutationEnvelope.Value)
                 : new LuaCsRbxModContext(this, capabilities, ownerModId, originTag);
-            EnsureNetworkActor(context.ActorContext.ActorId);
+            if (!context.IsNetworkServer)
+            {
+                EnsureNetworkActor(context.ActorContext.ActorId);
+            }
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
                 _currentSchedulerGenerationByMod[ownerModId] =

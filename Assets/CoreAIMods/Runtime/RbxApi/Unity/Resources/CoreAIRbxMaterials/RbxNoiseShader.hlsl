@@ -56,30 +56,60 @@ float4 RbxSimplexNoise01Grad(float3 position)
     return float4(signedSample.xyz * 0.5, signedSample.w * 0.5 + 0.5);
 }
 
+float RbxSimplexOctaveVisibility(float footprint)
+{
+    return 1.0 - smoothstep(0.35, 0.85, footprint);
+}
+
 float4 RbxSimplexFbmGrad(float3 position)
 {
     float frequency = 1.0;
-    float4 octave = RbxSimplexNoise01Grad(position);
-    float3 gradient = octave.xyz * 0.5333;
-    float value = octave.w * 0.5333;
+    float3 pixelWidth = fwidth(position);
+    float footprint = max(pixelWidth.x, max(pixelWidth.y, pixelWidth.z));
+    float visibility = RbxSimplexOctaveVisibility(footprint);
+    float4 octave = float4(0.0, 0.0, 0.0, 0.5);
+    UNITY_BRANCH if (visibility > 0.0)
+    {
+        octave = RbxSimplexNoise01Grad(position);
+    }
+    float3 gradient = octave.xyz * (0.5333 * visibility);
+    float value = lerp(0.5, octave.w, visibility) * 0.5333;
 
     position = position * 2.03 + 17.17;
     frequency *= 2.03;
-    octave = RbxSimplexNoise01Grad(position);
-    gradient += octave.xyz * (0.2667 * frequency);
-    value += octave.w * 0.2667;
+    footprint *= 2.03;
+    visibility = RbxSimplexOctaveVisibility(footprint);
+    octave = float4(0.0, 0.0, 0.0, 0.5);
+    UNITY_BRANCH if (visibility > 0.0)
+    {
+        octave = RbxSimplexNoise01Grad(position);
+    }
+    gradient += octave.xyz * (0.2667 * frequency * visibility);
+    value += lerp(0.5, octave.w, visibility) * 0.2667;
 
     position = position * 2.01 + 9.23;
     frequency *= 2.01;
-    octave = RbxSimplexNoise01Grad(position);
-    gradient += octave.xyz * (0.1333 * frequency);
-    value += octave.w * 0.1333;
+    footprint *= 2.01;
+    visibility = RbxSimplexOctaveVisibility(footprint);
+    octave = float4(0.0, 0.0, 0.0, 0.5);
+    UNITY_BRANCH if (visibility > 0.0)
+    {
+        octave = RbxSimplexNoise01Grad(position);
+    }
+    gradient += octave.xyz * (0.1333 * frequency * visibility);
+    value += lerp(0.5, octave.w, visibility) * 0.1333;
 
     position = position * 2.04 + 5.71;
     frequency *= 2.04;
-    octave = RbxSimplexNoise01Grad(position);
-    gradient += octave.xyz * (0.0667 * frequency);
-    value += octave.w * 0.0667;
+    footprint *= 2.04;
+    visibility = RbxSimplexOctaveVisibility(footprint);
+    octave = float4(0.0, 0.0, 0.0, 0.5);
+    UNITY_BRANCH if (visibility > 0.0)
+    {
+        octave = RbxSimplexNoise01Grad(position);
+    }
+    gradient += octave.xyz * (0.0667 * frequency * visibility);
+    value += lerp(0.5, octave.w, visibility) * 0.0667;
     return float4(gradient, value);
 }
 

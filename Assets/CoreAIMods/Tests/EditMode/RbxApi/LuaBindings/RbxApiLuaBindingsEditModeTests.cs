@@ -518,15 +518,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_NetworkProductionPath_RemoteEventDeliversEveryDirectionWithPlayerFirst()
+        public void Lua_NetworkProductionPath_ClientRegistersBeforeServerWithoutPhantomPlayer()
         {
             using ProductionNetworkHarness harness = new();
             ActorContext clientActor = Actor("delivery-actor");
             ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
 
+            harness.Runtime.LoadMod(clientActor, "network-delivery-client", @"
+                local Players = game:GetService('Players')
+                local localPlayer = Players.LocalPlayer
+                local listed = Players:GetPlayers()
+                assert(localPlayer ~= nil)
+                assert(#listed == 1 and listed[1] == localPlayer)
+                assert(Players.PlayerAdded ~= nil and Players.PlayerRemoving ~= nil)
+                task.defer(function()
+                    task.wait()
+                    local remote = workspace:WaitForChild('DeliveryRemote')
+                    local clientValues = {}
+                    remote.OnClientEvent:Connect(function(payload)
+                        table.insert(clientValues, payload)
+                        store_set('client', table.concat(clientValues, ','))
+                    end)
+                    remote:FireServer('server-payload')
+                end)", persistToStore: false);
+
             harness.Runtime.LoadMod(serverActor, "network-delivery-server", @"
                 local Players = game:GetService('Players')
+                assert(Players.LocalPlayer == nil)
                 local remote = Instance.new('RemoteEvent')
                 remote.Name = 'DeliveryRemote'
                 remote.Parent = workspace
@@ -535,35 +554,97 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 end)
                 task.defer(function()
                     task.wait()
+                    task.wait()
                     local listed = Players:GetPlayers()
+                    store_set('server_player_count', tostring(#listed))
                     local player = listed[#listed]
                     remote:FireClient(player, 'one')
                     remote:FireAllClients('all')
                 end)", persistToStore: false);
 
-            harness.Runtime.LoadMod(clientActor, "network-delivery-client", @"
-                local Players = game:GetService('Players')
-                local localPlayer = Players.LocalPlayer
-                local listed = Players:GetPlayers()
-                assert(localPlayer ~= nil)
-                assert(listed[#listed] == localPlayer)
-                assert(Players.PlayerAdded ~= nil and Players.PlayerRemoving ~= nil)
-
-                local remote = workspace:FindFirstChild('DeliveryRemote')
-                local clientValues = {}
-                remote.OnClientEvent:Connect(function(payload)
-                    table.insert(clientValues, payload)
-                    store_set('client', table.concat(clientValues, ','))
-                end)
-                remote:FireServer('server-payload')", persistToStore: false);
-
             harness.PumpFrames(4);
 
             Assert.IsInstanceOf<NullNetworkBridge>(harness.Bindings.NetworkBridge);
-            Assert.AreEqual("2:server-payload",
+            Assert.AreEqual("1:server-payload",
                 harness.Store.Get("network-delivery-server", "server"));
+            Assert.AreEqual("1",
+                harness.Store.Get("network-delivery-server", "server_player_count"));
             Assert.AreEqual("one,all",
                 harness.Store.Get("network-delivery-client", "client"));
+        }
+
+        [Test]
+        public void NetworkActorRegistration_PlayerFailureDoesNotLeaveBridgeActor()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            TrackingNetworkBridge bridge = new();
+            LuaCsRbxApiBindings bindings = new(
+                registry: registry, game: game, networkBridge: bridge);
+            ActorContext actor = Actor("rejected-player-actor");
+            LuaCsRbxModContext context = new(
+                bindings, LuaCapabilities.All, "rejected-player-mod",
+                OriginTag.FromMod("rejected-player-mod"), actor);
+            registry.Registered += record =>
+            {
+                if (record.Instance is RbxPlayer)
+                {
+                    record.Instance.Destroy();
+                    throw new InvalidOperationException("synthetic Player registration rejected");
+                }
+            };
+
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+                () => bindings.GetLocalPlayer(context));
+
+            StringAssert.Contains("registration rejected", error.Message);
+            Assert.IsEmpty(bridge.ActorIds);
+            Assert.IsEmpty(bindings.Players.GetPlayers());
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_ForeignActorCannotMutatePlayerIdentity()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext ownerActor = Actor("player-owner-actor");
+            ActorContext foreignActor = Actor("player-foreign-actor");
+            harness.Runtime.LoadMod(ownerActor, "player-owner-mod", @"
+                local player = game:GetService('Players').LocalPlayer
+                assert(player ~= nil)", persistToStore: false);
+            harness.Runtime.LoadMod(foreignActor, "player-foreign-mod", @"
+                local Players = game:GetService('Players')
+                local foreign = Players:GetPlayers()[1]
+                assert(foreign ~= Players.LocalPlayer)
+                local function capture(name, callback)
+                    local ok, failure = pcall(callback)
+                    store_set(name .. '_ok', tostring(ok))
+                    store_set(name .. '_error', tostring(failure))
+                end
+                capture('name', function() foreign.Name = 'Hijacked' end)
+                capture('attribute', function() foreign:SetAttribute('Admin', true) end)
+                capture('tag', function() foreign:AddTag('Impersonated') end)",
+                persistToStore: false);
+
+            Assert.IsTrue(harness.Bindings.Players.TryGetByActorId(
+                ownerActor.ActorId, out RbxPlayer ownerPlayer));
+            Assert.AreEqual("Player1", ownerPlayer.Name);
+            Assert.IsNull(ownerPlayer.GetAttribute("Admin"));
+            Assert.IsFalse(ownerPlayer.HasTag("Impersonated"));
+            Assert.IsTrue(harness.Bindings.Registry.TryGetRecord(
+                ownerPlayer.Id, out InstanceRecord ownerRecord));
+            Assert.IsTrue(ownerRecord.IsRuntimeInfrastructure);
+            Assert.AreEqual(ownerActor.ActorId, ownerRecord.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, ownerRecord.AccessScope);
+            string[] mutations = { "name", "attribute", "tag" };
+            for (int index = 0; index < mutations.Length; index++)
+            {
+                string mutation = mutations[index];
+                Assert.AreEqual("false",
+                    harness.Store.Get("player-foreign-mod", mutation + "_ok"));
+                StringAssert.Contains("Owned by actor '" + ownerActor.ActorId + "'",
+                    harness.Store.Get("player-foreign-mod", mutation + "_error"));
+            }
         }
 
         [Test]

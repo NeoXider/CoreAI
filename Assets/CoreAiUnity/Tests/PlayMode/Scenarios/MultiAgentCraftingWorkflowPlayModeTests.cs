@@ -490,7 +490,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("multi-agent-crafting-test"));
         }
 
         #region Logging

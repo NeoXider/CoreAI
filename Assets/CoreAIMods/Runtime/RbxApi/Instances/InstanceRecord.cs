@@ -93,8 +93,9 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Actor-level access policy, independent of teardown ownership and provenance.</summary>
         public InstanceAccessScope AccessScope { get; internal set; }
 
-        /// <summary>True for host-created runtime plumbing that is registered for API identity but is
-        /// not authored world content, actor quota usage, or a foreign ACL container.</summary>
+        /// <summary>True for runtime plumbing that is registered for API identity but is not authored
+        /// world content or actor quota usage. Infrastructure may retain an explicit actor owner when
+        /// the runtime identity itself requires ACL protection.</summary>
         public bool IsRuntimeInfrastructure { get; }
 
         /// <summary>True for ledger-attributed user/mod content, excluding host/runtime records.</summary>

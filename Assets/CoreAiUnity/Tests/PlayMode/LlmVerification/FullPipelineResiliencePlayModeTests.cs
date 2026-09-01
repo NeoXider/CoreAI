@@ -390,7 +390,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("full-pipeline-resilience-test"));
 
             using CancellationTokenSource orchCts = new();
             Task orchTask = orch.RunTaskAsync(new AiTaskRequest

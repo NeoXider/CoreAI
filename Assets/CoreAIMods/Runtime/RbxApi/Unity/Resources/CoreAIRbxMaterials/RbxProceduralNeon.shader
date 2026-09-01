@@ -88,7 +88,9 @@ Shader "CoreAI/Rbx/Procedural Neon"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 half3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(input.positionWS));
                 half fresnel = pow(1.0h - saturate(dot(normalize(input.normalWS), viewDirectionWS)), 2.0h);
-                float cellular = RbxValueNoise(input.positionWS * 3.2);
+                float cellularVisibility;
+                float cellular = RbxFilteredValueNoise(
+                    input.positionWS * (_PatternScale * 3.2), cellularVisibility);
                 half pulse = 0.97h + sin(_Time.y * 2.0) * 0.03h;
                 half intensity = (half)_EmissionStrength * pulse * (0.9h + cellular * 0.12h + fresnel * 0.2h);
                 half3 materialColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,

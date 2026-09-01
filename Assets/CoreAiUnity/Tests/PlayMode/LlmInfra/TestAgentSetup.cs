@@ -214,7 +214,8 @@ namespace CoreAI.Tests.PlayMode
                 Policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                orchestratorSettings);
+                orchestratorSettings,
+                new LocalActorIdentityProvider("test-agent-setup"));
         }
 
         private void SetupLogAsserts()

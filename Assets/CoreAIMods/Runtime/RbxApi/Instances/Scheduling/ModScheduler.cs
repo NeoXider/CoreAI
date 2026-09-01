@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("CoreAI.Mods.Tests")]
@@ -443,7 +444,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         /// <summary>Creates a scheduler-owned signal callback with its destruction tombstone scope.</summary>
         internal IRbxScriptThread SpawnSignal(string ownerModId, object callable, object[] args)
         {
-            ThreadRecord record = CreateRecord(ownerModId, callable);
+            ThreadRecord record;
+            try
+            {
+                record = CreateRecord(ownerModId, callable);
+            }
+            catch (RbxError error)
+            {
+                ReportThreadFault(ownerModId, error);
+                return null;
+            }
+
             record.ReadableTombstone = _currentSignalTombstone;
             ResumeThread(record, CopyArguments(args));
             return record.Thread;
@@ -836,6 +847,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             _drainingSignals = true;
             _signalCascadeChain = null;
+            Exception firstFailure = null;
             try
             {
                 while (_signalQueue.Count > 0)
@@ -854,7 +866,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         SignalInvocation invocation = _signalDrainBuffer[index];
                         _currentSignalChain = invocation.Chain;
                         _currentSignalTombstone = invocation.ReadableTombstone;
-                        invocation.Connection.InvokePending(invocation.Arguments);
+                        try
+                        {
+                            invocation.Connection.InvokePending(invocation.Arguments);
+                        }
+                        catch (Exception ex)
+                        {
+                            firstFailure = firstFailure ?? ex;
+                        }
                     }
 
                     if (_signalCascadeChain != null)
@@ -866,6 +885,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                             + " generations: " + string.Join(" -> ", _signalCascadeChain),
                             "break the signal cycle or defer the next mutation to a later frame");
                     }
+                }
+
+                if (firstFailure != null)
+                {
+                    ExceptionDispatchInfo.Capture(firstFailure).Throw();
                 }
             }
             finally
@@ -1243,13 +1267,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             record.DeferredArguments = null;
             record.State = ThreadScheduleState.Canceled;
             _records.Remove(record.Thread);
+            ReportThreadFault(record.OwnerModId, error);
+        }
+
+        private void ReportThreadFault(string ownerModId, RbxError error)
+        {
             Action<string, RbxError> handler = ThreadFaulted;
             if (handler == null)
             {
                 throw error;
             }
 
-            handler(record.OwnerModId, error);
+            handler(ownerModId, error);
         }
 
         private void KillRecord(ThreadRecord record)

@@ -108,7 +108,8 @@ namespace CoreAI.Tests.PlayMode
                     policy,
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    new LocalActorIdentityProvider("chat-service-integration-test"));
 
                 TestSettings settingsAsset = new() { EnableStreaming = true };
                 CoreAiChatService chatService = new(orchestrator, policy, settingsAsset, store, null);

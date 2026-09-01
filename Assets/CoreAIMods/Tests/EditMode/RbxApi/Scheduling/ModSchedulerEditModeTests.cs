@@ -121,6 +121,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
+        public void SignalDrain_QuotaSaturatedFirstSubscriber_StillInvokesLaterSubscriber()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureActorQuota(1, ownerModId => ownerModId);
+            scheduler.Spawn("saturated-actor",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            RbxScriptSignal signal = new("QuotaIsolation");
+            signal.BindScheduler(scheduler);
+            int laterInvocations = 0;
+            signal.Connect((Action<object[]>)(_ => scheduler.SpawnSignal(
+                "saturated-actor", new FakeThreadPlan(), Array.Empty<object>())));
+            signal.Connect((Action<object[]>)(_ => laterInvocations++));
+            signal.Fire();
+
+            RbxError error = Assert.Throws<RbxError>(() => scheduler.Advance(0d));
+
+            Assert.AreEqual(RbxErrorCode.ThreadCap, error.Code);
+            Assert.AreEqual(1, laterInvocations,
+                "one actor's admission refusal must not discard another queued signal invocation");
+        }
+
+        [Test]
         public void R4_8_TaskWaitWithoutDurationResumesNextFrameAndReturnsElapsed()
         {
             ModScheduler scheduler = CreateScheduler(out FakeTimeSource timeSource,

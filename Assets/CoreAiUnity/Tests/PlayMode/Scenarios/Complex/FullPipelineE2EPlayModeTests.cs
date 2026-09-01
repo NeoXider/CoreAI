@@ -328,7 +328,8 @@ namespace CoreAI.Tests.PlayMode
                     store, policy,
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    settings, null, null, null);
+                    settings,
+                    new LocalActorIdentityProvider("full-pipeline-e2e-test"), null, null);
 
 
                 // Phase 1: Crafting with SkillSet.

@@ -283,7 +283,7 @@ Some merchants only trade specific item types.",
                         new NoOpRoleStructuredResponsePolicy(),
                         new NullAiOrchestrationMetrics(),
                         settings,
-                        null, null, null);
+                        new LocalActorIdentityProvider("skill-benchmark-skills"), null, null);
 
                     using CancellationTokenSource skillsTimeout = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
@@ -375,7 +375,7 @@ Some merchants only trade specific item types.",
                         new NoOpRoleStructuredResponsePolicy(),
                         new NullAiOrchestrationMetrics(),
                         settings,
-                        null, null, null);
+                        new LocalActorIdentityProvider("skill-benchmark-direct"), null, null);
 
                     using CancellationTokenSource directTimeout = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest

@@ -300,7 +300,8 @@ namespace CoreAI.Tests.PlayMode
                 new AiPromptComposer(new CustomAgentPromptProvider(cfg.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
-                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("custom-agent-test"));
 
             Debug.Log($"[CustomAgents] PROMPT TO MODEL ({cfg.RoleId}):");
             Debug.Log($"[CustomAgents] System: {cfg.SystemPrompt}");

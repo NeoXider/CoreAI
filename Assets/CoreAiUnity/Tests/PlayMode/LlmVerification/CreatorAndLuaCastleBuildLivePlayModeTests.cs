@@ -438,7 +438,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new CompositeRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                settings);
+                settings,
+                new LocalActorIdentityProvider("creator-lua-castle-test"));
         }
 
         private static HashSet<int> CollectCastleInstanceIds()

@@ -19,6 +19,7 @@ using CoreAI.Session;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using VContainer;
 
 namespace CoreAI.Tests.PlayMode
 {
@@ -35,6 +36,8 @@ namespace CoreAI.Tests.PlayMode
     [Timeout(1_800_000)]
     public sealed class ProgrammerLuaModsLivePlayModeTests
     {
+        private static readonly IObjectResolver ProductionCoreContainer = BuildProductionCoreContainer();
+
         [UnitySetUp]
         public IEnumerator SetUp()
         {
@@ -52,6 +55,14 @@ namespace CoreAI.Tests.PlayMode
         // ------------------------------------------------------------------------------------------
         // Shared production-like Programmer setup
         // ------------------------------------------------------------------------------------------
+
+        private static IObjectResolver BuildProductionCoreContainer()
+        {
+            ContainerBuilder builder = new();
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+            return builder.Build();
+        }
 
         /// <summary>Thread-safe in-memory <see cref="ILuaModStore"/> so store_set/store_get exist without touching FileLuaModStore.</summary>
         private sealed class InMemoryModStore : ILuaModStore
@@ -153,6 +164,7 @@ namespace CoreAI.Tests.PlayMode
             public AiOrchestrator Orchestrator;
             public CapturingLlmClient Capturing;
             public CoreAISettingsAsset Settings;
+            public ActorContext ActorContext;
 
             public void Dispose()
             {
@@ -178,6 +190,9 @@ namespace CoreAI.Tests.PlayMode
                 Settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>()
             };
             setup.Settings.SetOrchestratorTimeoutSeconds(600);
+            IActorIdentityProvider actorIdentityProvider =
+                ProductionCoreContainer.Resolve<IActorIdentityProvider>();
+            setup.ActorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
 
             // WHY: Mirrors CoreAiModsInstaller with enableFullLuaAccess=false: mods get LuaCapabilities.All,
             // one-off execute_lua gets All minus Full — the exact production capability split.
@@ -206,7 +221,7 @@ namespace CoreAI.Tests.PlayMode
                     Log.Instance,
                     scriptCapabilities,
                     true,
-                    new LocalActorIdentityProvider("programmer-live-test"),
+                    actorIdentityProvider,
                     BuiltInAgentRoleIds.Programmer));
             policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
                 BuiltInLuaModdingSkillText.SkillName,
@@ -235,7 +250,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new CompositeRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                setup.Settings);
+                setup.Settings,
+                actorIdentityProvider);
 
             return setup;
         }
@@ -316,7 +332,9 @@ namespace CoreAI.Tests.PlayMode
                 TestContext.WriteLine($"[TetrisMod] Prompt length: {prompt.Length} chars (built-in 'tetris' example)");
 
                 List<string> loadedModIds = new();
-                setup.Stack.Runtime.ModSourceLoaded += (id, _, _) => loadedModIds.Add(id);
+                setup.Stack.Runtime.AddModSourceLoadedListener(
+                    setup.ActorContext,
+                    (id, _, _) => loadedModIds.Add(id));
 
                 CoreAi.ClearToolCallHistory();
                 using CancellationTokenSource cts = new();
@@ -329,7 +347,7 @@ namespace CoreAI.Tests.PlayMode
 
                 yield return PlayModeTestAwait.WaitTask(task, 1500f, "Programmer tetris mod", cts);
 
-                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods();
+                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
 
                 TestContext.WriteLine("[TetrisMod] ---------- TRANSCRIPT ----------");
                 LogToolCallTranscript("TetrisMod");
@@ -341,7 +359,7 @@ namespace CoreAI.Tests.PlayMode
                     TestContext.WriteLine(
                         $"[TetrisMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
                         $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
-                    if (setup.Stack.Runtime.TryGetModSource(mod.Id, out string source))
+                    if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
                     {
                         TestContext.WriteLine($"[TetrisMod] --- source of '{mod.Id}' ---\n{source}");
                     }
@@ -451,26 +469,30 @@ end)
                 int handlerErrors = 0;
                 string lastHandlerError = null;
                 List<string> waveDonePayloads = new();
-                setup.Stack.Runtime.ModHandlerErrored += (_, error, _) =>
-                {
-                    handlerErrors++;
-                    lastHandlerError = error;
-                };
-                setup.Stack.Runtime.ModEventEmitted += (_, eventName, payload) =>
-                {
-                    if (eventName == "wave_done")
+                setup.Stack.Runtime.AddModHandlerErroredListener(
+                    setup.ActorContext,
+                    (_, error, _) =>
                     {
-                        waveDonePayloads.Add(payload ?? "");
-                    }
-                };
+                        handlerErrors++;
+                        lastHandlerError = error;
+                    });
+                setup.Stack.Runtime.AddModEventEmittedListener(
+                    setup.ActorContext,
+                    (_, eventName, payload) =>
+                    {
+                        if (eventName == "wave_done")
+                        {
+                            waveDonePayloads.Add(payload ?? "");
+                        }
+                    });
 
                 // ---- Arrange: load the broken mod through the REAL runtime and prove it is broken.
-                setup.Stack.Runtime.LoadMod(BrokenModId, BrokenArenaLua, LuaCapabilities.All,
+                setup.Stack.Runtime.LoadMod(setup.ActorContext, BrokenModId, BrokenArenaLua, LuaCapabilities.All,
                     false);
-                Assert.IsTrue(setup.Stack.Runtime.IsLoaded(BrokenModId),
+                Assert.IsTrue(setup.Stack.Runtime.IsLoaded(setup.ActorContext, BrokenModId),
                     "Arrange failed: the broken mod did not load.");
 
-                yield return TriggerWave(setup.Stack.Runtime);
+                yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
 
                 TestContext.WriteLine($"[FixMod] BEFORE: handlerErrors={handlerErrors} " +
                                       $"waveDone={waveDonePayloads.Count} lastError={lastHandlerError}");
@@ -496,9 +518,9 @@ end)
                 int errorsAfterAgent = handlerErrors;
                 waveDonePayloads.Clear();
 
-                yield return TriggerWave(setup.Stack.Runtime);
+                yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
 
-                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods();
+                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
 
                 TestContext.WriteLine("[FixMod] ---------- TRANSCRIPT ----------");
                 LogToolCallTranscript("FixMod");
@@ -507,7 +529,7 @@ end)
                     TestContext.WriteLine(
                         $"[FixMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
                         $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
-                    if (setup.Stack.Runtime.TryGetModSource(mod.Id, out string source))
+                    if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
                     {
                         TestContext.WriteLine($"[FixMod] --- source of '{mod.Id}' (after) ---\n{source}");
                     }
@@ -549,12 +571,12 @@ end)
         /// Emits 'wave_start' and drives <see cref="ILuaModRuntime.Tick"/> for a short window, the same
         /// dispatch path the production frame ticker uses.
         /// </summary>
-        private static IEnumerator TriggerWave(ILuaModRuntime runtime)
+        private static IEnumerator TriggerWave(ILuaModRuntime runtime, ActorContext actorContext)
         {
-            runtime.EmitEvent("wave_start");
+            runtime.EmitEvent(actorContext, "wave_start");
             for (int i = 0; i < 10; i++)
             {
-                runtime.Tick(0.05);
+                runtime.Tick(actorContext, 0.05);
                 yield return null;
             }
         }

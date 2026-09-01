@@ -140,7 +140,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                effective);
+                effective,
+                new LocalActorIdentityProvider("mixed-backend-parallel-test"));
         }
     }
 }

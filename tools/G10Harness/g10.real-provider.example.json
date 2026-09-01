@@ -1,0 +1,15 @@
+{
+  "provider": {
+    "providerMode": "RealProvider",
+    "endpoint": "",
+    "apiKey": "",
+    "modelId": "",
+    "contextCapTokens": null,
+    "outputCapTokens": null,
+    "backendConcurrency": null,
+    "orchestratorConcurrency": null,
+    "requestTimeoutSeconds": null,
+    "temperature": 0.0,
+    "extraBodyJson": ""
+  }
+}

@@ -106,7 +106,8 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 return RbxFbm(position * 1.6) * 0.24 + saturate(fractureA + fractureB) * 0.76;
             }
 
-            float3 RbxTransparentNormal(float3 positionWS, float3 normalWS, int materialMode)
+            float3 RbxTransparentNormal(float3 patternPosition, float3 normalWS, int materialMode,
+                float patternScale)
             {
                 float3 referenceAxis = abs(normalWS.y) < 0.92
                     ? float3(0.0, 1.0, 0.0)
@@ -114,10 +115,13 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 float3 tangentWS = normalize(cross(referenceAxis, normalWS));
                 float3 bitangentWS = normalize(cross(normalWS, tangentWS));
                 float epsilon = 0.018;
-                float centerHeight = RbxTransparentHeight(positionWS, materialMode);
-                float tangentSlope = (RbxTransparentHeight(positionWS + tangentWS * epsilon,
+                float patternEpsilon = epsilon * max(patternScale, 0.0001);
+                float centerHeight = RbxTransparentHeight(patternPosition, materialMode);
+                float tangentSlope = (RbxTransparentHeight(
+                    patternPosition + tangentWS * patternEpsilon,
                     materialMode) - centerHeight) * _BumpStrength / epsilon;
-                float bitangentSlope = (RbxTransparentHeight(positionWS + bitangentWS * epsilon,
+                float bitangentSlope = (RbxTransparentHeight(
+                    patternPosition + bitangentWS * patternEpsilon,
                     materialMode) - centerHeight) * _BumpStrength / epsilon;
                 return normalize(normalWS - tangentWS * tangentSlope - bitangentWS * bitangentSlope);
             }
@@ -179,9 +183,11 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                     return half4(materialColor * intensity, saturate(alpha));
                 }
 
-                normalWS = RbxTransparentNormal(input.positionWS, normalWS, materialMode);
+                float3 patternPosition = input.positionWS * _PatternScale;
+                normalWS = RbxTransparentNormal(patternPosition, normalWS, materialMode,
+                    _PatternScale);
                 fresnel = pow(1.0h - saturate(dot(normalWS, viewDirectionWS)), 3.0h);
-                float height = RbxTransparentHeight(input.positionWS, materialMode);
+                float height = RbxTransparentHeight(patternPosition, materialMode);
 
                 SurfaceData surfaceData = (SurfaceData)0;
                 surfaceData.specular = half3(0.04h, 0.04h, 0.04h);

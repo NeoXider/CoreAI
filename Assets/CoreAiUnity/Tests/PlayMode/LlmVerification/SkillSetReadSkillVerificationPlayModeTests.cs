@@ -263,7 +263,7 @@ namespace CoreAI.Tests.PlayMode
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
                     settings,
-                    null, null, null);
+                    new LocalActorIdentityProvider("skill-read-verification-test"), null, null);
 
                 // ── Run ──────────────────────────────────────────────────────
 

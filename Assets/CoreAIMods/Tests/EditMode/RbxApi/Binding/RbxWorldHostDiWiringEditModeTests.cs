@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Reflection;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
@@ -135,6 +136,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
+        public void NoHost_UnloadDestroysOwnedInstancesAndReleasesRegistryCount()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(builder, registry);
+            IObjectResolver container = builder.Build();
+            try
+            {
+                LuaCsModStack stack = container.Resolve<LuaCsModStack>();
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                InstanceRegistry headlessRegistry = stack.GameplayBindings.RbxApi.Registry;
+                ActorContext actor = Actor("headless-unload-actor");
+                int authoredBefore = headlessRegistry.AuthoredCount;
+                runtime.LoadMod(actor, "headless-leaker", @"
+                    local folder = Instance.new('Folder')
+                    folder.Name = 'HeadlessLeak'
+                    folder.Parent = workspace", persistToStore: false);
+
+                Assert.IsNotNull(headlessRegistry.WorldRoot.FindFirstChild("HeadlessLeak"));
+                Assert.AreEqual(3, headlessRegistry.GetTeardownOwnedBy("headless-leaker").Count);
+                Assert.Greater(headlessRegistry.AuthoredCount, authoredBefore);
+
+                Assert.IsTrue(runtime.UnloadMod(actor, "headless-leaker"));
+
+                Assert.IsNull(headlessRegistry.WorldRoot.FindFirstChild("HeadlessLeak"));
+                Assert.AreEqual(0, headlessRegistry.GetTeardownOwnedBy("headless-leaker").Count);
+                Assert.AreEqual(authoredBefore, headlessRegistry.AuthoredCount);
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+            }
+        }
+
+        [Test]
         public void UnloadMod_DestroysInstancesTheModOwned()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
@@ -245,6 +282,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             GameObject hostGo = new("RbxWorldHost");
             RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            GameObject cameraGo = new("ProductionCamera");
+            Camera unityCamera = cameraGo.AddComponent<Camera>();
+            FieldInfo cameraField = typeof(RbxWorldHost).GetField(
+                "_camera", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(cameraField);
+            cameraField.SetValue(host, unityCamera);
             host.Initialize();
 
             ContainerBuilder builder = new();
@@ -269,8 +312,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                 Assert.AreEqual(actorA.ActorId, ownedRecord.OwnerActorId);
                 Assert.AreEqual(InstanceAccessScope.Owned, ownedRecord.AccessScope);
 
-                RbxInstance camera = host.Registry.WorldRoot.FindFirstChildOfClass("Camera");
-                Assert.IsTrue(host.Registry.TryGetRecord(camera.Id, out InstanceRecord cameraRecord));
+                RbxInstance rbxCamera = host.Registry.WorldRoot.FindFirstChildOfClass("Camera");
+                Assert.IsTrue(host.Registry.TryGetRecord(rbxCamera.Id, out InstanceRecord cameraRecord));
                 Assert.AreEqual(InstanceAccessScope.HostProtected, cameraRecord.AccessScope);
                 System.Exception writeError = Assert.Catch(() => runtime.LoadMod(
                     actorB,
@@ -285,11 +328,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
                     "production-camera-b",
                     "workspace.CurrentCamera.CFrame = CFrame.new(1, 2, 3)",
                     persistToStore: false));
+                Assert.IsInstanceOf<UnityCameraRig>(host.CameraRig);
+                Assert.AreEqual(0.28f, unityCamera.transform.position.x, Epsilon);
+                Assert.AreEqual(0.56f, unityCamera.transform.position.y, Epsilon);
+                Assert.AreEqual(-0.84f, unityCamera.transform.position.z, Epsilon);
             }
             finally
             {
                 container.Dispose();
                 Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(cameraGo);
                 Object.DestroyImmediate(hostGo);
             }
         }

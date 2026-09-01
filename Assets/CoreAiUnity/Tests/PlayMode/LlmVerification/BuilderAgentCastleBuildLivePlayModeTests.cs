@@ -163,7 +163,8 @@ namespace CoreAI.Tests.PlayMode
                     policy,
                     new CompositeRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    orchestratorSettings);
+                    orchestratorSettings,
+                    new LocalActorIdentityProvider("builder-castle-live-test"));
 
                 TestContext.WriteLine($"[BuilderCastle] Prompt: {Prompt}");
 

@@ -296,7 +296,8 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("crafting-memory-llm-unity-test"));
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,

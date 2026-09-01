@@ -71,7 +71,8 @@ namespace CoreAI.Tests.PlayMode
                 setup.MemoryStore,
                 setup.Policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new Authority.LocalActorIdentityProvider("agent-memory-real-model-test"));
 
             const int recallMaxAttempts = 2;
             string recallResult = null;

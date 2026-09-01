@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>9.0</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="C:/Program Files/Unity/Hub/Editor/6000.3.14f1/Editor/Data/Managed/UnityEngine/*.dll"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../CoreAI.Mods.csproj" />
+    <Reference Include="VContainer">
+      <HintPath>../../Library/ScriptAssemblies/VContainer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>C:/Program Files/Unity/Hub/Editor/6000.3.14f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Lua">
+      <HintPath>../../Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="MessagePipe">
+      <HintPath>../../Library/ScriptAssemblies/MessagePipe.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="MessagePipe.VContainer">
+      <HintPath>../../Library/ScriptAssemblies/MessagePipe.VContainer.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.AI">
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.AI.Abstractions">
+      <HintPath>../../Assets/Packages/Microsoft.Extensions.AI.Abstractions.10.7.0/lib/netstandard2.0/Microsoft.Extensions.AI.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Bcl.AsyncInterfaces">
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.AsyncInterfaces.10.0.9/lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Bcl.TimeProvider">
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.10.0.9/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../Library/PackageCache/com.unity.nuget.newtonsoft-json@4dfd81071c64/Runtime/Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

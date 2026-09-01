@@ -136,7 +136,10 @@ namespace CoreAI.Composition
             {
                 // WHY: Record metrics in-memory even without the logging sink, so the Hub's Statistics page can
                 // surface live completion/latency/per-role stats. Exposed AsSelf for that concrete resolve.
-                builder.Register<InMemoryAiOrchestrationMetrics>(Lifetime.Singleton)
+                // WHY the factory: the type also has a bounded-limits constructor, and VContainer picks the
+                // longest one — it then fails resolving its int parameters. CoreAI.Core references nothing,
+                // so [Inject] is unavailable there (gate G9); naming the constructor here is the fix.
+                builder.Register(_ => new InMemoryAiOrchestrationMetrics(), Lifetime.Singleton)
                     .AsImplementedInterfaces()
                     .AsSelf();
             }

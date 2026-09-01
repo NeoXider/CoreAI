@@ -353,7 +353,8 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                settings);
+                settings,
+                new LocalActorIdentityProvider("ai-attachment-live-test"));
         }
 
         // WHY: CoreAISettingsAsset has no public streaming setter; toggling the serialized field via reflection

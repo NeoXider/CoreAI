@@ -187,7 +187,7 @@ namespace CoreAI.Tests.PlayMode
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
                     settings,
-                    null, null, null);
+                    new LocalActorIdentityProvider("skill-tool-discovery-test"), null, null);
 
                 Debug.Log("[ToolDiscovery] ── Request: 'Enchant my iron sword with fire' ──");
 

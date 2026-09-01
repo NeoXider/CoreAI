@@ -1496,7 +1496,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(),
-                settings);
+                settings,
+                new LocalActorIdentityProvider("game-creation-benchmark"));
 
             Stopwatch sw = Stopwatch.StartNew();
             RunObservation obs = new();

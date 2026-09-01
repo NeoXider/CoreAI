@@ -181,6 +181,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
         }
 
         [Test]
+        public void RuntimePlayer_IsActorOwnedInfrastructureAndDoesNotIncreaseAuthoredCount()
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            RbxPlayers players = (RbxPlayers)game.GetService("Players");
+            int authoredBefore = registry.AuthoredCount;
+
+            RbxPlayer player = players.EnsureActor(registry, ActorId);
+
+            Assert.IsTrue(registry.TryGetRecord(player.Id, out InstanceRecord record));
+            Assert.IsTrue(record.IsRuntimeInfrastructure);
+            Assert.IsFalse(record.IsAuthoredContent);
+            Assert.AreEqual(authoredBefore, registry.AuthoredCount);
+            Assert.AreEqual(ActorId, record.OwnerActorId);
+            Assert.AreEqual(InstanceAccessScope.Owned, record.AccessScope);
+        }
+
+        [Test]
         public void RemoteFunction_PropagatesReturnPayloadAndReceiverError()
         {
             InstanceRegistry registry = new();

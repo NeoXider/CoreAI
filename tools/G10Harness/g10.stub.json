@@ -1,0 +1,9 @@
+{
+  "provider": {
+    "providerMode": "ScriptedStub",
+    "orchestratorConcurrency": 2,
+    "requestTimeoutSeconds": 120,
+    "stubLatencyMilliseconds": 100,
+    "temperature": 0.0
+  }
+}

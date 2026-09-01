@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using CoreAI.Demos.ProceduralMaterials;
 using NUnit.Framework;
 using UnityEngine;
@@ -95,6 +96,20 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             {
                 UnityEngine.Object.DestroyImmediate(root);
             }
+        }
+
+        [Test]
+        public void RealtimeProbe_CapturesGeneratedReflectionCards()
+        {
+            string builderPath = Path.Combine(Application.dataPath, "CoreAI.Demos",
+                "ProceduralMaterials", "Editor", "RbxProceduralMaterialsShowcaseBuilder.cs");
+            string scenePath = Path.Combine(Application.dataPath, "CoreAI.Demos",
+                "ProceduralMaterials", "ProceduralMaterialsShowcase.unity");
+            string builderSource = File.ReadAllText(builderPath);
+            string sceneSource = File.ReadAllText(scenePath);
+
+            StringAssert.Contains("probe.renderDynamicObjects = true;", builderSource);
+            StringAssert.Contains("m_RenderDynamicObjects: 1", sceneSource);
         }
 
         private static Camera CreateCamera(Transform parent, string name)

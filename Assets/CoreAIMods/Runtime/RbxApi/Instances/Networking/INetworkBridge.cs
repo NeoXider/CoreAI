@@ -156,14 +156,17 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     {
         RbxNetworkTopology Topology { get; }
 
+        /// <summary>Registered client actor ids; the authoritative server is never a client recipient.</summary>
         IReadOnlyList<string> ActorIds { get; }
 
         event Action<RbxNetworkEventMessage> EventReceived;
 
         event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived;
 
+        /// <summary>Registers a client actor as a remote recipient.</summary>
         void RegisterActor(string actorId);
 
+        /// <summary>Removes a client actor from remote delivery.</summary>
         void UnregisterActor(string actorId);
 
         void SendEvent(RbxNetworkEventMessage message);

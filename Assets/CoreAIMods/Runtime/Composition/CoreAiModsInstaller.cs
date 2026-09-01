@@ -209,7 +209,7 @@ namespace CoreAI.Composition
                 // idempotent.
                 {
                     Mods.Rbx.Instances.ModConnectionRegistry ownedConnections = rbxApi?.Connections;
-                    Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxHost?.Registry;
+                    Mods.Rbx.Instances.InstanceRegistry ownedRegistry = rbxApi?.Registry;
                     Logging.ILog teardownLog = c.ResolveOrDefault<Logging.ILog>();
                     luaCsStack.Runtime.ModTearingDown += (modId, reason) =>
                     {
@@ -288,13 +288,18 @@ namespace CoreAI.Composition
                 }
             });
 
-            builder.RegisterBuildCallback(container =>
+            // WHY: The explicit non-playing seam must not JIT a callback body containing Unity ECalls.
+            bool skipRuntimeStartupCallback = applicationIsPlayingProvider != null &&
+                                              !applicationIsPlayingProvider();
+            if (!skipRuntimeStartupCallback)
             {
-                try
+                builder.RegisterBuildCallback(container =>
                 {
-                    Logging.Log.Instance.Info(
-                        $"[CoreAI] CoreAiMods (Lua-CSharp): capability grant = {scriptCapabilities} " +
-                        $"(enableFullLuaAccess={enableFullLuaAccess})");
+                    try
+                    {
+                        Logging.Log.Instance.Info(
+                            $"[CoreAI] CoreAiMods (Lua-CSharp): capability grant = {scriptCapabilities} " +
+                            $"(enableFullLuaAccess={enableFullLuaAccess})");
 
                     bool applicationIsPlaying = applicationIsPlayingProvider != null
                         ? applicationIsPlayingProvider()
@@ -375,13 +380,14 @@ namespace CoreAI.Composition
                             RehydrateAndStartTicking();
                         }
                     }
-                }
-                catch (VContainerException)
-                {
-                    // Minimal containers (tests, headless tools) may omit the mod runtime; rehydration
-                    // is an additive convenience, not a requirement.
-                }
-            });
+                    }
+                    catch (VContainerException)
+                    {
+                        // Minimal containers (tests, headless tools) may omit the mod runtime; rehydration
+                        // is an additive convenience, not a requirement.
+                    }
+                });
+            }
 
             builder.RegisterBuildCallback(container =>
             {

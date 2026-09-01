@@ -124,6 +124,61 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task InGameChatPanel_TwoActors_CannotObserveClearOrConsumeEachOthersChatState()
+        {
+            StubLlmClient llm = new StubLlmClient();
+            ActorKeyedInGameLlmChatServiceFactory factory = CreateFactory(llm, 1);
+            IInGameLlmChatService legacySingleton = factory.Resolve(CreateActor("legacy-singleton"));
+            LocalActorIdentityProvider identityA = CreateIdentity("actor-a", "session-a");
+            LocalActorIdentityProvider identityB = CreateIdentity("actor-b", "session-b");
+            using IObjectResolver resolverA = CreatePanelResolver(factory, identityA, legacySingleton);
+            using IObjectResolver resolverB = CreatePanelResolver(factory, identityB, legacySingleton);
+
+            try
+            {
+                IInGameLlmChatService chatA = InGameChatPanel.ResolveCurrentActorChatService(
+                    resolverA, out ActorContext actorA, out IInGameLlmChatServiceFactory resolvedFactoryA);
+                IInGameLlmChatService chatB = InGameChatPanel.ResolveCurrentActorChatService(
+                    resolverB, out ActorContext actorB, out IInGameLlmChatServiceFactory resolvedFactoryB);
+
+                Assert.AreSame(factory, resolvedFactoryA);
+                Assert.AreSame(factory, resolvedFactoryB);
+                Assert.AreEqual("actor-a", actorA.ActorId);
+                Assert.AreEqual("actor-b", actorB.ActorId);
+                Assert.AreNotSame(legacySingleton, chatA);
+                Assert.AreNotSame(legacySingleton, chatB);
+                Assert.AreNotSame(chatA, chatB);
+
+                LlmCompletionResult firstA = await chatA.SendPlayerMessageAsync("message-a");
+                LlmCompletionResult blockedA = await chatA.SendPlayerMessageAsync("message-a-over-limit");
+
+                Assert.IsTrue(firstA.Ok);
+                Assert.IsFalse(blockedA.Ok);
+                Assert.AreEqual(1, chatA.HistoryPairCount);
+                Assert.AreEqual(0, chatB.HistoryPairCount);
+                Assert.AreEqual(0, chatB.GetRateLimiterMetrics().AcceptedInWindow);
+                Assert.AreEqual(0, chatB.GetRateLimiterMetrics().TotalRejected);
+
+                LlmCompletionResult firstB = await chatB.SendPlayerMessageAsync("message-b");
+                Assert.IsTrue(firstB.Ok);
+                Assert.AreEqual(1, chatA.HistoryPairCount);
+                Assert.AreEqual(1, chatB.HistoryPairCount);
+                Assert.AreEqual(1, chatB.GetRateLimiterMetrics().AcceptedInWindow);
+                Assert.AreEqual(0, chatB.GetRateLimiterMetrics().TotalRejected);
+
+                chatA.ClearHistory();
+
+                Assert.AreEqual(0, chatA.HistoryPairCount);
+                Assert.AreEqual(1, chatB.HistoryPairCount,
+                    "Actor A's shipped clear path must never clear actor B's history.");
+            }
+            finally
+            {
+                factory.Dispose();
+            }
+        }
+
+        [Test]
         public void RegisterCorePortable_DefaultSinglePlayerServiceResolvesFromFactory()
         {
             ContainerBuilder builder = new ContainerBuilder();
@@ -173,11 +228,17 @@ namespace CoreAI.Tests.EditMode
 
         private static IObjectResolver CreatePanelResolver(
             IInGameLlmChatServiceFactory factory,
-            IActorIdentityProvider identityProvider)
+            IActorIdentityProvider identityProvider,
+            IInGameLlmChatService legacySingleton = null)
         {
             ContainerBuilder builder = new ContainerBuilder();
             builder.RegisterInstance(factory);
             builder.RegisterInstance(identityProvider);
+            if (legacySingleton != null)
+            {
+                builder.RegisterInstance<IInGameLlmChatService>(legacySingleton);
+            }
+
             return builder.Build();
         }
 

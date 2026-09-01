@@ -9,6 +9,7 @@ using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Messaging;
 using NUnit.Framework;
 using CoreAI;
 using UnityEngine;
@@ -218,6 +219,81 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [Test]
+        public async Task OrchestrateAsync_ProductionComposition_ReconnectResumesOneDurableMemoryWithoutFork()
+        {
+            const string RoleId = "ReconnectMemoryRegression";
+            ReconnectingIdentityProvider identityProvider = new ReconnectingIdentityProvider(
+                "durable-reconnect-actor",
+                "session-before",
+                new AgentMemoryScope("legacy-a", "user-a", "connection-a", "topic-a"));
+            RecordingMemoryStore backingStore = new RecordingMemoryStore();
+            FixedMemoryScopeProvider legacyScopeProvider = new FixedMemoryScopeProvider();
+            ScopedAgentMemoryStoreDecorator memoryStore = new ScopedAgentMemoryStoreDecorator(
+                backingStore, legacyScopeProvider);
+            SequentialLlmClient llmClient = new SequentialLlmClient();
+            ContainerBuilder builder = new ContainerBuilder();
+            builder.RegisterInstance<IActorIdentityProvider>(identityProvider);
+            builder.RegisterInstance<ICoreAISettings>(new ProductionTestSettings());
+            builder.RegisterInstance<ILlmClient>(llmClient);
+            builder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
+            builder.RegisterInstance<IAiGameCommandSink>(new NoopCommandSink());
+            builder.RegisterInstance<IAgentSystemPromptProvider>(new StubPromptProvider());
+            builder.RegisterInstance<IAgentUserPromptTemplateProvider>(
+                new NoAgentUserPromptTemplateProvider());
+            builder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
+            builder.RegisterInstance(new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            builder.RegisterInstance<IAgentMemoryScopeProvider>(legacyScopeProvider);
+            builder.RegisterInstance<IAgentMemoryStore>(memoryStore);
+            builder.RegisterCorePortable(
+                suppressDefaultConversationSummaryStore: false,
+                suppressDefaultAgentMemoryStore: true);
+
+            using IObjectResolver container = builder.Build();
+            IAiOrchestrationService orchestrator = container.Resolve<IAiOrchestrationService>();
+            CoreAi.SetResolver(() => orchestrator);
+            try
+            {
+                AiTaskRequest firstRequest = new AiTaskRequest
+                {
+                    RoleId = RoleId,
+                    Hint = "first-turn"
+                };
+                Assert.AreEqual("reply-1", await CoreAi.OrchestrateAsync(firstRequest));
+                ActorContext firstActor = firstRequest.ActorContext.Value;
+
+                identityProvider.Reconnect(
+                    "session-after",
+                    new AgentMemoryScope("legacy-b", "user-b", "connection-b", "topic-b"));
+
+                AiTaskRequest secondRequest = new AiTaskRequest
+                {
+                    RoleId = RoleId,
+                    Hint = "second-turn"
+                };
+                Assert.AreEqual("reply-2", await CoreAi.OrchestrateAsync(secondRequest));
+                ActorContext secondActor = secondRequest.ActorContext.Value;
+
+                Assert.AreEqual(firstActor.ActorId, secondActor.ActorId);
+                Assert.AreNotEqual(firstActor.SessionId, secondActor.SessionId);
+                string durableKey = AgentMemoryScopeKey.Resolve(firstActor, RoleId);
+                Assert.AreEqual(durableKey, AgentMemoryScopeKey.Resolve(secondActor, RoleId));
+                CollectionAssert.AreEquivalent(new[] { durableKey }, backingStore.SeenKeys,
+                    "The production store must never fork a durable actor into a session-keyed memory.");
+
+                ChatMessage[] history = backingStore.GetChatHistory(durableKey);
+                Assert.AreEqual(4, history.Length);
+                StringAssert.Contains("first-turn", history[0].Content);
+                Assert.AreEqual("reply-1", history[1].Content);
+                StringAssert.Contains("second-turn", history[2].Content);
+                Assert.AreEqual("reply-2", history[3].Content);
+            }
+            finally
+            {
+                CoreAi.Invalidate();
+            }
+        }
+
         private sealed class TestStubOrchestrator : IAiOrchestrationService
         {
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
@@ -261,9 +337,29 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class SequentialLlmClient : ILlmClient
+        {
+            private int _callCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                int call = Interlocked.Increment(ref _callCount);
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = $"reply-{call}"
+                });
+            }
+        }
+
         private sealed class RecordingMemoryStore : IAgentMemoryStore
         {
             private readonly ConcurrentDictionary<string, byte> _seenKeys = new(StringComparer.Ordinal);
+            private readonly InMemoryAgentMemoryStore _inner = new InMemoryAgentMemoryStore();
+
+            public string[] SeenKeys => new List<string>(_seenKeys.Keys).ToArray();
 
             public bool HasSeen(string roleId)
             {
@@ -273,23 +369,25 @@ namespace CoreAI.Tests.EditMode
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {
                 Record(roleId);
-                state = null;
-                return false;
+                return _inner.TryLoad(roleId, out state);
             }
 
             public void Save(string roleId, AgentMemoryState state)
             {
                 Record(roleId);
+                _inner.Save(roleId, state);
             }
 
             public void Clear(string roleId)
             {
                 Record(roleId);
+                _inner.Clear(roleId);
             }
 
             public void ClearChatHistory(string roleId)
             {
                 Record(roleId);
+                _inner.ClearChatHistory(roleId);
             }
 
             public void AppendChatMessage(
@@ -299,18 +397,87 @@ namespace CoreAI.Tests.EditMode
                 bool persistToDisk = true)
             {
                 Record(roleId);
+                _inner.AppendChatMessage(roleId, role, content, persistToDisk);
             }
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
                 Record(roleId);
-                return Array.Empty<ChatMessage>();
+                return _inner.GetChatHistory(roleId, maxMessages);
             }
 
             private void Record(string roleId)
             {
                 _seenKeys.TryAdd(roleId ?? "", 0);
             }
+        }
+
+        private sealed class ReconnectingIdentityProvider : IActorIdentityProvider
+        {
+            private readonly string _actorId;
+            private LocalActorIdentityProvider _current;
+
+            public ReconnectingIdentityProvider(
+                string actorId,
+                string sessionId,
+                AgentMemoryScope memoryScope)
+            {
+                _actorId = actorId;
+                Reconnect(sessionId, memoryScope);
+            }
+
+            public ActorContext GetActorContext(string roleId)
+            {
+                return _current.GetActorContext(roleId);
+            }
+
+            public void Reconnect(string sessionId, AgentMemoryScope memoryScope)
+            {
+                _current = new LocalActorIdentityProvider(
+                    _actorId,
+                    sessionId,
+                    "world",
+                    ActorGrantSet.None,
+                    memoryScope);
+            }
+        }
+
+        private sealed class StubPromptProvider : IAgentSystemPromptProvider
+        {
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = "system";
+                return true;
+            }
+        }
+
+        private sealed class NoopCommandSink : IAiGameCommandSink
+        {
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
+        }
+
+        private sealed class ProductionTestSettings : ICoreAISettings
+        {
+            public int MaxLuaRepairRetries => 0;
+            public bool EnableMeaiDebugLogging => false;
+            public float LlmRequestTimeoutSeconds => 5f;
+            public int MaxLlmRequestRetries => 0;
+            public bool EnableHttpDebugLogging => false;
+            public bool LogTokenUsage => false;
+            public bool LogLlmLatency => false;
+            public bool LogLlmConnectionErrors => false;
+            public int ContextWindowTokens => 8192;
+            public string UniversalSystemPromptPrefix => "";
+            public float Temperature => 0f;
+            public int MaxToolCallRetries => 0;
+            public bool LogToolCalls => false;
+            public bool LogToolCallArguments => false;
+            public bool LogToolCallResults => false;
+            public bool LogMeaiToolCallingSteps => false;
+            public bool AllowDuplicateToolCalls => false;
+            public bool EnableStreaming => false;
         }
 
         private sealed class FixedMemoryScopeProvider : IAgentMemoryScopeProvider

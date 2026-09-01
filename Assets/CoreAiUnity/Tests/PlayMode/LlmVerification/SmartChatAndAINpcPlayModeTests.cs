@@ -333,7 +333,8 @@ namespace CoreAI.Tests.PlayMode
                     policy,
                     new CompositeRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
+                    ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                    new LocalActorIdentityProvider("ai-npc-memory-test"));
 
                 Debug.Log("[AINpc] Requesting NPC with memory tool...");
                 CoreAi.ClearToolCallHistory();
@@ -418,7 +419,8 @@ namespace CoreAI.Tests.PlayMode
                     new AgentMemoryPolicy(), // No tools
                     new AINpcResponsePolicy(),
                     new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
+                    ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                    new LocalActorIdentityProvider("ai-npc-chat-only-test"));
 
                 Debug.Log("[AINpc] Testing ChatOnly mode...");
                 Task t = orch.RunTaskAsync(new AiTaskRequest

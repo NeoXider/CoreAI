@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+using CoreAI.Composition;
 using Neo.Tools;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -72,6 +73,9 @@ namespace CoreAI.Demos.ProceduralMaterials
             ConfigureEnvironment(assets.Skybox);
 
             GameObject root = new GameObject("Rbx Material Judging Rig");
+            GameObject services = new GameObject("CoreAI Production Services");
+            services.transform.SetParent(root.transform, false);
+            services.AddComponent<CoreAILifetimeScope>();
             RbxProceduralMaterialsShowcase showcase =
                 root.AddComponent<RbxProceduralMaterialsShowcase>();
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -536,6 +540,7 @@ namespace CoreAI.Demos.ProceduralMaterials
             probe.clearFlags = ReflectionProbeClearFlags.Skybox;
             probe.hdr = true;
             probe.boxProjection = true;
+            probe.renderDynamicObjects = true;
             probe.resolution = 256;
             probe.intensity = 1f;
             probe.size = new Vector3(56f, 20f, 60f);

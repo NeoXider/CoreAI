@@ -398,7 +398,7 @@ namespace CoreAI.Mcp.Server
             call.Fail(new TimeoutException($"{reason}."));
         }
 
-        private McpToolRegistry BuildRegistry(IObjectResolver resolver)
+        internal McpToolRegistry BuildRegistry(IObjectResolver resolver)
         {
             resolver.TryResolve(out LuaTool.ILuaExecutor luaExecutor);
             resolver.TryResolve(out ILuaModRuntime modRuntime);

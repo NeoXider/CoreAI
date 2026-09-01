@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Rendering;
@@ -17,10 +18,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         private const int WoodValue = 512;
         private const int WoodPlanksValue = 528;
         private const int MarbleValue = 784;
+        private const int SlateValue = 800;
         private const int BrickValue = 848;
         private const int CobblestoneValue = 880;
+        private const int DiamondPlateValue = 1056;
         private const int MetalValue = 1088;
         private const int GrassValue = 1280;
+        private const int SandValue = 1296;
+        private const int FabricValue = 1312;
         private const int GroundValue = 1360;
         private const int LookupIterations = 4096;
         private const float ColorEpsilon = 1e-5f;
@@ -203,7 +208,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             string source = File.ReadAllText(path);
 
             StringAssert.Contains(
-                "pow(max(RbxValueNoise(position * 7.0), 0.0), 2.4)", source);
+                "pow(max(crystalNoise, 0.0), 2.4)", source);
             StringAssert.DoesNotContain("pow(RbxValueNoise(", source);
         }
 
@@ -270,17 +275,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 commonSource);
             StringAssert.Contains("return weights / weightSum;", commonSource);
             StringAssert.DoesNotContain("RbxProjectedUv", commonSource);
-            StringAssert.Contains("RbxBlendDiamondPlatePattern(position, weights)", commonSource);
+            StringAssert.Contains("RbxBlendDiamondPlatePattern(position, weights, diamond, treadEdge)",
+                commonSource);
             StringAssert.Contains("RbxBlendSlatePattern(position, weights", commonSource);
             StringAssert.Contains("RbxBlendCobblestonePattern(position, weights", commonSource);
             StringAssert.Contains("RbxBlendGrassPattern(position, weights", commonSource);
             StringAssert.Contains("RbxBlendSandPattern(position, weights", commonSource);
             StringAssert.Contains("RbxBlendGroundPattern(position, weights", commonSource);
-            StringAssert.Contains("RbxBlendFabricPattern(position, weights)", commonSource);
+            StringAssert.Contains("RbxBlendFabricPattern(position, weights, weave, weaveVisibility)",
+                commonSource);
             StringAssert.Contains("input.positionOS.xyz * RbxObjectAxisScale()", surfaceSource);
             StringAssert.Contains("RbxUsesObjectAlignedProjection(materialMode)", surfaceSource);
             StringAssert.Contains(
-                "return materialMode == 3 || materialMode == 5 || materialMode == 8 ||",
+                "return materialMode == 3 || materialMode == 4 || materialMode == 5 || materialMode == 8 ||",
                 commonSource);
             StringAssert.Contains(
                 "materialMode == 13 || materialMode == 14 || materialMode == 17;",
@@ -326,27 +333,161 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
-        public void MetalPattern_UsesProjectionIndependentVolumetricVariation()
+        public void MetalPattern_UsesFilteredDirectionalMachiningVariation()
         {
             string path = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
                 "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("float metalVariation = RbxFbm(position * 1.45", source);
-            StringAssert.Contains("float microVariation = RbxValueNoise(position * 10.0", source);
+            StringAssert.Contains("float metalVariation = RbxFbm(physicalPosition * 1.45", source);
+            StringAssert.Contains("RbxBlendDirectionalMachiningPattern(position, weights, 260.0",
+                source);
+            StringAssert.Contains("physicalPosition * 420.0", source);
             StringAssert.DoesNotContain("sin(uv.x * 34.0", source);
         }
 
         [Test]
         public void CorrectedMaterials_KeepIdentityAndTuningInRuntimeProvider()
         {
-            AssertProviderTuning("WoodPlanks", WoodPlanksValue, 3, 0.9f, 0.34f);
-            AssertProviderTuning("Metal", MetalValue, 4, 1f, 0.06f);
-            AssertProviderTuning("Marble", MarbleValue, 7, 0.48f, 0.11f);
-            AssertProviderTuning("Brick", BrickValue, 10, 0.8f, 0.42f);
-            AssertProviderTuning("Cobblestone", CobblestoneValue, 11, 1.15f, 0.48f);
-            AssertProviderTuning("Grass", GrassValue, 12, 0.9f, 0.38f);
-            AssertProviderTuning("Ground", GroundValue, 14, 0.78f, 0.44f);
+            AssertProviderTuning("WoodPlanks", WoodPlanksValue, 3, 5f, 0.34f);
+            AssertProviderTuning("Metal", MetalValue, 4, 1f, 0.15f);
+            AssertProviderTuning("Marble", MarbleValue, 7, 4f, 0.11f);
+            AssertProviderTuning("Brick", BrickValue, 10, 5.6f, 0.42f);
+            AssertProviderTuning("Cobblestone", CobblestoneValue, 11, 4f, 0.48f);
+            AssertProviderTuning("Grass", GrassValue, 12, 2f, 0.38f);
+            AssertProviderTuning("Ground", GroundValue, 14, 3f, 0.44f);
+            AssertProviderTuning("DiamondPlate", DiamondPlateValue, 5, 5f, 1f);
+            AssertProviderTuning("Fabric", FabricValue, 17, 6f, 0.28f);
+        }
+
+        [TestCase("Wood", WoodValue, 18f / (2f * Mathf.PI), 0.0291f)]
+        [TestCase("WoodPlanks", WoodPlanksValue, 1.35f, 0.1481f)]
+        [TestCase("Marble", MarbleValue, 2.15f / (2f * Mathf.PI), 0.7306f)]
+        [TestCase("Slate", SlateValue, 13f / (2f * Mathf.PI), 0.0806f)]
+        [TestCase("Brick", BrickValue, 1.28f, 0.1395f)]
+        [TestCase("Cobblestone", CobblestoneValue, 1.35f, 0.1852f)]
+        [TestCase("DiamondPlate", DiamondPlateValue, 1.35f, 0.1481f)]
+        [TestCase("Metal", MetalValue, 260f, 0.00385f)]
+        [TestCase("Grass", GrassValue, 3.2f, 0.1563f)]
+        [TestCase("Sand", SandValue, 7.5f / (2f * Mathf.PI), 0.1047f)]
+        [TestCase("Fabric", FabricValue, 42f / (2f * Mathf.PI), 0.0249f)]
+        [TestCase("Ground", GroundValue, 1.18f, 0.2825f)]
+        public void StructuredPatterns_ExposeCalibratedPhysicalFeatureSize(string name, int value,
+            float repeatsPerPatternUnit, float expectedFeatureMeters)
+        {
+            RbxMaterialId id = new RbxMaterialId(name, value);
+            bool mapped = _provider.TryGetMaterial(in id, out Material material);
+
+            Assert.IsTrue(mapped, id.ToString());
+            float actualFeatureMeters = 1f /
+                                        (material.GetFloat("_PatternScale") * repeatsPerPatternUnit);
+            Assert.That(actualFeatureMeters,
+                Is.EqualTo(expectedFeatureMeters).Within(0.0006f), id.ToString());
+        }
+
+        [TestCase("WoodPlanks", WoodPlanksValue, 1.35f, 4f, 8f)]
+        [TestCase("Brick", BrickValue, 1.28f, 4f, 8f)]
+        [TestCase("Cobblestone", CobblestoneValue, 1.55f, 4f, 8f)]
+        [TestCase("Grass", GrassValue, 4.7f, 6f, 10f)]
+        [TestCase("Fabric", FabricValue, 42f / (2f * Mathf.PI), 20f, 40f)]
+        public void CharacteristicPatterns_StayReadableAcrossThreeStudFace(string name, int value,
+            float repeatsPerPatternUnit, float minimumCountAcross, float maximumCountAcross)
+        {
+            const float faceMeters = 3f * 0.28f;
+            RbxMaterialId id = new RbxMaterialId(name, value);
+            bool mapped = _provider.TryGetMaterial(in id, out Material material);
+
+            Assert.IsTrue(mapped, id.ToString());
+            float featureCountAcross = faceMeters * material.GetFloat("_PatternScale")
+                                       * repeatsPerPatternUnit;
+            Assert.That(featureCountAcross, Is.InRange(minimumCountAcross, maximumCountAcross),
+                id.ToString());
+        }
+
+        [Test]
+        public void PriorityRoughnessAndFiltering_AreIndependentAndFootprintAware()
+        {
+            string root = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials");
+            string commonSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralCommon.hlsl"));
+            string noiseSource = File.ReadAllText(Path.Combine(root, "RbxNoiseShader.hlsl"));
+
+            StringAssert.Contains("float RbxPixelFootprint(float3 position)", commonSource);
+            StringAssert.Contains("float2 RbxUvFootprint(float2 uv)", commonSource);
+            StringAssert.Contains("fwidth(position)", commonSource);
+            StringAssert.Contains("fwidth(uv)", commonSource);
+            StringAssert.Contains("RbxFilteredInsideMask", commonSource);
+            StringAssert.Contains("RbxFilteredWave", commonSource);
+            StringAssert.Contains("RbxCompensateUnresolvedRoughness", commonSource);
+            StringAssert.Contains("physicalPosition * 220.0", commonSource);
+            StringAssert.Contains("physicalPosition * 240.0", commonSource);
+            StringAssert.Contains("physicalPosition * 280.0", commonSource);
+            StringAssert.Contains("physicalPosition * 320.0", commonSource);
+            StringAssert.Contains("physicalPosition * 420.0", commonSource);
+            StringAssert.Contains("physicalPosition * 650.0", commonSource);
+            StringAssert.Contains(
+                "RbxFilteredInsideMask(diamondDistance, 0.28, 0.06, distanceFootprint)",
+                commonSource);
+            StringAssert.Contains("float RbxSimplexOctaveVisibility(float footprint)", noiseSource);
+            StringAssert.Contains("UNITY_BRANCH if (visibility > 0.0)", noiseSource);
+            StringAssert.Contains("float normalVisibility = 1.0 - smoothstep", commonSource);
+        }
+
+        [Test]
+        public void PatternScaleContract_IsConsumedByEveryProceduralShaderFamily()
+        {
+            string root = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials");
+            string surfaceSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralSurface.shader"));
+            string neonSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralNeon.shader"));
+            string transparentSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralTransparent.shader"));
+
+            StringAssert.Contains("materialMode, _PatternScale, baseColor", surfaceSource);
+            StringAssert.Contains("input.positionWS * (_PatternScale * 3.2)", neonSource);
+            StringAssert.Contains("float3 patternPosition = input.positionWS * _PatternScale;",
+                transparentSource);
+            StringAssert.Contains("RbxTransparentHeight(patternPosition, materialMode)",
+                transparentSource);
+        }
+
+        [Test]
+        public void MetalModes_UseNearOneMetallicColoredResponse()
+        {
+            string path = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
+            string source = File.ReadAllText(path);
+
+            Assert.That(Regex.Matches(source, "sample\\.metallic = 1\\.0h;").Count,
+                Is.GreaterThanOrEqualTo(2));
+            StringAssert.Contains("sample.albedo = baseColor", source);
+            StringAssert.Contains("sample.metallic = saturate(sample.metallic);", source);
+            StringAssert.Contains("if (sample.metallic < 0.5h)", source);
+        }
+
+        [TestCase("Plastic", 256, 0.08f)]
+        [TestCase("SmoothPlastic", 272, 0.08f)]
+        [TestCase("Metal", MetalValue, 0.08f)]
+        [TestCase("Fabric", FabricValue, 0.08f)]
+        [TestCase("Brick", BrickValue, 0.75f)]
+        [TestCase("Grass", GrassValue, 0.7f)]
+        [TestCase("Sand", SandValue, 0.45f)]
+        [TestCase("Ground", GroundValue, 0.65f)]
+        public void CalibratedPalette_DefaultSaturationStaysWithinPhysicalLimit(string name,
+            int value, float maximumSaturation)
+        {
+            RbxMaterialId id = new RbxMaterialId(name, value);
+            bool mapped = _provider.TryGetMaterial(in id, out Material material);
+
+            Assert.IsTrue(mapped, id.ToString());
+            Color.RGBToHSV(material.GetColor("_MaterialColor"), out float hue,
+                out float saturation, out float brightness);
+            Assert.That(saturation, Is.LessThanOrEqualTo(maximumSaturation), id.ToString());
+            Assert.That(brightness, Is.InRange(0.2f, 0.9f), id.ToString());
+            Assert.That(hue, Is.InRange(0f, 1f), id.ToString());
         }
 
         [Test]
@@ -362,7 +503,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             StringAssert.Contains("void RbxGroundPattern", source);
             StringAssert.Contains("float pebbleRadius", source);
             StringAssert.Contains("void RbxCobblestonePattern", source);
-            StringAssert.Contains("stoneMask = 1.0 - smoothstep(0.82, 1.0, stoneDistance);", source);
+            StringAssert.Contains(
+                "stoneMask = RbxFilteredInsideMask(stoneDistance, 0.91, 0.09, distanceFootprint);",
+                source);
             StringAssert.DoesNotContain("float bladeA = 0.5 + 0.5 * sin", source);
         }
 

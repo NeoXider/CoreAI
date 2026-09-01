@@ -105,15 +105,20 @@ namespace CoreAI.Presentation.PlayerChat
         internal void ResolveCurrentActorChat(IObjectResolver resolver)
         {
             ReleaseCurrentActorChat();
-            IActorIdentityProvider identityProvider = resolver.Resolve<IActorIdentityProvider>();
-            ActorContext actor = identityProvider.GetActorContext(BuiltInAgentRoleIds.SmartChat);
-            IInGameLlmChatServiceFactory factory = resolver.Resolve<IInGameLlmChatServiceFactory>();
-            IInGameLlmChatService chat = factory.Resolve(actor);
-
-            _chatActor = actor;
-            _chatFactory = factory;
-            _chat = chat;
+            _chat = ResolveCurrentActorChatService(resolver, out _chatActor, out _chatFactory);
             _hasChatActor = true;
+        }
+
+        /// <summary>Resolves the actor-owned service through the same boundary used by a live panel.</summary>
+        internal static IInGameLlmChatService ResolveCurrentActorChatService(
+            IObjectResolver resolver,
+            out ActorContext actor,
+            out IInGameLlmChatServiceFactory factory)
+        {
+            IActorIdentityProvider identityProvider = resolver.Resolve<IActorIdentityProvider>();
+            actor = identityProvider.GetActorContext(BuiltInAgentRoleIds.SmartChat);
+            factory = resolver.Resolve<IInGameLlmChatServiceFactory>();
+            return factory.Resolve(actor);
         }
 
         /// <summary>Currently bound actor-owned service.</summary>

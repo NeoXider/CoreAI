@@ -462,7 +462,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
             instance.Attach(this, id);
             string resolvedOwnerActorId = isRuntimeInfrastructure
-                ? null
+                ? (string.IsNullOrWhiteSpace(ownerActorId) ? null : ownerActorId.Trim())
                 : ResolveOwnerActorId(ownerModId, originTag, ownerActorId);
             InstanceAccessScope resolvedAccessScope = accessScope
                 ?? (isRuntimeInfrastructure
