@@ -55,9 +55,21 @@ float3 RbxObjectAxisScale()
         length(mul(objectToWorld, float3(0.0, 0.0, 1.0))));
 }
 
-float3 RbxTriplanarWeights(float3 normal)
+bool RbxUsesObjectAlignedProjection(int materialMode)
 {
-    float3 weights = pow(saturate(abs(normal)), 4.0);
+    return materialMode == 3 || materialMode == 5 || materialMode == 8 ||
+        materialMode == 10 || materialMode == 11 || materialMode == 12 ||
+        materialMode == 13 || materialMode == 14 || materialMode == 17;
+}
+
+static const float RBX_AXIS_BLEND_WIDTH = 0.10;
+
+float3 RbxNarrowAxisWeights(float3 geometricNormal)
+{
+    float3 absoluteNormal = saturate(abs(geometricNormal));
+    float dominantComponent = max(absoluteNormal.x, max(absoluteNormal.y, absoluteNormal.z));
+    float3 componentDelta = dominantComponent.xxx - absoluteNormal;
+    float3 weights = 1.0 - smoothstep(0.0, RBX_AXIS_BLEND_WIDTH, componentDelta);
     float weightSum = max(weights.x + weights.y + weights.z, 0.0001);
     return weights / weightSum;
 }
@@ -68,22 +80,6 @@ void RbxPatternProjectionUvs(float3 position, out float2 uvX, out float2 uvY, ou
     uvX = position.zy;
     uvY = position.xz;
     uvZ = position.xy;
-}
-
-float2 RbxProjectedUv(float3 position, float3 normal)
-{
-    float3 absoluteNormal = abs(normal);
-    if (absoluteNormal.y >= absoluteNormal.x && absoluteNormal.y >= absoluteNormal.z)
-    {
-        return position.xz;
-    }
-
-    if (absoluteNormal.x >= absoluteNormal.z)
-    {
-        return position.zy;
-    }
-
-    return position.xy;
 }
 
 float RbxCellEdge(float2 cell)
@@ -196,6 +192,356 @@ void RbxGroundPattern(float2 uv, out float cracks, out float pebble,
     pebbleTone = RbxHash31(float3(pebbleCell, 211.0));
 }
 
+void RbxBlendWoodPlankPattern(float3 position, float3 weights, out float seam, out float grain,
+    out float plankTone)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    seam = 0.0;
+    grain = 0.0;
+    plankTone = 0.0;
+
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        float axisSeam;
+        float axisGrain;
+        float axisTone;
+        RbxWoodPlankPattern(uvX, 0.0, axisSeam, axisGrain, axisTone);
+        seam += axisSeam * weights.x;
+        grain += axisGrain * weights.x;
+        plankTone += axisTone * weights.x;
+    }
+
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        float axisSeam;
+        float axisGrain;
+        float axisTone;
+        RbxWoodPlankPattern(uvY, 7.0, axisSeam, axisGrain, axisTone);
+        seam += axisSeam * weights.y;
+        grain += axisGrain * weights.y;
+        plankTone += axisTone * weights.y;
+    }
+
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        float axisSeam;
+        float axisGrain;
+        float axisTone;
+        RbxWoodPlankPattern(uvZ, 13.0, axisSeam, axisGrain, axisTone);
+        seam += axisSeam * weights.z;
+        grain += axisGrain * weights.z;
+        plankTone += axisTone * weights.z;
+    }
+}
+
+void RbxBlendBrickPattern(float3 position, float3 weights, out float mortar, out float brickTone)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    mortar = 0.0;
+    brickTone = 0.0;
+
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        float axisMortar;
+        float axisTone;
+        RbxBrickPattern(uvX, 0.0, axisMortar, axisTone);
+        mortar += axisMortar * weights.x;
+        brickTone += axisTone * weights.x;
+    }
+
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        float axisMortar;
+        float axisTone;
+        RbxBrickPattern(uvY, 7.0, axisMortar, axisTone);
+        mortar += axisMortar * weights.y;
+        brickTone += axisTone * weights.y;
+    }
+
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        float axisMortar;
+        float axisTone;
+        RbxBrickPattern(uvZ, 13.0, axisMortar, axisTone);
+        mortar += axisMortar * weights.z;
+        brickTone += axisTone * weights.z;
+    }
+}
+
+void RbxBlendCobblestonePattern(float3 position, float3 weights, out float stoneMask,
+    out float stoneDome, out float stoneTone)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    stoneMask = 0.0;
+    stoneDome = 0.0;
+    stoneTone = 0.0;
+
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        float axisMask;
+        float axisDome;
+        float axisTone;
+        RbxCobblestonePattern(uvX, 0.0, axisMask, axisDome, axisTone);
+        stoneMask += axisMask * weights.x;
+        stoneDome += axisDome * weights.x;
+        stoneTone += axisTone * weights.x;
+    }
+
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        float axisMask;
+        float axisDome;
+        float axisTone;
+        RbxCobblestonePattern(uvY, 7.0, axisMask, axisDome, axisTone);
+        stoneMask += axisMask * weights.y;
+        stoneDome += axisDome * weights.y;
+        stoneTone += axisTone * weights.y;
+    }
+
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        float axisMask;
+        float axisDome;
+        float axisTone;
+        RbxCobblestonePattern(uvZ, 13.0, axisMask, axisDome, axisTone);
+        stoneMask += axisMask * weights.z;
+        stoneDome += axisDome * weights.z;
+        stoneTone += axisTone * weights.z;
+    }
+}
+
+float RbxDiamondPlatePattern(float2 uv)
+{
+    float2 plateCell = frac(uv * 1.35) - 0.5;
+    float2 diamondCoordinates = float2(plateCell.x + plateCell.y, plateCell.x - plateCell.y);
+    return 1.0 - smoothstep(0.22, 0.34,
+        max(abs(diamondCoordinates.x), abs(diamondCoordinates.y)));
+}
+
+float RbxSlatePattern(float2 uv, float broadNoise)
+{
+    return 0.5 + 0.5 * sin((uv.y + broadNoise * 0.42) * 13.0);
+}
+
+void RbxGrassPattern(float2 uv, float grassField, out float bladeMask, out float bladeRidge,
+    out float bladeTone)
+{
+    float2 grassUv = uv + float2(grassField - 0.5, 0.5 - grassField) * 0.08;
+    float3 bladeA = RbxGrassBladeLayer(grassUv, 3.2, 5.0);
+    float2 rotatedUv = float2(grassUv.x * 0.819 - grassUv.y * 0.574,
+        grassUv.x * 0.574 + grassUv.y * 0.819);
+    float3 bladeB = RbxGrassBladeLayer(rotatedUv + float2(4.3, 7.1), 4.7, 71.0);
+    bladeMask = saturate(max(bladeA.x, bladeB.x * 0.92));
+    bladeRidge = saturate(max(bladeA.y, bladeB.y * 0.86));
+    bladeTone = max(bladeA.z * bladeA.x, bladeB.z * bladeB.x);
+}
+
+float RbxSandPattern(float2 uv, float broadNoise)
+{
+    return 0.5 + 0.5 * sin(uv.x * 7.5 + sin(uv.y * 1.9) * 1.4 + broadNoise * 2.0);
+}
+
+float RbxFabricPattern(float2 uv)
+{
+    float warp = 0.5 + 0.5 * sin(uv.x * 42.0);
+    float weft = 0.5 + 0.5 * sin(uv.y * 42.0 + 1.5708);
+    return warp * 0.52 + weft * 0.48;
+}
+
+float RbxBlendDiamondPlatePattern(float3 position, float3 weights)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    float diamond = 0.0;
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        diamond += RbxDiamondPlatePattern(uvX) * weights.x;
+    }
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        diamond += RbxDiamondPlatePattern(uvY) * weights.y;
+    }
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        diamond += RbxDiamondPlatePattern(uvZ) * weights.z;
+    }
+    return diamond;
+}
+
+float RbxBlendSlatePattern(float3 position, float3 weights, float broadNoise)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    float strata = 0.0;
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        strata += RbxSlatePattern(uvX, broadNoise) * weights.x;
+    }
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        strata += RbxSlatePattern(uvY, broadNoise) * weights.y;
+    }
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        strata += RbxSlatePattern(uvZ, broadNoise) * weights.z;
+    }
+    return strata;
+}
+
+void RbxBlendGrassPattern(float3 position, float3 weights, float grassField,
+    out float bladeMask, out float bladeRidge, out float bladeTone)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    bladeMask = 0.0;
+    bladeRidge = 0.0;
+    bladeTone = 0.0;
+
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        float axisMask;
+        float axisRidge;
+        float axisTone;
+        RbxGrassPattern(uvX, grassField, axisMask, axisRidge, axisTone);
+        bladeMask += axisMask * weights.x;
+        bladeRidge += axisRidge * weights.x;
+        bladeTone += axisTone * weights.x;
+    }
+
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        float axisMask;
+        float axisRidge;
+        float axisTone;
+        RbxGrassPattern(uvY, grassField, axisMask, axisRidge, axisTone);
+        bladeMask += axisMask * weights.y;
+        bladeRidge += axisRidge * weights.y;
+        bladeTone += axisTone * weights.y;
+    }
+
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        float axisMask;
+        float axisRidge;
+        float axisTone;
+        RbxGrassPattern(uvZ, grassField, axisMask, axisRidge, axisTone);
+        bladeMask += axisMask * weights.z;
+        bladeRidge += axisRidge * weights.z;
+        bladeTone += axisTone * weights.z;
+    }
+}
+
+float RbxBlendSandPattern(float3 position, float3 weights, float broadNoise)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    float ripple = 0.0;
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        ripple += RbxSandPattern(uvX, broadNoise) * weights.x;
+    }
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        ripple += RbxSandPattern(uvY, broadNoise) * weights.y;
+    }
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        ripple += RbxSandPattern(uvZ, broadNoise) * weights.z;
+    }
+    return ripple;
+}
+
+void RbxBlendGroundPattern(float3 position, float3 weights, out float cracks, out float pebble,
+    out float plateTone, out float pebbleTone)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    cracks = 0.0;
+    pebble = 0.0;
+    plateTone = 0.0;
+    pebbleTone = 0.0;
+
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        float axisCracks;
+        float axisPebble;
+        float axisPlateTone;
+        float axisPebbleTone;
+        RbxGroundPattern(uvX, axisCracks, axisPebble, axisPlateTone, axisPebbleTone);
+        cracks += axisCracks * weights.x;
+        pebble += axisPebble * weights.x;
+        plateTone += axisPlateTone * weights.x;
+        pebbleTone += axisPebbleTone * weights.x;
+    }
+
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        float axisCracks;
+        float axisPebble;
+        float axisPlateTone;
+        float axisPebbleTone;
+        RbxGroundPattern(uvY, axisCracks, axisPebble, axisPlateTone, axisPebbleTone);
+        cracks += axisCracks * weights.y;
+        pebble += axisPebble * weights.y;
+        plateTone += axisPlateTone * weights.y;
+        pebbleTone += axisPebbleTone * weights.y;
+    }
+
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        float axisCracks;
+        float axisPebble;
+        float axisPlateTone;
+        float axisPebbleTone;
+        RbxGroundPattern(uvZ, axisCracks, axisPebble, axisPlateTone, axisPebbleTone);
+        cracks += axisCracks * weights.z;
+        pebble += axisPebble * weights.z;
+        plateTone += axisPlateTone * weights.z;
+        pebbleTone += axisPebbleTone * weights.z;
+    }
+}
+
+float RbxBlendFabricPattern(float3 position, float3 weights)
+{
+    float2 uvX;
+    float2 uvY;
+    float2 uvZ;
+    RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+    float weave = 0.0;
+    UNITY_BRANCH if (weights.x > 0.0)
+    {
+        weave += RbxFabricPattern(uvX) * weights.x;
+    }
+    UNITY_BRANCH if (weights.y > 0.0)
+    {
+        weave += RbxFabricPattern(uvY) * weights.y;
+    }
+    UNITY_BRANCH if (weights.z > 0.0)
+    {
+        weave += RbxFabricPattern(uvZ) * weights.z;
+    }
+    return weave;
+}
+
 half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partColorInfluence)
 {
     half3 partModulation = lerp(half3(1.0h, 1.0h, 1.0h),
@@ -208,7 +554,6 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
 {
     RbxSurfaceSample sample;
     float3 position = patternPosition * patternScale;
-    float2 uv = RbxProjectedUv(position, patternNormal);
     float broadNoise = RbxFbm(position * 0.72);
     float detailNoise = RbxValueNoise(position * 5.3);
     sample.albedo = baseColor;
@@ -246,26 +591,11 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 3)
     {
-        float2 uvX;
-        float2 uvY;
-        float2 uvZ;
-        RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
-        float seamX;
-        float seamY;
-        float seamZ;
-        float grainX;
-        float grainY;
-        float grainZ;
-        float toneX;
-        float toneY;
-        float toneZ;
-        RbxWoodPlankPattern(uvX, 0.0, seamX, grainX, toneX);
-        RbxWoodPlankPattern(uvY, 7.0, seamY, grainY, toneY);
-        RbxWoodPlankPattern(uvZ, 13.0, seamZ, grainZ, toneZ);
-        float3 weights = RbxTriplanarWeights(patternNormal);
-        float seam = dot(weights, float3(seamX, seamY, seamZ));
-        float grain = dot(weights, float3(grainX, grainY, grainZ));
-        float plankTone = dot(weights, float3(toneX, toneY, toneZ));
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float seam;
+        float grain;
+        float plankTone;
+        RbxBlendWoodPlankPattern(position, weights, seam, grain, plankTone);
         sample.albedo = lerp(baseColor * lerp(0.5h, 1.12h, grain) * plankTone,
             baseColor * 0.18h, seam);
         sample.smoothness = lerp(0.28h, 0.08h, seam);
@@ -284,10 +614,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 5)
     {
-        float2 plateCell = frac(uv * 1.35) - 0.5;
-        float2 diamondCoordinates = float2(plateCell.x + plateCell.y, plateCell.x - plateCell.y);
-        float diamond = 1.0 - smoothstep(0.22, 0.34,
-            max(abs(diamondCoordinates.x), abs(diamondCoordinates.y)));
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float diamond = RbxBlendDiamondPlatePattern(position, weights);
         float machining = 0.88 + RbxValueNoise(position * 7.0) * 0.15;
         sample.albedo = baseColor * machining * lerp(0.64h, 1.2h, diamond);
         sample.metallic = 0.98h;
@@ -332,7 +660,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 8)
     {
-        float strata = 0.5 + 0.5 * sin((uv.y + broadNoise * 0.42) * 13.0);
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float strata = RbxBlendSlatePattern(position, weights, broadNoise);
         float split = smoothstep(0.82, 0.96, strata);
         sample.albedo = baseColor * (0.48h + broadNoise * 0.48h) * lerp(1.0h, 0.48h, split);
         sample.smoothness = 0.22h + broadNoise * 0.1h;
@@ -353,22 +682,10 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 10)
     {
-        float2 uvX;
-        float2 uvY;
-        float2 uvZ;
-        RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
-        float mortarX;
-        float mortarY;
-        float mortarZ;
-        float toneX;
-        float toneY;
-        float toneZ;
-        RbxBrickPattern(uvX, 0.0, mortarX, toneX);
-        RbxBrickPattern(uvY, 7.0, mortarY, toneY);
-        RbxBrickPattern(uvZ, 13.0, mortarZ, toneZ);
-        float3 weights = RbxTriplanarWeights(patternNormal);
-        float mortar = dot(weights, float3(mortarX, mortarY, mortarZ));
-        float brickTone = dot(weights, float3(toneX, toneY, toneZ));
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float mortar;
+        float brickTone;
+        RbxBlendBrickPattern(position, weights, mortar, brickTone);
         half3 brickColor = baseColor * brickTone * (0.83h + detailNoise * 0.23h);
         half3 mortarColor = lerp(baseColor * 0.34h, half3(0.42h, 0.4h, 0.36h), 0.52h);
         sample.albedo = lerp(brickColor, mortarColor, mortar);
@@ -378,26 +695,11 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 11)
     {
-        float2 uvX;
-        float2 uvY;
-        float2 uvZ;
-        RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
-        float maskX;
-        float maskY;
-        float maskZ;
-        float domeX;
-        float domeY;
-        float domeZ;
-        float toneX;
-        float toneY;
-        float toneZ;
-        RbxCobblestonePattern(uvX, 0.0, maskX, domeX, toneX);
-        RbxCobblestonePattern(uvY, 7.0, maskY, domeY, toneY);
-        RbxCobblestonePattern(uvZ, 13.0, maskZ, domeZ, toneZ);
-        float3 weights = RbxTriplanarWeights(patternNormal);
-        float stoneMask = dot(weights, float3(maskX, maskY, maskZ));
-        float stoneDome = dot(weights, float3(domeX, domeY, domeZ));
-        float stoneTone = dot(weights, float3(toneX, toneY, toneZ));
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float stoneMask;
+        float stoneDome;
+        float stoneTone;
+        RbxBlendCobblestonePattern(position, weights, stoneMask, stoneDome, stoneTone);
         half3 jointColor = baseColor * 0.2h;
         half3 stoneColor = baseColor * stoneTone * (0.9h + broadNoise * 0.18h);
         sample.albedo = lerp(jointColor, stoneColor, stoneMask);
@@ -408,15 +710,11 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     else if (materialMode == 12)
     {
         float4 grassField = RbxSimplexFbmGrad(position * 0.48 + float3(5.0, 17.0, 31.0));
-        float2 grassUv = uv + float2(grassField.w - 0.5,
-            0.5 - grassField.w) * 0.08;
-        float3 bladeA = RbxGrassBladeLayer(grassUv, 3.2, 5.0);
-        float2 rotatedUv = float2(grassUv.x * 0.819 - grassUv.y * 0.574,
-            grassUv.x * 0.574 + grassUv.y * 0.819);
-        float3 bladeB = RbxGrassBladeLayer(rotatedUv + float2(4.3, 7.1), 4.7, 71.0);
-        float bladeMask = saturate(max(bladeA.x, bladeB.x * 0.92));
-        float bladeRidge = saturate(max(bladeA.y, bladeB.y * 0.86));
-        float bladeTone = max(bladeA.z * bladeA.x, bladeB.z * bladeB.x);
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float bladeMask;
+        float bladeRidge;
+        float bladeTone;
+        RbxBlendGrassPattern(position, weights, grassField.w, bladeMask, bladeRidge, bladeTone);
         float clumps = saturate(grassField.w * 0.78 + broadNoise * 0.22);
         half3 thatchColor = baseColor * (0.27h + clumps * 0.12h);
         half3 bladeColor = baseColor * (0.74h + clumps * 0.36h + bladeTone * 0.28h);
@@ -429,7 +727,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 13)
     {
-        float ripple = 0.5 + 0.5 * sin(uv.x * 7.5 + sin(uv.y * 1.9) * 1.4 + broadNoise * 2.0);
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float ripple = RbxBlendSandPattern(position, weights, broadNoise);
         float grains = RbxValueNoise(position * 12.0);
         sample.albedo = baseColor * (0.72h + ripple * 0.22h + grains * 0.14h);
         sample.smoothness = 0.18h;
@@ -439,11 +738,12 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     else if (materialMode == 14)
     {
         float4 earthField = RbxSimplexFbmGrad(position * 0.5 + float3(37.0, 11.0, 23.0));
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
         float cracks;
         float pebble;
         float plateTone;
         float pebbleTone;
-        RbxGroundPattern(uv, cracks, pebble, plateTone, pebbleTone);
+        RbxBlendGroundPattern(position, weights, cracks, pebble, plateTone, pebbleTone);
         half3 earthColor = baseColor
             * (0.72h + earthField.w * 0.16h + plateTone * 0.16h);
         half3 crackColor = baseColor * 0.22h;
@@ -480,9 +780,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 17)
     {
-        float warp = 0.5 + 0.5 * sin(uv.x * 42.0);
-        float weft = 0.5 + 0.5 * sin(uv.y * 42.0 + 1.5708);
-        float weave = warp * 0.52 + weft * 0.48;
+        float3 weights = RbxNarrowAxisWeights(patternNormal);
+        float weave = RbxBlendFabricPattern(position, weights);
         sample.albedo = baseColor * (0.68h + weave * 0.42h);
         sample.smoothness = 0.2h;
         sample.occlusion = 0.82h + weave * 0.16h;
@@ -490,7 +789,7 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else
     {
-        float invalidPattern = step(0.5, frac((uv.x + uv.y) * 2.0));
+        float invalidPattern = step(0.5, frac(dot(position, float3(1.0, 0.73, 1.31)) * 2.0));
         sample.albedo = lerp(half3(0.03h, 0.0h, 0.03h), half3(1.0h, 0.0h, 0.8h), invalidPattern);
         sample.smoothness = 0.15h;
         sample.occlusion = 1.0h;

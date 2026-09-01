@@ -11,7 +11,10 @@
     "CoreAI.RbxApi.Instances",
     "CoreAI.Mods.Hub",
     "CoreAI.Hub.UI",
-    "VContainer"
+    "VContainer",
+    "Neo.Tools.Move",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

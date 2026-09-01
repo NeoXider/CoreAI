@@ -11,7 +11,7 @@ minimal scripts, and a README.
 | [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua mods (`ILuaModRuntime`): hooks, timers, events, store, capability tiers; `LuaCsLogicSlots` — overriding the damage formula from Lua | No |
 | [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | AI command pipeline: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (the same path used by LLM agents and Lua bindings) | No |
 | [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: skill catalog, `read_skill` / `call_skill_tool`, a "game master" agent with crafting and combat | Yes |
-| [Procedural Materials](ProceduralMaterials/README.md) | `ProceduralMaterials/ProceduralMaterialsShowcase.unity` (generated) | Labelled PBR grid of all runtime Rbx materials plus the visible fallback | No |
+| [Material Judging Rig](ProceduralMaterials/README.md) | `ProceduralMaterials/ProceduralMaterialsShowcase.unity` (generated) | Neutral reflection studio with selectable shapes/scales, fixed views, Glass/Ice backdrop, Neon-only bloom, and the full Rbx catalog | No |
 | [Qwen Genie](QwenDemo/README.md) | `QwenDemo/QwenGenieDemo.unity` | Qwen 0.8B maps a free-form wish to one guarded native tool call | Yes |
 | [Qwen Spellcraft](QwenDemo/README.md) | `QwenDemo/QwenSpellcraftDemo.unity` | Qwen 0.8B maps free-form spell text to element/power; C# owns mana and determinism self-test | Yes |
 | [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **A real LLM changes mechanics live through chat**: the Programmer role writes Lua → `execute_lua` pipeline → logic slots / `LuaModRuntime` / world commands | Yes |

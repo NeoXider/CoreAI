@@ -4,6 +4,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Spatial;
 using UnityEngine;
@@ -32,11 +33,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         public Mvp1AcceptanceMemoryStore Store { get; }
 
-        public Mvp1AcceptanceWorld(float metersPerStud = RbxSpace.DefaultMetersPerStud)
+        public Mvp1AcceptanceWorld(float metersPerStud = RbxSpace.DefaultMetersPerStud,
+            IRbxMaterialProvider<Material> materialProvider = null)
         {
             RbxSpace.ResetForTests(metersPerStud);
             Root = new GameObject("Mvp1AcceptanceRoot");
-            Binder = new InstanceGameObjectBinder(Root.transform);
+            Binder = new InstanceGameObjectBinder(Root.transform,
+                materialProvider: materialProvider);
             Registry = new InstanceRegistry(null, Binder);
             Game = DataModelBootstrap.CreateGame(Registry);
             Bindings = new LuaCsRbxApiBindings(Registry, Game, partSink: Binder);

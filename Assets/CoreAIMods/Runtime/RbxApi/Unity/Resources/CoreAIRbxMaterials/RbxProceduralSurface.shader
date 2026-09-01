@@ -97,19 +97,20 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 int materialMode = (int)round(_MaterialMode);
-                float3 baseNormalWS = normalize(input.normalWS);
-                bool objectAlignedProjection = materialMode == 3 || materialMode == 10;
+                float3 geometricNormalWS = normalize(input.normalWS);
+                float3 geometricNormalAligned = normalize(input.normalAligned);
+                bool objectAlignedProjection = RbxUsesObjectAlignedProjection(materialMode);
                 float3 patternPosition = objectAlignedProjection
                     ? input.positionAligned
                     : input.positionWS;
-                float3 patternNormal = objectAlignedProjection
-                    ? normalize(input.normalAligned)
-                    : baseNormalWS;
+                float3 geometricPatternNormal = objectAlignedProjection
+                    ? geometricNormalAligned
+                    : geometricNormalWS;
                 half3 baseColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
                     _PartColorInfluence);
-                RbxSurfaceSample procedural = RbxEvaluateSurface(patternPosition, patternNormal,
-                    materialMode, _PatternScale, baseColor);
-                float3 normalWS = RbxPerturbNormal(input.positionWS, baseNormalWS,
+                RbxSurfaceSample procedural = RbxEvaluateSurface(patternPosition,
+                    geometricPatternNormal, materialMode, _PatternScale, baseColor);
+                float3 normalWS = RbxPerturbNormal(input.positionWS, geometricNormalWS,
                     procedural.heightGradient, objectAlignedProjection, _PatternScale,
                     _BumpStrength, procedural.height);
 

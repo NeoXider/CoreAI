@@ -122,14 +122,44 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 return normalize(normalWS - tangentWS * tangentSlope - bitangentWS * bitangentSlope);
             }
 
+            float RbxForceFieldLattice(float2 uv)
+            {
+                float diagonalA = abs(sin((uv.x + uv.y) * 7.0 + _Time.y * 2.4));
+                float diagonalB = abs(sin((uv.x - uv.y) * 6.0 - _Time.y * 1.7));
+                return smoothstep(0.78, 0.98, max(diagonalA, diagonalB));
+            }
+
+            float RbxBlendedForceFieldLattice(float3 position, float3 weights)
+            {
+                float2 uvX;
+                float2 uvY;
+                float2 uvZ;
+                RbxPatternProjectionUvs(position, uvX, uvY, uvZ);
+                float lattice = 0.0;
+                UNITY_BRANCH if (weights.x > 0.0)
+                {
+                    lattice += RbxForceFieldLattice(uvX) * weights.x;
+                }
+                UNITY_BRANCH if (weights.y > 0.0)
+                {
+                    lattice += RbxForceFieldLattice(uvY) * weights.y;
+                }
+                UNITY_BRANCH if (weights.z > 0.0)
+                {
+                    lattice += RbxForceFieldLattice(uvZ) * weights.z;
+                }
+                return lattice;
+            }
+
             half4 RbxTransparentFragment(Varyings input) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 int materialMode = (int)round(_MaterialMode);
-                float3 normalWS = normalize(input.normalWS);
+                float3 geometricNormalWS = normalize(input.normalWS);
+                float3 normalWS = geometricNormalWS;
                 half3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(input.positionWS));
-                half fresnel = pow(1.0h - saturate(dot(normalWS, viewDirectionWS)), 3.0h);
+                half fresnel = pow(1.0h - saturate(dot(geometricNormalWS, viewDirectionWS)), 3.0h);
                 half3 materialColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
                     _PartColorInfluence);
                 half materialAlpha = saturate(_Color.a * _MaterialColor.a);
@@ -139,10 +169,9 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                     float3 animatedPosition = input.positionWS * _PatternScale +
                         float3(_Time.y * 0.18, -_Time.y * 0.34, _Time.y * 0.12);
                     float energyNoise = RbxFbm(animatedPosition * 1.6);
-                    float2 energyUv = RbxProjectedUv(animatedPosition, normalWS);
-                    float diagonalA = abs(sin((energyUv.x + energyUv.y) * 7.0 + _Time.y * 2.4));
-                    float diagonalB = abs(sin((energyUv.x - energyUv.y) * 6.0 - _Time.y * 1.7));
-                    float lattice = smoothstep(0.78, 0.98, max(diagonalA, diagonalB));
+                    float3 projectionWeights = RbxNarrowAxisWeights(geometricNormalWS);
+                    float lattice = RbxBlendedForceFieldLattice(animatedPosition,
+                        projectionWeights);
                     float scan = 0.5 + 0.5 * sin(dot(animatedPosition, float3(1.4, 2.1, 0.9)) * 3.0);
                     half alpha = materialAlpha *
                         (0.08h + fresnel * 0.34h + lattice * 0.24h + scan * 0.08h);

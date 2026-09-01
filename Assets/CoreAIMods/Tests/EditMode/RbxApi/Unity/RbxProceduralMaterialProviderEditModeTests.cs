@@ -250,7 +250,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
-        public void ProjectionSensitivePatterns_UseObjectAlignedWorldUnitTriplanarCoordinates()
+        public void ProjectionSensitivePatterns_UseNarrowGeometricNormalAxisBlending()
         {
             string commonPath = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
                 "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
@@ -262,10 +262,67 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             StringAssert.Contains("uvX = position.zy;", commonSource);
             StringAssert.Contains("uvY = position.xz;", commonSource);
             StringAssert.Contains("uvZ = position.xy;", commonSource);
-            StringAssert.Contains("float3 weights = pow(saturate(abs(normal)), 4.0);", commonSource);
+            StringAssert.Contains("static const float RBX_AXIS_BLEND_WIDTH = 0.10;", commonSource);
+            StringAssert.Contains("float3 componentDelta = dominantComponent.xxx - absoluteNormal;",
+                commonSource);
+            StringAssert.Contains(
+                "float3 weights = 1.0 - smoothstep(0.0, RBX_AXIS_BLEND_WIDTH, componentDelta);",
+                commonSource);
             StringAssert.Contains("return weights / weightSum;", commonSource);
+            StringAssert.DoesNotContain("RbxProjectedUv", commonSource);
+            StringAssert.Contains("RbxBlendDiamondPlatePattern(position, weights)", commonSource);
+            StringAssert.Contains("RbxBlendSlatePattern(position, weights", commonSource);
+            StringAssert.Contains("RbxBlendCobblestonePattern(position, weights", commonSource);
+            StringAssert.Contains("RbxBlendGrassPattern(position, weights", commonSource);
+            StringAssert.Contains("RbxBlendSandPattern(position, weights", commonSource);
+            StringAssert.Contains("RbxBlendGroundPattern(position, weights", commonSource);
+            StringAssert.Contains("RbxBlendFabricPattern(position, weights)", commonSource);
             StringAssert.Contains("input.positionOS.xyz * RbxObjectAxisScale()", surfaceSource);
-            StringAssert.Contains("materialMode == 3 || materialMode == 10", surfaceSource);
+            StringAssert.Contains("RbxUsesObjectAlignedProjection(materialMode)", surfaceSource);
+            StringAssert.Contains(
+                "return materialMode == 3 || materialMode == 5 || materialMode == 8 ||",
+                commonSource);
+            StringAssert.Contains(
+                "materialMode == 13 || materialMode == 14 || materialMode == 17;",
+                commonSource);
+        }
+
+        [Test]
+        public void ProjectionAxes_UseGeometricNormalsBeforeReliefPerturbation()
+        {
+            string root = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials");
+            string texturedSource = File.ReadAllText(Path.Combine(root,
+                "RbxTexturedSurface.shader"));
+            string surfaceSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralSurface.shader"));
+            string transparentSource = File.ReadAllText(Path.Combine(root,
+                "RbxProceduralTransparent.shader"));
+
+            int texturedProjection = texturedSource.IndexOf(
+                "float3 projectionWeights = RbxNarrowAxisWeights(geometricNormalAligned);",
+                StringComparison.Ordinal);
+            int texturedPerturbation = texturedSource.IndexOf(
+                "float3 normalWS = normalize(mappedNormalWS);", StringComparison.Ordinal);
+            Assert.That(texturedProjection, Is.GreaterThanOrEqualTo(0));
+            Assert.That(texturedPerturbation, Is.GreaterThan(texturedProjection));
+            StringAssert.DoesNotContain("RbxNarrowAxisWeights(normalWS)", texturedSource);
+
+            int proceduralProjection = surfaceSource.IndexOf(
+                "geometricPatternNormal, materialMode", StringComparison.Ordinal);
+            int proceduralPerturbation = surfaceSource.IndexOf(
+                "float3 normalWS = RbxPerturbNormal", StringComparison.Ordinal);
+            Assert.That(proceduralProjection, Is.GreaterThanOrEqualTo(0));
+            Assert.That(proceduralPerturbation, Is.GreaterThan(proceduralProjection));
+            StringAssert.DoesNotContain(
+                "RbxEvaluateSurface(patternPosition, normalWS", surfaceSource);
+
+            int forceFieldProjection = transparentSource.IndexOf(
+                "RbxNarrowAxisWeights(geometricNormalWS)", StringComparison.Ordinal);
+            int transparentPerturbation = transparentSource.IndexOf(
+                "normalWS = RbxTransparentNormal", StringComparison.Ordinal);
+            Assert.That(forceFieldProjection, Is.GreaterThanOrEqualTo(0));
+            Assert.That(transparentPerturbation, Is.GreaterThan(forceFieldProjection));
         }
 
         [Test]

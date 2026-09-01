@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Rendering;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
 using UnityEngine;
@@ -36,6 +37,8 @@ namespace CoreAI.Mods.Rbx.Binding
     {
         private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
         private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+        private static readonly int NeutralDefaultPartColorPropertyId =
+            Shader.PropertyToID("_NeutralDefaultPartColor");
 
         // WHY: Unity has no wedge primitive, so we author one normalized to 1 unit = 1 stud (the
         // only stud-authored asset the scale rule allows, §2) and share the single mesh across all
@@ -57,6 +60,7 @@ namespace CoreAI.Mods.Rbx.Binding
             };
 
         private readonly Transform _worldParent;
+        private readonly IRbxMaterialProvider<Material> _materialProvider;
         private readonly Dictionary<InstanceId, BindingEntry> _bindings = new();
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
@@ -102,11 +106,15 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>Backing objects parent under <paramref name="worldParent"/> (the host that
         /// represents game/DataModel; null = scene root). <paramref name="log"/> receives the
-        /// materialization diagnostics; null falls back to the process-wide CoreAI logger.</summary>
-        public InstanceGameObjectBinder(Transform worldParent = null, ILog log = null)
+        /// materialization diagnostics; null falls back to the process-wide CoreAI logger.
+        /// <paramref name="materialProvider"/> is swappable; null selects the hybrid
+        /// texture/procedural runtime catalog.</summary>
+        public InstanceGameObjectBinder(Transform worldParent = null, ILog log = null,
+            IRbxMaterialProvider<Material> materialProvider = null)
         {
             _worldParent = worldParent;
             _log = log;
+            _materialProvider = materialProvider ?? new RbxTextureMaterialProvider();
         }
 
         /// <summary>Re-points diagnostics at the composition-scoped logger after construction, so a
@@ -361,6 +369,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Color = color;
+            properties.ColorWasExplicitlySet = true;
             Store(id, properties, PartAspect.Appearance);
         }
 
@@ -392,8 +401,6 @@ namespace CoreAI.Mods.Rbx.Binding
             Store(id, properties, PartAspect.Full);
         }
 
-        // TODO: MVP2 — resolve through IRbxMaterialProvider once the URP catalog lands; until then
-        // the state round-trips through PartProperties and every part keeps the default material.
         public void SetMaterial(InstanceId id, in RbxMaterialId material)
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
@@ -506,7 +513,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         // ---- Property application (the D2-allowed conversion call sites) --------------------
 
-        private static void Apply(BindingEntry entry, in PartProperties properties)
+        private void Apply(BindingEntry entry, in PartProperties properties)
         {
             ApplyShape(entry, properties.Shape);
             ApplyTransform(entry, properties);
@@ -829,7 +836,7 @@ namespace CoreAI.Mods.Rbx.Binding
             return _defaultMaterial;
         }
 
-        private static void ApplyAppearance(BindingEntry entry, in PartProperties properties)
+        private void ApplyAppearance(BindingEntry entry, in PartProperties properties)
         {
             Renderer renderer = entry.Renderer;
             if (renderer == null)
@@ -837,11 +844,20 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            _materialProvider.TryGetMaterial(in properties.Material, out Material sharedMaterial);
+            renderer.sharedMaterial = sharedMaterial;
+
             // WHY: MaterialPropertyBlock avoids per-part material instantiation (edit-mode
             // safe, no leaks); both _Color and _BaseColor are set so BiRP and URP shaders read
             // the same value. The block is reused off the entry so no alloc per write.
             float alpha = 1f - Mathf.Clamp01(properties.Transparency);
-            Color color = new(properties.Color.R, properties.Color.G, properties.Color.B, alpha);
+            bool materialUsesNeutralDefault = sharedMaterial != null &&
+                                              sharedMaterial.HasProperty(
+                                                  NeutralDefaultPartColorPropertyId) &&
+                                              sharedMaterial.GetFloat(
+                                                  NeutralDefaultPartColorPropertyId) > 0.5f;
+            RbxColor3 tint = properties.ResolveRenderTint(materialUsesNeutralDefault);
+            Color color = new(tint.R, tint.G, tint.B, alpha);
             MaterialPropertyBlock block = entry.PropertyBlock ??= new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);
             block.SetColor(ColorPropertyId, color);

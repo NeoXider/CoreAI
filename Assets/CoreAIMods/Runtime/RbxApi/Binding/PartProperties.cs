@@ -24,6 +24,10 @@ namespace CoreAI.Mods.Rbx.Binding
 
         public RbxColor3 Color;
 
+        /// <summary>True after a caller explicitly assigns Part.Color. Rendering uses this to
+        /// distinguish Roblox's stored default color from an authored texture's neutral tint.</summary>
+        public bool ColorWasExplicitlySet;
+
         /// <summary>True = no Rigidbody on the backing object (static geometry).</summary>
         public bool Anchored;
 
@@ -41,6 +45,15 @@ namespace CoreAI.Mods.Rbx.Binding
             set => CFrame = RbxCFrame.FromPosition(value) * CFrame.Rotation;
         }
 
+        /// <summary>Returns white for an untouched color when the resolved material owns its
+        /// albedo, otherwise returns the stored Roblox Part.Color tint.</summary>
+        public RbxColor3 ResolveRenderTint(bool materialUsesNeutralDefault)
+        {
+            return materialUsesNeutralDefault && !ColorWasExplicitlySet
+                ? new RbxColor3(1f, 1f, 1f)
+                : Color;
+        }
+
         /// <summary>Roblox Part defaults: Block, Plastic, 4x1x2 studs, medium stone grey,
         /// opaque, collidable.</summary>
         public static PartProperties CreateDefault()
@@ -52,6 +65,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 CFrame = RbxCFrame.Identity,
                 Size = new RbxVector3(4f, 1f, 2f),
                 Color = RbxColor3.FromRGB(163f, 162f, 165f),
+                ColorWasExplicitlySet = false,
                 Anchored = false,
                 Transparency = 0f,
                 CanCollide = true

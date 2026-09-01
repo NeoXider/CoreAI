@@ -41,6 +41,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Color = color;
+            properties.ColorWasExplicitlySet = true;
             _properties[id] = properties;
         }
 

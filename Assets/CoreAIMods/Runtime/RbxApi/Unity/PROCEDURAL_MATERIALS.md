@@ -42,6 +42,14 @@ an exposed noise field. Marble uses broad domain-warped primary ribbons, soft ha
 instead of high-power scratch lines. Their scale, bump strength, palette, mode, and shared handle remain
 owned by the runtime provider.
 
+All physical directionally projected procedural patterns use object-aligned, world-size coordinates and
+a narrow `0.10` normal-component transition rather than a hard dominant-axis switch or broad three-way
+blend. Projection weights use only the interpolated geometric normal and are resolved before
+`RbxPerturbNormal`; normally one pattern plane is evaluated, two are evaluated within about 4.1 degrees
+of either side of a 45-degree boundary, and three are evaluated only near triple-axis junctions.
+Three-dimensional noise modes and the visible fallback do not select a projection axis. ForceField keeps
+its intentionally world-animated coordinates but uses the same narrow geometric-normal transition.
+
 All procedural noise has a fixed instruction count and the shaders target shader model 3.0. Fragment
 derivatives used by the opaque surface pass are available on the WebGL 2 target. There are no compute
 passes, geometry/tessellation stages, texture dependencies, dynamic loops, or thread/blocking paths,
