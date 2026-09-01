@@ -1,10 +1,16 @@
 # Rbx material judging rig
 
-This demo compares all 22 runtime `Enum.Material` mappings plus the visible fallback under one
+This demo compares all 45 runtime `Enum.Material` mappings plus the visible invalid-id fallback under one
 controlled URP setup. It uses the same process-wide `RbxTextureMaterialProvider` hybrid handles as a
 built player: six entries use their CC0 PBR sets and the others delegate to
 `RbxProceduralMaterialProvider`. Every judging sample starts with the same neutral-white `Part.Color`;
 the rig does not brighten, recolour, or otherwise compensate the texture data.
+
+The public Lua enum contains 45 items and every item has a runtime render mapping. The catalog includes
+opaque, metallic, organic, terrain, transparent, force-field, air/water, and recent Roblox surface
+families. `CoreAiRbxMaterial_FALLBACK_UNMAPPED` is reserved for invalid or mismatched ids. An exhaustive
+EditMode acceptance test assigns every item through public Lua `BasePart.Material`, assigns an independent
+`Part.Color` to the same part, and rejects missing, unsupported, error-shader, or fallback handles.
 
 ## Build the scene
 
@@ -40,6 +46,18 @@ Enter Play Mode to use the non-IMGUI controls shown in each camera:
 - `4`: Glass/Ice backdrop;
 - `5`: Neon-only HDR bloom;
 - `Space`: pause/resume the mid/far sweep.
+
+For deterministic player/WebGL evidence, run this after the scene is visible:
+
+```javascript
+unityInstance.SendMessage("Rbx Material Judging Rig", "DumpMaterialApiEvidence");
+```
+
+The console must contain 46 ordered `MATERIAL slot=NN/46` records: 45 with `mapped=true` and
+`fallback=false`, followed by the explicit diagnostic slot with `mapped=false` and `fallback=true`.
+Every record must say `supported=true result=PASS`; the terminal line must be exactly
+`MATERIAL_CATALOG complete slots=46 mapped=45 fallback=1 failures=0 result=PASS`. The driver restores
+the previously selected material after collecting evidence.
 
 Judge stable highlights, correlation between colour/roughness/normal/metalness, seams across curved and
 edged shapes, texture stability on the turntable, retained identity at grazing angles, and shimmer as

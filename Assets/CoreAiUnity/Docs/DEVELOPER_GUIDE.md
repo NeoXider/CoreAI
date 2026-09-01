@@ -782,6 +782,19 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 **Simplify:**
 - For CI: the no-symbol `core` configuration or a stub profile, plus mandatory Edit Mode runs for all four module combinations.
 - For an “integration” branch: separate manual job with HTTP env and a time cap.
+- For WebGL demo QA, build the exact demo-scene matrix into a fresh player and opt in to the
+  external harness with `?coreai-external-driver=1`. The persistent
+  `CoreAiChatExternalDriver` accepts
+  `unityInstance.SendMessage('CoreAiChatExternalDriver', 'LoadScene', '<scene path or name>')` only
+  for scenes present in that player. After every load, call `DumpUnsupportedShaders`; treat scenes
+  omitted from the player as an evidence gap rather than inferring WebGL compatibility from Editor.
+- The repository's `CoreAIG11WebGlBuild` entry point freezes all 15 first-party demo scenes into its
+  WebGL QA player even though the normal product Build Settings intentionally keep only the three
+  primary entry scenes. Update its ordered scene regression whenever the published demo inventory
+  changes.
+- The external driver is absent without the opt-in flag, rejects empty or non-build scene names,
+  survives scene changes without duplicating itself, and logs both requested and completed scene
+  identity. This makes the browser harness reusable without exposing a shipping navigation API.
 
 ---
 

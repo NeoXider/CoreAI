@@ -2015,6 +2015,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaCs_LogicSlots_RbxSchedulerLoadKeepsOwnerStateAfterStartupCoroutineEnds()
+        {
+            LuaCsRbxApiBindings rbxApi = new();
+            LuaCsModStack stack = BuildMutationStack(rbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("scheduler-formula");
+
+            stack.Runtime.LoadMod(
+                "scheduler-owner",
+                "logic_define('scheduler-formula', function(value) return value * 2 end)");
+
+            Assert.IsTrue(slots.TryInvokeNumber(
+                "scheduler-formula", out double value, 21d), slots.LastError);
+            Assert.AreEqual(42d, value);
+        }
+
+        [Test]
         public void LuaCs_LogicSlots_ReloadDropsOldFormula_AndKeepsTheReplacementsOwn()
         {
             MemoryStore store = new();

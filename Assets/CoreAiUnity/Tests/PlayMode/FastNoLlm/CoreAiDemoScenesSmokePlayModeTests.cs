@@ -1,6 +1,9 @@
 #if UNITY_EDITOR
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.RegularExpressions;
+using CoreAI.Chat;
 using CoreAI.Composition;
 using NUnit.Framework;
 using CoreAI.Infrastructure.Llm;
@@ -18,20 +21,6 @@ namespace CoreAI.Tests.PlayMode
         private bool _previousIgnoreFailingMessages;
         private CoreAISettingsAsset _sharedSettings;
         private string _sharedSettingsSnapshotJson;
-
-        private static readonly string[] ScenePaths =
-        {
-            "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
-            "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
-            "Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity",
-            "Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",
-            "Assets/CoreAI.Demos/LiveMechanicsMods/WaveAutoBattlerModsDemo.unity",
-            "Assets/CoreAI.Demos/LuaMods/LuaModsDemo.unity",
-            "Assets/CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity",
-            "Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity",
-            "Assets/CoreAI.Demos/Skills/SkillsDemo.unity",
-            "Assets/CoreAI.Demos/WorldCommands/WorldCommandsDemo.unity"
-        };
 
         [UnityTest]
         public IEnumerator AllPublishedDemoScenes_LoadWithScopeCameraAndSupportedShaders()
@@ -76,9 +65,15 @@ namespace CoreAI.Tests.PlayMode
             _capture = capture;
             Application.logMessageReceived += capture;
 
-            foreach (string scenePath in ScenePaths)
+            IReadOnlyList<string> scenePaths = FindFirstPartyDemoScenePaths();
+            Assert.AreEqual(
+                15,
+                scenePaths.Count,
+                "Published first-party demo inventory changed; update the G11 build matrix and QA evidence.");
+            foreach (string scenePath in scenePaths)
             {
                 currentScene = scenePath;
+                AssertSerializedAssetReferencesResolve(scenePath);
                 Scene scene = EditorSceneManager.LoadSceneInPlayMode(
                     scenePath,
                     new LoadSceneParameters(LoadSceneMode.Single));
@@ -97,22 +92,113 @@ namespace CoreAI.Tests.PlayMode
                              FindObjectsInactive.Include,
                              FindObjectsSortMode.None))
                 {
-                    Material material = renderer.sharedMaterial;
-                    if (material == null)
+                    Material[] materials = renderer.sharedMaterials;
+                    for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
                     {
-                        continue;
+                        AssertMaterialSupported(
+                            materials[materialIndex],
+                            $"Renderer '{renderer.name}' material slot {materialIndex}",
+                            scenePath);
                     }
+                }
 
-                    Assert.IsNotNull(material.shader,
-                        $"Renderer '{renderer.name}' has a missing shader in {scenePath}.");
-                    Assert.IsTrue(material.shader.isSupported,
-                        $"Renderer '{renderer.name}' uses unsupported shader '{material.shader.name}' in {scenePath}.");
+                foreach (UnityEngine.UI.Graphic graphic in Object.FindObjectsByType<UnityEngine.UI.Graphic>(
+                             FindObjectsInactive.Include,
+                             FindObjectsSortMode.None))
+                {
+                    AssertMaterialSupported(
+                        graphic.material,
+                        $"UI Graphic '{graphic.name}'",
+                        scenePath);
                 }
             }
 
             CleanupLogCapture();
             Assert.IsEmpty(unexpectedErrors,
                 "Published demos emitted unexpected errors:\n" + string.Join("\n\n", unexpectedErrors));
+        }
+
+        private static void AssertMaterialSupported(
+            Material material,
+            string owner,
+            string scenePath)
+        {
+            Assert.IsNotNull(material, $"{owner} has a missing material in {scenePath}.");
+            if (material == null)
+            {
+                return;
+            }
+
+            Assert.IsNotNull(material.shader, $"{owner} has a missing shader in {scenePath}.");
+            if (material.shader == null)
+            {
+                return;
+            }
+
+            Assert.AreNotEqual(
+                "Hidden/InternalErrorShader",
+                material.shader.name,
+                $"{owner} resolves to Unity's error shader in {scenePath}.");
+            Assert.IsTrue(
+                material.shader.isSupported,
+                $"{owner} uses unsupported shader '{material.shader.name}' in {scenePath}.");
+        }
+
+        private static IReadOnlyList<string> FindFirstPartyDemoScenePaths()
+        {
+            string[] sceneGuids = AssetDatabase.FindAssets(
+                "t:Scene",
+                new[] { "Assets/CoreAI.Demos" });
+            List<string> scenePaths = new(sceneGuids.Length + 1);
+            for (int index = 0; index < sceneGuids.Length; index++)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(sceneGuids[index]);
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    scenePaths.Add(path);
+                }
+            }
+
+            scenePaths.Add("Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity");
+            scenePaths.Sort(System.StringComparer.Ordinal);
+            return scenePaths;
+        }
+
+        private static void AssertSerializedAssetReferencesResolve(string scenePath)
+        {
+            string yaml = File.ReadAllText(Path.GetFullPath(scenePath));
+            MatchCollection matches = Regex.Matches(
+                yaml,
+                @"guid:\s*([0-9a-fA-F]{32}),\s*type:\s*3");
+            HashSet<string> checkedGuids = new(System.StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < matches.Count; index++)
+            {
+                string guid = matches[index].Groups[1].Value;
+                if (!checkedGuids.Add(guid))
+                {
+                    continue;
+                }
+
+                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                Assert.IsFalse(
+                    string.IsNullOrEmpty(assetPath),
+                    $"Demo scene has a missing serialized asset GUID {guid}: {scenePath}");
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ExternalDriver_RejectsSceneMissingFromPlayerBuild()
+        {
+            Scene activeBefore = SceneManager.GetActiveScene();
+            GameObject driverObject = new(CoreAiChatExternalDriver.DriverObjectName + "_Test");
+            CoreAiChatExternalDriver driver = driverObject.AddComponent<CoreAiChatExternalDriver>();
+
+            driver.LoadScene("__coreai_missing_scene__");
+            yield return null;
+
+            Assert.AreEqual(activeBefore, SceneManager.GetActiveScene());
+            Object.Destroy(driverObject);
+            yield return null;
         }
 
         [TearDown]

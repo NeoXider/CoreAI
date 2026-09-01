@@ -11,6 +11,7 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
 using UnityEngine;
+using VContainer;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
@@ -211,6 +212,12 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
+                if (!LocalModelPlatformSupport.IsSupported(Application.platform))
+                {
+                    LocalModelPlatformSupport.LogUnavailableOnce(Application.platform);
+                    return false;
+                }
+
                 CoreAISettingsAsset? settings = ResolveSettings();
                 if (settings == null)
                 {
@@ -239,6 +246,11 @@ namespace CoreAI
         public static string[] GetLlmUnityModelFileNames()
         {
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            if (!LocalModelPlatformSupport.IsSupported(Application.platform))
+            {
+                return Array.Empty<string>();
+            }
+
             try
             {
                 LlmUnityModelBootstrap.EnsureModelEntriesLoaded();
@@ -583,8 +595,7 @@ namespace CoreAI
                                      ?? GameLoggerUnscopedFallback.Instance;
                 IAgentMemoryStore? memoryStore =
                     scope.Container.Resolve(typeof(IAgentMemoryStore)) as IAgentMemoryStore;
-                ILlmAgentProvider? agentProvider =
-                    scope.Container.Resolve(typeof(ILlmAgentProvider)) as ILlmAgentProvider;
+                scope.Container.TryResolve<ILlmAgentProvider>(out ILlmAgentProvider agentProvider);
                 ILog log = scope.Container.Resolve(typeof(ILog)) as ILog ?? Log.Instance;
 
                 ILlmClient rebuilt = LlmPipelineInstaller.BuildRoutedPrimaryClient(

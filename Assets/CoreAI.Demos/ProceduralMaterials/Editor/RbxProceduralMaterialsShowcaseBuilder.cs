@@ -28,7 +28,7 @@ namespace CoreAI.Demos.ProceduralMaterials
         private const string SoftboxPath = GeneratedRoot + "/Softbox.mat";
         private const string FixedVolumePath = GeneratedRoot + "/FixedExposureTonemapping.asset";
         private const string NeonVolumePath = GeneratedRoot + "/NeonBloomOnly.asset";
-        private const int CatalogColumns = 6;
+        private const int CatalogColumns = 9;
         private const float CatalogColumnSpacing = 4.1f;
         private const float CatalogRowSpacing = 4.1f;
 
@@ -41,21 +41,46 @@ namespace CoreAI.Demos.ProceduralMaterials
             new SwatchSpec("Glass", 1568, PrimitiveType.Sphere),
             new SwatchSpec("Wood", 512, PrimitiveType.Cylinder),
             new SwatchSpec("WoodPlanks", 528, PrimitiveType.Cube),
-            new SwatchSpec("Metal", 1088, PrimitiveType.Sphere),
-            new SwatchSpec("DiamondPlate", 1056, PrimitiveType.Cube),
-            new SwatchSpec("CorrodedMetal", 1040, PrimitiveType.Sphere),
             new SwatchSpec("Marble", 784, PrimitiveType.Sphere),
+            new SwatchSpec("Basalt", 788, PrimitiveType.Cube),
             new SwatchSpec("Slate", 800, PrimitiveType.Cube),
+            new SwatchSpec("CrackedLava", 804, PrimitiveType.Sphere),
             new SwatchSpec("Concrete", 816, PrimitiveType.Cube),
+            new SwatchSpec("Limestone", 820, PrimitiveType.Cube),
+            new SwatchSpec("Granite", 832, PrimitiveType.Sphere),
+            new SwatchSpec("Pavement", 836, PrimitiveType.Cube),
             new SwatchSpec("Brick", 848, PrimitiveType.Cube),
+            new SwatchSpec("Pebble", 864, PrimitiveType.Sphere),
             new SwatchSpec("Cobblestone", 880, PrimitiveType.Sphere),
-            new SwatchSpec("Grass", 1280, PrimitiveType.Cube),
-            new SwatchSpec("Sand", 1296, PrimitiveType.Sphere),
-            new SwatchSpec("Ground", 1360, PrimitiveType.Cube),
             new SwatchSpec("Rock", 896, PrimitiveType.Sphere),
-            new SwatchSpec("Ice", 1536, PrimitiveType.Sphere),
-            new SwatchSpec("Snow", 1328, PrimitiveType.Sphere),
+            new SwatchSpec("Sandstone", 912, PrimitiveType.Cube),
+            new SwatchSpec("CorrodedMetal", 1040, PrimitiveType.Sphere),
+            new SwatchSpec("DiamondPlate", 1056, PrimitiveType.Cube),
+            new SwatchSpec("Foil", 1072, PrimitiveType.Sphere),
+            new SwatchSpec("Metal", 1088, PrimitiveType.Sphere),
+            new SwatchSpec("Grass", 1280, PrimitiveType.Cube),
+            new SwatchSpec("LeafyGrass", 1284, PrimitiveType.Cube),
+            new SwatchSpec("Sand", 1296, PrimitiveType.Sphere),
             new SwatchSpec("Fabric", 1312, PrimitiveType.Capsule),
+            new SwatchSpec("Snow", 1328, PrimitiveType.Sphere),
+            new SwatchSpec("Mud", 1344, PrimitiveType.Sphere),
+            new SwatchSpec("Ground", 1360, PrimitiveType.Cube),
+            new SwatchSpec("Asphalt", 1376, PrimitiveType.Cube),
+            new SwatchSpec("Salt", 1392, PrimitiveType.Sphere),
+            new SwatchSpec("Ice", 1536, PrimitiveType.Sphere),
+            new SwatchSpec("Glacier", 1552, PrimitiveType.Sphere),
+            new SwatchSpec("Glass", 1568, PrimitiveType.Sphere),
+            new SwatchSpec("ForceField", 1584, PrimitiveType.Sphere),
+            new SwatchSpec("Air", 1792, PrimitiveType.Sphere),
+            new SwatchSpec("Water", 2048, PrimitiveType.Sphere),
+            new SwatchSpec("Cardboard", 2304, PrimitiveType.Cube),
+            new SwatchSpec("Carpet", 2305, PrimitiveType.Capsule),
+            new SwatchSpec("CeramicTiles", 2306, PrimitiveType.Cube),
+            new SwatchSpec("ClayRoofTiles", 2307, PrimitiveType.Cube),
+            new SwatchSpec("RoofShingles", 2308, PrimitiveType.Cube),
+            new SwatchSpec("Leather", 2309, PrimitiveType.Capsule),
+            new SwatchSpec("Plaster", 2310, PrimitiveType.Cube),
+            new SwatchSpec("Rubber", 2311, PrimitiveType.Sphere),
             new SwatchSpec("FALLBACK", -1, PrimitiveType.Cube)
         };
 
@@ -364,11 +389,11 @@ namespace CoreAI.Demos.ProceduralMaterials
             GameObject viewsRoot = new GameObject("Judging Views 1-5");
             viewsRoot.transform.SetParent(parent, false);
             Transform sweepTarget = CreateMarker(viewsRoot.transform, "Sweep Look Target",
-                new Vector3(0f, 2f, 10f));
+                new Vector3(0f, 2f, 22f));
             Transform sweepNear = CreateMarker(viewsRoot.transform, "Mid Marker",
-                new Vector3(0f, 15f, -29f));
+                new Vector3(0f, 18f, -34f));
             Transform sweepFar = CreateMarker(viewsRoot.transform, "Far Marker",
-                new Vector3(0f, 22f, -45f));
+                new Vector3(0f, 25f, -52f));
 
             Camera midFar = CreateCamera(viewsRoot.transform, "View 1 - Mid Far Sweep",
                 sweepNear.position, sweepTarget.position, 44f);

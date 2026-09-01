@@ -1631,8 +1631,18 @@ namespace CoreAI.Infrastructure.Llm
 #endif
                 case LlmExecutionMode.LocalModel:
 #if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || !COREAI_LLM
-                    return new StubLlmClient();
+#if UNITY_WEBGL
+                    return new UnsupportedLocalModelLlmClient(Application.platform);
 #else
+                    return new UnsupportedLocalModelLlmClient(
+                        LocalModelPlatformSupport.IntegrationUnavailableMessage);
+#endif
+#else
+                    if (!LocalModelPlatformSupport.IsSupported(Application.platform))
+                    {
+                        return new UnsupportedLocalModelLlmClient(Application.platform);
+                    }
+
                     LLMAgent agent = null;
                     if (!string.IsNullOrWhiteSpace(p.unityAgentGameObjectName))
                     {

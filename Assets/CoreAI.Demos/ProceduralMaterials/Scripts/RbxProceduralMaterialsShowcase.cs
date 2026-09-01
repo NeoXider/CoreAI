@@ -194,6 +194,101 @@ namespace CoreAI.Demos.ProceduralMaterials
             RefreshLabels();
         }
 
+        /// <summary>Applies every configured slot and logs deterministic built-player shader evidence.</summary>
+        public void DumpMaterialApiEvidence()
+        {
+            if (materialSelections == null || materialSelections.Length == 0
+                || diagnosticRenderers == null || diagnosticRenderers.Length == 0)
+            {
+                Debug.LogError(
+                    "[CoreAI.MaterialQA] MATERIAL_CATALOG complete slots=0 mapped=0 " +
+                    "fallback=0 failures=1 result=FAIL");
+                return;
+            }
+
+            int previousSelection = selectedMaterialIndex;
+            int mappedCount = 0;
+            int fallbackCount = 0;
+            int failureCount = 0;
+            for (int selectionIndex = 0; selectionIndex < materialSelections.Length;
+                 selectionIndex++)
+            {
+                MaterialSelection selection = materialSelections[selectionIndex];
+                RbxMaterialId id = new(selection.MaterialName, selection.MaterialValue);
+                bool mapped = Provider.TryGetMaterial(in id, out Material expectedMaterial);
+                bool fallback = ReferenceEquals(expectedMaterial, Provider.FallbackMaterial);
+                bool explicitFallback = string.Equals(
+                    selection.MaterialName,
+                    "FALLBACK",
+                    StringComparison.Ordinal)
+                    && selection.MaterialValue == -1;
+                SelectMaterial(selectionIndex);
+
+                int rendererCount = 0;
+                bool renderersMatch = true;
+                for (int rendererIndex = 0; rendererIndex < diagnosticRenderers.Length;
+                     rendererIndex++)
+                {
+                    Renderer targetRenderer = diagnosticRenderers[rendererIndex];
+                    if (targetRenderer == null)
+                    {
+                        renderersMatch = false;
+                        continue;
+                    }
+
+                    rendererCount++;
+                    renderersMatch &= ReferenceEquals(
+                        targetRenderer.sharedMaterial,
+                        expectedMaterial);
+                }
+
+                Shader shader = expectedMaterial != null ? expectedMaterial.shader : null;
+                bool shaderSupported = shader != null
+                                       && shader.isSupported
+                                       && !string.Equals(
+                                           shader.name,
+                                           "Hidden/InternalErrorShader",
+                                           StringComparison.Ordinal);
+                bool mappingPass = mapped
+                    ? !fallback
+                    : explicitFallback && fallback;
+                bool passed = mappingPass && shaderSupported && renderersMatch
+                              && rendererCount > 0;
+                mappedCount += mapped ? 1 : 0;
+                fallbackCount += fallback ? 1 : 0;
+                failureCount += passed ? 0 : 1;
+
+                Debug.Log(
+                    "[CoreAI.MaterialQA] MATERIAL slot=" + (selectionIndex + 1).ToString("D2")
+                    + "/" + materialSelections.Length.ToString("D2")
+                    + " name=" + selection.MaterialName
+                    + " value=" + selection.MaterialValue
+                    + " mapped=" + mapped.ToString().ToLowerInvariant()
+                    + " shader=" + (shader != null ? shader.name : "MISSING")
+                    + " supported=" + shaderSupported.ToString().ToLowerInvariant()
+                    + " fallback=" + fallback.ToString().ToLowerInvariant()
+                    + " renderers=" + rendererCount
+                    + " result=" + (passed ? "PASS" : "FAIL"));
+            }
+
+            SelectMaterial(previousSelection);
+            string summary =
+                "[CoreAI.MaterialQA] MATERIAL_CATALOG complete slots="
+                + materialSelections.Length
+                + " mapped=" + mappedCount
+                + " fallback=" + fallbackCount
+                + " failures=" + failureCount
+                + " result=" + (failureCount == 0 ? "PASS" : "FAIL");
+            if (failureCount == 0)
+            {
+                Debug.Log(summary);
+            }
+            else
+            {
+                Debug.LogError(summary);
+            }
+        }
+
         private void OnEnable()
         {
             ApplyMaterials();

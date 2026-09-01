@@ -1,15 +1,22 @@
 #if COREAI_HAS_HUB
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Demos;
+using CoreAI.Mods.WorldPackages;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -22,6 +29,124 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class CoreAiModsHubBinderFullTierEditModeTests
     {
+        private sealed class RecordingWorldRuntimeService : IRbxWorldRuntimeService
+        {
+            private readonly List<RbxPendingWorldLoadRequest> _pending = new();
+            private int _nextRequest;
+
+            public event Action<RbxPendingWorldLoadRequest> ManualLoadConfirmationRequested;
+
+            public DateTime UtcNow { get; set; } =
+                new DateTime(2035, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+
+            public int ConfirmCalls { get; private set; }
+
+            public int AppliedCount { get; private set; }
+
+            public List<string> SavedSlots { get; } = new();
+
+            public List<string> RequestedSlots { get; } = new();
+
+            public int Revision { get; private set; } = 17;
+
+            public string WorldMarker { get; private set; } = "original";
+
+            public List<string> Ledger { get; } = new() { "existing-entry" };
+
+            public Dictionary<string, string> ManualSlots { get; } =
+                new(StringComparer.Ordinal) { ["keep"] = "original-slot" };
+
+            public RbxWorldPackagePayload CaptureCurrent()
+            {
+                return null;
+            }
+
+            public IReadOnlyList<RbxPendingWorldLoadRequest> GetPendingManualLoads()
+            {
+                _pending.RemoveAll(request => request.ExpiresAtUtc <= UtcNow);
+                return _pending.ToArray();
+            }
+
+            public UniTask<RbxWorldPackageWriteResult> SaveManualAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                SavedSlots.Add(slot);
+                return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                    true,
+                    slot + ".world",
+                    ""));
+            }
+
+            public UniTask<RbxWorldLoadRequest> RequestManualLoadAsync(
+                ActorContext caller,
+                string slot,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RequestedSlots.Add(slot);
+                _nextRequest++;
+                string requestId = "request-" + _nextRequest;
+                DateTime expiresAtUtc = UtcNow.AddMinutes(1);
+                RbxPendingWorldLoadRequest pending = new(
+                    requestId,
+                    slot,
+                    "world-" + _nextRequest,
+                    UtcNow,
+                    expiresAtUtc);
+                _pending.Add(pending);
+                ManualLoadConfirmationRequested?.Invoke(pending);
+                return UniTask.FromResult(new RbxWorldLoadRequest(
+                    requestId,
+                    slot,
+                    pending.WorldId,
+                    pending.RequestedAtUtc,
+                    expiresAtUtc));
+            }
+
+            public UniTask<RbxWorldLoadResult> ConfirmManualLoadAsync(
+                string requestId,
+                bool playerConfirmed,
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ConfirmCalls++;
+                int index = _pending.FindIndex(request =>
+                    string.Equals(request.RequestId, requestId, StringComparison.Ordinal));
+                if (index < 0)
+                {
+                    return UniTask.FromResult(new RbxWorldLoadResult(
+                        false,
+                        "unknown, expired, or consumed",
+                        0));
+                }
+
+                _pending.RemoveAt(index);
+                if (!playerConfirmed)
+                {
+                    return UniTask.FromResult(new RbxWorldLoadResult(
+                        false,
+                        "rejected",
+                        0));
+                }
+
+                AppliedCount++;
+                Revision++;
+                WorldMarker = "loaded";
+                Ledger.Add("load-applied");
+                return UniTask.FromResult(new RbxWorldLoadResult(true, "", 1));
+            }
+
+            public UniTask<RbxWorldLoadResult> LoadConfirmedAsync(
+                RbxWorldPackagePayload payload,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
         [Test]
         public void CoreAiModsHubBinder_AllowFullTier_DefaultsToFalse()
         {
@@ -41,7 +166,138 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [Test]
+        public void WorldLoadPage_LateSubscription_RendersPendingAndRejectsWithoutMutation()
+        {
+            RecordingWorldRuntimeService service = new();
+            RbxWorldLoadRequest request = service.RequestManualLoadAsync(
+                default,
+                "manual-a").GetAwaiter().GetResult();
+            int revisionBefore = service.Revision;
+            string markerBefore = service.WorldMarker;
+            string[] ledgerBefore = service.Ledger.ToArray();
+            KeyValuePair<string, string>[] slotsBefore = service.ManualSlots.ToArray();
+
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                Button reject = root.Q<Button>("coreai-world-load-reject-" + request.RequestId);
+                Assert.IsNotNull(reject, "A late subscriber must render the service's pending list.");
+
+                InvokeButton(reject);
+
+                Assert.AreEqual(1, service.ConfirmCalls);
+                Assert.AreEqual(0, service.AppliedCount);
+                Assert.AreEqual(revisionBefore, service.Revision);
+                Assert.AreEqual(markerBefore, service.WorldMarker);
+                CollectionAssert.AreEqual(ledgerBefore, service.Ledger);
+                CollectionAssert.AreEqual(slotsBefore, service.ManualSlots);
+                Assert.AreEqual(0, service.GetPendingManualLoads().Count);
+                Assert.IsNull(root.Q<VisualElement>("coreai-world-load-row-" + request.RequestId));
+                Assert.AreEqual(
+                    "No pending requests.",
+                    root.Q<Label>("coreai-hub-world-loads-status").text);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_EventConfirmsExactlyOnce_AndReuseFailsClosed()
+        {
+            RecordingWorldRuntimeService service = new();
+            int attentionRequests = 0;
+            HubWorldLoadConfirmationPage page = new(service, () => attentionRequests++);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                RbxWorldLoadRequest request = service.RequestManualLoadAsync(
+                    default,
+                    "manual-b").GetAwaiter().GetResult();
+                Button confirm = root.Q<Button>("coreai-world-load-confirm-" + request.RequestId);
+                Assert.IsNotNull(confirm);
+                Assert.AreEqual(1, attentionRequests);
+                Assert.AreEqual(0, service.AppliedCount,
+                    "Requesting a load must not mutate before a player clicks Confirm.");
+
+                InvokeButton(confirm);
+                Assert.AreEqual(1, service.AppliedCount);
+                Assert.AreEqual(18, service.Revision);
+                Assert.AreEqual("loaded", service.WorldMarker);
+                Assert.AreEqual(0, service.GetPendingManualLoads().Count);
+
+                InvokeButton(confirm);
+                Assert.AreEqual(2, service.ConfirmCalls,
+                    "A reused UI callback may reach the service, which must reject the consumed id.");
+                Assert.AreEqual(1, service.AppliedCount,
+                    "Reusing a consumed request id must never apply the world twice.");
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_ExpiredRequest_IsRemovedOnRefresh()
+        {
+            RecordingWorldRuntimeService service = new();
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                RbxWorldLoadRequest request = service.RequestManualLoadAsync(
+                    default,
+                    "manual-expiring").GetAwaiter().GetResult();
+                Assert.IsNotNull(root.Q<VisualElement>("coreai-world-load-row-" + request.RequestId));
+
+                service.UtcNow = request.ExpiresAtUtc.AddSeconds(1);
+                page.OnActivated();
+
+                Assert.IsNull(root.Q<VisualElement>("coreai-world-load-row-" + request.RequestId));
+                Assert.AreEqual(0, service.GetPendingManualLoads().Count);
+                Assert.AreEqual(0, service.AppliedCount);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        private static void InvokeButton(Button button)
+        {
+            MethodInfo invoke = typeof(Clickable).GetMethod(
+                "Invoke",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(EventBase) },
+                null);
+            Assert.IsNotNull(invoke, "Unity UI Toolkit Clickable.Invoke(EventBase) must be available.");
+            invoke.Invoke(button.clickable, new object[] { null });
+        }
+
 #if COREAI_LUA
+        private sealed class RecordingLuaExecutor : LuaTool.ILuaExecutor
+        {
+            public List<string> Code { get; } = new();
+
+            public Task<LuaTool.LuaResult> ExecuteAsync(
+                string code,
+                CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Code.Add(code);
+                return Task.FromResult(new LuaTool.LuaResult
+                {
+                    Success = true,
+                    Output = "ok"
+                });
+            }
+        }
+
         private SynchronizationContext _savedContext;
 
         [SetUp]
@@ -57,6 +313,85 @@ namespace CoreAI.Tests.EditMode
         public void RestoreSynchronizationContext()
         {
             SynchronizationContext.SetSynchronizationContext(_savedContext);
+        }
+
+        [Test]
+        public void LuaPlatformWorldDriver_UsesProductionSeams_AndExposesNoConfirmationBypass()
+        {
+            RecordingLuaExecutor executor = new();
+            RecordingWorldRuntimeService service = new();
+            GameObject gameObject = new("LuaPlatformExampleController_Test");
+            try
+            {
+                LuaPlatformExampleController controller =
+                    gameObject.AddComponent<LuaPlatformExampleController>();
+                SetPrivateField(controller, "_worldLuaExecutor", executor);
+                SetPrivateField(controller, "_worldRuntimeService", service);
+
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_MARKER_CREATE requested name=CoreAI_WebGL_Marker_browser_check");
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_MARKER_CREATE success name=CoreAI_WebGL_Marker_browser_check");
+                controller.CreateWorldMarker("browser_check");
+
+                Assert.AreEqual(1, executor.Code.Count);
+                StringAssert.Contains("Instance.new('Folder')", executor.Code[0]);
+                StringAssert.Contains("CoreAI_WebGL_Marker_browser_check", executor.Code[0]);
+
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_SAVE requested slot=browser_slot");
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_SAVE success slot=browser_slot");
+                controller.SaveWorld("browser_slot");
+                CollectionAssert.AreEqual(new[] { "browser_slot" }, service.SavedSlots);
+
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_LOAD_REQUEST requested slot=browser_slot");
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[LuaPlatformExample] WORLD_LOAD_REQUEST success slot=browser_slot request=request-1 "
+                    + "world=world-1 expires=2035-01-02T03:05:05.0000000Z");
+                controller.RequestWorldLoad("browser_slot");
+                CollectionAssert.AreEqual(new[] { "browser_slot" }, service.RequestedSlots);
+                Assert.AreEqual(0, service.AppliedCount,
+                    "RequestWorldLoad must not apply a package without the player Hub decision.");
+
+                LogAssert.Expect(
+                    LogType.Warning,
+                    "[LuaPlatformExample] WORLD_MARKER_CREATE failure reason=invalid-name");
+                controller.CreateWorldMarker("bad'name");
+                LogAssert.Expect(
+                    LogType.Warning,
+                    "[LuaPlatformExample] WORLD_SAVE failure reason=invalid-slot");
+                controller.SaveWorld("../bad");
+                Assert.AreEqual(1, executor.Code.Count);
+                Assert.AreEqual(1, service.SavedSlots.Count);
+
+                MethodInfo[] publicMethods = typeof(LuaPlatformExampleController).GetMethods(
+                    BindingFlags.Instance | BindingFlags.Public);
+                Assert.IsFalse(publicMethods.Any(method =>
+                    method.Name.StartsWith("ConfirmWorld", StringComparison.Ordinal)),
+                    "The browser driver must not expose a world-load confirmation bypass.");
+                Assert.IsNotNull(typeof(LuaPlatformExampleController).GetMethod("DumpWorldMarker"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        private static void SetPrivateField(object target, string fieldName, object value)
+        {
+            FieldInfo field = target.GetType().GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(field, "Expected private driver field: " + fieldName);
+            field.SetValue(target, value);
         }
 
         /// <summary>In-memory package store so the test can drive import without touching the file system.</summary>

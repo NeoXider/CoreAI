@@ -29,7 +29,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsRbxApiBindings _roblox;
         private readonly LuaCsRbxHttpServiceAdapter _rbxHttp;
         private readonly bool _registerWorldEditBuildBindings;
-        private readonly LuaCsLogicSlots _logicSlots = new();
+        private readonly LuaCsLogicSlots _logicSlots;
 
         public LuaCsGameplayBindings(
             IGameLogger logger,
@@ -107,6 +107,8 @@ namespace CoreAI.Ai.LuaCs
             _full = full;
             _input = input;
             _roblox = rbxApi;
+            _logicSlots = new LuaCsLogicSlots(
+                stateResolver: state => ResolveLogicOwnerState(state));
             _rbxHttp = rbxApi == null
                 ? null
                 : new LuaCsRbxHttpServiceAdapter(
@@ -115,6 +117,20 @@ namespace CoreAI.Ai.LuaCs
                     rbxHttpRequestsPerWindow, rbxHttpRateWindowSeconds,
                     rbxMonotonicClock);
             _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
+        }
+
+        private IScriptState ResolveLogicOwnerState(IScriptState fallbackState)
+        {
+            if (_roblox == null)
+            {
+                return fallbackState;
+            }
+
+            Lua.LuaState fallback = CoreAI.Scripting.LuaCs.LuaCsScriptState.Unwrap(fallbackState);
+            Lua.LuaState owner = _roblox.ResolveSchedulerOwnerState(fallback);
+            return ReferenceEquals(fallback, owner)
+                ? fallbackState
+                : new CoreAI.Scripting.LuaCs.LuaCsScriptState(owner);
         }
 
         /// <summary>Optional Roblox API surface shared by every mod and the one-off executor.</summary>

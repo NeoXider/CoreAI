@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace CoreAI.Chat
 {
@@ -25,10 +26,18 @@ namespace CoreAI.Chat
 
         private const string LogPrefix = "[CoreAiChatExternalDriver]";
 
+        private string _pendingSceneRequest = string.Empty;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoSpawnWhenOptedIn()
         {
             if (!IsOptedIn())
+            {
+                return;
+            }
+
+            CoreAiChatExternalDriver existing = FindFirstObjectByType<CoreAiChatExternalDriver>();
+            if (existing != null)
             {
                 return;
             }
@@ -57,6 +66,46 @@ namespace CoreAI.Chat
             {
                 return false;
             }
+        }
+
+        private void OnDestroy()
+        {
+            SceneManager.sceneLoaded -= HandleSceneLoaded;
+        }
+
+        /// <summary>
+        /// Loads a scene that is present in this player build. The driver exists only when the
+        /// external-driver opt-in flag is present, so production players expose no navigation seam.
+        /// </summary>
+        public void LoadScene(string scenePathOrName)
+        {
+            if (string.IsNullOrWhiteSpace(scenePathOrName))
+            {
+                Logging.Log.Instance.Warn($"{LogPrefix} scene-load-rejected: empty scene identifier.");
+                return;
+            }
+
+            if (!Application.CanStreamedLevelBeLoaded(scenePathOrName))
+            {
+                Logging.Log.Instance.Warn(
+                    $"{LogPrefix} scene-load-rejected: not present in player build: {scenePathOrName}");
+                return;
+            }
+
+            _pendingSceneRequest = scenePathOrName;
+            SceneManager.sceneLoaded -= HandleSceneLoaded;
+            SceneManager.sceneLoaded += HandleSceneLoaded;
+            Logging.Log.Instance.Info($"{LogPrefix} scene-load-requested: {scenePathOrName}");
+            SceneManager.LoadScene(scenePathOrName, LoadSceneMode.Single);
+        }
+
+        private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            SceneManager.sceneLoaded -= HandleSceneLoaded;
+            Logging.Log.Instance.Info(
+                $"{LogPrefix} scene-load-complete: requested={_pendingSceneRequest} " +
+                $"name={scene.name} path={scene.path} mode={mode}");
+            _pendingSceneRequest = string.Empty;
         }
 
         /// <summary>

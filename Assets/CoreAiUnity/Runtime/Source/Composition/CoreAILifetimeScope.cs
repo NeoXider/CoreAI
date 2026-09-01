@@ -335,10 +335,19 @@ namespace CoreAI.Composition
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
             builder.RegisterEntryPoint<WorldStateEntryPoint>();
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            if (settings != null)
+            if (settings != null && ShouldRegisterLlmUnityAutostart(Application.platform))
             {
                 builder.RegisterEntryPoint<LlmUnityAutostartEntryPoint>();
             }
+#endif
+        }
+
+        internal static bool ShouldRegisterLlmUnityAutostart(RuntimePlatform platform)
+        {
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            return LocalModelPlatformSupport.IsSupported(platform);
+#else
+            return false;
 #endif
         }
 

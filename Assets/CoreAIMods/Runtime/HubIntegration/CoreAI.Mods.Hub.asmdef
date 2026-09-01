@@ -6,7 +6,8 @@
     "CoreAI.Source",
     "CoreAI.Mods",
     "CoreAI.Hub.UI",
-    "VContainer"
+    "VContainer",
+    "UniTask"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

@@ -51,6 +51,15 @@ namespace CoreAI.Ai
         /// <summary>Recent asynchronous hook/timer failures (all mods when modId is null).</summary>
         IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(ActorContext caller, string modId = null);
 
+        /// <summary>Recent mod report records visible to the trusted caller.</summary>
+        IReadOnlyList<LuaModReport> GetRecentReports(ActorContext caller, string modId = null);
+
+        /// <summary>Clears recent handler failures and returns the removed count.</summary>
+        int ClearRecentHandlerErrors(ActorContext caller, string modId = null);
+
+        /// <summary>Clears recent report records and returns the removed count.</summary>
+        int ClearRecentReports(ActorContext caller, string modId = null);
+
         /// <summary>Advances mod timers and dispatches queued events; the host calls this once per frame.</summary>
         void Tick(ActorContext caller, double deltaSeconds);
 

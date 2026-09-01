@@ -51,8 +51,28 @@ namespace CoreAI.Mods.Rbx.Instances
         public string OriginTag;
         public string OwnerActorId;
         public InstanceAccessScope? AccessScope;
+        public long Revision;
+        public ModelSnapshot Model;
+        public ClickDetectorSnapshot ClickDetector;
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
+    }
+
+    /// <summary>Durable Model/PVInstance state. PrimaryPartId 0 means nil; the explicit pivot flag
+    /// distinguishes an unset pivot from an authored identity CFrame.</summary>
+    [Serializable]
+    public sealed class ModelSnapshot
+    {
+        public ulong PrimaryPartId;
+        public bool HasStoredWorldPivot;
+        public string StoredWorldPivot;
+    }
+
+    /// <summary>Durable ClickDetector state; the value uses invariant round-trip formatting.</summary>
+    [Serializable]
+    public sealed class ClickDetectorSnapshot
+    {
+        public string MaxActivationDistance;
     }
 
     /// <summary>A captured subtree in preorder (parents always precede children).</summary>

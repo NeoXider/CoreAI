@@ -136,7 +136,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 Assert.AreEqual(ExpectedShaderName(id.Name), material.shader.name, id.ToString());
             }
 
-            Assert.AreEqual(22, supported.Count);
+            Assert.AreEqual(45, supported.Count);
             Assert.AreEqual(supported.Count + 1, materials.Count);
             Assert.AreEqual(supported.Count + 1,
                 RbxProceduralMaterialProvider.SharedMaterialAllocationCount);
@@ -190,13 +190,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 if (string.Equals(material.shader.name, "CoreAI/Rbx/Procedural Surface",
                     StringComparison.Ordinal))
                 {
-                    Assert.IsTrue(surfaceModes.Add(Mathf.RoundToInt(material.GetFloat("_MaterialMode"))),
-                        id + " must own a distinct opaque procedural mode");
+                    surfaceModes.Add(Mathf.RoundToInt(material.GetFloat("_MaterialMode")));
                 }
             }
 
-            Assert.AreEqual(22, intrinsicColors.Count);
-            Assert.AreEqual(22, baseColors.Count);
+            Assert.AreEqual(45, intrinsicColors.Count);
+            Assert.AreEqual(45, baseColors.Count);
             Assert.AreEqual(18, surfaceModes.Count);
         }
 
@@ -546,7 +545,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
 
             if (string.Equals(materialName, "ForceField", StringComparison.Ordinal)
                 || string.Equals(materialName, "Glass", StringComparison.Ordinal)
-                || string.Equals(materialName, "Ice", StringComparison.Ordinal))
+                || string.Equals(materialName, "Ice", StringComparison.Ordinal)
+                || string.Equals(materialName, "Glacier", StringComparison.Ordinal)
+                || string.Equals(materialName, "Air", StringComparison.Ordinal)
+                || string.Equals(materialName, "Water", StringComparison.Ordinal))
             {
                 return "CoreAI/Rbx/Procedural Transparent";
             }
@@ -564,39 +566,62 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                     return 0;
                 case "SmoothPlastic":
                 case "Glass":
+                case "Air":
+                case "Rubber":
                     return 1;
                 case "Wood":
                 case "Ice":
+                case "Glacier":
+                case "Water":
                     return 2;
                 case "WoodPlanks":
+                case "RoofShingles":
                     return 3;
                 case "Metal":
+                case "Foil":
                     return 4;
                 case "DiamondPlate":
                     return 5;
                 case "CorrodedMetal":
                     return 6;
                 case "Marble":
+                case "Granite":
                     return 7;
                 case "Slate":
                     return 8;
                 case "Concrete":
+                case "Limestone":
+                case "Asphalt":
+                case "Plaster":
                     return 9;
                 case "Brick":
+                case "ClayRoofTiles":
                     return 10;
                 case "Cobblestone":
+                case "Pavement":
+                case "Pebble":
+                case "CeramicTiles":
                     return 11;
                 case "Grass":
+                case "LeafyGrass":
                     return 12;
                 case "Sand":
+                case "Sandstone":
                     return 13;
                 case "Ground":
+                case "Mud":
                     return 14;
                 case "Rock":
+                case "Basalt":
+                case "CrackedLava":
                     return 15;
                 case "Snow":
+                case "Salt":
                     return 16;
                 case "Fabric":
+                case "Cardboard":
+                case "Carpet":
+                case "Leather":
                     return 17;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(materialName), materialName, null);

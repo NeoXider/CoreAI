@@ -198,8 +198,9 @@ namespace CoreAI.Ai.LuaCs
                 ctx => PrepareHttpRequest(ctx, context), context);
             try
             {
-                LuaValue[] bridgeResults = state.DoStringAsync(
-                    BridgeSource, "coreai_http_bridge").GetAwaiter().GetResult();
+                ValueTask<LuaValue[]> bridgeExecution = state.DoStringAsync(
+                    BridgeSource, "coreai_http_bridge");
+                LuaValue[] bridgeResults = RequireSynchronousBridgeResult(bridgeExecution);
                 if (bridgeResults.Length != 1
                     || bridgeResults[0].Type != LuaValueType.Table)
                 {
@@ -217,6 +218,19 @@ namespace CoreAI.Ai.LuaCs
             {
                 task["_prepareHttpRequest"] = LuaValue.Nil;
             }
+        }
+
+        internal static LuaValue[] RequireSynchronousBridgeResult(
+            ValueTask<LuaValue[]> execution)
+        {
+            if (!execution.IsCompletedSuccessfully)
+            {
+                throw new InvalidOperationException(
+                    "Rbx HttpService bridge initialization yielded unexpectedly; "
+                        + "blocking the runtime thread is forbidden.");
+            }
+
+            return execution.Result;
         }
 
         private LuaValue PrepareHttpRequest(LuaFunctionExecutionContext ctx,

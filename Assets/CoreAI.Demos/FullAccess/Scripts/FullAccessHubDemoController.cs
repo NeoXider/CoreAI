@@ -122,7 +122,7 @@ namespace CoreAI.Demos
                 }
 
                 IObjectResolver container = modsScope.Container;
-                LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
                 IActorIdentityProvider actorIdentityProvider = container.Resolve<IActorIdentityProvider>();
                 ActorContext actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
                 ILuaModSourceStore sourceStore = TryResolve<ILuaModSourceStore>(container);

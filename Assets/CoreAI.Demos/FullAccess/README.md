@@ -82,7 +82,13 @@ its panel with **F6**.
   (Hub → Mods tab) is a second, pure-Rbx take on the same game.
 
 WebGL builds can drive the same controller via `SendMessage("LuaPlatformExample", "RunSelfTest" |
-"StartTetris" | "StopTetris" | "DumpStatus")`.
+"StartTetris" | "StopTetris" | "DumpStatus")`. The same player-only harness also accepts string
+arguments for `CreateWorldMarker(name)`, `SaveWorld(slot)`, `RequestWorldLoad(slot)`, and
+`DumpWorldMarker(name)`. Marker names and slots accept only ASCII letters, digits, `-`, and `_`;
+stable `WORLD_MARKER_*`, `WORLD_SAVE`, and `WORLD_LOAD_REQUEST` log markers report each request and
+outcome. `CreateWorldMarker` executes through the production `execute_lua` backup gate, while save
+and load-request calls use `IRbxWorldRuntimeService`. There is deliberately no confirmation command:
+after `RequestWorldLoad`, approve or reject the metadata-only request in Hub → **World Loads**.
 
 ## Safety
 

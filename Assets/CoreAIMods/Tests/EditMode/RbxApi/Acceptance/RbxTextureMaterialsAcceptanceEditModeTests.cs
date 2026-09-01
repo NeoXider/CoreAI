@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -21,6 +23,55 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         private const int BrickValue = 848;
         private const int WoodValue = 512;
 
+        private static readonly (string Name, int Value)[] ExpectedRenderSupportedMaterials =
+        {
+            ("Plastic", 256),
+            ("SmoothPlastic", 272),
+            ("Neon", 288),
+            ("Wood", 512),
+            ("WoodPlanks", 528),
+            ("Marble", 784),
+            ("Basalt", 788),
+            ("Slate", 800),
+            ("CrackedLava", 804),
+            ("Concrete", 816),
+            ("Limestone", 820),
+            ("Granite", 832),
+            ("Pavement", 836),
+            ("Brick", 848),
+            ("Pebble", 864),
+            ("Cobblestone", 880),
+            ("Rock", 896),
+            ("Sandstone", 912),
+            ("CorrodedMetal", 1040),
+            ("DiamondPlate", 1056),
+            ("Foil", 1072),
+            ("Metal", 1088),
+            ("Grass", 1280),
+            ("LeafyGrass", 1284),
+            ("Sand", 1296),
+            ("Fabric", 1312),
+            ("Snow", 1328),
+            ("Mud", 1344),
+            ("Ground", 1360),
+            ("Asphalt", 1376),
+            ("Salt", 1392),
+            ("Ice", 1536),
+            ("Glacier", 1552),
+            ("Glass", 1568),
+            ("ForceField", 1584),
+            ("Air", 1792),
+            ("Water", 2048),
+            ("Cardboard", 2304),
+            ("Carpet", 2305),
+            ("CeramicTiles", 2306),
+            ("ClayRoofTiles", 2307),
+            ("RoofShingles", 2308),
+            ("Leather", 2309),
+            ("Plaster", 2310),
+            ("Rubber", 2311)
+        };
+
         [SetUp]
         public void SetUp()
         {
@@ -33,6 +84,86 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         {
             RbxTextureMaterialProvider.ResetSharedCacheForTests();
             RbxProceduralMaterialProvider.ResetSharedCacheForTests();
+        }
+
+        [Test]
+        public void EveryRenderSupportedMaterial_AppliesThroughPublicLuaPartApiWithoutPinkFallback()
+        {
+            IReadOnlyList<RbxMaterialId> supported =
+                RbxProceduralMaterialProvider.SupportedMaterials;
+            Assert.AreEqual(ExpectedRenderSupportedMaterials.Length, supported.Count);
+
+            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
+            Assert.AreEqual(45, materialEnum.GetEnumItems().Count,
+                "The complete public material enum must remain render-supported.");
+            Assert.AreEqual(materialEnum.GetEnumItems().Count, supported.Count,
+                "Every public Enum.Material item must have a runtime render mapping.");
+
+            StringBuilder source = new();
+            for (int index = 0; index < ExpectedRenderSupportedMaterials.Length; index++)
+            {
+                (string Name, int Value) expected = ExpectedRenderSupportedMaterials[index];
+                RbxMaterialId supportedId = supported[index];
+                Assert.AreEqual(expected.Name, supportedId.Name, "catalog name at " + index);
+                Assert.AreEqual(expected.Value, supportedId.Value, "catalog value at " + index);
+                Assert.AreEqual(expected.Value, materialEnum[expected.Name].Value,
+                    "public Enum.Material value for " + expected.Name);
+
+                source.Append("local part").Append(index)
+                    .Append(" = Instance.new('Part', workspace)\n")
+                    .Append("part").Append(index).Append(".Name = 'ApiMaterial_")
+                    .Append(expected.Name).Append("'\n")
+                    .Append("part").Append(index).Append(".Material = Enum.Material.")
+                    .Append(expected.Name).Append("\n");
+                int red = 32 + index * 29 % 192;
+                int green = 48 + index * 47 % 176;
+                int blue = 64 + index * 61 % 160;
+                source.Append("part").Append(index).Append(".Color = Color3.fromRGB(")
+                    .Append(red).Append(", ").Append(green).Append(", ")
+                    .Append(blue).Append(")\n");
+            }
+
+            using (Mvp1AcceptanceWorld world = new())
+            {
+                world.Stack.Runtime.LoadMod("all-render-materials", source.ToString());
+                for (int index = 0; index < ExpectedRenderSupportedMaterials.Length; index++)
+                {
+                    (string Name, int Value) expected = ExpectedRenderSupportedMaterials[index];
+                    RbxInstance part = world.Workspace.FindFirstChild(
+                        "ApiMaterial_" + expected.Name);
+                    Assert.IsNotNull(part, expected.Name);
+                    PartProperties properties = world.Binder.GetPartPropertiesOrDefault(part.Id);
+                    Assert.AreEqual(expected.Name, properties.Material.Name, expected.Name);
+                    Assert.AreEqual(expected.Value, properties.Material.Value, expected.Name);
+
+                    Renderer renderer = world.BoundObject(part).GetComponent<Renderer>();
+                    Material material = renderer.sharedMaterial;
+                    Assert.IsNotNull(material, expected.Name);
+                    Assert.IsNotNull(material.shader, expected.Name);
+                    Assert.IsTrue(material.shader.isSupported,
+                        expected.Name + " shader must be supported by the active player renderer.");
+                    Assert.AreNotEqual("Hidden/InternalErrorShader", material.shader.name,
+                        expected.Name);
+                    Assert.AreNotEqual("CoreAiRbxMaterial_FALLBACK_UNMAPPED", material.name,
+                        expected.Name);
+                    int red = 32 + index * 29 % 192;
+                    int green = 48 + index * 47 % 176;
+                    int blue = 64 + index * 61 % 160;
+                    RbxColor3 expectedColor = RbxColor3.FromRGB(red, green, blue);
+                    Assert.AreEqual(expectedColor, properties.Color, expected.Name);
+                    Assert.IsTrue(properties.ColorWasExplicitlySet, expected.Name);
+                    MaterialPropertyBlock block = new();
+                    renderer.GetPropertyBlock(block);
+                    Color tint = block.GetColor(Shader.PropertyToID("_Color"));
+                    Assert.AreEqual(expectedColor.R, tint.r, ColorEpsilon, expected.Name);
+                    Assert.AreEqual(expectedColor.G, tint.g, ColorEpsilon, expected.Name);
+                    Assert.AreEqual(expectedColor.B, tint.b, ColorEpsilon, expected.Name);
+                    Assert.AreEqual(
+                        tint,
+                        block.GetColor(Shader.PropertyToID("_BaseColor")),
+                        expected.Name);
+                }
+            }
         }
 
         [TestCase("Brick", 848, "Bricks104", 10f)]

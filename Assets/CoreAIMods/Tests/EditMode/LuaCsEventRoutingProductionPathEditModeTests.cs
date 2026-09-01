@@ -36,7 +36,7 @@ namespace CoreAI.Tests.EditMode
 
             using IObjectResolver container = builder.Build();
             ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
-            LuaCsModRuntime concreteRuntime = container.Resolve<LuaCsModRuntime>();
+            LuaCsModRuntime concreteRuntime = container.Resolve<LuaCsModStack>().Runtime;
             for (int index = 0; index < 20; index++)
             {
                 string modId = index == 0 ? "subscriber" : $"non-subscriber-{index:00}";

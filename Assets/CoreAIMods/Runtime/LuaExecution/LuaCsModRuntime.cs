@@ -222,6 +222,8 @@ namespace CoreAI.Ai.LuaCs
         [ThreadStatic]
         private static int _crossCallDepth;
 
+        private bool _shutdown;
+
         /// <summary>
         /// Raised when a mod calls <c>events_emit(name, payload)</c>: (modId, eventName, payload).
         /// The Unity layer bridges this to MessagePipe/game systems.
@@ -1103,6 +1105,7 @@ namespace CoreAI.Ai.LuaCs
             bool persistToStore,
             bool ownerHasHostAuthority)
         {
+            ThrowIfShutdown();
             string modId = Normalize(id);
             if (modId.Length == 0)
             {
@@ -1523,6 +1526,11 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Queues a game event for subscribed mods on the next <see cref="Tick"/>.</summary>
         internal void EmitEvent(string name, string payload = "")
         {
+            if (_shutdown)
+            {
+                return;
+            }
+
             string evt = Normalize(name);
             if (evt.Length == 0)
             {
@@ -1540,6 +1548,11 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal void Tick(double deltaSeconds)
         {
+            if (_shutdown)
+            {
+                return;
+            }
+
             if (deltaSeconds < 0d || double.IsNaN(deltaSeconds))
             {
                 return;
@@ -1707,6 +1720,74 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RaiseModTearingDown(modId, reason);
+        }
+
+        /// <summary>
+        /// Permanently stops this runtime without changing persisted mod manifests. World-session
+        /// replacement uses this after the active facade has moved to the staged runtime, so outgoing
+        /// hooks, timers, connections, scheduler work, and VM states cannot survive the swap while the
+        /// restored package's Active flags remain exact.
+        /// </summary>
+        internal int ShutdownWithoutPersistence()
+        {
+            List<Mod> outgoing;
+            lock (_gate)
+            {
+                if (_shutdown)
+                {
+                    return 0;
+                }
+
+                _shutdown = true;
+                outgoing = new List<Mod>(_modsInLoadOrder);
+                _mods.Clear();
+                _modsInLoadOrder.Clear();
+                lock (_subscriptionGate)
+                {
+                    for (int index = 0; index < outgoing.Count; index++)
+                    {
+                        DeactivateSubscriptionsLocked(outgoing[index]);
+                    }
+
+                    PublishSubscriptionSnapshotLocked();
+                }
+            }
+
+            for (int index = 0; index < outgoing.Count; index++)
+            {
+                TeardownModEffects(outgoing[index].Id, LuaModTeardownReason.Unload);
+            }
+
+            if (_rbxApi != null)
+            {
+                _rbxApi.Scheduler.ThreadFaulted -= OnSchedulerThreadFaulted;
+                _rbxApi.Registry.Registered -= OnInstanceRegistered;
+                _rbxApi.Registry.Unregistered -= OnInstanceUnregistered;
+            }
+
+            if (_logicSlots != null)
+            {
+                _logicSlots.OverrideFailed -= OnLogicSlotOverrideFailed;
+            }
+
+            ModEventEmitted = null;
+            ModSourceLoaded = null;
+            ModSourceUnloaded = null;
+            ModQuarantined = null;
+            ModTearingDown = null;
+            ModHandlerErrored = null;
+            ModReportEmitted = null;
+            return outgoing.Count;
+        }
+
+        private void ThrowIfShutdown()
+        {
+            if (_shutdown)
+            {
+                throw new ObjectDisposedException(
+                    nameof(LuaCsModRuntime),
+                    "The Lua runtime belongs to a replaced world session.");
+            }
         }
 
         /// <summary>
@@ -2660,6 +2741,70 @@ namespace CoreAI.Ai.LuaCs
                     // entry is fixed or forgotten, and the remaining mods keep loading.
                     _log?.Warn($"[LuaCsModRuntime] Rehydrate skipped mod '{modId}': {ex.Message}");
                 }
+            }
+
+            return loaded;
+        }
+
+        /// <summary>
+        /// Starts every active package from an exact staged source set and fails the whole candidate
+        /// on the first missing or invalid chunk. World-session replacement calls this only after the
+        /// restored tree exists and before the candidate is exposed; dormant packages are retained in
+        /// the source store but never acquire a VM state.
+        /// </summary>
+        internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            ThrowIfShutdown();
+            IReadOnlyList<LuaModManifest> manifests = _sourceStore.List()
+                ?? throw new InvalidOperationException(
+                    "The staged mod source store returned a nil manifest list.");
+            List<LuaModManifest> ordered = new(manifests);
+            ordered.Sort((left, right) => string.CompareOrdinal(left?.Id, right?.Id));
+            int loaded = 0;
+            for (int index = 0; index < ordered.Count; index++)
+            {
+                LuaModManifest manifest = ordered[index]
+                    ?? throw new InvalidOperationException(
+                        "The staged mod source store contains a nil manifest.");
+                if (!manifest.Active)
+                {
+                    continue;
+                }
+
+                string modId = Normalize(manifest.Id);
+                if (modId.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        "The staged mod source store contains an active package with an empty id.");
+                }
+
+                if (!_sourceStore.TryLoad(
+                        modId, out string source, out LuaModManifest stored)
+                    || stored == null
+                    || string.IsNullOrWhiteSpace(source))
+                {
+                    throw new InvalidOperationException(
+                        "Active staged mod '" + modId + "' has no exact source/manifest.");
+                }
+
+                string storedId = Normalize(stored.Id);
+                if (!string.Equals(storedId, modId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Staged mod key '" + modId + "' contains manifest id '" + storedId + "'.");
+                }
+
+                LuaCapabilities effectiveCaps = ApplyHostGrant(
+                    ParseCaps(stored.Capabilities), hostGrant, allowFull);
+                string ownerActorId = stored.OwnerActorId?.Trim() ?? "";
+                LoadModInternal(
+                    modId,
+                    source,
+                    ownerActorId,
+                    effectiveCaps,
+                    false,
+                    ownerActorId.Length == 0);
+                loaded++;
             }
 
             return loaded;

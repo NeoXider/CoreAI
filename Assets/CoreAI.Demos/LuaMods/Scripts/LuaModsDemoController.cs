@@ -79,9 +79,15 @@ namespace CoreAI.Demos
             }
 
             _mods.RemoveModEventEmittedListener(_actorContext, OnModEvent);
-            _mods.UnloadMod(_actorContext, WaveDirectorModId);
-            _mods.UnloadMod(_actorContext, DamageTunerModId);
-            _slots?.Reset(DamageSlot);
+            try
+            {
+                _mods.UnloadMod(_actorContext, WaveDirectorModId);
+                _mods.UnloadMod(_actorContext, DamageTunerModId);
+                _slots?.Reset(DamageSlot);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
 
         private void OnModEvent(string modId, string eventName, string payload)

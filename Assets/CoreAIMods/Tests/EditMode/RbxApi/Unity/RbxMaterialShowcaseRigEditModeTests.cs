@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using CoreAI.Demos.ProceduralMaterials;
+using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Rendering;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Unity
 {
@@ -99,6 +103,62 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
+        public void DumpMaterialApiEvidence_ExhaustsSupportedCatalogPlusExplicitFallback()
+        {
+            RbxTextureMaterialProvider.ResetSharedCacheForTests();
+            RbxProceduralMaterialProvider.ResetSharedCacheForTests();
+            GameObject root = new GameObject("Showcase Test Root");
+            try
+            {
+                RbxProceduralMaterialsShowcase showcase =
+                    root.AddComponent<RbxProceduralMaterialsShowcase>();
+                Renderer firstRenderer = CreateRenderer(root.transform, "First Sample");
+                Renderer secondRenderer = CreateRenderer(root.transform, "Second Sample");
+                IReadOnlyList<RbxMaterialId> supported =
+                    RbxProceduralMaterialProvider.SupportedMaterials;
+                RbxProceduralMaterialsShowcase.MaterialSelection[] selections =
+                    new RbxProceduralMaterialsShowcase.MaterialSelection[supported.Count + 1];
+                for (int index = 0; index < supported.Count; index++)
+                {
+                    RbxMaterialId id = supported[index];
+                    selections[index] = new RbxProceduralMaterialsShowcase.MaterialSelection(
+                        id.Name,
+                        id.Value);
+                }
+
+                selections[supported.Count] =
+                    new RbxProceduralMaterialsShowcase.MaterialSelection("FALLBACK", -1);
+                showcase.ConfigureRig(
+                    Array.Empty<RbxProceduralMaterialsShowcase.Entry>(),
+                    new[] { firstRenderer, secondRenderer },
+                    selections,
+                    null,
+                    Array.Empty<RbxProceduralMaterialsShowcase.CameraView>(),
+                    null,
+                    null,
+                    null,
+                    5);
+
+                LogAssert.Expect(
+                    LogType.Log,
+                    "[CoreAI.MaterialQA] MATERIAL_CATALOG complete slots=46 mapped=45 " +
+                    "fallback=1 failures=0 result=PASS");
+                showcase.DumpMaterialApiEvidence();
+
+                Assert.AreEqual(5, showcase.SelectedMaterialIndex);
+                Assert.IsNotNull(firstRenderer.sharedMaterial);
+                Assert.IsNotNull(secondRenderer.sharedMaterial);
+                Assert.AreSame(firstRenderer.sharedMaterial, secondRenderer.sharedMaterial);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                RbxTextureMaterialProvider.ResetSharedCacheForTests();
+                RbxProceduralMaterialProvider.ResetSharedCacheForTests();
+            }
+        }
+
+        [Test]
         public void RealtimeProbe_CapturesGeneratedReflectionCards()
         {
             string builderPath = Path.Combine(Application.dataPath, "CoreAI.Demos",
@@ -124,6 +184,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             GameObject gameObject = new GameObject(name);
             gameObject.transform.SetParent(parent, false);
             return gameObject.AddComponent<TextMesh>();
+        }
+
+        private static Renderer CreateRenderer(Transform parent, string name)
+        {
+            GameObject gameObject = new GameObject(name);
+            gameObject.transform.SetParent(parent, false);
+            return gameObject.AddComponent<MeshRenderer>();
         }
     }
 }

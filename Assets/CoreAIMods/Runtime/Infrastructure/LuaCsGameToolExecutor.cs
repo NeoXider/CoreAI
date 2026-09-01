@@ -6,9 +6,91 @@ using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.WorldPackages;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
+using Cysharp.Threading.Tasks;
+
+namespace CoreAI.Mods.WorldPackages
+{
+    /// <summary>Serializes capture, confirmed autosave, and the mutation protected by that autosave.</summary>
+    public interface IConfirmedWorldMutationGate
+    {
+        /// <summary>Runs a mutation only after its trigger-labelled snapshot is durably confirmed.</summary>
+        Task<TResult> ExecuteAsync<TResult>(
+            string trigger,
+            Func<CancellationToken, Task<TResult>> mutationAsync,
+            CancellationToken cancellationToken);
+    }
+
+    /// <summary>Requires a durable world-package autosave before allowing a runtime mutation.</summary>
+    public sealed class ConfirmedWorldMutationGate : IConfirmedWorldMutationGate
+    {
+        private readonly Func<CancellationToken, UniTask<RbxWorldPackagePayload>> _captureCurrentAsync;
+        private readonly IRbxWorldPackageStore _packageStore;
+        private readonly SemaphoreSlim _singleFlight = new(1, 1);
+
+        /// <summary>Creates a shared gate over the host capture port and durable package store.</summary>
+        public ConfirmedWorldMutationGate(
+            Func<CancellationToken, UniTask<RbxWorldPackagePayload>> captureCurrentAsync,
+            IRbxWorldPackageStore packageStore)
+        {
+            _captureCurrentAsync = captureCurrentAsync
+                                   ?? throw new ArgumentNullException(nameof(captureCurrentAsync));
+            _packageStore = packageStore ?? throw new ArgumentNullException(nameof(packageStore));
+        }
+
+        /// <inheritdoc />
+        public async Task<TResult> ExecuteAsync<TResult>(
+            string trigger,
+            Func<CancellationToken, Task<TResult>> mutationAsync,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(trigger))
+            {
+                throw new ArgumentException("A deterministic backup trigger is required.", nameof(trigger));
+            }
+
+            if (mutationAsync == null)
+            {
+                throw new ArgumentNullException(nameof(mutationAsync));
+            }
+
+            await _singleFlight.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RbxWorldPackagePayload payload = await _captureCurrentAsync(cancellationToken);
+                if (payload == null)
+                {
+                    throw new InvalidOperationException(
+                        "Confirmed pre-mutation backup capture returned no world payload.");
+                }
+
+                RbxWorldPackageWriteResult backup = await _packageStore.CreateAutoAsync(
+                    trigger,
+                    payload,
+                    cancellationToken);
+                if (backup == null || !backup.Success)
+                {
+                    string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
+                        ? "the package store did not confirm durability"
+                        : backup.Error;
+                    throw new InvalidOperationException(
+                        "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return await mutationAsync(cancellationToken);
+            }
+            finally
+            {
+                _singleFlight.Release();
+            }
+        }
+    }
+}
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -58,9 +140,13 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsGameToolExecutor : LuaTool.ILuaExecutor, LuaTool.IMutationExecutor
     {
+        /// <summary>Stable autosave trigger for one-shot Lua execution.</summary>
+        public const string ExecuteLuaBackupTrigger = "execute_lua";
+
         private readonly IScriptEngine _engine;
         private readonly ILuaCsGameRuntimeBindings _bindings;
         private readonly ILuaExecutionObserver _observer;
+        private readonly IConfirmedWorldMutationGate _worldMutationGate;
 
         /// <summary>
         /// Raised after <c>execute_lua</c> successfully runs a chunk. Mirrors
@@ -81,13 +167,13 @@ namespace CoreAI.Ai.LuaCs
         /// Creates the executor without an observability sink.
         /// </summary>
         // WHY: an OPTIONAL sink parameter would force every calling assembly to reference the
-        // engine-free scheduling assembly just to name the type it never passes, so the sink-free
-        // overload keeps that dependency off consumers such as the demos.
+        // WHY: engine-free scheduling assembly just to name the type it never passes, so the sink-free
+        // WHY: overload keeps that dependency off consumers such as the demos.
         public LuaCsGameToolExecutor(
             LuaCsSecureEnvironment sandbox,
             ILuaCsGameRuntimeBindings bindings,
             ILuaExecutionObserver observer)
-            : this(sandbox, bindings, observer, null)
+            : this(sandbox, bindings, observer, null, null)
         {
         }
 
@@ -96,6 +182,16 @@ namespace CoreAI.Ai.LuaCs
             ILuaCsGameRuntimeBindings bindings,
             ILuaExecutionObserver observer,
             IRbxRuntimeObservabilitySink observability)
+            : this(sandbox, bindings, observer, observability, null)
+        {
+        }
+
+        public LuaCsGameToolExecutor(
+            LuaCsSecureEnvironment sandbox,
+            ILuaCsGameRuntimeBindings bindings,
+            ILuaExecutionObserver observer,
+            IRbxRuntimeObservabilitySink observability,
+            IConfirmedWorldMutationGate worldMutationGate)
         {
             if (sandbox == null)
             {
@@ -105,14 +201,27 @@ namespace CoreAI.Ai.LuaCs
             _engine = new LuaCsScriptEngine(sandbox, observability);
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
+            _worldMutationGate = worldMutationGate;
         }
 
         /// <inheritdoc />
-        public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken cancellationToken)
+        public async Task<LuaTool.LuaResult> ExecuteAsync(
+            string code,
+            CancellationToken cancellationToken)
         {
-            LuaTool.LuaResult result = ExecuteCore(
-                code, cancellationToken, _bindings.RegisterGameplayApis);
-            return Task.FromResult(result);
+            try
+            {
+                return await ExecuteWithBackupAsync(
+                    token => Task.FromResult(ExecuteCore(
+                        code,
+                        token,
+                        _bindings.RegisterGameplayApis)),
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return CreateFailure(ex.Message);
+            }
         }
 
         /// <summary>
@@ -120,48 +229,64 @@ namespace CoreAI.Ai.LuaCs
         /// Kept as an overload so existing executor consumers do not need to reference the envelope
         /// assembly unless they opt into the mutation protocol.
         /// </summary>
-        public Task<LuaTool.LuaResult> ExecuteAsync(string code, ActorContext actorContext,
+        public async Task<LuaTool.LuaResult> ExecuteAsync(string code, ActorContext actorContext,
             MutationEnvelope mutationEnvelope, CancellationToken cancellationToken)
         {
             if (!actorContext.IsTrusted)
             {
-                return Task.FromResult(CreateFailure(
+                return CreateFailure(
                     "actor '<untrusted>' cannot apply operation '"
                     + mutationEnvelope.OperationId
-                    + "': actor context was not issued by an identity provider"));
+                    + "': actor context was not issued by an identity provider");
             }
 
             if (!string.Equals(actorContext.ActorId, mutationEnvelope.ActorId,
                     StringComparison.Ordinal))
             {
-                return Task.FromResult(CreateFailure(
+                return CreateFailure(
                     "actor '" + actorContext.ActorId + "' cannot apply operation '"
                     + mutationEnvelope.OperationId + "': the mutation envelope belongs to actor '"
-                    + mutationEnvelope.ActorId + "'"));
+                    + mutationEnvelope.ActorId + "'");
             }
 
             if (!(_bindings is IActorScopedLuaCsGameRuntimeBindings scopedBindings)
                 || scopedBindings.MutationRegistry == null)
             {
-                return Task.FromResult(CreateFailure(
+                return CreateFailure(
                     "actor '" + actorContext.ActorId + "' cannot apply operation '"
                     + mutationEnvelope.OperationId
-                    + "': the production Rbx mutation surface is not configured"));
+                    + "': the production Rbx mutation surface is not configured");
             }
 
             try
             {
-                LuaTool.LuaResult result = scopedBindings.MutationRegistry.ApplyMutation(
-                    mutationEnvelope,
-                    () => ExecuteCore(code, cancellationToken,
-                        registry => scopedBindings.RegisterGameplayApis(
-                            registry, actorContext, mutationEnvelope)));
-                return Task.FromResult(result);
+                return await ExecuteWithBackupAsync(
+                    token => Task.FromResult(scopedBindings.MutationRegistry.ApplyMutation(
+                        mutationEnvelope,
+                        () => ExecuteCore(code, token,
+                            registry => scopedBindings.RegisterGameplayApis(
+                                registry, actorContext, mutationEnvelope)))),
+                    cancellationToken);
             }
             catch (Exception ex)
             {
-                return Task.FromResult(CreateFailure(ex.Message));
+                return CreateFailure(ex.Message);
             }
+        }
+
+        private Task<LuaTool.LuaResult> ExecuteWithBackupAsync(
+            Func<CancellationToken, Task<LuaTool.LuaResult>> executeAsync,
+            CancellationToken cancellationToken)
+        {
+            if (_worldMutationGate == null)
+            {
+                return executeAsync(cancellationToken);
+            }
+
+            return _worldMutationGate.ExecuteAsync(
+                ExecuteLuaBackupTrigger,
+                executeAsync,
+                cancellationToken);
         }
 
         private LuaTool.LuaResult ExecuteCore(string code, CancellationToken cancellationToken,
@@ -177,9 +302,9 @@ namespace CoreAI.Ai.LuaCs
             }
 
             // WHY: The world bindings are a shared singleton: a prior chunk that died between
-            // coreai_world_begin() and commit/rollback leaves its transaction open, which would
-            // silently buffer this chunk's world commands. Reset before running and abort in the
-            // finally so a leaked transaction can never bleed across runs in either direction.
+            // WHY: coreai_world_begin() and commit/rollback leaves its transaction open, which would
+            // WHY: silently buffer this chunk's world commands. Reset before running and abort in the
+            // WHY: finally so a leaked transaction can never bleed across runs in either direction.
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
             try
             {
@@ -189,8 +314,8 @@ namespace CoreAI.Ai.LuaCs
                 registry.ApplyTo(state);
 
                 // WHY: Downlevel Luau -> Lua 5.2 before compiling so one-shot scripts accept the same
-                // Luau syntax mods do; a downlevel Error is thrown here and caught below as the exec
-                // failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
+                // WHY: Luau syntax mods do; a downlevel Error is thrown here and caught below as the exec
+                // WHY: failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
                 string compileCode = LuauSourceGate.ToLua52(code, "execute_lua");
                 object[] results = _engine.RunChunk(state, compileCode, cancellationToken: cancellationToken);
                 string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength);
@@ -252,9 +377,9 @@ namespace CoreAI.Ai.LuaCs
         }
 
         // WHY: a returned table otherwise renders as "table: 0x…" (its address), which is useless to the
-        // model — e.g. `return coreai_world_list_prefabs()` or `coreai_world_find(...)` would hand the LLM
-        // an opaque handle instead of the actual names. Convert it to a portable structure and JSON-encode
-        // it so discovery tools are legible; fall back to the plain describe if conversion/encoding fails.
+        // WHY: model — e.g. `return coreai_world_list_prefabs()` or `coreai_world_find(...)` would hand the LLM
+        // WHY: an opaque handle instead of the actual names. Convert it to a portable structure and JSON-encode
+        // WHY: it so discovery tools are legible; fall back to the plain describe if conversion/encoding fails.
         private static string StringifyTable(IValueMarshaller marshaller, object value)
         {
             try

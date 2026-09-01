@@ -8,6 +8,7 @@
     "CoreAI.RbxApi.Datatypes",
     "CoreAI.RbxApi.Instances",
     "CoreAI.RbxApi.Binding",
+    "CoreAI.RbxApi.Unity",
     "MessagePipe",
     "MessagePipe.VContainer",
     "Unity.TextMeshPro",

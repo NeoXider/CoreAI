@@ -45,6 +45,36 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void FileLuaModStore_ContentionFailsImmediatelyWithoutMutation()
+        {
+            System.Reflection.FieldInfo gateField = typeof(FileLuaModStore).GetField(
+                "_gate",
+                System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(gateField);
+            System.Threading.SemaphoreSlim gate =
+                (System.Threading.SemaphoreSlim)gateField.GetValue(_store);
+            Assert.IsTrue(gate.Wait(0));
+            try
+            {
+                System.InvalidOperationException getError =
+                    Assert.Throws<System.InvalidOperationException>(() =>
+                        _store.Get("mod", "key"));
+                StringAssert.Contains("busy", getError.Message);
+                Assert.Throws<System.InvalidOperationException>(() =>
+                    _store.Set("mod", "key", "blocked"));
+                Assert.Throws<System.InvalidOperationException>(() =>
+                    _store.Clear("mod"));
+            }
+            finally
+            {
+                gate.Release();
+            }
+
+            Assert.AreEqual("", _store.Get("mod", "key"));
+        }
+
+        [Test]
         public void FileLuaModStore_Get_MissingKeyReturnsEmptyString()
         {
             Assert.AreEqual("", _store.Get("mod", "missing"));
@@ -90,6 +120,51 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("slash", _store.Get("A/B", "key"));
             Assert.AreEqual("underscore", _store.Get("A_B", "key"));
             Assert.AreEqual(2, Directory.GetFiles(_root, "*.json").Length);
+        }
+
+        [Test]
+        public void FileLuaModStore_CaseDistinctIdsRemainIsolatedAcrossRestartAndClear()
+        {
+            _store.Set("Case", "shared", "upper");
+            _store.Set("case", "shared", "lower");
+
+            Assert.AreEqual("upper", _store.Get("Case", "shared"));
+            Assert.AreEqual("lower", _store.Get("case", "shared"));
+            Assert.AreEqual(2, Directory.GetFiles(_root, "*.json").Length);
+
+            _store.Dispose();
+            _store = new FileLuaModStore(_root);
+            Assert.AreEqual("upper", _store.Get("Case", "shared"));
+            Assert.AreEqual("lower", _store.Get("case", "shared"));
+
+            _store.Clear("Case");
+            Assert.AreEqual("", _store.Get("Case", "shared"));
+            Assert.AreEqual("lower", _store.Get("case", "shared"));
+
+            _store.Dispose();
+            _store = new FileLuaModStore(_root);
+            Assert.AreEqual("", _store.Get("Case", "shared"));
+            Assert.AreEqual("lower", _store.Get("case", "shared"));
+            Assert.AreEqual(1, Directory.GetFiles(_root, "*.json").Length);
+        }
+
+        [Test]
+        public void FileLuaModStore_LegacyFileIsClaimedByOneExactIdAndMigratedToHash()
+        {
+            File.WriteAllText(
+                Path.Combine(_root, "Case.json"),
+                "{\"shared\":\"legacy\"}");
+
+            Assert.AreEqual("legacy", _store.Get("Case", "shared"));
+            Assert.AreEqual("", _store.Get("case", "shared"));
+            string[] migratedFiles = Directory.GetFiles(_root, "*.json");
+            Assert.AreEqual(1, migratedFiles.Length);
+            StringAssert.StartsWith("id-", Path.GetFileNameWithoutExtension(migratedFiles[0]));
+
+            _store.Dispose();
+            _store = new FileLuaModStore(_root);
+            Assert.AreEqual("legacy", _store.Get("Case", "shared"));
+            Assert.AreEqual("", _store.Get("case", "shared"));
         }
 
         [Test]

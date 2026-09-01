@@ -498,8 +498,14 @@ namespace CoreAI.Tests.EditMode
                 // WHY: end-to-end proof the DI graph is closed — a mod's print must land in the SAME
                 // service instance the get_mod_logs tool reads. persistToStore: false keeps the shared
                 // EditMode file store untouched.
-                container.Resolve<LuaCsModRuntime>().LoadMod(
-                    "log_probe", "print('hello-from-probe')", persistToStore: false);
+                ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
+                ActorContext hostActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                runtime.LoadMod(
+                    hostActor,
+                    "log_probe",
+                    "print('hello-from-probe')",
+                    persistToStore: false);
                 IReadOnlyList<LuaLogEntry> entries = logService.Query(new LuaLogQuery { ModId = "log_probe" });
                 Assert.AreEqual(1, entries.Count);
                 Assert.AreEqual(LuaLogLevel.Print, entries[0].Level);

@@ -1,9 +1,13 @@
 #if COREAI_LUA
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Mods.WorldPackages;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using VContainer;
 
@@ -20,25 +24,34 @@ namespace CoreAI.Demos
     /// reflects its live state through the public read-only properties below.
     /// WebGL driver entry points (SendMessage("LuaPlatformExample", …)): <see cref="RunSelfTest"/>,
     /// <see cref="StartTetris"/>, <see cref="StopTetris"/>, <see cref="DumpStatus"/> (alias
-    /// <see cref="LogStatus"/>), and <see cref="TetrisMove"/> (alias <see cref="NudgePiece"/>).
+    /// <see cref="LogStatus"/>), <see cref="TetrisMove"/> (alias <see cref="NudgePiece"/>),
+    /// <see cref="CreateWorldMarker"/>, <see cref="SaveWorld"/>,
+    /// <see cref="RequestWorldLoad"/>, and <see cref="DumpWorldMarker"/>. There is intentionally no
+    /// confirmation bypass: requested loads can be approved or rejected only in the player Hub UI.
     /// </summary>
     public sealed class LuaPlatformExampleController : MonoBehaviour
     {
         private const string SelfTestAId = "platform_selftest_a";
         private const string SelfTestBId = "platform_selftest_b";
         private const string TetrisId = "tetris3d";
+        private const string BrowserMarkerPrefix = "CoreAI_WebGL_Marker_";
+        private const int MaximumMarkerInputLength = 32;
+        private const int MaximumSlotInputLength = 64;
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
         [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
         private ILuaModRuntime _mods;
+        private LuaTool.ILuaExecutor _worldLuaExecutor;
+        private IRbxWorldRuntimeService _worldRuntimeService;
         private ActorContext _actorContext;
         private string _status = "Waiting for CoreAI scope.";
         private string _selfTestSummary = "Self-test not run yet.";
         private readonly List<string> _selfTestLines = new();
         private string _tetrisHud = "";
         private bool _pendingSelfTestUnload;
+        private bool _worldDriverBusy;
 
         /// <summary>Current one-line driver status (loading, self-test progress, Tetris state).</summary>
         public string Status => _status;
@@ -80,6 +93,8 @@ namespace CoreAI.Demos
             IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
             _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             _mods = luaContainer.Resolve<ILuaModRuntime>();
+            _worldLuaExecutor = luaContainer.ResolveOrDefault<LuaTool.ILuaExecutor>();
+            _worldRuntimeService = luaContainer.ResolveOrDefault<IRbxWorldRuntimeService>();
             _mods.AddModReportEmittedListener(_actorContext, OnModReport);
             bool tetrisAlreadyRunning = _mods.IsLoaded(_actorContext, TetrisId);
             if (tetrisAlreadyRunning)
@@ -208,6 +223,307 @@ namespace CoreAI.Demos
         public void NudgePiece(string delta)
         {
             TetrisMove(delta);
+        }
+
+        /// <summary>Creates one world-owned marker through the production execute_lua mutation path.</summary>
+        public void CreateWorldMarker(string markerName)
+        {
+            CreateWorldMarkerAsync(markerName).Forget();
+        }
+
+        /// <summary>Saves the current world into a create-once manual slot.</summary>
+        public void SaveWorld(string slot)
+        {
+            SaveWorldAsync(slot).Forget();
+        }
+
+        /// <summary>Requests a manual load that can be completed only through the player Hub UI.</summary>
+        public void RequestWorldLoad(string slot)
+        {
+            RequestWorldLoadAsync(slot).Forget();
+        }
+
+        /// <summary>Logs whether the world-owned projection currently contains the named marker.</summary>
+        public void DumpWorldMarker(string markerName)
+        {
+            DumpWorldMarkerAsync(markerName).Forget();
+        }
+
+        private async UniTaskVoid CreateWorldMarkerAsync(string markerName)
+        {
+            if (!TryNormalizeDriverInput(
+                    markerName,
+                    MaximumMarkerInputLength,
+                    out string normalizedMarker))
+            {
+                LogWorldDriverFailure("WORLD_MARKER_CREATE", "invalid-name");
+                return;
+            }
+
+            if (!TryEnterWorldDriver("WORLD_MARKER_CREATE", true, false))
+            {
+                return;
+            }
+
+            string durableName = BrowserMarkerPrefix + normalizedMarker;
+            Debug.Log("[LuaPlatformExample] WORLD_MARKER_CREATE requested name=" + durableName);
+            try
+            {
+                string code =
+                    "local marker = workspace:FindFirstChild('" + durableName + "')\n" +
+                    "if marker == nil then\n" +
+                    "  marker = Instance.new('Folder')\n" +
+                    "  marker.Name = '" + durableName + "'\n" +
+                    "  marker.Parent = workspace\n" +
+                    "end\n" +
+                    "return marker.Name";
+                CancellationToken cancellationToken = this.GetCancellationTokenOnDestroy();
+                LuaTool.LuaResult result = await _worldLuaExecutor.ExecuteAsync(
+                    code,
+                    cancellationToken);
+                if (result != null && result.Success)
+                {
+                    Debug.Log("[LuaPlatformExample] WORLD_MARKER_CREATE success name=" + durableName);
+                }
+                else
+                {
+                    LogWorldDriverFailure("WORLD_MARKER_CREATE", "executor-rejected");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                LogWorldDriverFailure("WORLD_MARKER_CREATE", "cancelled");
+            }
+            catch (Exception ex)
+            {
+                LogWorldDriverFailure("WORLD_MARKER_CREATE", ex.GetType().Name);
+            }
+            finally
+            {
+                _worldDriverBusy = false;
+            }
+        }
+
+        private async UniTaskVoid SaveWorldAsync(string slot)
+        {
+            if (!TryNormalizeDriverInput(slot, MaximumSlotInputLength, out string normalizedSlot))
+            {
+                LogWorldDriverFailure("WORLD_SAVE", "invalid-slot");
+                return;
+            }
+
+            if (!TryEnterWorldDriver("WORLD_SAVE", false, true))
+            {
+                return;
+            }
+
+            Debug.Log("[LuaPlatformExample] WORLD_SAVE requested slot=" + normalizedSlot);
+            try
+            {
+                CancellationToken cancellationToken = this.GetCancellationTokenOnDestroy();
+                RbxWorldPackageWriteResult result = await _worldRuntimeService.SaveManualAsync(
+                    _actorContext,
+                    normalizedSlot,
+                    cancellationToken);
+                if (result != null && result.Success)
+                {
+                    Debug.Log("[LuaPlatformExample] WORLD_SAVE success slot=" + normalizedSlot);
+                }
+                else
+                {
+                    LogWorldDriverFailure(
+                        "WORLD_SAVE",
+                        SanitizeLogReason(result?.Error, "store-rejected"));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                LogWorldDriverFailure("WORLD_SAVE", "cancelled");
+            }
+            catch (Exception ex)
+            {
+                LogWorldDriverFailure("WORLD_SAVE", ex.GetType().Name);
+            }
+            finally
+            {
+                _worldDriverBusy = false;
+            }
+        }
+
+        private async UniTaskVoid RequestWorldLoadAsync(string slot)
+        {
+            if (!TryNormalizeDriverInput(slot, MaximumSlotInputLength, out string normalizedSlot))
+            {
+                LogWorldDriverFailure("WORLD_LOAD_REQUEST", "invalid-slot");
+                return;
+            }
+
+            if (!TryEnterWorldDriver("WORLD_LOAD_REQUEST", false, true))
+            {
+                return;
+            }
+
+            Debug.Log("[LuaPlatformExample] WORLD_LOAD_REQUEST requested slot=" + normalizedSlot);
+            try
+            {
+                CancellationToken cancellationToken = this.GetCancellationTokenOnDestroy();
+                RbxWorldLoadRequest request = await _worldRuntimeService.RequestManualLoadAsync(
+                    _actorContext,
+                    normalizedSlot,
+                    cancellationToken);
+                Debug.Log(
+                    "[LuaPlatformExample] WORLD_LOAD_REQUEST success slot=" + normalizedSlot
+                    + " request=" + request.RequestId
+                    + " world=" + request.WorldId
+                    + " expires=" + request.ExpiresAtUtc.ToUniversalTime().ToString("O"));
+            }
+            catch (OperationCanceledException)
+            {
+                LogWorldDriverFailure("WORLD_LOAD_REQUEST", "cancelled");
+            }
+            catch (Exception ex)
+            {
+                LogWorldDriverFailure("WORLD_LOAD_REQUEST", ex.GetType().Name);
+            }
+            finally
+            {
+                _worldDriverBusy = false;
+            }
+        }
+
+        private async UniTaskVoid DumpWorldMarkerAsync(string markerName)
+        {
+            if (!TryNormalizeDriverInput(
+                    markerName,
+                    MaximumMarkerInputLength,
+                    out string normalizedMarker))
+            {
+                LogWorldDriverFailure("WORLD_MARKER_DUMP", "invalid-name");
+                return;
+            }
+
+            if (!TryEnterWorldDriver("WORLD_MARKER_DUMP", false, true))
+            {
+                return;
+            }
+
+            string durableName = BrowserMarkerPrefix + normalizedMarker;
+            try
+            {
+                CancellationToken cancellationToken = this.GetCancellationTokenOnDestroy();
+                await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
+                RbxWorldPackagePayload payload = _worldRuntimeService.CaptureCurrent();
+                int matches = 0;
+                if (payload?.Tree?.Instances != null)
+                {
+                    for (int index = 0; index < payload.Tree.Instances.Count; index++)
+                    {
+                        if (string.Equals(
+                                payload.Tree.Instances[index]?.Name,
+                                durableName,
+                                StringComparison.Ordinal))
+                        {
+                            matches++;
+                        }
+                    }
+                }
+
+                Debug.Log(
+                    "[LuaPlatformExample] WORLD_MARKER_DUMP success name=" + durableName
+                    + " present=" + (matches > 0 ? "true" : "false")
+                    + " count=" + matches);
+            }
+            catch (OperationCanceledException)
+            {
+                LogWorldDriverFailure("WORLD_MARKER_DUMP", "cancelled");
+            }
+            catch (Exception ex)
+            {
+                LogWorldDriverFailure("WORLD_MARKER_DUMP", ex.GetType().Name);
+            }
+            finally
+            {
+                _worldDriverBusy = false;
+            }
+        }
+
+        private bool TryEnterWorldDriver(
+            string operation,
+            bool requiresExecutor,
+            bool requiresWorldRuntime)
+        {
+            if (_worldDriverBusy)
+            {
+                LogWorldDriverFailure(operation, "busy");
+                return false;
+            }
+
+            if (requiresExecutor && _worldLuaExecutor == null)
+            {
+                LogWorldDriverFailure(operation, "executor-unavailable");
+                return false;
+            }
+
+            if (requiresWorldRuntime && _worldRuntimeService == null)
+            {
+                LogWorldDriverFailure(operation, "world-service-unavailable");
+                return false;
+            }
+
+            _worldDriverBusy = true;
+            return true;
+        }
+
+        private static bool TryNormalizeDriverInput(
+            string value,
+            int maximumLength,
+            out string normalized)
+        {
+            normalized = value?.Trim() ?? "";
+            if (normalized.Length == 0 || normalized.Length > maximumLength)
+            {
+                normalized = "";
+                return false;
+            }
+
+            for (int index = 0; index < normalized.Length; index++)
+            {
+                char character = normalized[index];
+                bool allowed = character >= 'a' && character <= 'z'
+                               || character >= 'A' && character <= 'Z'
+                               || character >= '0' && character <= '9'
+                               || character == '-'
+                               || character == '_';
+                if (!allowed)
+                {
+                    normalized = "";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static void LogWorldDriverFailure(string operation, string reason)
+        {
+            Debug.LogWarning(
+                "[LuaPlatformExample] " + operation + " failure reason=" + reason);
+        }
+
+        private static string SanitizeLogReason(string reason, string fallback)
+        {
+            string source = string.IsNullOrWhiteSpace(reason) ? fallback : reason.Trim();
+            int length = Math.Min(source.Length, 160);
+            char[] sanitized = new char[length];
+            for (int index = 0; index < length; index++)
+            {
+                char character = source[index];
+                sanitized[index] = character >= 32 && character <= 126
+                    ? character
+                    : '_';
+            }
+
+            return new string(sanitized);
         }
 
         private void OnModReport(string modId, string message)

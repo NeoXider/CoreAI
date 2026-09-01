@@ -1,53 +1,91 @@
-// Persist Unity's WebGL Application.persistentDataPath into IndexedDB.
-//
-// On WebGL builds Emscripten mounts an IDBFS at /idbfs/<hash>; Unity directs
-// File.WriteAllText / File.ReadAllText through that mount. Writes land in an
-// **in-memory** copy of the FS — they only become durable after the runtime
-// calls FS.syncfs(false, cb) to push the in-memory tree into IndexedDB.
-// Unity auto-syncs on Application.Quit(), but a tab close / page reload does
-// not invoke Quit, so saved data is lost. Call CoreAi_PersistFsSync after each
-// write you want to survive a reload.
-//
-// **Single-flight:** Emscripten warns (and can misbehave) if FS.syncfs is
-// invoked while a previous sync is still in flight. FileAgentMemoryStore may
-// call this after every File.WriteAllText (chat + memory in one turn), so we
-// queue at most one follow-up sync when re-entrancy happens.
-
 mergeInto(LibraryManager.library, {
   $CoreAiPersistFsQueue: {
     pending: false,
-    queued: false
+    active: [],
+    queued: []
   },
 
-  CoreAi_PersistFsSync__deps: ['$CoreAiPersistFsQueue'],
-  CoreAi_PersistFsSync: function () {
+  $CoreAiPersistFsEnqueue__deps: ['$CoreAiPersistFsQueue', 'free'],
+  $CoreAiPersistFsEnqueue: function (callId, onCompletionPtr) {
     var q = CoreAiPersistFsQueue;
-    try {
-      if (typeof FS === 'undefined' || typeof FS.syncfs !== 'function') {
-        console.warn('[CoreAiPersistFs] FS or FS.syncfs unavailable; persistentDataPath writes will not survive reload');
-        return;
-      }
-      if (q.pending) {
-        q.queued = true;
-        return;
-      }
-      q.pending = true;
-      function onDone(err) {
-        if (err) {
-          console.warn('[CoreAiPersistFs] FS.syncfs failed:', err && err.message ? err.message : err);
-        }
-        if (q.queued) {
-          q.queued = false;
-          FS.syncfs(false, onDone);
-        } else {
-          q.pending = false;
-        }
-      }
-      FS.syncfs(false, onDone);
-    } catch (e) {
-      q.pending = false;
-      q.queued = false;
-      console.warn('[CoreAiPersistFs] FS.syncfs threw:', e && e.message ? e.message : e);
+    var request = {
+      callId: callId,
+      onCompletionPtr: onCompletionPtr
+    };
+
+    function messageOf(error) {
+      if (!error) return '';
+      return error.message ? error.message : String(error);
     }
+
+    function complete(requestToComplete, succeeded, message) {
+      if (!requestToComplete.onCompletionPtr) return;
+      var onCompletionPtr = requestToComplete.onCompletionPtr;
+      var errorPtr = stringToNewUTF8(message || '');
+      try {
+        {{{ makeDynCall('viii', 'onCompletionPtr') }}}(
+          requestToComplete.callId,
+          succeeded ? 1 : 0,
+          errorPtr);
+      } catch (callbackError) {
+        console.warn('[CoreAiPersistFs] completion callback failed:', messageOf(callbackError));
+      } finally {
+        _free(errorPtr);
+      }
+    }
+
+    function finishActive(succeeded, message) {
+      var completed = q.active;
+      q.active = [];
+      for (var index = 0; index < completed.length; index++) {
+        complete(completed[index], succeeded, message);
+      }
+
+      if (q.queued.length > 0) {
+        q.active = q.queued;
+        q.queued = [];
+        startActive();
+      } else {
+        q.pending = false;
+      }
+    }
+
+    function startActive() {
+      try {
+        if (typeof FS === 'undefined' || typeof FS.syncfs !== 'function') {
+          finishActive(false, 'FS.syncfs is unavailable');
+          return;
+        }
+
+        FS.syncfs(false, function (error) {
+          if (error) {
+            finishActive(false, messageOf(error));
+          } else {
+            finishActive(true, '');
+          }
+        });
+      } catch (error) {
+        finishActive(false, messageOf(error));
+      }
+    }
+
+    if (q.pending) {
+      q.queued.push(request);
+      return;
+    }
+
+    q.pending = true;
+    q.active = [request];
+    startActive();
+  },
+
+  CoreAi_PersistFsSync__deps: ['$CoreAiPersistFsEnqueue'],
+  CoreAi_PersistFsSync: function () {
+    CoreAiPersistFsEnqueue(0, 0);
+  },
+
+  CoreAi_PersistFsSyncAsync__deps: ['$CoreAiPersistFsEnqueue'],
+  CoreAi_PersistFsSyncAsync: function (callId, onCompletionPtr) {
+    CoreAiPersistFsEnqueue(callId, onCompletionPtr);
   }
 });

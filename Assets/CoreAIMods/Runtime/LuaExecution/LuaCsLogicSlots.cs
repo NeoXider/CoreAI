@@ -55,23 +55,54 @@ namespace CoreAI.Ai.LuaCs
         private readonly IScriptExecutionGuard _guard;
         private readonly IValueMarshaller _marshaller;
         private readonly ILog _log;
+        private readonly Func<IScriptState, IScriptState> _stateResolver;
+        private readonly Func<LuaCsLogicSlots> _activeProvider;
+        private event Action<string, string, string> _overrideFailed;
 
         /// <summary>Description of the most recent override failure, or empty.</summary>
-        public string LastError { get; private set; } = "";
+        public string LastError
+        {
+            get => ActiveTarget?.LastError ?? _lastError;
+            private set => _lastError = value;
+        }
+
+        private string _lastError = "";
 
         /// <summary>
         /// Raised when an installed override throws or exceeds its budget and is reset to vanilla:
         /// (ownerModId, slot, error). <c>ownerModId</c> is empty for ownerless overrides (one-off
         /// scripts). Subscribers are isolated: one throwing subscriber never skips the rest.
         /// </summary>
-        public event Action<string, string, string> OverrideFailed;
+        public event Action<string, string, string> OverrideFailed
+        {
+            add
+            {
+                _overrideFailed += value;
+                LuaCsLogicSlots target = ActiveTarget;
+                if (target != null)
+                {
+                    target.OverrideFailed += value;
+                }
+            }
+            remove
+            {
+                _overrideFailed -= value;
+                LuaCsLogicSlots target = ActiveTarget;
+                if (target != null)
+                {
+                    target.OverrideFailed -= value;
+                }
+            }
+        }
 
         public LuaCsLogicSlots(
             ILog log = null,
             int invokeTimeoutMs = DefaultInvokeTimeoutMs,
-            long invokeMaxSteps = DefaultInvokeMaxSteps)
+            long invokeMaxSteps = DefaultInvokeMaxSteps,
+            Func<IScriptState, IScriptState> stateResolver = null)
         {
             _log = log;
+            _stateResolver = stateResolver;
 
             // WHY: Slots are engine-passive — they never create states, only call back into states handed
             // to logic_define — so the Lua-CSharp guard/marshaller pair is bound here directly instead of
@@ -80,12 +111,26 @@ namespace CoreAI.Ai.LuaCs
             _marshaller = LuaCsValueMarshaller.Instance;
         }
 
+        internal LuaCsLogicSlots(Func<LuaCsLogicSlots> activeProvider)
+            : this()
+        {
+            _activeProvider = activeProvider
+                ?? throw new ArgumentNullException(nameof(activeProvider));
+        }
+
         /// <summary>
         /// Declares a slot as overridable. Scripts can only define slots the game declared, so the game
         /// stays in control of which decision points are moddable.
         /// </summary>
         public void DeclareSlot(string name)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                target.DeclareSlot(name);
+                return;
+            }
+
             string slot = Normalize(name);
             if (slot.Length == 0)
             {
@@ -103,6 +148,12 @@ namespace CoreAI.Ai.LuaCs
         {
             get
             {
+                LuaCsLogicSlots target = ActiveTarget;
+                if (target != null)
+                {
+                    return target.DeclaredSlots;
+                }
+
                 lock (_gate)
                 {
                     return new List<string>(_declared);
@@ -113,6 +164,12 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>True when a Lua override is currently installed for the slot.</summary>
         public bool IsOverridden(string name)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.IsOverridden(name);
+            }
+
             lock (_gate)
             {
                 return _overrides.ContainsKey(Normalize(name));
@@ -122,6 +179,13 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Removes the Lua override for a slot (C# default applies again).</summary>
         public void Reset(string name)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                target.Reset(name);
+                return;
+            }
+
             lock (_gate)
             {
                 _overrides.Remove(Normalize(name));
@@ -131,6 +195,13 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Removes every installed override.</summary>
         public void ResetAll()
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                target.ResetAll();
+                return;
+            }
+
             lock (_gate)
             {
                 _overrides.Clear();
@@ -146,6 +217,13 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void RegisterApis(IScriptFunctionRegistry registry, string ownerModId = null)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                target.RegisterApis(registry, ownerModId);
+                return;
+            }
+
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
@@ -184,7 +262,9 @@ namespace CoreAI.Ai.LuaCs
                         $"logic_define: slot '{slot}' is not declared by the game. Use logic_list().");
                 }
 
-                _overrides[slot] = new OverrideEntry { Fn = fn, State = state, OwnerModId = ownerModId };
+                IScriptState ownerState = _stateResolver?.Invoke(state) ?? state;
+                _overrides[slot] = new OverrideEntry
+                    { Fn = fn, State = ownerState, OwnerModId = ownerModId };
             }
 
             return true;
@@ -199,6 +279,12 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public int ClearOwnedBy(string modId, IScriptState except = null)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.ClearOwnedBy(modId, except);
+            }
+
             string owner = Normalize(modId);
             if (owner.Length == 0)
             {
@@ -273,6 +359,12 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public bool TryInvoke(string name, out object result, params object[] args)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.TryInvoke(name, out result, args);
+            }
+
             if (TryInvokeRaw(name, out object raw, args))
             {
                 result = _marshaller.ToHostValue(raw);
@@ -286,6 +378,12 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Numeric slot helper (formulas). False → use the C# default.</summary>
         public bool TryInvokeNumber(string name, out double value, params object[] args)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.TryInvokeNumber(name, out value, args);
+            }
+
             value = 0d;
             if (!TryInvokeRaw(name, out object result, args) ||
                 _marshaller.GetKind(result) != ScriptValueKind.Number)
@@ -300,6 +398,12 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Boolean slot helper (predicates). False → use the C# default.</summary>
         public bool TryInvokeBool(string name, out bool value, params object[] args)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.TryInvokeBool(name, out value, args);
+            }
+
             value = false;
             if (!TryInvokeRaw(name, out object result, args) ||
                 _marshaller.GetKind(result) != ScriptValueKind.Boolean)
@@ -314,6 +418,12 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>String slot helper (tables/ids serialized by the script). False → use the C# default.</summary>
         public bool TryInvokeString(string name, out string value, params object[] args)
         {
+            LuaCsLogicSlots target = ActiveTarget;
+            if (target != null)
+            {
+                return target.TryInvokeString(name, out value, args);
+            }
+
             value = "";
             if (!TryInvokeRaw(name, out object result, args) ||
                 _marshaller.GetKind(result) != ScriptValueKind.String)
@@ -354,7 +464,7 @@ namespace CoreAI.Ai.LuaCs
                 // runtime can record it in the same diagnostics channel as handler errors.
                 Reset(slot);
                 string owner = entry.OwnerModId ?? "";
-                LastError = $"slot '{slot}': {ex.Message}";
+                LastError = $"slot '{slot}': {ex}";
                 _log?.Error(
                     $"[LuaCsLogicSlots] Override for '{slot}'" +
                     $"{(owner.Length > 0 ? $" (mod '{owner}')" : "")} failed and was reset: {ex}");
@@ -368,7 +478,7 @@ namespace CoreAI.Ai.LuaCs
         // telemetry subscriber must not turn the fail-open path into a game-loop failure.
         private void RaiseOverrideFailed(string ownerModId, string slot, string error)
         {
-            Action<string, string, string> handler = OverrideFailed;
+            Action<string, string, string> handler = _overrideFailed;
             if (handler == null)
             {
                 return;
@@ -390,6 +500,55 @@ namespace CoreAI.Ai.LuaCs
         private static string Normalize(string name)
         {
             return (name ?? "").Trim();
+        }
+
+        internal void OnActiveTargetChanging(
+            LuaCsLogicSlots previous,
+            LuaCsLogicSlots next)
+        {
+            if (_activeProvider == null || ReferenceEquals(previous, next))
+            {
+                return;
+            }
+
+            Action<string, string, string> listeners = _overrideFailed;
+            if (listeners == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, string, string> listener in listeners.GetInvocationList())
+            {
+                if (previous != null)
+                {
+                    previous.OverrideFailed -= listener;
+                }
+
+                if (next != null)
+                {
+                    next.OverrideFailed += listener;
+                }
+            }
+        }
+
+        private LuaCsLogicSlots ActiveTarget
+        {
+            get
+            {
+                if (_activeProvider == null)
+                {
+                    return null;
+                }
+
+                LuaCsLogicSlots target = _activeProvider();
+                if (target == null || ReferenceEquals(target, this))
+                {
+                    throw new InvalidOperationException(
+                        "The active Lua world session has no logic-slot surface.");
+                }
+
+                return target;
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
@@ -51,7 +53,11 @@ namespace CoreAI.Infrastructure.Lua
 
             try
             {
-                _gate.Wait();
+                if (!_gate.Wait(0))
+                {
+                    throw new InvalidOperationException(
+                        "Lua mod data store is busy; retry the operation on a later frame.");
+                }
             }
             catch (ObjectDisposedException)
             {
@@ -203,7 +209,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             try
             {
-                string path = GetPath(modId);
+                string path = ResolvePathForRead(modId);
                 if (!File.Exists(path))
                 {
                     return new Dictionary<string, string>();
@@ -239,7 +245,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             try
             {
-                string path = GetPath(modId);
+                string path = ResolvePathForRead(modId);
                 if (File.Exists(path))
                 {
                     File.Delete(path);
@@ -264,29 +270,77 @@ namespace CoreAI.Infrastructure.Lua
 
         private string GetPath(string modId)
         {
-            return Path.Combine(_dir, $"{SanitizedFileStem(modId)}.json");
+            return Path.Combine(_dir, CaseSafeFileStem(modId) + ".json");
+        }
+
+        private string ResolvePathForRead(string modId)
+        {
+            string path = GetPath(modId);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            string legacyPath = Path.Combine(_dir, LegacySanitizedFileStem(modId) + ".json");
+            if (!File.Exists(legacyPath))
+            {
+                return path;
+            }
+
+            EnsureDir();
+            try
+            {
+                File.Move(legacyPath, path);
+                CoreAiWebGlPersistence.Sync();
+            }
+            catch (IOException)
+            {
+                if (!File.Exists(path))
+                {
+                    throw;
+                }
+            }
+
+            return path;
         }
 
         /// <summary>
-        /// Maps a raw role id to a unique file stem. Invalid filename characters are replaced, and
-        /// when the replacement changed anything a short hash of the raw id is appended so distinct
-        /// ids like "A/B" and "A_B" cannot collide on the same file.
+        /// Maps the exact UTF-8 mod id to a fixed case-safe SHA-256 file stem.
         /// </summary>
-        private static string SanitizedFileStem(string roleId)
+        private static string CaseSafeFileStem(string modId)
         {
-            string safe = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            if (string.Equals(safe, roleId, StringComparison.Ordinal))
+            byte[] idBytes = Encoding.UTF8.GetBytes(modId);
+            byte[] digest;
+            using (SHA256 algorithm = SHA256.Create())
+            {
+                digest = algorithm.ComputeHash(idBytes);
+            }
+
+            StringBuilder fileStem = new(3 + digest.Length * 2);
+            fileStem.Append("id-");
+            for (int index = 0; index < digest.Length; index++)
+            {
+                fileStem.Append(digest[index].ToString("x2"));
+            }
+
+            return fileStem.ToString();
+        }
+
+        private static string LegacySanitizedFileStem(string modId)
+        {
+            string safe = string.Join("_", modId.Split(Path.GetInvalidFileNameChars()));
+            if (string.Equals(safe, modId, StringComparison.Ordinal))
             {
                 return safe;
             }
 
             uint hash = 2166136261u;
-            foreach (char c in roleId)
+            foreach (char character in modId)
             {
-                hash = (hash ^ c) * 16777619u;
+                hash = (hash ^ character) * 16777619u;
             }
 
-            return $"{safe}_{hash:x8}";
+            return safe + "_" + hash.ToString("x8");
         }
 
         private void EnsureDir()

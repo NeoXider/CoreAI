@@ -21,8 +21,72 @@
 - [x] The acceptance manifest scopes G2 to ACL-versioned worlds, explicitly excludes legacy missing/null
       ACL worlds from the cross-actor refusal security claim, and marks the unrun machine/provider/test
       discovery/RSS fields `NOT MEASURED` instead of inventing values.
-- [ ] **Verification gate — owner-run Unity EditMode suite.** Non-Unity `CoreAI.Mods.Tests.csproj` build
-      is green; Unity and its test runner were intentionally not invoked for this wave.
+- [ ] **Verification gate — fresh post-fix Unity EditMode suite.** `g6.xml` is green at
+      3076 total / 3067 passed / 0 failed / 9 skipped, but predates the current WebGL/Llama and world
+      package changes and is not evidence for them. Current generated-project compile gates are green.
+- [~] **G11 LLMUnity/WebGL containment:** code review is green after restricting the Cecil rewrite to
+      the current `Temp/StagingArea/Data/Managed` DLL; persistent Bee caches are explicitly rejected.
+      Remaining evidence: fresh EditMode, clean + incremental WebGL builds, then the browser checks.
+- [ ] **G11 browser interaction gate:** the previous player was built and launched, but the fresh
+      post-fix player still needs the §6.5 interaction/console pass.
+
+## MVP3 world package first vertical (2026-09-01) — uncommitted
+
+- [~] **W3.1 codec slice:** engine-free versioned package, fresh-registry restore, stable
+      server-authority ids, hostile-input quotas, world-owned projection, and the regression fixture
+      are implemented. Capture/`ExportSnapshot` omit every non-null-`OwnerModId` subtree including
+      descendants without their own owner; injected mod-owned nodes and a retained Model pointing at
+      an excluded PrimaryPart fail closed. The roadmap restart gate remains open until a production
+      host actually swaps sessions and applies all settings.
+- [ ] Move world-owned projection into an ownership-aware capture traversal so an excluded
+      mod-ephemeral subtree is skipped before it consumes snapshot depth/count/materialization work.
+- [x] **W3.2 codec architecture:** disk encode/decode and `ExportSnapshot` share one canonical payload
+      and one instance-tree mapper.
+- [ ] **Verification gate — owner-run Unity EditMode suite.** Generated-project builds are green;
+      pure outside-Unity regressions are green, while Lua-authored cases require the open Editor.
+      Unity/Bee compilation now pins the direct `CoreAI.Mods` -> `CoreAI.RbxApi.Unity` asmdef reference;
+      generated csproj compilation had masked that dependency through a transitive reference.
+- [~] **W3.3 implementation complete; Unity acceptance pending:** production composition resolves
+      stable runtime/executor/stack/logic/source facades over a mutable session controller. Confirmed
+      load durably prepares exact sources before a zero-await fresh-host swap, starts active mods once
+      after the tree and dormant mods zero times, buffers staged mod-data writes, then makes the old
+      VM/hooks/connections/scheduler/registry inert. `save_world` and fail-closed `load_world` share
+      the runtime service; only host/UI confirmation consumes a one-use expiring load request. Exact
+      sources use collision-safe case-insensitive names and post-write verification; staged camera,
+      logic declarations, revisions, network output, and mod data have rollback/publish boundaries.
+      Active `Full` packages fail before staging because arbitrary Unity side effects cannot be
+      isolated. Persistent mod-data files hash the exact UTF-8 mod id, preventing ordinal `Case`/`case`
+      ids from aliasing on Windows; legacy sanitized files are one-time claimed and migrated by the
+      first exact id. The built-player Hub now exposes pending metadata with one-shot Confirm/Reject actions,
+      and the FullAccess WebGL harness drives marker creation, save, and request-only load through the
+      production seams without a confirmation bypass. Owner-run positive and negative Unity tests and
+      browser interaction remain required before PASS.
+- [ ] **W3.5 startup selection residue:** persist an explicit selected world/autoload pointer with a
+      crash-safe world+source protocol. Until then restart intentionally selects the prior world and
+      default source set; isolated loaded-session versions are not inferred as startup state.
+- [~] **W3.4 implementation complete; Unity acceptance pending:** autosave insertion and ring deletion have separate durability
+      confirmations, exact rollback journalling, serialized mutations, and reload-model regressions.
+      One reusable async single-flight gate now spans capture -> confirmed autosave -> mutation;
+      `execute_lua` and all six mutating `manage_mods` actions (`load`, `reload`, `unload`, `import`,
+      `forget`, `revert`) fail without mutation on false, exception, or cancellation. Production
+      composition injects the same gate instance into both tool paths. The behavioral matrix preserves
+      live/source-store/revision/manual state exactly; read-only actions bypass backup; cross-tool order
+      remains serialized. Owner-run focused/full Unity verification remains before PASS.
+- [~] **W3.5 implementation complete; browser acceptance pending:** the world store uses a real
+      WebGL `syncfs` success/error callback, finite realtime timeout/cancellation, and never treats
+      request issuance as durability. Node bridge tests and deterministic volatile/durable reload
+      tests are green. Remaining gate: real WebGL save -> callback -> page reload, including console
+      and within-budget responsiveness evidence.
+- [ ] Incrementally encode/decode JSON/ZIP on WebGL. The current player path yields chunked file I/O
+      and fails fast beyond a 4 MiB / 4,096-instance / bounded-collection budget; within-budget browser
+      responsiveness still needs G11 evidence.
+- [~] **WebGL Rbx material catalog evidence:** the frozen render-supported set is 22 of the 45 public
+      `Enum.Material` items; the remaining 23 stay on the visible diagnostic fallback and are not
+      claimed as supported. Exhaustive public-Lua binder and showcase-driver regressions are in place.
+      Remaining gate: run `DumpMaterialApiEvidence` in the actual WebGL player and retain the ordered
+      23-slot PASS summary plus a visual pass confirming no supported slot renders pink.
+- [ ] Stream or quota JSON token materialization before semantic tree validation to cap hostile
+      browser peak memory, and enforce hostile-reader preorder/sorted collection canonicality.
 
 ## MVP1 residue closed + MVP2 scheduler core (2026-08-30) — 7.1.0 prepared
 
@@ -766,12 +830,15 @@ Open:
       request-local and `ToolExecutionPolicy.Reset()` intentionally clears it.
 - [ ] Full-tier Lua queries: move recursive `unity_list_objects` / `unity_find_all` /
       `unity_find_by_tag` / `unity_find_by_component` implementations onto the shared budgeted walker.
-- [ ] **WebGL build: `LlamaLib.GetPlatform()` throws on Emscripten/WASM.** LLMUnity's native
+- [~] **WebGL build: `LlamaLib.GetPlatform()` throws on Emscripten/WASM.** LLMUnity's native
       llama.cpp wrapper uses `RuntimeInformation.IsOSPlatform` which does not recognise WebGL/Emscripten
       (`Unix 3.1.39.0`). `CoreAiWebGlLlmUnitySceneGuard` disables scene-placed `LLM` objects, but
       any programmatic `new LlamaLib()` / `LLMService()` path still hits `GetPlatform()` and crashes.
-      **Fix:** either add an Emscripten/WASM branch to `LlamaLib.GetPlatform()` upstream, or ensure
-      all LLMUnity construction paths in CoreAI are gated behind `#if !UNITY_WEBGL`.
+      **Containment implemented, verification pending:** browser composition no longer constructs a
+      local provider, staged scenes lose LLMUnity behaviours, and the current staging DLL's eager
+      initializer is replaced and verified fail-closed. Runtime polling is only post-`Awake`
+      containment; the RUNTIME-first debt still requires an upstream platform gate, assembly split,
+      or maintained fork. Fresh EditMode and clean/incremental WebGL builds remain before closure.
 - [ ] **Hub: log text should be copyable.** The Hub log viewer (Mod Logs / diagnostics) does not
       allow selecting/copying text. Add text selection support so users can copy error messages and
       diagnostics.

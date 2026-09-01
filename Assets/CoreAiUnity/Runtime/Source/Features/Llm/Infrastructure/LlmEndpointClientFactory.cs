@@ -141,8 +141,19 @@ namespace CoreAI.Infrastructure.Llm
         {
 #if !COREAI_HAS_LLMUNITY || UNITY_WEBGL || !COREAI_LLM
             await Task.Yield();
-            throw new PlatformNotSupportedException("LLMUnity endpoints are unavailable on this platform.");
+#if UNITY_WEBGL
+            throw new PlatformNotSupportedException(
+                LocalModelPlatformSupport.GetUnavailableMessage(UnityEngine.Application.platform));
 #else
+            throw new PlatformNotSupportedException(LocalModelPlatformSupport.IntegrationUnavailableMessage);
+#endif
+#else
+            if (!LocalModelPlatformSupport.IsSupported(Application.platform))
+            {
+                throw new PlatformNotSupportedException(
+                    LocalModelPlatformSupport.GetUnavailableMessage(Application.platform));
+            }
+
             LLMAgent agent = ResolveAgent(descriptor.UnityAgentName);
             if (agent == null)
             {

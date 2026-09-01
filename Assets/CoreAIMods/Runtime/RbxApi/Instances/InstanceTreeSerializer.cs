@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -12,6 +13,27 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </summary>
     public static class InstanceTreeSerializer
     {
+        private readonly struct CaptureFrame
+        {
+            public CaptureFrame(RbxInstance instance, ulong parentId, int depth)
+            {
+                Instance = instance;
+                ParentId = parentId;
+                Depth = depth;
+            }
+
+            public RbxInstance Instance { get; }
+
+            public ulong ParentId { get; }
+
+            public int Depth { get; }
+        }
+
+        public const int MaximumSnapshotInstances = 100000;
+        public const int MaximumSnapshotDepth = 2048;
+        public const int MaximumAttributesPerInstance = 256;
+        public const int MaximumTagsPerInstance = 256;
+
         /// <summary>Captures <paramref name="root"/> and its whole subtree in preorder.</summary>
         public static InstanceTreeSnapshot Capture(RbxInstance root)
         {
@@ -24,13 +46,48 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 WorldAclVersion = root.Registry?.WorldAclVersion
             };
-            CaptureNode(root, 0UL, snapshot.Instances);
+            Stack<CaptureFrame> pending = new();
+            pending.Push(new CaptureFrame(root, 0UL, 1));
+            while (pending.Count > 0)
+            {
+                CaptureFrame frame = pending.Pop();
+                CaptureNode(frame.Instance, frame.ParentId, frame.Depth, snapshot.Instances);
+                IReadOnlyList<RbxInstance> children = frame.Instance.GetChildren();
+                for (int index = children.Count - 1; index >= 0; index--)
+                {
+                    pending.Push(new CaptureFrame(
+                        children[index], frame.Instance.Id.Value, frame.Depth + 1));
+                }
+            }
+
             return snapshot;
         }
 
-        private static void CaptureNode(RbxInstance instance, ulong parentId,
+        private static void CaptureNode(RbxInstance instance, ulong parentId, int depth,
             List<InstanceSnapshot> output)
         {
+            if (depth > MaximumSnapshotDepth)
+            {
+                throw RbxError.BadArgument(
+                    "live instance hierarchy exceeds depth limit " + MaximumSnapshotDepth,
+                    "flatten the instance hierarchy before capture");
+            }
+
+            if (output.Count >= MaximumSnapshotInstances)
+            {
+                throw RbxError.BadArgument(
+                    "live instance tree exceeds instance limit " + MaximumSnapshotInstances,
+                    "split the world or reduce the live instance count before capture");
+            }
+
+            if (!instance.Id.IsServerAssigned)
+            {
+                throw RbxError.BadArgument(
+                    "locally-assigned instance id " + instance.Id.Value
+                    + " cannot be captured in a world file",
+                    "capture only server-authority instances");
+            }
+
             InstanceRecord record = null;
             instance.Registry?.TryGetRecord(instance.Id, out record);
 
@@ -44,8 +101,30 @@ namespace CoreAI.Mods.Rbx.Instances
                 OwnerModId = record?.OwnerModId,
                 OriginTag = record?.OriginTag,
                 OwnerActorId = record?.OwnerActorId,
-                AccessScope = record?.AccessScope
+                AccessScope = record?.AccessScope,
+                Revision = record?.Revision ?? 0L
             };
+
+            if (instance is RbxModel model)
+            {
+                node.Model = new ModelSnapshot
+                {
+                    PrimaryPartId = model.PrimaryPart?.Id.Value ?? 0UL,
+                    HasStoredWorldPivot = model.HasStoredWorldPivot,
+                    StoredWorldPivot = model.HasStoredWorldPivot
+                        ? Join(model.StoredWorldPivot.GetComponents())
+                        : null
+                };
+            }
+
+            if (instance is RbxClickDetector clickDetector)
+            {
+                node.ClickDetector = new ClickDetectorSnapshot
+                {
+                    MaxActivationDistance = clickDetector.MaxActivationDistance.ToString(
+                        "R", CultureInfo.InvariantCulture)
+                };
+            }
 
             foreach (string tag in instance.GetTags())
             {
@@ -59,10 +138,6 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             output.Add(node);
-            foreach (RbxInstance child in instance.GetChildren())
-            {
-                CaptureNode(child, instance.Id.Value, output);
-            }
         }
 
         private static AttributeSnapshot ToAttributeSnapshot(string name, object value)
@@ -114,11 +189,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public static RbxInstance Restore(InstanceTreeSnapshot snapshot, InstanceRegistry registry)
         {
-            if (snapshot == null || snapshot.Instances == null || snapshot.Instances.Count == 0)
-            {
-                throw RbxError.BadArgument("cannot restore an empty snapshot",
-                    "capture a subtree with InstanceTreeSerializer.Capture first");
-            }
+            Validate(snapshot, registry);
 
             registry.ConfigureWorldAclVersion(snapshot.WorldAclVersion);
             Dictionary<ulong, RbxInstance> restored = new();
@@ -155,14 +226,388 @@ namespace CoreAI.Mods.Rbx.Instances
                 instance.Parent = parent;
             }
 
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                RbxInstance instance = restored[node.Id];
+                if (node.Model != null)
+                {
+                    RbxModel model = (RbxModel)instance;
+                    if (node.Model.HasStoredWorldPivot)
+                    {
+                        model.SetWorldPivot(ParseCFrame(node.Model.StoredWorldPivot));
+                    }
+
+                    if (node.Model.PrimaryPartId != 0UL)
+                    {
+                        model.SetPrimaryPart(restored[node.Model.PrimaryPartId]);
+                    }
+                }
+
+                if (node.ClickDetector != null)
+                {
+                    RbxClickDetector clickDetector = (RbxClickDetector)instance;
+                    clickDetector.MaxActivationDistance = double.Parse(
+                        node.ClickDetector.MaxActivationDistance, CultureInfo.InvariantCulture);
+                }
+            }
+
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                registry.GetRecord(new InstanceId(node.Id)).Revision = node.Revision;
+            }
+
             return root;
+        }
+
+        /// <summary>Validates the entire tree before the destination registry is mutated.</summary>
+        public static void Validate(InstanceTreeSnapshot snapshot, InstanceRegistry registry)
+        {
+            if (snapshot == null || snapshot.Instances == null || snapshot.Instances.Count == 0)
+            {
+                throw RbxError.BadArgument("cannot restore an empty snapshot",
+                    "capture a subtree with InstanceTreeSerializer.Capture first");
+            }
+
+            if (snapshot.Instances.Count > MaximumSnapshotInstances)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot contains " + snapshot.Instances.Count + " instances; limit is "
+                    + MaximumSnapshotInstances,
+                    "split the world or reduce the serialized instance count");
+            }
+
+            if (registry == null)
+            {
+                throw new ArgumentNullException(nameof(registry));
+            }
+
+            if (snapshot.WorldAclVersion.HasValue
+                && snapshot.WorldAclVersion.Value != InstanceRegistry.CurrentWorldAclVersion)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot uses unsupported world ACL version " + snapshot.WorldAclVersion.Value,
+                    "use world ACL version " + InstanceRegistry.CurrentWorldAclVersion);
+            }
+
+            Dictionary<ulong, InstanceSnapshot> byId = new();
+            int rootCount = 0;
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node == null || node.Id == 0UL)
+                {
+                    throw RbxError.BadArgument("snapshot contains an invalid instance id",
+                        "every serialized instance id must be non-zero");
+                }
+
+                InstanceId nodeId = new(node.Id);
+                if (!nodeId.IsServerAssigned)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot contains locally-assigned instance id " + node.Id,
+                        "world files may contain only server-authority instance ids");
+                }
+
+                if (!byId.TryAdd(node.Id, node))
+                {
+                    throw RbxError.BadArgument("snapshot contains duplicate instance id " + node.Id,
+                        "every serialized instance id must be unique");
+                }
+
+                if (registry.TryGet(new InstanceId(node.Id), out RbxInstance _))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance id " + node.Id + " already exists in the destination registry",
+                        "restore into a fresh registry or remove the colliding destination instance");
+                }
+
+                if (!OriginTag.IsValid(node.OriginTag))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " has invalid origin tag '"
+                        + node.OriginTag + "'",
+                        "use a mod:, console:, or ai: origin tag with a non-empty payload");
+                }
+
+                if (!registry.Catalog.TryGet(node.ClassName, out ClassDescriptor descriptor)
+                    || descriptor.IsAbstract)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot contains unsupported class '" + node.ClassName + "'",
+                        "load the package with a catalog that supports every serialized class");
+                }
+
+                if (node.Revision < 0L)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " has negative revision " + node.Revision,
+                        "instance revisions must be zero or greater");
+                }
+
+                if (node.ParentId == 0UL)
+                {
+                    rootCount++;
+                }
+                else if (node.ParentId == node.Id)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " is its own parent",
+                        "parent ids must form one acyclic tree");
+                }
+
+                ValidateAttributes(node);
+                ValidateTags(node);
+                ValidateSpecializedState(node, registry.Catalog);
+            }
+
+            if (rootCount != 1)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot must contain exactly one root but contains " + rootCount,
+                    "capture one connected instance subtree");
+            }
+
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node.ParentId != 0UL && !byId.ContainsKey(node.ParentId))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " names missing parent " + node.ParentId,
+                        "include every parent in the captured subtree");
+                }
+            }
+
+            ValidateHierarchy(byId);
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                ValidateModelReferences(node, byId, registry.Catalog);
+            }
+        }
+
+        private static void ValidateAttributes(InstanceSnapshot node)
+        {
+            if (node.Attributes == null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot instance " + node.Id + " has a nil attribute collection",
+                    "serialize an empty attribute collection instead");
+            }
+            if (node.Attributes.Count > MaximumAttributesPerInstance)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot instance " + node.Id + " contains " + node.Attributes.Count
+                    + " attributes; limit is " + MaximumAttributesPerInstance,
+                    "reduce the serialized attribute count");
+            }
+
+            HashSet<string> names = new(StringComparer.Ordinal);
+            foreach (AttributeSnapshot attribute in node.Attributes)
+            {
+                if (attribute == null)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " contains a nil attribute",
+                        "remove the invalid attribute entry");
+                }
+
+                AttributeContract.ValidateName(attribute.Name);
+                if (!names.Add(attribute.Name))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " contains duplicate attribute '"
+                        + attribute.Name + "'",
+                        "serialize each attribute name once");
+                }
+
+                if (!Enum.IsDefined(typeof(AttributeValueKind), attribute.Kind))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot attribute '" + attribute.Name + "' uses unsupported kind "
+                        + (int)attribute.Kind,
+                        "use a supported attribute value kind");
+                }
+
+                FromAttributeSnapshot(attribute);
+            }
+        }
+
+        private static void ValidateTags(InstanceSnapshot node)
+        {
+            if (node.Tags == null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot instance " + node.Id + " has a nil tag collection",
+                    "serialize an empty tag collection instead");
+            }
+            if (node.Tags.Count > MaximumTagsPerInstance)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot instance " + node.Id + " contains " + node.Tags.Count
+                    + " tags; limit is " + MaximumTagsPerInstance,
+                    "reduce the serialized tag count");
+            }
+
+            HashSet<string> tags = new(StringComparer.Ordinal);
+            foreach (string tag in node.Tags)
+            {
+                if (string.IsNullOrEmpty(tag) || !tags.Add(tag))
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot instance " + node.Id + " contains an empty or duplicate tag",
+                        "serialize each non-empty tag once");
+                }
+            }
+        }
+
+        private static void ValidateSpecializedState(InstanceSnapshot node, ClassCatalog catalog)
+        {
+            bool isModel = catalog.IsA(node.ClassName, "Model");
+            if ((node.Model != null) != isModel)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched Model state",
+                    isModel ? "include Model state" : "remove Model state from this class");
+            }
+
+            if (node.Model != null && node.Model.HasStoredWorldPivot)
+            {
+                ParseCFrame(node.Model.StoredWorldPivot);
+            }
+            else if (node.Model != null && node.Model.StoredWorldPivot != null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Model " + node.Id
+                    + " stores a WorldPivot while has_stored_world_pivot is false",
+                    "clear StoredWorldPivot or mark the stored pivot as present");
+            }
+
+            bool isClickDetector = string.Equals(
+                node.ClassName, "ClickDetector", StringComparison.Ordinal);
+            if ((node.ClickDetector != null) != isClickDetector)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched ClickDetector state",
+                    isClickDetector
+                        ? "include ClickDetector state"
+                        : "remove ClickDetector state from this class");
+            }
+
+            if (node.ClickDetector != null)
+            {
+                double value = double.Parse(
+                    node.ClickDetector.MaxActivationDistance, CultureInfo.InvariantCulture);
+                if (double.IsNaN(value) || double.IsInfinity(value) || value < 0d)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot ClickDetector has invalid MaxActivationDistance '"
+                        + node.ClickDetector.MaxActivationDistance + "'",
+                        "use a finite non-negative distance");
+                }
+            }
+        }
+
+        private static void ValidateHierarchy(
+            IReadOnlyDictionary<ulong, InstanceSnapshot> byId)
+        {
+            Dictionary<ulong, byte> states = new();
+            Dictionary<ulong, int> depths = new();
+            foreach (InstanceSnapshot start in byId.Values)
+            {
+                if (states.TryGetValue(start.Id, out byte completedState)
+                    && completedState == 2)
+                {
+                    continue;
+                }
+
+                List<ulong> path = new();
+                InstanceSnapshot current = start;
+                int ancestorDepth = 0;
+                while (true)
+                {
+                    if (states.TryGetValue(current.Id, out byte state))
+                    {
+                        if (state == 1)
+                        {
+                            throw RbxError.BadArgument(
+                                "snapshot hierarchy contains a cycle at instance " + current.Id,
+                                "parent ids must form one acyclic tree");
+                        }
+
+                        ancestorDepth = depths[current.Id];
+                        break;
+                    }
+
+                    states.Add(current.Id, 1);
+                    path.Add(current.Id);
+                    if (current.ParentId == 0UL)
+                    {
+                        break;
+                    }
+
+                    current = byId[current.ParentId];
+                }
+
+                for (int index = path.Count - 1; index >= 0; index--)
+                {
+                    ulong id = path[index];
+                    ancestorDepth++;
+                    if (ancestorDepth > MaximumSnapshotDepth)
+                    {
+                        throw RbxError.BadArgument(
+                            "snapshot hierarchy exceeds depth limit " + MaximumSnapshotDepth,
+                            "flatten the serialized instance hierarchy");
+                    }
+
+                    depths[id] = ancestorDepth;
+                    states[id] = 2;
+                }
+            }
+        }
+
+        private static void ValidateModelReferences(InstanceSnapshot node,
+            IReadOnlyDictionary<ulong, InstanceSnapshot> byId, ClassCatalog catalog)
+        {
+            if (node.Model == null || node.Model.PrimaryPartId == 0UL)
+            {
+                return;
+            }
+
+            if (!byId.TryGetValue(node.Model.PrimaryPartId, out InstanceSnapshot primary)
+                || !catalog.IsA(primary.ClassName, "BasePart"))
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Model " + node.Id + " names invalid PrimaryPart "
+                    + node.Model.PrimaryPartId,
+                    "PrimaryPart must name a serialized BasePart descendant");
+            }
+
+            InstanceSnapshot current = primary;
+            while (current.ParentId != 0UL && current.ParentId != node.Id)
+            {
+                current = byId[current.ParentId];
+            }
+
+            if (current.ParentId != node.Id)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot Model " + node.Id + " names non-descendant PrimaryPart "
+                    + node.Model.PrimaryPartId,
+                    "PrimaryPart must name a serialized BasePart descendant");
+            }
         }
 
         private static object FromAttributeSnapshot(AttributeSnapshot attribute)
         {
             switch (attribute.Kind)
             {
-                case AttributeValueKind.String: return attribute.StringValue;
+                case AttributeValueKind.String:
+                    if (attribute.StringValue == null)
+                    {
+                        throw RbxError.BadArgument(
+                            "string attribute '" + attribute.Name + "' has a nil value",
+                            "serialize an empty string when the attribute is intentionally empty");
+                    }
+
+                    return attribute.StringValue;
                 case AttributeValueKind.Bool: return attribute.BoolValue;
                 case AttributeValueKind.Number: return attribute.NumberValue;
                 case AttributeValueKind.Vector3:
@@ -182,14 +627,32 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
                 case AttributeValueKind.UDim:
                 {
-                    float[] p = Parse(attribute.StringValue, 2);
-                    return new RbxUDim(p[0], (int)p[1]);
+                    string[] components = attribute.StringValue?.Split(',');
+                    if (components == null || components.Length != 2
+                        || !float.TryParse(
+                            components[0],
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture,
+                            out float scale)
+                        || float.IsNaN(scale)
+                        || float.IsInfinity(scale)
+                        || !int.TryParse(
+                            components[1],
+                            NumberStyles.Integer,
+                            CultureInfo.InvariantCulture,
+                            out int offset))
+                    {
+                        throw RbxError.BadArgument(
+                            "UDim attribute '" + attribute.Name + "' has invalid value '"
+                            + attribute.StringValue + "'",
+                            "serialize a finite Scale and exact 32-bit integer Offset");
+                    }
+
+                    return new RbxUDim(scale, offset);
                 }
                 default: return attribute.NumberValue;
             }
         }
-
-        // ---- Datatype attribute string codec (stable, invariant-culture) --------------------
 
         private static string Join(params float[] components)
         {
@@ -222,9 +685,25 @@ namespace CoreAI.Mods.Rbx.Instances
             for (int i = 0; i < expected; i++)
             {
                 result[i] = float.Parse(parts[i], CultureInfo.InvariantCulture);
+                if (float.IsNaN(result[i]) || float.IsInfinity(result[i]))
+                {
+                    throw RbxError.BadArgument(
+                        "datatype attribute value '" + serialized + "' contains a non-finite component",
+                        "serialize only finite datatype components");
+                }
             }
 
             return result;
+        }
+
+        private static RbxCFrame ParseCFrame(string serialized)
+        {
+            float[] values = Parse(serialized, 12);
+            return new RbxCFrame(
+                values[0], values[1], values[2],
+                values[3], values[4], values[5],
+                values[6], values[7], values[8],
+                values[9], values[10], values[11]);
         }
     }
 }

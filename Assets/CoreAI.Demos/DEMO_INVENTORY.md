@@ -5,6 +5,10 @@ Compiled by reading each scene's controller script and the per-demo `README.md` 
 
 Scope: `Assets/CoreAI.Demos/*/*.unity` and `Assets/CoreAiUnity/Scenes/*.unity`.
 
+The published player QA matrix is the 14 scenes under `Assets/CoreAI.Demos` plus
+`Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` — exactly 15. Internal scenes such as
+`_mainCoreAI.unity` and controller-only recipes are documented below but are not part of that matrix.
+
 **UI tech legend**
 - **UITK** — UI Toolkit (`UIDocument` + `.uxml`/`.uss`): the CoreAIHub Hub prefab and `CoreAiChatPanel`.
 - **IMGUI** — immediate-mode `OnGUI`/`GUILayout` overlay (the ratchet target; see `ImguiBanRatchetEditModeTests`).
@@ -41,6 +45,7 @@ its persisted mods live in an isolated store subdirectory and never rehydrate in
 | Qwen Genie | `QwenDemo/QwenGenieDemo.unity` | On-device **Qwen 0.8B** maps a free-form wish to one guarded native tool call (C# owns wish charges/clamps). | IMGUI | Preset buttons + HUD (latency/tokens/tool calls) | No |
 | Qwen Spellcraft | `QwenDemo/QwenSpellcraftDemo.unity` | On-device Qwen 0.8B maps spell text to element/power; C# owns mana + a `×5` determinism self-test. | IMGUI | Preset buttons, RU/EN aliases, determinism button, HUD | No |
 | MiniRpg | `MiniRpg/MiniRpgModsDemo.unity` | Compact **first-person** environment with the UITK Hub and mod-ready prompt buttons feeding the embedded chat. | mixed — UITK Hub + IMGUI prompt buttons | Prompt buttons forward ready-made tasks | Yes — child Mods scope |
+| Procedural Materials | `ProceduralMaterials/ProceduralMaterialsShowcase.unity` | Runtime Roblox-style material catalog, including opaque, neon, transparent, and textured shader paths in one judging rig. | scene labels | Material judging grid | No |
 
 ### P3 — Supporting / infrastructure reference
 
@@ -49,6 +54,7 @@ its persisted mods live in an isolated store subdirectory and never rehydrate in
 | World Commands | `WorldCommands/WorldCommandsDemo.unity` | The raw AI-command pipeline (`IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor`) — same path LLM agents and Lua bindings use. **No LLM, no Lua.** | IMGUI | Buttons that publish spawn/move/recolor/destroy envelopes | No (shared pipeline only) |
 | Full Access | `FullAccess/FullAccessDemo.unity` | **Full-tier** `unity_*` reflection access (opt-in): the Programmer inspects and moves/rotates/parents live scene objects from Lua. | mixed — IMGUI control panel + prompt buttons | IMGUI panel + prompt buttons | Yes — Full-tier Lua bindings |
 | Live Mechanics Mods Chat | `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity` | Chat-driven persistent `manage_mods` workflow (boss-rule sandbox) with runtime mod manager. | mixed — chat (UITK) + IMGUI mod-manager/token panels + prompt buttons | Mod-manager (F9) / usage (F10) panels + prompt buttons | Yes — persists mod sources |
+| Multiplayer Foundation | `MultiplayerFoundation/MultiplayerFoundationDemo.unity` | Runtime-first multiplayer host/client foundation and diagnostics surface used to prove composition without editor-only scene setup. | UITK/scene diagnostics | Connection and state diagnostics | No |
 
 ### P4 — Low priority (aspirational or internal)
 

@@ -12,6 +12,7 @@
     "CoreAI.Mods.Hub",
     "CoreAI.Hub.UI",
     "VContainer",
+    "UniTask",
     "Neo.Tools.Move",
     "Unity.RenderPipelines.Core.Runtime",
     "Unity.RenderPipelines.Universal.Runtime"

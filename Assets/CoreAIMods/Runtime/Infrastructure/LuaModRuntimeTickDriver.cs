@@ -1,6 +1,7 @@
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.WorldPackages;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
@@ -21,6 +22,7 @@ namespace CoreAI.Infrastructure.Lua
         private System.Action<float> _heartbeat;
         private System.Action<float> _preRender;
         private ModScheduler _scheduler;
+        private RbxWorldRuntimeSessionController _sessionController;
 
         /// <summary>Attaches the runtime and phase-specific host pumps to the scheduler.</summary>
         public void Initialize(ILuaModRuntime runtime, ActorContext actorContext, ModScheduler scheduler = null,
@@ -34,6 +36,7 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             _runtime = runtime;
+            _sessionController = null;
             _actorContext = actorContext;
             _scheduler = scheduler;
             _preSimulation = preSimulation;
@@ -43,6 +46,26 @@ namespace CoreAI.Infrastructure.Lua
             {
                 _scheduler.PhaseReached += OnSchedulerPhaseReached;
             }
+        }
+
+        /// <summary>Attaches the production session controller so every frame targets the active world.</summary>
+        public void Initialize(
+            RbxWorldRuntimeSessionController sessionController,
+            ActorContext actorContext)
+        {
+            if (_scheduler != null)
+            {
+                _scheduler.PhaseReached -= OnSchedulerPhaseReached;
+            }
+
+            _runtime = null;
+            _scheduler = null;
+            _preSimulation = null;
+            _heartbeat = null;
+            _preRender = null;
+            _sessionController = sessionController
+                ?? throw new System.ArgumentNullException(nameof(sessionController));
+            _actorContext = actorContext;
         }
 
         private void Update()
@@ -61,6 +84,12 @@ namespace CoreAI.Infrastructure.Lua
         /// <summary>Advances one scaled host frame in scheduler, signal, then runtime order.</summary>
         public void PumpFrame(float deltaSeconds)
         {
+            if (_sessionController != null)
+            {
+                _sessionController.PumpFrame(_actorContext, deltaSeconds);
+                return;
+            }
+
             if (_scheduler != null)
             {
                 _scheduler.Advance(deltaSeconds);

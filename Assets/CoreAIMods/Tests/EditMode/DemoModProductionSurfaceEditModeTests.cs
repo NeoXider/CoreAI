@@ -34,6 +34,20 @@ namespace CoreAI.Tests.EditMode
     {
         private SynchronizationContext _savedContext;
 
+        [Test]
+        public void HttpBridge_NonCompletedInitializationFailsWithoutBlocking()
+        {
+            TaskCompletionSource<Lua.LuaValue[]> pending = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            ValueTask<Lua.LuaValue[]> execution = new(pending.Task);
+
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                LuaCsRbxHttpServiceAdapter.RequireSynchronousBridgeResult(execution));
+
+            StringAssert.Contains("blocking the runtime thread is forbidden", error.Message);
+            Assert.IsFalse(pending.Task.IsCompleted);
+        }
+
         /// <summary>See <see cref="LuaCsModRuntimeEditModeTests"/>: the runtime blocks on its async
         /// VM, so the Unity main-thread SynchronizationContext must be detached to avoid deadlocks.</summary>
         [SetUp]

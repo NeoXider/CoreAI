@@ -16,11 +16,11 @@ namespace CoreAI.Ai.Hub
     /// </summary>
     public sealed class LuaCsModRuntimeHubService : HubModServiceBase
     {
-        private readonly LuaCsModRuntime _runtime;
+        private readonly ILuaModRuntime _runtime;
         private readonly ActorContext _actorContext;
 
         public LuaCsModRuntimeHubService(
-            LuaCsModRuntime runtime,
+            ILuaModRuntime runtime,
             ActorContext actorContext,
             ILuaModSourceStore store,
             LuaCapabilities grant = LuaCapabilities.All,

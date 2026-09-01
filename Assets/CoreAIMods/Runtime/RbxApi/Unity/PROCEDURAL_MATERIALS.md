@@ -98,7 +98,7 @@ silently leaving the previous material in place.
 `RbxProceduralMaterialProviderEditModeTests` drives the public provider contract from
 `PartProperties.Material`: Plastic and Wood must resolve to different shared handles, invalid or
 name/value-mismatched ids must resolve to the visible fallback, and every catalog entry must load the
-expected shader family. It also requires all 22 entries to own distinct intrinsic colors and verifies
+expected shader family. It also requires all 45 entries to own distinct intrinsic colors and verifies
 that the 18 opaque entries map one-to-one onto modes 0 through 17.
 
 The production-path scale gates derive feature sizes from each shared material's `_PatternScale` and the

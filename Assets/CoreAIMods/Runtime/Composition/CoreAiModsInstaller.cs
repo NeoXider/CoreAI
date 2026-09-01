@@ -9,6 +9,7 @@ using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.WorldPackages;
 using Newtonsoft.Json;
 using UnityEngine;
 using VContainer;
@@ -64,6 +65,11 @@ namespace CoreAI.Composition
         /// Optional host seam for loading a Resources skill override by path. Null uses
         /// <see cref="Resources.Load{T}(string)"/>; headless composition tests provide a null-returning delegate.
         /// </param>
+        /// <param name="worldSessionSourceStore">
+        /// Optional transactional backing store used by initial load, world-package replacement, capture,
+        /// runtime and Hub through the stable active-session facade. It must implement
+        /// <see cref="IRbxWorldModSourceStore"/>; null creates the default file-backed store.
+        /// </param>
         public static void RegisterCoreAiMods(
             this IContainerBuilder builder,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
@@ -73,7 +79,8 @@ namespace CoreAI.Composition
             string modStoreId = null,
             int? worldAclVersion = InstanceRegistry.CurrentWorldAclVersion,
             System.Func<bool> applicationIsPlayingProvider = null,
-            System.Func<string, string> skillTextProvider = null)
+            System.Func<string, string> skillTextProvider = null,
+            ILuaModSourceStore worldSessionSourceStore = null)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -92,8 +99,43 @@ namespace CoreAI.Composition
             // Persistent stores so mods survive a restart and export/import works. ResolveOrDefault in the
             // factory means a host that wires its own store wins; otherwise these file-backed defaults apply.
             builder.Register(_ => new FileLuaModStore(storeId: modStoreId), Lifetime.Singleton).As<ILuaModStore>();
-            builder.Register(_ => new FileLuaModSourceStore(storeId: modStoreId), Lifetime.Singleton)
-                .As<ILuaModSourceStore>();
+            if (worldSessionSourceStore != null)
+            {
+                if (worldSessionSourceStore is not IRbxWorldModSourceStore)
+                {
+                    throw new System.ArgumentException(
+                        "The world-session source store must support transactional exact replacement.",
+                        nameof(worldSessionSourceStore));
+                }
+
+                builder.RegisterInstance(
+                    new WorldSessionSourceBackend(worldSessionSourceStore));
+            }
+            else
+            {
+                builder.Register(
+                        _ => new FileLuaModSourceStore(storeId: modStoreId),
+                        Lifetime.Singleton)
+                    .AsSelf();
+                builder.Register(
+                    c => new WorldSessionSourceBackend(c.Resolve<FileLuaModSourceStore>()),
+                    Lifetime.Singleton);
+            }
+            builder.Register(_ => new FileRbxWorldPackageStore(), Lifetime.Singleton)
+                .As<IRbxWorldPackageStore>();
+            builder.Register(c => new ConfirmedWorldMutationGate(
+                    cancellationToken =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        IRbxWorldRuntimeService worldRuntimeService =
+                            c.Resolve<IRbxWorldRuntimeService>();
+                        return Cysharp.Threading.Tasks.UniTask.FromResult(
+                            worldRuntimeService.CaptureCurrent());
+                    },
+                    c.Resolve<IRbxWorldPackageStore>()),
+                Lifetime.Singleton)
+                .AsSelf()
+                .As<IConfirmedWorldMutationGate>();
 
             // Mods shipped with the build: Resources/CoreAIMods/*.lua are seeded into the store on startup
             // (before rehydrate) so a game can ship with a ready-made set of mods. Hosts register additional
@@ -177,11 +219,12 @@ namespace CoreAI.Composition
                     FullBlacklistPolicy = fullLuaBlacklistPolicy,
                     AllowNonPublicFullMembers = enableFullLuaPrivateAccess,
                     ModStore = c.ResolveOrDefault<ILuaModStore>(),
-                    ModSourceStore = c.ResolveOrDefault<ILuaModSourceStore>(),
+                    ModSourceStore = c.Resolve<WorldSessionSourceBackend>().Store,
                     Log = c.ResolveOrDefault<Logging.ILog>(),
                     LogService = c.ResolveOrDefault<ILuaLogService>(),
                     ExecutionObserver = c.ResolveOrDefault<ILuaExecutionObserver>(),
                     Observability = observability,
+                    WorldMutationGate = c.Resolve<IConfirmedWorldMutationGate>(),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
                     // WHY: one shared Roblox world too — persistent mods and one-off execute_lua resolve
@@ -249,7 +292,10 @@ namespace CoreAI.Composition
                     };
                 }
 
-                return luaCsStack;
+                return new InitialLuaWorldSession(
+                    luaCsStack,
+                    rbxApi,
+                    c.Resolve<WorldSessionSourceBackend>().Store);
             }, Lifetime.Singleton);
 
             builder.RegisterDisposeCallback(_ =>
@@ -258,17 +304,76 @@ namespace CoreAI.Composition
                 rbxApiHolder[0] = null;
             });
 
-            builder.Register(c => c.Resolve<LuaCsModStack>().Runtime, Lifetime.Singleton)
+            builder.Register(c =>
+            {
+                InitialLuaWorldSession initial = c.Resolve<InitialLuaWorldSession>();
+                Mods.Rbx.Binding.RbxWorldHost sceneHost =
+                    c.ResolveOrDefault<Mods.Rbx.Binding.RbxWorldHost>();
+                IRbxWorldSessionHost sessionHost = sceneHost != null
+                    ? new RbxWorldSessionHostAdapter(sceneHost)
+                    : new HeadlessRbxWorldSessionHost(
+                        initial.RbxApi.Registry,
+                        initial.RbxApi.Game);
+                INetworkBridge networkBridge = c.ResolveOrDefault<INetworkBridge>()
+                    ?? new NullNetworkBridge();
+                System.Func<IRbxWorldSessionCandidate, INetworkBridge, LuaCsRbxApiBindings>
+                    rbxApiFactory = (candidate, stagedNetwork) => new LuaCsRbxApiBindings(
+                        candidate.Registry,
+                        candidate.Game,
+                        partSink: candidate.PartSink,
+                        cameraRig: candidate.CameraRig,
+                        inputSource: candidate.InputSource,
+                        pickSource: candidate.PickSource,
+                        observability: c.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
+                            ?? NullRbxRuntimeObservabilitySink.Instance,
+                        networkBridge: stagedNetwork,
+                        log: message => (c.ResolveOrDefault<Logging.ILog>()
+                            ?? Logging.Log.Instance).Warn(
+                                "[CoreAI.RbxApi] " + message,
+                                Logging.LogTag.World));
+                System.Func<LuaCsRbxApiBindings, ILuaModSourceStore, ILuaModStore,
+                    ILuaScriptVersionStore, LuaCsModStack>
+                    stackFactory = (rbxApi, sourceStore, modStore, versionStore) => CreateSessionStack(
+                        c,
+                        rbxApi,
+                        sourceStore,
+                        modStore,
+                        versionStore,
+                        allowedLuaScenes,
+                        fullLuaBlacklistPolicy,
+                        enableFullLuaPrivateAccess,
+                        scriptCapabilities,
+                        oneOffCapabilities);
+                return new RbxWorldRuntimeSessionController(
+                    sessionHost,
+                    c.Resolve<IRbxWorldPackageStore>(),
+                    initial.SourceStore,
+                    initial.Stack,
+                    initial.RbxApi,
+                    rbxApiFactory,
+                    stackFactory,
+                    WireSessionTeardown,
+                    networkBridge,
+                    scriptCapabilities,
+                    (scriptCapabilities & LuaCapabilities.Full) != 0,
+                    c.ResolveOrDefault<ILuaModStore>(),
+                    c.ResolveOrDefault<ILuaScriptVersionStore>(),
+                    message => (c.ResolveOrDefault<Logging.ILog>()
+                        ?? Logging.Log.Instance).Warn(
+                            "[CoreAI.WorldLoad] " + message,
+                            Logging.LogTag.World));
+            }, Lifetime.Singleton).AsSelf().As<IRbxWorldRuntimeService>();
+
+            builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().Stack, Lifetime.Singleton)
                 .AsSelf();
-            builder.Register(c => new ActorAttributedLuaModRuntime(
-                    c.Resolve<LuaCsModStack>().Runtime,
-                    c.Resolve<LuaCsModStack>().GameplayBindings.RbxApi.Registry),
-                Lifetime.Singleton)
+            builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().Runtime, Lifetime.Singleton)
                 .As<ILuaModRuntime>();
-            builder.Register(c => c.Resolve<LuaCsModStack>().ToolExecutor, Lifetime.Singleton)
+            builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().Executor, Lifetime.Singleton)
                 .As<LuaTool.ILuaExecutor>();
-            builder.Register(c => c.Resolve<LuaCsModStack>().GameplayBindings.LogicSlots, Lifetime.Singleton)
+            builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().LogicSlots, Lifetime.Singleton)
                 .AsSelf();
+            builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().SourceStore, Lifetime.Singleton)
+                .As<ILuaModSourceStore>();
 
             // Startup rehydration + frame ticker (play mode only). EditMode containers share the REAL
             // persistent store, so rehydrating there would inject earlier-run mods into every fresh
@@ -307,7 +412,9 @@ namespace CoreAI.Composition
                     if (applicationIsPlaying)
                     {
                         LuaCsModStack stack = container.Resolve<LuaCsModStack>();
-                        LuaCsModRuntime runtime = stack.Runtime;
+                        RbxWorldRuntimeSessionController sessionController =
+                            container.Resolve<RbxWorldRuntimeSessionController>();
+                        LuaCsModRuntime runtime = sessionController.CurrentConcreteRuntime;
                         LuaCsRbxApiBindings stackRbxApi = stack.GameplayBindings.RbxApi;
 
                         GameObject tickerGo = new("CoreAI_LuaModTicker");
@@ -348,18 +455,8 @@ namespace CoreAI.Composition
                             // WHY: phase-specific pumps preserve Stepped -> delayed work -> input ->
                             // Heartbeat -> RenderStepped before the runtime tick each scaled frame.
                             tickerGo.AddComponent<LuaModRuntimeTickDriver>().Initialize(
-                                runtime,
-                                hostActor,
-                                stackRbxApi?.Scheduler,
-                                stackRbxApi != null
-                                    ? stackRbxApi.PumpPreSimulation
-                                    : (System.Action<float>)null,
-                                stackRbxApi != null
-                                    ? stackRbxApi.PumpHeartbeat
-                                    : (System.Action<float>)null,
-                                stackRbxApi != null
-                                    ? stackRbxApi.PumpPreRender
-                                    : (System.Action<float>)null);
+                                sessionController,
+                                hostActor);
                         }
 
                         // Ordering contract (audit finding W4, see WORLD_COMMANDS.md §7): mod rehydrate
@@ -416,9 +513,20 @@ namespace CoreAI.Composition
                             scriptCapabilities,
                             allowModManagement: true,
                             actorIdentityProvider: actorIdentityProvider,
-                            roleId: BuiltInAgentRoleIds.Programmer));
+                            roleId: BuiltInAgentRoleIds.Programmer,
+                            worldMutationGate: container.Resolve<IConfirmedWorldMutationGate>()));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new SaveWorldLlmTool(
+                            container.Resolve<IRbxWorldRuntimeService>(),
+                            actorIdentityProvider,
+                            BuiltInAgentRoleIds.Programmer));
+                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                        new LoadWorldLlmTool(
+                            container.Resolve<IRbxWorldRuntimeService>(),
+                            actorIdentityProvider,
+                            BuiltInAgentRoleIds.Programmer));
 
                     string skillOverride = skillTextProvider != null
                         ? skillTextProvider("AgentSkills/LuaModding")
@@ -450,6 +558,85 @@ namespace CoreAI.Composition
                     // Lua tools are an additive convenience, not a requirement.
                 }
             });
+        }
+
+        private static LuaCsModStack CreateSessionStack(
+            IObjectResolver container,
+            LuaCsRbxApiBindings rbxApi,
+            ILuaModSourceStore sourceStore,
+            ILuaModStore modStore,
+            ILuaScriptVersionStore versionStore,
+            System.Collections.Generic.IEnumerable<string> allowedLuaScenes,
+            IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy,
+            bool enableFullLuaPrivateAccess,
+            LuaCapabilities scriptCapabilities,
+            LuaCapabilities oneOffCapabilities)
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = container.Resolve<IGameLogger>(),
+                LuaScriptVersions = versionStore,
+                DataOverlayVersions = container.ResolveOrDefault<IDataOverlayVersionStore>(),
+                CommandSink = container.Resolve<IAiGameCommandSink>(),
+                PrefabRegistry = container.ResolveOrDefault<ICoreAiPrefabRegistry>(),
+                AllowedScenes = allowedLuaScenes,
+                FullBlacklistPolicy = fullLuaBlacklistPolicy,
+                AllowNonPublicFullMembers = enableFullLuaPrivateAccess,
+                ModStore = modStore,
+                ModSourceStore = sourceStore,
+                Log = container.ResolveOrDefault<Logging.ILog>(),
+                LogService = container.ResolveOrDefault<ILuaLogService>(),
+                ExecutionObserver = container.ResolveOrDefault<ILuaExecutionObserver>(),
+                Observability = container.ResolveOrDefault<IRbxRuntimeObservabilitySink>()
+                    ?? NullRbxRuntimeObservabilitySink.Instance,
+                WorldMutationGate = container.Resolve<IConfirmedWorldMutationGate>(),
+                Capabilities = scriptCapabilities,
+                OneOffCapabilities = oneOffCapabilities,
+                RbxApi = rbxApi,
+                RegisterWorldEditBuildBindings = false
+            });
+            return stack;
+        }
+
+        private static void WireSessionTeardown(
+            LuaCsModStack stack,
+            LuaCsRbxApiBindings rbxApi)
+        {
+            ModConnectionRegistry ownedConnections = rbxApi.Connections;
+            InstanceRegistry ownedRegistry = rbxApi.Registry;
+            stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                if (reason == LuaModTeardownReason.Reload)
+                {
+                    rbxApi.KillOutgoingScheduledGenerations(modId);
+                }
+                else
+                {
+                    rbxApi.KillAllScheduledOwnedBy(modId);
+                }
+
+                ownedConnections.DisconnectOwnedBy(
+                    modId,
+                    reason == LuaModTeardownReason.Reload);
+                if (reason != LuaModTeardownReason.Unload)
+                {
+                    return;
+                }
+
+                foreach (RbxInstance owned in ownedRegistry.GetTeardownOwnedBy(modId))
+                {
+                    try
+                    {
+                        owned?.Destroy();
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Logging.Log.Instance.Warn(
+                            "[CoreAiMods] Destroying a teardown-owned instance failed: "
+                                + ex.Message);
+                    }
+                }
+            };
         }
 
         private static void BindPersistedActorAttribution(
@@ -494,6 +681,36 @@ namespace CoreAI.Composition
 
                 registry.BindActorAttribution(modId, originTag, ownerActorId);
             }
+        }
+
+        private sealed class InitialLuaWorldSession
+        {
+            public InitialLuaWorldSession(
+                LuaCsModStack stack,
+                LuaCsRbxApiBindings rbxApi,
+                ILuaModSourceStore sourceStore)
+            {
+                Stack = stack;
+                RbxApi = rbxApi;
+                SourceStore = sourceStore;
+            }
+
+            public LuaCsModStack Stack { get; }
+
+            public LuaCsRbxApiBindings RbxApi { get; }
+
+            public ILuaModSourceStore SourceStore { get; }
+        }
+
+        private sealed class WorldSessionSourceBackend
+        {
+            public WorldSessionSourceBackend(ILuaModSourceStore store)
+            {
+                Store = store
+                    ?? throw new System.ArgumentNullException(nameof(store));
+            }
+
+            public ILuaModSourceStore Store { get; }
         }
 
         private sealed class ActorAttributedLuaModRuntime : ILuaModRuntime
@@ -613,6 +830,22 @@ namespace CoreAI.Composition
                 ActorContext caller, string modId = null)
             {
                 return _inner.GetRecentHandlerErrors(caller, modId);
+            }
+
+            public System.Collections.Generic.IReadOnlyList<LuaModReport> GetRecentReports(
+                ActorContext caller, string modId = null)
+            {
+                return _inner.GetRecentReports(caller, modId);
+            }
+
+            public int ClearRecentHandlerErrors(ActorContext caller, string modId = null)
+            {
+                return _inner.ClearRecentHandlerErrors(caller, modId);
+            }
+
+            public int ClearRecentReports(ActorContext caller, string modId = null)
+            {
+                return _inner.ClearRecentReports(caller, modId);
             }
 
             public void Tick(ActorContext caller, double deltaSeconds)

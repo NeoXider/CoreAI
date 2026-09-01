@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Mods.WorldPackages;
 using CoreAI.Authority;
 using CoreAI.Logging;
 using Microsoft.Extensions.AI;
@@ -20,7 +21,7 @@ namespace CoreAI.Ai
     /// mods auto-persist and survive a restart; export/import move a mod between players via a
     /// shareable bundle.
     /// <para>
-    /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>)
+    /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>/<c>revert</c>)
     /// effectively grant the model the
     /// whole capability tier configured at registration, so hosts that only want introspection
     /// must construct the tool with <c>allowModManagement: false</c>. Loaded mods always receive
@@ -33,6 +34,24 @@ namespace CoreAI.Ai
         /// <summary>Cap on the source text returned by <c>get_source</c>.</summary>
         public const int MaxSourceLengthReturned = 16_000;
 
+        /// <summary>Stable autosave trigger for loading a mod.</summary>
+        public const string LoadBackupTrigger = "manage_mods-load";
+
+        /// <summary>Stable autosave trigger for reloading a mod.</summary>
+        public const string ReloadBackupTrigger = "manage_mods-reload";
+
+        /// <summary>Stable autosave trigger for unloading a mod.</summary>
+        public const string UnloadBackupTrigger = "manage_mods-unload";
+
+        /// <summary>Stable autosave trigger for importing a mod.</summary>
+        public const string ImportBackupTrigger = "manage_mods-import";
+
+        /// <summary>Stable autosave trigger for forgetting a mod.</summary>
+        public const string ForgetBackupTrigger = "manage_mods-forget";
+
+        /// <summary>Stable autosave trigger for reverting a mod.</summary>
+        public const string RevertBackupTrigger = "manage_mods-revert";
+
         private static readonly ConditionalWeakTable<ILuaModRuntime, object> AuthorizationGates = new();
 
         private readonly ILuaModRuntime _runtime;
@@ -43,6 +62,7 @@ namespace CoreAI.Ai
         private readonly IActorIdentityProvider _actorIdentityProvider;
         private readonly object _authorizationGate;
         private readonly string _roleId;
+        private readonly IConfirmedWorldMutationGate _worldMutationGate;
 
         /// <summary>Creates an actor-aware mod tool that resolves identity at every call boundary.</summary>
         /// <param name="runtime">Mod runtime to manage.</param>
@@ -60,6 +80,27 @@ namespace CoreAI.Ai
             bool allowModManagement,
             IActorIdentityProvider actorIdentityProvider,
             string roleId)
+            : this(
+                runtime,
+                settings,
+                logger,
+                grantedCapabilities,
+                allowModManagement,
+                actorIdentityProvider,
+                roleId,
+                null)
+        {
+        }
+
+        public LuaModsLlmTool(
+            ILuaModRuntime runtime,
+            ICoreAISettings settings,
+            ILog logger,
+            LuaCapabilities grantedCapabilities,
+            bool allowModManagement,
+            IActorIdentityProvider actorIdentityProvider,
+            string roleId,
+            IConfirmedWorldMutationGate worldMutationGate)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -70,6 +111,7 @@ namespace CoreAI.Ai
                                      throw new ArgumentNullException(nameof(actorIdentityProvider));
             _authorizationGate = AuthorizationGates.GetValue(_runtime, CreateAuthorizationGate);
             _roleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Programmer : roleId.Trim();
+            _worldMutationGate = worldMutationGate;
         }
 
         /// <inheritdoc />
@@ -77,9 +119,9 @@ namespace CoreAI.Ai
 
         /// <inheritdoc />
         // WHY: Mutating mod actions (load/reload/unload/import/forget/revert) are non-idempotent, so an
-        // identical cross-turn echo must not re-run. AllowDuplicates=false lets ToolExecutionPolicy
-        // suppress only a CROSS-TURN byte-identical echo (structured no-op) while still allowing
-        // intra-turn repeats and never suppressing the retry of a FAILED call.
+        // WHY: identical cross-turn echo must not re-run. AllowDuplicates=false lets ToolExecutionPolicy
+        // WHY: suppress only a CROSS-TURN byte-identical echo (structured no-op) while still allowing
+        // WHY: intra-turn repeats and never suppressing the retry of a FAILED call.
         public override bool AllowDuplicates => false;
 
         /// <inheritdoc />
@@ -136,7 +178,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>Executes a mod-management action and returns a JSON result for the model.</summary>
-        public Task<string> ExecuteAsync(
+        public async Task<string> ExecuteAsync(
             [Description(
                 "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics")]
             string action,
@@ -168,24 +210,28 @@ namespace CoreAI.Ai
                     throw new InvalidOperationException("Actor identity provider returned an untrusted context.");
                 }
 
-                lock (_authorizationGate)
+                if (TryGetConfirmedBackupTrigger(normalized, out string trigger))
                 {
-                    result = normalized switch
-                    {
-                        "list" => ListMods(actor),
-                        "get_source" => GetSource(actor, mod_id),
-                        "load" => Mutate(() => Load(mod_id, code, actor)),
-                        "reload" => Mutate(() => Reload(actor, mod_id, code)),
-                        "unload" => Mutate(() => Unload(actor, mod_id)),
-                        "export" => Export(actor, mod_id),
-                        "import" => Mutate(() => Import(bundle ?? code, actor)),
-                        "forget" => Mutate(() => Forget(actor, mod_id)),
-                        "versions" => Versions(actor, mod_id),
-                        "revert" => Mutate(() => Revert(actor, mod_id, revision)),
-                        "diagnostics" => Diagnostics(mod_id, actor),
-                        _ => Fail(
-                            $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
-                    };
+                    result = await _worldMutationGate.ExecuteAsync(
+                        trigger,
+                        token => Task.FromResult(ExecuteAuthorizedAction(
+                            normalized,
+                            actor,
+                            mod_id,
+                            code,
+                            bundle,
+                            revision)),
+                        cancellationToken);
+                }
+                else
+                {
+                    result = ExecuteAuthorizedAction(
+                        normalized,
+                        actor,
+                        mod_id,
+                        code,
+                        bundle,
+                        revision);
                 }
             }
             catch (Exception ex)
@@ -199,7 +245,55 @@ namespace CoreAI.Ai
                 _logger.Info($"[Tool Call] manage_mods: {preview}");
             }
 
-            return Task.FromResult(result);
+            return result;
+        }
+
+        private bool TryGetConfirmedBackupTrigger(
+            string normalizedAction,
+            out string trigger)
+        {
+            trigger = normalizedAction switch
+            {
+                "load" => LoadBackupTrigger,
+                "reload" => ReloadBackupTrigger,
+                "unload" => UnloadBackupTrigger,
+                "import" => ImportBackupTrigger,
+                "forget" => ForgetBackupTrigger,
+                "revert" => RevertBackupTrigger,
+                _ => null
+            };
+            return _worldMutationGate != null
+                   && _allowModManagement
+                   && trigger != null;
+        }
+
+        private string ExecuteAuthorizedAction(
+            string normalized,
+            ActorContext actor,
+            string modId,
+            string code,
+            string bundle,
+            int revision)
+        {
+            lock (_authorizationGate)
+            {
+                return normalized switch
+                {
+                    "list" => ListMods(actor),
+                    "get_source" => GetSource(actor, modId),
+                    "load" => Mutate(() => Load(modId, code, actor)),
+                    "reload" => Mutate(() => Reload(actor, modId, code)),
+                    "unload" => Mutate(() => Unload(actor, modId)),
+                    "export" => Export(actor, modId),
+                    "import" => Mutate(() => Import(bundle ?? code, actor)),
+                    "forget" => Mutate(() => Forget(actor, modId)),
+                    "versions" => Versions(actor, modId),
+                    "revert" => Mutate(() => Revert(actor, modId, revision)),
+                    "diagnostics" => Diagnostics(modId, actor),
+                    _ => Fail(
+                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
+                };
+            }
         }
 
         private static object CreateAuthorizationGate(ILuaModRuntime runtime)

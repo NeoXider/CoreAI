@@ -9,6 +9,7 @@ using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.WorldPackages;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -130,6 +131,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Optional production sink for aggregated Lua runtime counters.</summary>
         public IRbxRuntimeObservabilitySink Observability;
 
+        /// <summary>Confirmed pre-mutation backup gate shared by runtime mutation tools.</summary>
+        public IConfirmedWorldMutationGate WorldMutationGate;
+
         // ---- Capability ceilings & guard budgets ------------------------------------------------
 
         /// <summary>
@@ -198,24 +202,53 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public sealed class LuaCsModStack
     {
+        private readonly Func<LuaCsModStack> _activeProvider;
+        private readonly LuaCsModRuntime _runtime;
+        private readonly LuaCsGameToolExecutor _toolExecutor;
+        private readonly LuaCsGameplayBindings _gameplayBindings;
+
         public LuaCsModStack(
             LuaCsModRuntime runtime,
             LuaCsGameToolExecutor toolExecutor,
             LuaCsGameplayBindings gameplayBindings)
         {
-            Runtime = runtime;
-            ToolExecutor = toolExecutor;
-            GameplayBindings = gameplayBindings;
+            _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+            _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
+            _gameplayBindings = gameplayBindings ?? throw new ArgumentNullException(nameof(gameplayBindings));
+        }
+
+        internal LuaCsModStack(Func<LuaCsModStack> activeProvider)
+        {
+            _activeProvider = activeProvider ?? throw new ArgumentNullException(nameof(activeProvider));
         }
 
         /// <summary>Persistent, ticked mod runtime (long-lived mods with hooks/timers/store).</summary>
-        public LuaCsModRuntime Runtime { get; }
+        public LuaCsModRuntime Runtime => Active._runtime;
 
         /// <summary>One-off <c>execute_lua</c> executor sharing the same gameplay bindings.</summary>
-        public LuaCsGameToolExecutor ToolExecutor { get; }
+        public LuaCsGameToolExecutor ToolExecutor => Active._toolExecutor;
 
         /// <summary>Shared capability-scoped gameplay bindings both surfaces register through.</summary>
-        public LuaCsGameplayBindings GameplayBindings { get; }
+        public LuaCsGameplayBindings GameplayBindings => Active._gameplayBindings;
+
+        private LuaCsModStack Active
+        {
+            get
+            {
+                if (_activeProvider == null)
+                {
+                    return this;
+                }
+
+                LuaCsModStack active = _activeProvider();
+                if (active == null || ReferenceEquals(active, this))
+                {
+                    throw new InvalidOperationException("The active Lua world session is unavailable.");
+                }
+
+                return active;
+            }
+        }
     }
 
     /// <summary>
@@ -313,7 +346,8 @@ namespace CoreAI.Ai.LuaCs
                 new CapabilityScopedGameRuntimeBindings(
                     bindings, options.OneOffCapabilities, options.AdditionalGameplayBindings),
                 options.ExecutionObserver ?? new NullLuaExecutionObserver(),
-                options.Observability);
+                options.Observability,
+                options.WorldMutationGate);
 
             return new LuaCsModStack(runtime, executor, bindings);
         }

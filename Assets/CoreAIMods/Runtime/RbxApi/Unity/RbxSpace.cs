@@ -52,6 +52,38 @@ namespace CoreAI.Mods.Rbx.Spatial
         }
 
         /// <summary>
+        /// Begins a synchronous whole-world session replacement at a new scale and returns the rollback
+        /// action a staged candidate must invoke unless it commits. Unlike <see cref="Configure"/>, this
+        /// is not a live-world mutation API: callers must keep the old session paused and publish the
+        /// new registry in the same main-thread transaction.
+        /// </summary>
+        public static Action BeginSessionReplacement(float metersPerStud)
+        {
+            if (metersPerStud <= 0f || float.IsNaN(metersPerStud) || float.IsInfinity(metersPerStud))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(metersPerStud), metersPerStud, "MetersPerStud must be a positive finite number.");
+            }
+
+            float previousScale = _metersPerStud;
+            bool previousConfigured = _configured;
+            _metersPerStud = metersPerStud;
+            _configured = true;
+            bool rolledBack = false;
+            return () =>
+            {
+                if (rolledBack)
+                {
+                    return;
+                }
+
+                rolledBack = true;
+                _metersPerStud = previousScale;
+                _configured = previousConfigured;
+            };
+        }
+
+        /// <summary>
         /// Test-only reset for the dual-scale EditMode runs (§5.1.1). Production keeps the
         /// constant-per-session rule; only CoreAI.Mods.Tests can see this.
         /// </summary>

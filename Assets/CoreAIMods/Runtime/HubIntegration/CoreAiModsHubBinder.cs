@@ -3,6 +3,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
+using CoreAI.Mods.WorldPackages;
 using CoreAI.Hub;
 using CoreAI.Hub.UI;
 using UnityEngine;
@@ -36,6 +37,8 @@ namespace CoreAI.Ai.Hub
                  "never self-escalate to Full unless this host flag is explicitly enabled.")]
         [SerializeField]
         private bool allowFullTier;
+
+        private HubWorldLoadConfirmationPage _worldLoadConfirmationPage;
 
         private void Start()
         {
@@ -77,7 +80,7 @@ namespace CoreAI.Ai.Hub
                     200);
             }
 
-            LuaCsModRuntime runtime = container.Resolve<LuaCsModRuntime>();
+            ILuaModRuntime runtime = container.Resolve<ILuaModRuntime>();
             IActorIdentityProvider actorIdentityProvider = container.Resolve<IActorIdentityProvider>();
             ActorContext actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             ILuaModSourceStore sourceStore = container.ResolveOrDefault<ILuaModSourceStore>();
@@ -86,10 +89,30 @@ namespace CoreAI.Ai.Hub
                 : LuaCapabilities.All;
             HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier);
 
+            IRbxWorldRuntimeService worldRuntimeService =
+                container.ResolveOrDefault<IRbxWorldRuntimeService>();
+            if (worldRuntimeService != null)
+            {
+                _worldLoadConfirmationPage = HubModsPages.RegisterWorldLoadConfirmation(
+                    registry,
+                    worldRuntimeService,
+                    () =>
+                    {
+                        window.SetCollapsed(false);
+                        window.ActivatePage(HubModsPages.WorldLoadsPageId);
+                    });
+            }
+
             if (window.Registry == null)
             {
                 window.Registry = registry;
             }
+        }
+
+        private void OnDestroy()
+        {
+            _worldLoadConfirmationPage?.OnDestroyed();
+            _worldLoadConfirmationPage = null;
         }
     }
 }

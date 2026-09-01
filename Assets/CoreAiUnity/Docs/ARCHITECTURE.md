@@ -150,7 +150,30 @@ Tests must measure whether the system under test works. They must not rescue the
 
 **Lua on WebGL player:** runtime Lua execution through **`SecureLuaEnvironment`** / Lua-CSharp is supported on WebGL player builds and **on by default**. Toggle with **`CoreAISettingsAsset.EnableLuaOnWebGl`**. The Full `unity_*` reflection tier stays disabled on WebGL. Lua-CSharp is a managed, AOT-safe VM, so no IL2CPP stripping protection is needed for it.
 
-**LLMUnity in scene:** If the scene still contains **`LLM` / `LLMAgent`**, native **LlamaLib** may run before DI skips LLMUnity. Add **[`CoreAiWebGlLlmUnitySceneGuard`](../Runtime/Source/Features/WebGl/CoreAiWebGlLlmUnitySceneGuard.cs)** to a bootstrap object (early execution order) or remove those components from WebGL scenes.
+**Local-model capability boundary:** unsupported players do not register `ILlmAgentProvider` or
+`LlmUnityAutostartEntryPoint`. `LocalModel` resolves to an actionable failure client, while HTTP and
+Offline composition and runtime hot-swap remain valid without a local provider. The Hub removes new
+local-model choices, disables a persisted local selection, and displays
+`LocalModelPlatformSupport.BrowserUnavailableMessage` instead of misclassifying the result as merely
+"no live scope".
+
+**LLMUnity build containment:** the installed LLMUnity package has an eager native initializer that
+can execute before CoreAI runtime composition. For unsupported targets, CoreAI therefore removes
+LLMUnity behaviours from staged scene copies and replaces `LLMUnitySetup.InitializeOnLoad` only in the
+current build's reported `Temp/StagingArea/Data/Managed/undream.llmunity.Runtime.dll`. The build
+callback rejects persistent Bee caches, fails closed when the current staging assembly is absent, and re-opens the written DLL to
+assert that the initializer contains only `ret`. It never patches Assets, Packages,
+`Library/ScriptAssemblies`, `Library/PackageCache`, or general Bee/player-script caches. Supported
+native targets bypass both scene stripping and assembly rewriting.
+
+**Runtime late-host containment:**
+[`CoreAiWebGlLlmUnitySceneGuard`](../Runtime/Source/Features/WebGl/CoreAiWebGlLlmUnitySceneGuard.cs) is
+installed automatically on an unsupported player and disables loaded LLMUnity behaviours without
+disabling unrelated components on their GameObjects. It rescans scene loads and later frames, but it
+cannot intercept an arbitrary third-party `Awake` or static initializer before that code runs. The
+Editor Cecil pass is consequently a build-compatibility containment layer, not the ideal
+RUNTIME-first primary design. Removing that debt requires an upstream platform gate, an
+unsupported-target assembly split, or a maintained LLMUnity fork; see `KNOWN_ISSUES.md`.
 
 **VContainer / IL2CPP:** `CoreServicesInstaller` registers **`IAiGameCommandSink`** with an explicit factory so player builds do not require constructor reflection on `MessagePipeAiCommandSink`. The package ships **`link.xml`** at `Assets/CoreAiUnity/link.xml`. EditMode guard: `CoreServicesInstallerEditModeTests`.
 

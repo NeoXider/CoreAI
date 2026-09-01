@@ -8,6 +8,7 @@ using CoreAI.Chat;
 using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
@@ -158,6 +159,32 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("new-model", _settings.ModelName);
         }
 
+        [Test]
+        public void BrowserSettings_DisablesLocalModelAndShowsActionableLimitation()
+        {
+            _settings.ConfigureLlmUnity(ggufPath: "browser.gguf");
+            HubSettingsPage page = new(_settings, RuntimePlatform.WebGLPlayer);
+            ScrollView root = (ScrollView)page.CreatePageContent();
+
+            DropdownField mode = root.Q<DropdownField>();
+            CollectionAssert.DoesNotContain(mode.choices, HubSettingsPage.ModeToOption(LlmExecutionMode.LocalModel));
+            CollectionAssert.DoesNotContain(
+                HubSettingsPage.EndpointKindOptionsForPlatform(RuntimePlatform.WebGLPlayer),
+                "LLMUnity");
+            CollectionAssert.Contains(
+                HubSettingsPage.ModeOptionsForPlatform(RuntimePlatform.WindowsPlayer),
+                HubSettingsPage.ModeToOption(LlmExecutionMode.LocalModel));
+
+            Button apply = FindButton(root, "Apply");
+            Assert.IsNotNull(apply);
+            Assert.IsFalse(apply.enabledSelf, "A persisted local mode must not be actionable in the browser.");
+            Assert.IsTrue(ContainsLabel(root, LocalModelPlatformSupport.BrowserUnavailableMessage),
+                "The page must explain the browser limitation instead of reporting only 'no live scope'.");
+
+            Invoke(page, "Apply");
+            Assert.IsTrue(ContainsLabel(root, LocalModelPlatformSupport.BrowserUnavailableMessage));
+        }
+
         private static Button RemoveButton(HubSettingsPage page, string endpointId)
         {
             VisualElement list = (VisualElement)Field(page, "_endpointListContainer").GetValue(page);
@@ -173,6 +200,32 @@ namespace CoreAI.Tests.EditMode
             }
 
             return null;
+        }
+
+        private static Button FindButton(VisualElement root, string text)
+        {
+            foreach (Button button in root.Query<Button>().ToList())
+            {
+                if (string.Equals(button.text, text, StringComparison.Ordinal))
+                {
+                    return button;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool ContainsLabel(VisualElement root, string text)
+        {
+            foreach (Label label in root.Query<Label>().ToList())
+            {
+                if (string.Equals(label.text, text, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static Button PendingRemoveButton(HubSettingsPage page)

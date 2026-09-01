@@ -29,13 +29,23 @@ namespace CoreAI.Composition
             CoreAISettingsAsset settings,
             LlmRoutingManifest routingManifest)
         {
+            RegisterLlmPipelineForPlatform(builder, settings, routingManifest, Application.platform);
+        }
+
+        internal static void RegisterLlmPipelineForPlatform(
+            IContainerBuilder builder,
+            CoreAISettingsAsset settings,
+            LlmRoutingManifest routingManifest,
+            RuntimePlatform platform)
+        {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
             ILlmAsyncMarshaler asyncMarshaler = UnityMainThreadLlmAsyncMarshaler.Instance;
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
-#else
-            builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
+            if (ShouldRegisterLocalModelProvider(platform))
+            {
+                builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
+            }
 #endif
 
 #if COREAI_LLM
@@ -62,8 +72,20 @@ namespace CoreAI.Composition
                             c.Resolve<IGameLogger>(),
                             c.Resolve<IAgentMemoryStore>(),
                             readinessProbe));
-                    ILlmClient primaryClient = BuildRoutedPrimaryClient(settings, c.Resolve<IGameLogger>(),
-                        c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>(), c.Resolve<ILog>());
+                    ILlmAgentProvider agentProvider = null;
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+                    if (ShouldRegisterLocalModelProvider(platform))
+                    {
+                        agentProvider = c.Resolve<ILlmAgentProvider>();
+                    }
+#endif
+                    ILlmClient primaryClient = BuildRoutedPrimaryClientForPlatform(
+                        settings,
+                        c.Resolve<IGameLogger>(),
+                        c.Resolve<IAgentMemoryStore>(),
+                        agentProvider,
+                        c.Resolve<ILog>(),
+                        platform);
 
                     reg.SetLegacyFallback(primaryClient);
                     reg.ApplyManifest(routingManifest);
@@ -163,7 +185,29 @@ namespace CoreAI.Composition
             ILlmAgentProvider agentProvider,
             ILog log)
         {
-            ILlmClient primaryClient = ResolveLlmClient(settings, logger, memoryStore, agentProvider);
+            return BuildRoutedPrimaryClientForPlatform(
+                settings,
+                logger,
+                memoryStore,
+                agentProvider,
+                log,
+                Application.platform);
+        }
+
+        internal static ILlmClient BuildRoutedPrimaryClientForPlatform(
+            CoreAISettingsAsset settings,
+            IGameLogger logger,
+            IAgentMemoryStore memoryStore,
+            ILlmAgentProvider agentProvider,
+            ILog log,
+            RuntimePlatform platform)
+        {
+            ILlmClient primaryClient = ResolveLlmClientForPlatform(
+                settings,
+                logger,
+                memoryStore,
+                agentProvider,
+                platform);
 
             if (settings != null && settings.HasValidFallbackBackend)
             {
@@ -183,21 +227,44 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
-#if UNITY_WEBGL
-            LlmExecutionMode webGlMode = settings != null ? settings.ExecutionMode : LlmExecutionMode.Auto;
-            if (IsHttpMode(webGlMode))
+            return ResolveLlmClientForPlatform(
+                settings,
+                logger,
+                memoryStore,
+                agentProvider,
+                Application.platform);
+        }
+
+        internal static ILlmClient ResolveLlmClientForPlatform(
+            CoreAISettingsAsset settings,
+            IGameLogger logger,
+            IAgentMemoryStore memoryStore,
+            ILlmAgentProvider agentProvider,
+            RuntimePlatform platform)
+        {
+            if (!LocalModelPlatformSupport.IsSupported(platform))
             {
-                return BuildHttpClient(settings, webGlMode, memoryStore);
+                LlmExecutionMode unsupportedMode =
+                    settings != null ? settings.ExecutionMode : LlmExecutionMode.Auto;
+                if (IsHttpMode(unsupportedMode))
+                {
+                    return BuildHttpClient(settings, unsupportedMode, memoryStore);
+                }
+
+                if (unsupportedMode == LlmExecutionMode.Offline)
+                {
+                    return BuildOfflineClient(settings);
+                }
+
+                if (unsupportedMode == LlmExecutionMode.LocalModel)
+                {
+                    return new UnsupportedLocalModelLlmClient(platform);
+                }
+
+                return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore) ??
+                       BuildOfflineClient(settings);
             }
 
-            if (webGlMode == LlmExecutionMode.Offline)
-            {
-                return BuildOfflineClient(settings);
-            }
-
-            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore) ??
-                   BuildOfflineClient(settings);
-#endif
 #if !COREAI_LLM
             if (settings != null && settings.ExecutionMode == LlmExecutionMode.Offline)
             {
@@ -228,6 +295,15 @@ namespace CoreAI.Composition
 #else
             return new StubLlmClient();
 #endif
+#endif
+        }
+
+        internal static bool ShouldRegisterLocalModelProvider(RuntimePlatform platform)
+        {
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            return LocalModelPlatformSupport.IsSupported(platform);
+#else
+            return false;
 #endif
         }
 

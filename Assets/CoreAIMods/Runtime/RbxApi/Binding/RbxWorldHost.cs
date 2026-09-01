@@ -1,3 +1,4 @@
+using System;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
@@ -41,9 +42,18 @@ namespace CoreAI.Mods.Rbx.Binding
         /// Initialize like the camera rig.</summary>
         public IInputSource InputSource { get; private set; }
 
+        /// <summary>Rendering camera resolved once for this host, or null in headless scenes.</summary>
+        public Camera SceneCamera { get; private set; }
+
+        /// <summary>Scale owned by the currently published host session.</summary>
+        public float MetersPerStud => _metersPerStud;
+
         public bool IsInitialized => Registry != null;
 
         private ILog _log;
+        private GameObject _ownedSessionRoot;
+
+        internal Action<UnityEngine.Object> RetiredRootDestroyerForTests { get; set; }
 
         // WHY: a scene component is created by Unity, not by the container, so it cannot be injected;
         // the process-wide CoreAI logger is the sanctioned no-DI seam and CoreServicesInstaller points
@@ -97,6 +107,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: the camera reference is resolved ONCE here at composition; Lua camera writes
             // must never pay a scene search per call.
             Camera sceneCamera = _camera != null ? _camera : Camera.main;
+            SceneCamera = sceneCamera;
             CameraRig = sceneCamera != null ? new UnityCameraRig(sceneCamera.transform, Binder) : null;
             // WHY: ClickDetector picking rays through the SAME rendering camera; no camera means no
             // pick source, and the bindings fall back to the headless no-op.
@@ -104,6 +115,91 @@ namespace CoreAI.Mods.Rbx.Binding
             // TODO: com.unity.inputsystem may be removed — the source stays behind IInputSource so
             // only this composition line changes when the backend is swapped.
             InputSource = new UnityNewInputSource();
+        }
+
+        /// <summary>Publishes an already restored replacement and retires the outgoing host state.</summary>
+        public void PublishReplacement(
+            GameObject sessionRoot,
+            InstanceGameObjectBinder binder,
+            InstanceRegistry registry,
+            RbxDataModel game,
+            IRbxCameraRig cameraRig,
+            IInputSource inputSource,
+            IClickPickSource pickSource,
+            float metersPerStud)
+        {
+            if (sessionRoot == null || binder == null || registry == null || game == null)
+            {
+                throw new ArgumentNullException(nameof(sessionRoot));
+            }
+
+            InstanceGameObjectBinder outgoingBinder = Binder;
+            InstanceRegistry outgoingRegistry = Registry;
+            RbxDataModel outgoingGame = Game;
+            GameObject outgoingRoot = _ownedSessionRoot;
+
+            Registry = registry;
+            Game = game;
+            Binder = binder;
+            CameraRig = cameraRig;
+            InputSource = inputSource;
+            PickSource = pickSource;
+            _metersPerStud = metersPerStud;
+            _ownedSessionRoot = sessionRoot;
+            Registry.Diagnostics = message => Logger.Error(message, LogTag.World);
+
+            try
+            {
+                outgoingBinder?.BeginHostTeardown();
+            }
+            catch (System.Exception ex)
+            {
+                Logger.Warn("[RbxWorldHost] Outgoing binder teardown failed: " + ex.Message);
+            }
+
+            try
+            {
+                outgoingRegistry?.MarkDetached();
+            }
+            catch (System.Exception ex)
+            {
+                Logger.Warn("[RbxWorldHost] Outgoing registry detach failed: " + ex.Message);
+            }
+
+            try
+            {
+                outgoingGame?.Destroy();
+            }
+            catch (System.Exception ex)
+            {
+                Logger.Warn("[RbxWorldHost] Outgoing world teardown failed: " + ex.Message);
+            }
+
+            try
+            {
+                if (outgoingRoot != null)
+                {
+                    Action<UnityEngine.Object> destroyer = RetiredRootDestroyerForTests;
+                    if (destroyer != null)
+                    {
+                        destroyer(outgoingRoot);
+                    }
+                    else
+                    {
+                        DestroyUnityObject(outgoingRoot);
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                try
+                {
+                    Logger.Warn("[RbxWorldHost] Outgoing root destroy failed: " + ex.Message);
+                }
+                catch
+                {
+                }
+            }
         }
 
         private void OnDestroy()
@@ -119,12 +215,32 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: registry-driven teardown releases backing GameObjects through the binder,
             // keeping the ledger and the scene consistent even on scene unload.
             Game?.Destroy();
+            DestroyUnityObject(_ownedSessionRoot);
             Game = null;
             Registry = null;
             Binder = null;
             CameraRig = null;
             PickSource = null;
             InputSource = null;
+            SceneCamera = null;
+            _ownedSessionRoot = null;
+        }
+
+        private static void DestroyUnityObject(UnityEngine.Object target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
         }
     }
 }

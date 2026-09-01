@@ -2,18 +2,36 @@
 
 This file tracks accepted warning debt and project-level issues that are not runtime regressions.
 
-## LLMUnity throws on WebGL startup
+## LLMUnity native initialization on WebGL is contained at build time, not fixed upstream
 
-Symptom: a WebGL player logs `ArgumentException: Unknown platform Unix <version>` from
-`UndreamAI.LlamaLib.LlamaLib.GetPlatform()` during startup.
+Symptom: an unguarded WebGL player can abort during startup in
+`UndreamAI.LlamaLib.LlamaLib.GetPlatform()` before CoreAI composition chooses an HTTP or Offline
+backend. A local GGUF model cannot run in a browser player.
 
-Cause: LLMUnity's native platform probe does not recognise the triple the WebGL player reports.
+Cause: the installed LLMUnity runtime assembly owns an eager initializer whose native platform probe
+does not support WebGL. CoreAI runtime DI cannot reliably run before an initializer in another
+assembly.
 
-Impact: noise only. A local GGUF model cannot run in a browser player regardless; CoreAI itself
-starts normally and an OpenAI-compatible HTTP backend works.
+Current containment:
 
-Recommended follow-up: skip the LLMUnity module entirely for WebGL builds (do not install
-`ai.undream.llm`, or guard its activation behind a non-WebGL check).
+- Browser composition never registers `ILlmAgentProvider` or LLMUnity autostart. `LocalModel`
+  requests return `LocalModelPlatformSupport.BrowserUnavailableMessage`; HTTP and Offline remain
+  available, and runtime hot-swap does not require a local provider.
+- The Hub removes local-model choices on unsupported players, disables a persisted local selection,
+  and shows the browser limitation explicitly.
+- Unsupported player builds remove LLMUnity behaviours from staged scene copies and rewrite only the
+  reported `Temp/StagingArea/Data/Managed/undream.llmunity.Runtime.dll` for the current callback. The
+  callback rejects persistent Bee caches, fails closed when that staged DLL is absent, never rewrites Assets/Packages/editor/package-cache
+  assemblies, and re-reads the output to require a return-only initializer.
+- A runtime guard disables LLMUnity behaviours found after bootstrap without disabling unrelated
+  components on the same GameObject. This is secondary containment for late-created hosts; it cannot
+  guarantee interception before an arbitrary third-party `Awake` or static initializer.
+
+Remaining limitation: the Cecil rewrite is an Editor build-compatibility step, not the desired
+RUNTIME-first architecture. The complete fix requires an upstream LLMUnity platform gate, an
+unsupported-target assembly split, or a maintained fork that omits native initialization in WebGL.
+Until then, a Unity staging-layout change intentionally fails the build instead of risking a source
+assembly mutation or shipping an unverified initializer.
 
 ## Legacy log-settings migration hides Lua mod errors
 

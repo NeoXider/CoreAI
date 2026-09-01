@@ -39,6 +39,7 @@ namespace CoreAI.Hub.UI
         private readonly ICoreAISettings _settings;
         private readonly CoreAiChatConfig _chatConfig;
         private readonly ICoreAiRoutingUiController _routingControllerOverride;
+        private readonly RuntimePlatform _runtimePlatform;
 
         private DropdownField _mode;
         private VisualElement _httpGroup;
@@ -125,6 +126,16 @@ namespace CoreAI.Hub.UI
             _settings = settings;
             _chatConfig = chatConfig;
             _routingControllerOverride = routingController;
+            _runtimePlatform = Application.platform;
+        }
+
+        internal HubSettingsPage(
+            ICoreAISettings settings,
+            RuntimePlatform runtimePlatform,
+            ICoreAiRoutingUiController routingController = null)
+            : this(settings, null, DefaultPageId, "AI Settings", 100, routingController)
+        {
+            _runtimePlatform = runtimePlatform;
         }
 
         /// <inheritdoc />
@@ -228,10 +239,15 @@ namespace CoreAI.Hub.UI
             }
 
             body.Add(HubPageWidgets.MakeSection("Backend"));
-            _mode = new DropdownField("Mode", ModeOptions, 0);
+            _mode = new DropdownField("Mode", ModeOptionsForPlatform(_runtimePlatform), 0);
             StyleField(_mode);
             _mode.RegisterValueChangedCallback(_ => RefreshInteractivity());
             body.Add(_mode);
+            if (!LocalModelPlatformSupport.IsSupported(_runtimePlatform))
+            {
+                body.Add(HubPageWidgets.MakeNote(
+                    LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform)));
+            }
 
             _httpGroup = MakeGroup("HTTP API");
             _baseUrl = new TextField("API base URL");
@@ -301,6 +317,7 @@ namespace CoreAI.Hub.UI
             _gpuLayers = new IntegerField("GPU layers");
             StyleField(_gpuLayers);
             _localGroup.Add(_gpuLayers);
+            _localGroup.SetEnabled(LocalModelPlatformSupport.IsSupported(_runtimePlatform));
             body.Add(_localGroup);
 
             _limitsGroup = MakeGroup("Request limits");
@@ -382,7 +399,7 @@ namespace CoreAI.Hub.UI
 
             _endpointKind = new DropdownField(
                 "Type",
-                new List<string> { "HTTP API", "LLMUnity", "Offline" },
+                EndpointKindOptionsForPlatform(_runtimePlatform),
                 0);
             StyleField(_endpointKind);
             _endpointKind.RegisterValueChangedCallback(_ => RefreshEndpointEditorVisibility());
@@ -801,6 +818,14 @@ namespace CoreAI.Hub.UI
             }
 
             LlmEndpointDescriptor endpoint = ReadEndpointEditor();
+            if (endpoint.Kind == LlmEndpointKind.LlmUnity &&
+                !LocalModelPlatformSupport.IsSupported(_runtimePlatform))
+            {
+                _endpointOperationStatus.text =
+                    LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform);
+                return;
+            }
+
             string validation = ValidateEndpoint(endpoint);
             if (string.IsNullOrEmpty(validation) && string.IsNullOrEmpty(_editingEndpointId) &&
                 EndpointIdExists(endpoint.EndpointId))
@@ -1058,6 +1083,7 @@ namespace CoreAI.Hub.UI
             LlmEndpointKind kind = LabelKind(_endpointKind?.value);
             bool http = kind == LlmEndpointKind.HttpOpenAi;
             bool local = kind == LlmEndpointKind.LlmUnity;
+            bool localAvailable = LocalModelPlatformSupport.IsSupported(_runtimePlatform);
             SetVisible(_endpointBaseUrl, http);
             SetVisible(_endpointSecretReference, http);
             SetVisible(_endpointSessionKey, http);
@@ -1077,11 +1103,19 @@ namespace CoreAI.Hub.UI
             SetVisible(_endpointFlashAttention, local);
             SetVisible(_endpointParallelSlots, kind != LlmEndpointKind.Offline);
             _endpointKeepWarm?.SetEnabled(kind != LlmEndpointKind.Offline);
+            _endpointSaveButton?.SetEnabled(_routingController != null && (!local || localAvailable));
+            if (local && !localAvailable && _endpointOperationStatus != null)
+            {
+                _endpointOperationStatus.text =
+                    LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform);
+            }
         }
 
         private void SetEndpointBusy(bool busy)
         {
-            _endpointSaveButton?.SetEnabled(!busy && _routingController != null);
+            bool local = LabelKind(_endpointKind?.value) == LlmEndpointKind.LlmUnity;
+            bool localAvailable = LocalModelPlatformSupport.IsSupported(_runtimePlatform);
+            _endpointSaveButton?.SetEnabled(!busy && _routingController != null && (!local || localAvailable));
         }
 
         private void ClearSessionKey()
@@ -1240,6 +1274,15 @@ namespace CoreAI.Hub.UI
             }
 
             LlmExecutionMode mode = SelectedMode();
+            if (mode == LlmExecutionMode.LocalModel &&
+                !LocalModelPlatformSupport.IsSupported(_runtimePlatform))
+            {
+                _status.text = LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform);
+                _health.text = "";
+                RefreshInteractivity();
+                return;
+            }
+
             bool live;
             switch (mode)
             {
@@ -1590,7 +1633,12 @@ namespace CoreAI.Hub.UI
 
             UpdateTemperatureInteractivity();
 
-            _status.text = status.IsLive ? "Live backend: " + status : "Settings only: " + status;
+            _status.text = status.Mode == LlmExecutionMode.LocalModel &&
+                           !LocalModelPlatformSupport.IsSupported(_runtimePlatform)
+                ? LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform)
+                : status.IsLive
+                    ? "Live backend: " + status
+                    : "Settings only: " + status;
             RefreshInteractivity();
         }
 
@@ -1604,9 +1652,14 @@ namespace CoreAI.Hub.UI
             LlmExecutionMode mode = SelectedMode();
             bool http = IsHttpMode(mode);
             bool local = mode == LlmExecutionMode.LocalModel;
+            bool localAvailable = LocalModelPlatformSupport.IsSupported(_runtimePlatform);
             SetVisible(_httpGroup, http);
             SetVisible(_localGroup, local);
             SetVisible(_limitsGroup, http);
+            _localGroup?.SetEnabled(localAvailable);
+            bool backendActionAllowed = !local || localAvailable;
+            _applyButton?.SetEnabled(backendActionAllowed && !_busy);
+            _testButton?.SetEnabled(backendActionAllowed && !_busy);
         }
 
         private void UpdateTemperatureInteractivity()
@@ -1642,6 +1695,12 @@ namespace CoreAI.Hub.UI
 
                 return "Saved backend settings; SmartChat currently routes to runtime profile '" +
                        profileName + "'. Backend settings apply only to Automatic/default roles.";
+            }
+
+            if (status.Mode == LlmExecutionMode.LocalModel &&
+                !LocalModelPlatformSupport.IsSupported(_runtimePlatform))
+            {
+                return LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform);
             }
 
             return live
@@ -1691,6 +1750,28 @@ namespace CoreAI.Hub.UI
             return mode == LlmExecutionMode.ClientOwnedApi ||
                    mode == LlmExecutionMode.ClientLimited ||
                    mode == LlmExecutionMode.ServerManagedApi;
+        }
+
+        internal static List<string> ModeOptionsForPlatform(RuntimePlatform platform)
+        {
+            List<string> options = new(ModeOptions);
+            if (!LocalModelPlatformSupport.IsSupported(platform))
+            {
+                options.Remove(ModeOptions[1]);
+            }
+
+            return options;
+        }
+
+        internal static List<string> EndpointKindOptionsForPlatform(RuntimePlatform platform)
+        {
+            List<string> options = new() { "HTTP API", "LLMUnity", "Offline" };
+            if (!LocalModelPlatformSupport.IsSupported(platform))
+            {
+                options.Remove("LLMUnity");
+            }
+
+            return options;
         }
 
         internal static string ModeToOption(LlmExecutionMode mode)
@@ -1964,14 +2045,17 @@ namespace CoreAI.Hub.UI
 
         private void SetButtonsEnabled(bool enabled)
         {
+            bool local = SelectedMode() == LlmExecutionMode.LocalModel;
+            bool backendActionAllowed = enabled &&
+                                        (!local || LocalModelPlatformSupport.IsSupported(_runtimePlatform));
             if (_applyButton != null)
             {
-                _applyButton.SetEnabled(enabled);
+                _applyButton.SetEnabled(backendActionAllowed);
             }
 
             if (_testButton != null)
             {
-                _testButton.SetEnabled(enabled);
+                _testButton.SetEnabled(backendActionAllowed);
             }
 
             if (_fetchModelsButton != null)

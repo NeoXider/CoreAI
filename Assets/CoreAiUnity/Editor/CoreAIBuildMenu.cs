@@ -553,7 +553,7 @@ namespace CoreAI.Editor
     }
 
     /// <summary>
-    /// Repeatable batch-mode entry point for the G11 WebGL browser-gate player.
+    /// Repeatable batch-mode entry point for the all-first-party-demo G11 WebGL browser gate.
     /// </summary>
     public static class CoreAIG11WebGlBuild
     {
@@ -563,11 +563,23 @@ namespace CoreAI.Editor
         {
             "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
             "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity",
+            "Assets/CoreAI.Demos/LiveMechanicsMods/WaveAutoBattlerModsDemo.unity",
+            "Assets/CoreAI.Demos/LuaMods/LuaModsDemo.unity",
+            "Assets/CoreAI.Demos/MiniRpg/MiniRpgModsDemo.unity",
+            "Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity",
+            "Assets/CoreAI.Demos/MultiplayerFoundation/MultiplayerFoundationDemo.unity",
+            "Assets/CoreAI.Demos/ProceduralMaterials/ProceduralMaterialsShowcase.unity",
+            "Assets/CoreAI.Demos/QwenDemo/QwenGenieDemo.unity",
+            "Assets/CoreAI.Demos/QwenDemo/QwenSpellcraftDemo.unity",
+            "Assets/CoreAI.Demos/Skills/SkillsDemo.unity",
+            "Assets/CoreAI.Demos/WorldCommands/WorldCommandsDemo.unity",
             "Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity"
         };
 
         /// <summary>
-        /// Builds the frozen G11 scene set into <c>artifacts/G11-WebGL</c> without prompts.
+        /// Builds the frozen 15-scene G11 demo set into <c>artifacts/G11-WebGL</c> without prompts.
         /// Launch Unity with <c>-buildTarget WebGL</c> because batch mode cannot switch targets while
         /// an execute method is running.
         /// </summary>
