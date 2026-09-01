@@ -358,9 +358,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxPlayer(descriptor)));
             catalog.Register(new ClassDescriptor("PVInstance", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("Folder", "Instance", false, true, false));
-            catalog.Register(new ClassDescriptor("Model", "PVInstance", false, true, false));
+            catalog.Register(new ClassDescriptor("Model", "PVInstance", false, true, false,
+                descriptor => new RbxModel(descriptor)));
             catalog.Register(new ClassDescriptor("WorldRoot", "Model", true, false, false));
-            catalog.Register(new ClassDescriptor("Workspace", "WorldRoot", false, false, true));
+            catalog.Register(new ClassDescriptor("Workspace", "WorldRoot", false, false, true,
+                descriptor => new RbxModel(descriptor)));
             catalog.Register(new ClassDescriptor("BasePart", "PVInstance", true, false, false));
             catalog.Register(new ClassDescriptor("Part", "BasePart", false, true, false));
             // WHY: one canonical Camera per world (bootstrap creates it under Workspace and the
@@ -397,20 +399,6 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("ClickDetector", "Instance", false, true, false,
                 descriptor => new RbxClickDetector(descriptor)));
 
-            catalog.RegisterKnownUnimplementedMembers("PVInstance",
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "PivotTo", "MVP2 (Model pivot)",
-                    "set part.CFrame directly until pivot aggregation lands"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "GetPivot", "MVP2 (Model pivot)",
-                    "read part.CFrame directly until pivot aggregation lands"));
-            catalog.RegisterKnownUnimplementedMembers("Model",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "PrimaryPart", "MVP2 (Model pivot)",
-                    "use a child BasePart.CFrame directly until Model pivot support lands"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "WorldPivot", "MVP2 (Model pivot)",
-                    "use a child BasePart.CFrame directly until Model pivot support lands"));
             catalog.RegisterKnownUnimplementedMembers("WorldRoot",
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
                     "Raycast", "MVP8",

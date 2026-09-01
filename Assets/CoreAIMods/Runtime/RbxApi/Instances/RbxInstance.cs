@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Datatypes;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -601,7 +602,7 @@ namespace CoreAI.Mods.Rbx.Instances
             return result;
         }
 
-        private void FireSignal(string signalName, params object[] arguments)
+        protected void FireSignal(string signalName, params object[] arguments)
         {
             if (_signals != null
                 && _signals.TryGetValue(signalName, out RbxScriptSignal signal))
@@ -657,6 +658,67 @@ namespace CoreAI.Mods.Rbx.Instances
         public override string ToString()
         {
             return _name;
+        }
+    }
+
+    /// <summary>Runtime state owned by Model descendants for the PVInstance pivot surface.</summary>
+    public sealed class RbxModel : RbxInstance
+    {
+        private RbxInstance _primaryPart;
+        private RbxCFrame _storedWorldPivot = RbxCFrame.Identity;
+        private bool _hasStoredWorldPivot;
+
+        protected internal RbxModel(ClassDescriptor descriptor) : base(descriptor)
+        {
+        }
+
+        public RbxInstance PrimaryPart => _primaryPart;
+
+        public bool HasStoredWorldPivot => _hasStoredWorldPivot;
+
+        public RbxCFrame StoredWorldPivot => _storedWorldPivot;
+
+        public void SetPrimaryPart(RbxInstance primaryPart)
+        {
+            ThrowIfDestroyed("PrimaryPart");
+            if (primaryPart != null && !primaryPart.IsA("BasePart"))
+            {
+                throw RbxError.BadArgument(
+                    "Model.PrimaryPart expects a BasePart or nil",
+                    "assign a BasePart descendant of the Model, or nil");
+            }
+
+            if (ReferenceEquals(_primaryPart, primaryPart))
+            {
+                return;
+            }
+
+            _primaryPart = primaryPart;
+            Registry?.AdvanceRevision(Id);
+            FireSignal("GetPropertyChangedSignal(PrimaryPart)");
+        }
+
+        public void SetWorldPivot(in RbxCFrame worldPivot)
+        {
+            ThrowIfDestroyed("WorldPivot");
+            if (_hasStoredWorldPivot && _storedWorldPivot == worldPivot)
+            {
+                return;
+            }
+
+            _storedWorldPivot = worldPivot;
+            _hasStoredWorldPivot = true;
+            Registry?.AdvanceRevision(Id);
+            FireSignal("GetPropertyChangedSignal(WorldPivot)");
+        }
+
+        internal void ResetInvalidPrimaryPart()
+        {
+            if (_primaryPart != null
+                && (_primaryPart.IsDestroyed || !_primaryPart.IsDescendantOf(this)))
+            {
+                SetPrimaryPart(null);
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Rendering;
@@ -15,10 +16,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
     {
         private const int WoodValue = 512;
         private const int WoodPlanksValue = 528;
+        private const int MarbleValue = 784;
         private const int BrickValue = 848;
         private const int CobblestoneValue = 880;
         private const int MetalValue = 1088;
         private const int GrassValue = 1280;
+        private const int GroundValue = 1360;
         private const int LookupIterations = 4096;
         private const float ColorEpsilon = 1e-5f;
 
@@ -205,6 +208,48 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
+        public void NoiseShaderVendor_CoreSourcesAndLicenseRemainByteIdentical()
+        {
+            string root = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials", "NoiseShader");
+
+            AssertSha256(Path.Combine(root, "ClassicNoise2D.hlsl"),
+                "b8dd33086fe80b8780225cc2a6fa8206423630ea280c6069191cf43ecad9e644");
+            AssertSha256(Path.Combine(root, "ClassicNoise3D.hlsl"),
+                "32c3910c76599d4ce9bc18e015841e67f189aa4b11ccddbf7be6859c39f11978");
+            AssertSha256(Path.Combine(root, "Common.hlsl"),
+                "f4d34c6fa5eaf4d1b9ec369de840232ba9798f6e099601176461221f2efa6e6d");
+            AssertSha256(Path.Combine(root, "Noise1D.hlsl"),
+                "de8c079a6f7d36a6c317715860d50dc9f266aa2215cd4e026d49c4d3924f40dd");
+            AssertSha256(Path.Combine(root, "SimplexNoise2D.hlsl"),
+                "8f72b4caabb0154df4d44279c5256c8371042aea9137c36bd3101b3aae2ee243");
+            AssertSha256(Path.Combine(root, "SimplexNoise3D.hlsl"),
+                "003bd6f2366f432cfb40d8d212da2f012c424b2b737e3418bc9da397bd540c6a");
+            AssertSha256(Path.Combine(root, "LICENSE"),
+                "bdafce1bb01517c9ae6c4f3620c01340790b5e9d039ae9e356347d1174250916");
+        }
+
+        [Test]
+        public void ProceduralNormals_UseVendoredAnalyticalDerivativesWithoutHeightResampling()
+        {
+            string root = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
+                "Unity", "Resources", "CoreAIRbxMaterials");
+            string wrapperSource = File.ReadAllText(Path.Combine(root, "RbxNoiseShader.hlsl"));
+            string commonSource = File.ReadAllText(Path.Combine(root, "RbxProceduralCommon.hlsl"));
+            string surfaceSource = File.ReadAllText(Path.Combine(root, "RbxProceduralSurface.shader"));
+
+            StringAssert.Contains("#include \"NoiseShader/Common.hlsl\"", wrapperSource);
+            StringAssert.Contains("float4 RbxSimplexNoiseGrad", wrapperSource);
+            StringAssert.Contains("float4 RbxSimplexFbmGrad", wrapperSource);
+            StringAssert.Contains("RbxSimplexFbmGrad", commonSource);
+            StringAssert.Contains("ddx(centerHeight)", commonSource);
+            StringAssert.Contains("float3 analyticalGradient", commonSource);
+            StringAssert.Contains("procedural.heightGradient", surfaceSource);
+            StringAssert.DoesNotContain("float epsilon", commonSource);
+            StringAssert.DoesNotContain("RbxEvaluateSurface(patternPosition +", commonSource);
+        }
+
+        [Test]
         public void ProjectionSensitivePatterns_UseObjectAlignedWorldUnitTriplanarCoordinates()
         {
             string commonPath = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
@@ -240,23 +285,41 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         {
             AssertProviderTuning("WoodPlanks", WoodPlanksValue, 3, 0.9f, 0.34f);
             AssertProviderTuning("Metal", MetalValue, 4, 1f, 0.06f);
+            AssertProviderTuning("Marble", MarbleValue, 7, 0.48f, 0.11f);
             AssertProviderTuning("Brick", BrickValue, 10, 0.8f, 0.42f);
             AssertProviderTuning("Cobblestone", CobblestoneValue, 11, 1.15f, 0.48f);
-            AssertProviderTuning("Grass", GrassValue, 12, 1.4f, 0.42f);
+            AssertProviderTuning("Grass", GrassValue, 12, 0.9f, 0.38f);
+            AssertProviderTuning("Ground", GroundValue, 14, 0.78f, 0.44f);
         }
 
         [Test]
-        public void GrassAndCobblestone_UseJitteredDiscretePatternKernels()
+        public void GrassGroundAndCobblestone_UseStructuredDiscretePatternKernels()
         {
             string path = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
                 "Unity", "Resources", "CoreAIRbxMaterials", "RbxProceduralCommon.hlsl");
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("float RbxGrassBladeLayer", source);
-            StringAssert.Contains("localPosition -= jitter * 0.5;", source);
+            StringAssert.Contains("float3 RbxGrassBladeLayer", source);
+            StringAssert.Contains("localPosition -= jitter * 0.38;", source);
+            StringAssert.Contains("float bladeProgress", source);
+            StringAssert.Contains("void RbxGroundPattern", source);
+            StringAssert.Contains("float pebbleRadius", source);
             StringAssert.Contains("void RbxCobblestonePattern", source);
             StringAssert.Contains("stoneMask = 1.0 - smoothstep(0.82, 1.0, stoneDistance);", source);
             StringAssert.DoesNotContain("float bladeA = 0.5 + 0.5 * sin", source);
+        }
+
+        private static void AssertSha256(string path, string expected)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            byte[] hash;
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                hash = sha256.ComputeHash(bytes);
+            }
+
+            string actual = BitConverter.ToString(hash).Replace("-", string.Empty).ToLowerInvariant();
+            Assert.AreEqual(expected, actual, path);
         }
 
         private void AssertProviderTuning(string name, int value, int expectedMode,

@@ -29,14 +29,23 @@ The current catalog maps:
 - Marble, Slate, Concrete, Brick, Cobblestone, Rock;
 - Grass, Sand, Ground, Ice, Snow, Fabric.
 
-Opaque materials use procedural albedo, metallic, smoothness, occlusion, and finite-difference height
-derivatives for normals. Neon is HDR emissive and independent of scene lighting. ForceField uses additive
-transparency with animated energy bands, lattice detail, noise, and Fresnel edges. Glass and Ice are
-transparent PBR modes with smooth specular response and procedural surface normals.
+Opaque materials use procedural albedo, metallic, smoothness, occlusion, and height-derived normals.
+Organic low-frequency relief uses NoiseShader's analytical 3D simplex derivatives; authored masks such
+as planks, mortar, blades, cracks, and pebbles use one center-height fragment derivative. The normal path
+does not resample the complete material. Neon is HDR emissive and independent of scene lighting.
+ForceField uses additive transparency with animated energy bands, lattice detail, noise, and Fresnel
+edges. Glass and Ice are transparent PBR modes with smooth specular response and procedural normals.
 
-All procedural noise has a fixed instruction count and the shaders target shader model 3.0. There are no
-compute passes, geometry/tessellation stages, texture dependencies, dynamic loops, or thread/blocking
-paths, keeping the catalog compatible with the URP WebGL 2 shipping path.
+Grass is built from tapered, bent blade silhouettes with highlighted midribs over recessed thatch.
+Ground uses warped compacted-earth plates, connected dark cracks, and discrete raised pebbles rather than
+an exposed noise field. Marble uses broad domain-warped primary ribbons, soft halos, and sparse branches
+instead of high-power scratch lines. Their scale, bump strength, palette, mode, and shared handle remain
+owned by the runtime provider.
+
+All procedural noise has a fixed instruction count and the shaders target shader model 3.0. Fragment
+derivatives used by the opaque surface pass are available on the WebGL 2 target. There are no compute
+passes, geometry/tessellation stages, texture dependencies, dynamic loops, or thread/blocking paths,
+keeping the catalog compatible with the URP WebGL 2 shipping path.
 
 ## Visible fallback
 
@@ -74,5 +83,10 @@ managed allocation.
 ## Source and licensing
 
 The enum names and values follow the offline mirrors in `D:/Git/RobloxDocs` and
-`Docs/CoreAIMods/RobloxReference/`. Shader code, patterns, tuning, demo layout, and documentation are
-authored in this repository. No texture, downloaded asset, or third-party binary is used.
+`Docs/CoreAIMods/RobloxReference/`. The six HLSL library sources under
+`Resources/CoreAIRbxMaterials/NoiseShader/` come from `keijiro/NoiseShader` commit
+`550100d4a74de1ba90eb1b8e90f25f9dbeec28d2`, itself an HLSL port of `stegu/webgl-noise`. Both are MIT;
+the complete upstream notice is preserved verbatim in `NoiseShader/LICENSE`, and `NoiseShader/UPSTREAM.md`
+records source paths and SHA-256 hashes. `RbxNoiseShader.hlsl`, material patterns, tuning, demo layout,
+and the remaining shader code are authored or adapted in this repository. No texture or third-party
+binary is used.

@@ -109,9 +109,9 @@ Shader "CoreAI/Rbx/Procedural Surface"
                     _PartColorInfluence);
                 RbxSurfaceSample procedural = RbxEvaluateSurface(patternPosition, patternNormal,
                     materialMode, _PatternScale, baseColor);
-                float3 normalWS = RbxPerturbNormal(patternPosition, patternNormal, baseNormalWS,
-                    objectAlignedProjection, materialMode, _PatternScale, _BumpStrength, baseColor,
-                    procedural.height);
+                float3 normalWS = RbxPerturbNormal(input.positionWS, baseNormalWS,
+                    procedural.heightGradient, objectAlignedProjection, _PatternScale,
+                    _BumpStrength, procedural.height);
 
                 SurfaceData surfaceData = (SurfaceData)0;
                 surfaceData.albedo = procedural.albedo;

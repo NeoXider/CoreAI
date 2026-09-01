@@ -1,6 +1,6 @@
 # TODO
 
-> Updated 2026-08-30. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-01. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
 > Prepared: 7.1.0 (2026-08-30, all six packages in lockstep; UNCOMMITTED, release pending the EditMode gate).
 > Released: 7.0.7 (2026-08-27, all six packages in lockstep); 7.0.0 (2026-08-01) added `McpServerInfo.Version`.
@@ -9,6 +9,20 @@
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## MVP2 acceptance-gate remediation (2026-09-01) — uncommitted
+
+- [x] G7 now inspects both compiled emit entry paths through the per-subscriber `Enqueue` boundary,
+      rejects process-wide synchronization before that boundary, and separately permits the target
+      mod's queue lock. A deliberate static emit lock made the compiled structural gate fail and was
+      removed; the lock-free production route is restored.
+- [x] G12 now freezes all 20 exact Tier-A ids and enforces the ≥30% Unmodified threshold. The manifest
+      records the actual 17 Unmodified / 0 Modified / 3 Failing catalog and lists every frozen id.
+- [x] The acceptance manifest scopes G2 to ACL-versioned worlds, explicitly excludes legacy missing/null
+      ACL worlds from the cross-actor refusal security claim, and marks the unrun machine/provider/test
+      discovery/RSS fields `NOT MEASURED` instead of inventing values.
+- [ ] **Verification gate — owner-run Unity EditMode suite.** Non-Unity `CoreAI.Mods.Tests.csproj` build
+      is green; Unity and its test runner were intentionally not invoked for this wave.
 
 ## MVP1 residue closed + MVP2 scheduler core (2026-08-30) — 7.1.0 prepared
 

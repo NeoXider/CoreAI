@@ -25,6 +25,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         private const int KeyE = 101;
         private const string ResultAttribute = "TierACorpusResult";
         private const int FrozenFixtureCount = 20;
+        private const int MinimumUnmodifiedPercent = 30;
+        private static readonly string[] FrozenFixtureIds =
+        {
+            "TAC-001-instance-parent-last",
+            "TAC-002-part-properties",
+            "TAC-003-attributes-change-signal",
+            "TAC-004-signal-connect-disconnect",
+            "TAC-005-signal-once",
+            "TAC-006-signal-wait",
+            "TAC-007-task-scheduling",
+            "TAC-008-runservice-heartbeat-loop",
+            "TAC-009-userinput-began",
+            "TAC-010-vector3-math",
+            "TAC-011-cframe-math",
+            "TAC-012-color3-math",
+            "TAC-013-getservice-identity",
+            "TAC-014-destroy-pcall-cleanup",
+            "TAC-015-script-parent-property-signal",
+            "TAC-016-generic-for-descendants",
+            "TAC-017-waitforchild-yield",
+            "TAC-018-contextaction-bind",
+            "TAC-019-tween-create",
+            "TAC-020-players-localplayer"
+        };
 
         private SynchronizationContext _savedContext;
         private ILog _savedLog;
@@ -283,6 +307,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
             Assert.AreEqual(FrozenFixtureCount, TierACorpusCatalog.Fixtures.Length);
             HashSet<string> ids = new(StringComparer.Ordinal);
             HashSet<string> fileNames = new(StringComparer.Ordinal);
+            int unmodifiedCount = 0;
 
             foreach (TierAFixtureSpec fixture in TierACorpusCatalog.Fixtures)
             {
@@ -294,6 +319,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
 
                 if (fixture.Classification == TierAFixtureClassification.Unmodified)
                 {
+                    unmodifiedCount++;
                     Assert.AreEqual("None.", fixture.Accommodation);
                     Assert.IsEmpty(fixture.ApiGap);
                     Assert.IsEmpty(fixture.ExpectedFailureText);
@@ -327,6 +353,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                     }
                 }
             }
+
+            CollectionAssert.AreEquivalent(FrozenFixtureIds, ids,
+                "The Tier-A catalog ids must match the frozen acceptance set exactly.");
+            Assert.GreaterOrEqual(
+                unmodifiedCount * 100,
+                FrozenFixtureCount * MinimumUnmodifiedPercent,
+                $"At least {MinimumUnmodifiedPercent}% of the frozen Tier-A catalog must run unmodified.");
 
             string[] fixtureFiles = Directory.GetFiles(FixtureDirectory, "*.lua", SearchOption.TopDirectoryOnly);
             Assert.AreEqual(FrozenFixtureCount, fixtureFiles.Length,

@@ -226,6 +226,22 @@ namespace CoreAI.Ai.LuaCs
                 WorldAclDecision.MutateMetadata, operation);
         }
 
+        public void RequirePivotMutation(RbxInstance target)
+        {
+            RequireWorldEdit(target.ClassName + ":PivotTo");
+            RequireMutationTarget(target, "pivot");
+            WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, target,
+                WorldAclDecision.WriteProperty, "pivot");
+            foreach (RbxInstance descendant in target.GetDescendants())
+            {
+                if (descendant.IsA("PVInstance"))
+                {
+                    WorldAclAuthorizer.Demand(Bindings.Registry, ActorContext, descendant,
+                        WorldAclDecision.WriteProperty, "pivot descendant");
+                }
+            }
+        }
+
         public void RequireReparent(RbxInstance target, RbxInstance destination)
         {
             RequireWorldEdit("setting Instance.Parent");
@@ -557,6 +573,11 @@ namespace CoreAI.Ai.LuaCs
                     return clickValue;
                 }
 
+                if (TryReadModelPivot(context, self, key, out LuaValue modelPivotValue))
+                {
+                    return modelPivotValue;
+                }
+
                 if (TryReadSpatial(context, self, key, out LuaValue spatial))
                 {
                     return spatial;
@@ -636,6 +657,11 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 if (TryWriteClickDetector(context, self, key, value))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (TryWriteModelPivot(context, self, key, value))
                 {
                     return LuaValue.Nil;
                 }
@@ -983,6 +1009,16 @@ namespace CoreAI.Ai.LuaCs
             Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
                 self.GetPropertyChangedSignal(ReadString(ctx, 1, "GetPropertyChangedSignal")), context));
 
+            Method("GetPivot", (_, self) => LuaCsRbxDatatypeBindings.Wrap(
+                GetPivot(context.PartSink, self)), "PVInstance");
+            Method("PivotTo", (ctx, self) =>
+            {
+                context.RequirePivotMutation(self);
+                PivotTo(context, self,
+                    ReadCFrameValue(Arg(ctx, 1), "PVInstance:PivotTo argument 1"));
+                return LuaValue.Nil;
+            }, "PVInstance");
+
             // ---- ServiceProvider (DataModel) ----
             Method("GetService", (ctx, self) => context.WrapInstance(
                     RequireDataModel(self, "GetService").GetService(ReadString(ctx, 1, "GetService"))),
@@ -1266,6 +1302,169 @@ namespace CoreAI.Ai.LuaCs
         }
 
         // ---- BasePart spatial/appearance (part-property sink) -------------------------------
+
+        private static bool TryReadModelPivot(LuaCsRbxModContext context, RbxInstance self,
+            string key, out LuaValue value)
+        {
+            if (!(self is RbxModel model))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "PrimaryPart":
+                    value = context.WrapInstance(model.PrimaryPart);
+                    return true;
+                case "WorldPivot":
+                    value = LuaCsRbxDatatypeBindings.Wrap(
+                        GetWorldPivot(context.PartSink, model));
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        private static bool TryWriteModelPivot(LuaCsRbxModContext context, RbxInstance self,
+            string key, LuaValue value)
+        {
+            if (!(self is RbxModel model))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "PrimaryPart":
+                    context.RequireWorldEditForWrite(self, "PrimaryPart");
+                    model.SetPrimaryPart(ReadOptionalInstance(
+                        value, "Model.PrimaryPart assignment"));
+                    return true;
+                case "WorldPivot":
+                    context.RequireWorldEditForWrite(self, "WorldPivot");
+                    RbxCFrame worldPivot = ReadCFrameValue(
+                        value, "Model.WorldPivot assignment");
+                    model.SetWorldPivot(in worldPivot);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static RbxCFrame GetPivot(IPartPropertySink sink, RbxInstance instance)
+        {
+            if (instance.IsA("BasePart"))
+            {
+                return sink.GetPartPropertiesOrDefault(instance.Id).CFrame;
+            }
+
+            if (instance is RbxModel model)
+            {
+                RbxInstance primaryPart = model.PrimaryPart;
+                return primaryPart != null
+                    ? sink.GetPartPropertiesOrDefault(primaryPart.Id).CFrame
+                    : GetWorldPivot(sink, model);
+            }
+
+            throw RbxError.BadArgument(
+                "GetPivot is not available on " + instance.ClassName,
+                "call GetPivot on a BasePart or Model");
+        }
+
+        private static RbxCFrame GetWorldPivot(IPartPropertySink sink, RbxModel model)
+        {
+            if (model.HasStoredWorldPivot)
+            {
+                return model.StoredWorldPivot;
+            }
+
+            bool foundPart = false;
+            RbxVector3 minimum = RbxVector3.Zero;
+            RbxVector3 maximum = RbxVector3.Zero;
+            foreach (RbxInstance descendant in model.GetDescendants())
+            {
+                if (!descendant.IsA("BasePart"))
+                {
+                    continue;
+                }
+
+                PartProperties properties = sink.GetPartPropertiesOrDefault(descendant.Id);
+                RbxVector3 halfSize = properties.Size.Abs() * 0.5f;
+                RbxVector3 extents = properties.CFrame.XVector.Abs() * halfSize.X
+                                     + properties.CFrame.YVector.Abs() * halfSize.Y
+                                     + properties.CFrame.ZVector.Abs() * halfSize.Z;
+                RbxVector3 partMinimum = properties.Position - extents;
+                RbxVector3 partMaximum = properties.Position + extents;
+                if (!foundPart)
+                {
+                    minimum = partMinimum;
+                    maximum = partMaximum;
+                    foundPart = true;
+                    continue;
+                }
+
+                minimum = minimum.Min(partMinimum);
+                maximum = maximum.Max(partMaximum);
+            }
+
+            return foundPart
+                ? RbxCFrame.FromPosition((minimum + maximum) * 0.5f)
+                : RbxCFrame.Identity;
+        }
+
+        private static void PivotTo(LuaCsRbxModContext context, RbxInstance instance,
+            RbxCFrame target)
+        {
+            IPartPropertySink sink = context.PartSink;
+            if (instance.IsA("BasePart"))
+            {
+                sink.SetCFrame(instance.Id, target);
+                context.RecordMutation(instance);
+                return;
+            }
+
+            if (!(instance is RbxModel model))
+            {
+                throw RbxError.BadArgument(
+                    "PivotTo is not available on " + instance.ClassName,
+                    "call PivotTo on a BasePart or Model");
+            }
+
+            RbxCFrame transform = target * GetPivot(sink, model).Inverse();
+            List<RbxInstance> parts = new();
+            List<RbxCFrame> partCFrames = new();
+            List<RbxModel> models = new() { model };
+            List<RbxCFrame> modelWorldPivots = new() { GetWorldPivot(sink, model) };
+            foreach (RbxInstance descendant in model.GetDescendants())
+            {
+                if (descendant.IsA("BasePart"))
+                {
+                    parts.Add(descendant);
+                    partCFrames.Add(sink.GetPartPropertiesOrDefault(descendant.Id).CFrame);
+                }
+
+                if (descendant is RbxModel descendantModel)
+                {
+                    models.Add(descendantModel);
+                    modelWorldPivots.Add(GetWorldPivot(sink, descendantModel));
+                }
+            }
+
+            for (int partIndex = 0; partIndex < parts.Count; partIndex++)
+            {
+                RbxInstance part = parts[partIndex];
+                sink.SetCFrame(part.Id, transform * partCFrames[partIndex]);
+                context.RecordMutation(part);
+            }
+
+            for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
+            {
+                RbxCFrame nextWorldPivot = transform * modelWorldPivots[modelIndex];
+                models[modelIndex].SetWorldPivot(in nextWorldPivot);
+            }
+        }
 
         /// <summary>Reads a wired BasePart property from the sink as a Roblox-space datatype.</summary>
         private static bool TryReadSpatial(LuaCsRbxModContext context, RbxInstance self, string key,

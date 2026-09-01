@@ -2146,9 +2146,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [TestCase(
-            "local model = Instance.new('Model'); local value = model.PrimaryPart",
-            "Model.PrimaryPart", "MVP2 (Model pivot)")]
-        [TestCase(
             "local value = workspace.Gravity",
             "Workspace.Gravity", "MVP8")]
         [TestCase(
@@ -2240,27 +2237,155 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_ModelPivotTo_LoudStubNamesMvp2ModelPivot()
+        public void Lua_ModelPivotTo_PreservesEveryDescendantPvInstanceOffset()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m", @"
+            stack.Runtime.LoadMod("m", @"
+                local function nearCFrame(a, b)
+                    local ac = { a:GetComponents() }
+                    local bc = { b:GetComponents() }
+                    for i = 1, 12 do
+                        if math.abs(ac[i] - bc[i]) >= 1e-4 then
+                            return false
+                        end
+                    end
+                    return true
+                end
+
                 local model = Instance.new('Model')
-                model:PivotTo(CFrame.new())");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("PVInstance:PivotTo", FullText(ex));
-            StringAssert.Contains("MVP2 (Model pivot)", FullText(ex));
+                model.Parent = workspace
+                local direct = Instance.new('Part')
+                direct.CFrame = CFrame.new(-4, 1, 3) * CFrame.Angles(0.1, 0.2, 0.3)
+                direct.Parent = model
+                local folder = Instance.new('Folder')
+                folder.Parent = model
+                local throughFolder = Instance.new('Part')
+                throughFolder.CFrame = CFrame.new(5, -2, 7) * CFrame.Angles(-0.2, 0.4, 0.1)
+                throughFolder.Parent = folder
+                local nested = Instance.new('Model')
+                nested.WorldPivot = CFrame.new(8, 3, -6) * CFrame.Angles(0.3, -0.1, 0.2)
+                nested.Parent = folder
+                local deep = Instance.new('Part')
+                deep.CFrame = CFrame.new(11, 4, -9) * CFrame.Angles(0.5, 0.25, -0.15)
+                deep.Parent = nested
+                model.WorldPivot = CFrame.new(1, 2, 3) * CFrame.Angles(0.2, -0.3, 0.4)
+
+                local oldPivot = model:GetPivot()
+                local directOffset = oldPivot:ToObjectSpace(direct.CFrame)
+                local folderOffset = oldPivot:ToObjectSpace(throughFolder.CFrame)
+                local deepOffset = oldPivot:ToObjectSpace(deep.CFrame)
+                local nestedOffset = oldPivot:ToObjectSpace(nested:GetPivot())
+                local target = CFrame.new(30, -7, 12) * CFrame.Angles(-0.4, 0.6, 0.25)
+                model:PivotTo(target)
+
+                assert(nearCFrame(model:GetPivot(), target), 'model pivot missed target')
+                assert(nearCFrame(target:ToObjectSpace(direct.CFrame), directOffset),
+                    'direct descendant offset changed')
+                assert(nearCFrame(target:ToObjectSpace(throughFolder.CFrame), folderOffset),
+                    'folder-nested descendant offset changed')
+                assert(nearCFrame(target:ToObjectSpace(deep.CFrame), deepOffset),
+                    'nested-model descendant offset changed')
+                assert(nearCFrame(target:ToObjectSpace(nested:GetPivot()), nestedOffset),
+                    'descendant Model pivot offset changed')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
         [Test]
-        public void Lua_ModelGetPivot_LoudStubNamesMvp2ModelPivot()
+        public void Lua_ModelGetPivot_UsesBoundingBoxWithoutPrimaryPart_AndPrimaryPartCFrameWhenSet()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m", @"
+            stack.Runtime.LoadMod("m", @"
                 local model = Instance.new('Model')
-                model:GetPivot()");
-            StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("PVInstance:GetPivot", FullText(ex));
-            StringAssert.Contains("MVP2 (Model pivot)", FullText(ex));
+                local left = Instance.new('Part')
+                left.Size = Vector3.new(2, 2, 2)
+                left.CFrame = CFrame.new(0, 0, 0)
+                left.Parent = model
+                local right = Instance.new('Part')
+                right.Size = Vector3.new(4, 2, 2)
+                right.CFrame = CFrame.new(10, 0, 0)
+                right.Parent = model
+
+                assert(model.PrimaryPart == nil)
+                assert(model:GetPivot().Position == Vector3.new(5.5, 0, 0),
+                    'fresh Model pivot must be its world-axis bounding-box center')
+                model.PrimaryPart = right
+                assert(model.PrimaryPart == right)
+                assert(model:GetPivot() == right.CFrame)
+                right.CFrame = CFrame.new(14, 3, -2) * CFrame.Angles(0.2, 0.4, 0.6)
+                assert(model:GetPivot() == right.CFrame,
+                    'PrimaryPart-driven pivot must follow the part')
+                model.PrimaryPart = nil
+                assert(model.PrimaryPart == nil)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_ModelPrimaryPart_NonDescendantSurvivesAssignmentThenClearsAtSimulationStep()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            stack.Runtime.LoadMod("create", @"
+                local model = Instance.new('Model')
+                model.Name = 'PivotModel'
+                model.Parent = workspace
+                local child = Instance.new('Part')
+                child.Name = 'Child'
+                child.Parent = model
+                local external = Instance.new('Part')
+                external.Name = 'ExternalPrimary'
+                external.Parent = workspace
+
+                assert(model.PrimaryPart == nil)
+                model.PrimaryPart = external
+                assert(model.PrimaryPart == external,
+                    'legacy assignment must remain visible until simulation')");
+            roblox.PumpPreSimulation(0.016f);
+            stack.Runtime.LoadMod("verify", @"
+                local model = workspace.PivotModel
+                assert(model.PrimaryPart == nil,
+                    'non-descendant PrimaryPart must clear at the next simulation step')
+                model.PrimaryPart = model.Child
+                assert(model.PrimaryPart == model.Child)
+                model.PrimaryPart = nil
+                assert(model.PrimaryPart == nil)");
+            Assert.IsTrue(stack.Runtime.IsLoaded("create"));
+            Assert.IsTrue(stack.Runtime.IsLoaded("verify"));
+        }
+
+        [Test]
+        public void Lua_ModelWorldPivot_RoundTripsAndStaysFixedWhenPartsMove()
+        {
+            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
+            stack.Runtime.LoadMod("m", @"
+                local function nearCFrame(a, b)
+                    local ac = { a:GetComponents() }
+                    local bc = { b:GetComponents() }
+                    for i = 1, 12 do
+                        if math.abs(ac[i] - bc[i]) >= 1e-4 then
+                            return false
+                        end
+                    end
+                    return true
+                end
+
+                local model = Instance.new('Model')
+                local part = Instance.new('Part')
+                part.CFrame = CFrame.new(2, 3, 4)
+                part.Parent = model
+                local pivot = CFrame.new(-8, 6, 12) * CFrame.Angles(0.3, -0.5, 0.7)
+                model.WorldPivot = pivot
+                assert(nearCFrame(model.WorldPivot, pivot))
+                assert(nearCFrame(model:GetPivot(), pivot))
+                local partBefore = part.CFrame
+                local replacement = CFrame.new(9, -4, 2) * CFrame.Angles(-0.2, 0.1, 0.8)
+                model.WorldPivot = replacement
+                assert(nearCFrame(model.WorldPivot, replacement))
+                assert(nearCFrame(model:GetPivot(), replacement))
+                assert(part.CFrame == partBefore, 'setting WorldPivot must not move descendants')
+                part.CFrame = CFrame.new(100, 200, 300)
+                assert(nearCFrame(model:GetPivot(), replacement),
+                    'explicit WorldPivot must stay fixed when descendants move')");
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
         [Test]

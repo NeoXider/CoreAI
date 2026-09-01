@@ -10,7 +10,7 @@ a negative twin so that "did nothing" cannot pass.
 
 | Field | Value |
 |---|---|
-| CPU / RAM / GPU | *filled in at Phase 3, then frozen* |
+| CPU / RAM / GPU | **NOT MEASURED** — the Phase 3 reference measurement machine has not been frozen |
 | OS / Unity | Windows 11, Unity 6000.3.14f1 |
 | Power profile | high performance, on AC |
 | Runs | (a) editor batchmode, (b) Standalone Mono player |
@@ -36,10 +36,10 @@ Thresholds apply to this machine. Other hardware is reported, never gated.
 
 | Field | Value |
 |---|---|
-| Model id | *frozen at Phase 3 from what LM Studio actually serves* |
-| Context cap / output cap | frozen with the model |
-| Backend concurrency | frozen; recorded in the result |
-| Deterministic backend | a scripted stub for queue/latency separation, **plus** one real provider-backed run |
+| Model id | **NOT MEASURED** — the real provider-backed run has not happened |
+| Context cap / output cap | **NOT MEASURED** — no provider/model caps have been recorded |
+| Backend concurrency | **NOT MEASURED** — no provider concurrency has been recorded |
+| Deterministic backend | a scripted stub for queue/latency separation, **plus** one real provider-backed run; real-provider configuration is **NOT MEASURED** |
 
 ## 3b. Production-path rule (added after the phase-1 QA)
 
@@ -57,14 +57,14 @@ A run reporting zero for any of these **fails**, regardless of its timings:
 - thread resumes
 - events delivered to subscribers
 - chat responses actually produced by the provider (not stubbed) in the provider-backed run
-- discovered tests: expected count fixed at Phase 3; **skips = 0**
+- discovered tests: expected count **NOT MEASURED** — the discovery run has not happened; **skips = 0**
 
 ## 5. Gates — every one with a negative twin
 
 | # | Positive | Negative (must be refused/absent) |
 |---|---|---|
 | G1 authorization, mods | actor A manages its own mod | A→B `unload`/`reload`/`revert`/`forget` refused, naming actor + reason |
-| G2 authorization, world | A mutates its own instance | A→B mutate/destroy refused |
+| G2 authorization, world | in an ACL-versioned world, A mutates its own instance | in an ACL-versioned world, A→B mutate/destroy refused |
 | G3 host-protected | mod writes `workspace.CurrentCamera` (samples rely on it) | A cannot destroy or reparent host-owned singletons |
 | G4 chat privacy | A reads A's history | A cannot read, clear or observe B's history or rate state |
 | G5 quotas | at quota `N` the actor succeeds | at `N+1` refused with actor + reason; **a build with quotas absent fails G5** |
@@ -74,7 +74,35 @@ A run reporting zero for any of these **fails**, regardless of its timings:
 | G9 engine-free ports | ports resolve | asmdef test: the engine-free assembly references no Unity assembly, transitively |
 | G10 chat throughput | ≥95% of offered load served, p95 ≤ 5 s | 0 cross-actor cancellations; no actor starved > 60 s |
 | G11 WebGL | §6.5 checklist in a real browser run | a static checklist alone does not satisfy G11 |
-| G12 corpus | fixed fixture ids (listed at Phase 10), ≥30% unmodified; measured 2026-09-01: **15/20 = 75%** (2 modified, 3 failing) | — |
+| G12 corpus | exact frozen fixture ids listed below, ≥30% unmodified; catalog measured 2026-09-01: **17/20 = 85%** (0 modified, 3 failing) | — |
+
+**G2 scope.** G2's cross-actor refusal security claim applies only to worlds with an explicit ACL
+version. Legacy worlds whose ACL version is missing or `null` remain in compatibility mode: they do
+**not** receive cross-actor mutation/destruction refusal and are **not covered by the G2 security
+claim**. The strict ACL-versioned-world positive/negative test remains mandatory.
+
+**G12 frozen fixture ids:**
+
+- `TAC-001-instance-parent-last`
+- `TAC-002-part-properties`
+- `TAC-003-attributes-change-signal`
+- `TAC-004-signal-connect-disconnect`
+- `TAC-005-signal-once`
+- `TAC-006-signal-wait`
+- `TAC-007-task-scheduling`
+- `TAC-008-runservice-heartbeat-loop`
+- `TAC-009-userinput-began`
+- `TAC-010-vector3-math`
+- `TAC-011-cframe-math`
+- `TAC-012-color3-math`
+- `TAC-013-getservice-identity`
+- `TAC-014-destroy-pcall-cleanup`
+- `TAC-015-script-parent-property-signal`
+- `TAC-016-generic-for-descendants`
+- `TAC-017-waitforchild-yield`
+- `TAC-018-contextaction-bind`
+- `TAC-019-tween-create`
+- `TAC-020-players-localplayer`
 
 ## 6. Frame budget — derived, with the arithmetic shown
 
@@ -95,7 +123,7 @@ the guarded rate first, then publishes the budget and its arithmetic.
 |---|---|
 | Warm-up | 30 s, fixed |
 | Managed heap slope | ≤ 1 MB/min after warm-up |
-| Absolute RSS ceiling | fixed at Phase 3 from the 20-actor baseline, then frozen |
+| Absolute RSS ceiling | **NOT MEASURED** — the 20-actor baseline run has not happened |
 | Per-state byte metering | **see the open risk in the plan — not available on Lua-CSharp 0.5.6** |
 
 

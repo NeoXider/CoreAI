@@ -1,6 +1,8 @@
 #ifndef COREAI_RBX_PROCEDURAL_COMMON_INCLUDED
 #define COREAI_RBX_PROCEDURAL_COMMON_INCLUDED
 
+#include "RbxNoiseShader.hlsl"
+
 struct RbxSurfaceSample
 {
     half3 albedo;
@@ -8,6 +10,7 @@ struct RbxSurfaceSample
     half smoothness;
     half occlusion;
     float height;
+    float3 heightGradient;
 };
 
 float RbxHash31(float3 value)
@@ -130,24 +133,67 @@ void RbxCobblestonePattern(float2 uv, float seed, out float stoneMask, out float
     stoneTone = 0.68 + RbxHash31(float3(cell, 59.0 + seed)) * 0.38;
 }
 
-float RbxGrassBladeLayer(float2 uv, float density, float seed)
+float3 RbxGrassBladeLayer(float2 uv, float density, float seed)
 {
     float2 gridPosition = uv * density;
     float2 cell = floor(gridPosition);
     float2 localPosition = frac(gridPosition) - 0.5;
     float2 jitter = float2(RbxHash31(float3(cell, seed)),
         RbxHash31(float3(cell, seed + 17.0))) - 0.5;
-    localPosition -= jitter * 0.5;
-    float angle = (RbxHash31(float3(cell, seed + 31.0)) - 0.5) * 1.7;
+    localPosition -= jitter * 0.38;
+    float angle = (RbxHash31(float3(cell, seed + 31.0)) - 0.5) * 1.3;
     float sine = sin(angle);
     float cosine = cos(angle);
     float2 bladePosition = float2(localPosition.x * cosine - localPosition.y * sine,
         localPosition.x * sine + localPosition.y * cosine);
-    float halfWidth = 0.035 + RbxHash31(float3(cell, seed + 43.0)) * 0.035;
-    float halfLength = 0.2 + RbxHash31(float3(cell, seed + 59.0)) * 0.18;
-    float blade = 1.0 - smoothstep(halfWidth, halfWidth + 0.035, abs(bladePosition.x));
-    blade *= 1.0 - smoothstep(halfLength, halfLength + 0.07, abs(bladePosition.y));
-    return blade;
+    float halfLength = 0.34 + RbxHash31(float3(cell, seed + 43.0)) * 0.12;
+    float bladeProgress = saturate((bladePosition.y + halfLength) / (2.0 * halfLength));
+    float lengthMask = smoothstep(0.0, 0.08, bladeProgress)
+        * (1.0 - smoothstep(0.84, 1.0, bladeProgress));
+    float profile = sqrt(max(1.0 - abs(bladeProgress * 2.0 - 1.0), 0.0));
+    float baseWidth = 0.055 + RbxHash31(float3(cell, seed + 59.0)) * 0.032;
+    float lean = (RbxHash31(float3(cell, seed + 71.0)) - 0.5) * 0.24;
+    float center = lean * (bladeProgress * bladeProgress - 0.18);
+    float halfWidth = baseWidth * profile;
+    float crossBlade = abs(bladePosition.x - center);
+    float blade = (1.0 - smoothstep(halfWidth, halfWidth + 0.018, crossBlade)) * lengthMask;
+    float ridge = (1.0 - smoothstep(0.006, 0.018, crossBlade)) * blade
+        * smoothstep(0.12, 0.72, bladeProgress);
+    float tone = RbxHash31(float3(cell, seed + 89.0));
+    return float3(blade, ridge, tone);
+}
+
+void RbxGroundPattern(float2 uv, out float cracks, out float pebble,
+    out float plateTone, out float pebbleTone)
+{
+    float2 crackedUv = uv * 1.18;
+    crackedUv.x += sin(crackedUv.y * 1.73 + sin(crackedUv.y * 0.47)) * 0.13;
+    crackedUv.y += sin(crackedUv.x * 1.31 + sin(crackedUv.x * 0.59)) * 0.11;
+    float2 plateCell = floor(crackedUv);
+    float2 platePosition = frac(crackedUv);
+    float edgeDistance = RbxCellEdge(platePosition);
+    cracks = 1.0 - smoothstep(0.022, 0.072, edgeDistance);
+
+    float2 centeredPlate = platePosition - 0.5;
+    float fractureDirection = RbxHash31(float3(plateCell, 113.0)) < 0.5 ? -1.0 : 1.0;
+    float fractureDistance = abs(centeredPlate.x + centeredPlate.y * fractureDirection);
+    float fractureLength = 1.0 - smoothstep(0.24, 0.46, abs(centeredPlate.y));
+    float fracture = (1.0 - smoothstep(0.012, 0.04, fractureDistance)) * fractureLength;
+    fracture *= step(0.78, RbxHash31(float3(plateCell, 127.0)));
+    cracks = max(cracks, fracture);
+    plateTone = RbxHash31(float3(plateCell, 139.0));
+
+    float2 pebbleGrid = uv * 4.1;
+    float2 pebbleCell = floor(pebbleGrid);
+    float2 pebblePosition = frac(pebbleGrid) - 0.5;
+    float2 pebbleJitter = float2(RbxHash31(float3(pebbleCell, 151.0)),
+        RbxHash31(float3(pebbleCell, 163.0))) - 0.5;
+    pebblePosition -= pebbleJitter * 0.48;
+    float pebbleRadius = 0.075 + RbxHash31(float3(pebbleCell, 179.0)) * 0.075;
+    pebble = 1.0 - smoothstep(pebbleRadius, pebbleRadius + 0.035,
+        length(pebblePosition));
+    pebble *= step(0.58, RbxHash31(float3(pebbleCell, 191.0)));
+    pebbleTone = RbxHash31(float3(pebbleCell, 211.0));
 }
 
 half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partColorInfluence)
@@ -170,6 +216,7 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     sample.smoothness = 0.4h;
     sample.occlusion = 1.0h;
     sample.height = 0.0;
+    sample.heightGradient = float3(0.0, 0.0, 0.0);
 
     if (materialMode == 0)
     {
@@ -262,15 +309,26 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 7)
     {
-        float veinSignal = abs(sin(position.x * 2.5 + position.z * 0.8 + broadNoise * 7.0));
-        float vein = pow(saturate(1.0 - veinSignal), 5.0);
-        float fineVein = pow(saturate(1.0 - abs(sin(position.y * 4.0 + detailNoise * 5.0))), 10.0);
-        float combinedVein = saturate(vein + fineVein * 0.45);
-        sample.albedo = lerp(baseColor * (0.9h + broadNoise * 0.18h), baseColor * 0.18h,
-            combinedVein);
-        sample.smoothness = 0.68h - combinedVein * 0.16h;
+        float4 marbleField = RbxSimplexFbmGrad(position * 0.42 + float3(13.0, 29.0, 47.0));
+        float ribbonCoordinate = dot(position, float3(0.78, 0.18, 0.42))
+            + (marbleField.w - 0.5) * 2.7;
+        float ribbonWave = abs(sin(ribbonCoordinate * 2.15));
+        float veinHalo = 1.0 - smoothstep(0.12, 0.48, ribbonWave);
+        float mainVein = 1.0 - smoothstep(0.035, 0.2, ribbonWave);
+        float branchCoordinate = dot(position, float3(-0.24, 0.62, 0.51))
+            + marbleField.w * 1.35;
+        float branchWave = abs(sin(branchCoordinate * 1.45 + 1.2));
+        float branchVein = (1.0 - smoothstep(0.055, 0.24, branchWave))
+            * smoothstep(0.52, 0.78, marbleField.w);
+        float combinedVein = saturate(mainVein + branchVein * 0.42);
+        half3 stoneColor = baseColor * (0.93h + marbleField.w * 0.12h);
+        half3 haloColor = lerp(stoneColor, baseColor * 0.69h, (half)veinHalo * 0.58h);
+        half3 veinColor = lerp(baseColor * 0.42h, half3(0.31h, 0.29h, 0.27h), 0.28h);
+        sample.albedo = lerp(haloColor, veinColor, combinedVein);
+        sample.smoothness = 0.72h - combinedVein * 0.11h;
         sample.occlusion = 0.97h;
-        sample.height = broadNoise * 0.12 - combinedVein * 0.16;
+        sample.height = -combinedVein * 0.075 - veinHalo * 0.018;
+        sample.heightGradient = marbleField.xyz * (0.42 * 0.035);
     }
     else if (materialMode == 8)
     {
@@ -349,20 +407,25 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 12)
     {
-        float2 warp = float2(RbxValueNoise(position * 0.63),
-            RbxValueNoise(position * 0.63 + float3(17.0, 31.0, 7.0))) - 0.5;
-        float2 grassUv = uv + warp * 0.18;
-        float bladeA = RbxGrassBladeLayer(grassUv, 5.7, 5.0);
+        float4 grassField = RbxSimplexFbmGrad(position * 0.48 + float3(5.0, 17.0, 31.0));
+        float2 grassUv = uv + float2(grassField.w - 0.5,
+            0.5 - grassField.w) * 0.08;
+        float3 bladeA = RbxGrassBladeLayer(grassUv, 3.2, 5.0);
         float2 rotatedUv = float2(grassUv.x * 0.819 - grassUv.y * 0.574,
             grassUv.x * 0.574 + grassUv.y * 0.819);
-        float bladeB = RbxGrassBladeLayer(rotatedUv + float2(4.3, 7.1), 7.9, 71.0);
-        float clumps = saturate(broadNoise * 0.7 + detailNoise * 0.3);
-        float blades = saturate(bladeA + bladeB * 0.78);
-        float grassTone = saturate(clumps * 0.54 + blades * 0.72);
-        sample.albedo = baseColor * lerp(0.5h, 1.2h, grassTone);
-        sample.smoothness = 0.16h + blades * 0.08h;
-        sample.occlusion = 0.76h + grassTone * 0.22h;
-        sample.height = blades * 0.68 + clumps * 0.2;
+        float3 bladeB = RbxGrassBladeLayer(rotatedUv + float2(4.3, 7.1), 4.7, 71.0);
+        float bladeMask = saturate(max(bladeA.x, bladeB.x * 0.92));
+        float bladeRidge = saturate(max(bladeA.y, bladeB.y * 0.86));
+        float bladeTone = max(bladeA.z * bladeA.x, bladeB.z * bladeB.x);
+        float clumps = saturate(grassField.w * 0.78 + broadNoise * 0.22);
+        half3 thatchColor = baseColor * (0.27h + clumps * 0.12h);
+        half3 bladeColor = baseColor * (0.74h + clumps * 0.36h + bladeTone * 0.28h);
+        sample.albedo = lerp(thatchColor, bladeColor, bladeMask);
+        sample.albedo = lerp(sample.albedo, baseColor * 1.48h, bladeRidge * 0.46);
+        sample.smoothness = 0.11h + bladeMask * 0.1h;
+        sample.occlusion = lerp(0.57h, 0.98h, bladeMask);
+        sample.height = bladeMask * (0.52 + bladeTone * 0.24) + bladeRidge * 0.16;
+        sample.heightGradient = grassField.xyz * (0.48 * 0.055);
     }
     else if (materialMode == 13)
     {
@@ -375,12 +438,25 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     }
     else if (materialMode == 14)
     {
-        float clods = smoothstep(0.34, 0.76, broadNoise);
-        float grit = RbxValueNoise(position * 6.0);
-        sample.albedo = baseColor * lerp(0.42h, 1.02h, clods) * (0.82h + grit * 0.18h);
-        sample.smoothness = 0.12h + (1.0h - clods) * 0.07h;
-        sample.occlusion = 0.68h + clods * 0.3h;
-        sample.height = clods * 0.62 + grit * 0.22;
+        float4 earthField = RbxSimplexFbmGrad(position * 0.5 + float3(37.0, 11.0, 23.0));
+        float cracks;
+        float pebble;
+        float plateTone;
+        float pebbleTone;
+        RbxGroundPattern(uv, cracks, pebble, plateTone, pebbleTone);
+        half3 earthColor = baseColor
+            * (0.72h + earthField.w * 0.16h + plateTone * 0.16h);
+        half3 crackColor = baseColor * 0.22h;
+        half3 stoneColor = lerp(baseColor * 1.17h, half3(0.28h, 0.25h, 0.2h), 0.34h)
+            * (0.86h + pebbleTone * 0.25h);
+        sample.albedo = lerp(earthColor, crackColor, cracks);
+        sample.albedo = lerp(sample.albedo, stoneColor, pebble);
+        sample.smoothness = lerp(0.13h, 0.055h, cracks);
+        sample.smoothness = lerp(sample.smoothness, 0.2h, pebble);
+        sample.occlusion = lerp(0.93h, 0.48h, cracks);
+        sample.occlusion = lerp(sample.occlusion, 0.98h, pebble);
+        sample.height = 0.1 - cracks * 0.4 + pebble * (0.62 + pebbleTone * 0.18);
+        sample.heightGradient = earthField.xyz * (0.5 * 0.075);
     }
     else if (materialMode == 15)
     {
@@ -424,10 +500,20 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
     return sample;
 }
 
-float3 RbxPerturbNormal(float3 patternPosition, float3 patternNormal, float3 normalWS,
-    bool objectAlignedProjection, int materialMode, float patternScale, float bumpStrength,
-    half3 baseColor, float centerHeight)
+float3 RbxPerturbNormal(float3 positionWS, float3 normalWS, float3 heightGradient,
+    bool objectAlignedProjection, float patternScale, float bumpStrength, float centerHeight)
 {
+    float3 positionDerivativeX = ddx(positionWS);
+    float3 positionDerivativeY = ddy(positionWS);
+    float heightDerivativeX = ddx(centerHeight);
+    float heightDerivativeY = ddy(centerHeight);
+    float3 reciprocalX = cross(positionDerivativeY, normalWS);
+    float3 reciprocalY = cross(normalWS, positionDerivativeX);
+    float determinant = dot(positionDerivativeX, reciprocalX);
+    float inverseDeterminant = sign(determinant) / max(abs(determinant), 0.00001);
+    float3 screenGradient = (heightDerivativeX * reciprocalX + heightDerivativeY * reciprocalY)
+        * inverseDeterminant;
+
     float3 referenceAxis = abs(normalWS.y) < 0.92 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
     float3 tangentWS = normalize(cross(referenceAxis, normalWS));
     float3 bitangentWS = normalize(cross(normalWS, tangentWS));
@@ -441,14 +527,11 @@ float3 RbxPerturbNormal(float3 patternPosition, float3 patternNormal, float3 nor
         bitangentPattern = mul(worldToObject, bitangentWS) * objectScale;
     }
 
-    float epsilon = 0.025 / max(patternScale, 0.25);
-    float tangentHeight = RbxEvaluateSurface(patternPosition + tangentPattern * epsilon,
-        patternNormal, materialMode, patternScale, baseColor).height;
-    float bitangentHeight = RbxEvaluateSurface(patternPosition + bitangentPattern * epsilon,
-        patternNormal, materialMode, patternScale, baseColor).height;
-    float tangentSlope = (tangentHeight - centerHeight) * bumpStrength / epsilon;
-    float bitangentSlope = (bitangentHeight - centerHeight) * bumpStrength / epsilon;
-    return normalize(normalWS - tangentWS * tangentSlope - bitangentWS * bitangentSlope);
+    float3 scaledGradient = heightGradient * patternScale;
+    float tangentSlope = dot(scaledGradient, tangentPattern);
+    float bitangentSlope = dot(scaledGradient, bitangentPattern);
+    float3 analyticalGradient = tangentWS * tangentSlope + bitangentWS * bitangentSlope;
+    return normalize(normalWS - (screenGradient + analyticalGradient) * bumpStrength);
 }
 
 #endif

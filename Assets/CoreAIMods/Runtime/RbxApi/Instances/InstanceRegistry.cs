@@ -320,6 +320,18 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
+        /// <summary>Applies Model state cleanup whose documented boundary is the next simulation step.</summary>
+        public void ProcessPreSimulation()
+        {
+            foreach (InstanceRecord record in _byId.Values)
+            {
+                if (record.Instance is RbxModel model)
+                {
+                    model.ResetInvalidPrimaryPart();
+                }
+            }
+        }
+
         private static void EnsureReplayMatches(MutationEnvelope envelope,
             MutationOperationRecord completed)
         {

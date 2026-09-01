@@ -827,6 +827,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void PumpPreSimulation(float dt)
         {
+            _registry.ProcessPreSimulation();
             if (_runService == null || _runService.IsDestroyed)
             {
                 return;

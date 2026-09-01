@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -845,62 +847,276 @@ namespace CoreAI.Tests.EditMode
                 "Routing must touch exactly the subscribed mod entry, not every loaded mod.");
         }
 
+        private static void AssertNoSynchronizationBeforeBoundary(MethodInfo root, MethodInfo boundary)
+        {
+            HashSet<MethodBase> visited = new();
+            bool reachedBoundary = InspectCallsBeforeBoundary(root, root, boundary, visited);
+            Assert.IsTrue(reachedBoundary,
+                $"Emit entry '{root.Name}' must reach the per-subscriber '{boundary.Name}' boundary.");
+        }
+
+        private static bool InspectCallsBeforeBoundary(
+            MethodInfo root,
+            MethodInfo method,
+            MethodInfo boundary,
+            HashSet<MethodBase> visited)
+        {
+            if (!visited.Add(method))
+            {
+                return false;
+            }
+
+            List<MethodBase> calls = ReadCalledMethods(method);
+            foreach (MethodBase call in calls)
+            {
+                if (call.Module == boundary.Module && call.MetadataToken == boundary.MetadataToken)
+                {
+                    return true;
+                }
+
+                Assert.IsFalse(IsSynchronizationAcquisition(call),
+                    $"Emit entry '{root.Name}' acquires synchronization through " +
+                    $"'{call.DeclaringType?.FullName}.{call.Name}' before '{boundary.Name}'.");
+
+                MethodInfo runtimeCall = call as MethodInfo;
+                if (runtimeCall != null && runtimeCall.DeclaringType == typeof(LuaCsModRuntime) &&
+                    InspectCallsBeforeBoundary(root, runtimeCall, boundary, visited))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void AssertNoSynchronizationOutsideBoundary(MethodInfo root, MethodInfo boundary)
+        {
+            HashSet<MethodBase> visited = new();
+            bool reachedBoundary = false;
+            InspectCallsOutsideBoundary(root, root, boundary, visited, ref reachedBoundary);
+            Assert.IsTrue(reachedBoundary,
+                $"Emit route '{root.Name}' must reach the per-subscriber '{boundary.Name}' boundary.");
+        }
+
+        private static void InspectCallsOutsideBoundary(
+            MethodInfo root,
+            MethodInfo method,
+            MethodInfo boundary,
+            HashSet<MethodBase> visited,
+            ref bool reachedBoundary)
+        {
+            if (!visited.Add(method))
+            {
+                return;
+            }
+
+            List<MethodBase> calls = ReadCalledMethods(method);
+            foreach (MethodBase call in calls)
+            {
+                if (call.Module == boundary.Module && call.MetadataToken == boundary.MetadataToken)
+                {
+                    reachedBoundary = true;
+                    continue;
+                }
+
+                Assert.IsFalse(IsSynchronizationAcquisition(call),
+                    $"Emit route '{root.Name}' acquires synchronization through " +
+                    $"'{call.DeclaringType?.FullName}.{call.Name}' outside '{boundary.Name}'.");
+
+                MethodInfo runtimeCall = call as MethodInfo;
+                if (runtimeCall != null && runtimeCall.DeclaringType == typeof(LuaCsModRuntime))
+                {
+                    InspectCallsOutsideBoundary(
+                        root, runtimeCall, boundary, visited, ref reachedBoundary);
+                }
+            }
+        }
+
+        private static bool IsSynchronizationAcquisition(MethodBase method)
+        {
+            Type declaringType = method.DeclaringType;
+            if (declaringType == null)
+            {
+                return false;
+            }
+
+            if (declaringType == typeof(Monitor))
+            {
+                return method.Name == "Enter" || method.Name == "TryEnter";
+            }
+
+            if (!string.Equals(declaringType.Namespace, "System.Threading", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return method.Name.StartsWith("Enter", StringComparison.Ordinal) ||
+                   method.Name.StartsWith("TryEnter", StringComparison.Ordinal) ||
+                   method.Name.StartsWith("Wait", StringComparison.Ordinal) ||
+                   method.Name.StartsWith("Acquire", StringComparison.Ordinal);
+        }
+
+        private static List<MethodBase> ReadCalledMethods(MethodInfo method)
+        {
+            MethodBody body = method.GetMethodBody();
+            Assert.IsNotNull(body, $"Method '{method.Name}' must expose a compiled body.");
+            byte[] il = body.GetILAsByteArray();
+            Assert.IsNotNull(il, $"Method '{method.Name}' must expose compiled IL.");
+
+            Dictionary<ushort, OpCode> opCodes = new();
+            FieldInfo[] opCodeFields = typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static);
+            foreach (FieldInfo opCodeField in opCodeFields)
+            {
+                OpCode opCode = (OpCode)opCodeField.GetValue(null);
+                opCodes[unchecked((ushort)opCode.Value)] = opCode;
+            }
+
+            List<MethodBase> calls = new();
+            int offset = 0;
+            while (offset < il.Length)
+            {
+                ushort value = il[offset++];
+                if (value == 0xfe)
+                {
+                    value = (ushort)(0xfe00 | il[offset++]);
+                }
+
+                Assert.IsTrue(opCodes.TryGetValue(value, out OpCode opCode),
+                    $"Unknown IL opcode 0x{value:x4} in '{method.Name}'.");
+                switch (opCode.OperandType)
+                {
+                    case OperandType.InlineNone:
+                        break;
+                    case OperandType.ShortInlineBrTarget:
+                    case OperandType.ShortInlineI:
+                    case OperandType.ShortInlineVar:
+                        offset += 1;
+                        break;
+                    case OperandType.InlineVar:
+                        offset += 2;
+                        break;
+                    case OperandType.InlineBrTarget:
+                    case OperandType.InlineField:
+                    case OperandType.InlineI:
+                    case OperandType.InlineSig:
+                    case OperandType.InlineString:
+                    case OperandType.InlineTok:
+                    case OperandType.ShortInlineR:
+                        offset += 4;
+                        break;
+                    case OperandType.InlineMethod:
+                        int metadataToken = BitConverter.ToInt32(il, offset);
+                        offset += 4;
+                        if (opCode.Value == OpCodes.Call.Value ||
+                            opCode.Value == OpCodes.Callvirt.Value ||
+                            opCode.Value == OpCodes.Newobj.Value)
+                        {
+                            MethodBase calledMethod = method.Module.ResolveMethod(
+                                metadataToken,
+                                method.DeclaringType?.GetGenericArguments(),
+                                method.GetGenericArguments());
+                            calls.Add(calledMethod);
+                        }
+
+                        break;
+                    case OperandType.InlineI8:
+                    case OperandType.InlineR:
+                        offset += 8;
+                        break;
+                    case OperandType.InlineSwitch:
+                        int caseCount = BitConverter.ToInt32(il, offset);
+                        offset += 4 + (caseCount * 4);
+                        break;
+                    default:
+                        Assert.Fail($"Unsupported IL operand '{opCode.OperandType}' in '{method.Name}'.");
+                        break;
+                }
+            }
+
+            return calls;
+        }
+
         [Test]
-        public void LuaCs_EmitEvent_DoesNotWaitForAnyProcessWideRuntimeLock()
+        public void LuaCs_EmitEvent_HasNoSynchronizationBeforePerSubscriberEnqueue()
+        {
+            MethodInfo hostEmit = typeof(LuaCsModRuntime).GetMethod(
+                "EmitEvent",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(string), typeof(string) },
+                null);
+            MethodInfo modEmit = typeof(LuaCsModRuntime).GetMethod(
+                "EmitFromMod", BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo routeEvent = typeof(LuaCsModRuntime).GetMethod(
+                "RouteEvent", BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo enqueue = typeof(LuaCsModRuntime).GetMethod(
+                "Enqueue", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(hostEmit);
+            Assert.IsNotNull(modEmit);
+            Assert.IsNotNull(routeEvent);
+            Assert.IsNotNull(enqueue);
+
+            AssertNoSynchronizationBeforeBoundary(hostEmit, routeEvent);
+            AssertNoSynchronizationBeforeBoundary(modEmit, routeEvent);
+            AssertNoSynchronizationOutsideBoundary(routeEvent, enqueue);
+        }
+
+        [Test]
+        public void LuaCs_EmitEvent_PerSubscriberQueueLockIsTheAllowedSynchronizationBoundary()
         {
             LuaCsModStack stack = BuildStack();
             stack.Runtime.LoadMod("subscriber", "hooks_on('target', function() end)");
-            FieldInfo[] gateFields = typeof(LuaCsModRuntime)
-                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
-                .Where(field => field.FieldType == typeof(object))
-                .ToArray();
-            Assert.Greater(gateFields.Length, 0);
+            FieldInfo snapshotField = typeof(LuaCsModRuntime).GetField(
+                "_subscriptionSnapshot", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(snapshotField);
+            IDictionary subscriptions = (IDictionary)snapshotField.GetValue(stack.Runtime);
+            Array subscribers = (Array)subscriptions["target"];
+            Assert.AreEqual(1, subscribers.Length);
+            object subscriber = subscribers.GetValue(0);
+            FieldInfo eventGateField = subscriber.GetType().GetField(
+                "EventGate", BindingFlags.Instance | BindingFlags.Public);
+            Assert.IsNotNull(eventGateField);
+            object eventGate = eventGateField.GetValue(subscriber);
 
-            foreach (FieldInfo gateField in gateFields)
+            ManualResetEventSlim started = new(false);
+            ManualResetEventSlim completed = new(false);
+            Exception emitError = null;
+            Thread emitThread = new(() =>
             {
-                object processWideGate = gateField.GetValue(stack.Runtime);
-                Assert.IsNotNull(processWideGate);
-                ManualResetEventSlim started = new(false);
-                ManualResetEventSlim completed = new(false);
-                Exception emitError = null;
-                Thread emitThread = new(() =>
+                started.Set();
+                try
                 {
-                    started.Set();
-                    try
-                    {
-                        stack.Runtime.EmitEvent("target", "");
-                    }
-                    catch (Exception ex)
-                    {
-                        emitError = ex;
-                    }
-                    finally
-                    {
-                        completed.Set();
-                    }
-                });
-                emitThread.IsBackground = true;
-
-                bool startedInTime;
-                bool completedWhileGateHeld;
-                lock (processWideGate)
-                {
-                    emitThread.Start();
-                    startedInTime = started.Wait(1000);
-                    completedWhileGateHeld = completed.Wait(1000);
+                    stack.Runtime.EmitEvent("target", "");
                 }
+                catch (Exception ex)
+                {
+                    emitError = ex;
+                }
+                finally
+                {
+                    completed.Set();
+                }
+            });
+            emitThread.IsBackground = true;
 
-                bool stoppedInTime = emitThread.Join(5000);
-                started.Dispose();
-                completed.Dispose();
-
-                Assert.IsTrue(startedInTime,
-                    $"The emit worker must start while runtime lock '{gateField.Name}' is held.");
-                Assert.IsTrue(completedWhileGateHeld,
-                    $"EmitEvent must complete while runtime lock '{gateField.Name}' is held elsewhere.");
-                Assert.IsTrue(stoppedInTime, "The emit worker must stop after the structural assertion.");
-                Assert.IsNull(emitError);
+            bool startedInTime;
+            bool completedWhileQueueHeld;
+            lock (eventGate)
+            {
+                emitThread.Start();
+                startedInTime = started.Wait(1000);
+                completedWhileQueueHeld = completed.Wait(250);
             }
+
+            bool stoppedInTime = emitThread.Join(5000);
+            started.Dispose();
+            completed.Dispose();
+
+            Assert.IsTrue(startedInTime, "The emit worker must reach the subscriber queue contention check.");
+            Assert.IsFalse(completedWhileQueueHeld,
+                "EmitEvent may wait on the target subscriber's queue lock at the enqueue boundary.");
+            Assert.IsTrue(stoppedInTime, "The emit worker must complete after the subscriber queue lock is released.");
+            Assert.IsNull(emitError);
         }
 
         [Test]

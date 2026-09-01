@@ -105,6 +105,13 @@ buttons live at 1000+).
   access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises PARENT_LOCKED
   — drop the reference and make a new one.
 
+### Model pivots
+
+`model.PrimaryPart` is a BasePart or nil; `model.WorldPivot` is a writable CFrame.
+`model:GetPivot()` uses the PrimaryPart CFrame when set, otherwise WorldPivot (initially the
+contents' bounding-box center). `model:PivotTo(cf)` rigidly moves every descendant PVInstance.
+Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`.
+
 ## 5. Part properties (a Part / any BasePart)
 
 Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector3/CFrame),
@@ -183,8 +190,7 @@ the current world, so report it instead of retrying the spawn.
 
 ## 10. Not implemented (raise NOT_IMPLEMENTED — do not use)
 
-- `WaitForChild(name)` when the child is absent, `Model:PivotTo/GetPivot`,
-  `Instance.fromExisting` (use `Clone`).
+- `WaitForChild(name)` when the child is absent, `Instance.fromExisting` (use `Clone`).
 - Part `Material`, `Orientation`, `Rotation` properties (Shape DOES work now — see section 5).
 - Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
   `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and

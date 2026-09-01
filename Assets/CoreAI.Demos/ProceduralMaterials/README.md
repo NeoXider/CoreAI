@@ -26,6 +26,9 @@ runs along a row or plank: local X on top/front faces and local Z on side faces.
 local Z on top. The three planar samples use normalized moderate-sharpness weights, so rounded transitions
 do not introduce an unnormalized brightness or height band.
 
-Metal uses projection-independent 3D variation. Grass uses jittered, rotated blade populations, and
-Cobblestone uses randomized rounded stones separated by recessed joints. These identities and their scale
-and bump tuning remain entirely in the runtime shader/provider; the showcase adds no material behavior.
+Metal uses projection-independent 3D variation. Grass uses two jittered, rotated populations of tapered
+blades with visible midribs over dark thatch. Ground uses warped cracked plates and isolated raised
+pebbles, while Marble uses broad warped ribbons and soft halos instead of scratch-like fine lines.
+Cobblestone continues to use randomized rounded stones separated by recessed joints. Analytical simplex
+derivatives supply organic relief without offset height resampling. These identities and their scale and
+bump tuning remain entirely in the runtime shader/provider; the showcase adds no material behavior.
