@@ -30,6 +30,7 @@ namespace CoreAI.Ai.LuaCs
     public sealed class LuaCsRbxApiBindings : IDisposable
     {
         private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
+        internal const double RemoteFunctionInvokeTimeoutSeconds = 30d;
 
         private sealed class ExecutingScriptBacking
         {
@@ -1592,6 +1593,8 @@ namespace CoreAI.Ai.LuaCs
 
                 long generation = luaThread.AdvanceRemoteFunctionWaitGeneration();
                 _remoteFunctionWaitGenerations[caller] = generation;
+                string actorId = context.ActorContext.ActorId;
+                string remoteFullName = remote.GetFullName();
 
                 RbxScriptSignal responseSignal = new(
                     "RemoteFunction.Response[" + remote.Id.Value + "]");
@@ -1642,7 +1645,27 @@ namespace CoreAI.Ai.LuaCs
                         remote.InvokeClient(_networkBridge, player, payload, receiveResponse);
                     }
 
-                    _scheduler.ScheduleSignalWait(caller);
+                    _scheduler.ScheduleSignalWait(
+                        caller,
+                        RemoteFunctionInvokeTimeoutSeconds,
+                        () =>
+                        {
+                            if (_remoteFunctionWaitGenerations.TryGetValue(
+                                    caller, out long activeGeneration)
+                                && activeGeneration == generation)
+                            {
+                                _remoteFunctionWaitGenerations.Remove(caller);
+                            }
+
+                            responseConnection.Disconnect();
+                            RbxNetworkResponse timeoutResponse = RbxNetworkResponse.Failure(
+                                "RemoteFunction invoke refused actor '" + actorId
+                                + "' for remote '" + remoteFullName
+                                + "': response timed out after 30 seconds");
+                            LuaTable timeoutValues = BuildRemoteFunctionResumeValues(
+                                context, timeoutResponse);
+                            return new object[] { new LuaValue(timeoutValues) };
+                        });
                 }
                 catch
                 {

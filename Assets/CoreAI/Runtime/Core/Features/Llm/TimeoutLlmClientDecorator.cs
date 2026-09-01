@@ -25,28 +25,134 @@ namespace CoreAI.Infrastructure.Llm
     /// a genuine caller cancellation always propagates unchanged.
     /// <para>
     /// This lives in <c>CoreAI.Core</c> so headless hosts, tests and non-Unity consumers get a request
-    /// timeout too — previously it was only enforced by the Unity <c>CoreAiChatService</c>. On WebGL the
-    /// single-threaded player still relies on the Unity PlayerLoop-based <c>CancelAfterSlim</c> timer in
-    /// <c>CoreAiChatService</c> (a managed <see cref="CancellationTokenSource"/> timer is unreliable
-    /// there); the two target the same <see cref="ICoreAISettings.LlmRequestTimeoutSeconds"/> and are
-    /// additive — whichever fires first cancels the shared linked token.
+    /// timeout too. Deadline scheduling is delegated to <see cref="ILlmAsyncMarshaler.DelayAsync"/>;
+    /// Unity supplies a PlayerLoop-driven delay so this decorator itself remains effective in WebGL,
+    /// while portable hosts retain the default managed task delay.
     /// </para>
     /// </summary>
     public sealed class TimeoutLlmClientDecorator : ILlmClient
     {
         private readonly ILlmClient _inner;
         private readonly Func<float> _timeoutSecondsProvider;
+        private readonly ILlmAsyncMarshaler _asyncMarshaler;
+
+        private sealed class HostScheduledCancellationDeadline : IDisposable
+        {
+            private readonly object _gate = new();
+            private readonly ILlmAsyncMarshaler _asyncMarshaler;
+            private readonly CancellationTokenSource _target;
+            private CancellationTokenSource _delayCts;
+            private long _generation;
+            private bool _disposed;
+
+            public HostScheduledCancellationDeadline(
+                ILlmAsyncMarshaler asyncMarshaler,
+                CancellationTokenSource target)
+            {
+                _asyncMarshaler = asyncMarshaler;
+                _target = target;
+            }
+
+            public void Reset(float timeoutSeconds)
+            {
+                double totalMilliseconds = timeoutSeconds * 1000d;
+                int milliseconds = totalMilliseconds >= int.MaxValue
+                    ? int.MaxValue
+                    : Math.Max(1, (int)Math.Ceiling(totalMilliseconds));
+                CancellationTokenSource next = new();
+                CancellationTokenSource previous;
+                long generation;
+                lock (_gate)
+                {
+                    if (_disposed)
+                    {
+                        next.Dispose();
+                        return;
+                    }
+
+                    previous = _delayCts;
+                    _delayCts = next;
+                    generation = ++_generation;
+                }
+
+                previous?.Cancel();
+                previous?.Dispose();
+                _ = CancelWhenElapsedAsync(milliseconds, generation, next.Token);
+            }
+
+            private async Task CancelWhenElapsedAsync(
+                int milliseconds,
+                long generation,
+                CancellationToken cancellationToken)
+            {
+                try
+                {
+                    await _asyncMarshaler.DelayAsync(milliseconds, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception)
+                {
+                }
+
+                lock (_gate)
+                {
+                    if (_disposed || generation != _generation)
+                    {
+                        return;
+                    }
+                }
+
+                try
+                {
+                    _target.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (AggregateException)
+                {
+                }
+            }
+
+            public void Dispose()
+            {
+                CancellationTokenSource delayCts;
+                lock (_gate)
+                {
+                    if (_disposed)
+                    {
+                        return;
+                    }
+
+                    _disposed = true;
+                    _generation++;
+                    delayCts = _delayCts;
+                    _delayCts = null;
+                }
+
+                delayCts?.Cancel();
+                delayCts?.Dispose();
+            }
+        }
 
         /// <param name="inner">The client whose calls are time-bounded.</param>
         /// <param name="timeoutSecondsProvider">
         /// Returns the request timeout in seconds, read fresh per call. A value &lt;= 0 disables the
         /// timeout (the call delegates straight through).
         /// </param>
-        public TimeoutLlmClientDecorator(ILlmClient inner, Func<float> timeoutSecondsProvider)
+        /// <param name="asyncMarshaler">Host delay scheduler; Unity supplies its PlayerLoop implementation.</param>
+        public TimeoutLlmClientDecorator(
+            ILlmClient inner,
+            Func<float> timeoutSecondsProvider,
+            ILlmAsyncMarshaler asyncMarshaler = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _timeoutSecondsProvider =
                 timeoutSecondsProvider ?? throw new ArgumentNullException(nameof(timeoutSecondsProvider));
+            _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
         }
 
         /// <inheritdoc />
@@ -89,7 +195,9 @@ namespace CoreAI.Infrastructure.Llm
 
             using CancellationTokenSource timeoutCts =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            using HostScheduledCancellationDeadline deadline =
+                new(_asyncMarshaler, timeoutCts);
+            deadline.Reset(timeoutSeconds);
 
             try
             {
@@ -141,7 +249,9 @@ namespace CoreAI.Infrastructure.Llm
 
             using CancellationTokenSource timeoutCts =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            using HostScheduledCancellationDeadline deadline =
+                new(_asyncMarshaler, timeoutCts);
+            deadline.Reset(timeoutSeconds);
 
             IAsyncEnumerator<LlmStreamChunk> enumerator =
                 _inner.CompleteStreamingAsync(request, timeoutCts.Token).GetAsyncEnumerator(timeoutCts.Token);
@@ -186,7 +296,7 @@ namespace CoreAI.Infrastructure.Llm
                     // WHY: idle budget, not a whole-turn one — a streamed call wraps the entire multi-step
                     // tool-calling turn, so every chunk is progress and re-arms the deadline. Only a real
                     // stall (no chunk for the full window) fires. Mirrors CoreAiChatService's idle timer.
-                    timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                    deadline.Reset(timeoutSeconds);
 
                     // WHY: A terminal Cancelled chunk may be the inner client's translation of this
                     // decorator's linked-token timeout, so preserve the chunk and correct only its code.

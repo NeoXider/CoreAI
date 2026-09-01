@@ -91,16 +91,10 @@ namespace CoreAI.Tests.EditMode
             [("Assets/CoreAI/Runtime/Core/ILlmAsyncMarshaler.cs", Primitive.TaskDelay)] =
                 "здесь Task.Delay — это и есть переносимая реализация хука DelayAsync по умолчанию; " +
                 "хост с кадровым циклом её переопределяет",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/TimeoutLlmClientDecorator.cs", Primitive.CancelAfter)] =
-                "унаследовано: таймаут LLM-запроса целиком; перевод на host-scheduled задержку — отдельная задача",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/HttpClientOpenAiTransport.cs", Primitive.CancelAfter)] =
                 "унаследовано: не-WebGL транспорт (в браузере работает FetchSseOpenAiTransport)",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs", Primitive.TaskDelay)] =
                 "унаследовано: таймаут чтения потока и пауза между ретраями, на WebGL не проверялись",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/RetryingStreamingLlmClientDecorator.cs", Primitive.TaskDelay)] =
-                "унаследовано: backoff между попытками стрима, на WebGL не проверялся",
-            [("Assets/CoreAI/Runtime/Core/Features/Llm/LoggingLlmClientDecorator.cs", Primitive.TaskDelay)] =
-                "унаследовано: backoff ретраев; WebGL-ветка там есть, но задержка в ней та же таймерная",
             [("Assets/CoreAI/Runtime/Core/Features/Llm/WaitLlmTool.cs", Primitive.TaskDelay)] =
                 "унаследовано: инструмент «подожди», смысл которого и есть задержка",
             [("Assets/CoreAI/Runtime/Core/Features/Orchestration/QueuedAiOrchestrator.cs", Primitive.PoolContinuations)] =

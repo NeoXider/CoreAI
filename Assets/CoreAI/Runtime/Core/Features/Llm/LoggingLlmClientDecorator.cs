@@ -32,6 +32,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly int _maxHttpRetryAttempts;
         private readonly bool _logPromptContent;
         private readonly bool _logResponseContent;
+        private readonly ILlmAsyncMarshaler _asyncMarshaler;
 
         /// <param name="requestTimeoutSeconds">The request timeout seconds value.</param>
         /// <param name="maxHttpRetryAttempts">The max http retry attempts value.</param>
@@ -44,9 +45,11 @@ namespace CoreAI.Infrastructure.Llm
         /// When false, the model response preview is suppressed from logs (metadata still logged).
         /// Mirrors <c>IOpenAiHttpSettings.LogLlmOutput</c>.
         /// </param>
+        /// <param name="asyncMarshaler">Host delay scheduler used by retry backoff.</param>
         public LoggingLlmClientDecorator(ILlmClient inner, ILog logger,
             float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0,
-            bool logPromptContent = true, bool logResponseContent = true)
+            bool logPromptContent = true, bool logResponseContent = true,
+            ILlmAsyncMarshaler asyncMarshaler = null)
         {
             _inner = inner;
             _logger = logger ?? NullLog.Instance;
@@ -54,6 +57,7 @@ namespace CoreAI.Infrastructure.Llm
             _maxHttpRetryAttempts = maxHttpRetryAttempts < 0 ? 0 : maxHttpRetryAttempts;
             _logPromptContent = logPromptContent;
             _logResponseContent = logResponseContent;
+            _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
             _backendLabel = inner?.GetType().Name ?? "?";
         }
 
@@ -172,8 +176,8 @@ namespace CoreAI.Infrastructure.Llm
                     _logger.Warn(
                         $"LLM ~ traceId={trace} role={role} | {httpEx.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s",
                         LogTag.Llm);
+                    await _asyncMarshaler.DelayAsync(waitSec * 1000, cancellationToken);
 #if UNITY_WEBGL && !UNITY_EDITOR
-                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
                     try
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken);
@@ -181,7 +185,6 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 #else
-                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
                     try
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
@@ -236,8 +239,8 @@ namespace CoreAI.Infrastructure.Llm
                     _logger.Warn(
                         $"LLM ~ traceId={trace} role={role} | {result.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)",
                         LogTag.Llm);
+                    await _asyncMarshaler.DelayAsync(waitSec * 1000, cancellationToken);
 #if UNITY_WEBGL && !UNITY_EDITOR
-                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
                     try
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken);
@@ -272,7 +275,6 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 #else
-                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
                     try
                     {
                         result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);

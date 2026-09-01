@@ -38,6 +38,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_Deadline_UsesInjectedHostDelay()
+        {
+            SlowClient inner = new() { DelayMs = 2000 };
+            RecordingDelayMarshaler marshaler = new();
+            TimeoutLlmClientDecorator sut = new(inner, () => 60f, marshaler);
+
+            bool timedOut = false;
+            try
+            {
+                await sut.CompleteAsync(Req());
+            }
+            catch (LlmOperationTimeoutException)
+            {
+                timedOut = true;
+            }
+
+            Assert.IsTrue(timedOut);
+            Assert.AreEqual(1, marshaler.DelayCallCount);
+            Assert.AreEqual(60000, marshaler.LastDelayMilliseconds);
+        }
+
+        [Test]
         public async Task CompleteAsync_CallerCancellation_PropagatesAsOperationCanceled_NotTimeout()
         {
             SlowClient inner = new() { DelayMs = 2000 };
@@ -157,6 +179,25 @@ namespace CoreAI.Tests.EditMode
             }
 
             return chunks;
+        }
+
+        private sealed class RecordingDelayMarshaler : ILlmAsyncMarshaler
+        {
+            public int DelayCallCount;
+            public int LastDelayMilliseconds;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                DelayCallCount++;
+                LastDelayMilliseconds = milliseconds;
+                return Task.CompletedTask;
+            }
         }
 
         private sealed class SlowClient : ILlmClient

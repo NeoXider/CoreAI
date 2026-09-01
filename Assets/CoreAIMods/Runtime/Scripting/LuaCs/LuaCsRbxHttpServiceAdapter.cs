@@ -373,7 +373,7 @@ namespace CoreAI.Ai.LuaCs
                         throw new InvalidOperationException("the host resolver returned no task");
                     }
 
-                    addresses = await resolveTask.ConfigureAwait(false);
+                    addresses = await resolveTask;
                 }
 
                 if (addresses == null || addresses.Count == 0)
@@ -399,7 +399,7 @@ namespace CoreAI.Ai.LuaCs
                     throw new InvalidOperationException("the host transport returned no task");
                 }
 
-                RbxHttpResponse response = await sendTask.ConfigureAwait(false);
+                RbxHttpResponse response = await sendTask;
                 if (response == null)
                 {
                     throw new InvalidOperationException("the host transport returned no response");

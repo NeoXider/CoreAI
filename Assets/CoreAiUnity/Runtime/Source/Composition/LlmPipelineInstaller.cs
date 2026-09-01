@@ -30,6 +30,7 @@ namespace CoreAI.Composition
             LlmRoutingManifest routingManifest)
         {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
+            ILlmAsyncMarshaler asyncMarshaler = UnityMainThreadLlmAsyncMarshaler.Instance;
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
@@ -92,11 +93,12 @@ namespace CoreAI.Composition
                     llmTimeout,
                     maxRetries,
                     settings == null || settings.LogLlmInput,
-                    settings == null || settings.LogLlmOutput), Lifetime.Singleton);
+                    settings == null || settings.LogLlmOutput,
+                    asyncMarshaler), Lifetime.Singleton);
 #else
             builder.Register<ILlmClient>(c =>
-                // WHY: Portable-core request timeout (works headless/standalone; Unity CoreAiChatService keeps
-                // its PlayerLoop timer for WebGL — both target LlmRequestTimeoutSeconds and are additive).
+                // WHY: Unity injects its PlayerLoop delay into every retry/timeout decorator so the
+                // portable pipeline remains live on WebGL without System.Threading timers.
                 new TimeoutLlmClientDecorator(
                     new LoggingLlmClientDecorator(
                         // WHY: Streaming-path retry (pre-commit only) — the logging decorator's HTTP retry covers
@@ -110,13 +112,16 @@ namespace CoreAI.Composition
                                 c.Resolve<IPublisher<LlmUsageReported>>()),
                             maxRetries,
                             attempt => TimeSpan.FromSeconds(Math.Min(1 << attempt, 8)),
-                            msg => c.Resolve<ILog>().Warn(msg, LogTag.Llm)),
+                            msg => c.Resolve<ILog>().Warn(msg, LogTag.Llm),
+                            asyncMarshaler),
                         c.Resolve<ILog>(),
                         llmTimeout,
                         maxRetries,
                         settings == null || settings.LogLlmInput,
-                        settings == null || settings.LogLlmOutput),
-                    () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f), Lifetime.Singleton);
+                        settings == null || settings.LogLlmOutput,
+                        asyncMarshaler),
+                    () => settings != null ? settings.LlmRequestTimeoutSeconds : 0f,
+                    asyncMarshaler), Lifetime.Singleton);
 #endif
 
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;

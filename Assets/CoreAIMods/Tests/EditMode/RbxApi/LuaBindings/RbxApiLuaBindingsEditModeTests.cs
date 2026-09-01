@@ -151,6 +151,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             public int RequestSubscriberCount => _requestReceived?.GetInvocationList().Length ?? 0;
 
+            public bool DropRequests { get; set; }
+
+            public Action<RbxNetworkResponse> LastResponse { get; private set; }
+
             public event Action<RbxNetworkEventMessage> EventReceived
             {
                 add => _eventReceived += value;
@@ -184,6 +188,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             public void SendRequest(RbxNetworkRequestMessage message,
                 Action<RbxNetworkResponse> response)
             {
+                LastResponse = response;
+                if (DropRequests)
+                {
+                    return;
+                }
+
                 Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> receiver =
                     _requestReceived;
                 if (receiver != null)
@@ -1032,6 +1042,47 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual(0, waitsBeforeUnload,
                 "A terminal missing-callback response must release its caller wait generation.");
             Assert.AreEqual(0, harness.Bindings.CountRemoteFunctionWaitsOwnedBy(modId));
+        }
+
+        [Test]
+        public void Lua_NetworkProductionPath_RemoteFunctionDroppedRequestTimesOutAndIgnoresLateResponse()
+        {
+            const string modId = "network-dropped-request";
+            const string actorId = "dropped-request-actor";
+            TrackingNetworkBridge bridge = new() { DropRequests = true };
+            LuaCsRbxApiBindings bindings = new(networkBridge: bridge);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext actorContext = Actor(actorId);
+
+            stack.Runtime.LoadMod(actorContext, modId, @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'DroppedRequestRemote'
+                remote.Parent = workspace
+                local ok, failure = pcall(function()
+                    return remote:InvokeServer()
+                end)
+                store_set('ok', tostring(ok))
+                store_set('failure', tostring(failure))", persistToStore: false);
+
+            Assert.AreEqual("", store.Get(modId, "ok"));
+            Assert.AreEqual(1, bindings.CountRemoteFunctionWaitsOwnedBy(modId));
+
+            bindings.Scheduler.Advance(
+                LuaCsRbxApiBindings.RemoteFunctionInvokeTimeoutSeconds);
+
+            Assert.AreEqual("false", store.Get(modId, "ok"));
+            StringAssert.Contains(actorId, store.Get(modId, "failure"));
+            StringAssert.Contains("DroppedRequestRemote", store.Get(modId, "failure"));
+            StringAssert.Contains("timed out after 30 seconds", store.Get(modId, "failure"));
+            Assert.AreEqual(0, bindings.CountRemoteFunctionWaitsOwnedBy(modId));
+            Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount);
+
+            bridge.LastResponse(RbxNetworkResponse.Failure("late response"));
+
+            Assert.AreEqual("false", store.Get(modId, "ok"));
+            StringAssert.DoesNotContain("late response", store.Get(modId, "failure"));
+            Assert.AreEqual(0, bindings.CountRemoteFunctionWaitsOwnedBy(modId));
         }
 
         [Test]

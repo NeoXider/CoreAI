@@ -134,6 +134,57 @@ a **versioned manifest file in the repository**, and the release is judged again
 - **Memory**: warm-up duration, RSS ceiling and managed-heap slope, all fixed in advance.
 - **WebGL**: an actual browser run, not a static checklist.
 
+### 6.5 G11 WebGL browser-run verdict
+
+G11 is decided from an actual served `artifacts/G11-WebGL` player built by
+`CoreAI.Editor.CoreAIG11WebGlBuild.Build`, not from Editor Play Mode, source inspection, screenshots of
+the build settings, or this protocol by itself. The run record identifies the browser and version, OS,
+served URL/origin, build log, start/end time, configured provider endpoint and request timeout, and
+preserves the browser console plus Network trace. A pass requires every transition below to be observed
+in that browser run; any named failure makes the verdict fail.
+
+**Player boot and continued frames.** The loading shell must reach the `FullAccessDemo` canvas, the hub
+and chat controls must accept pointer and keyboard input, and an animated or time-varying element must
+continue changing for at least ten seconds. A loader that never finishes, a browser-unresponsive prompt,
+an uncaught exception, a frozen canvas, or controls that stop accepting input is a failure.
+
+**Lua scheduling and world mutation.** In the Full Access hub's Lua Platform page, `Run self-test` must
+change from its progress state to a visible `PASS` containing `SELFTEST_DONE`, a non-zero check count,
+and `fails=0`. Starting Tetris immediately afterwards must create the Lua-authored world and show pieces
+continuing to fall and respond to input. `LOAD FAILED`, any `FAIL` line, no verdict within ten seconds,
+or a player freeze while a Lua coroutine yields/resumes is a failure. This is the browser observation
+for logical coroutine scheduling and runtime world mutation; an EditMode result is not a substitute.
+
+**Real-provider chat under latency.** With a server-managed endpoint and no provider key embedded in the
+player, send a prompt whose expected answer contains a unique run nonce. The Network trace must show a
+real provider/proxy request and the assistant bubble must contain that nonce. While the request is
+pending -- including a 17-38 second response -- repeatedly interact with another hub control and observe
+continued animation or status changes. The canvas freezing during the wait, an answer without a real
+network request, CORS/HTTP-zero failure on the intended happy path, or no terminal answer/error by the
+configured outer request timeout plus five seconds is a failure.
+
+**Retry, terminal failure, and recovery.** Configure the test proxy to return one retryable `503` before
+success; the same chat turn must retry and eventually show the nonce while the player remains responsive.
+Then make the proxy keep returning `503` (or deterministically block the request): the turn must reach a
+visible terminal error/timeout and re-enable send controls by the configured outer timeout plus five
+seconds. Restore the proxy and send a new nonce without reloading; it must succeed. An indefinite busy
+state, a `Task.Delay` retry that never resumes, controls that remain disabled, or recovery that requires
+a page reload is a failure.
+
+**WebGL persistence.** On the hub World page, use `Save Now` and observe `Has saved state: Yes`; after the
+browser has had time to complete the asynchronous IDBFS flush, reload the same URL on the same origin and
+observe `Has saved state: Yes` again. Use `Reset World`, observe `No`, reload again, and observe `No`.
+Reappearance or loss of state contrary to those transitions, an IDBFS `syncfs` warning/error, quota or
+permission failure, or any synchronous file-I/O exception is a failure. The run is invalid if performed
+in private browsing or with storage disabled because it would not exercise durable browser storage.
+
+Expected fail-closed behavior is recorded rather than hidden: the MCP loopback server is unavailable in
+a WebGL player, local-model StreamingAssets are excluded, and outbound mod HTTP has no production
+allowlisted transport in this build. If outbound mod HTTP is probed, it must return the configured
+deny/refuse error promptly and leave the player responsive; an allowed network result or a suspended Lua
+caller is a failure. Unexpected console exceptions, dead waits, or filesystem errors anywhere in the run
+also fail G11 even if the visible happy-path assertions completed.
+
 ## 7. Targets
 
 **Mandatory — 20 actors.** All manifest gates pass. This is the release gate.

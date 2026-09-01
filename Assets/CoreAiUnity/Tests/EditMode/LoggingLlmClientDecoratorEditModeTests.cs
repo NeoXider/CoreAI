@@ -87,6 +87,25 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class RecordingDelayMarshaler : ILlmAsyncMarshaler
+        {
+            public int DelayCallCount;
+            public int LastDelayMilliseconds;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                DelayCallCount++;
+                LastDelayMilliseconds = milliseconds;
+                return Task.CompletedTask;
+            }
+        }
+
         private sealed class BackendUnavailableThenOkMock : ILlmClient
         {
             public int CompleteCallCount;
@@ -262,6 +281,25 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("LLM ~", joined);
             StringAssert.Contains("failed completion", joined);
+        }
+
+        [Test]
+        public async Task FailedCompletion_RetryBackoff_UsesInjectedHostDelay()
+        {
+            RateLimitThenOkMock inner = new();
+            RecordingDelayMarshaler marshaler = new();
+            LoggingLlmClientDecorator sut = new(
+                inner, new SpyLogger(), 0f, 1, true, true, marshaler);
+
+            LlmCompletionResult result = await sut.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                UserPayload = "x"
+            });
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(1, marshaler.DelayCallCount);
+            Assert.AreEqual(1000, marshaler.LastDelayMilliseconds);
         }
 
         [Test]

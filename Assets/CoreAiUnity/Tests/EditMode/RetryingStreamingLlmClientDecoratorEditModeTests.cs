@@ -35,6 +35,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task PreCommitRetryBackoff_UsesInjectedHostDelay()
+        {
+            StubStreamingClient inner = new();
+            inner.NextStreams.Enqueue(new[] { ErrChunk(LlmErrorCode.BackendUnavailable) });
+            inner.NextStreams.Enqueue(new[] { Text("hello"), Done() });
+            RecordingDelayMarshaler marshaler = new();
+            RetryingStreamingLlmClientDecorator sut = new(
+                inner, 1, _ => TimeSpan.FromSeconds(2), null, marshaler);
+
+            List<LlmStreamChunk> chunks = await Drain(sut.CompleteStreamingAsync(Req()));
+
+            Assert.AreEqual("hello", Concat(chunks));
+            Assert.AreEqual(1, marshaler.DelayCallCount);
+            Assert.AreEqual(2000, marshaler.LastDelayMilliseconds);
+        }
+
+        [Test]
         public async Task PreCommitRetry_KeepsOneHeaderSnapshotAndLaterInvocationResamples()
         {
             SnapshotAwareStreamingClient inner = new();
@@ -213,6 +230,25 @@ namespace CoreAI.Tests.EditMode
             }
 
             return chunks;
+        }
+
+        private sealed class RecordingDelayMarshaler : ILlmAsyncMarshaler
+        {
+            public int DelayCallCount;
+            public int LastDelayMilliseconds;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                return factory();
+            }
+
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                DelayCallCount++;
+                LastDelayMilliseconds = milliseconds;
+                return Task.CompletedTask;
+            }
         }
 
         private sealed class StubStreamingClient : ILlmClient

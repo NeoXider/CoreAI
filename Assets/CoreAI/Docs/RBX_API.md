@@ -99,6 +99,22 @@ Four mods ship inside the Mods package at
 
 The three playable ones ship `active: false`; the player turns them on from the **Hub → Mods** tab.
 
+## RemoteFunction timeout compatibility deviation
+
+Roblox documents `RemoteFunction` invocation as yielding until the recipient responds, and explicitly
+warns that an `InvokeClient` recipient which never returns can leave the sender yielded forever. CoreAI
+intentionally bounds both `InvokeServer` and `InvokeClient` to **30 scheduler seconds**. A missing or
+stalled receiver raises an error in this form:
+
+```text
+RemoteFunction invoke refused actor '<actor-id>' for remote '<full-name>': response timed out after 30 seconds
+```
+
+This is an explicit compatibility deviation for runtime liveness, especially in a single-threaded WebGL
+player where an unbounded loopback request would otherwise leave the Lua caller permanently suspended.
+Late responses are ignored. Use `RemoteEvent` when no response is required, and wrap a fallible invocation
+in `pcall` when the mod can recover.
+
 ## Platform support
 
 The whole surface runs under **IL2CPP**, including WebGL at managed stripping level **Medium** —

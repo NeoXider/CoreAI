@@ -1410,7 +1410,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (!cancellationToken.CanBeCanceled)
             {
-                return await activation.ConfigureAwait(false);
+                return await activation;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -1418,13 +1418,13 @@ namespace CoreAI.Infrastructure.Llm
                 TaskCreationOptions.RunContinuationsAsynchronously);
             using CancellationTokenRegistration registration =
                 cancellationToken.Register(() => cancelled.TrySetResult(true));
-            Task completed = await Task.WhenAny(activation, cancelled.Task).ConfigureAwait(false);
+            Task completed = await Task.WhenAny(activation, cancelled.Task);
             if (completed == cancelled.Task)
             {
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            LlmEndpointSnapshot snapshot = await activation.ConfigureAwait(false);
+            LlmEndpointSnapshot snapshot = await activation;
             cancellationToken.ThrowIfCancellationRequested();
             return snapshot;
         }

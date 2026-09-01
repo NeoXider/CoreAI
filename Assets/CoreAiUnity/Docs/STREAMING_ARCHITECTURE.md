@@ -295,13 +295,15 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 
 ### Timeout enforcement
 
-> **Rule:** Timeout responsibility lives exclusively in the **Unity layer** (`CoreAiChatService`), not in the portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`).
+> **Rule:** The Unity UI and portable pipeline both enforce the configured request timeout. Every Unity-side deadline must be PlayerLoop-driven so it remains live in WebGL.
 
-Before v1.5.1, `AiOrchestrator` and `LoggingLlmClientDecorator` both used `CancellationTokenSource.CancelAfter()` to enforce request timeouts. This relies on `System.Threading.Timer`, which is **non-functional in WebGL** (Emscripten single-threaded model, no native timer callbacks), causing indefinite hangs.
+`CancellationTokenSource.CancelAfter()` and finite `Task.Delay` rely on managed timer support that is **non-functional in WebGL**, causing indefinite hangs.
 
-In v1.5.1:
-- `AiOrchestrator` and `LoggingLlmClientDecorator` **pass `cancellationToken` through** without wrapping it in timeout-linked sources.
-- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` with **`CancelAfterSlim(TimeSpan)`** from `Cysharp.Threading.Tasks` (UniTask), which uses Unity's `PlayerLoop` — fully WebGL-compatible.
+The active arrangement is:
+- `AiOrchestrator` **passes `cancellationToken` through** without adding a timer.
+- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` with **`CancelAfterSlim(TimeSpan)`** from `Cysharp.Threading.Tasks` (UniTask).
+- `TimeoutLlmClientDecorator` provides the portable pipeline bound; `LlmPipelineInstaller` injects `UnityMainThreadLlmAsyncMarshaler`, whose `DelayAsync` is also UniTask PlayerLoop-driven.
+- `LoggingLlmClientDecorator` and `RetryingStreamingLlmClientDecorator` use that same injected delay for retry backoff.
 - The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (default: 300s).
 
 ```csharp

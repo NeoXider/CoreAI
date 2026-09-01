@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using CoreAI.Editor;
 using NUnit.Framework;
+using UnityEditor;
+using UnityEditor.Build;
 using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode
@@ -119,6 +121,78 @@ namespace CoreAI.Tests.EditMode
                     backupAbsolutePath = Path.Combine(_backupRoot, "LLMUnity")
                 }
             };
+        }
+    }
+
+    /// <summary>
+    /// EditMode coverage for the deterministic G11 WebGL build request and its guarded output cleanup.
+    /// </summary>
+    [TestFixture]
+    public sealed class CoreAIG11WebGlBuildEditModeTests
+    {
+        private string _projectRoot;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _projectRoot = Path.Combine(
+                Path.GetTempPath(), "CoreAiG11WebGlBuildTests_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_projectRoot);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (Directory.Exists(_projectRoot))
+            {
+                Directory.Delete(_projectRoot, true);
+            }
+        }
+
+        [Test]
+        public void FrozenScenes_HaveTheRequiredOrderAndCannotBeMutatedByCaller()
+        {
+            string[] expected =
+            {
+                "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
+                "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
+                "Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity"
+            };
+            string[] firstRead = CoreAIG11WebGlBuild.GetFrozenScenePaths();
+
+            CollectionAssert.AreEqual(expected, firstRead);
+            firstRead[0] = "mutated";
+            CollectionAssert.AreEqual(expected, CoreAIG11WebGlBuild.GetFrozenScenePaths());
+        }
+
+        [Test]
+        public void BuildOptions_AreExplicitReleaseWebGlSettings()
+        {
+            string outputPath = CoreAIG11WebGlBuild.GetOutputPath(_projectRoot);
+            BuildPlayerOptions options = CoreAIG11WebGlBuild.CreateBuildPlayerOptions(outputPath);
+
+            Assert.AreEqual(outputPath, options.locationPathName);
+            Assert.AreEqual(BuildTarget.WebGL, options.target);
+            Assert.AreEqual(BuildTargetGroup.WebGL, options.targetGroup);
+            Assert.AreEqual(BuildOptions.CleanBuildCache | BuildOptions.StrictMode, options.options);
+            CollectionAssert.AreEqual(CoreAIG11WebGlBuild.GetFrozenScenePaths(), options.scenes);
+        }
+
+        [Test]
+        public void PrepareOutputDirectory_RemovesStaleFilesAndRejectsOtherPaths()
+        {
+            string outputPath = CoreAIG11WebGlBuild.GetOutputPath(_projectRoot);
+            Directory.CreateDirectory(outputPath);
+            string stalePath = Path.Combine(outputPath, "stale.txt");
+            File.WriteAllText(stalePath, "stale");
+
+            CoreAIG11WebGlBuild.PrepareOutputDirectory(_projectRoot, outputPath);
+
+            DirectoryAssert.Exists(outputPath);
+            FileAssert.DoesNotExist(stalePath);
+            Assert.Throws<BuildFailedException>(() => CoreAIG11WebGlBuild.PrepareOutputDirectory(
+                _projectRoot,
+                Path.Combine(_projectRoot, "outside")));
         }
     }
 }

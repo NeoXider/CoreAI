@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using CoreAI.Composition;
@@ -547,6 +549,112 @@ namespace CoreAI.Editor
             scope.SetLuaWorldModuleForMigration(module);
             EditorUtility.SetDirty(module);
             return module;
+        }
+    }
+
+    /// <summary>
+    /// Repeatable batch-mode entry point for the G11 WebGL browser-gate player.
+    /// </summary>
+    public static class CoreAIG11WebGlBuild
+    {
+        internal const string RelativeOutputPath = "artifacts/G11-WebGL";
+
+        private static readonly string[] FrozenScenePaths =
+        {
+            "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
+            "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
+            "Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity"
+        };
+
+        /// <summary>
+        /// Builds the frozen G11 scene set into <c>artifacts/G11-WebGL</c> without prompts.
+        /// Launch Unity with <c>-buildTarget WebGL</c> because batch mode cannot switch targets while
+        /// an execute method is running.
+        /// </summary>
+        public static void Build()
+        {
+            if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.WebGL)
+            {
+                throw new BuildFailedException(
+                    "G11 WebGL build requires an active WebGL target. Relaunch Unity with '-buildTarget WebGL'.");
+            }
+
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string outputPath = GetOutputPath(projectRoot);
+            ValidateScenes(projectRoot);
+            PrepareOutputDirectory(projectRoot, outputPath);
+
+            BuildPlayerOptions options = CreateBuildPlayerOptions(outputPath);
+            CoreAIEditorLog.Log(
+                $"G11 WebGL build started: {FrozenScenePaths.Length} scenes -> {outputPath}");
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != BuildResult.Succeeded)
+            {
+                throw new BuildFailedException(
+                    $"G11 WebGL build failed with result '{report.summary.result}', " +
+                    $"{report.summary.totalErrors} error(s), and {report.summary.totalWarnings} warning(s).");
+            }
+
+            CoreAIEditorLog.Log(
+                $"G11 WebGL build succeeded: {report.summary.totalSize} bytes in {report.summary.totalTime}.");
+        }
+
+        /// <summary>Returns an isolated copy of the frozen G11 scene list.</summary>
+        internal static string[] GetFrozenScenePaths()
+        {
+            return (string[])FrozenScenePaths.Clone();
+        }
+
+        /// <summary>Creates the fully explicit player-build request used by the entry point.</summary>
+        internal static BuildPlayerOptions CreateBuildPlayerOptions(string outputPath)
+        {
+            return new BuildPlayerOptions
+            {
+                scenes = GetFrozenScenePaths(),
+                locationPathName = outputPath,
+                target = BuildTarget.WebGL,
+                targetGroup = BuildTargetGroup.WebGL,
+                options = BuildOptions.CleanBuildCache | BuildOptions.StrictMode
+            };
+        }
+
+        /// <summary>Returns the fixed G11 output directory for a project root.</summary>
+        internal static string GetOutputPath(string projectRoot)
+        {
+            return Path.GetFullPath(Path.Combine(projectRoot, RelativeOutputPath));
+        }
+
+        /// <summary>Removes stale G11 output and recreates the exact fixed directory.</summary>
+        internal static void PrepareOutputDirectory(string projectRoot, string outputPath)
+        {
+            string expectedOutputPath = GetOutputPath(projectRoot);
+            StringComparison comparison = Path.DirectorySeparatorChar == '\\'
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (!string.Equals(Path.GetFullPath(outputPath), expectedOutputPath, comparison))
+            {
+                throw new BuildFailedException(
+                    $"Refusing to clean unexpected G11 output path '{outputPath}'. Expected '{expectedOutputPath}'.");
+            }
+
+            if (Directory.Exists(expectedOutputPath))
+            {
+                Directory.Delete(expectedOutputPath, true);
+            }
+
+            Directory.CreateDirectory(expectedOutputPath);
+        }
+
+        private static void ValidateScenes(string projectRoot)
+        {
+            foreach (string scenePath in FrozenScenePaths)
+            {
+                string absoluteScenePath = Path.GetFullPath(Path.Combine(projectRoot, scenePath));
+                if (!File.Exists(absoluteScenePath))
+                {
+                    throw new BuildFailedException($"G11 WebGL scene is missing: '{scenePath}'.");
+                }
+            }
         }
     }
 }

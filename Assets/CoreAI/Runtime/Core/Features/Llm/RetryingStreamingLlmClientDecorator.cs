@@ -29,6 +29,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly int _maxRetryAttempts;
         private readonly Func<int, TimeSpan> _retryDelay;
         private readonly Action<string> _log;
+        private readonly ILlmAsyncMarshaler _asyncMarshaler;
 
         /// <param name="inner">The streaming client to protect.</param>
         /// <param name="maxRetryAttempts">
@@ -39,16 +40,19 @@ namespace CoreAI.Infrastructure.Llm
         /// (used by deterministic tests). Production passes an exponential/jittered backoff.
         /// </param>
         /// <param name="log">Optional one-line diagnostics sink.</param>
+        /// <param name="asyncMarshaler">Host delay scheduler used by retry backoff.</param>
         public RetryingStreamingLlmClientDecorator(
             ILlmClient inner,
             int maxRetryAttempts,
             Func<int, TimeSpan> retryDelay = null,
-            Action<string> log = null)
+            Action<string> log = null,
+            ILlmAsyncMarshaler asyncMarshaler = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _maxRetryAttempts = maxRetryAttempts < 0 ? 0 : maxRetryAttempts;
             _retryDelay = retryDelay;
             _log = log;
+            _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
         }
 
         /// <summary>Total number of stream retries performed (diagnostics / tests).</summary>
@@ -234,7 +238,12 @@ namespace CoreAI.Infrastructure.Llm
                     TimeSpan delay = _retryDelay(attempt);
                     if (delay > TimeSpan.Zero)
                     {
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                        double totalMilliseconds = delay.TotalMilliseconds;
+                        int delayMilliseconds = totalMilliseconds >= int.MaxValue
+                            ? int.MaxValue
+                            : Math.Max(1, (int)Math.Ceiling(totalMilliseconds));
+                        await _asyncMarshaler.DelayAsync(
+                            delayMilliseconds, cancellationToken);
                     }
                 }
             }

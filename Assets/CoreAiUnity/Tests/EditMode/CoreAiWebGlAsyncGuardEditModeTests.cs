@@ -19,6 +19,8 @@ namespace CoreAI.Tests.EditMode
 
         private static string RuntimeRoot => Path.Combine(Application.dataPath, "CoreAiUnity", "Runtime");
 
+        private static string ModsRuntimeRoot => Path.Combine(Application.dataPath, "CoreAIMods", "Runtime");
+
         [Test]
         public void SwitchToThreadPool_EveryCallSite_IsWebGlGuarded()
         {
@@ -61,6 +63,24 @@ namespace CoreAI.Tests.EditMode
                 "drain loop would never resume, HostReleaseTask would never complete and the next activation " +
                 "would hang in WaitingForHttp forever. Use UniTask.Delay instead.");
             StringAssert.Contains("await UniTask.Delay(", source);
+        }
+
+        [Test]
+        public void LuaCsRbxHttpServiceAdapter_AwaitsPreserveUnitySynchronizationContext()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                ModsRuntimeRoot, "Scripting", "LuaCs", "LuaCsRbxHttpServiceAdapter.cs"));
+
+            StringAssert.DoesNotContain(
+                ".ConfigureAwait(false)",
+                source,
+                "Mod HTTP must resume through Unity's synchronization context in a single-threaded WebGL player.");
+            // WHY: assert the guarantee — both calls are awaited without hopping context — rather
+            // than one spelling of it. The adapter awaits through local Task variables, so matching
+            // a literal `await _field.Call(` expression failed on a refactor that never touched the
+            // WebGL-relevant behaviour.
+            StringAssert.Contains("_resolver.ResolveAsync(", source);
+            StringAssert.Contains("_transport.SendAsync(", source);
         }
 
         [Test]
